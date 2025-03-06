@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  neutree-core:
+    image: registry.smtx.io/neutree/neutree-core:latest
+    container_name: neutree-core
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - neutree
+    restart: always
+
+networks:
+  neutree:
+    driver: bridge

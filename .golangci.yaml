@@ -1,0 +1,115 @@
+run:
+  deadline: 5m
+
+linters:
+  disable-all: true
+  enable:
+    # checks whether HTTP response body is closed successfully
+    - bodyclose
+    # checks assignments with too many blank identifiers (e.g. x, _, _, _, := f())
+    - dogsled
+    # tool for code clone detection
+    - dupl
+    # errcheck is a program for checking for unchecked errors in go programs.
+    # these unchecked errors can be critical bugs in some cases
+    - errcheck
+    # tool for detection of long functions
+    - funlen
+    # no package level variables
+    # no func init
+    - gochecknoinits
+    # finds repeated strings that could be replaced by a constant
+    - goconst
+    # the most opinionated Go source code linter, https://go-critic.github.io/overview
+    - gocritic
+    # computes and checks the cyclomatic complexity of functions
+    - gocyclo
+    # gofmt checks whether code was gofmt-ed. By default this tool runs with -s option to check for code simplification
+    - gofmt
+    # goimports does everything that gofmt does. Additionally it checks unused imports
+    - goimports
+    # inspects source code for security problems
+    - gosec
+    # vet examines Go source code and reports suspicious constructs, such as Printf calls whose arguments do not align with the format string
+    - govet
+    # detects when assignments to existing variables are not used
+    - ineffassign
+    # reports long lines
+    - lll
+    # finds commonly misspelled English words in comments
+    - misspell
+    # finds naked returns in functions greater than a specified function length
+    - nakedret
+    # staticcheck is a go vet on steroids, applying a ton of static analysis checks
+    - staticcheck
+    # like the front-end of a Go compiler, parses and type-checks Go code
+    - typecheck
+    # remove unnecessary type conversions
+    - unconvert
+    # reports unused function parameters
+    - unparam
+    # checks Go code for unused constants, variables, functions and types
+    - unused
+    # tool for detection of leading and trailing whitespace
+    - whitespace
+    # whitespace Linter - Forces you to use empty lines!
+    - wsl
+    # tool for check license
+    - goheader
+
+linters-settings:
+  dupl:
+    # tokens count to trigger issue
+    threshold: 400
+  lll:
+    # max line length, lines longer will be reported. Default is 120.
+    # '\t' is counted as 1 character by default, and can be changed with the tab-width option
+    line-length: 170
+  gocyclo:
+    # minimal code complexity to report
+    min-complexity: 30
+  dogsled:
+    # checks assignments with too many blank identifiers
+    max-blank-identifiers: 3
+  errcheck:
+    # report about not checking of errors in type assertions: `a := b.(MyStruct)`;
+    # default is false: such cases aren't reported by default.
+    check-type-assertions: true
+  funlen:
+    # max function body len
+    lines: 100
+    # max function body statements
+    statements: 100
+  goconst:
+    # minimal length of string constant, 3 by default
+    min-len: 3
+    # minimal occurrences count to trigger, 3 by default
+    min-occurrences: 3
+  gofmt:
+    # simplify code: gofmt with `-s` option, true by default
+    simplify: true
+  goimports:
+    # Put imports beginning with prefix after 3rd-party packages.
+    # It's a comma-separated list of prefixes.
+    local-prefixes: github.com/neutree-ai/neutree
+  govet:
+    # report about shadowed variables
+    check-shadowing: true
+    # enable or disable analyzers by name
+    enable:
+      - atomicalign
+    # checks Go code for unused constants, variables, functions and types
+  whitespace:
+    # Enforces newlines (or comments) after every multi-line if statement
+    multi-if: false
+    # Enforces newlines (or comments) after every multi-line function signature
+    multi-func: false
+  wsl:
+    # Allow declarations (var) to be cuddled.
+    allow-cuddle-declarations: true
+    # Allow multiline assignments to be cuddled. Default is true.
+    allow-multiline-assign: true
+    # Allow trailing comments in ending of blocks
+    allow-trailing-comment: true
+    # Allow leading comments to be separated with empty liens
+    allow-separated-leading-comment: true

@@ -1,0 +1,6 @@
+.vscode
+.idea
+bin
+vendor
+.swp
+*.out
