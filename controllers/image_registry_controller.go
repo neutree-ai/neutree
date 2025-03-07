@@ -41,7 +41,8 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 	}
 
 	var err error
-	// todo 当前依赖 docker daemon
+	// todo
+	// depend on docker daemon
 	c.dockerClient, err = client.NewClientWithOpts(client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create Docker client")
