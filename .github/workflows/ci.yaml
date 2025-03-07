@@ -1,0 +1,44 @@
+name: pull-request
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+jobs:
+  pr-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.0'
+        id: go
+      - name: Configure git for private modules
+        env:
+          TOKEN: ${{ secrets.CI_ACCESS_TOKEN }}
+          USERNAME: ${{ secrets.CI_USERNAME }}
+        run: git config --global url."https://${USERNAME}:${TOKEN}@github.com".insteadOf "https://github.com"
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3.1.0
+        with:
+          version: v1.64.6
+
+      - name: Test
+        run: make test
+
+      - name: Build
+        run: make build
+
+      - name: Upload Coverage report to CodeCov
+        uses: codecov/codecov-action@v1.0.15
+        with:
+          token: ${{secrets.CODECOV_UPLOAD_TOKEN}}
+          file: ./coverage.out
