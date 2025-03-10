@@ -13,11 +13,11 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/postgrest"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type ImageRegistryController struct {
-	api   *postgrest.API
+	*storage.Storage
 	queue workqueue.RateLimitingInterface
 
 	workers int
@@ -28,7 +28,7 @@ type ImageRegistryController struct {
 }
 
 type ImageRegistryControllerOption struct {
-	API     *postgrest.API
+	*storage.Storage
 	Workers int
 }
 
@@ -36,7 +36,7 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 	c := &ImageRegistryController{
 		queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
 		workers:      option.Workers,
-		api:          option.API,
+		Storage:      option.Storage,
 		syncInterval: time.Second * 10,
 	}
 
@@ -90,7 +90,7 @@ func (c *ImageRegistryController) processNextWorkItem() bool {
 }
 
 func (c *ImageRegistryController) reconcileAll() {
-	imageRegistries, err := c.api.ListImageRegistry(postgrest.ListOption{})
+	imageRegistries, err := c.Storage.ListImageRegistry(storage.ListOption{})
 	if err != nil {
 		klog.Errorf("failed to list image registry: %v", err)
 		return
@@ -108,7 +108,7 @@ func (c *ImageRegistryController) sync(imageRegistry *v1.ImageRegistry) error {
 		if imageRegistry.Status.Phase == v1.ImageRegistryPhaseDELETED {
 			klog.Info("Deleted image registry " + imageRegistry.Metadata.Name)
 
-			err = c.api.DeleteImageRegistry(strconv.Itoa(imageRegistry.ID))
+			err = c.Storage.DeleteImageRegistry(strconv.Itoa(imageRegistry.ID))
 			if err != nil {
 				return errors.Wrap(err, "failed to delete image registry "+imageRegistry.Metadata.Name)
 			}
@@ -123,7 +123,7 @@ func (c *ImageRegistryController) sync(imageRegistry *v1.ImageRegistry) error {
 			Phase:              v1.ImageRegistryPhaseDELETED,
 		}
 
-		err = c.api.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
+		err = c.Storage.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
 		if err != nil {
 			return errors.Wrap(err, "failed to update image registry "+imageRegistry.Metadata.Name)
 		}
@@ -139,7 +139,7 @@ func (c *ImageRegistryController) sync(imageRegistry *v1.ImageRegistry) error {
 			Phase:              v1.ImageRegistryPhaseFAILED,
 		}
 
-		updateStatusErr := c.api.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
+		updateStatusErr := c.Storage.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
 		if updateStatusErr != nil {
 			return errors.Wrap(updateStatusErr, "failed to update image registry "+imageRegistry.Metadata.Name)
 		}
@@ -153,7 +153,7 @@ func (c *ImageRegistryController) sync(imageRegistry *v1.ImageRegistry) error {
 		Phase:              v1.ImageRegistryPhaseCONNECTED,
 	}
 
-	err = c.api.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
+	err = c.Storage.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
 	if err != nil {
 		return errors.Wrap(err, "failed to update image registry "+imageRegistry.Metadata.Name)
 	}

@@ -8,11 +8,12 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/controllers"
-	"github.com/neutree-ai/neutree/pkg/postgrest"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 var (
-	postgrestURl      = flag.String("postgrest-url", "http://localhost:6432", "postgrest url")
+	// todo only support postgrest now.
+	storageAccessURL  = flag.String("storage-access-url", "http://postgrest:6432", "postgrest url")
 	controllerWorkers = flag.Int("controller-workers", 5, "controller workers")
 )
 
@@ -23,8 +24,8 @@ func main() {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
-	api := postgrest.NewAPI(postgrest.Options{
-		AccessURL: *postgrestURl,
+	s := storage.New(storage.Options{
+		AccessURL: *storageAccessURL,
 		Scheme:    "api",
 	})
 
@@ -32,7 +33,7 @@ func main() {
 	defer cancel()
 
 	imageRegistryController, err := controllers.NewImageRegistryController(&controllers.ImageRegistryControllerOption{
-		API:     api,
+		Storage: s,
 		Workers: *controllerWorkers,
 	})
 	if err != nil {

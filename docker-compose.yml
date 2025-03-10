@@ -1,8 +1,57 @@
 version: "3.8"
 
 services:
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    environment:
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: pgpassword
+      POSTGRES_DB: aippp
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - neutree
+    restart: always
+
+  postgrest:
+    image: postgrest/postgrest:latest
+    container_name: postgrest
+    environment:
+      PGRST_DB_URI: postgres://pguser:pgpassword@postgres:5432/aippp
+      PGRST_DB_SCHEMA: api
+      PGRST_DB_ANON_ROLE: web_anon
+      PGRST_SERVER_HOST: 0.0.0.0
+      PGRST_SERVER_PORT: 6432
+    ports:
+      - "6432:6432"
+    depends_on:
+      - postgres
+    networks:
+      - neutree
+    restart: always
+
+  postgres-meta:
+    image: supabase/postgres-meta:v0.86.0
+    container_name: postgres-meta
+    environment:
+      PG_META_HOST: "0.0.0.0"
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: "postgres"
+      PG_META_DB_NAME: "aippp"
+      PG_META_DB_USER: "pguser"
+      PG_META_DB_PORT: 5432
+      PG_META_DB_PASSWORD: "pgpassword"
+    ports:
+      - "8081:8080"
+    networks:
+      - neutree
+
   neutree-core:
-    image: registry.smtx.io/neutree/neutree-core:latest
+    image: docker.io/neutree/neutree-core:latest
     container_name: neutree-core
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -13,3 +62,6 @@ services:
 networks:
   neutree:
     driver: bridge
+
+volumes:
+  pg_data:

@@ -1,4 +1,4 @@
-package postgrest
+package storage
 
 import (
 	"encoding/json"
@@ -16,8 +16,8 @@ const (
 	MODEL_REGISTRY_TABLE = "model_registries"
 )
 
-type API struct {
-	*postgrest.Client
+type Storage struct {
+	postgrestClient *postgrest.Client
 }
 
 type Options struct {
@@ -25,9 +25,9 @@ type Options struct {
 	Scheme    string
 }
 
-func NewAPI(o Options) *API {
-	return &API{
-		Client: postgrest.NewClient(o.AccessURL, o.Scheme, nil),
+func New(o Options) *Storage {
+	return &Storage{
+		postgrestClient: postgrest.NewClient(o.AccessURL, o.Scheme, nil),
 	}
 }
 
@@ -46,12 +46,12 @@ func applyListOption(builder *postgrest.FilterBuilder, option ListOption) {
 	}
 }
 
-func (api *API) ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error) {
+func (s *Storage) ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error) {
 	var (
 		response []v1.ImageRegistry
 		err      error
 	)
-	builder := api.From(IMAGE_REGISTRY_TABLE).Select("*", "", false)
+	builder := s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Select("*", "", false)
 	applyListOption(builder, option)
 
 	responseContent, _, err := builder.Execute()
@@ -66,36 +66,36 @@ func (api *API) ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error)
 	return response, nil
 }
 
-func (api *API) CreateImageRegistry(data *v1.ImageRegistry) error {
+func (s *Storage) CreateImageRegistry(data *v1.ImageRegistry) error {
 	var (
 		err error
 	)
 
-	if _, _, err = api.From(IMAGE_REGISTRY_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+	if _, _, err = s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (api *API) DeleteImageRegistry(id string) error {
+func (s *Storage) DeleteImageRegistry(id string) error {
 	var (
 		err error
 	)
 
-	if _, _, err = api.From(IMAGE_REGISTRY_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+	if _, _, err = s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (api *API) UpdateImageRegistry(id string, data *v1.ImageRegistry) error {
+func (s *Storage) UpdateImageRegistry(id string, data *v1.ImageRegistry) error {
 	var (
 		err error
 	)
 
-	if _, _, err = api.From(IMAGE_REGISTRY_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+	if _, _, err = s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
 		return err
 	}
 
