@@ -102,6 +102,66 @@ func (s *Storage) UpdateImageRegistry(id string, data *v1.ImageRegistry) error {
 	return nil
 }
 
+// ListModelRegistry lists all model registries with optional filters
+func (s *Storage) ListModelRegistry(option ListOption) ([]v1.ModelRegistry, error) {
+	var (
+		response []v1.ModelRegistry
+		err      error
+	)
+	builder := s.postgrestClient.From(MODEL_REGISTRY_TABLE).Select("*", "", false)
+	applyListOption(builder, option)
+
+	responseContent, _, err := builder.Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+// CreateModelRegistry creates a new model registry
+func (s *Storage) CreateModelRegistry(data *v1.ModelRegistry) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_REGISTRY_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// DeleteModelRegistry deletes a model registry by ID
+func (s *Storage) DeleteModelRegistry(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_REGISTRY_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// UpdateModelRegistry updates a model registry by ID
+func (s *Storage) UpdateModelRegistry(id string, data *v1.ModelRegistry) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_REGISTRY_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func parseResponse(response interface{}, responseContent []byte) error {
 	return json.Unmarshal(responseContent, response)
 }

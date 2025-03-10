@@ -43,7 +43,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} \
     go build "${GO_BUILD_ARGS}" \
     -o neutree-core cmd/main.go
 
-FROM --platform=linux/${ARCH} alpine:3
+FROM --platform=linux/${ARCH} alpine:3.18
+RUN apk update && apk add --no-cache build-base python3 python3-dev py3-pip openssl-dev libffi-dev && pip install --no-cache-dir bentoml
+RUN apk add util-linux nfs-utils
 WORKDIR /
 COPY --from=builder /workspace/neutree-core .
 USER root

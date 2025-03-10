@@ -40,9 +40,19 @@ func main() {
 		klog.Fatalf("failed to init image registry controller: %s", err.Error())
 	}
 
+	modelRegistryController, err := controllers.NewModelRegistryController(&controllers.ModelRegistryControllerOption{
+		Storage: s,
+		Workers: *controllerWorkers,
+	})
+
+	if err != nil {
+		klog.Fatalf("failed to init model registry controller: %s", err.Error())
+	}
+
 	klog.Infof("Starting controller")
 
 	go imageRegistryController.Start(ctx)
+	go modelRegistryController.Start(ctx)
 
 	<-ctx.Done()
 }

@@ -52,6 +52,8 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 }
 
 func (c *ImageRegistryController) Start(ctx context.Context) {
+	klog.Infof("Starting image registry controller")
+
 	defer c.queue.ShutDown()
 
 	for i := 0; i < c.workers; i++ {
@@ -101,61 +103,48 @@ func (c *ImageRegistryController) reconcileAll() {
 	}
 }
 
-func (c *ImageRegistryController) sync(imageRegistry *v1.ImageRegistry) error {
+func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 	var err error
 
-	if imageRegistry.Metadata.DeletionTimestamp != "" {
-		if imageRegistry.Status.Phase == v1.ImageRegistryPhaseDELETED {
-			klog.Info("Deleted image registry " + imageRegistry.Metadata.Name)
+	if obj.Metadata.DeletionTimestamp != "" {
+		if obj.Status.Phase == v1.ImageRegistryPhaseDELETED {
+			klog.Info("Deleted image registry " + obj.Metadata.Name)
 
-			err = c.Storage.DeleteImageRegistry(strconv.Itoa(imageRegistry.ID))
+			err = c.Storage.DeleteImageRegistry(strconv.Itoa(obj.ID))
 			if err != nil {
-				return errors.Wrap(err, "failed to delete image registry "+imageRegistry.Metadata.Name)
+				return errors.Wrap(err, "failed to delete image registry "+obj.Metadata.Name)
 			}
 
 			return nil
 		}
 
-		klog.Info("Deleting image registry " + imageRegistry.Metadata.Name)
-		imageRegistry.Status = v1.ImageRegistryStatus{
-			ErrorMessage:       nil,
-			LastTransitionTime: time.Now().Format(time.RFC3339Nano),
-			Phase:              v1.ImageRegistryPhaseDELETED,
-		}
+		klog.Info("Deleting image registry " + obj.Metadata.Name)
 
-		err = c.Storage.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
+		err = c.updateStatus(obj, v1.ImageRegistryPhaseDELETED, nil)
 		if err != nil {
-			return errors.Wrap(err, "failed to update image registry "+imageRegistry.Metadata.Name)
+			return errors.Wrap(err, "failed to update image registry "+obj.Metadata.Name)
 		}
 
 		return nil
 	}
 
-	err = c.connectImageRegistry(imageRegistry)
-	if err != nil {
-		imageRegistry.Status = v1.ImageRegistryStatus{
-			ErrorMessage:       err.Error(),
-			LastTransitionTime: time.Now().Format(time.RFC3339Nano),
-			Phase:              v1.ImageRegistryPhaseFAILED,
+	defer func() {
+		phase := v1.ImageRegistryPhaseCONNECTED
+		if err != nil {
+			phase = v1.ImageRegistryPhaseFAILED
 		}
 
-		updateStatusErr := c.Storage.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
+		updateStatusErr := c.updateStatus(obj, phase, err)
 		if updateStatusErr != nil {
-			return errors.Wrap(updateStatusErr, "failed to update image registry "+imageRegistry.Metadata.Name)
+			klog.Error(updateStatusErr, "failed to update image registry status")
 		}
+	}()
 
-		return err
-	}
+	klog.Info("Connect to image registry " + obj.Metadata.Name)
 
-	imageRegistry.Status = v1.ImageRegistryStatus{
-		ErrorMessage:       nil,
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
-		Phase:              v1.ImageRegistryPhaseCONNECTED,
-	}
-
-	err = c.Storage.UpdateImageRegistry(strconv.Itoa(imageRegistry.ID), imageRegistry)
+	err = c.connectImageRegistry(obj)
 	if err != nil {
-		return errors.Wrap(err, "failed to update image registry "+imageRegistry.Metadata.Name)
+		return errors.Wrap(err, "failed to connect image registry "+obj.Metadata.Name)
 	}
 
 	return nil
@@ -176,4 +165,21 @@ func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRe
 	}
 
 	return nil
+}
+
+func (c *ImageRegistryController) updateStatus(obj *v1.ImageRegistry, phase v1.ImageRegistryPhase, err error) error {
+	obj.Status = v1.ImageRegistryStatus{
+		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		Phase:              phase,
+	}
+	if err != nil {
+		obj.Status.ErrorMessage = err.Error()
+	}
+
+	updateStatusErr := c.Storage.UpdateImageRegistry(strconv.Itoa(obj.ID), obj)
+	if err != nil {
+		return errors.Wrap(updateStatusErr, "failed to update image registry "+obj.Metadata.Name)
+	}
+
+	return updateStatusErr
 }
