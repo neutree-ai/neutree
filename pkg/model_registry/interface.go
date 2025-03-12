@@ -21,9 +21,9 @@ type ModelRegistry interface {
 func New(registry *v1.ModelRegistry) (ModelRegistry, error) {
 	switch registry.Spec.Type {
 	case v1.HuggingFaceModelRegistryType:
-		return newHuggingFace(registry)
+		return newHuggingFace(registry), nil
 	case v1.BentoMLModelRegistryType:
-		return newBentoML(registry)
+		return newFileBased(registry)
 	default:
 		return nil, errors.New("unsupported model registry type: " + string(registry.Spec.Type))
 	}

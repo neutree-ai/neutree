@@ -19,10 +19,10 @@ type huggingFace struct {
 	apiToken string
 }
 
-func newHuggingFace(registry *v1.ModelRegistry) (ModelRegistry, error) {
+func newHuggingFace(registry *v1.ModelRegistry) *huggingFace {
 	return &huggingFace{
 		apiToken: registry.Spec.Credentials,
-	}, nil
+	}
 }
 
 func (hf *huggingFace) Connect() error {
