@@ -43,7 +43,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} \
     go build "${GO_BUILD_ARGS}" \
     -o neutree-core cmd/main.go
 
-FROM --platform=linux/${ARCH} alpine:3
+FROM --platform=linux/${ARCH} alpine:3.18
+
+# Copy requirements file
+COPY requirements.txt .
+
+# Install dependencies
+RUN apk update && apk add --no-cache util-linux nfs-utils build-base python3 python3-dev py3-pip openssl-dev libffi-dev && pip install --no-cache-dir -r requirements.txt
+
 WORKDIR /
 COPY --from=builder /workspace/neutree-core .
 USER root
