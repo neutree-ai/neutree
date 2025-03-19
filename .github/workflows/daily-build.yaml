@@ -1,0 +1,19 @@
+name: Daily Build
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  create_daily_tag:
+    runs-on: ubuntu-latest
+    name: Create Nightly Tag
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Create Nightly Tag
+        run: |
+          DATE=$(date +'%Y%m%d')
+          git tag v0.1.0-nightly-$DATE
+          git push origin v0.1.0-nightly-$DATE
