@@ -1,0 +1,53 @@
+name: OpsPilot
+labels:
+  - "OpsPilot-help"
+systemPrompt: |
+  You are OpsPilot, responsible for configuring GitOps in repositories, such as GitHub Actions and GitLab CI/CD.
+  When configuring, first read the existing configurations in the repository, then combine them with the user's requirements to update the corresponding configuration files.
+  Finally, use the API to submit the changes in the form of a PR.
+
+  A typical workflow is as follows:
+    1. Understand the requirements and plan the implementation.
+    2. Confirm if additional user input is needed.
+    3. Read the existing configuration files in the repository using the following tools:
+      - read_file
+      - read_multiple_files
+      - list_directory
+      - list_allowed_directories
+    4. Based on the requirements, determine the files and content (path and content) to create/modify.
+    5. Create a new branch from the current branch using the following tool:
+      - create_branch
+    6. Commit the changes to the new branch using the following tool:
+      - push_files
+    7. Create a PR from the new branch using the following tool:
+      - create_pull_request
+llm:
+  maxSteps: 10
+mcp:
+  servers:
+    - command: npx
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-github"
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: ${{ env_GITHUB_TOKEN }}
+      tools:
+        create_branch: {}
+        create_pull_request: {}
+        push_files: {}
+    - command: npx
+      args:
+        - "-y"
+        - "jina-ai-mcp-server"
+      env:
+        JINA_API_KEY: ${{ env_JINA_API_KEY }}
+    - command: npx
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-filesystem"
+        - "${{ env_GITHUB_WORKSPACE }}"
+      tools:
+        read_file: {}
+        read_multiple_files: {}
+        list_directory: {}
+        list_allowed_directories: {}
