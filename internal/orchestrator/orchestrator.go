@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/registry"
 )
 
 // Orchestrator defines the core interface for cluster orchestration
@@ -21,7 +22,10 @@ type Orchestrator interface {
 type Options struct {
 	Cluster       *v1.Cluster
 	ImageRegistry *v1.ImageRegistry
+	ImageService  registry.ImageService
 }
+
+type NewOrchestratorFunc func(opts Options) (Orchestrator, error)
 
 func NewOrchestrator(opts Options) (Orchestrator, error) {
 	switch opts.Cluster.Spec.Type {

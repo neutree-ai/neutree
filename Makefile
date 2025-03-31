@@ -42,6 +42,10 @@ GO_BUILD_ARGS = \
 	-X '$(MODULE_PATH)/pkg/version.appVersion=$(IMAGE_TAG)' \
 	-X '$(MODULE_PATH)/pkg/version.buildTime=$(shell date --iso-8601=seconds)'"
 
+MOCKERY_DIRS=pkg/model_registry pkg/storage internal/orchestrator internal/registry controllers/
+MOCKERY_OUTPUT_DIRS=pkg/model_registry/mocks pkg/storage/mocks internal/orchestrator/mocks internal/registry/mocks controllers/mocks
+
+
 .PHONY: help
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-21s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
@@ -85,7 +89,7 @@ docker-push-manifest: ## Push the fat manifest docker image.
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
 .PHONY: test
-test: fmt vet lint ## Run unit test
+test: fmt vet lint mockgen ## Run unit test
 	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e')
 
 .PHONY: clean
@@ -112,3 +116,19 @@ vet: ## Run go vet against code.
 release:
 	$(MAKE) docker-build-all
 	$(MAKE) docker-push-all
+
+MOCKERY := $(shell pwd)/bin/mockery
+mockery: ## Download mockery if not yet.
+	$(call go-get-tool,$(MOCKERY),github.com/vektra/mockery/v2@v2.53.0)
+
+.PHONY: mockgen
+mockgen: mockery
+	@for dir in $(MOCKERY_OUTPUT_DIRS); do \
+		rm -rf $$dir; \
+    done
+
+	@for dir in $(MOCKERY_DIRS); do \
+		cd $(PROJECT_DIR); \
+		cd $$dir; \
+		$(MOCKERY); \
+    done
