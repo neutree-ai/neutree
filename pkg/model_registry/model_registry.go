@@ -18,6 +18,8 @@ type ModelRegistry interface {
 	HealthyCheck() bool
 }
 
+type NewModelRegistry func(registry *v1.ModelRegistry) (ModelRegistry, error)
+
 func New(registry *v1.ModelRegistry) (ModelRegistry, error) {
 	switch registry.Spec.Type {
 	case v1.HuggingFaceModelRegistryType:

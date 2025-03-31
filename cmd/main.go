@@ -24,10 +24,13 @@ func main() {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
-	s := storage.New(storage.Options{
+	s, err := storage.New(storage.Options{
 		AccessURL: *storageAccessURL,
 		Scheme:    "api",
 	})
+	if err != nil {
+		klog.Fatalf("failed to init storage: %s", err.Error())
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

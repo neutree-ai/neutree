@@ -16,25 +16,29 @@ import (
 )
 
 type ModelRegistryController struct {
-	*storage.Storage
-	queue workqueue.RateLimitingInterface
+	storage storage.Storage
+	queue   workqueue.RateLimitingInterface
 
 	workers int
 
 	syncInterval time.Duration
+
+	newModelRegistry model_registry.NewModelRegistry
 }
 
 type ModelRegistryControllerOption struct {
-	*storage.Storage
-	Workers int
+	Storage          storage.Storage
+	Workers          int
+	NewModelRegistry model_registry.NewModelRegistry
 }
 
 func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRegistryController, error) {
 	c := &ModelRegistryController{
-		queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
-		workers:      option.Workers,
-		Storage:      option.Storage,
-		syncInterval: time.Second * 10,
+		queue:            workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
+		workers:          option.Workers,
+		storage:          option.Storage,
+		syncInterval:     time.Second * 10,
+		newModelRegistry: option.NewModelRegistry,
 	}
 
 	return c, nil
@@ -81,7 +85,7 @@ func (c *ModelRegistryController) processNextWorkItem() bool {
 }
 
 func (c *ModelRegistryController) reconcileAll() {
-	modelRegistries, err := c.Storage.ListModelRegistry(storage.ListOption{})
+	modelRegistries, err := c.storage.ListModelRegistry(storage.ListOption{})
 	if err != nil {
 		klog.Errorf("failed to list model registry: %v", err)
 		return
@@ -93,7 +97,7 @@ func (c *ModelRegistryController) reconcileAll() {
 }
 
 func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
-	modelRegistry, err := model_registry.New(obj)
+	modelRegistry, err := c.newModelRegistry(obj)
 	if err != nil {
 		return err
 	}
@@ -102,7 +106,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 		if obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
 			klog.Info("Deleted model registry " + obj.Metadata.Name)
 
-			err = c.Storage.DeleteModelRegistry(strconv.Itoa(obj.ID))
+			err = c.storage.DeleteModelRegistry(strconv.Itoa(obj.ID))
 			if err != nil {
 				return errors.Wrap(err, "failed to delete model registry "+obj.Metadata.Name)
 			}
@@ -185,8 +189,8 @@ func (c *ModelRegistryController) updateStatus(obj *v1.ModelRegistry, phase v1.M
 		obj.Status.ErrorMessage = err.Error()
 	}
 
-	updateStatusErr := c.Storage.UpdateModelRegistry(strconv.Itoa(obj.ID), obj)
-	if err != nil {
+	updateStatusErr := c.storage.UpdateModelRegistry(strconv.Itoa(obj.ID), obj)
+	if updateStatusErr != nil {
 		return errors.Wrap(updateStatusErr, "failed to update model registry "+obj.Metadata.Name)
 	}
 

@@ -17,18 +17,18 @@ import (
 )
 
 type ImageRegistryController struct {
-	*storage.Storage
-	queue workqueue.RateLimitingInterface
+	storage storage.Storage
+	queue   workqueue.RateLimitingInterface
 
 	workers int
 
 	syncInterval time.Duration
 
-	dockerClient *client.Client
+	dockerClient client.APIClient
 }
 
 type ImageRegistryControllerOption struct {
-	*storage.Storage
+	Storage storage.Storage
 	Workers int
 }
 
@@ -36,7 +36,7 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 	c := &ImageRegistryController{
 		queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
 		workers:      option.Workers,
-		Storage:      option.Storage,
+		storage:      option.Storage,
 		syncInterval: time.Second * 10,
 	}
 
@@ -92,7 +92,7 @@ func (c *ImageRegistryController) processNextWorkItem() bool {
 }
 
 func (c *ImageRegistryController) reconcileAll() {
-	imageRegistries, err := c.Storage.ListImageRegistry(storage.ListOption{})
+	imageRegistries, err := c.storage.ListImageRegistry(storage.ListOption{})
 	if err != nil {
 		klog.Errorf("failed to list image registry: %v", err)
 		return
@@ -110,7 +110,7 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 		if obj.Status.Phase == v1.ImageRegistryPhaseDELETED {
 			klog.Info("Deleted image registry " + obj.Metadata.Name)
 
-			err = c.Storage.DeleteImageRegistry(strconv.Itoa(obj.ID))
+			err = c.storage.DeleteImageRegistry(strconv.Itoa(obj.ID))
 			if err != nil {
 				return errors.Wrap(err, "failed to delete image registry "+obj.Metadata.Name)
 			}
@@ -176,7 +176,7 @@ func (c *ImageRegistryController) updateStatus(obj *v1.ImageRegistry, phase v1.I
 		obj.Status.ErrorMessage = err.Error()
 	}
 
-	updateStatusErr := c.Storage.UpdateImageRegistry(strconv.Itoa(obj.ID), obj)
+	updateStatusErr := c.storage.UpdateImageRegistry(strconv.Itoa(obj.ID), obj)
 	if err != nil {
 		return errors.Wrap(updateStatusErr, "failed to update image registry "+obj.Metadata.Name)
 	}

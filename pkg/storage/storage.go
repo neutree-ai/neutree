@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"encoding/json"
-
 	"github.com/supabase-community/postgrest-go"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -12,12 +10,35 @@ const (
 	ENDPOINT_TABLE       = "endpoints"
 	ENGINE_TABLE         = "engines"
 	IMAGE_REGISTRY_TABLE = "image_registries"
-	OCLUSTERS_TABLE      = "clusters"
+	CLUSTERS_TABLE       = "clusters"
 	MODEL_REGISTRY_TABLE = "model_registries"
 )
 
-type Storage struct {
-	postgrestClient *postgrest.Client
+type ImageRegistryStorage interface {
+	// CreateImageRegistry creates a new image registry in the database.
+	CreateImageRegistry(data *v1.ImageRegistry) error
+	// DeleteImageRegistry deletes an image registry by its ID.
+	DeleteImageRegistry(id string) error
+	// UpdateImageRegistry updates an existing image registry in the database.
+	UpdateImageRegistry(id string, data *v1.ImageRegistry) error
+	// ListImageRegistry retrieves a list of image registries with optional filters.
+	ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error)
+}
+
+type ModelRegistryStorage interface {
+	// CreateModelRegistry creates a new model registry in the database.
+	CreateModelRegistry(data *v1.ModelRegistry) error
+	// DeleteModelRegistry deletes a model registry by its ID.
+	DeleteModelRegistry(id string) error
+	// UpdateModelRegistry updates an existing model registry in the database.
+	UpdateModelRegistry(id string, data *v1.ModelRegistry) error
+	// ListModelRegistry retrieves a list of model registries with optional filters.
+	ListModelRegistry(option ListOption) ([]v1.ModelRegistry, error)
+}
+
+type Storage interface {
+	ImageRegistryStorage
+	ModelRegistryStorage
 }
 
 type Options struct {
@@ -25,10 +46,12 @@ type Options struct {
 	Scheme    string
 }
 
-func New(o Options) *Storage {
-	return &Storage{
-		postgrestClient: postgrest.NewClient(o.AccessURL, o.Scheme, nil),
-	}
+func New(o Options) (Storage, error) {
+	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil)
+
+	return &postgrestStorage{
+		postgrestClient: postgrestClient,
+	}, nil
 }
 
 type Filter struct {
@@ -44,124 +67,4 @@ func applyListOption(builder *postgrest.FilterBuilder, option ListOption) {
 	for _, filter := range option.Filters {
 		builder.Filter(filter.Column, filter.Operator, filter.Value)
 	}
-}
-
-func (s *Storage) ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error) {
-	var (
-		response []v1.ImageRegistry
-		err      error
-	)
-	builder := s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Select("*", "", false)
-	applyListOption(builder, option)
-
-	responseContent, _, err := builder.Execute()
-	if err != nil {
-		return nil, err
-	}
-
-	if err = parseResponse(&response, responseContent); err != nil {
-		return nil, err
-	}
-
-	return response, nil
-}
-
-func (s *Storage) CreateImageRegistry(data *v1.ImageRegistry) error {
-	var (
-		err error
-	)
-
-	if _, _, err = s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *Storage) DeleteImageRegistry(id string) error {
-	var (
-		err error
-	)
-
-	if _, _, err = s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *Storage) UpdateImageRegistry(id string, data *v1.ImageRegistry) error {
-	var (
-		err error
-	)
-
-	if _, _, err = s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// ListModelRegistry lists all model registries with optional filters
-func (s *Storage) ListModelRegistry(option ListOption) ([]v1.ModelRegistry, error) {
-	var (
-		response []v1.ModelRegistry
-		err      error
-	)
-	builder := s.postgrestClient.From(MODEL_REGISTRY_TABLE).Select("*", "", false)
-	applyListOption(builder, option)
-
-	responseContent, _, err := builder.Execute()
-	if err != nil {
-		return nil, err
-	}
-
-	if err = parseResponse(&response, responseContent); err != nil {
-		return nil, err
-	}
-
-	return response, nil
-}
-
-// CreateModelRegistry creates a new model registry
-func (s *Storage) CreateModelRegistry(data *v1.ModelRegistry) error {
-	var (
-		err error
-	)
-
-	if _, _, err = s.postgrestClient.From(MODEL_REGISTRY_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// DeleteModelRegistry deletes a model registry by ID
-func (s *Storage) DeleteModelRegistry(id string) error {
-	var (
-		err error
-	)
-
-	if _, _, err = s.postgrestClient.From(MODEL_REGISTRY_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// UpdateModelRegistry updates a model registry by ID
-func (s *Storage) UpdateModelRegistry(id string, data *v1.ModelRegistry) error {
-	var (
-		err error
-	)
-
-	if _, _, err = s.postgrestClient.From(MODEL_REGISTRY_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func parseResponse(response interface{}, responseContent []byte) error {
-	return json.Unmarshal(responseContent, response)
 }

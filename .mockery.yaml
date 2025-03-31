@@ -1,0 +1,8 @@
+---
+dir: testing/mocks
+filename: "mock_{{.InterfaceName | snakecase}}.go"
+outpkg: mocks
+packages:
+  github.com/docker/docker/client:
+    interfaces:
+      APIClient:
