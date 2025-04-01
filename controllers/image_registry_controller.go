@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -19,12 +18,9 @@ import (
 )
 
 type ImageRegistryController struct {
+	baseController *BaseController
+
 	storage storage.Storage
-	queue   workqueue.RateLimitingInterface
-
-	workers int
-
-	syncInterval time.Duration
 }
 
 type ImageRegistryControllerOption struct {
@@ -34,10 +30,12 @@ type ImageRegistryControllerOption struct {
 
 func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRegistryController, error) {
 	c := &ImageRegistryController{
-		queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
-		workers:      option.Workers,
-		storage:      option.Storage,
-		syncInterval: time.Second * 10,
+		baseController: &BaseController{
+			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
+			workers:      option.Workers,
+			syncInterval: time.Second * 10,
+		},
+		storage: option.Storage,
 	}
 
 	return c, nil
@@ -46,61 +44,37 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 func (c *ImageRegistryController) Start(ctx context.Context) {
 	klog.Infof("Starting image registry controller")
 
-	defer c.queue.ShutDown()
-
-	for i := 0; i < c.workers; i++ {
-		go wait.UntilWithContext(ctx, c.worker, time.Second)
-	}
-
-	wait.Until(c.reconcileAll, c.syncInterval, ctx.Done())
-	<-ctx.Done()
+	c.baseController.Start(ctx, c, c)
 }
 
-func (c *ImageRegistryController) worker(ctx context.Context) { //nolint:unparam
-	for c.processNextWorkItem() {
-	}
-}
-
-func (c *ImageRegistryController) processNextWorkItem() bool {
-	key, quit := c.queue.Get()
-	if quit {
-		return false
-	}
-	defer c.queue.Done(key)
-
+func (c *ImageRegistryController) Reconcile(key interface{}) error {
 	imageRegistryID, ok := key.(int)
 	if !ok {
-		klog.Error("failed to assert key to imageRegistryID")
-		return true
+		return errors.New("failed to assert key to imageRegistryID")
 	}
 
 	obj, err := c.storage.GetImageRegistry(strconv.Itoa(imageRegistryID))
 	if err != nil {
-		klog.Errorf("failed to get image registry %s, err: %v", strconv.Itoa(imageRegistryID), err)
-		return true
+		return errors.Wrapf(err, "failed to get image registry %s", strconv.Itoa(imageRegistryID))
 	}
 
 	klog.V(4).Info("Reconcile image registry " + obj.Metadata.Name)
 
-	err = c.sync(obj)
-	if err != nil {
-		klog.Errorf("failed to sync image registry %s, err: %v ", obj.Metadata.Name, err)
-		return true
-	}
-
-	return true
+	return c.sync(obj)
 }
 
-func (c *ImageRegistryController) reconcileAll() {
-	imageRegistries, err := c.storage.ListImageRegistry(storage.ListOption{})
+func (c *ImageRegistryController) ListKeys() ([]interface{}, error) {
+	registries, err := c.storage.ListImageRegistry(storage.ListOption{})
 	if err != nil {
-		klog.Errorf("failed to list image registry, err: %v", err)
-		return
+		return nil, err
 	}
 
-	for i := range imageRegistries {
-		c.queue.Add(imageRegistries[i].ID)
+	keys := make([]interface{}, len(registries))
+	for i := range registries {
+		keys[i] = registries[i].ID
 	}
+
+	return keys, nil
 }
 
 func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
