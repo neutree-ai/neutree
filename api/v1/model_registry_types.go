@@ -23,16 +23,16 @@ type ModelRegistrySpec struct {
 }
 
 type ModelRegistryStatus struct {
-	ErrorMessage       interface{}        `json:"error_message,omitempty"`
+	ErrorMessage       string             `json:"error_message,omitempty"`
 	LastTransitionTime string             `json:"last_transition_time,omitempty"`
 	Phase              ModelRegistryPhase `json:"phase,omitempty"`
 }
 
 type ModelRegistry struct {
-	APIVersion string              `json:"api_version"`
-	ID         int                 `json:"id"`
-	Kind       string              `json:"kind"`
-	Metadata   Metadata            `json:"metadata"`
-	Spec       ModelRegistrySpec   `json:"spec"`
-	Status     ModelRegistryStatus `json:"status,omitempty"`
+	APIVersion string               `json:"api_version,omitempty"`
+	ID         int                  `json:"id,omitempty"`
+	Kind       string               `json:"kind,omitempty"`
+	Metadata   *Metadata            `json:"metadata,omitempty"`
+	Spec       *ModelRegistrySpec   `json:"spec,omitempty"`
+	Status     *ModelRegistryStatus `json:"status,omitempty"`
 }

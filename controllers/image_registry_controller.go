@@ -2,33 +2,33 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
-	"github.com/docker/docker/api/types/registry"
-	"github.com/docker/docker/client"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type ImageRegistryController struct {
-	*storage.Storage
-	queue workqueue.RateLimitingInterface
+	storage storage.Storage
+	queue   workqueue.RateLimitingInterface
 
 	workers int
 
 	syncInterval time.Duration
-
-	dockerClient *client.Client
 }
 
 type ImageRegistryControllerOption struct {
-	*storage.Storage
+	Storage storage.Storage
 	Workers int
 }
 
@@ -36,16 +36,8 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 	c := &ImageRegistryController{
 		queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
 		workers:      option.Workers,
-		Storage:      option.Storage,
+		storage:      option.Storage,
 		syncInterval: time.Second * 10,
-	}
-
-	var err error
-	// todo
-	// depend on docker daemon
-	c.dockerClient, err = client.NewClientWithOpts(client.WithAPIVersionNegotiation())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create Docker client")
 	}
 
 	return c, nil
@@ -70,21 +62,29 @@ func (c *ImageRegistryController) worker(ctx context.Context) { //nolint:unparam
 }
 
 func (c *ImageRegistryController) processNextWorkItem() bool {
-	obj, quit := c.queue.Get()
+	key, quit := c.queue.Get()
 	if quit {
 		return false
 	}
-	defer c.queue.Done(obj)
+	defer c.queue.Done(key)
 
-	imageRegistry, ok := obj.(*v1.ImageRegistry)
+	imageRegistryID, ok := key.(int)
 	if !ok {
-		klog.Errorf("failed to assert obj to ImageRegistry")
+		klog.Error("failed to assert key to imageRegistryID")
 		return true
 	}
 
-	err := c.sync(imageRegistry)
+	obj, err := c.storage.GetImageRegistry(strconv.Itoa(imageRegistryID))
 	if err != nil {
-		klog.Errorf("failed to sync image registry %s: %v ", imageRegistry.Metadata.Name, err)
+		klog.Errorf("failed to get image registry %s, err: %v", strconv.Itoa(imageRegistryID), err)
+		return true
+	}
+
+	klog.V(4).Info("Reconcile image registry " + obj.Metadata.Name)
+
+	err = c.sync(obj)
+	if err != nil {
+		klog.Errorf("failed to sync image registry %s, err: %v ", obj.Metadata.Name, err)
 		return true
 	}
 
@@ -92,14 +92,14 @@ func (c *ImageRegistryController) processNextWorkItem() bool {
 }
 
 func (c *ImageRegistryController) reconcileAll() {
-	imageRegistries, err := c.Storage.ListImageRegistry(storage.ListOption{})
+	imageRegistries, err := c.storage.ListImageRegistry(storage.ListOption{})
 	if err != nil {
-		klog.Errorf("failed to list image registry: %v", err)
+		klog.Errorf("failed to list image registry, err: %v", err)
 		return
 	}
 
 	for i := range imageRegistries {
-		c.queue.Add(&imageRegistries[i])
+		c.queue.Add(imageRegistries[i].ID)
 	}
 }
 
@@ -110,7 +110,7 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 		if obj.Status.Phase == v1.ImageRegistryPhaseDELETED {
 			klog.Info("Deleted image registry " + obj.Metadata.Name)
 
-			err = c.Storage.DeleteImageRegistry(strconv.Itoa(obj.ID))
+			err = c.storage.DeleteImageRegistry(strconv.Itoa(obj.ID))
 			if err != nil {
 				return errors.Wrap(err, "failed to delete image registry "+obj.Metadata.Name)
 			}
@@ -122,7 +122,7 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 
 		err = c.updateStatus(obj, v1.ImageRegistryPhaseDELETED, nil)
 		if err != nil {
-			return errors.Wrap(err, "failed to update image registry "+obj.Metadata.Name)
+			klog.Errorf("failed to update image registry %s, err: %v ", obj.Metadata.Name, err)
 		}
 
 		return nil
@@ -136,7 +136,7 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 
 		updateStatusErr := c.updateStatus(obj, phase, err)
 		if updateStatusErr != nil {
-			klog.Error(updateStatusErr, "failed to update image registry status")
+			klog.Errorf("failed to update image registry %s status, err: %v ", obj.Metadata.Name, updateStatusErr)
 		}
 	}()
 
@@ -151,35 +151,37 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 }
 
 func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRegistry) error {
-	authConfig := registry.AuthConfig{
+	authConfig := authn.AuthConfig{
 		Username:      imageRegistry.Spec.AuthConfig.Username,
 		Password:      imageRegistry.Spec.AuthConfig.Password,
-		ServerAddress: imageRegistry.Spec.URL,
+		Auth:          imageRegistry.Spec.AuthConfig.Auth,
 		IdentityToken: imageRegistry.Spec.AuthConfig.IdentityToken,
 		RegistryToken: imageRegistry.Spec.AuthConfig.IdentityToken,
 	}
 
-	_, err := c.dockerClient.RegistryLogin(context.Background(), authConfig)
+	registryURL, err := url.Parse(imageRegistry.Spec.URL)
 	if err != nil {
-		return errors.Wrap(err, "image registry login failed")
+		return errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
+	}
+
+	imageRepo := fmt.Sprintf("%s/%s/neutree-serve", registryURL.Host, imageRegistry.Spec.Repository)
+
+	_, err = registry.ListImageTags(imageRepo, authn.FromConfig(authConfig))
+	if err != nil {
+		return errors.Wrap(err, "check image registry auth failed")
 	}
 
 	return nil
 }
 
 func (c *ImageRegistryController) updateStatus(obj *v1.ImageRegistry, phase v1.ImageRegistryPhase, err error) error {
-	obj.Status = v1.ImageRegistryStatus{
+	newStatus := &v1.ImageRegistryStatus{
 		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
 		Phase:              phase,
 	}
 	if err != nil {
-		obj.Status.ErrorMessage = err.Error()
+		newStatus.ErrorMessage = err.Error()
 	}
 
-	updateStatusErr := c.Storage.UpdateImageRegistry(strconv.Itoa(obj.ID), obj)
-	if err != nil {
-		return errors.Wrap(updateStatusErr, "failed to update image registry "+obj.Metadata.Name)
-	}
-
-	return updateStatusErr
+	return c.storage.UpdateImageRegistry(strconv.Itoa(obj.ID), &v1.ImageRegistry{Status: newStatus})
 }

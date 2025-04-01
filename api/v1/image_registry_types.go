@@ -10,12 +10,12 @@ const (
 )
 
 type ImageRegistry struct {
-	APIVersion string              `json:"api_version"`
-	ID         int                 `json:"id"`
-	Kind       string              `json:"kind"`
-	Metadata   Metadata            `json:"metadata"`
-	Spec       ImageRegistrySpec   `json:"spec"`
-	Status     ImageRegistryStatus `json:"status,omitempty"`
+	APIVersion string               `json:"api_version,omitempty"`
+	ID         int                  `json:"id,omitempty"`
+	Kind       string               `json:"kind,omitempty"`
+	Metadata   *Metadata            `json:"metadata,omitempty"`
+	Spec       *ImageRegistrySpec   `json:"spec,omitempty"`
+	Status     *ImageRegistryStatus `json:"status,omitempty"`
 }
 
 type ImageRegistrySpec struct {
@@ -32,7 +32,7 @@ type ImageRegistrySpec struct {
 }
 
 type ImageRegistryStatus struct {
-	ErrorMessage       interface{}        `json:"error_message,omitempty"`
+	ErrorMessage       string             `json:"error_message,omitempty"`
 	LastTransitionTime string             `json:"last_transition_time,omitempty"`
 	Phase              ImageRegistryPhase `json:"phase,omitempty"`
 }
