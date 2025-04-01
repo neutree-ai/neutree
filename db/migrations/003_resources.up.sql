@@ -292,7 +292,8 @@ CREATE TYPE api.cluster_status AS (
     desired_nodes integer,
     version TEXT,
     ray_version TEXT,
-    initialized BOOLEAN
+    initialized BOOLEAN,
+    node_provision_status TEXT
 );
 
 CREATE TABLE api.clusters (

@@ -1,5 +1,26 @@
 package v1
 
+// Ray node states.
+const (
+	DeadNodeState  = "DEAD"
+	AliveNodeState = "ALIVE"
+)
+
+// Ray node labels.
+const (
+	// NeutreeServingVersionLabel is the label key of Neutree Serving version on actual ray node.
+	NeutreeServingVersionLabel = "neutree.ai/neutree-serving-version"
+
+	// NeutreeNodeProvisionTypeLabel is the label key of Neutree node provision type on actual ray node.
+	// It can be either "static" or "autoscaler".
+	NeutreeNodeProvisionTypeLabel = "neutree.ai/node-provision-type"
+
+	// Ray node provision type.
+
+	StaticNodeProvisonType     = "static"
+	AutoScaleNodeProvisionType = "autoscaler"
+)
+
 type Provider struct {
 	Type               string   `json:"type,omitempty" yaml:"type,omitempty"`
 	HeadIP             string   `json:"head_ip,omitempty" yaml:"head_ip,omitempty"`

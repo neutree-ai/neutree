@@ -195,7 +195,7 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestr
 }
 
 // 1. get desired static node ip from cluster spec
-// 2. get static node provision status from cluster labels
+// 2. get static node provision status from cluster status
 // 3. compare desired static node ip and static node provision status
 // 4. start static node that not provisioned
 // 5. stop static node that not in desired static node ip
@@ -203,10 +203,10 @@ func (c *ClusterController) ReconcileStaticNodes(cluster *v1.Cluster, clusterOrc
 	klog.V(4).Info("Reconciling Static Nodes for cluster " + cluster.Metadata.Name)
 
 	var (
-		desiredStaticNodeIpMap    = map[string]string{}
-		staticNodeProvisionStatus = map[string]string{}
-		nodeIpToStart             []string
-		nodeIpToStop              []string
+		desiredStaticNodeIpMap       = map[string]string{}
+		staticNodeProvisionStatusMap = map[string]string{}
+		nodeIpToStart                []string
+		nodeIpToStop                 []string
 	)
 
 	// get desired static provision node ip from cluster spec
@@ -216,19 +216,15 @@ func (c *ClusterController) ReconcileStaticNodes(cluster *v1.Cluster, clusterOrc
 		desiredStaticNodeIpMap[nodeIp] = nodeIp
 	}
 
-	// get static node provision status from cluster labels
-	if cluster.Metadata.Labels == nil {
-		cluster.Metadata.Labels = map[string]string{}
-	}
-
-	if cluster.Metadata.Labels[v1.NeutreeNodeProvisionStatusLabel] != "" {
-		err := json.Unmarshal([]byte(cluster.Metadata.Labels[v1.NeutreeNodeProvisionStatusLabel]), &staticNodeProvisionStatus)
+	// get static node provision status from cluster status
+	if cluster.Status != nil && cluster.Status.NodeProvisionStatus != "" {
+		err := json.Unmarshal([]byte(cluster.Status.NodeProvisionStatus), &staticNodeProvisionStatusMap)
 		if err != nil {
 			return errors.Wrap(err, "failed to unmarshal static node provision status")
 		}
 	}
 
-	for nodeIp := range staticNodeProvisionStatus {
+	for nodeIp := range staticNodeProvisionStatusMap {
 		if _, ok := desiredStaticNodeIpMap[nodeIp]; ok {
 			continue
 		}
@@ -238,7 +234,7 @@ func (c *ClusterController) ReconcileStaticNodes(cluster *v1.Cluster, clusterOrc
 
 	for _, nodeIp := range desiredStaticNodeIpMap {
 		// already provisioned, skip
-		if _, ok := staticNodeProvisionStatus[nodeIp]; ok && staticNodeProvisionStatus[nodeIp] == v1.ProvisionedNodeProvisionStatus {
+		if _, ok := staticNodeProvisionStatusMap[nodeIp]; ok && staticNodeProvisionStatusMap[nodeIp] == v1.ProvisionedNodeProvisionStatus {
 			continue
 		}
 
@@ -283,30 +279,29 @@ func (c *ClusterController) ReconcileStaticNodes(cluster *v1.Cluster, clusterOrc
 	// update static node provision status
 	for i := range nodeIpToStart {
 		if nodeOpErrors[i] == nil {
-			staticNodeProvisionStatus[nodeIpToStart[i]] = v1.ProvisionedNodeProvisionStatus
+			staticNodeProvisionStatusMap[nodeIpToStart[i]] = v1.ProvisionedNodeProvisionStatus
 		} else {
-			staticNodeProvisionStatus[nodeIpToStart[i]] = v1.ProvisioningNodeProvisionStatus
+			staticNodeProvisionStatusMap[nodeIpToStart[i]] = v1.ProvisioningNodeProvisionStatus
 		}
 	}
 
 	for i := range nodeIpToStop {
 		if nodeOpErrors[len(nodeIpToStart)+i] == nil {
-			delete(staticNodeProvisionStatus, nodeIpToStop[i])
+			delete(staticNodeProvisionStatusMap, nodeIpToStop[i])
 		}
 	}
 
 	// update cluster labels
-	staticNodeProvisionStatusContent, err := json.Marshal(staticNodeProvisionStatus)
+	staticNodeProvisionStatusContent, err := json.Marshal(staticNodeProvisionStatusMap)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal static node provision status")
 	}
 
-	cluster.Metadata.Labels[v1.NeutreeNodeProvisionStatusLabel] = string(staticNodeProvisionStatusContent)
-
-	err = c.storage.UpdateCluster(strconv.Itoa(cluster.ID), &v1.Cluster{Metadata: cluster.Metadata})
-	if err != nil {
-		return errors.Wrap(err, "failed to update cluster "+cluster.Metadata.Name)
+	if cluster.Status == nil {
+		cluster.Status = &v1.ClusterStatus{}
 	}
+
+	cluster.Status.NodeProvisionStatus = string(staticNodeProvisionStatusContent)
 
 	aggregateError := apierrors.NewAggregate(nodeOpErrors)
 	if aggregateError != nil {
@@ -342,15 +337,23 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster, clusterOrchestr
 }
 
 func (c *ClusterController) getRelateImageRegistry(cluster *v1.Cluster) (*v1.ImageRegistry, error) {
-	imageRegistryList, err := c.storage.ListImageRegistry(storage.ListOption{
-		Filters: []storage.Filter{
-			{
-				Column:   "metadata->name",
-				Operator: "eq",
-				Value:    fmt.Sprintf(`"%s"`, cluster.Spec.ImageRegistry),
-			},
+	imageRegistryFilter := []storage.Filter{
+		{
+			Column:   "metadata->name",
+			Operator: "eq",
+			Value:    fmt.Sprintf(`"%s"`, cluster.Spec.ImageRegistry),
 		},
-	})
+	}
+
+	if cluster.Metadata.Workspace != "" {
+		imageRegistryFilter = append(imageRegistryFilter, storage.Filter{
+			Column:   "metadata->workspace",
+			Operator: "eq",
+			Value:    fmt.Sprintf(`"%s"`, cluster.Metadata.Workspace),
+		})
+	}
+
+	imageRegistryList, err := c.storage.ListImageRegistry(storage.ListOption{Filters: imageRegistryFilter})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list image registry")
 	}
@@ -371,6 +374,7 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 	if obj.Status != nil {
 		newStatus.Initialized = obj.Status.Initialized
 		newStatus.DashboardURL = obj.Status.DashboardURL
+		newStatus.NodeProvisionStatus = obj.Status.NodeProvisionStatus
 	}
 
 	if obj.IsInitialized() {

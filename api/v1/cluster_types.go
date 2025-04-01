@@ -1,27 +1,7 @@
 package v1
 
+// Neutree node provision status.
 const (
-	// Ray node state.
-
-	DeadNodeState  = "DEAD"
-	AliveNodeState = "ALIVE"
-
-	// NeutreeServingVersionLabel is the label key of Neutree Serving version.
-	NeutreeServingVersionLabel = "neutree.ai/neutree-serving-version"
-
-	// NeutreeNodeProvisionTypeLabel is the label key of Neutree node provision type.
-	// It can be either "static" or "autoscaler".
-	NeutreeNodeProvisionTypeLabel = "neutree.ai/node-provision-type"
-
-	// Ray node provision type.
-
-	StaticNodeProvisonType     = "static"
-	AutoScaleNodeProvisionType = "autoscaler"
-
-	// NeutreeNodeProvisionStatusLabel is the label key of Neutree node provision status.
-	// It can be either "provisioning" or "provisioned".
-	NeutreeNodeProvisionStatusLabel = "neutree.ai/node-provision-status"
-	// Neutree node provision status.
 	ProvisioningNodeProvisionStatus = "provisioning"
 	ProvisionedNodeProvisionStatus  = "provisioned"
 )
@@ -60,6 +40,9 @@ type ClusterStatus struct {
 	RayVersion string `json:"ray_version,omitempty"`
 	// whether the cluster is initialized.
 	Initialized bool `json:"initialized,omitempty"`
+	// the cluster all node provision status.
+	// current only record the static node provision status.
+	NodeProvisionStatus string `json:"node_provision_status,omitempty"`
 }
 
 func (c Cluster) IsInitialized() bool {
