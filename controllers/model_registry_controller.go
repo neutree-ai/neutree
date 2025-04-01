@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -16,12 +15,9 @@ import (
 )
 
 type ModelRegistryController struct {
+	baseController *BaseController
+
 	storage storage.Storage
-	queue   workqueue.RateLimitingInterface
-
-	workers int
-
-	syncInterval time.Duration
 }
 
 type ModelRegistryControllerOption struct {
@@ -31,10 +27,12 @@ type ModelRegistryControllerOption struct {
 
 func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRegistryController, error) {
 	c := &ModelRegistryController{
-		queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
-		workers:      option.Workers,
-		storage:      option.Storage,
-		syncInterval: time.Second * 10,
+		baseController: &BaseController{
+			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
+			workers:      option.Workers,
+			syncInterval: time.Second * 10,
+		},
+		storage: option.Storage,
 	}
 
 	return c, nil
@@ -43,61 +41,37 @@ func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRe
 func (c *ModelRegistryController) Start(ctx context.Context) {
 	klog.Infof("Starting model registry controller")
 
-	defer c.queue.ShutDown()
-
-	for i := 0; i < c.workers; i++ {
-		go wait.UntilWithContext(ctx, c.worker, time.Second)
-	}
-
-	wait.Until(c.reconcileAll, c.syncInterval, ctx.Done())
-	<-ctx.Done()
+	c.baseController.Start(ctx, c, c)
 }
 
-func (c *ModelRegistryController) worker(ctx context.Context) { //nolint:unparam
-	for c.processNextWorkItem() {
-	}
-}
-
-func (c *ModelRegistryController) processNextWorkItem() bool {
-	key, quit := c.queue.Get()
-	if quit {
-		return false
-	}
-	defer c.queue.Done(key)
-
+func (c *ModelRegistryController) Reconcile(key interface{}) error {
 	modelRegistryID, ok := key.(int)
 	if !ok {
-		klog.Errorf("failed to assert key to modelRegistryID")
-		return true
+		return errors.New("failed to assert key to modelRegistryID")
 	}
 
 	obj, err := c.storage.GetModelRegistry(strconv.Itoa(modelRegistryID))
 	if err != nil {
-		klog.Errorf("failed to get model registry %s, err: %v", strconv.Itoa(modelRegistryID), err)
-		return true
+		return errors.Wrapf(err, "failed to get model registry %s", strconv.Itoa(modelRegistryID))
 	}
 
 	klog.V(4).Info("Reconcile model registry " + obj.Metadata.Name)
 
-	err = c.sync(obj)
-	if err != nil {
-		klog.Errorf("failed to sync model registry %s, err: %v ", obj.Metadata.Name, err)
-		return true
-	}
-
-	return true
+	return c.sync(obj)
 }
 
-func (c *ModelRegistryController) reconcileAll() {
-	modelRegistries, err := c.storage.ListModelRegistry(storage.ListOption{})
+func (c *ModelRegistryController) ListKeys() ([]interface{}, error) {
+	registries, err := c.storage.ListModelRegistry(storage.ListOption{})
 	if err != nil {
-		klog.Errorf("failed to list model registry, err: %v", err)
-		return
+		return nil, err
 	}
 
-	for i := range modelRegistries {
-		c.queue.Add(modelRegistries[i].ID)
+	keys := make([]interface{}, len(registries))
+	for i := range registries {
+		keys[i] = registries[i].ID
 	}
+
+	return keys, nil
 }
 
 func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {

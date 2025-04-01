@@ -10,7 +10,6 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -20,12 +19,9 @@ import (
 )
 
 type ClusterController struct {
-	storage storage.Storage
-	queue   workqueue.RateLimitingInterface
-	workers int
+	baseController *BaseController
 
-	syncInterval time.Duration
-
+	storage               storage.Storage
 	defaultClusterVersion string
 }
 
@@ -37,11 +33,12 @@ type ClusterControllerOption struct {
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
 	c := &ClusterController{
-		storage: opt.Storage,
-		queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
-			workqueue.RateLimitingQueueConfig{Name: "cluster-controller"}),
-		workers:               opt.Workers,
-		syncInterval:          time.Second * 10,
+		baseController: &BaseController{
+			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "cluster"}),
+			workers:      opt.Workers,
+			syncInterval: time.Second * 10,
+		},
+		storage:               opt.Storage,
 		defaultClusterVersion: opt.DefaultClusterVesion,
 	}
 
@@ -50,62 +47,37 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 
 func (c *ClusterController) Start(ctx context.Context) {
 	klog.Infof("Starting cluster controller")
-
-	defer c.queue.ShutDown()
-
-	for i := 0; i < c.workers; i++ {
-		go wait.UntilWithContext(ctx, c.worker, time.Second)
-	}
-
-	wait.Until(c.reconcileAll, c.syncInterval, ctx.Done())
-	<-ctx.Done()
+	c.baseController.Start(ctx, c, c)
 }
 
-func (c *ClusterController) worker(ctx context.Context) { //nolint:unparam
-	for c.processNextWorkItem() {
+func (c *ClusterController) ListKeys() ([]interface{}, error) {
+	clusters, err := c.storage.ListCluster(storage.ListOption{})
+	if err != nil {
+		return nil, err
 	}
+
+	keys := make([]interface{}, len(clusters))
+	for i := range clusters {
+		keys[i] = clusters[i].ID
+	}
+
+	return keys, nil
 }
 
-func (c *ClusterController) processNextWorkItem() bool {
-	key, quit := c.queue.Get()
-	if quit {
-		return false
-	}
-	defer c.queue.Done(key)
-
+func (c *ClusterController) Reconcile(key interface{}) error {
 	clusterID, ok := key.(int)
 	if !ok {
-		klog.Error("failed to assert key to clusterID")
-		return true
+		return errors.New("failed to assert key to clusterID")
 	}
 
 	obj, err := c.storage.GetCluster(strconv.Itoa(clusterID))
 	if err != nil {
-		klog.Errorf("failed to get cluster %s, err: %v", strconv.Itoa(clusterID), err)
-		return true
+		return errors.Wrapf(err, "failed to get cluster %s", strconv.Itoa(clusterID))
 	}
 
 	klog.V(4).Info("Reconciling cluster " + obj.Metadata.Name)
 
-	err = c.sync(obj)
-	if err != nil {
-		klog.Errorf("failed to sync cluster %s, err: %v", obj.Metadata.Name, err)
-		return true
-	}
-
-	return true
-}
-
-func (c *ClusterController) reconcileAll() {
-	clusters, err := c.storage.ListCluster(storage.ListOption{})
-	if err != nil {
-		klog.Errorf("failed to list clusters, err: %v", err)
-		return
-	}
-
-	for i := range clusters {
-		c.queue.Add(clusters[i].ID)
-	}
+	return c.sync(obj)
 }
 
 func (c *ClusterController) sync(obj *v1.Cluster) error {
