@@ -4,7 +4,13 @@ on:
   push:
     # Sequence of patterns matched against refs/tags
     tags:
-      - 'v*' # Push events to matching v*, i.e. v1.0
+      - "v*" # Push events to matching v*, i.e. v1.0, v0.1.0-nightly-20250405
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the release tag (e.g : v0.1.0-nightly-20250405)"
+        required: true
+        type: string
 
 jobs:
   release:
@@ -25,15 +31,27 @@ jobs:
       - name: release
         run: make release
         env:
-          IMAGE_PROJECT:  ${{ secrets.RELEASE_IMAGE_PROJECT }}
-          IMAGE_REPO:  ${{ secrets.IMAGE_REPO }}
+          IMAGE_PROJECT: ${{ secrets.RELEASE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.IMAGE_REPO }}
+
+      - name: Set release tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "RELEASE_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+          fi
+
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
 
       - name: Generate draft release
         uses: softprops/action-gh-release@v1
         with:
           draft: true
-          tag_name: ${{ env.TAG }}
-          name: Release ${{ env.TAG }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
           files: out/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
