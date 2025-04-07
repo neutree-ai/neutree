@@ -119,7 +119,7 @@ release:
 
 MOCKERY := $(shell pwd)/bin/mockery
 mockery: ## Download mockery if not yet.
-	$(call go-get-tool,$(MOCKERY),github.com/vektra/mockery/v2@v2.53.0)
+	$(call go-get-tool,$(MOCKERY),github.com/vektra/mockery/v2@v2.53.3)
 
 .PHONY: mockgen
 mockgen: mockery

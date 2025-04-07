@@ -53,6 +53,7 @@ func (c *RoleController) Reconcile(key interface{}) error {
 	}
 
 	roleID := strconv.Itoa(_roleID)
+
 	obj, err := c.storage.GetRole(roleID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get role %s", roleID)
@@ -83,6 +84,7 @@ func (c *RoleController) sync(obj *v1.Role) error {
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
 		if obj.Status != nil && obj.Status.Phase == v1.RolePhaseDELETED {
 			klog.Infof("Role %s already marked as deleted, removing from DB", obj.Metadata.Name)
+
 			err = c.storage.DeleteRole(strconv.Itoa(obj.ID))
 			if err != nil {
 				return errors.Wrapf(err, "failed to delete role in DB %s", obj.Metadata.Name)
@@ -97,6 +99,7 @@ func (c *RoleController) sync(obj *v1.Role) error {
 		if err != nil {
 			return errors.Wrapf(err, "failed to update role %s status to DELETED", obj.Metadata.Name)
 		}
+
 		return nil
 	}
 
@@ -105,9 +108,11 @@ func (c *RoleController) sync(obj *v1.Role) error {
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.RolePhasePENDING {
 		klog.Infof("Role %s is PENDING or has no status, updating to CREATED", obj.Metadata.Name)
 		err = c.updateStatus(obj, v1.RolePhaseCREATED, nil)
+
 		if err != nil {
 			return errors.Wrapf(err, "failed to update role %s status to CREATED", obj.Metadata.Name)
 		}
+
 		return nil
 	}
 

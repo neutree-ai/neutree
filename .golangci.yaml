@@ -1,8 +1,5 @@
 run:
-  deadline: 5m
-  skip-files:
-    - '.*_test\.go$'
-    - 'mock_.*\.go$'
+  timeout: 5m
 
 linters:
   disable-all: true
@@ -96,8 +93,6 @@ linters-settings:
     # It's a comma-separated list of prefixes.
     local-prefixes: github.com/neutree-ai/neutree
   govet:
-    # report about shadowed variables
-    check-shadowing: true
     # enable or disable analyzers by name
     enable:
       - atomicalign
@@ -116,3 +111,8 @@ linters-settings:
     allow-trailing-comment: true
     # Allow leading comments to be separated with empty liens
     allow-separated-leading-comment: true
+
+issues:
+  exclude-files:
+    - '.*_test\.go$'
+    - 'mock_.*\.go$'

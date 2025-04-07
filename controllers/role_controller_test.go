@@ -165,7 +165,7 @@ func TestRoleController_Sync_CreateOrUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:  "Phase=DELETED (no timestamp) -> No Change",
+			name:  "Phase=DELETED (no deletionTimestamp) -> No Change",
 			input: testRole(roleID, v1.RolePhaseDELETED),
 			mockSetup: func(s *storagemocks.MockStorage) {
 				// Expect no calls to UpdateRole or DeleteRole.
