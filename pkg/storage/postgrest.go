@@ -9,6 +9,9 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+// explicitly check that postgrestStorage implements the interfaces
+var _ Storage = (*postgrestStorage)(nil)
+
 type postgrestStorage struct {
 	postgrestClient *postgrest.Client
 }
@@ -226,4 +229,69 @@ func parseResponse(response interface{}, responseContent []byte) error {
 	}
 
 	return nil
+}
+
+func (s *postgrestStorage) CreateRole(data *v1.Role) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ROLE_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteRole(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ROLE_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateRole(id string, data *v1.Role) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ROLE_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetRole(id string) (*v1.Role, error) {
+	var (
+		response []v1.Role
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(ROLE_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListRole(option ListOption) ([]v1.Role, error) {
+	var response []v1.Role
+	err := s.genericList(ROLE_TABLE, &response, option)
+
+	return response, err
 }
