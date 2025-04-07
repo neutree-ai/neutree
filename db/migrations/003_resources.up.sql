@@ -25,6 +25,7 @@ CREATE TYPE api.endpoint_spec AS (
     model api.model_spec,
     container api.container_spec,
     resources api.resource_spec,
+    replicas INTEGER,
     variables json
 );
 
@@ -54,7 +55,7 @@ CREATE TRIGGER set_endpoints_default_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION set_default_metadata_timestamp_column();
 
-CREATE UNIQUE INDEX endpoints_name_unique_idx ON api.endpoints (((metadata).name));
+CREATE UNIQUE INDEX endpoints_name_workspace_unique_idx ON api.endpoints (((metadata).workspace), ((metadata).name));
 
 ALTER TABLE api.endpoints ENABLE ROW LEVEL SECURITY;
 
@@ -117,7 +118,7 @@ CREATE TRIGGER set_image_registries_default_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION set_default_metadata_timestamp_column();
 
-CREATE UNIQUE INDEX image_registries_name_unique_idx ON api.image_registries (((metadata).name));
+CREATE UNIQUE INDEX image_registries_name_workspace_unique_idx ON api.image_registries (((metadata).workspace), ((metadata).name));
 
 ALTER TABLE api.image_registries ENABLE ROW LEVEL SECURITY;
 
@@ -179,7 +180,7 @@ CREATE TRIGGER set_model_registries_default_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION set_default_metadata_timestamp_column();
 
-CREATE UNIQUE INDEX model_registries_name_unique_idx ON api.model_registries (((metadata).name));
+CREATE UNIQUE INDEX model_registries_name_workspace_unique_idx ON api.model_registries (((metadata).workspace), ((metadata).name));
 
 ALTER TABLE api.model_registries ENABLE ROW LEVEL SECURITY;
 
@@ -244,7 +245,7 @@ CREATE TRIGGER set_engines_default_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION set_default_metadata_timestamp_column();
 
-CREATE UNIQUE INDEX engines_name_unique_idx ON api.engines (((metadata).name));
+CREATE UNIQUE INDEX engines_name_workspace_unique_idx ON api.engines (((metadata).workspace), ((metadata).name));
 
 ALTER TABLE api.engines ENABLE ROW LEVEL SECURITY;
 
@@ -315,7 +316,7 @@ CREATE TRIGGER set_clusters_default_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION set_default_metadata_timestamp_column();
 
-CREATE UNIQUE INDEX clusters_name_unique_idx ON api.clusters (((metadata).name));
+CREATE UNIQUE INDEX clusters_name_workspace_unique_idx ON api.clusters (((metadata).workspace), ((metadata).name));
 
 ALTER TABLE api.clusters ENABLE ROW LEVEL SECURITY;
 

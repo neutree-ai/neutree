@@ -19,8 +19,8 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
-      timeout: 5s
-      retries: 5
+      timeout: 15s
+      retries: 10
 
   auth:
     image: supabase/gotrue:v2.170.0
@@ -56,8 +56,8 @@ services:
           "wget -q -O /dev/null http://localhost:9999/health || exit 1",
         ]
       interval: 2s
-      timeout: 5s
-      retries: 5
+      timeout: 15s
+      retries: 10
 
   migration:
     image: migrate/migrate
@@ -101,10 +101,12 @@ services:
       PGRST_SERVER_PORT: 6432
       PGRST_JWT_SECRET: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
       PGRST_DB_EXTRA_SEARCH_PATH: auth
+      PGRST_DB_AGGREGATES_ENABLED: 1
     ports:
       - "6432:6432"
     depends_on:
-      - migration
+      migration:
+        condition: service_completed_successfully
     networks:
       - neutree
     restart: always
@@ -125,10 +127,11 @@ services:
     networks:
       - neutree
     depends_on:
-      - migration
+      migration:
+        condition: service_completed_successfully
 
   neutree-core:
-    image: docker.io/neutree/neutree-core:latest
+    image: docker.io/weihuang080513/neutree-core:latest
     container_name: neutree-core
     command:
       - ./neutree-core
@@ -139,6 +142,8 @@ services:
     networks:
       - neutree
     restart: always
+    depends_on:
+      - postgrest
 
 networks:
   neutree:

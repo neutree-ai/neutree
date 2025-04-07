@@ -3,6 +3,7 @@
 -- ----------------------
 CREATE TYPE api.metadata AS (
     name TEXT,
+    display_name TEXT,
     workspace TEXT, -- null for global resources
     deletion_timestamp TIMESTAMP,
     creation_timestamp TIMESTAMP,
@@ -16,7 +17,15 @@ CREATE TYPE api.metadata AS (
 CREATE OR REPLACE FUNCTION update_metadata_update_timestamp_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.metadata := ROW((NEW.metadata).name,(NEW.metadata).workspace,(NEW.metadata).deletion_timestamp,(NEW.metadata).creation_timestamp,CURRENT_TIMESTAMP,(NEW.metadata).labels);
+    NEW.metadata := ROW(
+        (NEW.metadata).name,
+        (NEW.metadata).display_name,
+        (NEW.metadata).workspace,
+        (NEW.metadata).deletion_timestamp,
+        (NEW.metadata).creation_timestamp,
+        CURRENT_TIMESTAMP,
+        (NEW.metadata).labels
+    );
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -24,7 +33,15 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION set_default_metadata_timestamp_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.metadata := ROW((NEW.metadata).name,(NEW.metadata).workspace,(NEW.metadata).deletion_timestamp,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,(NEW.metadata).labels);
+    NEW.metadata := ROW(
+        (NEW.metadata).name,
+        (NEW.metadata).display_name,
+        (NEW.metadata).workspace,
+        (NEW.metadata).deletion_timestamp,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP,
+        (NEW.metadata).labels
+    );
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -170,12 +187,19 @@ CREATE TYPE api.role_spec AS (
     permissions api.permission_action[]
 );
 
+CREATE TYPE api.role_status AS (
+    phase TEXT,
+    service_url TEXT,
+    error_message TEXT
+);
+
 CREATE TABLE api.roles (
     id SERIAL PRIMARY KEY,
     api_version TEXT NOT NULL,
     kind TEXT NOT NULL,
     metadata api.metadata,
-    spec api.role_spec
+    spec api.role_spec,
+    status api.role_status
 );
 
 CREATE OR REPLACE FUNCTION api.update_admin_permissions()
@@ -243,12 +267,19 @@ CREATE TYPE api.role_assignment_spec AS (
     role TEXT
 );
 
+CREATE TYPE api.role_assignment_status AS (
+    phase TEXT,
+    service_url TEXT,
+    error_message TEXT
+);
+
 CREATE TABLE api.role_assignments (
     id SERIAL PRIMARY KEY,
     api_version TEXT NOT NULL,
     kind TEXT NOT NULL,
     metadata api.metadata,
-    spec api.role_assignment_spec
+    spec api.role_assignment_spec,
+    status api.role_assignment_status
 );
 
 CREATE TRIGGER update_role_assignments_update_timestamp

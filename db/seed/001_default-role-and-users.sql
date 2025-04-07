@@ -8,7 +8,7 @@ BEGIN
         VALUES (
             'v1',
             'Role',
-            ROW('admin', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
+            ROW('admin', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
             ROW('admin'::api.role_preset, ARRAY[]::api.permission_action[])::api.role_spec
         );
     END IF;
@@ -18,7 +18,7 @@ BEGIN
         VALUES (
             'v1',
             'Role',
-            ROW('workspace_user', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
+            ROW('workspace_user', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
             ROW('workspace_user'::api.role_preset, ARRAY[]::api.permission_action[])::api.role_spec
         );
     END IF;
@@ -106,6 +106,7 @@ BEGIN
             'RoleAssignment',
             ROW(
                 'admin-global-role-assignment',
+                NULL,
                 NULL,
                 NULL,
                 CURRENT_TIMESTAMP,
