@@ -53,7 +53,6 @@ func (c *RoleController) Reconcile(key interface{}) error {
 	}
 
 	roleID := strconv.Itoa(_roleID)
-
 	obj, err := c.storage.GetRole(roleID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get role %s", roleID)
