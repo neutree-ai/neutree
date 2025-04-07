@@ -11,13 +11,30 @@ import (
 	"github.com/pkg/errors"
 )
 
-func CheckImageExists(image string, auth authn.Authenticator) (bool, error) {
+type ImageService interface {
+	CheckImageExists(image string, auth authn.Authenticator) (bool, error)
+	ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error)
+}
+
+type imageService struct {
+	transport *http.Transport
+}
+
+func NewImageService() ImageService {
+	return &imageService{
+		transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
+	}
+}
+
+func (svc *imageService) CheckImageExists(image string, auth authn.Authenticator) (bool, error) {
 	ref, err := name.ParseReference(image)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to parse image "+image)
 	}
 
-	_, err = remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(&http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}})) //nolint:gosec
+	_, err = remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(svc.transport))
 	if err != nil {
 		if transportErr, ok := err.(*transport.Error); ok {
 			if transportErr.StatusCode == http.StatusNotFound {
@@ -31,13 +48,13 @@ func CheckImageExists(image string, auth authn.Authenticator) (bool, error) {
 	return true, nil
 }
 
-func ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error) {
+func (svc *imageService) ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error) {
 	repo, err := name.NewRepository(imageRepo)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse image repo "+imageRepo)
 	}
 
-	tags, err := remote.List(repo, remote.WithAuth(auth), remote.WithTransport(&http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}})) //nolint:gosec
+	tags, err := remote.List(repo, remote.WithAuth(auth), remote.WithTransport(svc.transport))
 	if err != nil {
 		if transportErr, ok := err.(*transport.Error); ok {
 			if transportErr.StatusCode == http.StatusNotFound {

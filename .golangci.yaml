@@ -1,5 +1,8 @@
 run:
   deadline: 5m
+  skip-files:
+    - '.*_test\.go$'
+    - 'mock_.*\.go$'
 
 linters:
   disable-all: true

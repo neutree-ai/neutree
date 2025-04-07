@@ -20,12 +20,16 @@ import (
 type ImageRegistryController struct {
 	baseController *BaseController
 
-	storage storage.Storage
+	storage      storage.Storage
+	imageService registry.ImageService
+
+	syncHandler func(imageRegistry *v1.ImageRegistry) error
 }
 
 type ImageRegistryControllerOption struct {
-	Storage storage.Storage
-	Workers int
+	ImageService registry.ImageService
+	Storage      storage.Storage
+	Workers      int
 }
 
 func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRegistryController, error) {
@@ -37,6 +41,8 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 		},
 		storage: option.Storage,
 	}
+
+	c.syncHandler = c.sync
 
 	return c, nil
 }
@@ -60,7 +66,7 @@ func (c *ImageRegistryController) Reconcile(key interface{}) error {
 
 	klog.V(4).Info("Reconcile image registry " + obj.Metadata.Name)
 
-	return c.sync(obj)
+	return c.syncHandler(obj)
 }
 
 func (c *ImageRegistryController) ListKeys() ([]interface{}, error) {
@@ -80,8 +86,8 @@ func (c *ImageRegistryController) ListKeys() ([]interface{}, error) {
 func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 	var err error
 
-	if obj.Metadata.DeletionTimestamp != "" {
-		if obj.Status.Phase == v1.ImageRegistryPhaseDELETED {
+	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
+		if obj.Status != nil && obj.Status.Phase == v1.ImageRegistryPhaseDELETED {
 			klog.Info("Deleted image registry " + obj.Metadata.Name)
 
 			err = c.storage.DeleteImageRegistry(strconv.Itoa(obj.ID))
@@ -106,6 +112,10 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 		phase := v1.ImageRegistryPhaseCONNECTED
 		if err != nil {
 			phase = v1.ImageRegistryPhaseFAILED
+		}
+
+		if obj.Status != nil && obj.Status.Phase == phase {
+			return
 		}
 
 		updateStatusErr := c.updateStatus(obj, phase, err)
@@ -140,7 +150,7 @@ func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRe
 
 	imageRepo := fmt.Sprintf("%s/%s/neutree-serve", registryURL.Host, imageRegistry.Spec.Repository)
 
-	_, err = registry.ListImageTags(imageRepo, authn.FromConfig(authConfig))
+	_, err = c.imageService.ListImageTags(imageRepo, authn.FromConfig(authConfig))
 	if err != nil {
 		return errors.Wrap(err, "check image registry auth failed")
 	}

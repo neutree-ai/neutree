@@ -18,11 +18,17 @@ type ModelRegistryController struct {
 	baseController *BaseController
 
 	storage storage.Storage
+
+	newModelRegistry model_registry.NewModelRegistry
+
+	syncHandler func(modelRegistry *v1.ModelRegistry) error
 }
 
 type ModelRegistryControllerOption struct {
 	Storage storage.Storage
 	Workers int
+
+	NewModelRegistry model_registry.NewModelRegistry
 }
 
 func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRegistryController, error) {
@@ -32,8 +38,11 @@ func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRe
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},
-		storage: option.Storage,
+		storage:          option.Storage,
+		newModelRegistry: option.NewModelRegistry,
 	}
+
+	c.syncHandler = c.sync
 
 	return c, nil
 }
@@ -57,7 +66,7 @@ func (c *ModelRegistryController) Reconcile(key interface{}) error {
 
 	klog.V(4).Info("Reconcile model registry " + obj.Metadata.Name)
 
-	return c.sync(obj)
+	return c.syncHandler(obj)
 }
 
 func (c *ModelRegistryController) ListKeys() ([]interface{}, error) {
@@ -75,13 +84,13 @@ func (c *ModelRegistryController) ListKeys() ([]interface{}, error) {
 }
 
 func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
-	modelRegistry, err := model_registry.New(obj)
+	modelRegistry, err := c.newModelRegistry(obj)
 	if err != nil {
 		return err
 	}
 
-	if obj.Metadata.DeletionTimestamp != "" {
-		if obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
+	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
+		if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
 			klog.Info("Deleted model registry " + obj.Metadata.Name)
 
 			err = c.storage.DeleteModelRegistry(strconv.Itoa(obj.ID))
@@ -111,7 +120,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			phase = v1.ModelRegistryPhaseFAILED
 		}
 
-		if obj.Status.Phase == phase {
+		if obj.Status != nil && obj.Status.Phase == phase {
 			return
 		}
 
@@ -121,7 +130,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 		}
 	}()
 
-	if obj.Status.Phase == "" || obj.Status.Phase == v1.ModelRegistryPhasePENDING {
+	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.ModelRegistryPhasePENDING {
 		klog.Info("Connect model registry " + obj.Metadata.Name)
 
 		err = modelRegistry.Connect()
@@ -132,7 +141,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 		return nil
 	}
 
-	if obj.Status.Phase == v1.ModelRegistryPhaseFAILED {
+	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseFAILED {
 		klog.Info("Reconnect model registry " + obj.Metadata.Name)
 
 		if err = modelRegistry.Disconnect(); err != nil {
@@ -146,7 +155,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 		return nil
 	}
 
-	if obj.Status.Phase == v1.ModelRegistryPhaseCONNECTED {
+	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseCONNECTED {
 		klog.Info("Health check model registry " + obj.Metadata.Name)
 
 		healthy := modelRegistry.HealthyCheck()

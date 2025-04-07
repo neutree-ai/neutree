@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/pkg/errors"
-	"github.com/supabase-community/postgrest-go"
+	postgrest "github.com/supabase-community/postgrest-go"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )

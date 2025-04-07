@@ -40,11 +40,10 @@ type RayOrchestrator struct {
 	config        *v1.RayClusterConfig
 	cluster       *v1.Cluster
 	imageRegistry *v1.ImageRegistry
+	imageService  registry.ImageService
 
 	clusterHelper *ray.ClusterManager
 	opTimeout     OperationConfig
-
-	initialized bool
 }
 
 func (o *RayOrchestrator) CreateCluster() (string, error) {
@@ -56,7 +55,7 @@ func (o *RayOrchestrator) CreateCluster() (string, error) {
 		return "", errors.Wrap(err, "check ray cluster serving image failed")
 	}
 
-	if o.initialized {
+	if o.cluster.IsInitialized() {
 		// if cluster already initialized, but still need to create cluster, may need to restart head node.
 		return o.clusterHelper.UpCluster(ctx, true)
 	} else {
@@ -307,7 +306,6 @@ func NewRayOrchestrator(opts Options) (Orchestrator, error) {
 	}
 
 	if opts.Cluster.IsInitialized() {
-		o.initialized = true
 		if o.config.Provider.Type == "local" {
 			// when ray provider is local, all cluster operation depend on local provider cluster state file.
 			// So we need to ensure local provider cache exists after cluster initialized.
@@ -416,7 +414,11 @@ func (o *RayOrchestrator) setDefaultRayClusterConfig() error {
 }
 
 func (o *RayOrchestrator) checkDockerImage(image string) error {
-	imageExisted, err := registry.CheckImageExists(image, authn.FromConfig(authn.AuthConfig{
+	if o.imageRegistry.Status == nil || o.imageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
+		return errors.New("image registry " + o.imageRegistry.Metadata.Name + " not connected")
+	}
+
+	imageExisted, err := o.imageService.CheckImageExists(image, authn.FromConfig(authn.AuthConfig{
 		Username:      o.imageRegistry.Spec.AuthConfig.Username,
 		Password:      o.imageRegistry.Spec.AuthConfig.Password,
 		Auth:          o.imageRegistry.Spec.AuthConfig.Auth,

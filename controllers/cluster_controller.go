@@ -15,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -22,13 +23,21 @@ type ClusterController struct {
 	baseController *BaseController
 
 	storage               storage.Storage
+	imageService          registry.ImageService
 	defaultClusterVersion string
+
+	newOrchestrator orchestrator.NewOrchestratorFunc
+
+	syncHandler func(cluster *v1.Cluster) error
 }
 
 type ClusterControllerOption struct {
+	ImageService         registry.ImageService
 	Storage              storage.Storage
 	Workers              int
 	DefaultClusterVesion string
+
+	NewOrchestrator orchestrator.NewOrchestratorFunc
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
@@ -39,8 +48,12 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 			syncInterval: time.Second * 10,
 		},
 		storage:               opt.Storage,
+		imageService:          opt.ImageService,
 		defaultClusterVersion: opt.DefaultClusterVesion,
+		newOrchestrator:       opt.NewOrchestrator,
 	}
+
+	c.syncHandler = c.sync
 
 	return c, nil
 }
@@ -77,7 +90,7 @@ func (c *ClusterController) Reconcile(key interface{}) error {
 
 	klog.V(4).Info("Reconciling cluster " + obj.Metadata.Name)
 
-	return c.sync(obj)
+	return c.syncHandler(obj)
 }
 
 func (c *ClusterController) sync(obj *v1.Cluster) error {
@@ -85,18 +98,20 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 		err error
 	)
 
+	// set default cluster version
 	if obj.Spec.Version == "" {
 		obj.Spec.Version = c.defaultClusterVersion
 	}
 
 	imageRegistry, err := c.getRelateImageRegistry(obj)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to get relate image registry")
 	}
 
-	clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
+	clusterOrchestrator, err := c.newOrchestrator(orchestrator.Options{
 		Cluster:       obj,
 		ImageRegistry: imageRegistry,
+		ImageService:  c.imageService,
 	})
 	if err != nil {
 		return err
@@ -150,11 +165,11 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestr
 		return nil
 	}
 
-	// only ssh should reconcile static node.
-	if cluster.Spec.Type == "ssh" {
-		err = c.ReconcileStaticNodes(cluster, clusterOrchestrator)
+	// only reconcile  node when cluster is running.
+	if cluster.Status != nil && cluster.Status.Phase == v1.ClusterPhaseRunning {
+		err = c.reconcileNodes(cluster, clusterOrchestrator)
 		if err != nil {
-			return errors.Wrap(err, "failed to reconcile cluster static node "+cluster.Metadata.Name)
+			return errors.Wrap(err, "failed to reconcile nodes")
 		}
 	}
 
@@ -166,12 +181,25 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestr
 	return nil
 }
 
+// reconcileNodes will reconcile the desired node of the cluster.
+func (c *ClusterController) reconcileNodes(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error {
+	// only ssh should reconcile static node.
+	if cluster.Spec.Type == "ssh" {
+		err := c.reconcileStaticNodes(cluster, clusterOrchestrator)
+		if err != nil {
+			return errors.Wrap(err, "failed to reconcile cluster static node "+cluster.Metadata.Name)
+		}
+	}
+
+	return nil
+}
+
 // 1. get desired static node ip from cluster spec
 // 2. get static node provision status from cluster status
 // 3. compare desired static node ip and static node provision status
 // 4. start static node that not provisioned
 // 5. stop static node that not in desired static node ip
-func (c *ClusterController) ReconcileStaticNodes(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error { //nolint:funlen
+func (c *ClusterController) reconcileStaticNodes(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error { //nolint:funlen
 	klog.V(4).Info("Reconciling Static Nodes for cluster " + cluster.Metadata.Name)
 
 	var (
@@ -284,7 +312,7 @@ func (c *ClusterController) ReconcileStaticNodes(cluster *v1.Cluster, clusterOrc
 }
 
 func (c *ClusterController) reconcileDelete(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error {
-	if cluster.Status.Phase == v1.ClusterPhaseDeleted {
+	if cluster.Status != nil && cluster.Status.Phase == v1.ClusterPhaseDeleted {
 		err := c.storage.DeleteCluster(strconv.Itoa(cluster.ID))
 		if err != nil {
 			return errors.Wrap(err, "failed to delete cluster "+cluster.Metadata.Name)
@@ -347,14 +375,18 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 		newStatus.Initialized = obj.Status.Initialized
 		newStatus.DashboardURL = obj.Status.DashboardURL
 		newStatus.NodeProvisionStatus = obj.Status.NodeProvisionStatus
+		newStatus.ReadyNodes = obj.Status.ReadyNodes
+		newStatus.DesiredNodes = obj.Status.DesiredNodes
+		newStatus.Version = obj.Status.Version
+		newStatus.RayVersion = obj.Status.RayVersion
 	}
 
-	if obj.IsInitialized() {
+	if obj.IsInitialized() && obj.Metadata.DeletionTimestamp == "" {
+		newStatus.DesiredNodes = len(clusterOrchestrator.GetDesireStaticWorkersIP())
+
 		clusterStatus, getClusterStatusErr := clusterOrchestrator.ClusterStatus()
-		if getClusterStatusErr != nil {
-		} else {
+		if getClusterStatusErr == nil {
 			newStatus.ReadyNodes = clusterStatus.ReadyNodes
-			newStatus.DesiredNodes = len(clusterOrchestrator.GetDesireStaticWorkersIP())
 			newStatus.Version = clusterStatus.NeutreeServeVersion
 			newStatus.RayVersion = clusterStatus.RayVersion
 		}

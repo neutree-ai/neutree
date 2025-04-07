@@ -18,17 +18,19 @@ type ImageRegistry struct {
 	Status     *ImageRegistryStatus `json:"status,omitempty"`
 }
 
+type ImageRegistryAuthConfig struct {
+	Password      string `json:"password,omitempty"`
+	Username      string `json:"username,omitempty"`
+	Auth          string `json:"auth,omitempty"`
+	IdentityToken string `json:"identitytoken,omitempty"`
+	RegistryToken string `json:"registrytoken,omitempty"`
+}
+
 type ImageRegistrySpec struct {
-	AuthConfig struct {
-		Password      string `json:"password,omitempty"`
-		Username      string `json:"username,omitempty"`
-		Auth          string `json:"auth,omitempty"`
-		IdentityToken string `json:"identitytoken,omitempty"`
-		RegistryToken string `json:"registrytoken,omitempty"`
-	} `json:"authconfig"`
-	Ca         string `json:"ca"`
-	Repository string `json:"repository"`
-	URL        string `json:"url"`
+	AuthConfig ImageRegistryAuthConfig `json:"authconfig"`
+	Ca         string                  `json:"ca"`
+	Repository string                  `json:"repository"`
+	URL        string                  `json:"url"`
 }
 
 type ImageRegistryStatus struct {

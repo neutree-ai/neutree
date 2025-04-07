@@ -8,6 +8,9 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/pkg/model_registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -35,20 +38,21 @@ func main() {
 		klog.Fatalf("failed to init storage: %s", err.Error())
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	imageService := registry.NewImageService()
 
 	imageRegistryController, err := controllers.NewImageRegistryController(&controllers.ImageRegistryControllerOption{
-		Storage: s,
-		Workers: *controllerWorkers,
+		Storage:      s,
+		Workers:      *controllerWorkers,
+		ImageService: imageService,
 	})
 	if err != nil {
 		klog.Fatalf("failed to init image registry controller: %s", err.Error())
 	}
 
 	modelRegistryController, err := controllers.NewModelRegistryController(&controllers.ModelRegistryControllerOption{
-		Storage: s,
-		Workers: *controllerWorkers,
+		Storage:          s,
+		Workers:          *controllerWorkers,
+		NewModelRegistry: model_registry.New,
 	})
 
 	if err != nil {
@@ -59,11 +63,15 @@ func main() {
 		Storage:              s,
 		Workers:              *controllerWorkers,
 		DefaultClusterVesion: *defaultClusterVersion,
+		NewOrchestrator:      orchestrator.NewOrchestrator,
 	})
 
 	if err != nil {
 		klog.Fatalf("failed to init cluster controller: %s", err.Error())
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	go imageRegistryController.Start(ctx)
 	go modelRegistryController.Start(ctx)
