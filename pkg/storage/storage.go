@@ -18,6 +18,7 @@ const (
 	IMAGE_REGISTRY_TABLE = "image_registries"
 	CLUSTERS_TABLE       = "clusters"
 	MODEL_REGISTRY_TABLE = "model_registries"
+	ROLE_TABLE           = "roles"
 )
 
 type ImageRegistryStorage interface {
@@ -59,10 +60,24 @@ type ClusterStorage interface {
 	ListCluster(option ListOption) ([]v1.Cluster, error)
 }
 
+type RoleStorage interface {
+	// CreateRole creates a new role in the database.
+	CreateRole(data *v1.Role) error
+	// DeleteRole deletes a role by its ID.
+	DeleteRole(id string) error
+	// UpdateRole updates an existing role in the database.
+	UpdateRole(id string, data *v1.Role) error
+	// GetRole retrieves a role by its ID.
+	GetRole(id string) (*v1.Role, error)
+	// ListRole retrieves a list of roles with optional filters.
+	ListRole(option ListOption) ([]v1.Role, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
 	ModelRegistryStorage
+	RoleStorage
 }
 
 type Options struct {
