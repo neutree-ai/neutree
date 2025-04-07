@@ -2,21 +2,6 @@ package v1
 
 import "database/sql"
 
-type PublicSchemaMigrationsSelect struct {
-	Dirty   bool  `json:"dirty"`
-	Version int64 `json:"version"`
-}
-
-type PublicSchemaMigrationsInsert struct {
-	Dirty   bool  `json:"dirty"`
-	Version int64 `json:"version"`
-}
-
-type PublicSchemaMigrationsUpdate struct {
-	Dirty   sql.NullBool  `json:"dirty"`
-	Version sql.NullInt64 `json:"version"`
-}
-
 type AuthSchemaMigrationsSelect struct {
 	Version string `json:"version"`
 }
@@ -27,477 +12,6 @@ type AuthSchemaMigrationsInsert struct {
 
 type AuthSchemaMigrationsUpdate struct {
 	Version sql.NullString `json:"version"`
-}
-
-type ApiApiKeysSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         string                 `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-	UserId     string                 `json:"user_id"`
-}
-
-type ApiApiKeysInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         sql.NullString         `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-	UserId     string                 `json:"user_id"`
-}
-
-type ApiApiKeysUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullString         `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-	UserId     sql.NullString         `json:"user_id"`
-}
-
-type ApiRoleAssignmentsSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         int32                  `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type ApiRoleAssignmentsInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type ApiRoleAssignmentsUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type ApiUserProfilesSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         string                 `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type ApiUserProfilesInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         string                 `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type ApiUserProfilesUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullString         `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type AuthIdentitiesSelect struct {
-	CreatedAt    sql.NullString `json:"created_at"`
-	Email        sql.NullString `json:"email"`
-	Id           string         `json:"id"`
-	IdentityData interface{}    `json:"identity_data"`
-	LastSignInAt sql.NullString `json:"last_sign_in_at"`
-	Provider     string         `json:"provider"`
-	ProviderId   string         `json:"provider_id"`
-	UpdatedAt    sql.NullString `json:"updated_at"`
-	UserId       string         `json:"user_id"`
-}
-
-type AuthIdentitiesInsert struct {
-	CreatedAt    sql.NullString `json:"created_at"`
-	Email        sql.NullString `json:"email"`
-	Id           sql.NullString `json:"id"`
-	IdentityData interface{}    `json:"identity_data"`
-	LastSignInAt sql.NullString `json:"last_sign_in_at"`
-	Provider     string         `json:"provider"`
-	ProviderId   string         `json:"provider_id"`
-	UpdatedAt    sql.NullString `json:"updated_at"`
-	UserId       string         `json:"user_id"`
-}
-
-type AuthIdentitiesUpdate struct {
-	CreatedAt    sql.NullString `json:"created_at"`
-	Email        sql.NullString `json:"email"`
-	Id           sql.NullString `json:"id"`
-	IdentityData interface{}    `json:"identity_data"`
-	LastSignInAt sql.NullString `json:"last_sign_in_at"`
-	Provider     sql.NullString `json:"provider"`
-	ProviderId   sql.NullString `json:"provider_id"`
-	UpdatedAt    sql.NullString `json:"updated_at"`
-	UserId       sql.NullString `json:"user_id"`
-}
-
-type AuthSsoDomainsSelect struct {
-	CreatedAt     sql.NullString `json:"created_at"`
-	Domain        string         `json:"domain"`
-	Id            string         `json:"id"`
-	SsoProviderId string         `json:"sso_provider_id"`
-	UpdatedAt     sql.NullString `json:"updated_at"`
-}
-
-type AuthSsoDomainsInsert struct {
-	CreatedAt     sql.NullString `json:"created_at"`
-	Domain        string         `json:"domain"`
-	Id            string         `json:"id"`
-	SsoProviderId string         `json:"sso_provider_id"`
-	UpdatedAt     sql.NullString `json:"updated_at"`
-}
-
-type AuthSsoDomainsUpdate struct {
-	CreatedAt     sql.NullString `json:"created_at"`
-	Domain        sql.NullString `json:"domain"`
-	Id            sql.NullString `json:"id"`
-	SsoProviderId sql.NullString `json:"sso_provider_id"`
-	UpdatedAt     sql.NullString `json:"updated_at"`
-}
-
-type ApiRolesSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         int32                  `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type ApiRolesInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type ApiRolesUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-}
-
-type AuthAuditLogEntriesSelect struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         string         `json:"id"`
-	InstanceId sql.NullString `json:"instance_id"`
-	IpAddress  string         `json:"ip_address"`
-	Payload    interface{}    `json:"payload"`
-}
-
-type AuthAuditLogEntriesInsert struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         string         `json:"id"`
-	InstanceId sql.NullString `json:"instance_id"`
-	IpAddress  sql.NullString `json:"ip_address"`
-	Payload    interface{}    `json:"payload"`
-}
-
-type AuthAuditLogEntriesUpdate struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         sql.NullString `json:"id"`
-	InstanceId sql.NullString `json:"instance_id"`
-	IpAddress  sql.NullString `json:"ip_address"`
-	Payload    interface{}    `json:"payload"`
-}
-
-type AuthMfaChallengesSelect struct {
-	CreatedAt           string         `json:"created_at"`
-	FactorId            string         `json:"factor_id"`
-	Id                  string         `json:"id"`
-	IpAddress           interface{}    `json:"ip_address"`
-	OtpCode             sql.NullString `json:"otp_code"`
-	VerifiedAt          sql.NullString `json:"verified_at"`
-	WebAuthnSessionData interface{}    `json:"web_authn_session_data"`
-}
-
-type AuthMfaChallengesInsert struct {
-	CreatedAt           string         `json:"created_at"`
-	FactorId            string         `json:"factor_id"`
-	Id                  string         `json:"id"`
-	IpAddress           interface{}    `json:"ip_address"`
-	OtpCode             sql.NullString `json:"otp_code"`
-	VerifiedAt          sql.NullString `json:"verified_at"`
-	WebAuthnSessionData interface{}    `json:"web_authn_session_data"`
-}
-
-type AuthMfaChallengesUpdate struct {
-	CreatedAt           sql.NullString `json:"created_at"`
-	FactorId            sql.NullString `json:"factor_id"`
-	Id                  sql.NullString `json:"id"`
-	IpAddress           interface{}    `json:"ip_address"`
-	OtpCode             sql.NullString `json:"otp_code"`
-	VerifiedAt          sql.NullString `json:"verified_at"`
-	WebAuthnSessionData interface{}    `json:"web_authn_session_data"`
-}
-
-type AuthInstancesSelect struct {
-	CreatedAt     sql.NullString `json:"created_at"`
-	Id            string         `json:"id"`
-	RawBaseConfig sql.NullString `json:"raw_base_config"`
-	UpdatedAt     sql.NullString `json:"updated_at"`
-	Uuid          sql.NullString `json:"uuid"`
-}
-
-type AuthInstancesInsert struct {
-	CreatedAt     sql.NullString `json:"created_at"`
-	Id            string         `json:"id"`
-	RawBaseConfig sql.NullString `json:"raw_base_config"`
-	UpdatedAt     sql.NullString `json:"updated_at"`
-	Uuid          sql.NullString `json:"uuid"`
-}
-
-type AuthInstancesUpdate struct {
-	CreatedAt     sql.NullString `json:"created_at"`
-	Id            sql.NullString `json:"id"`
-	RawBaseConfig sql.NullString `json:"raw_base_config"`
-	UpdatedAt     sql.NullString `json:"updated_at"`
-	Uuid          sql.NullString `json:"uuid"`
-}
-
-type ApiModelRegistriesSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         int32                  `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiModelRegistriesInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiModelRegistriesUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type AuthSamlProvidersSelect struct {
-	AttributeMapping interface{}    `json:"attribute_mapping"`
-	CreatedAt        sql.NullString `json:"created_at"`
-	EntityId         string         `json:"entity_id"`
-	Id               string         `json:"id"`
-	MetadataUrl      sql.NullString `json:"metadata_url"`
-	MetadataXml      string         `json:"metadata_xml"`
-	NameIdFormat     sql.NullString `json:"name_id_format"`
-	SsoProviderId    string         `json:"sso_provider_id"`
-	UpdatedAt        sql.NullString `json:"updated_at"`
-}
-
-type AuthSamlProvidersInsert struct {
-	AttributeMapping interface{}    `json:"attribute_mapping"`
-	CreatedAt        sql.NullString `json:"created_at"`
-	EntityId         string         `json:"entity_id"`
-	Id               string         `json:"id"`
-	MetadataUrl      sql.NullString `json:"metadata_url"`
-	MetadataXml      string         `json:"metadata_xml"`
-	NameIdFormat     sql.NullString `json:"name_id_format"`
-	SsoProviderId    string         `json:"sso_provider_id"`
-	UpdatedAt        sql.NullString `json:"updated_at"`
-}
-
-type AuthSamlProvidersUpdate struct {
-	AttributeMapping interface{}    `json:"attribute_mapping"`
-	CreatedAt        sql.NullString `json:"created_at"`
-	EntityId         sql.NullString `json:"entity_id"`
-	Id               sql.NullString `json:"id"`
-	MetadataUrl      sql.NullString `json:"metadata_url"`
-	MetadataXml      sql.NullString `json:"metadata_xml"`
-	NameIdFormat     sql.NullString `json:"name_id_format"`
-	SsoProviderId    sql.NullString `json:"sso_provider_id"`
-	UpdatedAt        sql.NullString `json:"updated_at"`
-}
-
-type ApiEndpointsSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         int32                  `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiEndpointsInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiEndpointsUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiWorkspacesSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         int32                  `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-}
-
-type ApiWorkspacesInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-}
-
-type ApiWorkspacesUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-}
-
-type ApiEnginesSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         int32                  `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiEnginesInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiEnginesUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type AuthSsoProvidersSelect struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         string         `json:"id"`
-	ResourceId sql.NullString `json:"resource_id"`
-	UpdatedAt  sql.NullString `json:"updated_at"`
-}
-
-type AuthSsoProvidersInsert struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         string         `json:"id"`
-	ResourceId sql.NullString `json:"resource_id"`
-	UpdatedAt  sql.NullString `json:"updated_at"`
-}
-
-type AuthSsoProvidersUpdate struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         sql.NullString `json:"id"`
-	ResourceId sql.NullString `json:"resource_id"`
-	UpdatedAt  sql.NullString `json:"updated_at"`
-}
-
-type ApiClustersSelect struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         int32                  `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiClustersInsert struct {
-	ApiVersion string                 `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       string                 `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type ApiClustersUpdate struct {
-	ApiVersion sql.NullString         `json:"api_version"`
-	Id         sql.NullInt32          `json:"id"`
-	Kind       sql.NullString         `json:"kind"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       map[string]interface{} `json:"spec"`
-	Status     map[string]interface{} `json:"status"`
-}
-
-type AuthMfaFactorsSelect struct {
-	CreatedAt          string         `json:"created_at"`
-	FactorType         string         `json:"factor_type"`
-	FriendlyName       sql.NullString `json:"friendly_name"`
-	Id                 string         `json:"id"`
-	LastChallengedAt   sql.NullString `json:"last_challenged_at"`
-	Phone              sql.NullString `json:"phone"`
-	Secret             sql.NullString `json:"secret"`
-	Status             string         `json:"status"`
-	UpdatedAt          string         `json:"updated_at"`
-	UserId             string         `json:"user_id"`
-	WebAuthnAaguid     sql.NullString `json:"web_authn_aaguid"`
-	WebAuthnCredential interface{}    `json:"web_authn_credential"`
-}
-
-type AuthMfaFactorsInsert struct {
-	CreatedAt          string         `json:"created_at"`
-	FactorType         string         `json:"factor_type"`
-	FriendlyName       sql.NullString `json:"friendly_name"`
-	Id                 string         `json:"id"`
-	LastChallengedAt   sql.NullString `json:"last_challenged_at"`
-	Phone              sql.NullString `json:"phone"`
-	Secret             sql.NullString `json:"secret"`
-	Status             string         `json:"status"`
-	UpdatedAt          string         `json:"updated_at"`
-	UserId             string         `json:"user_id"`
-	WebAuthnAaguid     sql.NullString `json:"web_authn_aaguid"`
-	WebAuthnCredential interface{}    `json:"web_authn_credential"`
-}
-
-type AuthMfaFactorsUpdate struct {
-	CreatedAt          sql.NullString `json:"created_at"`
-	FactorType         sql.NullString `json:"factor_type"`
-	FriendlyName       sql.NullString `json:"friendly_name"`
-	Id                 sql.NullString `json:"id"`
-	LastChallengedAt   sql.NullString `json:"last_challenged_at"`
-	Phone              sql.NullString `json:"phone"`
-	Secret             sql.NullString `json:"secret"`
-	Status             sql.NullString `json:"status"`
-	UpdatedAt          sql.NullString `json:"updated_at"`
-	UserId             sql.NullString `json:"user_id"`
-	WebAuthnAaguid     sql.NullString `json:"web_authn_aaguid"`
-	WebAuthnCredential interface{}    `json:"web_authn_credential"`
 }
 
 type AuthUsersSelect struct {
@@ -614,6 +128,243 @@ type AuthUsersUpdate struct {
 	UpdatedAt                sql.NullString `json:"updated_at"`
 }
 
+type AuthRefreshTokensSelect struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         int64          `json:"id"`
+	InstanceId sql.NullString `json:"instance_id"`
+	Parent     sql.NullString `json:"parent"`
+	Revoked    sql.NullBool   `json:"revoked"`
+	SessionId  sql.NullString `json:"session_id"`
+	Token      sql.NullString `json:"token"`
+	UpdatedAt  sql.NullString `json:"updated_at"`
+	UserId     sql.NullString `json:"user_id"`
+}
+
+type AuthRefreshTokensInsert struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         sql.NullInt64  `json:"id"`
+	InstanceId sql.NullString `json:"instance_id"`
+	Parent     sql.NullString `json:"parent"`
+	Revoked    sql.NullBool   `json:"revoked"`
+	SessionId  sql.NullString `json:"session_id"`
+	Token      sql.NullString `json:"token"`
+	UpdatedAt  sql.NullString `json:"updated_at"`
+	UserId     sql.NullString `json:"user_id"`
+}
+
+type AuthRefreshTokensUpdate struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         sql.NullInt64  `json:"id"`
+	InstanceId sql.NullString `json:"instance_id"`
+	Parent     sql.NullString `json:"parent"`
+	Revoked    sql.NullBool   `json:"revoked"`
+	SessionId  sql.NullString `json:"session_id"`
+	Token      sql.NullString `json:"token"`
+	UpdatedAt  sql.NullString `json:"updated_at"`
+	UserId     sql.NullString `json:"user_id"`
+}
+
+type AuthInstancesSelect struct {
+	CreatedAt     sql.NullString `json:"created_at"`
+	Id            string         `json:"id"`
+	RawBaseConfig sql.NullString `json:"raw_base_config"`
+	UpdatedAt     sql.NullString `json:"updated_at"`
+	Uuid          sql.NullString `json:"uuid"`
+}
+
+type AuthInstancesInsert struct {
+	CreatedAt     sql.NullString `json:"created_at"`
+	Id            string         `json:"id"`
+	RawBaseConfig sql.NullString `json:"raw_base_config"`
+	UpdatedAt     sql.NullString `json:"updated_at"`
+	Uuid          sql.NullString `json:"uuid"`
+}
+
+type AuthInstancesUpdate struct {
+	CreatedAt     sql.NullString `json:"created_at"`
+	Id            sql.NullString `json:"id"`
+	RawBaseConfig sql.NullString `json:"raw_base_config"`
+	UpdatedAt     sql.NullString `json:"updated_at"`
+	Uuid          sql.NullString `json:"uuid"`
+}
+
+type AuthAuditLogEntriesSelect struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         string         `json:"id"`
+	InstanceId sql.NullString `json:"instance_id"`
+	IpAddress  string         `json:"ip_address"`
+	Payload    interface{}    `json:"payload"`
+}
+
+type AuthAuditLogEntriesInsert struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         string         `json:"id"`
+	InstanceId sql.NullString `json:"instance_id"`
+	IpAddress  sql.NullString `json:"ip_address"`
+	Payload    interface{}    `json:"payload"`
+}
+
+type AuthAuditLogEntriesUpdate struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         sql.NullString `json:"id"`
+	InstanceId sql.NullString `json:"instance_id"`
+	IpAddress  sql.NullString `json:"ip_address"`
+	Payload    interface{}    `json:"payload"`
+}
+
+type AuthIdentitiesSelect struct {
+	CreatedAt    sql.NullString `json:"created_at"`
+	Email        sql.NullString `json:"email"`
+	Id           string         `json:"id"`
+	IdentityData interface{}    `json:"identity_data"`
+	LastSignInAt sql.NullString `json:"last_sign_in_at"`
+	Provider     string         `json:"provider"`
+	ProviderId   string         `json:"provider_id"`
+	UpdatedAt    sql.NullString `json:"updated_at"`
+	UserId       string         `json:"user_id"`
+}
+
+type AuthIdentitiesInsert struct {
+	CreatedAt    sql.NullString `json:"created_at"`
+	Email        sql.NullString `json:"email"`
+	Id           sql.NullString `json:"id"`
+	IdentityData interface{}    `json:"identity_data"`
+	LastSignInAt sql.NullString `json:"last_sign_in_at"`
+	Provider     string         `json:"provider"`
+	ProviderId   string         `json:"provider_id"`
+	UpdatedAt    sql.NullString `json:"updated_at"`
+	UserId       string         `json:"user_id"`
+}
+
+type AuthIdentitiesUpdate struct {
+	CreatedAt    sql.NullString `json:"created_at"`
+	Email        sql.NullString `json:"email"`
+	Id           sql.NullString `json:"id"`
+	IdentityData interface{}    `json:"identity_data"`
+	LastSignInAt sql.NullString `json:"last_sign_in_at"`
+	Provider     sql.NullString `json:"provider"`
+	ProviderId   sql.NullString `json:"provider_id"`
+	UpdatedAt    sql.NullString `json:"updated_at"`
+	UserId       sql.NullString `json:"user_id"`
+}
+
+type AuthSessionsSelect struct {
+	Aal         sql.NullString `json:"aal"`
+	CreatedAt   sql.NullString `json:"created_at"`
+	FactorId    sql.NullString `json:"factor_id"`
+	Id          string         `json:"id"`
+	Ip          interface{}    `json:"ip"`
+	NotAfter    sql.NullString `json:"not_after"`
+	RefreshedAt sql.NullString `json:"refreshed_at"`
+	Tag         sql.NullString `json:"tag"`
+	UpdatedAt   sql.NullString `json:"updated_at"`
+	UserAgent   sql.NullString `json:"user_agent"`
+	UserId      string         `json:"user_id"`
+}
+
+type AuthSessionsInsert struct {
+	Aal         sql.NullString `json:"aal"`
+	CreatedAt   sql.NullString `json:"created_at"`
+	FactorId    sql.NullString `json:"factor_id"`
+	Id          string         `json:"id"`
+	Ip          interface{}    `json:"ip"`
+	NotAfter    sql.NullString `json:"not_after"`
+	RefreshedAt sql.NullString `json:"refreshed_at"`
+	Tag         sql.NullString `json:"tag"`
+	UpdatedAt   sql.NullString `json:"updated_at"`
+	UserAgent   sql.NullString `json:"user_agent"`
+	UserId      string         `json:"user_id"`
+}
+
+type AuthSessionsUpdate struct {
+	Aal         sql.NullString `json:"aal"`
+	CreatedAt   sql.NullString `json:"created_at"`
+	FactorId    sql.NullString `json:"factor_id"`
+	Id          sql.NullString `json:"id"`
+	Ip          interface{}    `json:"ip"`
+	NotAfter    sql.NullString `json:"not_after"`
+	RefreshedAt sql.NullString `json:"refreshed_at"`
+	Tag         sql.NullString `json:"tag"`
+	UpdatedAt   sql.NullString `json:"updated_at"`
+	UserAgent   sql.NullString `json:"user_agent"`
+	UserId      sql.NullString `json:"user_id"`
+}
+
+type AuthMfaFactorsSelect struct {
+	CreatedAt          string         `json:"created_at"`
+	FactorType         string         `json:"factor_type"`
+	FriendlyName       sql.NullString `json:"friendly_name"`
+	Id                 string         `json:"id"`
+	LastChallengedAt   sql.NullString `json:"last_challenged_at"`
+	Phone              sql.NullString `json:"phone"`
+	Secret             sql.NullString `json:"secret"`
+	Status             string         `json:"status"`
+	UpdatedAt          string         `json:"updated_at"`
+	UserId             string         `json:"user_id"`
+	WebAuthnAaguid     sql.NullString `json:"web_authn_aaguid"`
+	WebAuthnCredential interface{}    `json:"web_authn_credential"`
+}
+
+type AuthMfaFactorsInsert struct {
+	CreatedAt          string         `json:"created_at"`
+	FactorType         string         `json:"factor_type"`
+	FriendlyName       sql.NullString `json:"friendly_name"`
+	Id                 string         `json:"id"`
+	LastChallengedAt   sql.NullString `json:"last_challenged_at"`
+	Phone              sql.NullString `json:"phone"`
+	Secret             sql.NullString `json:"secret"`
+	Status             string         `json:"status"`
+	UpdatedAt          string         `json:"updated_at"`
+	UserId             string         `json:"user_id"`
+	WebAuthnAaguid     sql.NullString `json:"web_authn_aaguid"`
+	WebAuthnCredential interface{}    `json:"web_authn_credential"`
+}
+
+type AuthMfaFactorsUpdate struct {
+	CreatedAt          sql.NullString `json:"created_at"`
+	FactorType         sql.NullString `json:"factor_type"`
+	FriendlyName       sql.NullString `json:"friendly_name"`
+	Id                 sql.NullString `json:"id"`
+	LastChallengedAt   sql.NullString `json:"last_challenged_at"`
+	Phone              sql.NullString `json:"phone"`
+	Secret             sql.NullString `json:"secret"`
+	Status             sql.NullString `json:"status"`
+	UpdatedAt          sql.NullString `json:"updated_at"`
+	UserId             sql.NullString `json:"user_id"`
+	WebAuthnAaguid     sql.NullString `json:"web_authn_aaguid"`
+	WebAuthnCredential interface{}    `json:"web_authn_credential"`
+}
+
+type AuthMfaChallengesSelect struct {
+	CreatedAt           string         `json:"created_at"`
+	FactorId            string         `json:"factor_id"`
+	Id                  string         `json:"id"`
+	IpAddress           interface{}    `json:"ip_address"`
+	OtpCode             sql.NullString `json:"otp_code"`
+	VerifiedAt          sql.NullString `json:"verified_at"`
+	WebAuthnSessionData interface{}    `json:"web_authn_session_data"`
+}
+
+type AuthMfaChallengesInsert struct {
+	CreatedAt           string         `json:"created_at"`
+	FactorId            string         `json:"factor_id"`
+	Id                  string         `json:"id"`
+	IpAddress           interface{}    `json:"ip_address"`
+	OtpCode             sql.NullString `json:"otp_code"`
+	VerifiedAt          sql.NullString `json:"verified_at"`
+	WebAuthnSessionData interface{}    `json:"web_authn_session_data"`
+}
+
+type AuthMfaChallengesUpdate struct {
+	CreatedAt           sql.NullString `json:"created_at"`
+	FactorId            sql.NullString `json:"factor_id"`
+	Id                  sql.NullString `json:"id"`
+	IpAddress           interface{}    `json:"ip_address"`
+	OtpCode             sql.NullString `json:"otp_code"`
+	VerifiedAt          sql.NullString `json:"verified_at"`
+	WebAuthnSessionData interface{}    `json:"web_authn_session_data"`
+}
+
 type AuthMfaAmrClaimsSelect struct {
 	AuthenticationMethod string `json:"authentication_method"`
 	CreatedAt            string `json:"created_at"`
@@ -636,6 +387,87 @@ type AuthMfaAmrClaimsUpdate struct {
 	Id                   sql.NullString `json:"id"`
 	SessionId            sql.NullString `json:"session_id"`
 	UpdatedAt            sql.NullString `json:"updated_at"`
+}
+
+type AuthSsoProvidersSelect struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         string         `json:"id"`
+	ResourceId sql.NullString `json:"resource_id"`
+	UpdatedAt  sql.NullString `json:"updated_at"`
+}
+
+type AuthSsoProvidersInsert struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         string         `json:"id"`
+	ResourceId sql.NullString `json:"resource_id"`
+	UpdatedAt  sql.NullString `json:"updated_at"`
+}
+
+type AuthSsoProvidersUpdate struct {
+	CreatedAt  sql.NullString `json:"created_at"`
+	Id         sql.NullString `json:"id"`
+	ResourceId sql.NullString `json:"resource_id"`
+	UpdatedAt  sql.NullString `json:"updated_at"`
+}
+
+type AuthSsoDomainsSelect struct {
+	CreatedAt     sql.NullString `json:"created_at"`
+	Domain        string         `json:"domain"`
+	Id            string         `json:"id"`
+	SsoProviderId string         `json:"sso_provider_id"`
+	UpdatedAt     sql.NullString `json:"updated_at"`
+}
+
+type AuthSsoDomainsInsert struct {
+	CreatedAt     sql.NullString `json:"created_at"`
+	Domain        string         `json:"domain"`
+	Id            string         `json:"id"`
+	SsoProviderId string         `json:"sso_provider_id"`
+	UpdatedAt     sql.NullString `json:"updated_at"`
+}
+
+type AuthSsoDomainsUpdate struct {
+	CreatedAt     sql.NullString `json:"created_at"`
+	Domain        sql.NullString `json:"domain"`
+	Id            sql.NullString `json:"id"`
+	SsoProviderId sql.NullString `json:"sso_provider_id"`
+	UpdatedAt     sql.NullString `json:"updated_at"`
+}
+
+type AuthSamlProvidersSelect struct {
+	AttributeMapping interface{}    `json:"attribute_mapping"`
+	CreatedAt        sql.NullString `json:"created_at"`
+	EntityId         string         `json:"entity_id"`
+	Id               string         `json:"id"`
+	MetadataUrl      sql.NullString `json:"metadata_url"`
+	MetadataXml      string         `json:"metadata_xml"`
+	NameIdFormat     sql.NullString `json:"name_id_format"`
+	SsoProviderId    string         `json:"sso_provider_id"`
+	UpdatedAt        sql.NullString `json:"updated_at"`
+}
+
+type AuthSamlProvidersInsert struct {
+	AttributeMapping interface{}    `json:"attribute_mapping"`
+	CreatedAt        sql.NullString `json:"created_at"`
+	EntityId         string         `json:"entity_id"`
+	Id               string         `json:"id"`
+	MetadataUrl      sql.NullString `json:"metadata_url"`
+	MetadataXml      string         `json:"metadata_xml"`
+	NameIdFormat     sql.NullString `json:"name_id_format"`
+	SsoProviderId    string         `json:"sso_provider_id"`
+	UpdatedAt        sql.NullString `json:"updated_at"`
+}
+
+type AuthSamlProvidersUpdate struct {
+	AttributeMapping interface{}    `json:"attribute_mapping"`
+	CreatedAt        sql.NullString `json:"created_at"`
+	EntityId         sql.NullString `json:"entity_id"`
+	Id               sql.NullString `json:"id"`
+	MetadataUrl      sql.NullString `json:"metadata_url"`
+	MetadataXml      sql.NullString `json:"metadata_xml"`
+	NameIdFormat     sql.NullString `json:"name_id_format"`
+	SsoProviderId    sql.NullString `json:"sso_provider_id"`
+	UpdatedAt        sql.NullString `json:"updated_at"`
 }
 
 type AuthSamlRelayStatesSelect struct {
@@ -716,42 +548,6 @@ type AuthFlowStateUpdate struct {
 	UserId               sql.NullString `json:"user_id"`
 }
 
-type AuthRefreshTokensSelect struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         int64          `json:"id"`
-	InstanceId sql.NullString `json:"instance_id"`
-	Parent     sql.NullString `json:"parent"`
-	Revoked    sql.NullBool   `json:"revoked"`
-	SessionId  sql.NullString `json:"session_id"`
-	Token      sql.NullString `json:"token"`
-	UpdatedAt  sql.NullString `json:"updated_at"`
-	UserId     sql.NullString `json:"user_id"`
-}
-
-type AuthRefreshTokensInsert struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         sql.NullInt64  `json:"id"`
-	InstanceId sql.NullString `json:"instance_id"`
-	Parent     sql.NullString `json:"parent"`
-	Revoked    sql.NullBool   `json:"revoked"`
-	SessionId  sql.NullString `json:"session_id"`
-	Token      sql.NullString `json:"token"`
-	UpdatedAt  sql.NullString `json:"updated_at"`
-	UserId     sql.NullString `json:"user_id"`
-}
-
-type AuthRefreshTokensUpdate struct {
-	CreatedAt  sql.NullString `json:"created_at"`
-	Id         sql.NullInt64  `json:"id"`
-	InstanceId sql.NullString `json:"instance_id"`
-	Parent     sql.NullString `json:"parent"`
-	Revoked    sql.NullBool   `json:"revoked"`
-	SessionId  sql.NullString `json:"session_id"`
-	Token      sql.NullString `json:"token"`
-	UpdatedAt  sql.NullString `json:"updated_at"`
-	UserId     sql.NullString `json:"user_id"`
-}
-
 type AuthOneTimeTokensSelect struct {
 	CreatedAt string `json:"created_at"`
 	Id        string `json:"id"`
@@ -782,46 +578,241 @@ type AuthOneTimeTokensUpdate struct {
 	UserId    sql.NullString `json:"user_id"`
 }
 
-type AuthSessionsSelect struct {
-	Aal         sql.NullString `json:"aal"`
-	CreatedAt   sql.NullString `json:"created_at"`
-	FactorId    sql.NullString `json:"factor_id"`
-	Id          string         `json:"id"`
-	Ip          interface{}    `json:"ip"`
-	NotAfter    sql.NullString `json:"not_after"`
-	RefreshedAt sql.NullString `json:"refreshed_at"`
-	Tag         sql.NullString `json:"tag"`
-	UpdatedAt   sql.NullString `json:"updated_at"`
-	UserAgent   sql.NullString `json:"user_agent"`
-	UserId      string         `json:"user_id"`
+type PublicSchemaMigrationsSelect struct {
+	Dirty   bool  `json:"dirty"`
+	Version int64 `json:"version"`
 }
 
-type AuthSessionsInsert struct {
-	Aal         sql.NullString `json:"aal"`
-	CreatedAt   sql.NullString `json:"created_at"`
-	FactorId    sql.NullString `json:"factor_id"`
-	Id          string         `json:"id"`
-	Ip          interface{}    `json:"ip"`
-	NotAfter    sql.NullString `json:"not_after"`
-	RefreshedAt sql.NullString `json:"refreshed_at"`
-	Tag         sql.NullString `json:"tag"`
-	UpdatedAt   sql.NullString `json:"updated_at"`
-	UserAgent   sql.NullString `json:"user_agent"`
-	UserId      string         `json:"user_id"`
+type PublicSchemaMigrationsInsert struct {
+	Dirty   bool  `json:"dirty"`
+	Version int64 `json:"version"`
 }
 
-type AuthSessionsUpdate struct {
-	Aal         sql.NullString `json:"aal"`
-	CreatedAt   sql.NullString `json:"created_at"`
-	FactorId    sql.NullString `json:"factor_id"`
-	Id          sql.NullString `json:"id"`
-	Ip          interface{}    `json:"ip"`
-	NotAfter    sql.NullString `json:"not_after"`
-	RefreshedAt sql.NullString `json:"refreshed_at"`
-	Tag         sql.NullString `json:"tag"`
-	UpdatedAt   sql.NullString `json:"updated_at"`
-	UserAgent   sql.NullString `json:"user_agent"`
-	UserId      sql.NullString `json:"user_id"`
+type PublicSchemaMigrationsUpdate struct {
+	Dirty   sql.NullBool  `json:"dirty"`
+	Version sql.NullInt64 `json:"version"`
+}
+
+type ApiWorkspacesSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+}
+
+type ApiWorkspacesInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+}
+
+type ApiWorkspacesUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+}
+
+type ApiRolesSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiRolesInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiRolesUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiRoleAssignmentsSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiRoleAssignmentsInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiRoleAssignmentsUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiUserProfilesSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         string                 `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiUserProfilesInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         string                 `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiUserProfilesUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullString         `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiApiKeysSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         string                 `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+	UserId     string                 `json:"user_id"`
+}
+
+type ApiApiKeysInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullString         `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+	UserId     string                 `json:"user_id"`
+}
+
+type ApiApiKeysUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullString         `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+	UserId     sql.NullString         `json:"user_id"`
+}
+
+type ApiApiUsageRecordsSelect struct {
+	ApiKeyId     string         `json:"api_key_id"`
+	CreatedAt    string         `json:"created_at"`
+	Id           int64          `json:"id"`
+	IsAggregated sql.NullBool   `json:"is_aggregated"`
+	Metadata     interface{}    `json:"metadata"`
+	Model        sql.NullString `json:"model"`
+	RequestId    sql.NullString `json:"request_id"`
+	UsageAmount  int32          `json:"usage_amount"`
+	Workspace    sql.NullString `json:"workspace"`
+}
+
+type ApiApiUsageRecordsInsert struct {
+	ApiKeyId     string         `json:"api_key_id"`
+	CreatedAt    sql.NullString `json:"created_at"`
+	Id           sql.NullInt64  `json:"id"`
+	IsAggregated sql.NullBool   `json:"is_aggregated"`
+	Metadata     interface{}    `json:"metadata"`
+	Model        sql.NullString `json:"model"`
+	RequestId    sql.NullString `json:"request_id"`
+	UsageAmount  int32          `json:"usage_amount"`
+	Workspace    sql.NullString `json:"workspace"`
+}
+
+type ApiApiUsageRecordsUpdate struct {
+	ApiKeyId     sql.NullString `json:"api_key_id"`
+	CreatedAt    sql.NullString `json:"created_at"`
+	Id           sql.NullInt64  `json:"id"`
+	IsAggregated sql.NullBool   `json:"is_aggregated"`
+	Metadata     interface{}    `json:"metadata"`
+	Model        sql.NullString `json:"model"`
+	RequestId    sql.NullString `json:"request_id"`
+	UsageAmount  sql.NullInt32  `json:"usage_amount"`
+	Workspace    sql.NullString `json:"workspace"`
+}
+
+type ApiApiDailyUsageSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiApiDailyUsageInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiApiDailyUsageUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiEndpointsSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiEndpointsInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiEndpointsUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
 }
 
 type ApiImageRegistriesSelect struct {
@@ -851,8 +842,90 @@ type ApiImageRegistriesUpdate struct {
 	Status     map[string]interface{} `json:"status"`
 }
 
+type ApiModelRegistriesSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiModelRegistriesInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiModelRegistriesUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiEnginesSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiEnginesInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiEnginesUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiClustersSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiClustersInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiClustersUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
 type ApiMetadata struct {
 	Name              string      `json:"name"`
+	DisplayName       string      `json:"display_name"`
 	Workspace         string      `json:"workspace"`
 	DeletionTimestamp interface{} `json:"deletion_timestamp"`
 	CreationTimestamp interface{} `json:"creation_timestamp"`
@@ -865,6 +938,12 @@ type ApiRoleSpec struct {
 	Permissions interface{} `json:"permissions"`
 }
 
+type ApiRoleStatus struct {
+	Phase        string `json:"phase"`
+	ServiceUrl   string `json:"service_url"`
+	ErrorMessage string `json:"error_message"`
+}
+
 type ApiRoleAssignmentSpec struct {
 	UserId    string      `json:"user_id"`
 	Workspace string      `json:"workspace"`
@@ -872,8 +951,20 @@ type ApiRoleAssignmentSpec struct {
 	Role      string      `json:"role"`
 }
 
+type ApiRoleAssignmentStatus struct {
+	Phase        string `json:"phase"`
+	ServiceUrl   string `json:"service_url"`
+	ErrorMessage string `json:"error_message"`
+}
+
 type ApiUserProfileSpec struct {
 	Email string `json:"email"`
+}
+
+type ApiUserProfileStatus struct {
+	Phase        string `json:"phase"`
+	ServiceUrl   string `json:"service_url"`
+	ErrorMessage string `json:"error_message"`
 }
 
 type ApiApiKeySpec struct {
@@ -888,6 +979,17 @@ type ApiApiKeyStatus struct {
 	Usage              interface{} `json:"usage"`
 	LastUsedAt         interface{} `json:"last_used_at"`
 	LastSyncAt         interface{} `json:"last_sync_at"`
+}
+
+type ApiApiDailyUsageSpec struct {
+	ApiKeyId         string      `json:"api_key_id"`
+	UsageDate        string      `json:"usage_date"`
+	TotalUsage       interface{} `json:"total_usage"`
+	DimensionalUsage interface{} `json:"dimensional_usage"`
+}
+
+type ApiApiDailyUsageStatus struct {
+	LastSyncTime interface{} `json:"last_sync_time"`
 }
 
 type ApiModelSpec struct {
@@ -914,6 +1016,7 @@ type ApiEndpointSpec struct {
 	Model     interface{} `json:"model"`
 	Container interface{} `json:"container"`
 	Resources interface{} `json:"resources"`
+	Replicas  interface{} `json:"replicas"`
 	Variables interface{} `json:"variables"`
 }
 
@@ -972,14 +1075,15 @@ type ApiClusterSpec struct {
 }
 
 type ApiClusterStatus struct {
-	Phase              string      `json:"phase"`
-	Image              string      `json:"image"`
-	DashboardUrl       string      `json:"dashboard_url"`
-	LastTransitionTime interface{} `json:"last_transition_time"`
-	ErrorMessage       string      `json:"error_message"`
-	ReadyNodes         interface{} `json:"ready_nodes"`
-	DesiredNodes       interface{} `json:"desired_nodes"`
-	Version            string      `json:"version"`
-	RayVersion         string      `json:"ray_version"`
-	Initialized        interface{} `json:"initialized"`
+	Phase               string      `json:"phase"`
+	Image               string      `json:"image"`
+	DashboardUrl        string      `json:"dashboard_url"`
+	LastTransitionTime  interface{} `json:"last_transition_time"`
+	ErrorMessage        string      `json:"error_message"`
+	ReadyNodes          interface{} `json:"ready_nodes"`
+	DesiredNodes        interface{} `json:"desired_nodes"`
+	Version             string      `json:"version"`
+	RayVersion          string      `json:"ray_version"`
+	Initialized         interface{} `json:"initialized"`
+	NodeProvisionStatus string      `json:"node_provision_status"`
 }
