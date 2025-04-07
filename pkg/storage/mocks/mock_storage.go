@@ -160,6 +160,52 @@ func (_c *MockStorage_CreateModelRegistry_Call) RunAndReturn(run func(*v1.ModelR
 	return _c
 }
 
+// CreateRole provides a mock function with given fields: data
+func (_m *MockStorage) CreateRole(data *v1.Role) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Role) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRole'
+type MockStorage_CreateRole_Call struct {
+	*mock.Call
+}
+
+// CreateRole is a helper method to define mock.On call
+//   - data *v1.Role
+func (_e *MockStorage_Expecter) CreateRole(data interface{}) *MockStorage_CreateRole_Call {
+	return &MockStorage_CreateRole_Call{Call: _e.mock.On("CreateRole", data)}
+}
+
+func (_c *MockStorage_CreateRole_Call) Run(run func(data *v1.Role)) *MockStorage_CreateRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Role))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateRole_Call) Return(_a0 error) *MockStorage_CreateRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateRole_Call) RunAndReturn(run func(*v1.Role) error) *MockStorage_CreateRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteCluster provides a mock function with given fields: id
 func (_m *MockStorage) DeleteCluster(id string) error {
 	ret := _m.Called(id)
@@ -294,6 +340,52 @@ func (_c *MockStorage_DeleteModelRegistry_Call) Return(_a0 error) *MockStorage_D
 }
 
 func (_c *MockStorage_DeleteModelRegistry_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteModelRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteRole provides a mock function with given fields: id
+func (_m *MockStorage) DeleteRole(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteRole'
+type MockStorage_DeleteRole_Call struct {
+	*mock.Call
+}
+
+// DeleteRole is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteRole(id interface{}) *MockStorage_DeleteRole_Call {
+	return &MockStorage_DeleteRole_Call{Call: _e.mock.On("DeleteRole", id)}
+}
+
+func (_c *MockStorage_DeleteRole_Call) Run(run func(id string)) *MockStorage_DeleteRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteRole_Call) Return(_a0 error) *MockStorage_DeleteRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteRole_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteRole_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -472,6 +564,64 @@ func (_c *MockStorage_GetModelRegistry_Call) RunAndReturn(run func(string) (*v1.
 	return _c
 }
 
+// GetRole provides a mock function with given fields: id
+func (_m *MockStorage) GetRole(id string) (*v1.Role, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRole")
+	}
+
+	var r0 *v1.Role
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.Role, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.Role); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.Role)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRole'
+type MockStorage_GetRole_Call struct {
+	*mock.Call
+}
+
+// GetRole is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetRole(id interface{}) *MockStorage_GetRole_Call {
+	return &MockStorage_GetRole_Call{Call: _e.mock.On("GetRole", id)}
+}
+
+func (_c *MockStorage_GetRole_Call) Run(run func(id string)) *MockStorage_GetRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetRole_Call) Return(_a0 *v1.Role, _a1 error) *MockStorage_GetRole_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetRole_Call) RunAndReturn(run func(string) (*v1.Role, error)) *MockStorage_GetRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListCluster provides a mock function with given fields: option
 func (_m *MockStorage) ListCluster(option storage.ListOption) ([]v1.Cluster, error) {
 	ret := _m.Called(option)
@@ -646,6 +796,64 @@ func (_c *MockStorage_ListModelRegistry_Call) RunAndReturn(run func(storage.List
 	return _c
 }
 
+// ListRole provides a mock function with given fields: option
+func (_m *MockStorage) ListRole(option storage.ListOption) ([]v1.Role, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRole")
+	}
+
+	var r0 []v1.Role
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.Role, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.Role); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.Role)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRole'
+type MockStorage_ListRole_Call struct {
+	*mock.Call
+}
+
+// ListRole is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListRole(option interface{}) *MockStorage_ListRole_Call {
+	return &MockStorage_ListRole_Call{Call: _e.mock.On("ListRole", option)}
+}
+
+func (_c *MockStorage_ListRole_Call) Run(run func(option storage.ListOption)) *MockStorage_ListRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListRole_Call) Return(_a0 []v1.Role, _a1 error) *MockStorage_ListRole_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListRole_Call) RunAndReturn(run func(storage.ListOption) ([]v1.Role, error)) *MockStorage_ListRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateCluster provides a mock function with given fields: id, data
 func (_m *MockStorage) UpdateCluster(id string, data *v1.Cluster) error {
 	ret := _m.Called(id, data)
@@ -783,6 +991,53 @@ func (_c *MockStorage_UpdateModelRegistry_Call) Return(_a0 error) *MockStorage_U
 }
 
 func (_c *MockStorage_UpdateModelRegistry_Call) RunAndReturn(run func(string, *v1.ModelRegistry) error) *MockStorage_UpdateModelRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateRole provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateRole(id string, data *v1.Role) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.Role) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateRole'
+type MockStorage_UpdateRole_Call struct {
+	*mock.Call
+}
+
+// UpdateRole is a helper method to define mock.On call
+//   - id string
+//   - data *v1.Role
+func (_e *MockStorage_Expecter) UpdateRole(id interface{}, data interface{}) *MockStorage_UpdateRole_Call {
+	return &MockStorage_UpdateRole_Call{Call: _e.mock.On("UpdateRole", id, data)}
+}
+
+func (_c *MockStorage_UpdateRole_Call) Run(run func(id string, data *v1.Role)) *MockStorage_UpdateRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.Role))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateRole_Call) Return(_a0 error) *MockStorage_UpdateRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateRole_Call) RunAndReturn(run func(string, *v1.Role) error) *MockStorage_UpdateRole_Call {
 	_c.Call.Return(run)
 	return _c
 }

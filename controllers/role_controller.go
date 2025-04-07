@@ -2,22 +2,22 @@ package controllers
 
 import (
 	"context"
-
 	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage"
-	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 )
 
 type RoleController struct {
 	baseController *BaseController
 
-	storage storage.Storage
+	storage     storage.Storage
+	syncHandler func(role *v1.Role) error // Added syncHandler field
 }
 
 type RoleControllerOption struct {
@@ -34,6 +34,8 @@ func NewRoleController(option *RoleControllerOption) (*RoleController, error) {
 		},
 		storage: option.Storage,
 	}
+
+	c.syncHandler = c.sync
 
 	return c, nil
 }
@@ -58,7 +60,7 @@ func (c *RoleController) Reconcile(key interface{}) error {
 
 	klog.V(4).Info("Reconcile role " + obj.Metadata.Name)
 
-	return c.sync(obj)
+	return c.syncHandler(obj)
 }
 
 func (c *RoleController) ListKeys() ([]interface{}, error) {
@@ -78,10 +80,9 @@ func (c *RoleController) ListKeys() ([]interface{}, error) {
 func (c *RoleController) sync(obj *v1.Role) error {
 	var err error
 
-	if obj.Metadata.DeletionTimestamp != "" {
-		if obj.Status.Phase == v1.RolePhaseDELETED {
-			klog.Infof("Role %s already deleted", obj.Metadata.Name)
-
+	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
+		if obj.Status != nil && obj.Status.Phase == v1.RolePhaseDELETED {
+			klog.Infof("Role %s already marked as deleted, removing from DB", obj.Metadata.Name)
 			err = c.storage.DeleteRole(strconv.Itoa(obj.ID))
 			if err != nil {
 				return errors.Wrapf(err, "failed to delete role in DB %s", obj.Metadata.Name)
@@ -91,7 +92,7 @@ func (c *RoleController) sync(obj *v1.Role) error {
 		}
 
 		klog.Info("Deleting role " + obj.Metadata.Name)
-
+		// Update status to DELETED
 		err = c.updateStatus(obj, v1.RolePhaseDELETED, nil)
 		if err != nil {
 			return errors.Wrapf(err, "failed to update role %s status to DELETED", obj.Metadata.Name)
@@ -99,11 +100,15 @@ func (c *RoleController) sync(obj *v1.Role) error {
 		return nil
 	}
 
-	if obj.Status == nil || obj.Status.Phase == v1.RolePhasePENDING {
+	// Handle creation/update (when not deleting)
+	// If status is missing or PENDING, update it to CREATED.
+	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.RolePhasePENDING {
+		klog.Infof("Role %s is PENDING or has no status, updating to CREATED", obj.Metadata.Name)
 		err = c.updateStatus(obj, v1.RolePhaseCREATED, nil)
 		if err != nil {
 			return errors.Wrapf(err, "failed to update role %s status to CREATED", obj.Metadata.Name)
 		}
+		return nil
 	}
 
 	return nil
@@ -116,6 +121,8 @@ func (c *RoleController) updateStatus(obj *v1.Role, phase v1.RolePhase, err erro
 	}
 	if err != nil {
 		newStatus.ErrorMessage = err.Error()
+	} else {
+		newStatus.ErrorMessage = ""
 	}
 
 	return c.storage.UpdateRole(strconv.Itoa(obj.ID), &v1.Role{Status: newStatus})
