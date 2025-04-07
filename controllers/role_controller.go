@@ -83,7 +83,6 @@ func (c *RoleController) sync(obj *v1.Role) error {
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
 		if obj.Status != nil && obj.Status.Phase == v1.RolePhaseDELETED {
 			klog.Infof("Role %s already marked as deleted, removing from DB", obj.Metadata.Name)
-
 			err = c.storage.DeleteRole(strconv.Itoa(obj.ID))
 			if err != nil {
 				return errors.Wrapf(err, "failed to delete role in DB %s", obj.Metadata.Name)
@@ -111,7 +110,6 @@ func (c *RoleController) sync(obj *v1.Role) error {
 		if err != nil {
 			return errors.Wrapf(err, "failed to update role %s status to CREATED", obj.Metadata.Name)
 		}
-
 		return nil
 	}
 
