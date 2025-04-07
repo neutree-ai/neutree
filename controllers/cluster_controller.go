@@ -26,8 +26,6 @@ type ClusterController struct {
 	imageService          registry.ImageService
 	defaultClusterVersion string
 
-	newOrchestrator orchestrator.NewOrchestratorFunc
-
 	syncHandler func(cluster *v1.Cluster) error
 }
 
@@ -36,8 +34,6 @@ type ClusterControllerOption struct {
 	Storage              storage.Storage
 	Workers              int
 	DefaultClusterVesion string
-
-	NewOrchestrator orchestrator.NewOrchestratorFunc
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
@@ -50,7 +46,6 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		storage:               opt.Storage,
 		imageService:          opt.ImageService,
 		defaultClusterVersion: opt.DefaultClusterVesion,
-		newOrchestrator:       opt.NewOrchestrator,
 	}
 
 	c.syncHandler = c.sync
@@ -108,7 +103,7 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 		return errors.Wrap(err, "failed to get relate image registry")
 	}
 
-	clusterOrchestrator, err := c.newOrchestrator(orchestrator.Options{
+	clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
 		Cluster:       obj,
 		ImageRegistry: imageRegistry,
 		ImageService:  c.imageService,
@@ -165,7 +160,7 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestr
 		return nil
 	}
 
-	// only reconcile  node when cluster is running.
+	// only reconcile node when cluster is running.
 	if cluster.Status != nil && cluster.Status.Phase == v1.ClusterPhaseRunning {
 		err = c.reconcileNodes(cluster, clusterOrchestrator)
 		if err != nil {

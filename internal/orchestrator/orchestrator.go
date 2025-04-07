@@ -27,7 +27,11 @@ type Options struct {
 
 type NewOrchestratorFunc func(opts Options) (Orchestrator, error)
 
-func NewOrchestrator(opts Options) (Orchestrator, error) {
+var (
+	NewOrchestrator NewOrchestratorFunc = newOrchestrator
+)
+
+func newOrchestrator(opts Options) (Orchestrator, error) {
 	switch opts.Cluster.Spec.Type {
 	case "ssh":
 		return NewRayOrchestrator(opts)

@@ -2,7 +2,6 @@ package command_runner
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"strings"
 
@@ -296,6 +295,10 @@ func (d *DockerCommandRunner) autoConfigureShm(ctx context.Context, runOptions [
 		}
 	}
 
+	if availableMemory == 0 {
+		return nil, errors.New("failed to get available memory")
+	}
+
 	availableMemoryBytes := availableMemory * 1024
 	// overestimate SHM size by 10%
 	shmSize := int(float64(availableMemoryBytes) * 0.1 * 1.1)
@@ -311,9 +314,4 @@ func prependEnvVars(cmd string, environmentVariables map[string]interface{}) str
 	}
 
 	return strings.Join(envStrings, "") + cmd
-}
-
-func hashString(s string) []byte {
-	hash := sha256.Sum256([]byte(s))
-	return hash[:]
 }

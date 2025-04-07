@@ -9,12 +9,24 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+type DashboardService interface {
+	GetClusterMetadata() (*ClusterMetadataResponse, error)
+	ListNodes() ([]v1.NodeSummary, error)
+	GetClusterAutoScaleStatus() (v1.AutoscalerReport, error)
+}
+
 type Client struct {
 	dashboardURL string
 	client       *http.Client
 }
 
-func New(dashboardURL string) *Client {
+type NewDashboardServiceFunc func(dashboardURL string) DashboardService
+
+var (
+	NewDashboardService NewDashboardServiceFunc = new
+)
+
+func new(dashboardURL string) DashboardService {
 	return &Client{
 		dashboardURL: dashboardURL,
 		client: &http.Client{

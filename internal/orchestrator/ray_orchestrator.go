@@ -21,6 +21,8 @@ import (
 	"github.com/neutree-ai/neutree/pkg/command"
 )
 
+var _ Orchestrator = &RayOrchestrator{}
+
 var (
 	ErrImageNotFound      = errors.New("image not found")
 	ErrClusterHealthCheck = errors.New("cluster health check failed")
@@ -42,7 +44,7 @@ type RayOrchestrator struct {
 	imageRegistry *v1.ImageRegistry
 	imageService  registry.ImageService
 
-	clusterHelper *ray.ClusterManager
+	clusterHelper ray.ClusterManager
 	opTimeout     OperationConfig
 }
 
@@ -87,7 +89,7 @@ func (o *RayOrchestrator) DeleteCluster() error {
 	}
 
 	// remove local cluster state file to avoid ray cluster start failed.
-	localClusterStatePath := fmt.Sprintf("/tmp/ray/cluster-%s.state", o.config.ClusterName)
+	localClusterStatePath := fmt.Sprintf("%s/cluster-%s.state", getRayTmpDir(), o.config.ClusterName)
 	if err = os.Remove(localClusterStatePath); err != nil {
 		return errors.Wrap(err, "failed to remove local cluster state file")
 	}
@@ -99,12 +101,13 @@ func (o *RayOrchestrator) HealthCheck() error {
 	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
 	defer cancel()
 
-	headIP, err := o.clusterHelper.GetHeadIP(ctx)
+	dashboardService, err := o.getDashboardService(ctx)
 	if err != nil {
-		return errors.New("failed to get cluster head ip")
+		return errors.Wrap(ErrClusterHealthCheck, err.Error())
 	}
 
-	_, err = o.newDashboardClient(headIP).GetClusterMetadata()
+	// check ray cluster health by get cluster metadata.
+	_, err = dashboardService.GetClusterMetadata()
 	if err != nil {
 		return errors.Wrap(ErrClusterHealthCheck, err.Error())
 	}
@@ -115,6 +118,10 @@ func (o *RayOrchestrator) HealthCheck() error {
 func (o *RayOrchestrator) StartNode(nodeIP string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.StartNodeTimeout)
 	defer cancel()
+
+	if nodeIP == "" {
+		return errors.New("node IP cannot be empty")
+	}
 
 	err := o.checkDockerImage(o.config.Docker.Image)
 	if err != nil {
@@ -150,14 +157,14 @@ func (o *RayOrchestrator) StopNode(nodeIP string) error {
 }
 
 func (o *RayOrchestrator) getNodeByIP(ctx context.Context, nodeIP string) (*v1.NodeSummary, error) {
-	headIP, err := o.clusterHelper.GetHeadIP(ctx)
+	dashboardService, err := o.getDashboardService(ctx)
 	if err != nil {
-		return nil, errors.New("failed to get cluster head ip")
+		return nil, errors.Wrap(err, "failed to get dashboard service")
 	}
 
-	rayNodes, err := o.newDashboardClient(headIP).ListNodes()
+	rayNodes, err := dashboardService.ListNodes()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to list ray nodes")
 	}
 
 	for i := range rayNodes {
@@ -170,15 +177,12 @@ func (o *RayOrchestrator) getNodeByIP(ctx context.Context, nodeIP string) (*v1.N
 }
 
 func (o *RayOrchestrator) ListNodes() ([]v1.NodeSummary, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
-	defer cancel()
-
-	headIP, err := o.clusterHelper.GetHeadIP(ctx)
+	dashboardService, err := o.getDashboardService(context.Background())
 	if err != nil {
-		return nil, errors.New("failed to get cluster head ip")
+		return nil, errors.Wrap(err, "failed to get dashboard service")
 	}
 
-	return o.newDashboardClient(headIP).ListNodes()
+	return dashboardService.ListNodes()
 }
 
 func (o *RayOrchestrator) GetDesireStaticWorkersIP() []string {
@@ -186,18 +190,14 @@ func (o *RayOrchestrator) GetDesireStaticWorkersIP() []string {
 }
 
 func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
-	defer cancel()
-
-	headIP, err := o.clusterHelper.GetHeadIP(ctx)
-	if err != nil {
-		return nil, errors.New("failed to get cluster head ip")
-	}
-
-	dashboardClient := o.newDashboardClient(headIP)
 	clusterStatus := &v1.RayClusterStatus{}
 
-	nodes, err := dashboardClient.ListNodes()
+	dashboardService, err := o.getDashboardService(context.Background())
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get dashboard service")
+	}
+
+	nodes, err := dashboardService.ListNodes()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get ray nodes")
 	}
@@ -235,7 +235,7 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 	clusterStatus.ReadyNodes = readyNodes
 	clusterStatus.NeutreeServeVersion = neutreeServingVersion
 
-	autoScaleStatus, err := dashboardClient.GetClusterAutoScaleStatus()
+	autoScaleStatus, err := dashboardService.GetClusterAutoScaleStatus()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get cluster autoScale status")
 	}
@@ -253,11 +253,11 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 		pendingLauncherNodes += pendingLauncherNumber
 	}
 
-	clusterStatus.AutoScaleStatus.PendingNodes = len(autoScaleStatus.PendingNodes) + len(autoScaleStatus.PendingLaunches)
+	clusterStatus.AutoScaleStatus.PendingNodes = len(autoScaleStatus.PendingNodes) + pendingLauncherNodes
 	clusterStatus.AutoScaleStatus.ActiveNodes = currentAutoScaleActiveNodes
 	clusterStatus.AutoScaleStatus.FailedNodes = len(autoScaleStatus.FailedNodes)
 
-	clusterMetadata, err := dashboardClient.GetClusterMetadata()
+	clusterMetadata, err := dashboardService.GetClusterMetadata()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get cluster metadata")
 	}
@@ -268,7 +268,7 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 	return clusterStatus, nil
 }
 
-func NewRayOrchestrator(opts Options) (Orchestrator, error) {
+func NewRayOrchestrator(opts Options) (*RayOrchestrator, error) {
 	rayClusterConfig := &v1.RayClusterConfig{}
 
 	rayConfig, err := json.Marshal(opts.Cluster.Spec.Config)
@@ -284,6 +284,7 @@ func NewRayOrchestrator(opts Options) (Orchestrator, error) {
 	o := &RayOrchestrator{
 		cluster:       opts.Cluster,
 		imageRegistry: opts.ImageRegistry,
+		imageService:  opts.ImageService,
 		config:        rayClusterConfig,
 		opTimeout: OperationConfig{
 			UpTimeout:        time.Minute * 30,
@@ -320,12 +321,14 @@ func NewRayOrchestrator(opts Options) (Orchestrator, error) {
 }
 
 func (o *RayOrchestrator) ensureLocalClusterStateFile() error {
-	err := os.MkdirAll("/tmp/ray", 0700)
+	rayClusterTmpDir := getRayTmpDir()
+
+	err := os.MkdirAll(rayClusterTmpDir, 0700)
 	if err != nil {
 		return err
 	}
 
-	localClusterStatePath := fmt.Sprintf("/tmp/ray/cluster-%s.state", o.config.ClusterName)
+	localClusterStatePath := fmt.Sprintf("%s/cluster-%s.state", rayClusterTmpDir, o.config.ClusterName)
 	if _, err = os.Stat(localClusterStatePath); err == nil {
 		return nil
 	}
@@ -344,7 +347,7 @@ func (o *RayOrchestrator) ensureLocalClusterStateFile() error {
 		return err
 	}
 
-	err = os.WriteFile(fmt.Sprintf("/tmp/ray/cluster-%s.state", o.config.ClusterName), localClusterStateContent, 0600)
+	err = os.WriteFile(fmt.Sprintf("%s/cluster-%s.state", rayClusterTmpDir, o.config.ClusterName), localClusterStateContent, 0600)
 	if err != nil {
 		return err
 	}
@@ -437,6 +440,29 @@ func (o *RayOrchestrator) checkDockerImage(image string) error {
 	return nil
 }
 
-func (o *RayOrchestrator) newDashboardClient(headIP string) *dashboard.Client {
-	return dashboard.New(fmt.Sprintf("http://%s:8265", headIP))
+func (o *RayOrchestrator) getDashboardService(ctx context.Context) (dashboard.DashboardService, error) {
+	var dashboardService dashboard.DashboardService
+
+	if o.cluster.IsInitialized() {
+		dashboardService = dashboard.NewDashboardService(o.cluster.Status.DashboardURL)
+	} else {
+		headIP, err := o.clusterHelper.GetHeadIP(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get head ip")
+		}
+
+		dashboardService = dashboard.NewDashboardService(fmt.Sprintf("http://%s:8265", headIP))
+	}
+
+	return dashboardService, nil
+}
+
+func getRayTmpDir() string {
+	tmpDir := "/tmp"
+
+	if os.Getenv("RAY_TMP_DIR") != "" {
+		tmpDir = os.Getenv("RAY_TMP_DIR")
+	}
+
+	return filepath.Join(tmpDir, "ray")
 }

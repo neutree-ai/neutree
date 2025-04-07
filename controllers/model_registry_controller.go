@@ -19,16 +19,12 @@ type ModelRegistryController struct {
 
 	storage storage.Storage
 
-	newModelRegistry model_registry.NewModelRegistry
-
 	syncHandler func(modelRegistry *v1.ModelRegistry) error
 }
 
 type ModelRegistryControllerOption struct {
 	Storage storage.Storage
 	Workers int
-
-	NewModelRegistry model_registry.NewModelRegistry
 }
 
 func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRegistryController, error) {
@@ -38,8 +34,7 @@ func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRe
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},
-		storage:          option.Storage,
-		newModelRegistry: option.NewModelRegistry,
+		storage: option.Storage,
 	}
 
 	c.syncHandler = c.sync
@@ -84,7 +79,7 @@ func (c *ModelRegistryController) ListKeys() ([]interface{}, error) {
 }
 
 func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
-	modelRegistry, err := c.newModelRegistry(obj)
+	modelRegistry, err := model_registry.NewModelRegistry(obj)
 	if err != nil {
 		return err
 	}

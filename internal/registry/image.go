@@ -17,7 +17,7 @@ type ImageService interface {
 }
 
 type imageService struct {
-	transport *http.Transport
+	transport http.RoundTripper
 }
 
 func NewImageService() ImageService {

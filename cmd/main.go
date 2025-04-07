@@ -8,9 +8,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/controllers"
-	"github.com/neutree-ai/neutree/internal/orchestrator"
 	"github.com/neutree-ai/neutree/internal/registry"
-	"github.com/neutree-ai/neutree/pkg/model_registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -50,9 +48,8 @@ func main() {
 	}
 
 	modelRegistryController, err := controllers.NewModelRegistryController(&controllers.ModelRegistryControllerOption{
-		Storage:          s,
-		Workers:          *controllerWorkers,
-		NewModelRegistry: model_registry.New,
+		Storage: s,
+		Workers: *controllerWorkers,
 	})
 
 	if err != nil {
@@ -63,7 +60,7 @@ func main() {
 		Storage:              s,
 		Workers:              *controllerWorkers,
 		DefaultClusterVesion: *defaultClusterVersion,
-		NewOrchestrator:      orchestrator.NewOrchestrator,
+		ImageService:         imageService,
 	})
 
 	if err != nil {

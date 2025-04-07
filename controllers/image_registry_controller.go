@@ -39,7 +39,8 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},
-		storage: option.Storage,
+		storage:      option.Storage,
+		imageService: option.ImageService,
 	}
 
 	c.syncHandler = c.sync

@@ -18,12 +18,13 @@ import (
 )
 
 func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService, o *orchestratormocks.MockOrchestrator) *ClusterController {
+	orchestrator.NewOrchestrator = func(opts orchestrator.Options) (orchestrator.Orchestrator, error) {
+		return o, nil
+	}
+
 	return &ClusterController{
 		storage:      storage,
 		imageService: imageSvc,
-		newOrchestrator: func(opts orchestrator.Options) (orchestrator.Orchestrator, error) {
-			return o, nil
-		},
 		baseController: &BaseController{
 			queue:        workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 			workers:      1,

@@ -42,8 +42,8 @@ GO_BUILD_ARGS = \
 	-X '$(MODULE_PATH)/pkg/version.appVersion=$(IMAGE_TAG)' \
 	-X '$(MODULE_PATH)/pkg/version.buildTime=$(shell date --iso-8601=seconds)'"
 
-MOCKERY_DIRS=pkg/model_registry pkg/storage internal/orchestrator internal/registry controllers/
-MOCKERY_OUTPUT_DIRS=pkg/model_registry/mocks pkg/storage/mocks internal/orchestrator/mocks internal/registry/mocks controllers/mocks
+MOCKERY_DIRS=./ pkg/model_registry pkg/storage pkg/command internal/orchestrator internal/orchestrator/ray internal/orchestrator/ray/dashboard internal/registry controllers/
+MOCKERY_OUTPUT_DIRS=testing/mocks pkg/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/orchestrator/ray/mocks internal/orchestrator/ray/dashboard/mocks internal/registry/mocks controllers/mocks
 
 
 .PHONY: help
@@ -89,8 +89,8 @@ docker-push-manifest: ## Push the fat manifest docker image.
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
 .PHONY: test
-test: fmt vet lint mockgen ## Run unit test
-	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e')
+test: mockgen fmt vet lint ## Run unit test
+	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e\|mocks')
 
 .PHONY: clean
 clean: ## Clean up
