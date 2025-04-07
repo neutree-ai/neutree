@@ -13,27 +13,73 @@ on:
         type: string
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    name: release
+  build-amd64-image:
+    runs-on: ubuntu-22.04
+    name: build amd64 image
     steps:
       - uses: actions/checkout@v2
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
       - name: Login docker
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.IMAGE_PUSH_TOKEN }}
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ secrets.CI_ACCESS_TOKEN }}
-          USERNAME: ${{ secrets.CI_USERNAME }}
-        run: git config --global url."https://${USERNAME}:${TOKEN}@github.com".insteadOf "https://github.com"
-      - name: release
-        run: make release
+      - name: build amd64 image
+        run: export ARCH=amd64; make docker-build && make docker-push
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.IMAGE_REPO }}
-
+  build-arm64-image:
+    runs-on: ubuntu-22.04-arm
+    name: build arm64 image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.IMAGE_PUSH_TOKEN }}
+      - name: build arm64 image
+        run: export ARCH=arm64; make docker-build && make docker-push
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.IMAGE_REPO }}
+  push-manifests:
+    runs-on: ubuntu-latest
+    name: merge and push manifests
+    needs:
+      - build-amd64-image
+      - build-arm64-image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.IMAGE_PUSH_TOKEN }}
+      - name: push manifests
+        run: make docker-push-manifest
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.IMAGE_REPO }}
+  release:
+    runs-on: ubuntu-latest
+    name: release
+    needs:
+      - push-manifests
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
       - name: Set release tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -41,10 +87,6 @@ jobs:
           else
             echo "RELEASE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
           fi
-
-      - name: Check out specific tag when manually triggered
-        if: github.event_name == 'workflow_dispatch'
-        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
 
       - name: Generate draft release
         uses: softprops/action-gh-release@v1
