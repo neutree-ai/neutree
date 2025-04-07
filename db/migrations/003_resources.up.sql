@@ -279,8 +279,7 @@ CREATE POLICY "engine delete policy" ON api.engines
 CREATE TYPE api.cluster_spec AS (
     type TEXT,
     config json,
-    image_registry TEXT,
-    version TEXT
+    image_registry TEXT
 );
 
 CREATE TYPE api.cluster_status AS (
@@ -288,13 +287,7 @@ CREATE TYPE api.cluster_status AS (
     image TEXT,
     dashboard_url TEXT,
     last_transition_time TIMESTAMP,
-    error_message TEXT,
-    ready_nodes integer,
-    desired_nodes integer,
-    version TEXT,
-    ray_version TEXT,
-    initialized BOOLEAN,
-    node_provision_status TEXT
+    error_message TEXT
 );
 
 CREATE TABLE api.clusters (
