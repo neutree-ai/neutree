@@ -4,6 +4,13 @@ llm:
   maxTokens: 8192
   maxSteps: 3
   maxRetries: 5
+  __unstable_model_preferences:
+    bestIntelligence:
+      provider: google
+      model: gemini-2.5-pro-exp-03-25
+    bestCost:
+      provider: google
+      model: gemini-2.0-flash
 mcp:
   servers:
     - command: npx

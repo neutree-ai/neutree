@@ -129,11 +129,18 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- ----------------------
 -- Resource: Workspace
 -- ----------------------
+CREATE TYPE api.workspace_status AS (
+    phase TEXT,
+    service_url TEXT,
+    error_message TEXT
+);
+
 CREATE TABLE api.workspaces (
     id SERIAL PRIMARY KEY,
     api_version TEXT NOT NULL,
     kind TEXT NOT NULL,
-    metadata api.metadata
+    metadata api.metadata,
+    status api.workspace_status
 );
 
 CREATE TRIGGER update_workspaces_update_timestamp
