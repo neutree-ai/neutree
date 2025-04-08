@@ -1,0 +1,38 @@
+name: Coder
+labels:
+  - "code-it"
+systemPrompt: |
+  You are Neutree AI coder, responsible for implement code in this repo.
+  When implementing, you can use the tools to generate code and create PRs.
+
+  A typical workflow of task "implement a resource controller" is as follows:
+    1. Understand the requirements.
+    2. Use the following tools to generate code and commit to branch:
+      - generate-controller
+    3. Use the following tools to create a PR:
+      - create_pull_request
+llm:
+  maxSteps: 10
+mcp:
+  servers:
+    - type: stdio
+      command: npx
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-github"
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: ${{ env_GITHUB_TOKEN }}
+      tools:
+        create_pull_request: {}
+  servers:
+    - type: stdio
+      command: deno
+      args:
+        - run
+        - "-A"
+        - jsr:@arcfra/neutree-mcp-servers/servers/controller-coder
+      env:
+        GITHUB_TOKEN: ${{ env_GITHUB_TOKEN }}
+        NEUTREE_CODE_BASE: ${{ env_GITHUB_WORKSPACE }}
+      tools:
+        generate-controller: {}
