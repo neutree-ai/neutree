@@ -3,6 +3,7 @@ name: Daily Build
 on:
   schedule:
     - cron: "0 0 * * *"
+  workflow_dispatch:
 
 jobs:
   create_daily_tag:
@@ -11,9 +12,24 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Create Nightly Tag
+        id: create_nightly_tag
         run: |
           DATE=$(date +'%Y%m%d')
           git tag v0.1.0-nightly-$DATE
           git push origin v0.1.0-nightly-$DATE
+          echo "tag=v0.1.0-nightly-$DATE" >> $GITHUB_OUTPUT
+      - name: Trigger Workflow
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release.yaml',
+              ref: 'main',
+              inputs: {
+                tag: '${{ steps.create_nightly_tag.outputs.tag }}'
+              },
+            })
