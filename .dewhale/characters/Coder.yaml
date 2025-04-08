@@ -24,7 +24,6 @@ mcp:
         GITHUB_PERSONAL_ACCESS_TOKEN: ${{ env_GITHUB_TOKEN }}
       tools:
         create_pull_request: {}
-  servers:
     - type: stdio
       command: deno
       args:
