@@ -61,6 +61,7 @@ func (c *RoleAssignmentController) Reconcile(key interface{}) error {
 			klog.Warningf("RoleAssignment %s not found, skipping reconcile", roleAssignmentID)
 			return nil // Or return a specific error if reconciliation should stop
 		}
+
 		return errors.Wrapf(err, "failed to get role assignment %s", roleAssignmentID)
 	}
 
@@ -69,6 +70,7 @@ func (c *RoleAssignmentController) Reconcile(key interface{}) error {
 	if obj.Metadata != nil && obj.Metadata.Name != "" {
 		objName = obj.Metadata.Name
 	}
+
 	klog.V(4).Infof("Reconcile role assignment %s (ID: %s)", objName, roleAssignmentID)
 
 	return c.syncHandler(obj)
@@ -90,6 +92,7 @@ func (c *RoleAssignmentController) ListKeys() ([]interface{}, error) {
 
 func (c *RoleAssignmentController) sync(obj *v1.RoleAssignment) error {
 	var err error
+
 	objName := strconv.Itoa(obj.ID) // Default to ID if name is missing
 	if obj.Metadata != nil && obj.Metadata.Name != "" {
 		objName = obj.Metadata.Name
@@ -106,6 +109,7 @@ func (c *RoleAssignmentController) sync(obj *v1.RoleAssignment) error {
 					klog.Warningf("RoleAssignment %s (ID: %d) not found during final deletion, assuming already deleted", objName, obj.ID)
 					return nil
 				}
+
 				return errors.Wrapf(err, "failed to delete role assignment in DB %s (ID: %d)", objName, obj.ID)
 			}
 
