@@ -295,3 +295,68 @@ func (s *postgrestStorage) ListRole(option ListOption) ([]v1.Role, error) {
 
 	return response, err
 }
+
+func (s *postgrestStorage) CreateRoleAssignment(data *v1.RoleAssignment) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ROLE_ASSIGNMENT_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteRoleAssignment(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ROLE_ASSIGNMENT_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateRoleAssignment(id string, data *v1.RoleAssignment) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ROLE_ASSIGNMENT_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetRoleAssignment(id string) (*v1.RoleAssignment, error) {
+	var (
+		response []v1.RoleAssignment
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(ROLE_ASSIGNMENT_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListRoleAssignment(option ListOption) ([]v1.RoleAssignment, error) {
+	var response []v1.RoleAssignment
+	err := s.genericList(ROLE_ASSIGNMENT_TABLE, &response, option)
+
+	return response, err
+}
