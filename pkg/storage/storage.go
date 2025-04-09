@@ -20,6 +20,7 @@ const (
 	MODEL_REGISTRY_TABLE  = "model_registries"
 	ROLE_TABLE            = "roles"
 	ROLE_ASSIGNMENT_TABLE = "role_assignments"
+	WORKSPACE_TABLE       = "workspaces"
 )
 
 type ImageRegistryStorage interface {
@@ -87,12 +88,26 @@ type RoleAssignmentStorage interface {
 	ListRoleAssignment(option ListOption) ([]v1.RoleAssignment, error)
 }
 
+type WorkspaceStorage interface {
+	// CreateWorkspace creates a new workspace in the database.
+	CreateWorkspace(data *v1.Workspace) error
+	// DeleteWorkspace deletes a workspace by its ID.
+	DeleteWorkspace(id string) error
+	// UpdateWorkspace updates an existing workspace in the database.
+	UpdateWorkspace(id string, data *v1.Workspace) error
+	// GetWorkspace retrieves a workspace by its ID.
+	GetWorkspace(id string) (*v1.Workspace, error)
+	// ListWorkspace retrieves a list of workspaces with optional filters.
+	ListWorkspace(option ListOption) ([]v1.Workspace, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
 	ModelRegistryStorage
 	RoleStorage
 	RoleAssignmentStorage
+	WorkspaceStorage
 }
 
 type Options struct {

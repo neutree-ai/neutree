@@ -360,3 +360,68 @@ func (s *postgrestStorage) ListRoleAssignment(option ListOption) ([]v1.RoleAssig
 
 	return response, err
 }
+
+func (s *postgrestStorage) CreateWorkspace(data *v1.Workspace) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(WORKSPACE_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteWorkspace(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(WORKSPACE_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateWorkspace(id string, data *v1.Workspace) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(WORKSPACE_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetWorkspace(id string) (*v1.Workspace, error) {
+	var (
+		response []v1.Workspace
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(WORKSPACE_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListWorkspace(option ListOption) ([]v1.Workspace, error) {
+	var response []v1.Workspace
+	err := s.genericList(WORKSPACE_TABLE, &response, option)
+
+	return response, err
+}
