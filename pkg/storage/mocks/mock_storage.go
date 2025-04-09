@@ -252,6 +252,52 @@ func (_c *MockStorage_CreateRoleAssignment_Call) RunAndReturn(run func(*v1.RoleA
 	return _c
 }
 
+// CreateWorkspace provides a mock function with given fields: data
+func (_m *MockStorage) CreateWorkspace(data *v1.Workspace) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateWorkspace")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Workspace) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateWorkspace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateWorkspace'
+type MockStorage_CreateWorkspace_Call struct {
+	*mock.Call
+}
+
+// CreateWorkspace is a helper method to define mock.On call
+//   - data *v1.Workspace
+func (_e *MockStorage_Expecter) CreateWorkspace(data interface{}) *MockStorage_CreateWorkspace_Call {
+	return &MockStorage_CreateWorkspace_Call{Call: _e.mock.On("CreateWorkspace", data)}
+}
+
+func (_c *MockStorage_CreateWorkspace_Call) Run(run func(data *v1.Workspace)) *MockStorage_CreateWorkspace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Workspace))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateWorkspace_Call) Return(_a0 error) *MockStorage_CreateWorkspace_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateWorkspace_Call) RunAndReturn(run func(*v1.Workspace) error) *MockStorage_CreateWorkspace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteCluster provides a mock function with given fields: id
 func (_m *MockStorage) DeleteCluster(id string) error {
 	ret := _m.Called(id)
@@ -478,6 +524,52 @@ func (_c *MockStorage_DeleteRoleAssignment_Call) Return(_a0 error) *MockStorage_
 }
 
 func (_c *MockStorage_DeleteRoleAssignment_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteWorkspace provides a mock function with given fields: id
+func (_m *MockStorage) DeleteWorkspace(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteWorkspace")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteWorkspace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteWorkspace'
+type MockStorage_DeleteWorkspace_Call struct {
+	*mock.Call
+}
+
+// DeleteWorkspace is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteWorkspace(id interface{}) *MockStorage_DeleteWorkspace_Call {
+	return &MockStorage_DeleteWorkspace_Call{Call: _e.mock.On("DeleteWorkspace", id)}
+}
+
+func (_c *MockStorage_DeleteWorkspace_Call) Run(run func(id string)) *MockStorage_DeleteWorkspace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteWorkspace_Call) Return(_a0 error) *MockStorage_DeleteWorkspace_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteWorkspace_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteWorkspace_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -772,6 +864,64 @@ func (_c *MockStorage_GetRoleAssignment_Call) RunAndReturn(run func(string) (*v1
 	return _c
 }
 
+// GetWorkspace provides a mock function with given fields: id
+func (_m *MockStorage) GetWorkspace(id string) (*v1.Workspace, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetWorkspace")
+	}
+
+	var r0 *v1.Workspace
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.Workspace, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.Workspace); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.Workspace)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetWorkspace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetWorkspace'
+type MockStorage_GetWorkspace_Call struct {
+	*mock.Call
+}
+
+// GetWorkspace is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetWorkspace(id interface{}) *MockStorage_GetWorkspace_Call {
+	return &MockStorage_GetWorkspace_Call{Call: _e.mock.On("GetWorkspace", id)}
+}
+
+func (_c *MockStorage_GetWorkspace_Call) Run(run func(id string)) *MockStorage_GetWorkspace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetWorkspace_Call) Return(_a0 *v1.Workspace, _a1 error) *MockStorage_GetWorkspace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetWorkspace_Call) RunAndReturn(run func(string) (*v1.Workspace, error)) *MockStorage_GetWorkspace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListCluster provides a mock function with given fields: option
 func (_m *MockStorage) ListCluster(option storage.ListOption) ([]v1.Cluster, error) {
 	ret := _m.Called(option)
@@ -1062,6 +1212,64 @@ func (_c *MockStorage_ListRoleAssignment_Call) RunAndReturn(run func(storage.Lis
 	return _c
 }
 
+// ListWorkspace provides a mock function with given fields: option
+func (_m *MockStorage) ListWorkspace(option storage.ListOption) ([]v1.Workspace, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListWorkspace")
+	}
+
+	var r0 []v1.Workspace
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.Workspace, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.Workspace); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.Workspace)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListWorkspace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListWorkspace'
+type MockStorage_ListWorkspace_Call struct {
+	*mock.Call
+}
+
+// ListWorkspace is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListWorkspace(option interface{}) *MockStorage_ListWorkspace_Call {
+	return &MockStorage_ListWorkspace_Call{Call: _e.mock.On("ListWorkspace", option)}
+}
+
+func (_c *MockStorage_ListWorkspace_Call) Run(run func(option storage.ListOption)) *MockStorage_ListWorkspace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListWorkspace_Call) Return(_a0 []v1.Workspace, _a1 error) *MockStorage_ListWorkspace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListWorkspace_Call) RunAndReturn(run func(storage.ListOption) ([]v1.Workspace, error)) *MockStorage_ListWorkspace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateCluster provides a mock function with given fields: id, data
 func (_m *MockStorage) UpdateCluster(id string, data *v1.Cluster) error {
 	ret := _m.Called(id, data)
@@ -1293,6 +1501,53 @@ func (_c *MockStorage_UpdateRoleAssignment_Call) Return(_a0 error) *MockStorage_
 }
 
 func (_c *MockStorage_UpdateRoleAssignment_Call) RunAndReturn(run func(string, *v1.RoleAssignment) error) *MockStorage_UpdateRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateWorkspace provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateWorkspace(id string, data *v1.Workspace) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateWorkspace")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.Workspace) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateWorkspace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateWorkspace'
+type MockStorage_UpdateWorkspace_Call struct {
+	*mock.Call
+}
+
+// UpdateWorkspace is a helper method to define mock.On call
+//   - id string
+//   - data *v1.Workspace
+func (_e *MockStorage_Expecter) UpdateWorkspace(id interface{}, data interface{}) *MockStorage_UpdateWorkspace_Call {
+	return &MockStorage_UpdateWorkspace_Call{Call: _e.mock.On("UpdateWorkspace", id, data)}
+}
+
+func (_c *MockStorage_UpdateWorkspace_Call) Run(run func(id string, data *v1.Workspace)) *MockStorage_UpdateWorkspace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.Workspace))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateWorkspace_Call) Return(_a0 error) *MockStorage_UpdateWorkspace_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateWorkspace_Call) RunAndReturn(run func(string, *v1.Workspace) error) *MockStorage_UpdateWorkspace_Call {
 	_c.Call.Return(run)
 	return _c
 }
