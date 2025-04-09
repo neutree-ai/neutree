@@ -102,7 +102,7 @@ golangci-lint: ## Download golangci-lint if not yet.
 
 .PHONY: lint
 lint: golangci-lint ## Lint codebase
-	$(GOLANGCI_LINT) run -v --fast=false
+	$(GOLANGCI_LINT) run -v --fast=false --fix
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.

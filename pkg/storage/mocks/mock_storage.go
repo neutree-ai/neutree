@@ -206,6 +206,52 @@ func (_c *MockStorage_CreateRole_Call) RunAndReturn(run func(*v1.Role) error) *M
 	return _c
 }
 
+// CreateRoleAssignment provides a mock function with given fields: data
+func (_m *MockStorage) CreateRoleAssignment(data *v1.RoleAssignment) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRoleAssignment")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.RoleAssignment) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateRoleAssignment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRoleAssignment'
+type MockStorage_CreateRoleAssignment_Call struct {
+	*mock.Call
+}
+
+// CreateRoleAssignment is a helper method to define mock.On call
+//   - data *v1.RoleAssignment
+func (_e *MockStorage_Expecter) CreateRoleAssignment(data interface{}) *MockStorage_CreateRoleAssignment_Call {
+	return &MockStorage_CreateRoleAssignment_Call{Call: _e.mock.On("CreateRoleAssignment", data)}
+}
+
+func (_c *MockStorage_CreateRoleAssignment_Call) Run(run func(data *v1.RoleAssignment)) *MockStorage_CreateRoleAssignment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.RoleAssignment))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateRoleAssignment_Call) Return(_a0 error) *MockStorage_CreateRoleAssignment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateRoleAssignment_Call) RunAndReturn(run func(*v1.RoleAssignment) error) *MockStorage_CreateRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteCluster provides a mock function with given fields: id
 func (_m *MockStorage) DeleteCluster(id string) error {
 	ret := _m.Called(id)
@@ -386,6 +432,52 @@ func (_c *MockStorage_DeleteRole_Call) Return(_a0 error) *MockStorage_DeleteRole
 }
 
 func (_c *MockStorage_DeleteRole_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteRoleAssignment provides a mock function with given fields: id
+func (_m *MockStorage) DeleteRoleAssignment(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteRoleAssignment")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteRoleAssignment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteRoleAssignment'
+type MockStorage_DeleteRoleAssignment_Call struct {
+	*mock.Call
+}
+
+// DeleteRoleAssignment is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteRoleAssignment(id interface{}) *MockStorage_DeleteRoleAssignment_Call {
+	return &MockStorage_DeleteRoleAssignment_Call{Call: _e.mock.On("DeleteRoleAssignment", id)}
+}
+
+func (_c *MockStorage_DeleteRoleAssignment_Call) Run(run func(id string)) *MockStorage_DeleteRoleAssignment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteRoleAssignment_Call) Return(_a0 error) *MockStorage_DeleteRoleAssignment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteRoleAssignment_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteRoleAssignment_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -622,6 +714,64 @@ func (_c *MockStorage_GetRole_Call) RunAndReturn(run func(string) (*v1.Role, err
 	return _c
 }
 
+// GetRoleAssignment provides a mock function with given fields: id
+func (_m *MockStorage) GetRoleAssignment(id string) (*v1.RoleAssignment, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRoleAssignment")
+	}
+
+	var r0 *v1.RoleAssignment
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.RoleAssignment, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.RoleAssignment); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.RoleAssignment)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetRoleAssignment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRoleAssignment'
+type MockStorage_GetRoleAssignment_Call struct {
+	*mock.Call
+}
+
+// GetRoleAssignment is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetRoleAssignment(id interface{}) *MockStorage_GetRoleAssignment_Call {
+	return &MockStorage_GetRoleAssignment_Call{Call: _e.mock.On("GetRoleAssignment", id)}
+}
+
+func (_c *MockStorage_GetRoleAssignment_Call) Run(run func(id string)) *MockStorage_GetRoleAssignment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetRoleAssignment_Call) Return(_a0 *v1.RoleAssignment, _a1 error) *MockStorage_GetRoleAssignment_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetRoleAssignment_Call) RunAndReturn(run func(string) (*v1.RoleAssignment, error)) *MockStorage_GetRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListCluster provides a mock function with given fields: option
 func (_m *MockStorage) ListCluster(option storage.ListOption) ([]v1.Cluster, error) {
 	ret := _m.Called(option)
@@ -854,6 +1004,64 @@ func (_c *MockStorage_ListRole_Call) RunAndReturn(run func(storage.ListOption) (
 	return _c
 }
 
+// ListRoleAssignment provides a mock function with given fields: option
+func (_m *MockStorage) ListRoleAssignment(option storage.ListOption) ([]v1.RoleAssignment, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRoleAssignment")
+	}
+
+	var r0 []v1.RoleAssignment
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.RoleAssignment, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.RoleAssignment); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.RoleAssignment)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListRoleAssignment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRoleAssignment'
+type MockStorage_ListRoleAssignment_Call struct {
+	*mock.Call
+}
+
+// ListRoleAssignment is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListRoleAssignment(option interface{}) *MockStorage_ListRoleAssignment_Call {
+	return &MockStorage_ListRoleAssignment_Call{Call: _e.mock.On("ListRoleAssignment", option)}
+}
+
+func (_c *MockStorage_ListRoleAssignment_Call) Run(run func(option storage.ListOption)) *MockStorage_ListRoleAssignment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListRoleAssignment_Call) Return(_a0 []v1.RoleAssignment, _a1 error) *MockStorage_ListRoleAssignment_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListRoleAssignment_Call) RunAndReturn(run func(storage.ListOption) ([]v1.RoleAssignment, error)) *MockStorage_ListRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateCluster provides a mock function with given fields: id, data
 func (_m *MockStorage) UpdateCluster(id string, data *v1.Cluster) error {
 	ret := _m.Called(id, data)
@@ -1038,6 +1246,53 @@ func (_c *MockStorage_UpdateRole_Call) Return(_a0 error) *MockStorage_UpdateRole
 }
 
 func (_c *MockStorage_UpdateRole_Call) RunAndReturn(run func(string, *v1.Role) error) *MockStorage_UpdateRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateRoleAssignment provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateRoleAssignment(id string, data *v1.RoleAssignment) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateRoleAssignment")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.RoleAssignment) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateRoleAssignment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateRoleAssignment'
+type MockStorage_UpdateRoleAssignment_Call struct {
+	*mock.Call
+}
+
+// UpdateRoleAssignment is a helper method to define mock.On call
+//   - id string
+//   - data *v1.RoleAssignment
+func (_e *MockStorage_Expecter) UpdateRoleAssignment(id interface{}, data interface{}) *MockStorage_UpdateRoleAssignment_Call {
+	return &MockStorage_UpdateRoleAssignment_Call{Call: _e.mock.On("UpdateRoleAssignment", id, data)}
+}
+
+func (_c *MockStorage_UpdateRoleAssignment_Call) Run(run func(id string, data *v1.RoleAssignment)) *MockStorage_UpdateRoleAssignment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.RoleAssignment))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateRoleAssignment_Call) Return(_a0 error) *MockStorage_UpdateRoleAssignment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateRoleAssignment_Call) RunAndReturn(run func(string, *v1.RoleAssignment) error) *MockStorage_UpdateRoleAssignment_Call {
 	_c.Call.Return(run)
 	return _c
 }

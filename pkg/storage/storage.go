@@ -13,12 +13,13 @@ var (
 )
 
 const (
-	ENDPOINT_TABLE       = "endpoints"
-	ENGINE_TABLE         = "engines"
-	IMAGE_REGISTRY_TABLE = "image_registries"
-	CLUSTERS_TABLE       = "clusters"
-	MODEL_REGISTRY_TABLE = "model_registries"
-	ROLE_TABLE           = "roles"
+	ENDPOINT_TABLE        = "endpoints"
+	ENGINE_TABLE          = "engines"
+	IMAGE_REGISTRY_TABLE  = "image_registries"
+	CLUSTERS_TABLE        = "clusters"
+	MODEL_REGISTRY_TABLE  = "model_registries"
+	ROLE_TABLE            = "roles"
+	ROLE_ASSIGNMENT_TABLE = "role_assignments"
 )
 
 type ImageRegistryStorage interface {
@@ -73,11 +74,25 @@ type RoleStorage interface {
 	ListRole(option ListOption) ([]v1.Role, error)
 }
 
+type RoleAssignmentStorage interface {
+	// CreateRoleAssignment creates a new role assignment in the database.
+	CreateRoleAssignment(data *v1.RoleAssignment) error
+	// DeleteRoleAssignment deletes a role assignment by its ID.
+	DeleteRoleAssignment(id string) error
+	// UpdateRoleAssignment updates an existing role assignment in the database.
+	UpdateRoleAssignment(id string, data *v1.RoleAssignment) error
+	// GetRoleAssignment retrieves a role assignment by its ID.
+	GetRoleAssignment(id string) (*v1.RoleAssignment, error)
+	// ListRoleAssignment retrieves a list of role assignments with optional filters.
+	ListRoleAssignment(option ListOption) ([]v1.RoleAssignment, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
 	ModelRegistryStorage
 	RoleStorage
+	RoleAssignmentStorage
 }
 
 type Options struct {
