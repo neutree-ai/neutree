@@ -2,6 +2,7 @@ package command_runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -12,7 +13,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-type ProcessExecute func(ctx context.Context, name string, args ...string) ([]byte, error)
+type ProcessExecute func(ctx context.Context, name string, args []string) ([]byte, error)
 
 // SSHCommandRunner represents an SSH command runner.
 type SSHCommandRunner struct {
@@ -35,9 +36,13 @@ type CommonArgs struct {
 
 // NewSSHCommandRunner creates a new SSHCommandRunner instance.
 func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, clusterName string, processExecute ProcessExecute) *SSHCommandRunner {
-	sshControlHash := fmt.Sprintf("%x", hashString(clusterName))[:10]
-	sshControlPath := fmt.Sprintf("/tmp/ray_ssh/%s", sshControlHash)
-	_ = os.MkdirAll(sshControlPath, 0700) //nolint:errcheck
+	var sshControlPath string
+
+	if clusterName != "" {
+		sshControlHash := fmt.Sprintf("%x", hashString(clusterName))[:10]
+		sshControlPath = fmt.Sprintf("/tmp/ray_ssh/%s", sshControlHash)
+		_ = os.MkdirAll(sshControlPath, 0700) //nolint:errcheck
+	}
 
 	return &SSHCommandRunner{
 		nodeID:         nodeID,
@@ -82,7 +87,7 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 	klog.V(4).Infof("Node %s running `%s`", s.nodeID, cmd)
 	klog.V(4).Infof("Node %s running full command is `%s`", s.nodeID, strings.Join(sshCommand, " "))
 
-	output, err := s.processExecute(ctx, sshCommand[0], sshCommand[1:]...)
+	output, err := s.processExecute(ctx, sshCommand[0], sshCommand[1:])
 	if err != nil {
 		if exitOnFail {
 			return "", fmt.Errorf("command failed:\n\n  %s\n", strings.Join(sshCommand, " "))
@@ -132,4 +137,9 @@ func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []stri
 	}
 
 	return sshOptions
+}
+
+func hashString(s string) []byte {
+	hash := sha256.Sum256([]byte(s))
+	return hash[:]
 }

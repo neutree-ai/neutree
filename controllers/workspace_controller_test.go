@@ -394,7 +394,7 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 				assert.Error(t, err)
 				if tt.expectedError != nil {
 					// Use Contains for checking wrapped errors, Is for specific errors.
-					if errors.Is(tt.expectedError, storage.ErrResourceNotFound) || tt.expectedError.Error() == "failed to assert key to workspaceID" {
+					if errors.Is(tt.expectedError, storage.ErrResourceNotFound) {
 						assert.ErrorIs(t, err, tt.expectedError)
 					} else {
 						assert.Contains(t, err.Error(), tt.expectedError.Error())

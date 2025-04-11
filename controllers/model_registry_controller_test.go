@@ -16,11 +16,12 @@ import (
 )
 
 func newTestModelRegistryController(storage *storagemocks.MockStorage, model *modelregistrymocks.MockModelRegistry) *ModelRegistryController {
+	model_registry.NewModelRegistry = func(obj *v1.ModelRegistry) (model_registry.ModelRegistry, error) {
+		return model, nil
+	}
+
 	return &ModelRegistryController{
 		storage: storage,
-		newModelRegistry: func(obj *v1.ModelRegistry) (model_registry.ModelRegistry, error) {
-			return model, nil
-		},
 		baseController: &BaseController{
 			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
 			workers:      1,

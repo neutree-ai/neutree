@@ -14,14 +14,23 @@ import (
 	"github.com/neutree-ai/neutree/pkg/command"
 )
 
-type ClusterManager struct {
+type ClusterManager interface {
+	UpCluster(ctx context.Context, restart bool) (string, error)
+	DownCluster(ctx context.Context) error
+	StartNode(ctx context.Context, nodeIP string) error
+	StopNode(ctx context.Context, nodeIP string) error
+	GetHeadIP(ctx context.Context) (string, error)
+	DrainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error
+}
+
+type clusterManager struct {
 	executor  command.Executor
 	configMgr *config.Manager
 	config    *v1.RayClusterConfig
 }
 
 func NewRayClusterManager(cfg *v1.RayClusterConfig,
-	executor command.Executor) (*ClusterManager, error) {
+	executor command.Executor) (*clusterManager, error) {
 	if cfg == nil {
 		return nil, errors.New("cluster config cannot be nil")
 	}
@@ -32,7 +41,7 @@ func NewRayClusterManager(cfg *v1.RayClusterConfig,
 		return nil, errors.Wrap(err, "failed to generate config")
 	}
 
-	manager := &ClusterManager{
+	manager := &clusterManager{
 		executor:  executor,
 		configMgr: configMgr,
 		config:    cfg,
@@ -41,7 +50,7 @@ func NewRayClusterManager(cfg *v1.RayClusterConfig,
 	return manager, nil
 }
 
-func (c *ClusterManager) DownCluster(ctx context.Context) error {
+func (c *clusterManager) DownCluster(ctx context.Context) error {
 	downArgs := []string{
 		"down",
 		"-y",
@@ -50,7 +59,7 @@ func (c *ClusterManager) DownCluster(ctx context.Context) error {
 
 	downArgs = append(downArgs, c.configMgr.ConfigPath())
 
-	output, err := c.executor.Execute(ctx, "ray", downArgs...)
+	output, err := c.executor.Execute(ctx, "ray", downArgs)
 	if err != nil {
 		return errors.Wrap(err, "failed to down cluster: "+string(output))
 	}
@@ -60,7 +69,7 @@ func (c *ClusterManager) DownCluster(ctx context.Context) error {
 	return nil
 }
 
-func (c *ClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
+func (c *clusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
 	upArgs := []string{
 		"up",
 		"--disable-usage-stats",
@@ -75,7 +84,7 @@ func (c *ClusterManager) UpCluster(ctx context.Context, restart bool) (string, e
 
 	upArgs = append(upArgs, c.configMgr.ConfigPath())
 
-	output, err := c.executor.Execute(ctx, "ray", upArgs...)
+	output, err := c.executor.Execute(ctx, "ray", upArgs)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to up cluster: "+string(output))
 	}
@@ -90,7 +99,7 @@ func (c *ClusterManager) UpCluster(ctx context.Context, restart bool) (string, e
 	return headIP, nil
 }
 
-func (c *ClusterManager) StartNode(ctx context.Context, nodeIP string) error {
+func (c *clusterManager) StartNode(ctx context.Context, nodeIP string) error {
 	headIP, err := c.GetHeadIP(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to get head ip")
@@ -129,7 +138,7 @@ func (c *ClusterManager) StartNode(ctx context.Context, nodeIP string) error {
 	return nil
 }
 
-func (c *ClusterManager) DrainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error {
+func (c *clusterManager) DrainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error {
 	headIP, err := c.GetHeadIP(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to get head ip")
@@ -145,7 +154,7 @@ func (c *ClusterManager) DrainNode(ctx context.Context, nodeID, reason, message 
 		"--deadline-remaining-seconds=" + fmt.Sprintf("%d", deadlineRemainSeconds),
 	}
 
-	output, err := c.executor.Execute(ctx, "ray", drainArgs...)
+	output, err := c.executor.Execute(ctx, "ray", drainArgs)
 	if err != nil {
 		return errors.Wrap(err, "failed to drain node: "+string(output))
 	}
@@ -155,7 +164,7 @@ func (c *ClusterManager) DrainNode(ctx context.Context, nodeID, reason, message 
 	return nil
 }
 
-func (c *ClusterManager) StopNode(ctx context.Context, nodeIP string) error {
+func (c *clusterManager) StopNode(ctx context.Context, nodeIP string) error {
 	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
 	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
 
@@ -190,8 +199,8 @@ func (c *ClusterManager) StopNode(ctx context.Context, nodeIP string) error {
 	return nil
 }
 
-func (c *ClusterManager) GetHeadIP(ctx context.Context) (string, error) {
-	output, err := c.executor.Execute(ctx, "ray", "get-head-ip", c.configMgr.ConfigPath())
+func (c *clusterManager) GetHeadIP(ctx context.Context) (string, error) {
+	output, err := c.executor.Execute(ctx, "ray", []string{"get-head-ip", c.configMgr.ConfigPath()})
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get cluster head ip: "+string(output))
 	}
@@ -209,7 +218,7 @@ func (c *ClusterManager) GetHeadIP(ctx context.Context) (string, error) {
 	return lines[len(lines)-1], nil
 }
 
-func (c *ClusterManager) buildSSHCommandArgs(nodeIP string) *command_runner.CommonArgs {
+func (c *clusterManager) buildSSHCommandArgs(nodeIP string) *command_runner.CommonArgs {
 	return &command_runner.CommonArgs{
 		NodeID: nodeIP,
 		SshIP:  nodeIP,

@@ -139,9 +139,13 @@ func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.Workspace
 	newStatus := &v1.WorkspaceStatus{
 		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
 		Phase:              phase,
-		// Preserve existing fields if needed, e.g., ServiceURL
-		ServiceURL: obj.Status.ServiceURL,
 	}
+
+	// Preserve existing fields if needed, e.g., ServiceURL
+	if obj.Status != nil {
+		newStatus.ServiceURL = obj.Status.ServiceURL
+	}
+
 	if err != nil {
 		newStatus.ErrorMessage = err.Error()
 	} else {
