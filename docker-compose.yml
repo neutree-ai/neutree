@@ -131,7 +131,7 @@ services:
         condition: service_completed_successfully
 
   neutree-core:
-    image: docker.io/weihuang080513/neutree-core:latest
+    image: docker.io/weihuang080513/neutree-core:v0.1.0-nightly-20250412
     container_name: neutree-core
     command:
       - ./neutree-core

@@ -67,12 +67,39 @@ func main() {
 		klog.Fatalf("failed to init cluster controller: %s", err.Error())
 	}
 
+	roleController, err := controllers.NewRoleController(&controllers.RoleControllerOption{
+		Storage: s,
+		Workers: *controllerWorkers,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init role controller: %s", err.Error())
+	}
+
+	roleAssignmentController, err := controllers.NewRoleAssignmentController(&controllers.RoleAssignmentControllerOption{
+		Storage: s,
+		Workers: *controllerWorkers,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init role assignment controller: %s", err.Error())
+	}
+
+	workspaceController, err := controllers.NewWorkspaceController(&controllers.WorkspaceControllerOption{
+		Storage: s,
+		Workers: *controllerWorkers,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init workspace controller: %s", err.Error())
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go imageRegistryController.Start(ctx)
 	go modelRegistryController.Start(ctx)
 	go clusterController.Start(ctx)
+	go roleController.Start(ctx)
+	go roleAssignmentController.Start(ctx)
+	go workspaceController.Start(ctx)
 
 	<-ctx.Done()
 }
