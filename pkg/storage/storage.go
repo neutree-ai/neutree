@@ -21,6 +21,7 @@ const (
 	ROLE_TABLE            = "roles"
 	ROLE_ASSIGNMENT_TABLE = "role_assignments"
 	WORKSPACE_TABLE       = "workspaces"
+	API_KEY_TABLE         = "api_keys"
 )
 
 type ImageRegistryStorage interface {
@@ -101,6 +102,19 @@ type WorkspaceStorage interface {
 	ListWorkspace(option ListOption) ([]v1.Workspace, error)
 }
 
+type ApiKeyStorage interface {
+	// CreateApiKey creates a new api_key in the database.
+	CreateApiKey(data *v1.ApiKey) error
+	// DeleteApiKey deletes a api_key by its ID.
+	DeleteApiKey(id string) error
+	// UpdateApiKey updates an existing api_key in the database.
+	UpdateApiKey(id string, data *v1.ApiKey) error
+	// GetApiKey retrieves a api_key by its ID.
+	GetApiKey(id string) (*v1.ApiKey, error)
+	// ListApiKey retrieves a list of api_keys with optional filters.
+	ListApiKey(option ListOption) ([]v1.ApiKey, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -108,6 +122,7 @@ type Storage interface {
 	RoleStorage
 	RoleAssignmentStorage
 	WorkspaceStorage
+	ApiKeyStorage
 }
 
 type Options struct {

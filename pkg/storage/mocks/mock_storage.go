@@ -22,6 +22,52 @@ func (_m *MockStorage) EXPECT() *MockStorage_Expecter {
 	return &MockStorage_Expecter{mock: &_m.Mock}
 }
 
+// CreateApiKey provides a mock function with given fields: data
+func (_m *MockStorage) CreateApiKey(data *v1.ApiKey) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateApiKey")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.ApiKey) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateApiKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateApiKey'
+type MockStorage_CreateApiKey_Call struct {
+	*mock.Call
+}
+
+// CreateApiKey is a helper method to define mock.On call
+//   - data *v1.ApiKey
+func (_e *MockStorage_Expecter) CreateApiKey(data interface{}) *MockStorage_CreateApiKey_Call {
+	return &MockStorage_CreateApiKey_Call{Call: _e.mock.On("CreateApiKey", data)}
+}
+
+func (_c *MockStorage_CreateApiKey_Call) Run(run func(data *v1.ApiKey)) *MockStorage_CreateApiKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.ApiKey))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateApiKey_Call) Return(_a0 error) *MockStorage_CreateApiKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateApiKey_Call) RunAndReturn(run func(*v1.ApiKey) error) *MockStorage_CreateApiKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateCluster provides a mock function with given fields: data
 func (_m *MockStorage) CreateCluster(data *v1.Cluster) error {
 	ret := _m.Called(data)
@@ -298,6 +344,52 @@ func (_c *MockStorage_CreateWorkspace_Call) RunAndReturn(run func(*v1.Workspace)
 	return _c
 }
 
+// DeleteApiKey provides a mock function with given fields: id
+func (_m *MockStorage) DeleteApiKey(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteApiKey")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteApiKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteApiKey'
+type MockStorage_DeleteApiKey_Call struct {
+	*mock.Call
+}
+
+// DeleteApiKey is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteApiKey(id interface{}) *MockStorage_DeleteApiKey_Call {
+	return &MockStorage_DeleteApiKey_Call{Call: _e.mock.On("DeleteApiKey", id)}
+}
+
+func (_c *MockStorage_DeleteApiKey_Call) Run(run func(id string)) *MockStorage_DeleteApiKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteApiKey_Call) Return(_a0 error) *MockStorage_DeleteApiKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteApiKey_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteApiKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteCluster provides a mock function with given fields: id
 func (_m *MockStorage) DeleteCluster(id string) error {
 	ret := _m.Called(id)
@@ -570,6 +662,64 @@ func (_c *MockStorage_DeleteWorkspace_Call) Return(_a0 error) *MockStorage_Delet
 }
 
 func (_c *MockStorage_DeleteWorkspace_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteWorkspace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetApiKey provides a mock function with given fields: id
+func (_m *MockStorage) GetApiKey(id string) (*v1.ApiKey, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetApiKey")
+	}
+
+	var r0 *v1.ApiKey
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.ApiKey, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.ApiKey); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.ApiKey)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetApiKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetApiKey'
+type MockStorage_GetApiKey_Call struct {
+	*mock.Call
+}
+
+// GetApiKey is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetApiKey(id interface{}) *MockStorage_GetApiKey_Call {
+	return &MockStorage_GetApiKey_Call{Call: _e.mock.On("GetApiKey", id)}
+}
+
+func (_c *MockStorage_GetApiKey_Call) Run(run func(id string)) *MockStorage_GetApiKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetApiKey_Call) Return(_a0 *v1.ApiKey, _a1 error) *MockStorage_GetApiKey_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetApiKey_Call) RunAndReturn(run func(string) (*v1.ApiKey, error)) *MockStorage_GetApiKey_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -922,6 +1072,64 @@ func (_c *MockStorage_GetWorkspace_Call) RunAndReturn(run func(string) (*v1.Work
 	return _c
 }
 
+// ListApiKey provides a mock function with given fields: option
+func (_m *MockStorage) ListApiKey(option storage.ListOption) ([]v1.ApiKey, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListApiKey")
+	}
+
+	var r0 []v1.ApiKey
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.ApiKey, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.ApiKey); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.ApiKey)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListApiKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListApiKey'
+type MockStorage_ListApiKey_Call struct {
+	*mock.Call
+}
+
+// ListApiKey is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListApiKey(option interface{}) *MockStorage_ListApiKey_Call {
+	return &MockStorage_ListApiKey_Call{Call: _e.mock.On("ListApiKey", option)}
+}
+
+func (_c *MockStorage_ListApiKey_Call) Run(run func(option storage.ListOption)) *MockStorage_ListApiKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListApiKey_Call) Return(_a0 []v1.ApiKey, _a1 error) *MockStorage_ListApiKey_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListApiKey_Call) RunAndReturn(run func(storage.ListOption) ([]v1.ApiKey, error)) *MockStorage_ListApiKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListCluster provides a mock function with given fields: option
 func (_m *MockStorage) ListCluster(option storage.ListOption) ([]v1.Cluster, error) {
 	ret := _m.Called(option)
@@ -1266,6 +1474,53 @@ func (_c *MockStorage_ListWorkspace_Call) Return(_a0 []v1.Workspace, _a1 error) 
 }
 
 func (_c *MockStorage_ListWorkspace_Call) RunAndReturn(run func(storage.ListOption) ([]v1.Workspace, error)) *MockStorage_ListWorkspace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateApiKey provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateApiKey(id string, data *v1.ApiKey) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateApiKey")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.ApiKey) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateApiKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateApiKey'
+type MockStorage_UpdateApiKey_Call struct {
+	*mock.Call
+}
+
+// UpdateApiKey is a helper method to define mock.On call
+//   - id string
+//   - data *v1.ApiKey
+func (_e *MockStorage_Expecter) UpdateApiKey(id interface{}, data interface{}) *MockStorage_UpdateApiKey_Call {
+	return &MockStorage_UpdateApiKey_Call{Call: _e.mock.On("UpdateApiKey", id, data)}
+}
+
+func (_c *MockStorage_UpdateApiKey_Call) Run(run func(id string, data *v1.ApiKey)) *MockStorage_UpdateApiKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.ApiKey))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateApiKey_Call) Return(_a0 error) *MockStorage_UpdateApiKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateApiKey_Call) RunAndReturn(run func(string, *v1.ApiKey) error) *MockStorage_UpdateApiKey_Call {
 	_c.Call.Return(run)
 	return _c
 }
