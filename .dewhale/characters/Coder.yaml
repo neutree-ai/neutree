@@ -31,7 +31,6 @@ mcp:
         - "-A"
         - jsr:@arcfra/neutree-mcp-servers/servers/controller-coder
       env:
-        GITHUB_TOKEN: ${{ env_GITHUB_TOKEN }}
         NEUTREE_CODE_BASE: ${{ env_GITHUB_WORKSPACE }}
       tools:
         generate-controller: {}

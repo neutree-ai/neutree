@@ -425,3 +425,68 @@ func (s *postgrestStorage) ListWorkspace(option ListOption) ([]v1.Workspace, err
 
 	return response, err
 }
+
+func (s *postgrestStorage) CreateApiKey(data *v1.ApiKey) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(API_KEY_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteApiKey(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(API_KEY_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateApiKey(id string, data *v1.ApiKey) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(API_KEY_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetApiKey(id string) (*v1.ApiKey, error) {
+	var (
+		response []v1.ApiKey
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(API_KEY_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListApiKey(option ListOption) ([]v1.ApiKey, error) {
+	var response []v1.ApiKey
+	err := s.genericList(API_KEY_TABLE, &response, option)
+
+	return response, err
+}
