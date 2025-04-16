@@ -598,6 +598,7 @@ type ApiWorkspacesSelect struct {
 	Id         int32                  `json:"id"`
 	Kind       string                 `json:"kind"`
 	Metadata   map[string]interface{} `json:"metadata"`
+	Status     map[string]interface{} `json:"status"`
 }
 
 type ApiWorkspacesInsert struct {
@@ -605,6 +606,7 @@ type ApiWorkspacesInsert struct {
 	Id         sql.NullInt32          `json:"id"`
 	Kind       string                 `json:"kind"`
 	Metadata   map[string]interface{} `json:"metadata"`
+	Status     map[string]interface{} `json:"status"`
 }
 
 type ApiWorkspacesUpdate struct {
@@ -612,6 +614,7 @@ type ApiWorkspacesUpdate struct {
 	Id         sql.NullInt32          `json:"id"`
 	Kind       sql.NullString         `json:"kind"`
 	Metadata   map[string]interface{} `json:"metadata"`
+	Status     map[string]interface{} `json:"status"`
 }
 
 type ApiRolesSelect struct {
@@ -933,6 +936,12 @@ type ApiMetadata struct {
 	Labels            interface{} `json:"labels"`
 }
 
+type ApiWorkspaceStatus struct {
+	Phase        string `json:"phase"`
+	ServiceUrl   string `json:"service_url"`
+	ErrorMessage string `json:"error_message"`
+}
+
 type ApiRoleSpec struct {
 	PresetKey   interface{} `json:"preset_key"`
 	Permissions interface{} `json:"permissions"`
@@ -997,9 +1006,10 @@ type ApiModelSpec struct {
 	Name     string `json:"name"`
 	File     string `json:"file"`
 	Version  string `json:"version"`
+	Task     string `json:"task"`
 }
 
-type ApiContainerSpec struct {
+type ApiEndpointEngineSpec struct {
 	Engine  string `json:"engine"`
 	Version string `json:"version"`
 }
@@ -1012,12 +1022,13 @@ type ApiResourceSpec struct {
 }
 
 type ApiEndpointSpec struct {
-	Cluster   string      `json:"cluster"`
-	Model     interface{} `json:"model"`
-	Container interface{} `json:"container"`
-	Resources interface{} `json:"resources"`
-	Replicas  interface{} `json:"replicas"`
-	Variables interface{} `json:"variables"`
+	Cluster           string      `json:"cluster"`
+	Model             interface{} `json:"model"`
+	Engine            interface{} `json:"engine"`
+	Resources         interface{} `json:"resources"`
+	Replicas          interface{} `json:"replicas"`
+	DeploymentOptions interface{} `json:"deployment_options"`
+	Variables         interface{} `json:"variables"`
 }
 
 type ApiEndpointStatus struct {
@@ -1058,7 +1069,8 @@ type ApiEngineVersion struct {
 }
 
 type ApiEngineSpec struct {
-	Versions interface{} `json:"versions"`
+	Versions       interface{} `json:"versions"`
+	SupportedTasks interface{} `json:"supported_tasks"`
 }
 
 type ApiEngineStatus struct {
