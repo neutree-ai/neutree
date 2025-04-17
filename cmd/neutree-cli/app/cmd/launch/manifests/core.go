@@ -1,3 +1,26 @@
+package manifests
+
+import (
+	"embed"
+)
+
+//go:embed db.tar
+var NeutreeCoreDBInitScripts embed.FS
+
+var NeutreePrometheusScrapeConfig = `
+global:
+  scrape_interval: 30s # Set the scrape interval to every 30 seconds. Default is every 1 minute.
+
+scrape_configs:
+# Scrape from each Ray node as defined in the service_discovery.json provided by Ray.
+- job_name: 'neutree'
+  file_sd_configs:
+  - files:
+    - '/etc/prometheus/scrape/*.json'
+`
+
+//nolint:lll
+var NeutreeCoreDockerComposeManifests = `
 version: "3.8"
 
 services:
@@ -10,7 +33,7 @@ services:
       POSTGRES_DB: aippp
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./db/init-scripts:/docker-entrypoint-initdb.d
+      - {{ .WorkDir}}/db/init-scripts:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
     networks:
@@ -29,7 +52,7 @@ services:
       - "9999:9999"
     environment:
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: "/verify"
-      GOTRUE_JWT_SECRET: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
+      GOTRUE_JWT_SECRET: {{ .JwtSecret}}
       GOTRUE_JWT_EXP: 3600
       GOTRUE_JWT_DEFAULT_GROUP_NAME: api_user
       GOTRUE_DB_DRIVER: postgres
@@ -67,7 +90,7 @@ services:
         condition: service_healthy
     command: -source=file://migrations -database "postgres://postgres:pgpassword@postgres:5432/aippp?sslmode=disable" up
     volumes:
-      - ./db/migrations:/migrations
+      - {{ .WorkDir}}/db/migrations:/migrations
     networks:
       - neutree
     restart: none
@@ -84,7 +107,7 @@ services:
       migration:
         condition: service_completed_successfully
     volumes:
-      - ./db/seed:/seed
+      - {{ .WorkDir}}/db/seed:/seed
     command: 'bash -c ''for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://postgres:pgpassword@postgres:5432/aippp?sslmode=disable -f $$file; done'''
     restart: none
     deploy:
@@ -99,7 +122,7 @@ services:
       PGRST_DB_SCHEMA: api
       PGRST_SERVER_HOST: 0.0.0.0
       PGRST_SERVER_PORT: 6432
-      PGRST_JWT_SECRET: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
+      PGRST_JWT_SECRET: {{ .JwtSecret}}
       PGRST_DB_EXTRA_SEARCH_PATH: auth
       PGRST_DB_AGGREGATES_ENABLED: 1
     ports:
@@ -131,19 +154,38 @@ services:
         condition: service_completed_successfully
 
   neutree-core:
-    image: docker.io/weihuang080513/neutree-core:v0.1.0-nightly-20250415
+    image: neutree-ai/neutree-core:{{ .NeutreeCoreVersion}}
     container_name: neutree-core
     command:
       - ./neutree-core
       - --storage-access-url=http://postgrest:6432
-      - --storage-jwt-secret=mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp
+      - --storage-jwt-secret={{ .JwtSecret}}
       - --controller-workers=5
       - --default-cluster-version=v1
+    volumes:
+      - {{.WorkDir}}/collect:/etc/neutree/collect
     networks:
       - neutree
     restart: always
     depends_on:
       - postgrest
+
+  vmagent:
+    container_name: vmagent
+    image: victoriametrics/vmagent:{{ .VictoriaMetricsVersion}}
+    depends_on:
+      - "neutree-core"
+    ports:
+      - 8429:8429
+    volumes:
+      - vmagentdata:/vmagentdata
+      - {{ .WorkDir}}/metrics/prometheus-cluster.yml:/etc/prometheus/prometheus.yml
+      - {{ .WorkDir}}/collect/metrics:/etc/prometheus/scrape
+    command:
+      - "--promscrape.config=/etc/prometheus/prometheus.yml"
+      - "--promscrape.configCheckInterval=10s"
+      - "--remoteWrite.url={{ .MetricsRemoteWriteURL}}"
+    restart: always
 
 networks:
   neutree:
@@ -151,3 +193,5 @@ networks:
 
 volumes:
   pg_data:
+  vmagentdata:
+`

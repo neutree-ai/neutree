@@ -41,7 +41,7 @@ ARG GO_BUILD_ARGS
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} \
     go build "${GO_BUILD_ARGS}" \
-    -o neutree-core cmd/main.go
+    -o neutree-core cmd/neutree-core/neutree-core.go
 
 FROM --platform=linux/${ARCH} ubuntu:22.04
 

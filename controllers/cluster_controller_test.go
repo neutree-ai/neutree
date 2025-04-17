@@ -2,12 +2,14 @@ package controllers
 
 import (
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"k8s.io/client-go/util/workqueue"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
 	registrymocks "github.com/neutree-ai/neutree/internal/registry/mocks"
@@ -17,10 +19,16 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService, o *orchestratormocks.MockOrchestrator) *ClusterController {
+func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService,
+	o *orchestratormocks.MockOrchestrator) *ClusterController {
 	orchestrator.NewOrchestrator = func(opts orchestrator.Options) (orchestrator.Orchestrator, error) {
 		return o, nil
 	}
+
+	obsCollectConfigManager, _ := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
+		DeployType:             "local",
+		LocalCollectConfigPath: os.TempDir(),
+	})
 
 	return &ClusterController{
 		storage:      storage,
@@ -30,7 +38,8 @@ func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *regis
 			workers:      1,
 			syncInterval: time.Second * 10,
 		},
-		defaultClusterVersion: "v1",
+		defaultClusterVersion:   "v1",
+		obsCollectConfigManager: obsCollectConfigManager,
 	}
 }
 

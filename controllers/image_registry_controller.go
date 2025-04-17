@@ -35,7 +35,8 @@ type ImageRegistryControllerOption struct {
 func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRegistryController, error) {
 	c := &ImageRegistryController{
 		baseController: &BaseController{
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
+			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
+				workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},

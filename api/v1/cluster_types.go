@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 // Neutree node provision status.
 const (
 	ProvisioningNodeProvisionStatus = "provisioning"
@@ -43,6 +45,10 @@ type ClusterStatus struct {
 	// the cluster all node provision status.
 	// current only record the static node provision status.
 	NodeProvisionStatus string `json:"node_provision_status,omitempty"`
+}
+
+func (c Cluster) Key() string {
+	return "clsuter" + "-" + strconv.Itoa(c.ID) + "-" + c.Metadata.Name
 }
 
 func (c Cluster) IsInitialized() bool {

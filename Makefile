@@ -42,8 +42,8 @@ GO_BUILD_ARGS = \
 	-X '$(MODULE_PATH)/pkg/version.appVersion=$(IMAGE_TAG)' \
 	-X '$(MODULE_PATH)/pkg/version.buildTime=$(shell date --iso-8601=seconds)'"
 
-MOCKERY_DIRS=./ pkg/model_registry pkg/storage pkg/command internal/orchestrator internal/orchestrator/ray internal/orchestrator/ray/dashboard internal/registry controllers/
-MOCKERY_OUTPUT_DIRS=testing/mocks pkg/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/orchestrator/ray/mocks internal/orchestrator/ray/dashboard/mocks internal/registry/mocks controllers/mocks
+MOCKERY_DIRS=./ pkg/model_registry pkg/storage pkg/command internal/orchestrator internal/orchestrator/ray internal/orchestrator/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config
+MOCKERY_OUTPUT_DIRS=testing/mocks pkg/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/orchestrator/ray/mocks internal/orchestrator/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks
 
 
 .PHONY: help
@@ -52,10 +52,19 @@ help: ## Display this help.
 
 all: build
 
-build: test build-neutree-core
+build: test build-neutree-core build-neutree-cli
 
 build-neutree-core:
-	$(GO) build -o bin/neutree-core ./cmd/main.go
+	$(GO) build -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
+
+prepare-build-cli:
+	tar -cvf dashboards.tar dashboards
+	mv -f dashboards.tar cmd/neutree-cli/app/cmd/launch/manifests/
+	tar -cvf db.tar db
+	mv -f db.tar cmd/neutree-cli/app/cmd/launch/manifests/
+
+build-neutree-cli: prepare-build-cli
+	$(GO) build -o bin/neutree-cli ./cmd/neutree-cli/neutree-cli.go
 
 .PHONY: docker-build
 docker-build:
@@ -89,7 +98,7 @@ docker-push-manifest: ## Push the fat manifest docker image.
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
 .PHONY: test
-test: mockgen fmt vet lint ## Run unit test
+test: prepare-build-cli mockgen fmt vet lint ## Run unit test
 	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e\|mocks')
 
 .PHONY: clean
