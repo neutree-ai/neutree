@@ -490,3 +490,73 @@ func (s *postgrestStorage) ListApiKey(option ListOption) ([]v1.ApiKey, error) {
 
 	return response, err
 }
+
+func (s *postgrestStorage) CreateEngine(data *v1.Engine) error {
+	var (
+		err error
+	)
+
+	// Assuming the table name is "engines"
+	if _, _, err = s.postgrestClient.From("engines").Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteEngine(id string) error {
+	var (
+		err error
+	)
+
+	// Assuming the table name is "engines"
+	if _, _, err = s.postgrestClient.From("engines").Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateEngine(id string, data *v1.Engine) error {
+	var (
+		err error
+	)
+
+	// Assuming the table name is "engines"
+	if _, _, err = s.postgrestClient.From("engines").Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetEngine(id string) (*v1.Engine, error) {
+	var (
+		response []v1.Engine
+		err      error
+	)
+
+	// Assuming the table name is "engines"
+	responseContent, _, err := s.postgrestClient.From("engines").Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListEngine(option ListOption) ([]v1.Engine, error) {
+	var response []v1.Engine
+	// Assuming the table name is "engines"
+	err := s.genericList("engines", &response, option)
+
+	return response, err
+}

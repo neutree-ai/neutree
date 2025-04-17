@@ -115,6 +115,19 @@ type ApiKeyStorage interface {
 	ListApiKey(option ListOption) ([]v1.ApiKey, error)
 }
 
+type EngineStorage interface {
+	// CreateEngine creates a new engine in the database.
+	CreateEngine(data *v1.Engine) error
+	// DeleteEngine deletes a engine by its ID.
+	DeleteEngine(id string) error
+	// UpdateEngine updates an existing engine in the database.
+	UpdateEngine(id string, data *v1.Engine) error
+	// GetEngine retrieves a engine by its ID.
+	GetEngine(id string) (*v1.Engine, error)
+	// ListEngine retrieves a list of engine with optional filters.
+	ListEngine(option ListOption) ([]v1.Engine, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -123,6 +136,7 @@ type Storage interface {
 	RoleAssignmentStorage
 	WorkspaceStorage
 	ApiKeyStorage
+	EngineStorage
 }
 
 type Options struct {

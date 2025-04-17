@@ -114,6 +114,52 @@ func (_c *MockStorage_CreateCluster_Call) RunAndReturn(run func(*v1.Cluster) err
 	return _c
 }
 
+// CreateEngine provides a mock function with given fields: data
+func (_m *MockStorage) CreateEngine(data *v1.Engine) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateEngine")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Engine) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateEngine_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEngine'
+type MockStorage_CreateEngine_Call struct {
+	*mock.Call
+}
+
+// CreateEngine is a helper method to define mock.On call
+//   - data *v1.Engine
+func (_e *MockStorage_Expecter) CreateEngine(data interface{}) *MockStorage_CreateEngine_Call {
+	return &MockStorage_CreateEngine_Call{Call: _e.mock.On("CreateEngine", data)}
+}
+
+func (_c *MockStorage_CreateEngine_Call) Run(run func(data *v1.Engine)) *MockStorage_CreateEngine_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Engine))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateEngine_Call) Return(_a0 error) *MockStorage_CreateEngine_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateEngine_Call) RunAndReturn(run func(*v1.Engine) error) *MockStorage_CreateEngine_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateImageRegistry provides a mock function with given fields: data
 func (_m *MockStorage) CreateImageRegistry(data *v1.ImageRegistry) error {
 	ret := _m.Called(data)
@@ -432,6 +478,52 @@ func (_c *MockStorage_DeleteCluster_Call) Return(_a0 error) *MockStorage_DeleteC
 }
 
 func (_c *MockStorage_DeleteCluster_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteEngine provides a mock function with given fields: id
+func (_m *MockStorage) DeleteEngine(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteEngine")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteEngine_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteEngine'
+type MockStorage_DeleteEngine_Call struct {
+	*mock.Call
+}
+
+// DeleteEngine is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteEngine(id interface{}) *MockStorage_DeleteEngine_Call {
+	return &MockStorage_DeleteEngine_Call{Call: _e.mock.On("DeleteEngine", id)}
+}
+
+func (_c *MockStorage_DeleteEngine_Call) Run(run func(id string)) *MockStorage_DeleteEngine_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteEngine_Call) Return(_a0 error) *MockStorage_DeleteEngine_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteEngine_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteEngine_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -778,6 +870,64 @@ func (_c *MockStorage_GetCluster_Call) Return(_a0 *v1.Cluster, _a1 error) *MockS
 }
 
 func (_c *MockStorage_GetCluster_Call) RunAndReturn(run func(string) (*v1.Cluster, error)) *MockStorage_GetCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetEngine provides a mock function with given fields: id
+func (_m *MockStorage) GetEngine(id string) (*v1.Engine, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEngine")
+	}
+
+	var r0 *v1.Engine
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.Engine, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.Engine); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.Engine)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetEngine_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEngine'
+type MockStorage_GetEngine_Call struct {
+	*mock.Call
+}
+
+// GetEngine is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetEngine(id interface{}) *MockStorage_GetEngine_Call {
+	return &MockStorage_GetEngine_Call{Call: _e.mock.On("GetEngine", id)}
+}
+
+func (_c *MockStorage_GetEngine_Call) Run(run func(id string)) *MockStorage_GetEngine_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetEngine_Call) Return(_a0 *v1.Engine, _a1 error) *MockStorage_GetEngine_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetEngine_Call) RunAndReturn(run func(string) (*v1.Engine, error)) *MockStorage_GetEngine_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1188,6 +1338,64 @@ func (_c *MockStorage_ListCluster_Call) RunAndReturn(run func(storage.ListOption
 	return _c
 }
 
+// ListEngine provides a mock function with given fields: option
+func (_m *MockStorage) ListEngine(option storage.ListOption) ([]v1.Engine, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListEngine")
+	}
+
+	var r0 []v1.Engine
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.Engine, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.Engine); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.Engine)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListEngine_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListEngine'
+type MockStorage_ListEngine_Call struct {
+	*mock.Call
+}
+
+// ListEngine is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListEngine(option interface{}) *MockStorage_ListEngine_Call {
+	return &MockStorage_ListEngine_Call{Call: _e.mock.On("ListEngine", option)}
+}
+
+func (_c *MockStorage_ListEngine_Call) Run(run func(option storage.ListOption)) *MockStorage_ListEngine_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListEngine_Call) Return(_a0 []v1.Engine, _a1 error) *MockStorage_ListEngine_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListEngine_Call) RunAndReturn(run func(storage.ListOption) ([]v1.Engine, error)) *MockStorage_ListEngine_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImageRegistry provides a mock function with given fields: option
 func (_m *MockStorage) ListImageRegistry(option storage.ListOption) ([]v1.ImageRegistry, error) {
 	ret := _m.Called(option)
@@ -1568,6 +1776,53 @@ func (_c *MockStorage_UpdateCluster_Call) Return(_a0 error) *MockStorage_UpdateC
 }
 
 func (_c *MockStorage_UpdateCluster_Call) RunAndReturn(run func(string, *v1.Cluster) error) *MockStorage_UpdateCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateEngine provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateEngine(id string, data *v1.Engine) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateEngine")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.Engine) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateEngine_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateEngine'
+type MockStorage_UpdateEngine_Call struct {
+	*mock.Call
+}
+
+// UpdateEngine is a helper method to define mock.On call
+//   - id string
+//   - data *v1.Engine
+func (_e *MockStorage_Expecter) UpdateEngine(id interface{}, data interface{}) *MockStorage_UpdateEngine_Call {
+	return &MockStorage_UpdateEngine_Call{Call: _e.mock.On("UpdateEngine", id, data)}
+}
+
+func (_c *MockStorage_UpdateEngine_Call) Run(run func(id string, data *v1.Engine)) *MockStorage_UpdateEngine_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.Engine))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateEngine_Call) Return(_a0 error) *MockStorage_UpdateEngine_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateEngine_Call) RunAndReturn(run func(string, *v1.Engine) error) *MockStorage_UpdateEngine_Call {
 	_c.Call.Return(run)
 	return _c
 }

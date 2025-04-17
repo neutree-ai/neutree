@@ -5,10 +5,11 @@ CREATE TYPE api.model_spec AS (
     registry TEXT,
     name TEXT,
     file TEXT,
-    version TEXT
+    version TEXT,
+    task TEXT
 );
 
-CREATE TYPE api.container_spec AS (
+CREATE TYPE api.endpoint_engine_spec AS (
     engine TEXT,
     version TEXT
 );
@@ -23,9 +24,10 @@ CREATE TYPE api.resource_spec AS (
 CREATE TYPE api.endpoint_spec AS (
     cluster TEXT,
     model api.model_spec,
-    container api.container_spec,
+    engine api.endpoint_engine_spec,
     resources api.resource_spec,
     replicas INTEGER,
+    deployment_options json,
     variables json
 );
 
@@ -217,7 +219,8 @@ CREATE TYPE api.engine_version AS (
 );
 
 CREATE TYPE api.engine_spec AS (
-    versions api.engine_version[]
+    versions api.engine_version[],
+    supported_tasks TEXT[]
 );
 
 CREATE TYPE api.engine_status AS (
