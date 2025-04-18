@@ -25,8 +25,6 @@ CREATE TYPE api.endpoint_spec AS (
     cluster TEXT,
     model api.model_spec,
     engine api.endpoint_engine_spec,
-    resources api.resource_spec,
-    replicas INTEGER,
     deployment_options json,
     variables json
 );

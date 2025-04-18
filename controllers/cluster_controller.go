@@ -122,6 +122,7 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 		ImageRegistry:         imageRegistry,
 		ImageService:          c.imageService,
 		MetricsRemoteWriteURL: c.MetricsRemoteWriteURL,
+		Storage:               c.storage,
 	})
 	if err != nil {
 		return err

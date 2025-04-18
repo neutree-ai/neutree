@@ -7,6 +7,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/cluster"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // Orchestrator defines the core interface for cluster orchestration
@@ -20,6 +21,10 @@ type Orchestrator interface {
 	HealthCheck() error
 	ClusterStatus() (*v1.RayClusterStatus, error)
 	ListNodes() ([]v1.NodeSummary, error)
+
+	CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error)
+	DeleteEndpoint(endpoint *v1.Endpoint) error
+	GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error)
 }
 
 type Options struct {
@@ -28,6 +33,7 @@ type Options struct {
 	ImageService  registry.ImageService
 
 	MetricsRemoteWriteURL string
+	Storage               storage.Storage
 }
 
 type NewOrchestratorFunc func(opts Options) (Orchestrator, error)

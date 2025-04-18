@@ -134,6 +134,63 @@ func (_c *MockDashboardService_GetClusterMetadata_Call) RunAndReturn(run func() 
 	return _c
 }
 
+// GetServeApplications provides a mock function with no fields
+func (_m *MockDashboardService) GetServeApplications() (*dashboard.RayServeApplicationsResponse, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetServeApplications")
+	}
+
+	var r0 *dashboard.RayServeApplicationsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (*dashboard.RayServeApplicationsResponse, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() *dashboard.RayServeApplicationsResponse); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*dashboard.RayServeApplicationsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDashboardService_GetServeApplications_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetServeApplications'
+type MockDashboardService_GetServeApplications_Call struct {
+	*mock.Call
+}
+
+// GetServeApplications is a helper method to define mock.On call
+func (_e *MockDashboardService_Expecter) GetServeApplications() *MockDashboardService_GetServeApplications_Call {
+	return &MockDashboardService_GetServeApplications_Call{Call: _e.mock.On("GetServeApplications")}
+}
+
+func (_c *MockDashboardService_GetServeApplications_Call) Run(run func()) *MockDashboardService_GetServeApplications_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDashboardService_GetServeApplications_Call) Return(_a0 *dashboard.RayServeApplicationsResponse, _a1 error) *MockDashboardService_GetServeApplications_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDashboardService_GetServeApplications_Call) RunAndReturn(run func() (*dashboard.RayServeApplicationsResponse, error)) *MockDashboardService_GetServeApplications_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListNodes provides a mock function with no fields
 func (_m *MockDashboardService) ListNodes() ([]v1.NodeSummary, error) {
 	ret := _m.Called()
@@ -187,6 +244,52 @@ func (_c *MockDashboardService_ListNodes_Call) Return(_a0 []v1.NodeSummary, _a1 
 }
 
 func (_c *MockDashboardService_ListNodes_Call) RunAndReturn(run func() ([]v1.NodeSummary, error)) *MockDashboardService_ListNodes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateServeApplications provides a mock function with given fields: appsReq
+func (_m *MockDashboardService) UpdateServeApplications(appsReq dashboard.RayServeApplicationsRequest) error {
+	ret := _m.Called(appsReq)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateServeApplications")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(dashboard.RayServeApplicationsRequest) error); ok {
+		r0 = rf(appsReq)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockDashboardService_UpdateServeApplications_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateServeApplications'
+type MockDashboardService_UpdateServeApplications_Call struct {
+	*mock.Call
+}
+
+// UpdateServeApplications is a helper method to define mock.On call
+//   - appsReq dashboard.RayServeApplicationsRequest
+func (_e *MockDashboardService_Expecter) UpdateServeApplications(appsReq interface{}) *MockDashboardService_UpdateServeApplications_Call {
+	return &MockDashboardService_UpdateServeApplications_Call{Call: _e.mock.On("UpdateServeApplications", appsReq)}
+}
+
+func (_c *MockDashboardService_UpdateServeApplications_Call) Run(run func(appsReq dashboard.RayServeApplicationsRequest)) *MockDashboardService_UpdateServeApplications_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(dashboard.RayServeApplicationsRequest))
+	})
+	return _c
+}
+
+func (_c *MockDashboardService_UpdateServeApplications_Call) Return(_a0 error) *MockDashboardService_UpdateServeApplications_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockDashboardService_UpdateServeApplications_Call) RunAndReturn(run func(dashboard.RayServeApplicationsRequest) error) *MockDashboardService_UpdateServeApplications_Call {
 	_c.Call.Return(run)
 	return _c
 }
