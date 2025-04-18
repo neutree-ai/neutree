@@ -117,6 +117,7 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 		Cluster:       obj,
 		ImageRegistry: imageRegistry,
 		ImageService:  c.imageService,
+		Storage:       c.storage,
 	})
 	if err != nil {
 		return err

@@ -133,6 +133,64 @@ func (_c *MockOrchestrator_CreateCluster_Call) RunAndReturn(run func() (string, 
 	return _c
 }
 
+// CreateEndpoint provides a mock function with given fields: endpoint
+func (_m *MockOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
+	ret := _m.Called(endpoint)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateEndpoint")
+	}
+
+	var r0 *v1.EndpointStatus
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) (*v1.EndpointStatus, error)); ok {
+		return rf(endpoint)
+	}
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) *v1.EndpointStatus); ok {
+		r0 = rf(endpoint)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.EndpointStatus)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*v1.Endpoint) error); ok {
+		r1 = rf(endpoint)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockOrchestrator_CreateEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEndpoint'
+type MockOrchestrator_CreateEndpoint_Call struct {
+	*mock.Call
+}
+
+// CreateEndpoint is a helper method to define mock.On call
+//   - endpoint *v1.Endpoint
+func (_e *MockOrchestrator_Expecter) CreateEndpoint(endpoint interface{}) *MockOrchestrator_CreateEndpoint_Call {
+	return &MockOrchestrator_CreateEndpoint_Call{Call: _e.mock.On("CreateEndpoint", endpoint)}
+}
+
+func (_c *MockOrchestrator_CreateEndpoint_Call) Run(run func(endpoint *v1.Endpoint)) *MockOrchestrator_CreateEndpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Endpoint))
+	})
+	return _c
+}
+
+func (_c *MockOrchestrator_CreateEndpoint_Call) Return(_a0 *v1.EndpointStatus, _a1 error) *MockOrchestrator_CreateEndpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockOrchestrator_CreateEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) (*v1.EndpointStatus, error)) *MockOrchestrator_CreateEndpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteCluster provides a mock function with no fields
 func (_m *MockOrchestrator) DeleteCluster() error {
 	ret := _m.Called()
@@ -174,6 +232,52 @@ func (_c *MockOrchestrator_DeleteCluster_Call) Return(_a0 error) *MockOrchestrat
 }
 
 func (_c *MockOrchestrator_DeleteCluster_Call) RunAndReturn(run func() error) *MockOrchestrator_DeleteCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteEndpoint provides a mock function with given fields: endpoint
+func (_m *MockOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
+	ret := _m.Called(endpoint)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteEndpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) error); ok {
+		r0 = rf(endpoint)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockOrchestrator_DeleteEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteEndpoint'
+type MockOrchestrator_DeleteEndpoint_Call struct {
+	*mock.Call
+}
+
+// DeleteEndpoint is a helper method to define mock.On call
+//   - endpoint *v1.Endpoint
+func (_e *MockOrchestrator_Expecter) DeleteEndpoint(endpoint interface{}) *MockOrchestrator_DeleteEndpoint_Call {
+	return &MockOrchestrator_DeleteEndpoint_Call{Call: _e.mock.On("DeleteEndpoint", endpoint)}
+}
+
+func (_c *MockOrchestrator_DeleteEndpoint_Call) Run(run func(endpoint *v1.Endpoint)) *MockOrchestrator_DeleteEndpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Endpoint))
+	})
+	return _c
+}
+
+func (_c *MockOrchestrator_DeleteEndpoint_Call) Return(_a0 error) *MockOrchestrator_DeleteEndpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockOrchestrator_DeleteEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockOrchestrator_DeleteEndpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -221,6 +325,64 @@ func (_c *MockOrchestrator_GetDesireStaticWorkersIP_Call) Return(_a0 []string) *
 }
 
 func (_c *MockOrchestrator_GetDesireStaticWorkersIP_Call) RunAndReturn(run func() []string) *MockOrchestrator_GetDesireStaticWorkersIP_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetEndpointStatus provides a mock function with given fields: endpoint
+func (_m *MockOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
+	ret := _m.Called(endpoint)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEndpointStatus")
+	}
+
+	var r0 *v1.EndpointStatus
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) (*v1.EndpointStatus, error)); ok {
+		return rf(endpoint)
+	}
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) *v1.EndpointStatus); ok {
+		r0 = rf(endpoint)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.EndpointStatus)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*v1.Endpoint) error); ok {
+		r1 = rf(endpoint)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockOrchestrator_GetEndpointStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEndpointStatus'
+type MockOrchestrator_GetEndpointStatus_Call struct {
+	*mock.Call
+}
+
+// GetEndpointStatus is a helper method to define mock.On call
+//   - endpoint *v1.Endpoint
+func (_e *MockOrchestrator_Expecter) GetEndpointStatus(endpoint interface{}) *MockOrchestrator_GetEndpointStatus_Call {
+	return &MockOrchestrator_GetEndpointStatus_Call{Call: _e.mock.On("GetEndpointStatus", endpoint)}
+}
+
+func (_c *MockOrchestrator_GetEndpointStatus_Call) Run(run func(endpoint *v1.Endpoint)) *MockOrchestrator_GetEndpointStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Endpoint))
+	})
+	return _c
+}
+
+func (_c *MockOrchestrator_GetEndpointStatus_Call) Return(_a0 *v1.EndpointStatus, _a1 error) *MockOrchestrator_GetEndpointStatus_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockOrchestrator_GetEndpointStatus_Call) RunAndReturn(run func(*v1.Endpoint) (*v1.EndpointStatus, error)) *MockOrchestrator_GetEndpointStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }

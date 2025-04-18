@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray"
@@ -19,6 +20,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 var _ Orchestrator = &RayOrchestrator{}
@@ -45,6 +47,7 @@ type RayOrchestrator struct {
 	imageService  registry.ImageService
 
 	clusterHelper ray.ClusterManager
+	storage       storage.Storage
 	opTimeout     OperationConfig
 }
 
@@ -280,6 +283,7 @@ func NewRayOrchestrator(opts Options) (*RayOrchestrator, error) {
 		cluster:       opts.Cluster,
 		imageRegistry: opts.ImageRegistry,
 		imageService:  opts.ImageService,
+		storage:       opts.Storage,
 		config:        rayClusterConfig,
 		opTimeout: OperationConfig{
 			UpTimeout:        time.Minute * 30,
@@ -450,6 +454,243 @@ func (o *RayOrchestrator) getDashboardService(ctx context.Context) (dashboard.Da
 	}
 
 	return dashboardService, nil
+}
+
+// CreateEndpoint deploys a new endpoint using Ray Serve.
+func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
+	defer cancel()
+
+	// pre-check related resources
+	cluster, err := o.storage.ListCluster(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    endpoint.Spec.Cluster,
+			},
+		},
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list cluster")
+	}
+	if len(cluster) == 0 {
+		return nil, errors.New("cluster " + endpoint.Spec.Cluster + " not found")
+	}
+
+	engine, err := o.storage.ListEngine(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    endpoint.Spec.Engine.Engine,
+			},
+		},
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list engine")
+	}
+	if len(engine) == 0 {
+		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not found")
+	}
+	if engine[0].Status.Phase != v1.EnginePhaseCreated {
+		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not ready")
+	}
+
+	versionMatched := false
+	for _, v := range engine[0].Spec.Versions {
+		if v.Version == endpoint.Spec.Engine.Version {
+			versionMatched = true
+			break
+		}
+	}
+	if !versionMatched {
+		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " version " + endpoint.Spec.Engine.Version + " not found")
+	}
+
+	modelRegistry, err := o.storage.ListModelRegistry(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    endpoint.Spec.Model.Registry,
+			},
+		},
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list model registry")
+	}
+	if len(modelRegistry) == 0 {
+		return nil, errors.New("model registry " + endpoint.Spec.Model.Registry + " not found")
+	}
+	if modelRegistry[0].Status.Phase != v1.ModelRegistryPhaseCONNECTED {
+		return nil, errors.New("model registry " + endpoint.Spec.Model.Registry + " not ready")
+	}
+
+	// call ray dashboard API
+
+	dashboardService, err := o.getDashboardService(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get dashboard service for creating endpoint")
+	}
+
+	currentAppsResp, err := dashboardService.GetServeApplications()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get current serve applications")
+	}
+
+	newApp := dashboard.EndpointToApplication(endpoint, &modelRegistry[0])
+
+	// Build the list of applications for the PUT request
+	updatedAppsList := make([]dashboard.RayServeApplication, 0, len(currentAppsResp.Applications)+1)
+	for _, appStatus := range currentAppsResp.Applications {
+		updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+	}
+	updatedAppsList = append(updatedAppsList, newApp)
+
+	updateReq := dashboard.RayServeApplicationsRequest{
+		Applications: updatedAppsList,
+	}
+
+	err = dashboardService.UpdateServeApplications(updateReq)
+	if err != nil {
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseFAILED,
+			ErrorMessage: errors.Wrap(err, "failed to update serve applications").Error(),
+		}, nil // Return nil error as the operation failed but we captured status
+	}
+
+	serviceURL, err := dashboard.FormatServiceURL(o.cluster, endpoint)
+	if err != nil {
+		// Log the error, but the endpoint might still be running
+		klog.Warningf("Warning: failed to format service URL: %v", err)
+	}
+
+	return &v1.EndpointStatus{
+		Phase:        v1.EndpointPhaseRUNNING,
+		ServiceURL:   serviceURL,
+		ErrorMessage: "",
+	}, nil
+}
+
+// DeleteEndpoint removes an endpoint from Ray Serve.
+func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
+	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
+	defer cancel()
+
+	// pre-check cluster
+	cluster, err := o.storage.ListCluster(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    endpoint.Spec.Cluster,
+			},
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to list cluster")
+	}
+	if len(cluster) == 0 {
+		// it's safe to ignore this, because the cluster has been removed
+		return nil
+	}
+
+	dashboardService, err := o.getDashboardService(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get dashboard service for deleting endpoint")
+	}
+
+	currentAppsResp, err := dashboardService.GetServeApplications()
+	if err != nil {
+		return errors.Wrap(err, "failed to get current serve applications before deletion")
+	}
+
+	// Build the list of applications excluding the one to delete
+	updatedAppsList := make([]dashboard.RayServeApplication, 0, len(currentAppsResp.Applications))
+	found := false
+	for name, appStatus := range currentAppsResp.Applications {
+		if name == endpoint.Metadata.Name {
+			found = true
+			continue // Skip the endpoint to be deleted
+		}
+		updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+	}
+
+	if !found {
+		// Endpoint not found, consider it successfully deleted (idempotency)
+		klog.Infof("Endpoint %s not found during deletion, assuming already deleted.\n", endpoint.Metadata.Name)
+		return nil
+	}
+
+	updateReq := dashboard.RayServeApplicationsRequest{
+		Applications: updatedAppsList,
+	}
+
+	err = dashboardService.UpdateServeApplications(updateReq)
+	if err != nil {
+		return errors.Wrap(err, "failed to update serve applications for deletion")
+	}
+
+	return nil
+}
+
+// GetEndpointStatus retrieves the status of a specific endpoint from Ray Serve.
+func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
+	defer cancel()
+
+	// Placeholder implementation: Get all apps and check if ours exists.
+	// A more robust implementation would query the specific app status if the API supports it,
+	// or parse the status field from the GetServeApplications response.
+	dashboardService, err := o.getDashboardService(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get dashboard service for getting endpoint status")
+	}
+
+	currentAppsResp, err := dashboardService.GetServeApplications()
+	if err != nil {
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseFAILED,
+			ErrorMessage: errors.Wrap(err, "failed to get serve applications to check status").Error(),
+		}, nil
+	}
+
+	status, exists := currentAppsResp.Applications[endpoint.Metadata.Name]
+	if !exists {
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhasePENDING,
+			ErrorMessage: "Endpoint not found in Ray Serve applications",
+		}, nil
+	}
+
+	// Basic status mapping
+	// https://docs.ray.io/en/latest/serve/api/doc/ray.serve.schema.ApplicationStatus.html#ray.serve.schema.ApplicationStatus
+	var phase v1.EndpointPhase
+	switch status.Status {
+	case "RUNNING":
+	case "DELETING":
+		phase = v1.EndpointPhaseRUNNING
+	case "NOT_STARTED":
+	case "DEPLOYING":
+		phase = v1.EndpointPhasePENDING
+	case "DEPLOY_FAILED":
+	case "UNHEALTHY":
+		phase = v1.EndpointPhaseFAILED
+	default:
+		phase = v1.EndpointPhaseFAILED
+	}
+
+	serviceURL, err := dashboard.FormatServiceURL(o.cluster, endpoint)
+	if err != nil {
+		fmt.Printf("Warning: failed to format service URL while getting status: %v\n", err)
+	}
+
+	return &v1.EndpointStatus{
+		Phase:        phase,
+		ServiceURL:   serviceURL,
+		ErrorMessage: status.Message, // Use message from Ray if available
+	}, nil
 }
 
 func getRayTmpDir() string {
