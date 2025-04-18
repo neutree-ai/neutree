@@ -14,6 +14,9 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+
+	"github.com/neutree-ai/neutree/internal/observability/manager"
+	"github.com/neutree-ai/neutree/internal/observability/monitoring"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -27,25 +30,32 @@ type ClusterController struct {
 	defaultClusterVersion string
 
 	syncHandler func(cluster *v1.Cluster) error
+
+	obsCollectConfigManager manager.ObsCollectConfigManager
 }
 
 type ClusterControllerOption struct {
-	ImageService         registry.ImageService
-	Storage              storage.Storage
-	Workers              int
-	DefaultClusterVesion string
+	ImageService          registry.ImageService
+	Storage               storage.Storage
+	Workers               int
+	DefaultClusterVersion string
+
+	ObsCollectConfigManager manager.ObsCollectConfigManager
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
 	c := &ClusterController{
 		baseController: &BaseController{
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "cluster"}),
+			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
+				workqueue.RateLimitingQueueConfig{Name: "cluster"}),
 			workers:      opt.Workers,
 			syncInterval: time.Second * 10,
 		},
 		storage:               opt.Storage,
 		imageService:          opt.ImageService,
-		defaultClusterVersion: opt.DefaultClusterVesion,
+		defaultClusterVersion: opt.DefaultClusterVersion,
+
+		obsCollectConfigManager: opt.ObsCollectConfigManager,
 	}
 
 	c.syncHandler = c.sync
@@ -172,6 +182,8 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestr
 	if err != nil {
 		return errors.Wrap(err, "health check cluster failed")
 	}
+
+	c.obsCollectConfigManager.GetMetricsCollectConfigManager().RegisterMetricsMonitor(cluster.Key(), monitoring.NewClusterMonitor(cluster, clusterOrchestrator))
 
 	return nil
 }
@@ -317,6 +329,8 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster, clusterOrchestr
 	}
 
 	klog.Info("Deleting cluster " + cluster.Metadata.Name)
+
+	c.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(cluster.Key())
 
 	err := clusterOrchestrator.DeleteCluster()
 	if err != nil {

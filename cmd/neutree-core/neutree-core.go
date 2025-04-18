@@ -8,16 +8,19 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 var (
 	// todo only support postgrest now.
-	storageAccessURL      = flag.String("storage-access-url", "http://postgrest:6432", "postgrest url")
-	storageJwtSecret      = flag.String("storage-jwt-secret", "jwt_secret", "storage auth token")
-	controllerWorkers     = flag.Int("controller-workers", 5, "controller workers")
-	defaultClusterVersion = flag.String("default-cluster-version", "v1", "default neutree cluster version")
+	storageAccessURL        = flag.String("storage-access-url", "http://postgrest:6432", "postgrest url")
+	storageJwtSecret        = flag.String("storage-jwt-secret", "jwt_secret", "storage auth token")
+	controllerWorkers       = flag.Int("controller-workers", 5, "controller workers")
+	defaultClusterVersion   = flag.String("default-cluster-version", "v1", "default neutree cluster version")
+	deployType              = flag.String("deploy-type", "local", "deploy type")
+	LocalCollecteConfigPath = flag.String("local-collect-config-path", "/etc/neutree/collect", "local collect config path")
 )
 
 func main() {
@@ -26,6 +29,14 @@ func main() {
 
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
+
+	obsCollectConfigManager, err := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
+		DeployType:             *deployType,
+		LocalCollectConfigPath: *LocalCollecteConfigPath,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init obs collect config manager: %s", err.Error())
+	}
 
 	s, err := storage.New(storage.Options{
 		AccessURL: *storageAccessURL,
@@ -57,10 +68,11 @@ func main() {
 	}
 
 	clusterController, err := controllers.NewClusterController(&controllers.ClusterControllerOption{
-		Storage:              s,
-		Workers:              *controllerWorkers,
-		DefaultClusterVesion: *defaultClusterVersion,
-		ImageService:         imageService,
+		Storage:                 s,
+		Workers:                 *controllerWorkers,
+		DefaultClusterVersion:   *defaultClusterVersion,
+		ImageService:            imageService,
+		ObsCollectConfigManager: obsCollectConfigManager,
 	})
 
 	if err != nil {
@@ -100,6 +112,8 @@ func main() {
 	go roleController.Start(ctx)
 	go roleAssignmentController.Start(ctx)
 	go workspaceController.Start(ctx)
+
+	go obsCollectConfigManager.Start(ctx)
 
 	<-ctx.Done()
 }

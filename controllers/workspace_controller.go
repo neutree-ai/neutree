@@ -28,7 +28,8 @@ type WorkspaceControllerOption struct {
 func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceController, error) {
 	c := &WorkspaceController{
 		baseController: &BaseController{
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "workspace"}),
+			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
+				workqueue.RateLimitingQueueConfig{Name: "workspace"}),
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},

@@ -23,7 +23,8 @@ func newTestModelRegistryController(storage *storagemocks.MockStorage, model *mo
 	return &ModelRegistryController{
 		storage: storage,
 		baseController: &BaseController{
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
+			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
+				workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
 			workers:      1,
 			syncInterval: time.Second * 10,
 		},

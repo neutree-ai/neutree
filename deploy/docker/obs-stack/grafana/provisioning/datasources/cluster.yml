@@ -1,0 +1,10 @@
+apiVersion: 1
+
+datasources:
+    - name: neutree-cluster
+      type: prometheus
+      url: http://{{ .NodeIP}}:8481/select/0/prometheus
+      isDefault: true
+      jsonData:
+        prometheusType: Prometheus
+        prometheusVersion: 2.24.0

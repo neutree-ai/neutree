@@ -156,13 +156,8 @@ func (o *RayOrchestrator) StopNode(nodeIP string) error {
 	return o.clusterHelper.StopNode(ctx, nodeIP)
 }
 
-func (o *RayOrchestrator) getNodeByIP(ctx context.Context, nodeIP string) (*v1.NodeSummary, error) {
-	dashboardService, err := o.getDashboardService(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get dashboard service")
-	}
-
-	rayNodes, err := dashboardService.ListNodes()
+func (o *RayOrchestrator) getNodeByIP(_ context.Context, nodeIP string) (*v1.NodeSummary, error) {
+	rayNodes, err := o.ListNodes()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list ray nodes")
 	}
@@ -376,18 +371,18 @@ func (o *RayOrchestrator) setDefaultRayClusterConfig() error {
 	o.config.Docker.PullBeforeRun = true
 	o.config.HeadStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
-			v1.NeutreeServingVersionLabel, o.cluster.Spec.Version),
+		fmt.Sprintf(`ray start --disable-usage-stats --head --metrics-export-port=%d --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+			v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, o.cluster.Spec.Version),
 	}
 	o.config.WorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
-			v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType, v1.NeutreeServingVersionLabel, o.cluster.Spec.Version),
+		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType, v1.NeutreeServingVersionLabel, o.cluster.Spec.Version),
 	}
 	o.config.StaticWorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
-			v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisonType, v1.NeutreeServingVersionLabel, o.cluster.Spec.Version),
+		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, o.cluster.Spec.Version),
 	}
 
 	initializationCommands := []string{}

@@ -341,15 +341,15 @@ func TestSetDefaultRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"mkdir -p /etc/docker/certs.d/registry.example.com",
@@ -397,15 +397,15 @@ func TestSetDefaultRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"mkdir -p /etc/docker/certs.d/registry.example.com",
@@ -453,15 +453,15 @@ func TestSetDefaultRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"mkdir -p /etc/docker/certs.d/registry.example.com",
@@ -509,15 +509,15 @@ func TestSetDefaultRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"mkdir -p /etc/docker/certs.d/registry.example.com",
@@ -568,15 +568,15 @@ func TestSetDefaultRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"mkdir -p /etc/docker/certs.d/registry.example.com",
@@ -626,15 +626,15 @@ func TestSetDefaultRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u user -p pass",
