@@ -1,6 +1,8 @@
 package util
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -113,4 +115,80 @@ func TestRemoveEmptyLines(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestBatchParseTemplateFiles tests the BatchParseTemplateFiles function with various scenarios
+func TestBatchParseTemplateFiles(t *testing.T) {
+	tempDir := os.TempDir()
+
+	tests := []struct {
+		name        string
+		template    string
+		data        interface{}
+		wantContent string
+		wantErr     bool
+	}{
+		{
+			name:        "simple string replacement",
+			template:    "Hello {{.Name}}!",
+			data:        struct{ Name string }{Name: "World"},
+			wantContent: "Hello World!",
+			wantErr:     false,
+		},
+		{
+			name:        "pointer data",
+			template:    "Value: {{.Value}}",
+			data:        &struct{ Value int }{Value: 42},
+			wantContent: "Value: 42",
+			wantErr:     false,
+		},
+		{
+			name:        "invalid template",
+			template:    "Hello {{.MissingField}}",
+			data:        struct{}{},
+			wantContent: "",
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary template file
+			tempFile := filepath.Join(tempDir, "test_template.tpl")
+			err := os.WriteFile(tempFile, []byte(tt.template), 0644)
+			assert.NoError(t, err)
+			defer os.Remove(tempFile)
+
+			// Test the function
+			err = BatchParseTemplateFiles([]string{tempFile}, tt.data)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+
+			// Verify the file content
+			content, err := os.ReadFile(tempFile)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantContent, string(content))
+		})
+	}
+}
+
+// TestBatchParseTemplateFilesErrorCases tests error scenarios
+func TestBatchParseTemplateFilesErrorCases(t *testing.T) {
+	tempDir := os.TempDir()
+
+	t.Run("non-existent file", func(t *testing.T) {
+		nonExistentFile := filepath.Join(tempDir, "nonexistent.tpl")
+		err := BatchParseTemplateFiles([]string{nonExistentFile}, struct{}{})
+		assert.Error(t, err)
+	})
+
+	t.Run("empty file list", func(t *testing.T) {
+		err := BatchParseTemplateFiles([]string{}, struct{}{})
+		assert.NoError(t, err)
+	})
 }

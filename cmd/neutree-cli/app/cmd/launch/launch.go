@@ -18,6 +18,7 @@ type commonOptions struct {
 	deployType string
 	deployMode string
 	deployIps  []string
+	nodeIP     string
 
 	mirrorRegistry string
 }
@@ -39,6 +40,8 @@ Available deployment types and modes:
 Common options:
   --deploy-ips       Specify target IP addresses for deployment
   --mirror-registry  Use a custom image registry mirror
+  --node-ip          Specify the current node IP address for deployment
+
 
 Subcommands:
   obs-stack      Install Neutree OBS storage stack
@@ -57,6 +60,7 @@ Examples:
 	launchCmd.PersistentFlags().StringVar(&commonOptions.deployType, "deploy-type", "local", "deploy type")
 	launchCmd.PersistentFlags().StringVar(&commonOptions.deployMode, "deploy-mode", "single", "deploy mode")
 	launchCmd.PersistentFlags().StringSliceVar(&commonOptions.deployIps, "deploy-ips", []string{}, "deploy ips")
+	launchCmd.PersistentFlags().StringVar(&commonOptions.nodeIP, "node-ip", "", "current deploy node ip")
 
 	launchCmd.PersistentFlags().StringVar(&commonOptions.mirrorRegistry, "mirror-registry", "", "mirror registry")
 

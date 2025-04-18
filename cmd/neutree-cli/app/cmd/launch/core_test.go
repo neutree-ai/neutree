@@ -1,13 +1,13 @@
 package launch
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -84,94 +84,151 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 	}
 }
 
-func TestInstallNeutreeCoreSingleNodeByDocker_Success(t *testing.T) {
-	// Setup test environment
-	tempDir := t.TempDir()
-	t.Setenv("NEUTREE_LAUNCH_WORK_DIR", tempDir)
-
-	// Prepare mock executor
-	mockExecutor := &mocks.MockExecutor{}
-	mockExecutor.On("Execute",
-		context.Background(),
-		"docker",
-		[]string{"compose", "-p", "neutree-core", "-f", filepath.Join(tempDir, "neutree-core", "docker-compose.yaml"), "up", "-d"},
-	).Return([]byte("success"), nil)
-
-	// Prepare test options
-	options := neutreeCoreInstallOptions{
-		commonOptions: &commonOptions{
-			workDir: tempDir,
-		},
-		jwtSecret:             "test_jwt",
-		metricsRemoteWriteURL: "http://metrics:8428",
-		version:               "v1.0.0",
-	}
-
-	// Execute test
-	err := installNeutreeCoreSingleNodeByDocker(mockExecutor, options)
-
-	// Verify results
-	assert.NoError(t, err)
-
-	// Check directory structure
-	expectedDirs := []string{
-		filepath.Join(tempDir, "neutree-core"),
-		filepath.Join(tempDir, "neutree-core", "metrics"),
-	}
-	for _, dir := range expectedDirs {
-		_, err = os.Stat(dir)
-		assert.NoError(t, err)
-	}
-
-	// Check compose file content
-	composeFilePath := filepath.Join(tempDir, "neutree-core", "docker-compose.yaml")
-	content, err := os.ReadFile(composeFilePath)
-	assert.NoError(t, err)
-	assert.Contains(t, string(content), options.jwtSecret)
-	assert.Contains(t, string(content), options.metricsRemoteWriteURL)
-	assert.Contains(t, string(content), options.version)
-	assert.Contains(t, string(content), constants.VictoriaMetricsVersion)
-
-	// Verify mock expectations
-	mockExecutor.AssertExpectations(t)
-}
-
-func TestInstallNeutreeCoreSingleNodeByDocker_ErrorCases(t *testing.T) {
+func TestPrepareNeutreeCoreDeployConfig(t *testing.T) {
+	// Setup test cases
 	tests := []struct {
 		name        string
-		mockSetup   func(*mocks.MockExecutor)
 		options     neutreeCoreInstallOptions
+		wantErr     bool
 		expectedErr string
 	}{
 		{
-			name: "docker compose failed",
-			mockSetup: func(m *mocks.MockExecutor) {
-				m.On("Execute", mock.Anything, "docker", mock.Anything).
-					Return([]byte("error"), assert.AnError)
-			},
+			name: "success with default options",
 			options: neutreeCoreInstallOptions{
 				commonOptions: &commonOptions{
-					workDir: t.TempDir(),
+					workDir:    os.TempDir(),
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
+				},
+				jwtSecret:             "test-secret",
+				metricsRemoteWriteURL: "",
+				version:               "v1.0.0",
+			},
+			wantErr: false,
+		},
+		{
+			name: "success with custom metrics URL",
+			options: neutreeCoreInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:    os.TempDir(),
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
+				},
+				jwtSecret:             "test-secret",
+				metricsRemoteWriteURL: "http://metrics.example.com",
+				version:               "v1.0.0",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temp directory for test
+			tempDir, err := os.MkdirTemp("", "neutree-test-")
+			require.NoError(t, err)
+			defer os.RemoveAll(tempDir)
+
+			// Update workDir to use temp directory
+			tt.options.workDir = tempDir
+
+			// Execute test
+			err = prepareNeutreeCoreDeployConfig(tt.options)
+
+			// Verify results
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.expectedErr != "" {
+					assert.Contains(t, err.Error(), tt.expectedErr)
+				}
+			} else {
+				assert.NoError(t, err)
+
+				// Verify files were created/modified
+				assert.FileExists(t, filepath.Join(tempDir, "neutree-core", "docker-compose.yml"))
+				assert.DirExists(t, filepath.Join(tempDir, "neutree-core", "db"))
+			}
+		})
+	}
+}
+
+func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
+	// Setup test cases
+	tests := []struct {
+		name        string
+		options     neutreeCoreInstallOptions
+		setupMock   func(*mocks.MockExecutor)
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name: "successful deployment",
+			options: neutreeCoreInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:    os.TempDir(),
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
+				},
+				jwtSecret: "test-secret",
+				version:   "v1.0.0",
+			},
+			setupMock: func(m *mocks.MockExecutor) {
+				m.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
+					return args[0] == "compose" && args[1] == "-p"
+				})).Return([]byte("success"), nil)
+			},
+			wantErr: false,
+		},
+		{
+			name: "failed when docker compose fails",
+			options: neutreeCoreInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:    os.TempDir(),
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
 				},
 			},
+			setupMock: func(m *mocks.MockExecutor) {
+				m.On("Execute", mock.Anything, "docker", mock.Anything).Return([]byte("error"), errors.New("docker error"))
+			},
+			wantErr:     true,
 			expectedErr: "error when executing docker compose up",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup environment
+			// Create temp directory for test
+			tempDir, err := os.MkdirTemp("", "neutree-test-")
+			require.NoError(t, err)
+			defer os.RemoveAll(tempDir)
 
-			t.Setenv("NEUTREE_LAUNCH_WORK_DIR", tt.options.workDir)
+			// Update workDir to use temp directory
+			tt.options.workDir = tempDir
 
+			// Setup mock
 			mockExecutor := &mocks.MockExecutor{}
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockExecutor)
+			if tt.setupMock != nil {
+				tt.setupMock(mockExecutor)
 			}
 
-			err := installNeutreeCoreSingleNodeByDocker(mockExecutor, tt.options)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tt.expectedErr)
+			// Execute test
+			err = installNeutreeCoreSingleNodeByDocker(mockExecutor, tt.options)
+
+			// Verify results
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.expectedErr != "" {
+					assert.Contains(t, err.Error(), tt.expectedErr)
+				}
+			} else {
+				assert.NoError(t, err)
+				mockExecutor.AssertExpectations(t)
+			}
 		})
 	}
 }

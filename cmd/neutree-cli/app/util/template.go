@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"html/template"
+	"os"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -36,4 +37,27 @@ func removeEmptyLines(str string) string {
 	}
 
 	return strings.Join(nonEmptyLines, "\n")
+}
+
+// BatchParseTemplateFiles batch parses template files and overwrite orignal template file.
+// it only for params the same case.
+func BatchParseTemplateFiles(templateFiles []string, obj interface{}) error {
+	for _, templateFile := range templateFiles {
+		templateContent, err := os.ReadFile(templateFile)
+		if err != nil {
+			return errors.Wrapf(err, "read template file failed, file path: %s", templateFile)
+		}
+
+		parsedContent, err := ParseTemplate(string(templateContent), obj)
+		if err != nil {
+			return errors.Wrapf(err, "parse template file failed, file path: %s", templateFile)
+		}
+
+		err = os.WriteFile(templateFile, parsedContent, 0600)
+		if err != nil {
+			return errors.Wrapf(err, "write template file failed, file path: %s", templateFile)
+		}
+	}
+
+	return nil
 }

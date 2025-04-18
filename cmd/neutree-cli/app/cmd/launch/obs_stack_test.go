@@ -1,16 +1,17 @@
 package launch
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewObsStackInstallCmd(t *testing.T) {
@@ -74,151 +75,150 @@ func TestNewObsStackInstallCmd(t *testing.T) {
 	}
 }
 
-func TestInstallVictoriaMetricsSingleNodeByDocker_Success(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Setenv("NEUTREE_LAUNCH_WORK_DIR", tempDir)
-
-	mockExecutor := &mocks.MockExecutor{}
-	mockExecutor.On("Execute",
-		context.Background(),
-		"docker",
-		[]string{"compose", "-p", "victoriametrics", "-f", filepath.Join(tempDir, "victoriametrics", "docker-compose.yaml"), "up", "-d"},
-	).Return([]byte("success"), nil)
-
-	options := &commonOptions{
-		workDir: tempDir,
-	}
-
-	hostIP := "192.168.1.100"
-
-	err := installVictoriaMetricsSingleNodeByDocker(mockExecutor, options, hostIP)
-
-	assert.NoError(t, err)
-
-	composeFilePath := filepath.Join(tempDir, "victoriametrics", "docker-compose.yaml")
-	_, err = os.Stat(composeFilePath)
-	assert.NoError(t, err)
-
-	content, err := os.ReadFile(composeFilePath)
-	assert.NoError(t, err)
-	assert.Contains(t, string(content), hostIP)
-	assert.Contains(t, string(content), constants.VictoriaMetricsClusterVersion)
-
-	mockExecutor.AssertExpectations(t)
-}
-
-func TestInstallVictoriaMetricsSingleNodeByDocker_ErrorCases(t *testing.T) {
+func TestPrepareObsStackDeployConfig(t *testing.T) {
+	// Setup test cases
 	tests := []struct {
 		name        string
-		mockSetup   func(*mocks.MockExecutor)
-		options     *commonOptions
-		hostIP      string
+		options     *obsStackInstallOptions
+		setup       func(*mocks.MockExecutor)
+		wantErr     bool
 		expectedErr string
 	}{
 		{
-			name: "docker compose failed",
-			mockSetup: func(m *mocks.MockExecutor) {
-				m.On("Execute", mock.Anything, "docker", mock.Anything).
-					Return([]byte("error"), assert.AnError)
+			name: "success with default options",
+			options: &obsStackInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:    os.TempDir(),
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
+				},
 			},
-			options: &commonOptions{
-				workDir: t.TempDir(),
+			setup:   func(m *mocks.MockExecutor) {},
+			wantErr: false,
+		},
+		{
+			name: "success with custom registry",
+			options: &obsStackInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:        os.TempDir(),
+					nodeIP:         "192.168.1.1",
+					deployType:     constants.DeployTypeLocal,
+					deployMode:     constants.DeployModeSingle,
+					mirrorRegistry: "my.registry.com",
+				},
 			},
-			hostIP:      "192.168.1.1",
-			expectedErr: "error when executing docker compose up",
+			setup:   func(m *mocks.MockExecutor) {},
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("NEUTREE_LAUNCH_WORK_DIR", tt.options.workDir)
+			// Create temp directory for test
+			tempDir, err := os.MkdirTemp("", "neutree-test-")
+			require.NoError(t, err)
+			defer os.RemoveAll(tempDir)
 
-			mockExecutor := &mocks.MockExecutor{}
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockExecutor)
+			// Update workDir to use temp directory
+			tt.options.workDir = tempDir
+
+			// Execute test
+			err = prepareObsStackDeployConfig(tt.options)
+
+			// Verify results
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.expectedErr != "" {
+					assert.Contains(t, err.Error(), tt.expectedErr)
+				}
+			} else {
+				assert.NoError(t, err)
+
+				// Verify files were created/modified
+				assert.FileExists(t, filepath.Join(tempDir, "obs-stack", "docker-compose.yml"))
+				assert.FileExists(t, filepath.Join(tempDir, "obs-stack", "grafana", "provisioning", "datasources", "cluster.yml"))
 			}
-
-			err := installVictoriaMetricsSingleNodeByDocker(mockExecutor, tt.options, tt.hostIP)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tt.expectedErr)
 		})
 	}
 }
 
-func TestInstallGrafanaByDocker_Success(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Setenv("NEUTREE_LAUNCH_WORK_DIR", tempDir)
-
-	mockExecutor := &mocks.MockExecutor{}
-	mockExecutor.On("Execute",
-		context.Background(),
-		"docker",
-		[]string{"compose", "-p", "grafana", "-f", filepath.Join(tempDir, "grafana", "docker-compose.yaml"), "up", "-d"},
-	).Return([]byte("success"), nil)
-
-	options := &commonOptions{
-		workDir: tempDir,
-	}
-
-	hostIP := "192.168.1.100"
-
-	err := installGrafanaSingleNodeByDocker(mockExecutor, options, hostIP)
-
-	assert.NoError(t, err)
-
-	expectedDirs := []string{
-		filepath.Join(tempDir, "grafana"),
-		filepath.Join(tempDir, "grafana", "provisioning", "datasources"),
-		filepath.Join(tempDir, "grafana", "provisioning", "dashboards"),
-		filepath.Join(tempDir, "grafana", "dashboards"),
-	}
-	for _, dir := range expectedDirs {
-		_, err = os.Stat(dir)
-		assert.NoError(t, err)
-	}
-
-	composeFilePath := filepath.Join(tempDir, "grafana", "docker-compose.yaml")
-	content, err := os.ReadFile(composeFilePath)
-	assert.NoError(t, err)
-	assert.Contains(t, string(content), constants.GrafanaVersion)
-
-	mockExecutor.AssertExpectations(t)
-}
-
-func TestInstallGrafanaByDocker_ErrorCases(t *testing.T) {
+func TestInstallObsStackSingleNodeByDocker(t *testing.T) {
+	// Setup test cases
 	tests := []struct {
 		name        string
-		mockSetup   func(*mocks.MockExecutor)
-		options     *commonOptions
+		options     obsStackInstallOptions
 		hostIP      string
+		setupMock   func(*mocks.MockExecutor)
+		wantErr     bool
 		expectedErr string
 	}{
 		{
-			name: "docker compose failed",
-			mockSetup: func(m *mocks.MockExecutor) {
-				m.On("Execute", mock.Anything, "docker", mock.Anything).
-					Return([]byte("error"), assert.AnError)
+			name: "successful deployment",
+			options: obsStackInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:    os.TempDir(),
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
+				},
 			},
-			options: &commonOptions{
-				workDir: t.TempDir(),
+			hostIP: "192.168.1.1",
+			setupMock: func(m *mocks.MockExecutor) {
+				m.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
+					return args[0] == "compose" && args[1] == "-p"
+				})).Return([]byte("success"), nil)
 			},
-			hostIP:      "192.168.1.1",
+			wantErr: false,
+		},
+		{
+			name: "failed when docker compose fails",
+			options: obsStackInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:    os.TempDir(),
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
+				},
+			},
+			hostIP: "192.168.1.1",
+			setupMock: func(m *mocks.MockExecutor) {
+				m.On("Execute", mock.Anything, "docker", mock.Anything).Return([]byte("error"), errors.New("docker error"))
+			},
+			wantErr:     true,
 			expectedErr: "error when executing docker compose up",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("NEUTREE_LAUNCH_WORK_DIR", tt.options.workDir)
+			// Create temp directory for test
+			tempDir, err := os.MkdirTemp("", "neutree-test-")
+			require.NoError(t, err)
+			defer os.RemoveAll(tempDir)
 
+			// Update workDir to use temp directory
+			tt.options.workDir = tempDir
+
+			// Setup mock
 			mockExecutor := &mocks.MockExecutor{}
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockExecutor)
+			if tt.setupMock != nil {
+				tt.setupMock(mockExecutor)
 			}
 
-			err := installGrafanaSingleNodeByDocker(mockExecutor, tt.options, tt.hostIP)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tt.expectedErr)
+			// Execute test
+			err = installObsStackSingleNodeByDocker(mockExecutor, tt.options)
+
+			// Verify results
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.expectedErr != "" {
+					assert.Contains(t, err.Error(), tt.expectedErr)
+				}
+			} else {
+				assert.NoError(t, err)
+				mockExecutor.AssertExpectations(t)
+			}
 		})
 	}
 }

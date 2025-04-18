@@ -58,10 +58,11 @@ build-neutree-core:
 	$(GO) build -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
 
 prepare-build-cli:
-	tar -cvf dashboards.tar dashboards
-	mv -f dashboards.tar cmd/neutree-cli/app/cmd/launch/manifests/
 	tar -cvf db.tar db
+	cd deploy/docker && tar -cvf obs-stack.tar obs-stack && tar -cvf neutree-core.tar neutree-core
 	mv -f db.tar cmd/neutree-cli/app/cmd/launch/manifests/
+	mv -f deploy/docker/neutree-core.tar cmd/neutree-cli/app/cmd/launch/manifests/
+	mv -f deploy/docker/obs-stack.tar cmd/neutree-cli/app/cmd/launch/manifests/
 
 build-neutree-cli: prepare-build-cli
 	$(GO) build -o bin/neutree-cli ./cmd/neutree-cli/neutree-cli.go

@@ -48,7 +48,7 @@ type ClusterStatus struct {
 }
 
 func (c Cluster) Key() string {
-	return "clsuter" + "-" + strconv.Itoa(c.ID) + "-" + c.Metadata.Name
+	return c.Metadata.Workspace + "-" + "clsuter" + "-" + strconv.Itoa(c.ID) + "-" + c.Metadata.Name
 }
 
 func (c Cluster) IsInitialized() bool {

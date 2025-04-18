@@ -3,7 +3,6 @@ package launch
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/pkg/errors"
@@ -83,44 +82,13 @@ func installNeutreeCoreByDocker(exector command.Executor, options neutreeCoreIns
 }
 
 func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neutreeCoreInstallOptions) error {
-	coreWorkDir := filepath.Join(options.workDir, "neutree-core")
-
-	err := os.MkdirAll(coreWorkDir, 0755)
+	err := prepareNeutreeCoreDeployConfig(options)
 	if err != nil {
-		return errors.Wrap(err, "create neutree core work dir failed")
-	}
-
-	err = prepareNeutreeCoreConfig(coreWorkDir, options)
-	if err != nil {
-		return errors.Wrap(err, "prepare neutree core config failed")
-	}
-
-	neutreeCoreComposeContent, err := util.ParseTemplate(manifests.NeutreeCoreDockerComposeManifests, map[string]string{
-		"WorkDir":                coreWorkDir,
-		"JwtSecret":              options.jwtSecret,
-		"MetricsRemoteWriteURL":  options.metricsRemoteWriteURL,
-		"VictoriaMetricsVersion": constants.VictoriaMetricsVersion,
-		"NeutreeCoreVersion":     options.version,
-	})
-
-	if err != nil {
-		return errors.Wrap(err, "parse neutree core docker compose manifests failed")
-	}
-
-	composeFilePath := filepath.Join(coreWorkDir, "docker-compose.yaml")
-
-	err = os.WriteFile(composeFilePath, neutreeCoreComposeContent, 0600)
-	if err != nil {
-		return errors.Wrap(err, "write neutree core docker compose manifests failed")
-	}
-
-	err = replaceComposeImageRegistry(composeFilePath, options.mirrorRegistry)
-	if err != nil {
-		return errors.Wrapf(err, "replace compose image registry failed, file path: %s", composeFilePath)
+		return errors.Wrap(err, "prepare neutree core launch config failed")
 	}
 
 	output, err := exector.Execute(context.Background(), "docker",
-		[]string{"compose", "-p", "neutree-core", "-f", filepath.Join(coreWorkDir, "docker-compose.yaml"), "up", "-d"})
+		[]string{"compose", "-p", "neutree-core", "-f", filepath.Join(options.workDir, "neutree-core", "docker-compose.yml"), "up", "-d"})
 	if err != nil {
 		return errors.Wrapf(err, "error when executing docker compose up, failed msg %s", string(output))
 	}
@@ -128,30 +96,56 @@ func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neut
 	return nil
 }
 
-func prepareNeutreeCoreConfig(workDir string, _ neutreeCoreInstallOptions) error {
-	// write prometheus scrape config
-	metricsConfigDir := filepath.Join(workDir, "metrics")
-
-	err := os.MkdirAll(metricsConfigDir, 0755)
+func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
+	// extract neutree core deploy manifests
+	neutreeCoreDeployManifestsTarFile, err := manifests.NeutreeDeployManifestsTar.Open("neutree-core.tar")
 	if err != nil {
-		return errors.Wrap(err, "create metrics config dir failed")
+		return errors.Wrap(err, "open neutree core db init scripts failed")
+	}
+	defer neutreeCoreDeployManifestsTarFile.Close()
+
+	err = util.ExtractTar(neutreeCoreDeployManifestsTarFile, options.workDir)
+	if err != nil {
+		return errors.Wrap(err, "extract neutree core db init scripts failed")
 	}
 
-	err = os.WriteFile(filepath.Join(metricsConfigDir, "prometheus-cluster.yml"), []byte(manifests.NeutreePrometheusScrapeConfig), 0644) //nolint:gosec
-	if err != nil {
-		return errors.Wrap(err, "write neutree prometheus scrape config failed")
-	}
+	coreWorkDir := filepath.Join(options.workDir, "neutree-core")
 
 	// extract db init scripts
-	neutreeDBInitScriptsTarFile, err := manifests.NeutreeCoreDBInitScripts.Open("db.tar")
+	neutreeDBInitScriptsTarFile, err := manifests.NeutreeCoreDBInitScriptsTar.Open("db.tar")
 	if err != nil {
 		return errors.Wrap(err, "open neutree core db init scripts failed")
 	}
 	defer neutreeDBInitScriptsTarFile.Close()
 
-	err = util.ExtractTar(neutreeDBInitScriptsTarFile, workDir)
+	err = util.ExtractTar(neutreeDBInitScriptsTarFile, coreWorkDir)
 	if err != nil {
 		return errors.Wrap(err, "extract neutree core db init scripts failed")
+	}
+
+	// parseTemplate
+	tempplateFiles := []string{
+		filepath.Join(coreWorkDir, "docker-compose.yml"),
+	}
+
+	templateParams := map[string]string{
+		"NeutreeCoreWorkDir":     coreWorkDir,
+		"JwtSecret":              options.jwtSecret,
+		"MetricsRemoteWriteURL":  options.metricsRemoteWriteURL,
+		"VictoriaMetricsVersion": constants.VictoriaMetricsVersion,
+		"NeutreeCoreVersion":     options.version,
+	}
+
+	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)
+	if err != nil {
+		return errors.Wrap(err, "parse template files failed")
+	}
+
+	composeFilePath := filepath.Join(coreWorkDir, "docker-compose.yml")
+	err = replaceComposeImageRegistry(composeFilePath, options.mirrorRegistry)
+
+	if err != nil {
+		return errors.Wrapf(err, "replace compose image registry failed, file path: %s", composeFilePath)
 	}
 
 	return nil

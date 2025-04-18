@@ -25,11 +25,11 @@ func ExtractTar(fileReader io.Reader, dst string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil { //nolint:gosec
+			if err = os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil { //nolint:gosec
 				return err
 			}
 		case tar.TypeReg:
-			file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode)) //nolint:gosec
+			file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode)) //nolint:gosec
 			if err != nil {
 				return err
 			}
