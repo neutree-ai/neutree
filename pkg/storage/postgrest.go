@@ -560,3 +560,68 @@ func (s *postgrestStorage) ListEngine(option ListOption) ([]v1.Engine, error) {
 
 	return response, err
 }
+
+func (s *postgrestStorage) CreateEndpoint(data *v1.Endpoint) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ENDPOINT_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteEndpoint(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ENDPOINT_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateEndpoint(id string, data *v1.Endpoint) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(ENDPOINT_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetEndpoint(id string) (*v1.Endpoint, error) {
+	var (
+		response []v1.Endpoint
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(ENDPOINT_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListEndpoint(option ListOption) ([]v1.Endpoint, error) {
+	var response []v1.Endpoint
+	err := s.genericList(ENDPOINT_TABLE, &response, option)
+
+	return response, err
+}

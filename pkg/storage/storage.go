@@ -128,6 +128,19 @@ type EngineStorage interface {
 	ListEngine(option ListOption) ([]v1.Engine, error)
 }
 
+type EndpointStorage interface {
+	// CreateEndpoint creates a new endpoint in the database.
+	CreateEndpoint(data *v1.Endpoint) error
+	// DeleteEndpoint deletes a endpoint by its ID.
+	DeleteEndpoint(id string) error
+	// UpdateEndpoint updates an existing endpoint in the database.
+	UpdateEndpoint(id string, data *v1.Endpoint) error
+	// GetEndpoint retrieves a endpoint by its ID.
+	GetEndpoint(id string) (*v1.Endpoint, error)
+	// ListEndpoint retrieves a list of endpoint with optional filters.
+	ListEndpoint(option ListOption) ([]v1.Endpoint, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -137,6 +150,7 @@ type Storage interface {
 	WorkspaceStorage
 	ApiKeyStorage
 	EngineStorage
+	EndpointStorage
 }
 
 type Options struct {

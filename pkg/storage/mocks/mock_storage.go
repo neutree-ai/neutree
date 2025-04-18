@@ -114,6 +114,52 @@ func (_c *MockStorage_CreateCluster_Call) RunAndReturn(run func(*v1.Cluster) err
 	return _c
 }
 
+// CreateEndpoint provides a mock function with given fields: data
+func (_m *MockStorage) CreateEndpoint(data *v1.Endpoint) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateEndpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEndpoint'
+type MockStorage_CreateEndpoint_Call struct {
+	*mock.Call
+}
+
+// CreateEndpoint is a helper method to define mock.On call
+//   - data *v1.Endpoint
+func (_e *MockStorage_Expecter) CreateEndpoint(data interface{}) *MockStorage_CreateEndpoint_Call {
+	return &MockStorage_CreateEndpoint_Call{Call: _e.mock.On("CreateEndpoint", data)}
+}
+
+func (_c *MockStorage_CreateEndpoint_Call) Run(run func(data *v1.Endpoint)) *MockStorage_CreateEndpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Endpoint))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateEndpoint_Call) Return(_a0 error) *MockStorage_CreateEndpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockStorage_CreateEndpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateEngine provides a mock function with given fields: data
 func (_m *MockStorage) CreateEngine(data *v1.Engine) error {
 	ret := _m.Called(data)
@@ -478,6 +524,52 @@ func (_c *MockStorage_DeleteCluster_Call) Return(_a0 error) *MockStorage_DeleteC
 }
 
 func (_c *MockStorage_DeleteCluster_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteEndpoint provides a mock function with given fields: id
+func (_m *MockStorage) DeleteEndpoint(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteEndpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteEndpoint'
+type MockStorage_DeleteEndpoint_Call struct {
+	*mock.Call
+}
+
+// DeleteEndpoint is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteEndpoint(id interface{}) *MockStorage_DeleteEndpoint_Call {
+	return &MockStorage_DeleteEndpoint_Call{Call: _e.mock.On("DeleteEndpoint", id)}
+}
+
+func (_c *MockStorage_DeleteEndpoint_Call) Run(run func(id string)) *MockStorage_DeleteEndpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteEndpoint_Call) Return(_a0 error) *MockStorage_DeleteEndpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteEndpoint_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteEndpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -870,6 +962,64 @@ func (_c *MockStorage_GetCluster_Call) Return(_a0 *v1.Cluster, _a1 error) *MockS
 }
 
 func (_c *MockStorage_GetCluster_Call) RunAndReturn(run func(string) (*v1.Cluster, error)) *MockStorage_GetCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetEndpoint provides a mock function with given fields: id
+func (_m *MockStorage) GetEndpoint(id string) (*v1.Endpoint, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEndpoint")
+	}
+
+	var r0 *v1.Endpoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.Endpoint, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.Endpoint); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.Endpoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEndpoint'
+type MockStorage_GetEndpoint_Call struct {
+	*mock.Call
+}
+
+// GetEndpoint is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetEndpoint(id interface{}) *MockStorage_GetEndpoint_Call {
+	return &MockStorage_GetEndpoint_Call{Call: _e.mock.On("GetEndpoint", id)}
+}
+
+func (_c *MockStorage_GetEndpoint_Call) Run(run func(id string)) *MockStorage_GetEndpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetEndpoint_Call) Return(_a0 *v1.Endpoint, _a1 error) *MockStorage_GetEndpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetEndpoint_Call) RunAndReturn(run func(string) (*v1.Endpoint, error)) *MockStorage_GetEndpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1338,6 +1488,64 @@ func (_c *MockStorage_ListCluster_Call) RunAndReturn(run func(storage.ListOption
 	return _c
 }
 
+// ListEndpoint provides a mock function with given fields: option
+func (_m *MockStorage) ListEndpoint(option storage.ListOption) ([]v1.Endpoint, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListEndpoint")
+	}
+
+	var r0 []v1.Endpoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.Endpoint, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.Endpoint); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.Endpoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListEndpoint'
+type MockStorage_ListEndpoint_Call struct {
+	*mock.Call
+}
+
+// ListEndpoint is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListEndpoint(option interface{}) *MockStorage_ListEndpoint_Call {
+	return &MockStorage_ListEndpoint_Call{Call: _e.mock.On("ListEndpoint", option)}
+}
+
+func (_c *MockStorage_ListEndpoint_Call) Run(run func(option storage.ListOption)) *MockStorage_ListEndpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListEndpoint_Call) Return(_a0 []v1.Endpoint, _a1 error) *MockStorage_ListEndpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListEndpoint_Call) RunAndReturn(run func(storage.ListOption) ([]v1.Endpoint, error)) *MockStorage_ListEndpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListEngine provides a mock function with given fields: option
 func (_m *MockStorage) ListEngine(option storage.ListOption) ([]v1.Engine, error) {
 	ret := _m.Called(option)
@@ -1776,6 +1984,53 @@ func (_c *MockStorage_UpdateCluster_Call) Return(_a0 error) *MockStorage_UpdateC
 }
 
 func (_c *MockStorage_UpdateCluster_Call) RunAndReturn(run func(string, *v1.Cluster) error) *MockStorage_UpdateCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateEndpoint provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateEndpoint(id string, data *v1.Endpoint) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateEndpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.Endpoint) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateEndpoint'
+type MockStorage_UpdateEndpoint_Call struct {
+	*mock.Call
+}
+
+// UpdateEndpoint is a helper method to define mock.On call
+//   - id string
+//   - data *v1.Endpoint
+func (_e *MockStorage_Expecter) UpdateEndpoint(id interface{}, data interface{}) *MockStorage_UpdateEndpoint_Call {
+	return &MockStorage_UpdateEndpoint_Call{Call: _e.mock.On("UpdateEndpoint", id, data)}
+}
+
+func (_c *MockStorage_UpdateEndpoint_Call) Run(run func(id string, data *v1.Endpoint)) *MockStorage_UpdateEndpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.Endpoint))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateEndpoint_Call) Return(_a0 error) *MockStorage_UpdateEndpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateEndpoint_Call) RunAndReturn(run func(string, *v1.Endpoint) error) *MockStorage_UpdateEndpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
