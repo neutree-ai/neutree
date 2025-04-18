@@ -173,14 +173,16 @@ func TestNewRayOrchestrator(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := Options{
-				Cluster:       tt.cluster,
-				ImageRegistry: tt.imageRegistry,
+				Cluster: tt.cluster,
 			}
 
 			setUp()
 			defer tearDown()
 
-			o, err := NewRayOrchestrator(opts)
+			o, err := NewRayOrchestrator(RayOptions{
+				Options:       opts,
+				ImageRegistry: tt.imageRegistry,
+			})
 
 			if tt.expectError {
 				assert.Error(t, err)

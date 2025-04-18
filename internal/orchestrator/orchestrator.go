@@ -8,6 +8,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/storage"
+	"github.com/pkg/errors"
 )
 
 // Orchestrator defines the core interface for cluster orchestration
@@ -43,15 +44,20 @@ var (
 )
 
 func newOrchestrator(opts Options) (Orchestrator, error) {
+	imageRegistry, err := getRelateImageRegistry(opts.Storage, opts.Cluster)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get relate image registry")
+	}
+
 	switch opts.Cluster.Spec.Type {
 	case "ssh":
-		clustrManager, err := cluster.NewRaySSHClusterManager(opts.Cluster, opts.ImageRegistry, opts.ImageService, &command.OSExecutor{})
+		clustrManager, err := cluster.NewRaySSHClusterManager(opts.Cluster, imageRegistry, opts.ImageService, &command.OSExecutor{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create ray ssh cluster manager: %w", err)
 		}
 		return NewRayOrchestrator(opts, clustrManager)
 	case "kubernetes":
-		clusterManager, err := cluster.NewKubeRayClusterManager(opts.MetricsRemoteWriteURL, opts.Cluster, opts.ImageRegistry, opts.ImageService)
+		clusterManager, err := cluster.NewKubeRayClusterManager(opts.MetricsRemoteWriteURL, opts.Cluster, imageRegistry, opts.ImageService)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kube ray cluster manager: %w", err)
 		}
@@ -59,4 +65,33 @@ func newOrchestrator(opts Options) (Orchestrator, error) {
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", opts.Cluster.Spec.Type)
 	}
+}
+
+func getRelateImageRegistry(s storage.Storage, cluster *v1.Cluster) (*v1.ImageRegistry, error) {
+	imageRegistryFilter := []storage.Filter{
+		{
+			Column:   "metadata->name",
+			Operator: "eq",
+			Value:    fmt.Sprintf(`"%s"`, cluster.Spec.ImageRegistry),
+		},
+	}
+
+	if cluster.Metadata.Workspace != "" {
+		imageRegistryFilter = append(imageRegistryFilter, storage.Filter{
+			Column:   "metadata->workspace",
+			Operator: "eq",
+			Value:    fmt.Sprintf(`"%s"`, cluster.Metadata.Workspace),
+		})
+	}
+
+	imageRegistryList, err := s.ListImageRegistry(storage.ListOption{Filters: imageRegistryFilter})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list image registry")
+	}
+
+	if len(imageRegistryList) == 0 {
+		return nil, errors.New("relate image registry not found")
+	}
+
+	return &imageRegistryList[0], nil
 }
