@@ -51,6 +51,11 @@ type RayOrchestrator struct {
 	opTimeout     OperationConfig
 }
 
+type RayOptions struct {
+	Options
+	ImageRegistry *v1.ImageRegistry
+}
+
 func (o *RayOrchestrator) CreateCluster() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.UpTimeout)
 	defer cancel()
@@ -266,7 +271,7 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 	return clusterStatus, nil
 }
 
-func NewRayOrchestrator(opts Options) (*RayOrchestrator, error) {
+func NewRayOrchestrator(opts RayOptions) (*RayOrchestrator, error) {
 	rayClusterConfig := &v1.RayClusterConfig{}
 
 	rayConfig, err := json.Marshal(opts.Cluster.Spec.Config)
