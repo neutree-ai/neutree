@@ -38,6 +38,27 @@ type RayServeApplicationsResponse struct {
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
 func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) RayServeApplication {
+	accelerator := map[string]float64{}
+	for key, value := range endpoint.Spec.Resources.Accelerator {
+		if key != "-" && value > 0 {
+			accelerator[key] = value
+		}
+	}
+
+	endpoint.Spec.DeploymentOptions["backend"] = map[string]interface{}{
+		"backend": map[string]interface{}{
+			"num_replicas": endpoint.Spec.Replicas.Num,
+			"num_cpus":     endpoint.Spec.Resources.CPU,
+			"num_gpus":     endpoint.Spec.Resources.GPU,
+			"memory":       endpoint.Spec.Resources.Memory,
+			"resources":    accelerator,
+		},
+		"controller": map[string]interface{}{
+			"num_replicas": 1,
+			"num_cpus":     0.1,
+			"num_gpus":     0,
+		},
+	}
 
 	args := map[string]interface{}{
 		"model": map[string]interface{}{

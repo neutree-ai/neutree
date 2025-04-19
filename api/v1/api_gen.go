@@ -1021,6 +1021,10 @@ type ApiResourceSpec struct {
 	Memory      interface{} `json:"memory"`
 }
 
+type ApiReplicaSpec struct {
+	Num interface{} `json:"num"`
+}
+
 type ApiEndpointSpec struct {
 	Cluster           string      `json:"cluster"`
 	Model             interface{} `json:"model"`
