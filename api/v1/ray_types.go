@@ -1,5 +1,12 @@
 package v1
 
+// Ray Metrics Ports.
+const (
+	RayletMetricsPort    = 54311
+	DashboardMetricsPort = 44227
+	AutoScaleMetricsPort = 44217
+)
+
 // Ray node states.
 const (
 	DeadNodeState  = "DEAD"
@@ -17,7 +24,7 @@ const (
 
 	// Ray node provision type.
 
-	StaticNodeProvisonType     = "static"
+	StaticNodeProvisionType    = "static"
 	AutoScaleNodeProvisionType = "autoscaler"
 )
 

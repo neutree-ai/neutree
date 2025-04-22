@@ -1,0 +1,59 @@
+version: "3.8"
+
+services:
+  vmstorage:
+    container_name: vmstorage
+    image: victoriametrics/vmstorage:{{ .VictoriaMetricsVersion}}
+    ports:
+      - 8482:8482 # metrics
+      - 8400:8400 # insert access port
+      - 8401:8401 # select access port
+    volumes:
+      - storagedata:/storage
+    command:
+      - "--storageDataPath=/storage"
+    restart: always
+
+  # vminsert is ingestion frontend. It receives metrics pushed by vmagent,
+  # pre-process them and distributes across configured vmstorage shards.
+  vminsert:
+    container_name: vminsert
+    image: victoriametrics/vminsert:{{ .VictoriaMetricsVersion}}
+    depends_on:
+      - "vmstorage"
+    command:
+	  {{range $ip := .DeployIps}}
+      - "--storageNode={{ $ip}}:8400"
+      {{end}}
+    ports:
+      - 8480:8480
+    restart: always
+  vmselect:
+    container_name: vmselect
+    image: victoriametrics/vmselect:{{ .VictoriaMetricsVersion}}
+    depends_on:
+      - "vmstorage"
+    command:
+	  {{range $ip := .DeployIps}}
+      - "--storageNode={{ $ip}}:8401"
+      {{end}}
+    ports:
+      - 8481:8481
+    restart: always
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:{{.GrafanaVersion}}
+    ports:
+      - 3000:3000
+    restart: always
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - {{ .GrafanaWorkDir}}/provisioning/datasources/cluster.yml:/etc/grafana/provisioning/datasources/cluster.yml
+      - {{ .GrafanaWorkDir}}/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - {{ .GrafanaWorkDir}}/dashboards:/var/lib/grafana/dashboards
+      - {{ .GrafanaWorkDir}}/grafana.ini:/etc/grafana/grafana.ini
+    depends_on:
+      - "vmselect"
+volumes:
+  grafanadata: {}
+  storagedata: {}  

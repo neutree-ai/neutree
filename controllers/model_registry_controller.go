@@ -30,7 +30,8 @@ type ModelRegistryControllerOption struct {
 func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRegistryController, error) {
 	c := &ModelRegistryController{
 		baseController: &BaseController{
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
+			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
+				workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},
