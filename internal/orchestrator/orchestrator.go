@@ -3,10 +3,11 @@ package orchestrator
 import (
 	"fmt"
 
+	"github.com/pkg/errors"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
-	"github.com/pkg/errors"
 )
 
 // Orchestrator defines the core interface for cluster orchestration
