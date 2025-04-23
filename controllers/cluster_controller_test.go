@@ -43,113 +43,6 @@ func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *regis
 	}
 }
 
-func TestClusterController_Sync_relateImageRegistry(t *testing.T) {
-	testImageRegistry := v1.ImageRegistry{
-		ID: 1,
-		Metadata: &v1.Metadata{
-			Name: "test",
-		},
-		Spec: &v1.ImageRegistrySpec{
-			AuthConfig: v1.ImageRegistryAuthConfig{
-				Username: "test",
-				Password: "test",
-			},
-			URL:        "test",
-			Repository: "neutree",
-		},
-	}
-
-	tests := []struct {
-		name            string
-		input           *v1.Cluster
-		mockSetup       func(*storagemocks.MockStorage, *orchestratormocks.MockOrchestrator)
-		newOrchestrator orchestrator.NewOrchestratorFunc
-		wantErr         bool
-	}{
-		{
-			name: "get relate image registry error",
-			input: &v1.Cluster{
-				ID: 1,
-				Metadata: &v1.Metadata{
-					Name: "test",
-				},
-				Spec: &v1.ClusterSpec{
-					ImageRegistry: "test",
-					Version:       "test",
-				},
-			},
-			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
-				s.On("ListImageRegistry", mock.Anything).Return(nil, assert.AnError)
-			},
-			wantErr: true,
-		},
-		{
-			name: "get relate image registry not found",
-			input: &v1.Cluster{
-				ID: 1,
-				Metadata: &v1.Metadata{
-					Name: "test",
-				},
-				Spec: &v1.ClusterSpec{
-					ImageRegistry: "test",
-					Version:       "test",
-				},
-			},
-			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
-				s.On("ListImageRegistry", mock.Anything).Return(nil, nil)
-			},
-			wantErr: true,
-		},
-		{
-			name: "relete image registry exist",
-			input: &v1.Cluster{
-				ID: 1,
-				Metadata: &v1.Metadata{
-					Name: "test",
-				},
-				Spec: &v1.ClusterSpec{
-					ImageRegistry: "test",
-					Version:       "test",
-				},
-				Status: &v1.ClusterStatus{
-					Initialized: true,
-				},
-			},
-			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testImageRegistry}, nil)
-				o.On("GetDesireStaticWorkersIP").Return(nil)
-				o.On("HealthCheck").Return(nil)
-				o.On("ClusterStatus").Return(&v1.RayClusterStatus{
-					PythonVersion: "3.10.10",
-					RayVersion:    "1.1.1",
-					ReadyNodes:    0,
-				}, nil)
-				s.On("UpdateCluster", "1", mock.Anything).Return(nil)
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			storage := new(storagemocks.MockStorage)
-			imageSvc := new(registrymocks.MockImageService)
-			o := new(orchestratormocks.MockOrchestrator)
-			tt.mockSetup(storage, o)
-			c := newTestClusterController(storage, imageSvc, o)
-			err := c.sync(tt.input)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-
-			storage.AssertExpectations(t)
-			o.AssertExpectations(t)
-		})
-	}
-}
-
 func TestClusterController_Sync_Delete(t *testing.T) {
 	testConnectedImageRegistry := v1.ImageRegistry{
 		ID: 1,
@@ -232,23 +125,6 @@ func TestClusterController_Sync_Delete(t *testing.T) {
 
 func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 	testHeadIP := "192.168.1.1"
-	testConnectedImageRegistry := v1.ImageRegistry{
-		ID: 1,
-		Metadata: &v1.Metadata{
-			Name: "test",
-		},
-		Spec: &v1.ImageRegistrySpec{
-			AuthConfig: v1.ImageRegistryAuthConfig{
-				Username: "test",
-				Password: "test",
-			},
-			URL:        "test",
-			Repository: "neutree",
-		},
-		Status: &v1.ImageRegistryStatus{
-			Phase: v1.ImageRegistryPhaseCONNECTED,
-		},
-	}
 
 	getTestCluster := func() *v1.Cluster {
 		return &v1.Cluster{
@@ -300,7 +176,6 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 				o.On("GetDesireStaticWorkersIP").Return(nil)
 				o.On("HealthCheck").Return(nil)
 				o.On("ClusterStatus").Return(testClusterStatus, nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseRunning, obj.Status.Phase)
@@ -319,7 +194,6 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			input: getTestCluster(),
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("CreateCluster").Return("", assert.AnError)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
@@ -334,7 +208,6 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("CreateCluster").Return(testHeadIP, nil)
 				o.On("HealthCheck").Return(assert.AnError)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
@@ -348,7 +221,6 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			input: getTestClusterWithDeletionTimestamp(),
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("DeleteCluster").Return(nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseDeleted, obj.Status.Phase)
@@ -362,7 +234,6 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			input: getTestClusterWithDeletionTimestamp(),
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("DeleteCluster").Return(assert.AnError)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 			},
 			wantErr: true,
 		},
@@ -390,23 +261,6 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 func TestClusterController_Sync_Running(t *testing.T) {
 	testHeadIP := "192.168.1.1"
 	testWorkerIP := "192.168.1.2"
-	testConnectedImageRegistry := v1.ImageRegistry{
-		ID: 1,
-		Metadata: &v1.Metadata{
-			Name: "test",
-		},
-		Spec: &v1.ImageRegistrySpec{
-			AuthConfig: v1.ImageRegistryAuthConfig{
-				Username: "test",
-				Password: "test",
-			},
-			URL:        "test",
-			Repository: "neutree",
-		},
-		Status: &v1.ImageRegistryStatus{
-			Phase: v1.ImageRegistryPhaseCONNECTED,
-		},
-	}
 
 	getTestCluster := func() *v1.Cluster {
 		return &v1.Cluster{
@@ -476,7 +330,6 @@ func TestClusterController_Sync_Running(t *testing.T) {
 				o.On("StartNode", testWorkerIP).Return(nil)
 				o.On("HealthCheck").Return(nil)
 				o.On("ClusterStatus").Return(testClusterStatus, nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseRunning, obj.Status.Phase)
@@ -497,7 +350,6 @@ func TestClusterController_Sync_Running(t *testing.T) {
 				o.On("GetDesireStaticWorkersIP").Return([]string{testWorkerIP})
 				o.On("StartNode", testWorkerIP).Return(assert.AnError)
 				o.On("ClusterStatus").Return(testClusterStatus, nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
@@ -523,7 +375,6 @@ func TestClusterController_Sync_Running(t *testing.T) {
 					ReadyNodes:          0,
 					NeutreeServeVersion: "v2",
 				}, nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
@@ -542,7 +393,6 @@ func TestClusterController_Sync_Running(t *testing.T) {
 			input: getTestClusterWithDeletionTimestamp(),
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("DeleteCluster").Return(nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseDeleted, obj.Status.Phase)
@@ -561,7 +411,6 @@ func TestClusterController_Sync_Running(t *testing.T) {
 			input: getTestClusterWithDeletionTimestamp(),
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("DeleteCluster").Return(assert.AnError)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 			},
 			wantErr: true,
 		},
@@ -588,23 +437,6 @@ func TestClusterController_Sync_Running(t *testing.T) {
 
 func TestClusterController_Sync_Failed(t *testing.T) {
 	testHeadIP := "192.168.1.1"
-	testConnectedImageRegistry := v1.ImageRegistry{
-		ID: 1,
-		Metadata: &v1.Metadata{
-			Name: "test",
-		},
-		Spec: &v1.ImageRegistrySpec{
-			AuthConfig: v1.ImageRegistryAuthConfig{
-				Username: "test",
-				Password: "test",
-			},
-			URL:        "test",
-			Repository: "neutree",
-		},
-		Status: &v1.ImageRegistryStatus{
-			Phase: v1.ImageRegistryPhaseCONNECTED,
-		},
-	}
 
 	getTestCluster := func() *v1.Cluster {
 		return &v1.Cluster{
@@ -673,7 +505,6 @@ func TestClusterController_Sync_Failed(t *testing.T) {
 				o.On("GetDesireStaticWorkersIP").Return(nil)
 				o.On("HealthCheck").Return(assert.AnError)
 				o.On("ClusterStatus").Return(testClusterStatus, nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
@@ -694,7 +525,6 @@ func TestClusterController_Sync_Failed(t *testing.T) {
 				o.On("GetDesireStaticWorkersIP").Return(nil)
 				o.On("HealthCheck").Return(nil)
 				o.On("ClusterStatus").Return(testClusterStatus, nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseRunning, obj.Status.Phase)
@@ -713,7 +543,6 @@ func TestClusterController_Sync_Failed(t *testing.T) {
 			input: getTestClusterWithDeletionTimestamp(),
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("DeleteCluster").Return(assert.AnError)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 			},
 			wantErr: true,
 		},
@@ -722,7 +551,6 @@ func TestClusterController_Sync_Failed(t *testing.T) {
 			input: getTestClusterWithDeletionTimestamp(),
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("DeleteCluster").Return(nil)
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testConnectedImageRegistry}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseDeleted, obj.Status.Phase)
