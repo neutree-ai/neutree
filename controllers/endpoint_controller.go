@@ -191,6 +191,16 @@ func (c *EndpointController) createEndpoint(obj *v1.Endpoint) (*v1.EndpointStatu
 }
 
 func (c *EndpointController) cleanupEndpoint(obj *v1.Endpoint) error {
+	o, err := c.getOrchestrator(obj)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get orchestrator for endpoint %s", obj.Metadata.Name)
+	}
+
+	err = o.DeleteEndpoint(obj)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete endpoint %s", obj.Metadata.Name)
+	}
+
 	return nil
 }
 
@@ -234,12 +244,12 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    obj.Spec.Cluster,
+				Value:    strconv.Quote(obj.Spec.Cluster),
 			},
 			{
 				Column:   "metadata->workspace",
 				Operator: "eq",
-				Value:    obj.Metadata.Workspace,
+				Value:    strconv.Quote(obj.Metadata.Workspace),
 			},
 		},
 	})

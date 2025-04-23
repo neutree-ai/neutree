@@ -79,6 +79,23 @@ func main() {
 		klog.Fatalf("failed to init cluster controller: %s", err.Error())
 	}
 
+	engineController, err := controllers.NewEngineController(&controllers.EngineControllerOption{
+		Storage: s,
+		Workers: *controllerWorkers,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init engine controller: %s", err.Error())
+	}
+
+	endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
+		Storage:      s,
+		Workers:      *controllerWorkers,
+		ImageService: imageService,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init endpoint controller: %s", err.Error())
+	}
+
 	roleController, err := controllers.NewRoleController(&controllers.RoleControllerOption{
 		Storage: s,
 		Workers: *controllerWorkers,
@@ -109,6 +126,8 @@ func main() {
 	go imageRegistryController.Start(ctx)
 	go modelRegistryController.Start(ctx)
 	go clusterController.Start(ctx)
+	go engineController.Start(ctx)
+	go endpointController.Start(ctx)
 	go roleController.Start(ctx)
 	go roleAssignmentController.Start(ctx)
 	go workspaceController.Start(ctx)

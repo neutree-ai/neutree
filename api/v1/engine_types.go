@@ -1,7 +1,5 @@
 package v1
 
-import "time"
-
 type EngineVersion struct {
 	Version      string                 `json:"version,omitempty"`
 	ValuesSchema map[string]interface{} `json:"values_schema,omitempty"`
@@ -23,7 +21,7 @@ const (
 
 type EngineStatus struct {
 	Phase              EnginePhase `json:"phase,omitempty"`
-	LastTransitionTime *time.Time  `json:"last_transition_time,omitempty"`
+	LastTransitionTime string      `json:"last_transition_time,omitempty"`
 	ErrorMessage       string      `json:"error_message,omitempty"`
 }
 

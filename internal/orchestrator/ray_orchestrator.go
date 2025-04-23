@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -472,7 +473,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    endpoint.Spec.Cluster,
+				Value:    strconv.Quote(endpoint.Spec.Cluster),
 			},
 		},
 	})
@@ -489,7 +490,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    endpoint.Spec.Engine.Engine,
+				Value:    strconv.Quote(endpoint.Spec.Engine.Engine),
 			},
 		},
 	})
@@ -523,7 +524,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    endpoint.Spec.Model.Registry,
+				Value:    strconv.Quote(endpoint.Spec.Model.Registry),
 			},
 		},
 	})
@@ -554,12 +555,25 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	newApp := dashboard.EndpointToApplication(endpoint, &modelRegistry[0])
 
 	// Build the list of applications for the PUT request
+	need_append := true
+
 	updatedAppsList := make([]dashboard.RayServeApplication, 0, len(currentAppsResp.Applications)+1)
+
 	for _, appStatus := range currentAppsResp.Applications {
-		updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+		if appStatus.DeployedAppConfig != nil {
+			updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+		}
+
+		if appStatus.DeployedAppConfig.Name == newApp.Name {
+			// If the application already exists, update it
+			updatedAppsList[len(updatedAppsList)-1] = newApp
+			need_append = false
+		}
 	}
 
-	updatedAppsList = append(updatedAppsList, newApp)
+	if need_append {
+		updatedAppsList = append(updatedAppsList, newApp)
+	}
 
 	updateReq := dashboard.RayServeApplicationsRequest{
 		Applications: updatedAppsList,
@@ -597,7 +611,7 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    endpoint.Spec.Cluster,
+				Value:    strconv.Quote(endpoint.Spec.Cluster),
 			},
 		},
 	})
@@ -685,17 +699,12 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	var phase v1.EndpointPhase
 
 	switch status.Status {
-	case "RUNNING":
-	case "DELETING":
+	case "RUNNING", "DELETING", "DEPLOYING", "UNHEALTHY", "NOT_STARTED":
 		phase = v1.EndpointPhaseRUNNING
-	case "NOT_STARTED":
-	case "DEPLOYING":
-		phase = v1.EndpointPhasePENDING
 	case "DEPLOY_FAILED":
-	case "UNHEALTHY":
 		phase = v1.EndpointPhaseFAILED
 	default:
-		phase = v1.EndpointPhaseFAILED
+		phase = v1.EndpointPhaseRUNNING
 	}
 
 	serviceURL, err := dashboard.FormatServiceURL(o.cluster, endpoint)
