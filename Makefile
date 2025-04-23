@@ -111,7 +111,7 @@ golangci-lint: ## Download golangci-lint if not yet.
 	$(call go-get-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.6)
 
 .PHONY: lint
-lint: golangci-lint ## Lint codebase
+lint: prepare-build-cli golangci-lint ## Lint codebase
 	$(GOLANGCI_LINT) run -v --fast=false --fix
 
 .PHONY: fmt
