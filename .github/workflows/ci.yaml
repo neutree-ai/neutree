@@ -25,12 +25,12 @@ jobs:
           TOKEN: ${{ secrets.CI_ACCESS_TOKEN }}
           USERNAME: ${{ secrets.CI_USERNAME }}
         run: git config --global url."https://${USERNAME}:${TOKEN}@github.com".insteadOf "https://github.com"
-
+      - name: Prepare for lint
+        run: make prepare-build-cli
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.6
-
       - name: Test
         run: make test
 
