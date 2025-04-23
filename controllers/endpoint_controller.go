@@ -98,6 +98,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 		}
 
 		klog.Info("Deleting endpoint " + obj.Metadata.Name)
+
 		err = c.cleanupEndpoint(obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to cleanup endpoint %s", obj.Metadata.Name)
@@ -116,6 +117,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	// If status is missing or PENDING, update it to RUNNING.
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.EndpointPhasePENDING {
 		klog.Infof("Endpoint %s is PENDING or has no status, creating", obj.Metadata.Name)
+
 		status, err := c.createEndpoint(obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create endpoint %s", obj.Metadata.Name)
@@ -153,6 +155,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 
 	if obj.Status.Phase == v1.EndpointPhaseRUNNING {
 		klog.Infof("Endpoint %s is RUNNING, checking health", obj.Metadata.Name)
+
 		status, err := c.checkEndpointHealth(obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to check endpoint %s health", obj.Metadata.Name)
@@ -243,6 +246,7 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get cluster %s", obj.Spec.Cluster)
 	}
+
 	if len(cluster) == 0 {
 		return nil, errors.New("cluster not found")
 	}
@@ -255,5 +259,6 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create orchestrator for cluster %s", cluster[0].Metadata.Name)
 	}
+
 	return orchestrator, nil
 }

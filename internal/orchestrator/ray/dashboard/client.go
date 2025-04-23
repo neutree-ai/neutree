@@ -43,11 +43,13 @@ func new(dashboardURL string) DashboardService {
 
 func (c *Client) doRequest(method, path string, body, result interface{}) error {
 	var reqBody io.Reader
+
 	if body != nil {
 		jsonData, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
+
 		reqBody = bytes.NewBuffer(jsonData)
 	}
 

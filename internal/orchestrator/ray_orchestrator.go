@@ -275,6 +275,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list cluster")
 	}
+
 	if len(cluster) == 0 {
 		return nil, errors.New("cluster " + endpoint.Spec.Cluster + " not found")
 	}
@@ -291,20 +292,24 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list engine")
 	}
+
 	if len(engine) == 0 {
 		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not found")
 	}
+
 	if engine[0].Status.Phase != v1.EnginePhaseCreated {
 		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not ready")
 	}
 
 	versionMatched := false
+
 	for _, v := range engine[0].Spec.Versions {
 		if v.Version == endpoint.Spec.Engine.Version {
 			versionMatched = true
 			break
 		}
 	}
+
 	if !versionMatched {
 		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " version " + endpoint.Spec.Engine.Version + " not found")
 	}
@@ -321,9 +326,11 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list model registry")
 	}
+
 	if len(modelRegistry) == 0 {
 		return nil, errors.New("model registry " + endpoint.Spec.Model.Registry + " not found")
 	}
+
 	if modelRegistry[0].Status.Phase != v1.ModelRegistryPhaseCONNECTED {
 		return nil, errors.New("model registry " + endpoint.Spec.Model.Registry + " not ready")
 	}
@@ -347,6 +354,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	for _, appStatus := range currentAppsResp.Applications {
 		updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
 	}
+
 	updatedAppsList = append(updatedAppsList, newApp)
 
 	updateReq := dashboard.RayServeApplicationsRequest{
@@ -392,6 +400,7 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to list cluster")
 	}
+
 	if len(cluster) == 0 {
 		// it's safe to ignore this, because the cluster has been removed
 		return nil
@@ -410,11 +419,13 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	// Build the list of applications excluding the one to delete
 	updatedAppsList := make([]dashboard.RayServeApplication, 0, len(currentAppsResp.Applications))
 	found := false
+
 	for name, appStatus := range currentAppsResp.Applications {
 		if name == endpoint.Metadata.Name {
 			found = true
 			continue // Skip the endpoint to be deleted
 		}
+
 		updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
 	}
 
@@ -468,6 +479,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	// Basic status mapping
 	// https://docs.ray.io/en/latest/serve/api/doc/ray.serve.schema.ApplicationStatus.html#ray.serve.schema.ApplicationStatus
 	var phase v1.EndpointPhase
+
 	switch status.Status {
 	case "RUNNING":
 	case "DELETING":

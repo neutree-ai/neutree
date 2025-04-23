@@ -7,8 +7,9 @@ import (
 
 	"maps"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/pkg/errors"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // RayServeApplication represents the structure expected by the Ray Serve API.
@@ -39,6 +40,7 @@ type RayServeApplicationsResponse struct {
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
 func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) RayServeApplication {
 	accelerator := map[string]float64{}
+
 	for key, value := range endpoint.Spec.Resources.Accelerator {
 		if key != "-" && value > 0 {
 			accelerator[key] = value
@@ -84,6 +86,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 // GetServeApplications retrieves the current Ray Serve applications.
 func (c *Client) GetServeApplications() (*RayServeApplicationsResponse, error) {
 	var appsResp RayServeApplicationsResponse
+
 	err := c.doRequest(http.MethodGet, "/api/serve/applications/", nil, &appsResp)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to execute request to get serve applications")
@@ -109,6 +112,7 @@ func FormatServiceURL(cluster *v1.Cluster, endpoint *v1.Endpoint) (string, error
 	if cluster.Status == nil || cluster.Status.DashboardURL == "" {
 		return "", errors.New("cluster dashboard URL is not available")
 	}
+
 	dashboardURL, err := url.Parse(cluster.Status.DashboardURL)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse cluster dashboard URL")
