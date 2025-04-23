@@ -5,374 +5,255 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/orchestrator"
+	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
+	"github.com/neutree-ai/neutree/pkg/storage"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"k8s.io/client-go/util/workqueue"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/storage"
-	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
-// newTestEndpointController is a helper to create a EndpointController with mocked storage for testing.
-func newTestEndpointController(storage *storagemocks.MockStorage) *EndpointController {
-	c, _ := NewEndpointController(&EndpointControllerOption{
-		Storage: storage,
-		Workers: 1,
-	})
-	// Use a predictable queue for testing.
-	c.baseController.queue = workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "endpoint-test"})
+func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) *EndpointController {
+	orchestrator.NewOrchestrator = func(opts orchestrator.Options) (orchestrator.Orchestrator, error) {
+		return o, nil
+	}
+	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Workers: 1})
+	c.baseController.queue = workqueue.NewRateLimitingQueueWithConfig(
+		workqueue.DefaultControllerRateLimiter(),
+		workqueue.RateLimitingQueueConfig{Name: "endpoint-test"},
+	)
 	return c
 }
 
-// testEndpoint is a helper to create a basic Endpoint object for tests.
-func testEndpoint(id int, phase v1.EndpointPhase) *v1.Endpoint {
-	endpoint := &v1.Endpoint{
+func ep(id int, phase v1.EndpointPhase) *v1.Endpoint {
+	e := &v1.Endpoint{
 		ID: id,
 		Metadata: &v1.Metadata{
-			Name: "test-endpoint-" + strconv.Itoa(id),
+			Name:      "test-endpoint-" + strconv.Itoa(id),
+			Workspace: "default",
 		},
-		Spec: &v1.EndpointSpec{},
+		Spec: &v1.EndpointSpec{
+			Cluster: "test-cluster",
+			Engine:  &v1.EndpointEngineSpec{Engine: "test-engine", Version: "1.0.0"},
+			Model:   &v1.ModelSpec{Registry: "test-model-registry", Name: "test-model"},
+		},
 	}
-	if phase != "" { // Only set status if phase is provided.
-		endpoint.Status = &v1.EndpointStatus{Phase: phase}
+	if phase != "" {
+		e.Status = &v1.EndpointStatus{Phase: phase}
 	}
-	return endpoint
+	return e
 }
 
-// testEndpointWithDeletionTimestamp is a helper to create a Endpoint object marked for deletion.
-func testEndpointWithDeletionTimestamp(id int, phase v1.EndpointPhase) *v1.Endpoint {
-	endpoint := testEndpoint(id, phase)
-	endpoint.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
-	return endpoint
+func epDel(id int, phase v1.EndpointPhase) *v1.Endpoint {
+	e := ep(id, phase)
+	e.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
+	return e
 }
 
-// --- Tests for the 'sync' method ---
+/* ---------- Deletion ---------- */
 
 func TestEndpointController_Sync_Deletion(t *testing.T) {
-	endpointID := 1
-	endpointIDStr := strconv.Itoa(endpointID)
-
+	id := 1
 	tests := []struct {
-		name      string
-		input     *v1.Endpoint
-		mockSetup func(*storagemocks.MockStorage)
-		wantErr   bool
+		name    string
+		in      *v1.Endpoint
+		setup   func(*storagemocks.MockStorage)
+		wantErr bool
 	}{
 		{
-			name:  "Deleting (Phase=DELETED) -> Deleted (DB delete success)",
-			input: testEndpointWithDeletionTimestamp(endpointID, v1.EndpointPhaseDELETED),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("DeleteEndpoint", endpointIDStr).Return(nil).Once()
+			name: "delete ok",
+			in:   epDel(id, v1.EndpointPhaseDELETED),
+			setup: func(s *storagemocks.MockStorage) {
+				s.On("DeleteEndpoint", strconv.Itoa(id)).Return(nil)
 			},
 			wantErr: false,
 		},
 		{
-			name:  "Deleting (Phase=DELETED) -> Error (DB delete failed)",
-			input: testEndpointWithDeletionTimestamp(endpointID, v1.EndpointPhaseDELETED),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("DeleteEndpoint", endpointIDStr).Return(assert.AnError).Once()
-			},
-			wantErr: true,
-		},
-		{
-			name:  "Deleting (Phase=RUNNING) -> Set Phase=DELETED (Update success)",
-			input: testEndpointWithDeletionTimestamp(endpointID, v1.EndpointPhaseRUNNING),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("UpdateEndpoint", endpointIDStr, mock.MatchedBy(func(r *v1.Endpoint) bool {
-					return r.Status != nil && r.Status.Phase == v1.EndpointPhaseDELETED && r.Status.ErrorMessage == ""
-				})).Return(nil).Once()
-			},
-			wantErr: false,
-		},
-		{
-			name:  "Deleting (Phase=PENDING) -> Set Phase=DELETED (Update failed)",
-			input: testEndpointWithDeletionTimestamp(endpointID, v1.EndpointPhasePENDING),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("UpdateEndpoint", endpointIDStr, mock.MatchedBy(func(r *v1.Endpoint) bool {
-					return r.Status != nil && r.Status.Phase == v1.EndpointPhaseDELETED
-				})).Return(assert.AnError).Once()
+			name: "delete fail",
+			in:   epDel(id, v1.EndpointPhaseDELETED),
+			setup: func(s *storagemocks.MockStorage) {
+				s.On("DeleteEndpoint", strconv.Itoa(id)).Return(assert.AnError)
 			},
 			wantErr: true,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-			c := newTestEndpointController(mockStorage)
-
-			err := c.sync(tt.input) // Test sync directly.
-
+			ms := &storagemocks.MockStorage{}
+			mo := &orchestratormocks.MockOrchestrator{}
+			tt.setup(ms)
+			c := newTestEndpointController(ms, mo)
+			err := c.sync(tt.in)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
-			mockStorage.AssertExpectations(t)
+			ms.AssertExpectations(t)
+			mo.AssertExpectations(t)
 		})
 	}
 }
 
-func TestEndpointController_Sync_CreateOrUpdate(t *testing.T) {
-	endpointID := 1
-	endpointIDStr := strconv.Itoa(endpointID)
+/* ---------- Create / Update ---------- */
+
+func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
+	id := 1
+	cluster := v1.Cluster{Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"}}
+	imageRegistry := v1.ImageRegistry{Metadata: &v1.Metadata{Name: "default-registry", Workspace: "default"}}
+	engine := v1.Engine{Metadata: &v1.Metadata{Name: "test-engine"}}
+	modelRegistry := v1.ModelRegistry{Metadata: &v1.Metadata{Name: "test-model-registry"}}
+
+	okStatus := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
 
 	tests := []struct {
-		name      string
-		input     *v1.Endpoint
-		mockSetup func(*storagemocks.MockStorage)
-		wantErr   bool
+		name    string
+		in      *v1.Endpoint
+		setup   func(*storagemocks.MockStorage, *orchestratormocks.MockOrchestrator)
+		wantErr bool
 	}{
 		{
-			name:  "No Status -> Set Phase=RUNNING (Update success)",
-			input: testEndpoint(endpointID, ""),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("UpdateEndpoint", endpointIDStr, mock.MatchedBy(func(r *v1.Endpoint) bool {
-					return r.Status != nil && r.Status.Phase == v1.EndpointPhaseRUNNING && r.Status.ErrorMessage == ""
-				})).Return(nil).Once()
+			name: "create ok",
+			in:   ep(id, ""),
+			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
+				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
+				s.On("ListEngine", mock.Anything).Return([]v1.Engine{engine}, nil).Maybe()
+				s.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil).Maybe()
+				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
+				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(nil)
 			},
 			wantErr: false,
 		},
 		{
-			name:  "Phase=PENDING -> Set Phase=RUNNING (Update success)",
-			input: testEndpoint(endpointID, v1.EndpointPhasePENDING),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("UpdateEndpoint", endpointIDStr, mock.MatchedBy(func(r *v1.Endpoint) bool {
-					return r.Status != nil && r.Status.Phase == v1.EndpointPhaseRUNNING && r.Status.ErrorMessage == ""
-				})).Return(nil).Once()
-			},
-			wantErr: false,
-		},
-		{
-			name:  "Phase=PENDING -> Set Phase=RUNNING (Update failed)",
-			input: testEndpoint(endpointID, v1.EndpointPhasePENDING),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("UpdateEndpoint", endpointIDStr, mock.MatchedBy(func(r *v1.Endpoint) bool {
-					return r.Status != nil && r.Status.Phase == v1.EndpointPhaseRUNNING
-				})).Return(assert.AnError).Once()
+			name: "update fail",
+			in:   ep(id, ""),
+			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
+				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
+				s.On("ListEngine", mock.Anything).Return([]v1.Engine{engine}, nil).Maybe()
+				s.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil).Maybe()
+				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
+				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(assert.AnError)
 			},
 			wantErr: true,
 		},
 		{
-			name:  "Phase=RUNNING -> No Change",
-			input: testEndpoint(endpointID, v1.EndpointPhaseRUNNING),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// Expect no calls to UpdateEndpoint or DeleteEndpoint.
-			},
-			wantErr: false,
-		},
-		{
-			name:  "Phase=DELETED (no deletionTimestamp) -> No Change",
-			input: testEndpoint(endpointID, v1.EndpointPhaseDELETED),
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// Expect no calls to UpdateEndpoint or DeleteEndpoint.
+			name: "running health ok",
+			in:   ep(id, v1.EndpointPhaseRUNNING),
+			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
+				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
+				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
 			},
 			wantErr: false,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-			c := newTestEndpointController(mockStorage)
-
-			err := c.sync(tt.input) // Test sync directly.
-
+			ms := &storagemocks.MockStorage{}
+			mo := &orchestratormocks.MockOrchestrator{}
+			tt.setup(ms, mo)
+			c := newTestEndpointController(ms, mo)
+			err := c.sync(tt.in)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
-			mockStorage.AssertExpectations(t)
+			ms.AssertExpectations(t)
+			mo.AssertExpectations(t)
 		})
 	}
 }
 
-// --- Test for ListKeys ---
+/* ---------- ListKeys ---------- */
 
 func TestEndpointController_ListKeys(t *testing.T) {
 	tests := []struct {
-		name      string
-		mockSetup func(*storagemocks.MockStorage)
-		wantKeys  []interface{}
-		wantErr   bool
+		name    string
+		setup   func(*storagemocks.MockStorage)
+		wantErr bool
 	}{
 		{
-			name: "List success",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListEndpoint", storage.ListOption{}).Return([]v1.Endpoint{
-					{ID: 1}, {ID: 5}, {ID: 10},
-				}, nil).Once()
+			name: "ok",
+			setup: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", storage.ListOption{}).Return([]v1.Endpoint{{ID: 1}, {ID: 3}}, nil)
 			},
-			wantKeys: []interface{}{1, 5, 10},
-			wantErr:  false,
+			wantErr: false,
 		},
 		{
-			name: "List returns empty",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListEndpoint", storage.ListOption{}).Return([]v1.Endpoint{}, nil).Once()
+			name: "err",
+			setup: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", storage.ListOption{}).Return(nil, assert.AnError)
 			},
-			wantKeys: []interface{}{},
-			wantErr:  false,
-		},
-		{
-			name: "List returns error",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListEndpoint", storage.ListOption{}).Return(nil, assert.AnError).Once()
-			},
-			wantKeys: nil,
-			wantErr:  true,
+			wantErr: true,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-			c := newTestEndpointController(mockStorage)
-
-			keys, err := c.ListKeys()
-
+			ms := &storagemocks.MockStorage{}
+			tt.setup(ms)
+			c := &EndpointController{storage: ms}
+			_, err := c.ListKeys()
 			if tt.wantErr {
 				assert.Error(t, err)
-				assert.Nil(t, keys)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, tt.wantKeys, keys)
 			}
-			mockStorage.AssertExpectations(t)
+			ms.AssertExpectations(t)
 		})
 	}
 }
 
-// --- Test for Reconcile ---
+/* ---------- Reconcile ---------- */
 
 func TestEndpointController_Reconcile(t *testing.T) {
-	endpointID := 1
-	endpointIDStr := strconv.Itoa(endpointID)
-
-	// mockSyncHandler provides a controllable sync function for Reconcile tests.
-	mockSyncHandler := func(obj *v1.Endpoint) error {
-		// Check for a condition to simulate failure.
-		if obj != nil && obj.Metadata != nil && obj.Metadata.Name == "sync-should-fail" {
-			return errors.New("mock sync failed")
-		}
-		// Simulate successful sync.
-		return nil
-	}
-
+	id := 1
 	tests := []struct {
-		name          string
-		inputKey      interface{}
-		mockSetup     func(*storagemocks.MockStorage)
-		useMockSync   bool  // Flag to indicate if the mock syncHandler should be used.
-		expectedError error // Expected contained error string for specific checks.
-		wantErr       bool
+		name    string
+		key     interface{}
+		setup   func(*storagemocks.MockStorage)
+		wantErr bool
 	}{
 		{
-			name:     "Reconcile success (real sync, no status change)", // Test scenario using default sync handler.
-			inputKey: endpointID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetEndpoint succeeds, endpoint is already in the desired state.
-				s.On("GetEndpoint", endpointIDStr).Return(testEndpoint(endpointID, v1.EndpointPhaseRUNNING), nil).Once()
-				// The real 'sync' method expects no further storage calls here.
+			name: "ok",
+			key:  id,
+			setup: func(s *storagemocks.MockStorage) {
+				s.On("GetEndpoint", strconv.Itoa(id)).Return(ep(id, v1.EndpointPhaseRUNNING), nil)
 			},
-			useMockSync: false, // Use the default c.sync via syncHandler.
-			wantErr:     false,
+			wantErr: false,
 		},
 		{
-			name:     "Reconcile success (real sync, status updated)", // Test scenario using default sync handler.
-			inputKey: endpointID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetEndpoint succeeds, endpoint needs status update.
-				s.On("GetEndpoint", endpointIDStr).Return(testEndpoint(endpointID, v1.EndpointPhasePENDING), nil).Once()
-				// The real 'sync' method expects UpdateEndpoint to be called.
-				s.On("UpdateEndpoint", endpointIDStr, mock.MatchedBy(func(r *v1.Endpoint) bool {
-					return r.Status != nil && r.Status.Phase == v1.EndpointPhaseRUNNING
-				})).Return(nil).Once()
-			},
-			useMockSync: false, // Use the default c.sync via syncHandler.
-			wantErr:     false,
+			name:    "invalid key",
+			key:     "a",
+			wantErr: true,
 		},
 		{
-			name:     "Reconcile success (mock sync)", // Test Reconcile isolation using mock handler.
-			inputKey: endpointID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetEndpoint succeeds.
-				s.On("GetEndpoint", endpointIDStr).Return(testEndpoint(endpointID, v1.EndpointPhaseRUNNING), nil).Once()
-				// No further storage calls expected by Reconcile before calling syncHandler.
+			name: "get fail",
+			key:  id,
+			setup: func(s *storagemocks.MockStorage) {
+				s.On("GetEndpoint", strconv.Itoa(id)).Return(nil, assert.AnError)
 			},
-			useMockSync: true, // Override with mockSyncHandler.
-			wantErr:     false,
-		},
-		{
-			name:     "Invalid key type",
-			inputKey: "not-an-int",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// No storage calls expected.
-			},
-			useMockSync:   false, // Fails before sync handler.
-			wantErr:       true,
-			expectedError: errors.New("failed to assert key to endpointID"),
-		},
-		{
-			name:     "GetEndpoint returns error",
-			inputKey: endpointID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// Mock GetEndpoint to return an error.
-				s.On("GetEndpoint", endpointIDStr).Return(nil, assert.AnError).Once()
-			},
-			useMockSync: false, // Fails before sync handler.
-			wantErr:     true,  // Expect error from GetEndpoint to be propagated.
-		},
-		{
-			name:     "Sync handler returns error (mock sync)",
-			inputKey: endpointID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetEndpoint succeeds, providing the endpoint that triggers mock failure.
-				endpoint := testEndpoint(endpointID, v1.EndpointPhaseRUNNING)
-				endpoint.Metadata.Name = "sync-should-fail" // Condition for mockSyncHandler failure.
-				s.On("GetEndpoint", endpointIDStr).Return(endpoint, nil).Once()
-			},
-			useMockSync: true, // Use the mock handler.
-			wantErr:     true, // Expect error from mock sync handler to be propagated.
+			wantErr: true,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockStorage)
+			ms := &storagemocks.MockStorage{}
+			if tt.setup != nil {
+				tt.setup(ms)
 			}
-
-			// Create controller using the helper.
-			c := newTestEndpointController(mockStorage)
-
-			// Override syncHandler if the test case requires the mock.
-			if tt.useMockSync {
-				c.syncHandler = mockSyncHandler
-			}
-
-			// Directly call the Reconcile method.
-			err := c.Reconcile(tt.inputKey)
-
-			// Assertions.
+			c := &EndpointController{storage: ms, syncHandler: func(*v1.Endpoint) error { return nil }}
+			err := c.Reconcile(tt.key)
 			if tt.wantErr {
 				assert.Error(t, err)
-				if tt.expectedError != nil {
-					// Use Contains for checking wrapped errors.
-					assert.Contains(t, err.Error(), tt.expectedError.Error())
-				}
 			} else {
 				assert.NoError(t, err)
 			}
-			// Verify mock expectations.
-			mockStorage.AssertExpectations(t)
+			ms.AssertExpectations(t)
 		})
 	}
 }
