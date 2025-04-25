@@ -462,6 +462,19 @@ func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 		imageRegistry.Spec.AuthConfig.Username,
 		password)))
 
+	dockerAuthData := fmt.Sprintf(`{
+			"auths": {
+				"%s": {
+					"username": "%s",
+					"password": "%s",
+					"auth": "%s"
+				}
+			}
+		}`, registryURL.Host,
+		imageRegistry.Spec.AuthConfig.Username,
+		password,
+		auth)
+	dockerAuthDataBase64 := base64.StdEncoding.EncodeToString([]byte(dockerAuthData))
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "neutree-cluster-" + cluster.Metadata.Name + "-image-pull-secret",
@@ -469,18 +482,7 @@ func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 		},
 		Type: corev1.SecretTypeDockerConfigJson,
 		Data: map[string][]byte{
-			corev1.DockerConfigJsonKey: []byte(fmt.Sprintf(`{
-				"auths": {
-					"%s": {
-						"username": "%s",
-						"password": "%s",
-						"auth": "%s"
-					}
-				}
-			}`, registryURL.Host,
-				imageRegistry.Spec.AuthConfig.Username,
-				password,
-				auth)),
+			corev1.DockerConfigJsonKey: []byte(dockerAuthDataBase64),
 		},
 	}, nil
 }
