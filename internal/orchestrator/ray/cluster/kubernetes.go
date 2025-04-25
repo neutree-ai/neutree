@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
@@ -457,9 +458,10 @@ func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 	case imageRegistry.Spec.AuthConfig.RegistryToken != "":
 		password = imageRegistry.Spec.AuthConfig.RegistryToken
 	}
-
+	userName := removeEscapes(imageRegistry.Spec.AuthConfig.Username)
+	password = removeEscapes(password)
 	auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s",
-		imageRegistry.Spec.AuthConfig.Username,
+		userName,
 		password)))
 
 	dockerAuthData := fmt.Sprintf(`{
@@ -471,10 +473,9 @@ func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 				}
 			}
 		}`, registryURL.Host,
-		imageRegistry.Spec.AuthConfig.Username,
+		userName,
 		password,
 		auth)
-	dockerAuthDataBase64 := base64.StdEncoding.EncodeToString([]byte(dockerAuthData))
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "neutree-cluster-" + cluster.Metadata.Name + "-image-pull-secret",
@@ -482,7 +483,7 @@ func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 		},
 		Type: corev1.SecretTypeDockerConfigJson,
 		Data: map[string][]byte{
-			corev1.DockerConfigJsonKey: []byte(dockerAuthDataBase64),
+			corev1.DockerConfigJsonKey: []byte(dockerAuthData),
 		},
 	}, nil
 }
@@ -807,4 +808,9 @@ func generateRayClusterMetricsScrapeTargetsConfig(clusterName, clusterNamespace 
 	}
 
 	return metricsScrapeTargetConfig, nil
+}
+
+func removeEscapes(s string) string {
+	re := regexp.MustCompile(`\\`)
+	return re.ReplaceAllString(s, "")
 }
