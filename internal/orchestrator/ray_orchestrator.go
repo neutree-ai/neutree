@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
@@ -268,7 +269,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    endpoint.Spec.Cluster,
+				Value:    strconv.Quote(endpoint.Spec.Cluster),
 			},
 		},
 	})
@@ -285,7 +286,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    endpoint.Spec.Engine.Engine,
+				Value:    strconv.Quote(endpoint.Spec.Engine.Engine),
 			},
 		},
 	})
@@ -319,7 +320,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    endpoint.Spec.Model.Registry,
+				Value:    strconv.Quote(endpoint.Spec.Model.Registry),
 			},
 		},
 	})
@@ -352,7 +353,9 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	// Build the list of applications for the PUT request
 	updatedAppsList := make([]dashboard.RayServeApplication, 0, len(currentAppsResp.Applications)+1)
 	for _, appStatus := range currentAppsResp.Applications {
-		updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+		if appStatus.DeployedAppConfig != nil {
+			updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+		}
 	}
 
 	updatedAppsList = append(updatedAppsList, newApp)
@@ -393,7 +396,7 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    endpoint.Spec.Cluster,
+				Value:    strconv.Quote(endpoint.Spec.Cluster),
 			},
 		},
 	})
@@ -482,17 +485,23 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	switch status.Status {
 	case "RUNNING":
+		fallthrough
 	case "DELETING":
-		phase = v1.EndpointPhaseRUNNING
-	case "NOT_STARTED":
+		fallthrough
 	case "DEPLOYING":
-		phase = v1.EndpointPhasePENDING
-	case "DEPLOY_FAILED":
+		fallthrough
 	case "UNHEALTHY":
+		fallthrough
+	case "NOT_STARTED":
+		phase = v1.EndpointPhaseRUNNING
+		// phase = v1.EndpointPhasePENDING
+	case "DEPLOY_FAILED":
 		phase = v1.EndpointPhaseFAILED
 	default:
 		phase = v1.EndpointPhaseFAILED
 	}
+
+	fmt.Println("status:", status.Status, phase)
 
 	serviceURL, err := dashboard.FormatServiceURL(o.cluster, endpoint)
 	if err != nil {

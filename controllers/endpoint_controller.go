@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -161,6 +162,8 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			return errors.Wrapf(err, "failed to check endpoint %s health", obj.Metadata.Name)
 		}
 
+		fmt.Println(status)
+
 		if status.Phase != v1.EndpointPhaseRUNNING {
 			klog.Infof("Endpoint %s is not RUNNING, updating status", obj.Metadata.Name)
 
@@ -234,12 +237,12 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    obj.Spec.Cluster,
+				Value:    strconv.Quote(obj.Spec.Cluster),
 			},
 			{
 				Column:   "metadata->workspace",
 				Operator: "eq",
-				Value:    obj.Metadata.Workspace,
+				Value:    strconv.Quote(obj.Metadata.Workspace),
 			},
 		},
 	})
