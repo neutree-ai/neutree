@@ -26,6 +26,37 @@ type ClusterSpec struct {
 	Version string `json:"version"`
 }
 
+type RaySSHProvisionClusterConfig struct {
+	Provider Provider `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Auth     Auth     `json:"auth,omitempty" yaml:"auth,omitempty"`
+}
+
+type RayKubernetesProvisionClusterConfig struct {
+	Kubeconfig       string            `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
+	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
+	WorkerGroupSpecs []WorkerGroupSpec `json:"worker_group_specs,omitempty" yaml:"worker_group_specs,omitempty"`
+}
+
+type KubernetesAccessMode string
+
+const (
+	KubernetesAccessModeLoadBalancer KubernetesAccessMode = "LoadBalancer"
+	// todo support ingress access mode.
+	KubernetesAccessModeIngress KubernetesAccessMode = "Ingress"
+)
+
+type HeadNodeSpec struct {
+	AccessMode KubernetesAccessMode `json:"access_mode,omitempty" yaml:"access_mode,omitempty"`
+	Resources  map[string]string    `json:"resources,omitempty" yaml:"resources,omitempty"`
+}
+
+type WorkerGroupSpec struct {
+	GroupName   string            `json:"group_name,omitempty" yaml:"group_name,omitempty"`
+	MinReplicas int32             `json:"min_replicas,omitempty" yaml:"min_replicas,omitempty"`
+	MaxReplicas int32             `json:"max_replicas,omitempty" yaml:"max_replicas,omitempty"`
+	Resources   map[string]string `json:"resources,omitempty" yaml:"resources,omitempty"`
+}
+
 type ClusterStatus struct {
 	Phase              ClusterPhase `json:"phase,omitempty"`
 	Image              string       `json:"image,omitempty"`
@@ -48,6 +79,10 @@ type ClusterStatus struct {
 }
 
 func (c Cluster) Key() string {
+	if c.Metadata == nil || c.Metadata.Workspace == "" {
+		return "default" + "-" + "clsuter" + "-" + strconv.Itoa(c.ID) + "-" + c.Metadata.Name
+	}
+
 	return c.Metadata.Workspace + "-" + "clsuter" + "-" + strconv.Itoa(c.ID) + "-" + c.Metadata.Name
 }
 

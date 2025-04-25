@@ -32,6 +32,8 @@ type ClusterController struct {
 	syncHandler func(cluster *v1.Cluster) error
 
 	obsCollectConfigManager manager.ObsCollectConfigManager
+
+	MetricsRemoteWriteURL string
 }
 
 type ClusterControllerOption struct {
@@ -39,6 +41,7 @@ type ClusterControllerOption struct {
 	Storage               storage.Storage
 	Workers               int
 	DefaultClusterVersion string
+	MetricsRemoteWriteURL string
 
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 }
@@ -56,6 +59,7 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		defaultClusterVersion: opt.DefaultClusterVersion,
 
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
+		MetricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
 	}
 
 	c.syncHandler = c.sync
@@ -114,9 +118,10 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 	}
 
 	clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:       obj,
-		ImageRegistry: imageRegistry,
-		ImageService:  c.imageService,
+		Cluster:               obj,
+		ImageRegistry:         imageRegistry,
+		ImageService:          c.imageService,
+		MetricsRemoteWriteURL: c.MetricsRemoteWriteURL,
 	})
 	if err != nil {
 		return err
@@ -176,6 +181,11 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestr
 		if err != nil {
 			return errors.Wrap(err, "failed to reconcile nodes")
 		}
+	}
+
+	err = clusterOrchestrator.SyncCluster()
+	if err != nil {
+		return errors.Wrap(err, "sync cluster failed")
 	}
 
 	err = clusterOrchestrator.HealthCheck()
@@ -388,16 +398,16 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 		newStatus.Version = obj.Status.Version
 		newStatus.RayVersion = obj.Status.RayVersion
+		newStatus.DesiredNodes = obj.Status.DesiredNodes
 	}
 
 	if obj.IsInitialized() && obj.Metadata.DeletionTimestamp == "" {
-		newStatus.DesiredNodes = len(clusterOrchestrator.GetDesireStaticWorkersIP())
-
 		clusterStatus, getClusterStatusErr := clusterOrchestrator.ClusterStatus()
 		if getClusterStatusErr == nil {
 			newStatus.ReadyNodes = clusterStatus.ReadyNodes
 			newStatus.Version = clusterStatus.NeutreeServeVersion
 			newStatus.RayVersion = clusterStatus.RayVersion
+			newStatus.DesiredNodes = clusterStatus.DesireNodes
 		}
 	}
 

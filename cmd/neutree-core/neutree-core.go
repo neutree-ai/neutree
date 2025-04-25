@@ -21,6 +21,7 @@ var (
 	defaultClusterVersion   = flag.String("default-cluster-version", "v1", "default neutree cluster version")
 	deployType              = flag.String("deploy-type", "local", "deploy type")
 	LocalCollecteConfigPath = flag.String("local-collect-config-path", "/etc/neutree/collect", "local collect config path")
+	MetricsRemoteWriteURL   = flag.String("metrics-remote-write-url", "http://10.255.1.81:8480/insert/0/prometheus/", "metrics remote write url")
 )
 
 func main() {
@@ -73,6 +74,7 @@ func main() {
 		DefaultClusterVersion:   *defaultClusterVersion,
 		ImageService:            imageService,
 		ObsCollectConfigManager: obsCollectConfigManager,
+		MetricsRemoteWriteURL:   *MetricsRemoteWriteURL,
 	})
 
 	if err != nil {

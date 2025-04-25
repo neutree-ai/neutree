@@ -15,7 +15,7 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 		cluster       *v1.Cluster
 		mockNodes     []v1.NodeSummary
 		mockError     error
-		expected      []MetricsScrapeTargetsConfig
+		expected      []v1.MetricsScrapeTargetsConfig
 		expectedError string
 	}{
 		{
@@ -39,7 +39,7 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 					},
 				},
 			},
-			expected: []MetricsScrapeTargetsConfig{
+			expected: []v1.MetricsScrapeTargetsConfig{
 				{
 					Labels: map[string]string{
 						"ray_io_cluster": "test-cluster",
@@ -68,7 +68,7 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 					},
 				},
 			},
-			expected: []MetricsScrapeTargetsConfig{
+			expected: []v1.MetricsScrapeTargetsConfig{
 				{
 					Labels: map[string]string{
 						"ray_io_cluster": "test-cluster",
@@ -111,7 +111,7 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 					},
 				},
 			},
-			expected: []MetricsScrapeTargetsConfig{
+			expected: []v1.MetricsScrapeTargetsConfig{
 				{
 					Labels: map[string]string{
 						"ray_io_cluster": "test-cluster",

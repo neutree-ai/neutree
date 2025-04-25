@@ -156,7 +156,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 		healthy := modelRegistry.HealthyCheck()
 		if !healthy {
-			return errors.New("health check failed")
+			return errors.New("health check model registry " + obj.Metadata.Name + " failed")
 		}
 	}
 
