@@ -37,7 +37,8 @@ func NewEndpointController(option *EndpointControllerOption) (*EndpointControlle
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},
-		storage: option.Storage,
+		storage:      option.Storage,
+		imageService: option.ImageService,
 	}
 
 	c.syncHandler = c.sync
