@@ -265,7 +265,7 @@ func (d *DockerCommandRunner) configureRuntime(ctx context.Context, runOptions [
 	if strings.Contains(runtimeOutput, "nvidia-container-runtime") {
 		_, err := d.sshCommandRunner.Run(ctx, "nvidia-smi", false, nil, false, nil, "host", "", false)
 		if err == nil {
-			return append(runOptions, "--runtime=nvidia"), nil
+			return append(runOptions, " --runtime=nvidia --gpus all "), nil
 		}
 
 		klog.Info("Nvidia Container Runtime is present, but no GPUs found.")

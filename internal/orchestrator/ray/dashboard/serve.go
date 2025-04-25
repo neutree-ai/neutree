@@ -48,18 +48,17 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 	}
 
 	endpoint.Spec.DeploymentOptions["backend"] = map[string]interface{}{
-		"backend": map[string]interface{}{
-			"num_replicas": endpoint.Spec.Replicas.Num,
-			"num_cpus":     endpoint.Spec.Resources.CPU,
-			"num_gpus":     endpoint.Spec.Resources.GPU,
-			"memory":       endpoint.Spec.Resources.Memory,
-			"resources":    accelerator,
-		},
-		"controller": map[string]interface{}{
-			"num_replicas": 1,
-			"num_cpus":     0.1,
-			"num_gpus":     0,
-		},
+		"num_replicas": endpoint.Spec.Replicas.Num,
+		"num_cpus":     endpoint.Spec.Resources.CPU,
+		"num_gpus":     endpoint.Spec.Resources.GPU,
+		"memory":       endpoint.Spec.Resources.Memory,
+		"resources":    accelerator,
+	}
+
+	endpoint.Spec.DeploymentOptions["controller"] = map[string]interface{}{
+		"num_replicas": 1,
+		"num_cpus":     0.1,
+		"num_gpus":     0,
 	}
 
 	args := map[string]interface{}{

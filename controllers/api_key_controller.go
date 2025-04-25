@@ -118,7 +118,7 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 
 func (c *ApiKeyController) updateStatus(obj *v1.ApiKey, phase v1.ApiKeyPhase, err error) error {
 	newStatus := &v1.ApiKeyStatus{
-		LastTransitionTime: time.Now(),
+		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
 		Phase:              phase,
 	}
 	if err != nil {

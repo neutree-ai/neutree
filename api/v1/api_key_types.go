@@ -1,7 +1,5 @@
 package v1
 
-import "time"
-
 type ApiKeySpec struct {
 	Quota int64 `json:"quota,omitempty"`
 }
@@ -16,12 +14,12 @@ const (
 
 type ApiKeyStatus struct {
 	ErrorMessage       string      `json:"error_message,omitempty"`
-	LastTransitionTime time.Time   `json:"last_transition_time,omitempty"`
+	LastTransitionTime string      `json:"last_transition_time,omitempty"`
 	Phase              ApiKeyPhase `json:"phase,omitempty"`
 	SkValue            string      `json:"sk_value,omitempty"`
 	Usage              int64       `json:"usage,omitempty"`
-	LastUsedAt         time.Time   `json:"last_used_at,omitempty"`
-	LastSyncAt         time.Time   `json:"last_sync_at,omitempty"`
+	LastUsedAt         string      `json:"last_used_at,omitempty"`
+	LastSyncAt         string      `json:"last_sync_at,omitempty"`
 }
 
 type ApiKey struct {

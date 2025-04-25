@@ -234,12 +234,12 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
-				Value:    obj.Spec.Cluster,
+				Value:    strconv.Quote(obj.Spec.Cluster),
 			},
 			{
 				Column:   "metadata->workspace",
 				Operator: "eq",
-				Value:    obj.Metadata.Workspace,
+				Value:    strconv.Quote(obj.Metadata.Workspace),
 			},
 		},
 	})

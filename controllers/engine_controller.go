@@ -121,11 +121,8 @@ func (c *EngineController) sync(obj *v1.Engine) error {
 
 func (c *EngineController) updateStatus(obj *v1.Engine, phase v1.EnginePhase, err error) error {
 	newStatus := &v1.EngineStatus{
-		LastTransitionTime: func() *time.Time {
-			now := time.Now()
-			return &now
-		}(),
-		Phase: phase,
+		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		Phase:              phase,
 	}
 	if err != nil {
 		newStatus.ErrorMessage = err.Error()
