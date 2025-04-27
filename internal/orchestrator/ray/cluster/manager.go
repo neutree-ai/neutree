@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -17,14 +18,18 @@ var (
 )
 
 type ClusterManager interface {
+	// UpCluster will create a new cluster if not exists, if restart is true, will restart head node.
 	UpCluster(ctx context.Context, restart bool) (string, error)
+	// DownCluster will down the cluster.
 	DownCluster(ctx context.Context) error
-	StartNode(ctx context.Context, nodeIP string) error
-	StopNode(ctx context.Context, nodeIP string) error
-	GetDesireStaticWorkersIP(ctx context.Context) []string
+	// GetDashboardService will return the dashboard service for the cluster.
 	GetDashboardService(ctx context.Context) (dashboard.DashboardService, error)
+	// GetServeEndpoint will return the serve endpoint for the cluster.
 	GetServeEndpoint(ctx context.Context) (string, error)
+	// Sync will sync the cluster spec to the real cluster.
 	Sync(ctx context.Context) error
+	// GetDesireStaticWorkers will return the desire static workers number for the cluster.
+	GetDesireStaticWorkers() int
 }
 
 func checkClusterImage(imageService registry.ImageService, cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) error {
@@ -63,4 +68,34 @@ func getClusterImage(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) (stri
 	}
 
 	return registryURL.Host + "/" + imageRegistry.Spec.Repository + "/neutree-serve:" + cluster.Spec.Version, nil
+}
+
+func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster, dashboardService dashboard.DashboardService) (*v1.MetricsScrapeTargetsConfig, error) {
+	nodes, err := dashboardService.ListNodes()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list ray nodes")
+	}
+
+	metricsScrapeTargetConfig := &v1.MetricsScrapeTargetsConfig{
+		Labels: map[string]string{
+			"ray_io_cluster": cluster.Metadata.Name,
+			"job":            "ray",
+		},
+	}
+
+	for _, node := range nodes {
+		if node.Raylet.IsHeadNode {
+			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.DashboardMetricsPort))
+			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.AutoScaleMetricsPort))
+			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.RayletMetricsPort))
+
+			continue
+		}
+
+		if node.Raylet.State == v1.AliveNodeState {
+			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.RayletMetricsPort))
+		}
+	}
+
+	return metricsScrapeTargetConfig, nil
 }

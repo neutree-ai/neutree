@@ -7,28 +7,32 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/command_runner"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/config"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/orchestrator/ray/observability"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog"
 )
 
 type sshClusterManager struct {
-	executor     command.Executor
-	configMgr    *config.Manager
-	config       *v1.RayClusterConfig
-	imageService registry.ImageService
+	cluster *v1.Cluster
+
+	obsConfigSync *observability.LocalConfigSync
+	executor      command.Executor
+	configMgr     *config.Manager
+	config        *v1.RayClusterConfig
+	imageService  registry.ImageService
 }
 
 func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService,
-	executor command.Executor) (*sshClusterManager, error) {
+	executor command.Executor, localObsConfigSync *observability.LocalConfigSync) (*sshClusterManager, error) {
 	err := checkClusterImage(imageService, cluster, imageRegistry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to check cluster image")
@@ -53,9 +57,10 @@ func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 	}
 
 	manager := &sshClusterManager{
-		executor:  executor,
-		configMgr: configMgr,
-		config:    rayClusterConfig,
+		executor:      executor,
+		configMgr:     configMgr,
+		config:        rayClusterConfig,
+		obsConfigSync: localObsConfigSync,
 	}
 
 	return manager, nil
@@ -69,7 +74,7 @@ func (c *sshClusterManager) DownCluster(ctx context.Context) error {
 		nodeIP := c.config.Provider.WorkerIPs[i]
 
 		eg.Go(func() error {
-			return c.StopNode(ctx, nodeIP)
+			return c.stopNode(ctx, nodeIP)
 		})
 	}
 
@@ -91,16 +96,177 @@ func (c *sshClusterManager) DownCluster(ctx context.Context) error {
 
 	klog.V(4).Infof("Ray cluster down output: %s", string(output))
 
+	// remove local cluster metrics config file
+	err = c.removeMetricsConfig(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to remove metrics config")
+	}
+
 	// remove local cluster state file to avoid ray cluster start failed.
-	localClusterStatePath := fmt.Sprintf("%s/cluster-%s.state", getRayTmpDir(), c.config.ClusterName)
-	if err = os.Remove(localClusterStatePath); err != nil {
-		return errors.Wrap(err, "failed to remove local cluster state file")
+	localClusterStatePath := filepath.Join(getRayTmpDir(), fmt.Sprintf("cluster-%s.state", c.config.ClusterName))
+	if _, err = os.Stat(localClusterStatePath); err == nil {
+		if err = os.Remove(localClusterStatePath); err != nil {
+			return errors.Wrap(err, "failed to remove local cluster state file")
+		}
 	}
 
 	return nil
 }
 
 func (c *sshClusterManager) Sync(ctx context.Context) error {
+	err := c.reconcileStaticNodes(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to reconcile static nodes")
+	}
+
+	err = c.syncMetricsConfig(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to sync metrics config")
+	}
+	return nil
+}
+
+// 1. get desired static node ip from cluster spec
+// 2. get static node provision status from cluster status
+// 3. compare desired static node ip and static node provision status
+// 4. start static node that not provisioned
+// 5. stop static node that not in desired static node ip
+func (c *sshClusterManager) reconcileStaticNodes(ctx context.Context) error { //nolint:funlen
+	klog.V(4).Info("Reconciling Static Nodes for ssh cluster " + c.cluster.Metadata.Name)
+
+	var (
+		desiredStaticNodeIpMap       = map[string]string{}
+		staticNodeProvisionStatusMap = map[string]string{}
+		nodeIpToStart                []string
+		nodeIpToStop                 []string
+	)
+
+	// get desired static provision node ip from cluster spec
+	desiredStaticWorkersIP := c.config.Provider.WorkerIPs
+
+	for _, nodeIp := range desiredStaticWorkersIP {
+		desiredStaticNodeIpMap[nodeIp] = nodeIp
+	}
+
+	// get static node provision status from cluster status
+	if c.cluster.Status != nil && c.cluster.Status.NodeProvisionStatus != "" {
+		err := json.Unmarshal([]byte(c.cluster.Status.NodeProvisionStatus), &staticNodeProvisionStatusMap)
+		if err != nil {
+			return errors.Wrap(err, "failed to unmarshal static node provision status")
+		}
+	}
+
+	for nodeIp := range staticNodeProvisionStatusMap {
+		if _, ok := desiredStaticNodeIpMap[nodeIp]; ok {
+			continue
+		}
+
+		nodeIpToStop = append(nodeIpToStop, nodeIp)
+	}
+
+	for _, nodeIp := range desiredStaticNodeIpMap {
+		// already provisioned, skip
+		if _, ok := staticNodeProvisionStatusMap[nodeIp]; ok && staticNodeProvisionStatusMap[nodeIp] == v1.ProvisionedNodeProvisionStatus {
+			continue
+		}
+
+		nodeIpToStart = append(nodeIpToStart, nodeIp)
+	}
+
+	nodeOpErrors := make([]error, len(nodeIpToStart)+len(nodeIpToStop))
+	eg := &errgroup.Group{}
+
+	for i := range nodeIpToStart {
+		ip := nodeIpToStart[i]
+
+		eg.Go(func() error {
+			klog.Info("Starting ray node " + ip)
+
+			err := c.startNode(ctx, ip)
+			if err != nil {
+				nodeOpErrors[i] = errors.Wrap(err, "failed to start ray node "+ip)
+			}
+
+			return nil
+		})
+	}
+
+	for i := range nodeIpToStop {
+		ip := nodeIpToStop[i]
+
+		eg.Go(func() error {
+			klog.Info("Stopping ray node " + ip)
+
+			err := c.stopNode(ctx, ip)
+			if err != nil {
+				nodeOpErrors[i+len(nodeIpToStart)] = errors.Wrap(err, "failed to stop ray node "+ip)
+			}
+
+			return nil
+		})
+	}
+
+	eg.Wait() //nolint:errcheck
+
+	// update static node provision status
+	for i := range nodeIpToStart {
+		if nodeOpErrors[i] == nil {
+			staticNodeProvisionStatusMap[nodeIpToStart[i]] = v1.ProvisionedNodeProvisionStatus
+		} else {
+			staticNodeProvisionStatusMap[nodeIpToStart[i]] = v1.ProvisioningNodeProvisionStatus
+		}
+	}
+
+	for i := range nodeIpToStop {
+		if nodeOpErrors[len(nodeIpToStart)+i] == nil {
+			delete(staticNodeProvisionStatusMap, nodeIpToStop[i])
+		}
+	}
+
+	// update cluster labels
+	staticNodeProvisionStatusContent, err := json.Marshal(staticNodeProvisionStatusMap)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal static node provision status")
+	}
+
+	if c.cluster.Status == nil {
+		c.cluster.Status = &v1.ClusterStatus{}
+	}
+
+	c.cluster.Status.NodeProvisionStatus = string(staticNodeProvisionStatusContent)
+
+	aggregateError := apierrors.NewAggregate(nodeOpErrors)
+	if aggregateError != nil {
+		return aggregateError
+	}
+
+	return nil
+}
+
+func (c *sshClusterManager) syncMetricsConfig(ctx context.Context) error {
+	dashboardService, err := c.GetDashboardService(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get dashboard service")
+	}
+
+	clusterMetricsConfig, err := generateRayClusterMetricsScrapeTargetsConfig(c.cluster, dashboardService)
+	if err != nil {
+		return errors.Wrap(err, "failed to generate ray cluster metrics scrape targets config")
+	}
+
+	err = c.obsConfigSync.UpdateMetricsConfig(c.cluster.Key(), []*v1.MetricsScrapeTargetsConfig{clusterMetricsConfig})
+	if err != nil {
+		return errors.Wrap(err, "failed to update ray cluster metrics scrape targets config")
+	}
+
+	return nil
+}
+
+func (c *sshClusterManager) removeMetricsConfig(_ context.Context) error {
+	err := c.obsConfigSync.RemoveMetricsConfig(c.cluster.Key())
+	if err != nil {
+		return errors.Wrap(err, "failed to remove ray cluster metrics scrape targets config")
+	}
 	return nil
 }
 
@@ -126,29 +292,19 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 
 	klog.V(4).Infof("Ray cluster up output: %s", string(output))
 
-	headIP, err := c.GetHeadIP(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get head ip")
-	}
-
-	return headIP, nil
+	return c.config.Provider.HeadIP, nil
 }
 
-func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error {
-	headIP, err := c.GetHeadIP(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to get head ip")
-	}
-
+func (c *sshClusterManager) startNode(ctx context.Context, nodeIP string) error {
 	env := map[string]interface{}{
-		"RAY_HEAD_IP": headIP,
+		"RAY_HEAD_IP": c.config.Provider.HeadIP,
 	}
 
 	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
 	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
 
 	for _, command := range c.config.InitializationCommands {
-		_, err = dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)
+		_, err := dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)
 		if err != nil {
 			return errors.Wrap(err, "failed to run command "+command)
 		}
@@ -173,13 +329,8 @@ func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error 
 	return nil
 }
 
-func (c *sshClusterManager) DrainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error {
-	headIP, err := c.GetHeadIP(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to get head ip")
-	}
-
-	gcsServerURL := headIP + ":6379"
+func (c *sshClusterManager) drainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error {
+	gcsServerURL := c.config.Provider.HeadIP + ":6379"
 	drainArgs := []string{
 		"drain-node",
 		"--address=" + gcsServerURL,
@@ -215,7 +366,7 @@ func (c *sshClusterManager) getNodeByIP(ctx context.Context, nodeIP string) (*v1
 	return nil, ErrorRayNodeNotFound
 }
 
-func (c *sshClusterManager) StopNode(ctx context.Context, nodeIP string) error {
+func (c *sshClusterManager) stopNode(ctx context.Context, nodeIP string) error {
 	node, err := c.getNodeByIP(ctx, nodeIP)
 	if err != nil {
 		// no need to stop node if node not found.
@@ -228,7 +379,7 @@ func (c *sshClusterManager) StopNode(ctx context.Context, nodeIP string) error {
 
 	if node.Raylet.State == v1.AliveNodeState {
 		// current drainNode behavior is similar to ray stop, and the ray community will optimize it later.
-		err = c.DrainNode(ctx, node.Raylet.NodeID, "DRAIN_NODE_REASON_PREEMPTION", "stop node", 600)
+		err = c.drainNode(ctx, node.Raylet.NodeID, "DRAIN_NODE_REASON_PREEMPTION", "stop node", 600)
 		if err != nil {
 			return errors.Wrap(err, "failed to drain node "+nodeIP)
 		}
@@ -268,35 +419,16 @@ func (c *sshClusterManager) StopNode(ctx context.Context, nodeIP string) error {
 	return nil
 }
 
-func (c *sshClusterManager) GetHeadIP(ctx context.Context) (string, error) {
-	output, err := c.executor.Execute(ctx, "ray", []string{"get-head-ip", c.configMgr.ConfigPath()})
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get cluster head ip: "+string(output))
-	}
-
-	klog.V(4).Infof("Ray get-head-ip output: %s", string(output))
-
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed == "" {
-		return "", errors.New("empty output from ray get-head-ip command")
-	}
-
-	// last line is head ip
-	lines := strings.Split(trimmed, "\n")
-
-	return lines[len(lines)-1], nil
-}
-
-func (c *sshClusterManager) GetDesireStaticWorkersIP(_ context.Context) []string {
-	return c.config.Provider.WorkerIPs
-}
-
 func (c *sshClusterManager) GetDashboardService(_ context.Context) (dashboard.DashboardService, error) {
 	return dashboard.NewDashboardService(fmt.Sprintf("http://%s:8265", c.config.Provider.HeadIP)), nil
 }
 
 func (c *sshClusterManager) GetServeEndpoint(_ context.Context) (string, error) {
 	return fmt.Sprintf("http://%s:8000", c.config.Provider.HeadIP), nil
+}
+
+func (c *sshClusterManager) GetDesireStaticWorkers() int {
+	return len(c.config.Provider.WorkerIPs)
 }
 
 func (c *sshClusterManager) buildSSHCommandArgs(nodeIP string) *command_runner.CommonArgs {

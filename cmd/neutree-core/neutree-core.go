@@ -8,7 +8,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/controllers"
-	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -30,14 +29,6 @@ func main() {
 
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
-
-	obsCollectConfigManager, err := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
-		DeployType:             *deployType,
-		LocalCollectConfigPath: *LocalCollecteConfigPath,
-	})
-	if err != nil {
-		klog.Fatalf("failed to init obs collect config manager: %s", err.Error())
-	}
 
 	s, err := storage.New(storage.Options{
 		AccessURL: *storageAccessURL,
@@ -69,12 +60,12 @@ func main() {
 	}
 
 	clusterController, err := controllers.NewClusterController(&controllers.ClusterControllerOption{
-		Storage:                 s,
-		Workers:                 *controllerWorkers,
-		DefaultClusterVersion:   *defaultClusterVersion,
-		ImageService:            imageService,
-		ObsCollectConfigManager: obsCollectConfigManager,
-		MetricsRemoteWriteURL:   *MetricsRemoteWriteURL,
+		Storage:                s,
+		Workers:                *controllerWorkers,
+		DefaultClusterVersion:  *defaultClusterVersion,
+		ImageService:           imageService,
+		MetricsRemoteWriteURL:  *MetricsRemoteWriteURL,
+		LocalMetricsConfigPath: *LocalCollecteConfigPath,
 	})
 
 	if err != nil {
@@ -114,8 +105,6 @@ func main() {
 	go roleController.Start(ctx)
 	go roleAssignmentController.Start(ctx)
 	go workspaceController.Start(ctx)
-
-	go obsCollectConfigManager.Start(ctx)
 
 	<-ctx.Done()
 }

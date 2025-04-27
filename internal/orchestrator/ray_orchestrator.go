@@ -20,12 +20,10 @@ var (
 )
 
 type OperationConfig struct {
-	UpTimeout        time.Duration
-	DownTimeout      time.Duration
-	StartNodeTimeout time.Duration
-	StopNodeTimeout  time.Duration
-	DrainNodeTimeout time.Duration
-	CommonTimeout    time.Duration
+	UpTimeout     time.Duration
+	DownTimeout   time.Duration
+	SyncCluster   time.Duration
+	CommonTimeout time.Duration
 }
 
 type RayOrchestrator struct {
@@ -62,13 +60,14 @@ func (o *RayOrchestrator) DeleteCluster() error {
 }
 
 func (o *RayOrchestrator) SyncCluster() error {
-	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.SyncCluster)
 	defer cancel()
 
 	err := o.clusterHelper.Sync(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to sync ray cluster")
 	}
+
 	return nil
 }
 
@@ -88,54 +87,6 @@ func (o *RayOrchestrator) HealthCheck() error {
 	}
 
 	return nil
-}
-
-func (o *RayOrchestrator) StartNode(nodeIP string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.StartNodeTimeout)
-	defer cancel()
-
-	if nodeIP == "" {
-		return errors.New("node IP cannot be empty")
-	}
-
-	return o.clusterHelper.StartNode(ctx, nodeIP)
-}
-
-func (o *RayOrchestrator) StopNode(nodeIP string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.StopNodeTimeout)
-	defer cancel()
-
-	return o.clusterHelper.StopNode(ctx, nodeIP)
-}
-
-func (o *RayOrchestrator) getNodeByIP(_ context.Context, nodeIP string) (*v1.NodeSummary, error) {
-	rayNodes, err := o.ListNodes()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list ray nodes")
-	}
-
-	for i := range rayNodes {
-		if rayNodes[i].IP == nodeIP {
-			return &rayNodes[i], nil
-		}
-	}
-
-	return nil, ErrorRayNodeNotFound
-}
-
-func (o *RayOrchestrator) ListNodes() ([]v1.NodeSummary, error) {
-	dashboardService, err := o.getDashboardService(context.Background())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get dashboard service")
-	}
-
-	return dashboardService.ListNodes()
-}
-
-func (o *RayOrchestrator) GetDesireStaticWorkersIP() []string {
-	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
-	defer cancel()
-	return o.clusterHelper.GetDesireStaticWorkersIP(ctx)
 }
 
 func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
@@ -196,7 +147,7 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 
 	for key, activeNodeNumber := range autoScaleStatus.ActiveNodes {
 		// skip calculate headgroup active nodes.
-		if key == "headgroup" {
+		if key == "headgroup" || key == "local.cluster.node" {
 			continue
 		}
 		currentAutoScaleActiveNodes += activeNodeNumber
@@ -217,7 +168,7 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 
 	clusterStatus.PythonVersion = clusterMetadata.Data.PythonVersion
 	clusterStatus.RayVersion = clusterMetadata.Data.RayVersion
-	clusterStatus.DesireNodes = len(o.clusterHelper.GetDesireStaticWorkersIP(context.Background())) + clusterStatus.AutoScaleStatus.PendingNodes +
+	clusterStatus.DesireNodes = o.clusterHelper.GetDesireStaticWorkers() + clusterStatus.AutoScaleStatus.PendingNodes +
 		clusterStatus.AutoScaleStatus.ActiveNodes + clusterStatus.AutoScaleStatus.FailedNodes
 
 	return clusterStatus, nil
@@ -228,12 +179,11 @@ func NewRayOrchestrator(opts Options, clusterManager cluster.ClusterManager) (*R
 		cluster:       opts.Cluster,
 		imageRegistry: opts.ImageRegistry,
 		opTimeout: OperationConfig{
-			UpTimeout:        time.Minute * 30,
-			DownTimeout:      time.Minute * 30,
-			StartNodeTimeout: time.Minute * 10,
-			StopNodeTimeout:  time.Minute * 2,
-			DrainNodeTimeout: time.Minute * 5,
-			CommonTimeout:    time.Minute * 1,
+			UpTimeout:   time.Minute * 30,
+			DownTimeout: time.Minute * 30,
+			SyncCluster: time.Minute * 30,
+
+			CommonTimeout: time.Minute * 1,
 		},
 		clusterHelper: clusterManager,
 	}

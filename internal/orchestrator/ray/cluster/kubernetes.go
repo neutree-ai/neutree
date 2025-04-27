@@ -12,39 +12,44 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/pkg/errors"
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
 	kuberayutil "github.com/ray-project/kuberay/ray-operator/controllers/ray/utils"
-	rayclientv1 "github.com/ray-project/kuberay/ray-operator/pkg/client/clientset/versioned/typed/ray/v1"
 	"go.openly.dev/pointy"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ ClusterManager = &kubeRayClusterManager{}
 
+var (
+	scheme = runtime.NewScheme()
+	_      = rayv1.AddToScheme(scheme)
+	_      = appsv1.AddToScheme(scheme)
+	_      = corev1.AddToScheme(scheme)
+)
+
 type kubeRayClusterManager struct {
-	imageService registry.ImageService
+	cluster *v1.Cluster
 
-	kuberayCluster  *rayv1.RayCluster
-	imagePullSecret *corev1.Secret
-
-	clientSet *kubernetes.Clientset
-	rayClient *rayclientv1.RayV1Client
-
-	vmAgentConfigMap       *corev1.ConfigMap
-	vmAgentScrapeConfigMap *corev1.ConfigMap
-	vmAgentDeployment      *appsv1.Deployment
+	clusterNamespace string
+	installObjects   []client.Object
+	ctrClient        client.Client
 }
 
-func NewKubeRayClusterManager(MetricsRemoteWriteURL string, cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService) (*kubeRayClusterManager, error) {
+func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService, MetricsRemoteWriteURL string) (*kubeRayClusterManager, error) {
 	c := &kubeRayClusterManager{
-		imageService: imageService,
+		installObjects:   []client.Object{},
+		cluster:          cluster,
+		clusterNamespace: Namespace(cluster),
 	}
 
 	err := checkClusterImage(imageService, cluster, imageRegistry)
@@ -71,33 +76,42 @@ func NewKubeRayClusterManager(MetricsRemoteWriteURL string, cluster *v1.Cluster,
 		return nil, errors.Wrap(err, "failed to create REST config")
 	}
 
-	clientset, err := kubernetes.NewForConfig(restConfig)
+	restConfig.QPS = 10
+	restConfig.Burst = 20
+
+	ctrClient, err := client.New(restConfig, client.Options{
+		Scheme: scheme,
+	})
+
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create kubernetes client")
+		return nil, errors.Wrap(err, "failed to create controller client")
 	}
 
-	c.clientSet = clientset
+	c.ctrClient = ctrClient
 
-	rayClient, err := rayclientv1.NewForConfig(restConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create ray client")
-	}
-
-	c.rayClient = rayClient
-
-	c.imagePullSecret, err = generateImagePullSecret(cluster, imageRegistry)
+	// generate install objects
+	c.installObjects = append(c.installObjects, generateInstallNs(cluster))
+	imagePullSecret, err := generateImagePullSecret(cluster, imageRegistry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate image pull secret")
 	}
+	c.installObjects = append(c.installObjects, imagePullSecret)
 
-	c.vmAgentConfigMap, c.vmAgentScrapeConfigMap, c.vmAgentDeployment, err = generateVMAgent(cluster, imageRegistry, MetricsRemoteWriteURL)
+	vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment, err := generateVMAgent(cluster, imageRegistry, MetricsRemoteWriteURL)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate vm agent")
 	}
 
-	c.kuberayCluster, err = generateKubeRayCluster(cluster, imageRegistry)
+	c.installObjects = append(c.installObjects, vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment)
+
+	kuberayCluster, err := generateKubeRayCluster(cluster, imageRegistry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate kuberay cluster")
+	}
+
+	c.installObjects = append(c.installObjects, kuberayCluster)
+	for i := range c.installObjects {
+		addMetedataForObject(c.installObjects[i], cluster)
 	}
 
 	return c, nil
@@ -109,325 +123,144 @@ func (c *kubeRayClusterManager) Sync(ctx context.Context) error {
 		return errors.Wrap(err, "failed to sync cluster")
 	}
 
-	return nil
-}
-
-func (c *kubeRayClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
-	err := c.createNs(ctx)
+	err = c.syncMetricsConfig(ctx)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to create namespace")
-	}
-
-	err = c.createOrUpdateImagePullSecret(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create or update image pull secret")
-	}
-
-	err = c.createOrUpdateVMAgent(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create vm agent")
-	}
-
-	err = c.createOrUpdateKubeRayCluster(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create or update kuberay cluster")
-	}
-
-	return c.GetHeadIP(ctx)
-}
-
-func (c *kubeRayClusterManager) createOrUpdateVMAgent(ctx context.Context) error {
-	vmAgentConfigMap, err := c.clientSet.CoreV1().ConfigMaps(c.kuberayCluster.Namespace).Get(ctx, c.vmAgentConfigMap.Name, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return errors.Wrap(err, "failed to get vm agent config map")
-		}
-		_, err = c.clientSet.CoreV1().ConfigMaps(c.kuberayCluster.Namespace).Create(ctx, c.vmAgentConfigMap, metav1.CreateOptions{})
-		if err != nil {
-			return errors.Wrap(err, "failed to create vm agent config map")
-		}
-	}
-
-	vmAgentConfigMap.Data = c.vmAgentConfigMap.Data
-	_, err = c.clientSet.CoreV1().ConfigMaps(c.kuberayCluster.Namespace).Update(ctx, vmAgentConfigMap, metav1.UpdateOptions{})
-	if err != nil {
-		return errors.Wrap(err, "failed to update vm agent config map")
-	}
-
-	vmAgentScrapeConfigMap, err := c.clientSet.CoreV1().ConfigMaps(c.kuberayCluster.Namespace).Get(ctx, c.vmAgentScrapeConfigMap.Name, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return errors.Wrap(err, "failed to get vm agent scrape config map")
-		}
-		_, err = c.clientSet.CoreV1().ConfigMaps(c.kuberayCluster.Namespace).Create(ctx, c.vmAgentScrapeConfigMap, metav1.CreateOptions{})
-		if err != nil {
-			return errors.Wrap(err, "failed to create vm agent scrape config map")
-		}
-	}
-
-	scrapConfig, err := generateRayClusterMetricsScrapeTargetsConfig(c.kuberayCluster.Name, c.kuberayCluster.Namespace, c.clientSet)
-	if err != nil {
-		return errors.Wrap(err, "failed to generate ray cluster metrics scrape targets config")
-	}
-
-	scrapConfigContent, err := json.Marshal([]v1.MetricsScrapeTargetsConfig{*scrapConfig})
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal metrics scrape targets config")
-	}
-
-	vmAgentScrapeConfigMap.Data = map[string]string{
-		"scrape_configs.json": string(scrapConfigContent),
-	}
-	_, err = c.clientSet.CoreV1().ConfigMaps(c.kuberayCluster.Namespace).Update(ctx, vmAgentScrapeConfigMap, metav1.UpdateOptions{})
-	if err != nil {
-		return errors.Wrap(err, "failed to update vm agent scrape config map")
-	}
-
-	vmAgentDeploy, err := c.clientSet.AppsV1().Deployments(c.kuberayCluster.Namespace).Get(ctx, c.vmAgentDeployment.Name, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return errors.Wrap(err, "failed to get vm agent deployment")
-		}
-		_, err = c.clientSet.AppsV1().Deployments(c.kuberayCluster.Namespace).Create(ctx, c.vmAgentDeployment, metav1.CreateOptions{})
-		if err != nil {
-			return errors.Wrap(err, "failed to create vm agent deployment")
-		}
-	}
-
-	vmAgentDeploy.Spec = c.vmAgentDeployment.Spec
-	_, err = c.clientSet.AppsV1().Deployments(c.kuberayCluster.Namespace).Update(ctx, vmAgentDeploy, metav1.UpdateOptions{})
-	if err != nil {
-		return errors.Wrap(err, "failed to update vm agent deployment")
+		return errors.Wrap(err, "failed to sync metrics config")
 	}
 
 	return nil
 }
 
-func (c *kubeRayClusterManager) createNs(ctx context.Context) error {
-	_, err := c.clientSet.CoreV1().Namespaces().Get(ctx, c.kuberayCluster.Namespace, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return errors.Wrap(err, "failed to get namespace")
-		}
-		_, err = c.clientSet.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: c.kuberayCluster.Namespace,
-			},
-		}, metav1.CreateOptions{})
+func (c *kubeRayClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
+	for _, object := range c.installObjects {
+
+		err := CreateOrPatch(ctx, object, c.ctrClient)
 		if err != nil {
-			return errors.Wrap(err, "failed to create namespace")
+			return "", errors.Wrap(err, "failed to create or patch object "+client.ObjectKeyFromObject(object).String())
 		}
-		return nil
 	}
 
-	return nil
-}
-
-func (c *kubeRayClusterManager) createOrUpdateImagePullSecret(ctx context.Context) error {
-	secret, err := c.clientSet.CoreV1().Secrets(c.kuberayCluster.Namespace).Get(ctx, c.imagePullSecret.Name, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return errors.Wrap(err, "failed to get image pull secret")
-		}
-		_, err = c.clientSet.CoreV1().Secrets(c.kuberayCluster.Namespace).Create(ctx, c.imagePullSecret, metav1.CreateOptions{})
-		if err != nil {
-			return errors.Wrap(err, "failed to create image pull secret")
-		}
-		return nil
-	}
-
-	secret.Data = c.imagePullSecret.Data
-	_, err = c.clientSet.CoreV1().Secrets(c.kuberayCluster.Namespace).Update(ctx, secret, metav1.UpdateOptions{})
-	if err != nil {
-		return errors.Wrap(err, "failed to update image pull secret")
-	}
-	return nil
-}
-
-func (c *kubeRayClusterManager) createOrUpdateKubeRayCluster(ctx context.Context) error {
-	_, err := c.rayClient.RayClusters(c.kuberayCluster.Namespace).Get(ctx, c.kuberayCluster.Name, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return errors.Wrap(err, "failed to get ray cluster")
-		}
-		_, err = c.rayClient.RayClusters(c.kuberayCluster.Namespace).Create(ctx, c.kuberayCluster, metav1.CreateOptions{})
-		if err != nil {
-			return errors.Wrap(err, "failed to create ray cluster")
-		}
-
-		return nil
-	}
-
-	// todo add update logic
-	return nil
+	return c.getClusterAccessIP(ctx)
 }
 
 func (c *kubeRayClusterManager) DownCluster(ctx context.Context) error {
-	err := c.deleteKubeRayCluster(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to delete kuberay cluster")
+	resourceExist := false
+
+	for _, object := range c.installObjects {
+		err := c.ctrClient.Get(ctx, client.ObjectKeyFromObject(object), object)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return errors.Wrap(err, "failed to get object "+client.ObjectKeyFromObject(object).String())
+		}
+
+		resourceExist = true
+		if object.GetDeletionTimestamp() != nil {
+			continue
+		}
+
+		err = c.ctrClient.Delete(ctx, object)
+		if err != nil {
+			return errors.Wrap(err, "failed to delete object "+client.ObjectKeyFromObject(object).String())
+		}
 	}
 
-	err = c.deleteImagePullSecret(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to delete image pull secret")
-	}
-
-	err = c.deleteNs(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to delete namespace")
+	if resourceExist {
+		return errors.New("wait for resources to be deleted")
 	}
 
 	return nil
 }
 
-func (c *kubeRayClusterManager) deleteNs(ctx context.Context) error {
-	ns, err := c.clientSet.CoreV1().Namespaces().Get(ctx, c.kuberayCluster.Namespace, metav1.GetOptions{})
+func (c *kubeRayClusterManager) GetDashboardService(ctx context.Context) (dashboard.DashboardService, error) {
+	accessIP, err := c.getClusterAccessIP(ctx)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-
-		return errors.Wrap(err, "failed to get namespace")
+		return nil, errors.Wrap(err, "failed to get cluster access ip")
 	}
 
-	if !ns.DeletionTimestamp.IsZero() {
-		return errors.New("wait for namespace to be deleted")
-	}
-
-	err = c.clientSet.CoreV1().Namespaces().Delete(ctx, c.kuberayCluster.Namespace, metav1.DeleteOptions{})
-	if err != nil {
-		return errors.Wrap(err, "failed to delete namespace")
-	}
-
-	return errors.New("wait for namespace to be deleted")
+	dashboardUrl := fmt.Sprintf("http://%s:8265", accessIP)
+	return dashboard.NewDashboardService(dashboardUrl), nil
 }
 
-func (c *kubeRayClusterManager) deleteKubeRayCluster(ctx context.Context) error {
-	rayCluster, err := c.rayClient.RayClusters(c.kuberayCluster.Namespace).Get(ctx, c.kuberayCluster.Name, metav1.GetOptions{})
+func (c *kubeRayClusterManager) GetServeEndpoint(ctx context.Context) (string, error) {
+	accessIP, err := c.getClusterAccessIP(ctx)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return errors.Wrap(err, "failed to get ray cluster")
+		return "", errors.Wrap(err, "failed to get cluster access ip")
 	}
 
-	if !rayCluster.DeletionTimestamp.IsZero() {
-		return errors.New("wait for ray cluster to be deleted")
-	}
-
-	err = c.rayClient.RayClusters(c.kuberayCluster.Namespace).Delete(ctx, c.kuberayCluster.Name, metav1.DeleteOptions{})
-	if err != nil {
-		return errors.Wrap(err, "failed to delete ray cluster")
-	}
-
-	return errors.New("wait for ray cluster to be deleted")
+	return fmt.Sprintf("http://%s:8000", accessIP), nil
 }
 
-func (c *kubeRayClusterManager) deleteImagePullSecret(ctx context.Context) error {
-	imagePullSecret, err := c.clientSet.CoreV1().Secrets(c.kuberayCluster.Namespace).Get(ctx, c.imagePullSecret.Name, metav1.GetOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return errors.Wrap(err, "failed to get image pull secret")
-	}
-
-	if !imagePullSecret.DeletionTimestamp.IsZero() {
-		return errors.New("wait for ray cluster to be deleted")
-	}
-
-	err = c.clientSet.CoreV1().Secrets(c.kuberayCluster.Namespace).Delete(ctx, c.imagePullSecret.Name, metav1.DeleteOptions{})
-	if err != nil {
-		return errors.Wrap(err, "failed to delete image pull secret")
-	}
-
-	return errors.New("wait for image pull secret to be deleted")
+func (c *kubeRayClusterManager) GetDesireStaticWorkers() int {
+	// always return 0, kuberay cluster only support auto scale
+	return 0
 }
 
-func (c *kubeRayClusterManager) StartNode(ctx context.Context, nodeIP string) error {
-	// not implemented yet
-	return nil
-}
-
-func (c *kubeRayClusterManager) StopNode(ctx context.Context, nodeIP string) error {
-	// not implemented yet
-	return nil
-}
-
-func (c *kubeRayClusterManager) GetHeadIP(ctx context.Context) (string, error) {
-	rayCluster, err := c.rayClient.RayClusters(c.kuberayCluster.Namespace).Get(ctx, c.kuberayCluster.Name, metav1.GetOptions{})
+func (c *kubeRayClusterManager) getClusterAccessIP(ctx context.Context) (string, error) {
+	rayCluster := &rayv1.RayCluster{}
+	err := c.ctrClient.Get(ctx, client.ObjectKey{
+		Name:      c.cluster.Metadata.Name,
+		Namespace: c.clusterNamespace,
+	}, rayCluster)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get ray cluster")
 	}
 
-	if rayCluster.Status.State != rayv1.Ready {
-		return "", errors.New("ray cluster is not ready")
-	}
+	if rayCluster.Spec.HeadGroupSpec.ServiceType == corev1.ServiceTypeLoadBalancer {
+		headServiceName := kuberayutil.GenerateServeServiceName(rayCluster.Name)
 
-	if c.kuberayCluster.Spec.HeadGroupSpec.ServiceType == corev1.ServiceTypeLoadBalancer {
-		headServiceName := getHeadSvcName(c.kuberayCluster.Name)
-		service, err := c.clientSet.CoreV1().Services(c.kuberayCluster.Namespace).Get(ctx, headServiceName, metav1.GetOptions{})
+		headSvc := &corev1.Service{}
+		err := c.ctrClient.Get(ctx, client.ObjectKey{
+			Name:      headServiceName,
+			Namespace: c.clusterNamespace,
+		}, headSvc)
 		if err != nil {
 			return "", errors.Wrap(err, "failed to get service")
 		}
 
-		if len(service.Status.LoadBalancer.Ingress) == 0 {
+		if len(headSvc.Status.LoadBalancer.Ingress) == 0 {
 			return "", errors.New("service has no load balancer ip")
 		}
 
-		return service.Status.LoadBalancer.Ingress[0].IP, nil
+		return headSvc.Status.LoadBalancer.Ingress[0].IP, nil
 	}
 
-	return "", errors.New("no access to head node")
+	return "", errors.New("only support load balancer service type")
 }
 
-func (c *kubeRayClusterManager) DrainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error {
+func (c *kubeRayClusterManager) syncMetricsConfig(ctx context.Context) error {
+	dashboardService, err := c.GetDashboardService(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get dashboard service")
+	}
+
+	clusterMetricsConfig, err := generateRayClusterMetricsScrapeTargetsConfig(c.cluster, dashboardService)
+	if err != nil {
+		return errors.Wrap(err, "failed to generate ray cluster metrics scrape targets config")
+	}
+
+	clusterMetricsConfigContent, err := json.Marshal([]*v1.MetricsScrapeTargetsConfig{clusterMetricsConfig})
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal ray cluster metrics config")
+	}
+
+	vmAgentScrapeConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vmagent-scrape-config",
+			Namespace: c.clusterNamespace,
+		},
+		Data: map[string]string{
+			"cluster.json": string(clusterMetricsConfigContent),
+		},
+	}
+
+	err = CreateOrPatch(ctx, vmAgentScrapeConfigMap, c.ctrClient)
+	if err != nil {
+		return errors.Wrap(err, "failed to create or patch vmagent scrape config map")
+	}
+
 	return nil
-}
-
-func (c *kubeRayClusterManager) GetDesireStaticWorkersIP(_ context.Context) []string {
-	return []string{}
-}
-
-func (c *kubeRayClusterManager) GetDashboardService(ctx context.Context) (dashboard.DashboardService, error) {
-	if c.kuberayCluster.Spec.HeadGroupSpec.ServiceType == corev1.ServiceTypeLoadBalancer {
-		headServiceName := getHeadSvcName(c.kuberayCluster.Name)
-
-		service, err := c.clientSet.CoreV1().Services(c.kuberayCluster.Namespace).Get(ctx, headServiceName, metav1.GetOptions{})
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get service")
-		}
-
-		if len(service.Status.LoadBalancer.Ingress) == 0 {
-			return nil, errors.New("service has no load balancer ip")
-		}
-
-		dashboardUrl := fmt.Sprintf("http://%s:8265", service.Status.LoadBalancer.Ingress[0].IP)
-		return dashboard.NewDashboardService(dashboardUrl), nil
-	}
-
-	return nil, errors.New("dashboard service not found")
-}
-
-func (c *kubeRayClusterManager) GetServeEndpoint(ctx context.Context) (string, error) {
-	if c.kuberayCluster.Spec.HeadGroupSpec.ServiceType == corev1.ServiceTypeLoadBalancer {
-		serveServiceName := kuberayutil.GenerateServeServiceName(c.kuberayCluster.Name)
-
-		service, err := c.clientSet.CoreV1().Services(c.kuberayCluster.Namespace).Get(ctx, serveServiceName, metav1.GetOptions{})
-		if err != nil {
-			return "", errors.Wrap(err, "failed to get service")
-		}
-
-		if len(service.Status.LoadBalancer.Ingress) == 0 {
-			return "", errors.New("service has no load balancer ip")
-		}
-
-		serveURL := fmt.Sprintf("http://%s:8000", service.Status.LoadBalancer.Ingress[0].IP)
-		return serveURL, nil
-	}
-
-	return "", errors.New("serve service not found")
 }
 
 func getKubeconfig(cluster *v1.Cluster) (string, error) {
@@ -479,7 +312,7 @@ func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "neutree-cluster-" + cluster.Metadata.Name + "-image-pull-secret",
-			Namespace: cluster.Key(),
+			Namespace: Namespace(cluster),
 		},
 		Type: corev1.SecretTypeDockerConfigJson,
 		Data: map[string][]byte{
@@ -777,40 +610,54 @@ func getHeadSvcName(clusterName string) string {
 	return fmt.Sprintf("%s-%s-%s", clusterName, rayv1.HeadNode, "svc")
 }
 
-func generateRayClusterMetricsScrapeTargetsConfig(clusterName, clusterNamespace string, kubeClient *kubernetes.Clientset) (*v1.MetricsScrapeTargetsConfig, error) {
-	metricsScrapeTargetConfig := &v1.MetricsScrapeTargetsConfig{
-		Labels: map[string]string{
-			"ray_io_cluster": clusterName,
-			"job":            "ray",
+func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: Namespace(cluster),
+			Labels: map[string]string{
+				"neutree.ai/neutree-cluster":   cluster.Metadata.Name,
+				"neutree.ai/neutree-workspace": cluster.Metadata.Workspace,
+			},
 		},
 	}
+}
 
-	headPodList, err := kubeClient.CoreV1().Pods(clusterNamespace).List(context.Background(), metav1.ListOptions{
-		LabelSelector: "ray.io/node-type=head",
-	})
-
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list ray head pods")
+func addMetedataForObject(obj client.Object, cluster *v1.Cluster) {
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
 	}
-
-	for _, pod := range headPodList.Items {
-		metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", pod.Status.PodIP, v1.DashboardMetricsPort))
-		metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", pod.Status.PodIP, v1.AutoScaleMetricsPort))
-		metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", pod.Status.PodIP, v1.RayletMetricsPort))
-	}
-
-	workerPodList, err := kubeClient.CoreV1().Pods(clusterNamespace).List(context.Background(), metav1.ListOptions{
-		LabelSelector: "ray.io/node-type=worker",
-	})
-
-	for _, pod := range workerPodList.Items {
-		metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", pod.Status.PodIP, v1.RayletMetricsPort))
-	}
-
-	return metricsScrapeTargetConfig, nil
+	labels["neutree.ai/neutree-cluster"] = cluster.Metadata.Name
+	labels["neutree.ai/neutree-workspace"] = cluster.Metadata.Workspace
+	obj.SetLabels(labels)
 }
 
 func removeEscapes(s string) string {
 	re := regexp.MustCompile(`\\`)
 	return re.ReplaceAllString(s, "")
+}
+
+func Namespace(cluster *v1.Cluster) string {
+	return "neutree-cluster-" + string(util.HashString(cluster.Key()))
+}
+
+func CreateOrPatch(ctx context.Context, obj client.Object, ctrClient client.Client) error {
+	curObj := &unstructured.Unstructured{}
+	curObj.SetGroupVersionKind(obj.GetObjectKind().GroupVersionKind())
+	err := ctrClient.Get(ctx, client.ObjectKeyFromObject(obj), curObj)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrClient.Create(ctx, obj)
+		}
+		return errors.Wrap(err, "failed to get object")
+	}
+
+	// patch the object
+	patch := client.StrategicMergeFrom(curObj.DeepCopy())
+	err = ctrClient.Patch(ctx, obj, patch)
+	if err != nil {
+		return errors.Wrap(err, "failed to patch object")
+	}
+
+	return nil
 }

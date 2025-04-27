@@ -2,7 +2,6 @@ package command_runner
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 type ProcessExecute func(ctx context.Context, name string, args []string) ([]byte, error)
@@ -39,7 +39,7 @@ func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, cluste
 	var sshControlPath string
 
 	if clusterName != "" {
-		sshControlHash := fmt.Sprintf("%x", hashString(clusterName))[:10]
+		sshControlHash := fmt.Sprintf("%x", util.HashString(clusterName))[:10]
 		sshControlPath = fmt.Sprintf("/tmp/ray_ssh/%s", sshControlHash)
 		_ = os.MkdirAll(sshControlPath, 0700) //nolint:errcheck
 	}
@@ -137,9 +137,4 @@ func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []stri
 	}
 
 	return sshOptions
-}
-
-func hashString(s string) []byte {
-	hash := sha256.Sum256([]byte(s))
-	return hash[:]
 }
