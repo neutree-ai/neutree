@@ -21,12 +21,16 @@ CREATE TYPE api.resource_spec AS (
     memory FLOAT
 );
 
+CREATE TYPE api.replica_spec AS (
+    num INTEGER
+);
+
 CREATE TYPE api.endpoint_spec AS (
     cluster TEXT,
     model api.model_spec,
     engine api.endpoint_engine_spec,
     resources api.resource_spec,
-    replicas INTEGER,
+    replicas api.replica_spec,
     deployment_options json,
     variables json
 );

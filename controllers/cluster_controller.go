@@ -108,15 +108,10 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 		obj.Spec.Version = c.defaultClusterVersion
 	}
 
-	imageRegistry, err := c.getRelateImageRegistry(obj)
-	if err != nil {
-		return errors.Wrap(err, "failed to get relate image registry")
-	}
-
 	clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:       obj,
-		ImageRegistry: imageRegistry,
-		ImageService:  c.imageService,
+		Cluster:      obj,
+		ImageService: c.imageService,
+		Storage:      c.storage,
 	})
 	if err != nil {
 		return err
@@ -343,35 +338,6 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster, clusterOrchestr
 	}
 
 	return nil
-}
-
-func (c *ClusterController) getRelateImageRegistry(cluster *v1.Cluster) (*v1.ImageRegistry, error) {
-	imageRegistryFilter := []storage.Filter{
-		{
-			Column:   "metadata->name",
-			Operator: "eq",
-			Value:    fmt.Sprintf(`"%s"`, cluster.Spec.ImageRegistry),
-		},
-	}
-
-	if cluster.Metadata.Workspace != "" {
-		imageRegistryFilter = append(imageRegistryFilter, storage.Filter{
-			Column:   "metadata->workspace",
-			Operator: "eq",
-			Value:    fmt.Sprintf(`"%s"`, cluster.Metadata.Workspace),
-		})
-	}
-
-	imageRegistryList, err := c.storage.ListImageRegistry(storage.ListOption{Filters: imageRegistryFilter})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list image registry")
-	}
-
-	if len(imageRegistryList) == 0 {
-		return nil, errors.New("relate image registry not found")
-	}
-
-	return &imageRegistryList[0], nil
 }
 
 func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator, phase v1.ClusterPhase, err error) error {

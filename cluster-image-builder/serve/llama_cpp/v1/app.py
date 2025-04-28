@@ -210,15 +210,11 @@ class Controller:
 def app_builder(args: Dict[str, Any]) -> Application:
     """
     Application builder function that configures and returns the Backend and Controller deployments.
-    
-    Args:
-        args: A dictionary containing all the configuration parameters, expected to have
-              'model', 'deployment_options', and 'model_settings' keys.
     """
     # Extract configuration sections
     model = args.get('model', {})
     deployment_options = args.get('deployment_options', {})
-    model_settings = args.get('model_settings', {})
+    model_settings = args.get('engine_args', {})
     
     # Extract backend deployment options
     backend_options = deployment_options.get('backend', {})
