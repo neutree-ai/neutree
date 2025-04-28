@@ -41,6 +41,7 @@ func searchModels(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": errS,
 			})
+
 			return
 		}
 
@@ -48,6 +49,7 @@ func searchModels(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{
 				"message": "model registry not found",
 			})
+
 			return
 		}
 
@@ -58,6 +60,7 @@ func searchModels(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": errS,
 			})
+
 			return
 		}
 
@@ -71,6 +74,7 @@ func searchModels(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": errS,
 			})
+
 			return
 		}
 

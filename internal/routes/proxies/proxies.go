@@ -24,6 +24,7 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 	target, err := url.Parse(fmt.Sprintf("%s/%s", targetURL, path))
 	if err != nil {
 		klog.Errorf("Failed to parse target URL: %v", err)
+
 		return func(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "Failed to create proxy",
@@ -38,6 +39,7 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 		originalDirector(req)
 		req.URL.Path = target.Path
 		req.Host = target.Host
+
 		if modifyRequest != nil {
 			modifyRequest(req)
 		}
@@ -60,6 +62,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "name is required",
 			})
+
 			return
 		}
 
@@ -79,6 +82,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": errS,
 			})
+
 			return
 		}
 
@@ -86,6 +90,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": "endpoint not found",
 			})
+
 			return
 		}
 
@@ -94,6 +99,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "service_url not found",
 			})
+
 			return
 		}
 
@@ -106,11 +112,13 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 		if c.Request.Method != "GET" && c.Request.Method != "HEAD" {
 			bodyBytes, err := io.ReadAll(c.Request.Body)
 			c.Request.Body.Close()
+
 			if err == nil && len(bodyBytes) > 0 {
 				var requestBody map[string]interface{}
 				if err := json.Unmarshal(bodyBytes, &requestBody); err == nil {
 					if _, exists := requestBody["encoding_format"]; exists {
 						delete(requestBody, "encoding_format")
+
 						modifiedBodyBytes, err := json.Marshal(requestBody)
 						if err == nil {
 							c.Request.Body = io.NopCloser(strings.NewReader(string(modifiedBodyBytes)))
@@ -138,6 +146,7 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "name is required",
 			})
+
 			return
 		}
 
@@ -158,6 +167,7 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": errS,
 			})
+
 			return
 		}
 
@@ -165,6 +175,7 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": "cluster not found",
 			})
+
 			return
 		}
 
@@ -173,6 +184,7 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "dashboard_url not found",
 			})
+
 			return
 		}
 

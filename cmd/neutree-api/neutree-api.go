@@ -75,6 +75,7 @@ func main() {
 
 	serverAddr := fmt.Sprintf("%s:%d", *host, *port)
 	klog.Infof("Starting API server on %s", serverAddr)
+
 	if err := r.Run(serverAddr); err != nil {
 		klog.Fatalf("Failed to start API server: %s", err.Error())
 	}
