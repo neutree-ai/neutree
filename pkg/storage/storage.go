@@ -159,17 +159,26 @@ type Options struct {
 	JwtSecret string
 }
 
-func New(o Options) (Storage, error) {
+func CreateServiceToken(jwtSecret string) (*string, error) {
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims := token.Claims.(jwt.MapClaims) //nolint:errcheck
 	claims["role"] = "service_role"
 
-	jwtAutoToken, err := token.SignedString([]byte(o.JwtSecret))
+	jwtAutoToken, err := token.SignedString([]byte(jwtSecret))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate jwt token")
 	}
 
-	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil).SetAuthToken(jwtAutoToken)
+	return &jwtAutoToken, nil
+}
+
+func New(o Options) (Storage, error) {
+	jwtAutoToken, err := CreateServiceToken(o.JwtSecret)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to init storage")
+	}
+
+	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil).SetAuthToken(*jwtAutoToken)
 
 	return &postgrestStorage{
 		postgrestClient: postgrestClient,
