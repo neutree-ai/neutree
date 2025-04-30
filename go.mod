@@ -5,6 +5,7 @@ go 1.23.0
 require (
 	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/compose-spec/compose-go v1.20.2
+	github.com/gin-gonic/gin v1.10.0
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/go-containerregistry v0.20.3
 	github.com/pkg/errors v0.9.1
@@ -35,7 +36,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
-	github.com/gin-gonic/gin v1.10.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect

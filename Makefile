@@ -7,6 +7,7 @@ IMAGE_PROJECT ?= neutree-ai
 IMAGE_PREFIX ?= ${IMAGE_REPO}/${IMAGE_PROJECT}/
 IMAGE_TAG ?= ${shell echo $(VERSION) | awk -F '/' '{print $$NF}'}
 NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
+NEUTREE_API_IMAGE := $(IMAGE_PREFIX)neutree-api
 
 ARCH ?= amd64
 ALL_ARCH = amd64 arm64
@@ -52,7 +53,7 @@ help: ## Display this help.
 
 all: build
 
-build: test build-neutree-core build-neutree-cli
+build: test build-neutree-core build-neutree-cli build-neutree-api
 
 build-neutree-core:
 	$(GO) build -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
@@ -67,13 +68,11 @@ prepare-build-cli:
 build-neutree-cli: prepare-build-cli
 	$(GO) build -o bin/neutree-cli ./cmd/neutree-cli/neutree-cli.go
 
-.PHONY: docker-build
-docker-build:
-	docker build --build-arg ARCH=$(ARCH) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_CORE_IMAGE)-$(ARCH):$(IMAGE_TAG)
+build-neutree-api:
+	$(GO) build -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
 
-.PHONY: docker-push
-docker-push:
-	docker push $(NEUTREE_CORE_IMAGE)-$(ARCH):$(IMAGE_TAG)
+# Choice of images to build/push
+ALL_DOCKER_BUILD ?= core api
 
 .PHONY: docker-build-all ## Build all the architecture docker images
 docker-build-all: $(addprefix docker-build-,$(ALL_ARCH))
@@ -81,19 +80,50 @@ docker-build-all: $(addprefix docker-build-,$(ALL_ARCH))
 docker-build-%:
 	$(MAKE) ARCH=$* docker-build
 
+.PHONY: docker-build
+docker-build: ## Run docker-build-* targets for all the images
+	$(MAKE) ARCH=$(ARCH) $(addprefix docker-build-,$(ALL_DOCKER_BUILD))
+
+.PHONY: docker-build-core
+docker-build-core: # build core docker image
+	docker build --build-arg ARCH=$(ARCH) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_CORE_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.core
+
+.PHONY: docker-build-api
+docker-build-api: # build api docker image
+	docker build --build-arg ARCH=$(ARCH) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_API_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.api
+
 .PHONY: docker-push-all ## Push all the architecture docker images
-docker-push-all: $(addprefix docker-push-,$(ALL_ARCH))
-	$(MAKE) docker-push-manifest
+docker-push-all:
+	$(MAKE) ALL_ARCH="$(ALL_ARCH)" $(addprefix docker-push-,$(ALL_DOCKER_BUILD))
 
 docker-push-%:
 	$(MAKE) ARCH=$* docker-push
 
+.PHONY: docker-push
+docker-push: $(addprefix docker-push-,$(ALL_DOCKER_BUILD))
+
+.PHONY: docker-push-core
+docker-push-core: # push core docker image
+	docker push $(NEUTREE_CORE_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
+.PHONY: docker-push-api
+docker-push-api: # push api docker image
+	docker push $(NEUTREE_API_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
 .PHONY: docker-push-manifest
-docker-push-manifest: ## Push the fat manifest docker image.
-	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
+docker-push-manifest: $(addprefix docker-push-manifest-,$(ALL_DOCKER_BUILD))
+
+.PHONY: docker-push-manifest-core
+docker-push-manifest-core: ## Push the core manifest docker image.
 	docker manifest create --amend $(NEUTREE_CORE_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_CORE_IMAGE)\-&:$(IMAGE_TAG)~g")
 	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_CORE_IMAGE}:${IMAGE_TAG} ${NEUTREE_CORE_IMAGE}-$${arch}:${IMAGE_TAG}; done
 	docker manifest push --purge ${NEUTREE_CORE_IMAGE}:${IMAGE_TAG}
+
+.PHONY: docker-push-manifest-api
+docker-push-manifest-api: ## Push the api manifest docker image.
+	docker manifest create --amend $(NEUTREE_API_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_API_IMAGE)\-&:$(IMAGE_TAG)~g")
+	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_API_IMAGE}:${IMAGE_TAG} ${NEUTREE_API_IMAGE}-$${arch}:${IMAGE_TAG}; done
+	docker manifest push --purge ${NEUTREE_API_IMAGE}:${IMAGE_TAG}
 
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
