@@ -1,0 +1,45 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "neutree.fullname" . }}-migration-job-{{ .Release.Revision }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: neutree-migration
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}    
+      serviceAccountName:  {{ include "neutree.fullname" . }}-sa
+      initContainers:
+        - name: wait-auth-service
+          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+          args:
+            - pod
+            - -lapp.kubernetes.io/component=neutree-auth
+      containers:
+      - name: migration
+        image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag }}"
+        imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
+        args:
+          - -source=file://migrations
+          - -database
+          - "postgres://{{.Values.db.user }}:{{.Values.db.password }}@{{ include "neutree.fullname" . }}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable"
+          - up
+        volumeMounts:
+          - name: migrations
+            mountPath: /migrations
+            readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: {{ include "neutree.fullname" . }}-migration-sql
+      restartPolicy: OnFailure 

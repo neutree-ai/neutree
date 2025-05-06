@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "neutree.fullname" . }}-postgresql-pvc
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.db.persistence.storageClassName }}
+  storageClassName: {{ .Values.db.persistence.storageClassName }}
+  {{- end }}
+  accessModes:
+  {{- range .Values.db.persistence.accessModes }}
+    - {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.db.persistence.size | quote }}

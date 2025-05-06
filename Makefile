@@ -167,6 +167,7 @@ $(RELEASE_DIR):
 release: clean # release files excluding image.
 	$(MAKE) $(RELEASE_DIR)
 	$(MAKE) release-binaries
+	$(MAKE) release-chart
 
 .PHONY: release-binaries
 release-binaries: prepare-build-cli ## Build the binaries to publish with a release
@@ -189,6 +190,14 @@ release-binary:
 		go build $(GO_BUILD_ARGS) \
 		-o $(RELEASE_DIR)/$(notdir $(RELEASE_BINARY)) $(BUILD_PATH)
 
+.PHONY: prepare-chart
+prepare-chart:
+	rm -rf ./deploy/chart/neutree/db
+	cp -r db ./deploy/chart/neutree/
+
+.PHONY: release-chart
+release-chart: prepare-chart ## Build the chart to publish with a release
+	helm package ./deploy/chart/neutree -d $(RELEASE_DIR)
 
 MOCKERY := $(shell pwd)/bin/mockery
 mockery: ## Download mockery if not yet.

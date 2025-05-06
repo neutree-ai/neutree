@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "neutree.fullname" . }}-api
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: neutree-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: neutree-api
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: neutree-api
+          args:
+            - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
+            - --storage-jwt-secret={{.Values.jwtSecret  }}
+            - --host=0.0.0.0
+            - --port=3000
+            - --static-dir=./public
+            - --gin-mode=release
+            - --auth-endpoint=http://{{ include "neutree.fullname" . }}-auth-service:9999
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          {{- with .Values.api.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

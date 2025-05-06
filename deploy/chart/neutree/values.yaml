@@ -1,0 +1,147 @@
+# Default values for neutree.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+jwtSecret: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
+imagePullSecrets: []
+
+metrics:
+  enabled: false
+  remoteWriteUrl: ""
+
+k8sWaitFor:
+  image:
+    repository: ghcr.io/groundnuty/k8s-wait-for
+    tag: "v2.0"
+    pullPolicy: IfNotPresent
+
+db:
+  image:
+    repository: postgres
+    tag: "13"
+    pullPolicy: IfNotPresent
+  user: postgres
+  password: pgpassword
+  name: aippp
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+  persistence:
+    enabled: true
+    size: 40Gi
+    accessModes: 
+      - ReadWriteOnce
+  service:
+    type: ClusterIP
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+auth:
+  image:
+    repository: supabase/gotrue
+    tag: "v2.170.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP      
+
+migration:
+  image:
+    repository: migrate/migrate
+    tag: "v4.18.3"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+postgrest:
+  image:
+    repository: postgrest/postgrest
+    tag: "v12.2.12"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+  
+postgresmeta:
+  image:
+    repository: supabase/postgres-meta
+    tag: "v0.86.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+
+core:
+  image:
+    repository: neutree-ai/neutree-core
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+api:
+  image:
+    repository: neutree-ai/neutree-api
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources: 
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  replicaCount: 1
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+
+vmagent:
+  image:
+    repository: victoriametrics/vmagent
+    tag: "v1.115.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  persistence:
+    enabled: true
+    size: 1Gi
+    accessModes: 
+      - ReadWriteOnce

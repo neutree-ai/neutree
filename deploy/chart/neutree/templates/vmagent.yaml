@@ -1,0 +1,104 @@
+{{ if .Values.metrics.enabled}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "neutree.fullname" . }}-vmagent
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: neutree-vmagent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: neutree-vmagent
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: neutree-vmagent
+          args:
+            - "--promscrape.config=/etc/prometheus/prometheus.yml"
+            - "--promscrape.configCheckInterval=10s"
+            - "--remoteWrite.url={{ .Values.metrics.remoteWriteUrl}}"
+          image: "{{ .Values.vmagent.image.repository }}:{{ .Values.vmagent.image.tag}}"
+          imagePullPolicy: {{ .Values.vmagent.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8429
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.vmagent.resources | nindent 12 }}
+          volumeMounts:
+            - name: vmagent-config
+              mountPath: /etc/prometheus
+            - name: vmagentdata
+              mountPath: /vmagentdata
+            - name: vmagent-scrape-config
+              mountPath: /etc/prometheus/scrape
+      volumes:
+        - name: vmagentdata
+          persistentVolumeClaim:
+            claimName: {{ include "neutree.fullname" . }}-vmagent-pvc
+        - name: vmagent-scrape-config
+          configMap:
+            name: vmagent-scrape-config
+        - name: vmagent-config
+          configMap:
+            name: vmagent-config
+            items:
+              - key: prometheus.yml
+                path: prometheus.yml
+      {{- with .Values.vmagent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vmagent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.db.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "neutree.fullname" . }}-vmagent-pvc
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.vmagent.persistence.storageClassName }}
+  storageClassName: {{ .Values.vmagent.persistence.storageClassName }}
+  {{- end }}
+  accessModes:
+  {{- range .Values.vmagent.persistence.accessModes }}
+    - {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.vmagent.persistence.size | quote }}
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: vmagent-config
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+data:
+  "prometheus.yml": |-
+    global:
+      scrape_interval: 30s
+    scrape_configs:
+      - job_name: 'neutree'
+        file_sd_configs:
+          - files:
+            - /etc/prometheus/scrape/*.json
+{{ end }}
