@@ -80,6 +80,8 @@ jobs:
       - name: Check out specific tag when manually triggered
         if: github.event_name == 'workflow_dispatch'
         run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+      - name: generate release artifacts
+        run: make release
       - name: Set release tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then

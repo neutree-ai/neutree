@@ -1,5 +1,6 @@
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 VERSION ?= $(shell git describe --tags --always --dirty)
+UI_VERSION ?= main
 LATEST ?= false
 
 IMAGE_REPO ?= docker.io
@@ -20,6 +21,8 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+GO_VERSION ?= 1.23.0
+
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 define go-get-tool
@@ -33,6 +36,8 @@ GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
 endef
+
+RELEASE_DIR ?= out
 
 SHELL := /bin/bash
 
@@ -90,7 +95,7 @@ docker-build-core: # build core docker image
 
 .PHONY: docker-build-api
 docker-build-api: # build api docker image
-	docker build --build-arg ARCH=$(ARCH) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_API_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.api
+	docker build --build-arg ARCH=$(ARCH) --build-arg UI_VERSION=$(UI_VERSION) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_API_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.api
 
 .PHONY: docker-push-all ## Push all the architecture docker images
 docker-push-all:
@@ -135,6 +140,7 @@ test: prepare-build-cli mockgen fmt vet lint ## Run unit test
 .PHONY: clean
 clean: ## Clean up
 	rm -rf bin
+	rm -rf out
 
 GOLANGCI_LINT := $(shell pwd)/bin/golangci-lint
 golangci-lint: ## Download golangci-lint if not yet.
@@ -152,10 +158,37 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+
+.PHONY: $(RELEASE_DIR)
+$(RELEASE_DIR):
+	mkdir -p $(RELEASE_DIR)/
+
 .PHONY: release
-release:
-	$(MAKE) docker-build-all
-	$(MAKE) docker-push-all
+release: clean # release files excluding image.
+	$(MAKE) $(RELEASE_DIR)
+	$(MAKE) release-binaries
+
+.PHONY: release-binaries
+release-binaries: prepare-build-cli ## Build the binaries to publish with a release
+	RELEASE_BINARY=neutree-cli-amd64 BUILD_PATH=./cmd/neutree-cli GOOS=linux GOARCH=amd64 $(MAKE) release-binary
+	RELEASE_BINARY=neutree-cli-arm64 BUILD_PATH=./cmd/neutree-cli GOOS=linux GOARCH=arm64 $(MAKE) release-binary
+
+
+.PHONY: release-binary
+release-binary:
+	docker run \
+		--rm \
+		-e CGO_ENABLED=0 \
+		-e GOOS=$(GOOS) \
+		-e GOARCH=$(GOARCH) \
+		-e GOCACHE=/tmp/ \
+		--user $$(id -u):$$(id -g) \
+		-v "$$(pwd):/workspace:z" \
+		-w /workspace \
+		$(IMAGE_REPO)/golang:$(GO_VERSION) \
+		go build $(GO_BUILD_ARGS) \
+		-o $(RELEASE_DIR)/$(notdir $(RELEASE_BINARY)) $(BUILD_PATH)
+
 
 MOCKERY := $(shell pwd)/bin/mockery
 mockery: ## Download mockery if not yet.
