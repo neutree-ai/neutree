@@ -30,6 +30,7 @@ type ModelRegistryControllerOption struct {
 func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRegistryController, error) {
 	c := &ModelRegistryController{
 		baseController: &BaseController{
+			//nolint:staticcheck
 			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
 				workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
 			workers:      option.Workers,
@@ -156,7 +157,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 		healthy := modelRegistry.HealthyCheck()
 		if !healthy {
-			return errors.New("health check failed")
+			return errors.New("health check model registry " + obj.Metadata.Name + " failed")
 		}
 	}
 

@@ -32,6 +32,8 @@ type ClusterController struct {
 	syncHandler func(cluster *v1.Cluster) error
 
 	obsCollectConfigManager manager.ObsCollectConfigManager
+
+	MetricsRemoteWriteURL string
 }
 
 type ClusterControllerOption struct {
@@ -39,6 +41,7 @@ type ClusterControllerOption struct {
 	Storage               storage.Storage
 	Workers               int
 	DefaultClusterVersion string
+	MetricsRemoteWriteURL string
 
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 }
@@ -46,6 +49,7 @@ type ClusterControllerOption struct {
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
 	c := &ClusterController{
 		baseController: &BaseController{
+			//nolint:staticcheck
 			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
 				workqueue.RateLimitingQueueConfig{Name: "cluster"}),
 			workers:      opt.Workers,
@@ -56,6 +60,7 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		defaultClusterVersion: opt.DefaultClusterVersion,
 
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
+		MetricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
 	}
 
 	c.syncHandler = c.sync
@@ -109,9 +114,10 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 	}
 
 	clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:      obj,
-		ImageService: c.imageService,
-		Storage:      c.storage,
+		Cluster:               obj,
+		ImageService:          c.imageService,
+		Storage:               c.storage,
+		MetricsRemoteWriteURL: c.MetricsRemoteWriteURL,
 	})
 	if err != nil {
 		return err
@@ -173,12 +179,20 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestr
 		}
 	}
 
+	err = clusterOrchestrator.SyncCluster()
+	if err != nil {
+		return errors.Wrap(err, "sync cluster failed")
+	}
+
 	err = clusterOrchestrator.HealthCheck()
 	if err != nil {
 		return errors.Wrap(err, "health check cluster failed")
 	}
 
-	c.obsCollectConfigManager.GetMetricsCollectConfigManager().RegisterMetricsMonitor(cluster.Key(), monitoring.NewClusterMonitor(cluster, clusterOrchestrator))
+	// ssh cluster use local metrics collector.
+	if cluster.Spec.Type == "ssh" {
+		c.obsCollectConfigManager.GetMetricsCollectConfigManager().RegisterMetricsMonitor(cluster.Key(), monitoring.NewClusterMonitor(cluster, clusterOrchestrator))
+	}
 
 	return nil
 }
@@ -354,16 +368,16 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 		newStatus.Version = obj.Status.Version
 		newStatus.RayVersion = obj.Status.RayVersion
+		newStatus.DesiredNodes = obj.Status.DesiredNodes
 	}
 
 	if obj.IsInitialized() && obj.Metadata.DeletionTimestamp == "" {
-		newStatus.DesiredNodes = len(clusterOrchestrator.GetDesireStaticWorkersIP())
-
 		clusterStatus, getClusterStatusErr := clusterOrchestrator.ClusterStatus()
 		if getClusterStatusErr == nil {
 			newStatus.ReadyNodes = clusterStatus.ReadyNodes
 			newStatus.Version = clusterStatus.NeutreeServeVersion
 			newStatus.RayVersion = clusterStatus.RayVersion
+			newStatus.DesiredNodes = clusterStatus.DesireNodes
 		}
 	}
 

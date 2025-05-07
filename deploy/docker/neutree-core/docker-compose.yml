@@ -139,6 +139,7 @@ services:
       - --storage-jwt-secret={{ .JwtSecret}}
       - --controller-workers=5
       - --default-cluster-version=v1
+      - --metrics-remote-write-url={{.MetricsRemoteWriteURL}}
     volumes:
       - {{.NeutreeCoreWorkDir}}/collect:/etc/neutree/collect
     networks:

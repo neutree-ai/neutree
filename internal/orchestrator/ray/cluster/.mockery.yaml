@@ -4,6 +4,6 @@ filename: "mock_{{.InterfaceName | snakecase}}.go"
 outpkg: mocks
 with-expecter: true
 packages:
-  github.com/neutree-ai/neutree/internal/orchestrator/ray:
+  github.com/neutree-ai/neutree/internal/orchestrator/ray/cluster:
     interfaces:
       ClusterManager:

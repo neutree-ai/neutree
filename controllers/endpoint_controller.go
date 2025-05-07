@@ -32,6 +32,7 @@ type EndpointControllerOption struct {
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
 	c := &EndpointController{
 		baseController: &BaseController{
+			//nolint:staticcheck
 			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "endpoint"}),
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,

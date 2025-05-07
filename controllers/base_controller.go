@@ -18,7 +18,7 @@ type Lister interface {
 }
 
 type BaseController struct {
-	queue        workqueue.RateLimitingInterface
+	queue        workqueue.RateLimitingInterface //nolint:staticcheck
 	workers      int
 	syncInterval time.Duration
 }

@@ -6,7 +6,9 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/orchestrator/ray/cluster"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -14,6 +16,7 @@ import (
 type Orchestrator interface {
 	CreateCluster() (string, error)
 	DeleteCluster() error
+	SyncCluster() error
 	StartNode(nodeIP string) error
 	StopNode(nodeIP string) error
 	GetDesireStaticWorkersIP() []string
@@ -30,6 +33,8 @@ type Options struct {
 	Cluster      *v1.Cluster
 	Storage      storage.Storage
 	ImageService registry.ImageService
+
+	MetricsRemoteWriteURL string
 }
 
 type NewOrchestratorFunc func(opts Options) (Orchestrator, error)
@@ -46,9 +51,24 @@ func newOrchestrator(opts Options) (Orchestrator, error) {
 
 	switch opts.Cluster.Spec.Type {
 	case "ssh":
+		clustrManager, err := cluster.NewRaySSHClusterManager(opts.Cluster, imageRegistry, opts.ImageService, &command.OSExecutor{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create ray ssh cluster manager: %w", err)
+		}
+
 		return NewRayOrchestrator(RayOptions{
-			Options:       opts,
-			ImageRegistry: imageRegistry,
+			Options:        opts,
+			clusterManager: clustrManager,
+		})
+	case "kubernetes":
+		clusterManager, err := cluster.NewKubeRayClusterManager(opts.Cluster, imageRegistry, opts.ImageService, opts.MetricsRemoteWriteURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create kube ray cluster manager: %w", err)
+		}
+
+		return NewRayOrchestrator(RayOptions{
+			Options:        opts,
+			clusterManager: clusterManager,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", opts.Cluster.Spec.Type)

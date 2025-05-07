@@ -13,7 +13,7 @@ import (
 )
 
 func TestReplaceComposeImageRegistry(t *testing.T) {
-	tempDir := os.TempDir()
+	tempDir := t.TempDir()
 
 	tests := []struct {
 		name           string
@@ -136,7 +136,7 @@ func TestNewLaunchCmd(t *testing.T) {
 			setup: func(mock *mocks.MockExecutor) {
 				// No expectations needed for command creation
 			},
-			envWorkDir: filepath.Join(os.TempDir(), "custom-neutree-workdir"),
+			envWorkDir: filepath.Join(t.TempDir(), "custom-neutree-workdir"),
 			expectedCmd: func(t *testing.T, cmd *cobra.Command) {
 				assert.Equal(t, "launch", cmd.Use)
 				assert.Equal(t, "Deploy Neutree components", cmd.Short)

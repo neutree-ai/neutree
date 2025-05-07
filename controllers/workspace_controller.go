@@ -28,6 +28,7 @@ type WorkspaceControllerOption struct {
 func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceController, error) {
 	c := &WorkspaceController{
 		baseController: &BaseController{
+			//nolint:staticcheck
 			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
 				workqueue.RateLimitingQueueConfig{Name: "workspace"}),
 			workers:      option.Workers,

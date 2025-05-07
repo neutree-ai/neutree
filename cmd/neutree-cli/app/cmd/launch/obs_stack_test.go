@@ -28,7 +28,7 @@ func TestNewObsStackInstallCmd(t *testing.T) {
 				// No expectations needed for command creation
 			},
 			commonOptions: &commonOptions{
-				workDir:        filepath.Join(os.TempDir(), "neutree-obs-test"),
+				workDir:        filepath.Join(t.TempDir(), "neutree-obs-test"),
 				deployType:     "local",
 				mirrorRegistry: "",
 			},
@@ -45,7 +45,7 @@ func TestNewObsStackInstallCmd(t *testing.T) {
 				// No expectations needed for command creation
 			},
 			commonOptions: &commonOptions{
-				workDir:        filepath.Join(os.TempDir(), "neutree-obs-test-custom"),
+				workDir:        filepath.Join(t.TempDir(), "neutree-obs-test-custom"),
 				deployType:     "local",
 				mirrorRegistry: "my.registry.com",
 			},
@@ -88,7 +88,7 @@ func TestPrepareObsStackDeployConfig(t *testing.T) {
 			name: "success with default options",
 			options: &obsStackInstallOptions{
 				commonOptions: &commonOptions{
-					workDir:    os.TempDir(),
+					workDir:    t.TempDir(),
 					nodeIP:     "192.168.1.1",
 					deployType: constants.DeployTypeLocal,
 					deployMode: constants.DeployModeSingle,
@@ -101,7 +101,7 @@ func TestPrepareObsStackDeployConfig(t *testing.T) {
 			name: "success with custom registry",
 			options: &obsStackInstallOptions{
 				commonOptions: &commonOptions{
-					workDir:        os.TempDir(),
+					workDir:        t.TempDir(),
 					nodeIP:         "192.168.1.1",
 					deployType:     constants.DeployTypeLocal,
 					deployMode:     constants.DeployModeSingle,
@@ -157,7 +157,7 @@ func TestInstallObsStackSingleNodeByDocker(t *testing.T) {
 			name: "successful deployment",
 			options: obsStackInstallOptions{
 				commonOptions: &commonOptions{
-					workDir:    os.TempDir(),
+					workDir:    t.TempDir(),
 					nodeIP:     "192.168.1.1",
 					deployType: constants.DeployTypeLocal,
 					deployMode: constants.DeployModeSingle,
@@ -175,7 +175,7 @@ func TestInstallObsStackSingleNodeByDocker(t *testing.T) {
 			name: "failed when docker compose fails",
 			options: obsStackInstallOptions{
 				commonOptions: &commonOptions{
-					workDir:    os.TempDir(),
+					workDir:    t.TempDir(),
 					nodeIP:     "192.168.1.1",
 					deployType: constants.DeployTypeLocal,
 					deployMode: constants.DeployModeSingle,
