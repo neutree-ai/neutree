@@ -1,9 +1,7 @@
 package proxies
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sashabaranov/go-openai"
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -63,7 +60,6 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	r.Any("/api/v1/ray-dashboard-proxy/:name/*path", handleRayDashboardProxy(deps))
 	r.Any("/api/v1/auth/:path", handleAuthProxy(deps))
 	r.Any("/api/v1/:path", handlePostgrestProxy(deps))
-	r.Any("/api/v1/playgrounds/chat/:endpoint", handlePlaygroundProxy(deps))
 }
 
 func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
@@ -232,142 +228,5 @@ func handlePostgrestProxy(deps *Dependencies) gin.HandlerFunc {
 			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", deps.ServiceToken))
 		})
 		proxyHandler(c)
-	}
-}
-
-type ChatRequest struct {
-	Model       string                         `json:"model"`
-	Messages    []openai.ChatCompletionMessage `json:"messages"`
-	ID          string                         `json:"id"`
-	Temperature float32                        `json:"temperature,omitempty"`
-	TopP        float32                        `json:"top_p,omitempty"`
-	MaxLength   int                            `json:"max_length,omitempty"`
-}
-
-func handlePlaygroundProxy(deps *Dependencies) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		endpoint := c.Param("endpoint")
-		if endpoint == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "endpoint is required",
-			})
-
-			return
-		}
-
-		endpoints, err := deps.Storage.ListEndpoint(storage.ListOption{
-			Filters: []storage.Filter{
-				{
-					Column:   "metadata->name",
-					Operator: "eq",
-					Value:    strconv.Quote(endpoint),
-				},
-			},
-		})
-
-		if err != nil {
-			errS := fmt.Sprintf("Failed to list endpoints: %v", err)
-			klog.Error(errS)
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": errS,
-			})
-
-			return
-		}
-
-		if len(endpoints) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "endpoint not found",
-			})
-		}
-
-		serviceURL := endpoints[0].Status.ServiceURL
-		if serviceURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "service_url not found",
-			})
-
-			return
-		}
-
-		clientConfig := openai.DefaultConfig("")
-		clientConfig.BaseURL = serviceURL + "/v1"
-		client := openai.NewClientWithConfig(clientConfig)
-
-		requestContent, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			errS := fmt.Sprintf("Failed to read request body: %v", err)
-			klog.Error(errS)
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": errS,
-			})
-
-			return
-		}
-
-		var chatRequest ChatRequest
-		if err = json.Unmarshal(requestContent, &chatRequest); err != nil {
-			errS := fmt.Sprintf("Failed to unmarshal request body: %v", err)
-			klog.Error(errS)
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": errS,
-			})
-
-			return
-		}
-
-		chatCompletionParams := openai.ChatCompletionRequest{
-			Model:       chatRequest.Model,
-			Temperature: chatRequest.Temperature,
-			TopP:        chatRequest.TopP,
-			MaxTokens:   chatRequest.MaxLength,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleSystem,
-					Content: "You are a helpful assistant.",
-				},
-			},
-		}
-
-		for _, message := range chatRequest.Messages {
-			chatCompletionParams.Messages = append(chatCompletionParams.Messages, openai.ChatCompletionMessage{
-				Role:    message.Role,
-				Content: message.Content,
-			})
-		}
-
-		ctx := context.Background()
-
-		stream, err := client.CreateChatCompletionStream(ctx, chatCompletionParams)
-		if err != nil {
-			errS := fmt.Sprintf("Failed to create chat completion stream: %v", err)
-			klog.Error(errS)
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": errS,
-			})
-
-			return
-		}
-
-		defer stream.Close()
-
-		w := c.Writer
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-
-		for {
-			response, err := stream.Recv()
-			if errors.Is(err, io.EOF) {
-				break
-			}
-
-			if err != nil {
-				w.Write([]byte(fmt.Sprintf("Stream error: %v", err))) // nolint: errcheck
-				return
-			}
-
-			w.Write([]byte(response.Choices[0].Delta.Content)) // nolint: errcheck
-			w.(http.Flusher).Flush()                           // nolint: errcheck
-		}
 	}
 }
