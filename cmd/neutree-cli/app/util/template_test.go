@@ -119,7 +119,7 @@ func TestRemoveEmptyLines(t *testing.T) {
 
 // TestBatchParseTemplateFiles tests the BatchParseTemplateFiles function with various scenarios
 func TestBatchParseTemplateFiles(t *testing.T) {
-	tempDir := os.TempDir()
+	tempDir := t.TempDir()
 
 	tests := []struct {
 		name        string
@@ -179,7 +179,7 @@ func TestBatchParseTemplateFiles(t *testing.T) {
 
 // TestBatchParseTemplateFilesErrorCases tests error scenarios
 func TestBatchParseTemplateFilesErrorCases(t *testing.T) {
-	tempDir := os.TempDir()
+	tempDir := t.TempDir()
 
 	t.Run("non-existent file", func(t *testing.T) {
 		nonExistentFile := filepath.Join(tempDir, "nonexistent.tpl")

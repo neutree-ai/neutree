@@ -43,7 +43,7 @@ func createTestTar(t *testing.T, files map[string]string) *bytes.Buffer {
 }
 
 func TestExtractTar(t *testing.T) {
-	tempDir := os.TempDir()
+	tempDir := t.TempDir()
 	testDir := filepath.Join(tempDir, "test-extract")
 	defer os.RemoveAll(testDir)
 

@@ -581,6 +581,51 @@ func (_c *MockOrchestrator_StopNode_Call) RunAndReturn(run func(string) error) *
 	return _c
 }
 
+// SyncCluster provides a mock function with no fields
+func (_m *MockOrchestrator) SyncCluster() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncCluster")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockOrchestrator_SyncCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncCluster'
+type MockOrchestrator_SyncCluster_Call struct {
+	*mock.Call
+}
+
+// SyncCluster is a helper method to define mock.On call
+func (_e *MockOrchestrator_Expecter) SyncCluster() *MockOrchestrator_SyncCluster_Call {
+	return &MockOrchestrator_SyncCluster_Call{Call: _e.mock.On("SyncCluster")}
+}
+
+func (_c *MockOrchestrator_SyncCluster_Call) Run(run func()) *MockOrchestrator_SyncCluster_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockOrchestrator_SyncCluster_Call) Return(_a0 error) *MockOrchestrator_SyncCluster_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockOrchestrator_SyncCluster_Call) RunAndReturn(run func() error) *MockOrchestrator_SyncCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockOrchestrator creates a new instance of MockOrchestrator. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockOrchestrator(t interface {

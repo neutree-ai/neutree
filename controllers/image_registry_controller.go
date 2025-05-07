@@ -35,6 +35,7 @@ type ImageRegistryControllerOption struct {
 func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRegistryController, error) {
 	c := &ImageRegistryController{
 		baseController: &BaseController{
+			//nolint:staticcheck
 			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
 				workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
 			workers:      option.Workers,

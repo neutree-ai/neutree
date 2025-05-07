@@ -27,6 +27,7 @@ type ApiKeyControllerOption struct {
 func NewApiKeyController(option *ApiKeyControllerOption) (*ApiKeyController, error) {
 	c := &ApiKeyController{
 		baseController: &BaseController{
+			//nolint:staticcheck
 			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "api_key"}),
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,

@@ -28,6 +28,7 @@ type RoleAssignmentControllerOption struct {
 func NewRoleAssignmentController(option *RoleAssignmentControllerOption) (*RoleAssignmentController, error) {
 	c := &RoleAssignmentController{
 		baseController: &BaseController{
+			//nolint:staticcheck
 			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "roleassignment"}),
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,

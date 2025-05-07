@@ -28,6 +28,12 @@ const (
 	AutoScaleNodeProvisionType = "autoscaler"
 )
 
+// KubeRay resource labels.
+const (
+	NeutreeClusterLabelKey          = "neutree.ai/neutree-cluster"
+	NeutreeClusterWorkspaceLabelKey = "neutree.ai/neutree-workspace"
+)
+
 type Provider struct {
 	Type               string   `json:"type,omitempty" yaml:"type,omitempty"`
 	HeadIP             string   `json:"head_ip,omitempty" yaml:"head_ip,omitempty"`
@@ -64,11 +70,17 @@ type RayClusterConfig struct {
 	WorkerSetupCommands          []string `json:"worker_setup_commands,omitempty" yaml:"worker_setup_commands,omitempty"`
 	InitializationCommands       []string `json:"initialization_commands,omitempty" yaml:"initialization_commands,omitempty"`
 
-	MaxWorkers         int     `json:"max_workers,omitempty" yaml:"max_workers,omitempty"`
-	UpscalingSpeed     float64 `json:"upscaling_speed,omitempty" yaml:"upscaling_speed,omitempty"`
-	IdleTimeoutMinutes int     `json:"idle_timeout_minutes,omitempty" yaml:"idle_timeout_minutes,omitempty"`
-	AvailableNodeTypes any     `json:"available_node_types,omitempty" yaml:"available_node_types,omitempty"`
-	HeadNodeType       string  `json:"head_node_type,omitempty" yaml:"head_node_type,omitempty"`
+	MaxWorkers         int                          `json:"max_workers,omitempty" yaml:"max_workers,omitempty"`
+	UpscalingSpeed     float64                      `json:"upscaling_speed,omitempty" yaml:"upscaling_speed,omitempty"`
+	IdleTimeoutMinutes int                          `json:"idle_timeout_minutes,omitempty" yaml:"idle_timeout_minutes,omitempty"`
+	AvailableNodeTypes map[string]AvailableNodeType `json:"available_node_types,omitempty" yaml:"available_node_types,omitempty"`
+	HeadNodeType       string                       `json:"head_node_type,omitempty" yaml:"head_node_type,omitempty"`
+}
+
+type AvailableNodeType struct {
+	Resources  map[string]string `json:"resources,omitempty" yaml:"resources,omitempty"`
+	MinWorkers int               `json:"min_workers,omitempty" yaml:"min_workers,omitempty"`
+	MaxWorkers int               `json:"max_workers,omitempty" yaml:"max_workers,omitempty"`
 }
 
 type RayClusterMetadataData struct {
@@ -122,6 +134,7 @@ type RayClusterStatus struct {
 	PythonVersion       string
 	NeutreeServeVersion string
 	ReadyNodes          int
+	DesireNodes         int
 	AutoScaleStatus     AutoScaleStatus
 }
 

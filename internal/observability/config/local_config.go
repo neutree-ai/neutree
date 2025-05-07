@@ -8,6 +8,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
 )
 
@@ -73,7 +74,7 @@ func (s *LocalConfigSync) removeMetricsConfig(key string) error {
 	return nil
 }
 
-func (s *LocalConfigSync) updateMetricsConfig(key string, configs []monitoring.MetricsScrapeTargetsConfig) error {
+func (s *LocalConfigSync) updateMetricsConfig(key string, configs []v1.MetricsScrapeTargetsConfig) error {
 	metricsConfigFilePath := filepath.Join(s.metricsConfigPath, key+".json")
 
 	configContent, err := json.Marshal(configs)

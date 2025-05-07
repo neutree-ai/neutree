@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
@@ -21,11 +22,13 @@ var (
 	defaultClusterVersion   = flag.String("default-cluster-version", "v1", "default neutree cluster version")
 	deployType              = flag.String("deploy-type", "local", "deploy type")
 	LocalCollecteConfigPath = flag.String("local-collect-config-path", "/etc/neutree/collect", "local collect config path")
+	MetricsRemoteWriteURL   = flag.String("metrics-remote-write-url", "", "metrics remote write url")
 )
 
 func main() {
 	klog.InitFlags(nil)
 	defer klog.Flush()
+	ctrl.SetLogger(klog.NewKlogr())
 
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
@@ -73,6 +76,7 @@ func main() {
 		DefaultClusterVersion:   *defaultClusterVersion,
 		ImageService:            imageService,
 		ObsCollectConfigManager: obsCollectConfigManager,
+		MetricsRemoteWriteURL:   *MetricsRemoteWriteURL,
 	})
 
 	if err != nil {

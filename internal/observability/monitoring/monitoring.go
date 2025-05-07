@@ -1,9 +1,6 @@
 package monitoring
 
-type MetricsScrapeTargetsConfig struct {
-	Labels  map[string]string `json:"labels"`
-	Targets []string          `json:"targets"`
-}
+import v1 "github.com/neutree-ai/neutree/api/v1"
 
 // ServiceMonitor defines the interface for services to provide their monitoring configurations
 type ServiceMonitor interface {
@@ -13,5 +10,5 @@ type ServiceMonitor interface {
 type MetricsMonitor interface {
 	// GetMetricsScrapeTargetsConfig returns the configuration for metrics scraping
 	// including target endpoints and identifying labels
-	GetMetricsScrapeTargetsConfig() ([]MetricsScrapeTargetsConfig, error)
+	GetMetricsScrapeTargetsConfig() ([]v1.MetricsScrapeTargetsConfig, error)
 }

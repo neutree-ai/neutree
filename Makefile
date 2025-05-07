@@ -48,8 +48,8 @@ GO_BUILD_ARGS = \
 	-X '$(MODULE_PATH)/pkg/version.appVersion=$(IMAGE_TAG)' \
 	-X '$(MODULE_PATH)/pkg/version.buildTime=$(shell date --iso-8601=seconds)'"
 
-MOCKERY_DIRS=./ pkg/model_registry pkg/storage pkg/command internal/orchestrator internal/orchestrator/ray internal/orchestrator/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config
-MOCKERY_OUTPUT_DIRS=testing/mocks pkg/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/orchestrator/ray/mocks internal/orchestrator/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks
+MOCKERY_DIRS=./ pkg/model_registry pkg/storage pkg/command internal/orchestrator internal/orchestrator/ray/cluster internal/orchestrator/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config
+MOCKERY_OUTPUT_DIRS=testing/mocks pkg/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/orchestrator/ray/cluster/mocks internal/orchestrator/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks
 
 
 .PHONY: help

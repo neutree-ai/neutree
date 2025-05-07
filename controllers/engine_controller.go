@@ -28,6 +28,7 @@ type EngineControllerOption struct {
 func NewEngineController(option *EngineControllerOption) (*EngineController, error) {
 	c := &EngineController{
 		baseController: &BaseController{
+			//nolint:staticcheck
 			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "engine"}),
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,

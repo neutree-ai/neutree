@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring/mocks"
 	"github.com/stretchr/testify/assert"
@@ -13,7 +14,7 @@ import (
 
 func TestLocalConfigSync(t *testing.T) {
 	// Setup temp directory
-	tempDir := os.TempDir()
+	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "neutree_test_config")
 	defer os.RemoveAll(configPath)
 
@@ -65,7 +66,7 @@ func TestLocalConfigSync(t *testing.T) {
 			// Mock behavior for GetMetricsScrapeTargetsConfig
 			for _, sm := range tt.metricsMonitorMap {
 				mockSM := sm.(*mocks.MockMetricsMonitor)
-				mockSM.On("GetMetricsScrapeTargetsConfig").Return([]monitoring.MetricsScrapeTargetsConfig{}, nil)
+				mockSM.On("GetMetricsScrapeTargetsConfig").Return([]v1.MetricsScrapeTargetsConfig{}, nil)
 			}
 
 			// Create config sync instance
@@ -103,7 +104,7 @@ func TestLocalConfigSync(t *testing.T) {
 }
 
 func TestRemoveConfig(t *testing.T) {
-	tempDir := os.TempDir()
+	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "neutree_test_config_remove")
 	defer os.RemoveAll(configPath)
 
@@ -151,20 +152,20 @@ func TestRemoveConfig(t *testing.T) {
 }
 
 func TestUpdateConfig(t *testing.T) {
-	tempDir := os.TempDir()
+	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "neutree_test_config_update")
 	defer os.RemoveAll(configPath)
 
 	tests := []struct {
 		name        string
 		key         string
-		configs     []monitoring.MetricsScrapeTargetsConfig
+		configs     []v1.MetricsScrapeTargetsConfig
 		expectError bool
 	}{
 		{
 			name: "successful update",
 			key:  "metrics1",
-			configs: []monitoring.MetricsScrapeTargetsConfig{
+			configs: []v1.MetricsScrapeTargetsConfig{
 				{Targets: []string{"localhost:9090"}},
 			},
 		},

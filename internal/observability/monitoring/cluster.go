@@ -21,9 +21,9 @@ func NewClusterMonitor(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orc
 	}
 }
 
-func (cm *clusterMonitor) GetMetricsScrapeTargetsConfig() ([]MetricsScrapeTargetsConfig, error) {
+func (cm *clusterMonitor) GetMetricsScrapeTargetsConfig() ([]v1.MetricsScrapeTargetsConfig, error) {
 	var (
-		metricsScrapeTargetsConfigs []MetricsScrapeTargetsConfig
+		metricsScrapeTargetsConfigs []v1.MetricsScrapeTargetsConfig
 	)
 
 	// current only support ray cluster
@@ -37,13 +37,13 @@ func (cm *clusterMonitor) GetMetricsScrapeTargetsConfig() ([]MetricsScrapeTarget
 	return metricsScrapeTargetsConfigs, nil
 }
 
-func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) (*MetricsScrapeTargetsConfig, error) {
+func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) (*v1.MetricsScrapeTargetsConfig, error) {
 	nodes, err := clusterOrchestrator.ListNodes()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list ray nodes")
 	}
 
-	metricsScrapeTargetConfig := &MetricsScrapeTargetsConfig{
+	metricsScrapeTargetConfig := &v1.MetricsScrapeTargetsConfig{
 		Labels: map[string]string{
 			"ray_io_cluster": cluster.Metadata.Name,
 			"job":            "ray",
