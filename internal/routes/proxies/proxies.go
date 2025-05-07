@@ -18,6 +18,11 @@ import (
 
 type Dependencies struct {
 	Storage storage.Storage
+
+	StorageAccessURL string
+	ServiceToken     string
+
+	AuthEndpoint string
 }
 
 func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.Request)) gin.HandlerFunc {
@@ -53,6 +58,8 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	r.Any("/api/v1/serve-proxy/:name/*path", handleServeProxy(deps))
 	r.Any("/api/v1/ray-dashboard-proxy/:name/*path", handleRayDashboardProxy(deps))
+	r.Any("/api/v1/auth/:path", handleAuthProxy(deps))
+	r.Any("/api/v1/:path", handlePostgrestProxy(deps))
 }
 
 func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
@@ -194,6 +201,32 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		proxyHandler := CreateProxyHandler(dashboardURL, path, nil)
+		proxyHandler(c)
+	}
+}
+
+func handleAuthProxy(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Param("path")
+		if path != "" && path[0] == '/' {
+			path = path[1:]
+		}
+
+		proxyHandler := CreateProxyHandler(deps.AuthEndpoint, path, nil)
+		proxyHandler(c)
+	}
+}
+
+func handlePostgrestProxy(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Param("path")
+		if path != "" && path[0] == '/' {
+			path = path[1:]
+		}
+
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, func(req *http.Request) {
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", deps.ServiceToken))
+		})
 		proxyHandler(c)
 	}
 }

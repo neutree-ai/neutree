@@ -44,7 +44,7 @@ services:
     container_name: grafana
     image: grafana/grafana:{{.GrafanaVersion}}
     ports:
-      - 3000:3000
+      - 3030:3000
     restart: always
     volumes:
       - grafanadata:/var/lib/grafana

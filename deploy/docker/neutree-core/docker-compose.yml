@@ -147,6 +147,26 @@ services:
     depends_on:
       - postgrest
 
+  neutree-api:
+    image: neutree-ai/neutree-api:{{ .NeutreeAPIVersion}}
+    container_name: neutree-api
+    command:
+      - ./neutree-api
+      - --storage-access-url=http://postgrest:6432
+      - --storage-jwt-secret={{ .JwtSecret}}
+      - --host=0.0.0.0
+      - --port=3000
+      - --static-dir=./public
+      - --gin-mode=release
+      - --auth-endpoint=http://auth:9999
+    ports:
+      - 3000:3000
+    networks:
+      - neutree
+    restart: always
+    depends_on:
+      - postgrest
+
   vmagent:
     container_name: vmagent
     image: victoriametrics/vmagent:{{ .VictoriaMetricsVersion}}

@@ -502,7 +502,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not found")
 	}
 
-	if engine[0].Status.Phase != v1.EnginePhaseCreated {
+	if engine[0].Status == nil || engine[0].Status.Phase != v1.EnginePhaseCreated {
 		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not ready")
 	}
 
@@ -562,12 +562,11 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	for _, appStatus := range currentAppsResp.Applications {
 		if appStatus.DeployedAppConfig != nil {
 			updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
-		}
-
-		if appStatus.DeployedAppConfig.Name == newApp.Name {
-			// If the application already exists, update it
-			updatedAppsList[len(updatedAppsList)-1] = newApp
-			need_append = false
+			if appStatus.DeployedAppConfig.Name == newApp.Name {
+				// If the application already exists, update it
+				updatedAppsList[len(updatedAppsList)-1] = newApp
+				need_append = false
+			}
 		}
 	}
 

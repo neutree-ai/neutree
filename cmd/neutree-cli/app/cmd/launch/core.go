@@ -134,6 +134,7 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		"MetricsRemoteWriteURL":  options.metricsRemoteWriteURL,
 		"VictoriaMetricsVersion": constants.VictoriaMetricsVersion,
 		"NeutreeCoreVersion":     options.version,
+		"NeutreeAPIVersion":      options.version,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)

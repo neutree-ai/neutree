@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
@@ -40,21 +41,12 @@ func main() {
 
 	r := gin.Default()
 
+	r.Use(static.Serve("/", static.LocalFile(*staticDir, true)))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 		})
 	})
-
-	postgrestProxy := proxies.CreateProxyHandler(*storageAccessURL, "", func(req *http.Request) {
-		req.Header.Set("Authorization", "Bearer "+*serviceToken)
-	})
-	r.Any("/api/v1/*path", postgrestProxy)
-
-	r.Static("/public", *staticDir)
-
-	authProxy := proxies.CreateProxyHandler(*authEndpoint, "", nil)
-	r.Any("/api/v1/auth/*path", authProxy)
 
 	s, err := storage.New(storage.Options{
 		AccessURL: *storageAccessURL,
@@ -70,7 +62,10 @@ func main() {
 	})
 
 	proxies.RegisterRoutes(r, &proxies.Dependencies{
-		Storage: s,
+		Storage:          s,
+		StorageAccessURL: *storageAccessURL,
+		ServiceToken:     *serviceToken,
+		AuthEndpoint:     *authEndpoint,
 	})
 
 	serverAddr := fmt.Sprintf("%s:%d", *host, *port)

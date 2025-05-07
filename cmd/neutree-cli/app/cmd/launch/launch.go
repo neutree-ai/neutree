@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/compose-spec/compose-go/cli"
+	"github.com/compose-spec/compose-go/loader"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
@@ -86,10 +87,15 @@ func replaceComposeImageRegistry(composeFile string, mirrorRegistry string) erro
 		return nil
 	}
 
-	project, err := cli.ProjectFromOptions(&cli.ProjectOptions{
-		ConfigPaths: []string{composeFile},
-	})
+	options, err := cli.NewProjectOptions([]string{composeFile}, cli.WithLoadOptions(func(o *loader.Options) {
+		// disable interpolation to avoid character escapes
+		o.SkipInterpolation = true
+	}))
+	if err != nil {
+		return errors.Wrapf(err, "load docker compose file %s error", composeFile)
+	}
 
+	project, err := cli.ProjectFromOptions(options)
 	if err != nil {
 		return errors.Wrapf(err, "analyze docker compose file %s error", composeFile)
 	}
