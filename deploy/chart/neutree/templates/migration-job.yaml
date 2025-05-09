@@ -17,7 +17,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}    
-      serviceAccountName:  {{ include "neutree.fullname" . }}-sa
+      serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-auth-service
           image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
@@ -25,6 +25,15 @@ spec:
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-auth
+        - name: copy-migration-sql
+          image: "{{.Values.dbScripts.image.repository }}:{{.Values.dbScripts.image.tag | default .Chart.AppVersion  }}"
+          imagePullPolicy: {{.Values.dbScripts.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - "cp -r /db/migrations/* /migrations/"
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
       containers:
       - name: migration
         image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag }}"
@@ -40,6 +49,5 @@ spec:
             readOnly: true
       volumes:
         - name: migrations
-          configMap:
-            name: {{ include "neutree.fullname" . }}-migration-sql
+          emptyDir: {}
       restartPolicy: OnFailure 

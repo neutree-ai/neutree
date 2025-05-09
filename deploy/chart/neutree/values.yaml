@@ -15,6 +15,13 @@ k8sWaitFor:
     tag: "v2.0"
     pullPolicy: IfNotPresent
 
+dbScripts:
+  image:
+    repository: neutree-ai/neutree-db-scripts
+    tag: ""
+    pullPolicy: IfNotPresent
+
+
 db:
   image:
     repository: postgres
@@ -59,7 +66,7 @@ auth:
 migration:
   image:
     repository: migrate/migrate
-    tag: "v4.18.3"
+    tag: "latest"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -72,7 +79,7 @@ migration:
 postgrest:
   image:
     repository: postgrest/postgrest
-    tag: "v12.2.12"
+    tag: "latest"
     pullPolicy: IfNotPresent
   resources:
     requests:

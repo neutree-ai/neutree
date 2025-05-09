@@ -20,6 +20,16 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        - name: copy-init-sql
+          image: "{{.Values.dbScripts.image.repository }}:{{.Values.dbScripts.image.tag | default .Chart.AppVersion  }}"
+          imagePullPolicy: {{.Values.dbScripts.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - "cp -r /db/init-scripts/* /docker-entrypoint-initdb.d/"
+          volumeMounts:
+            - name: postgresql-initdb
+              mountPath: /docker-entrypoint-initdb.d
       containers:
         - name: neutree-postgresql
           env:
@@ -57,8 +67,7 @@ spec:
           persistentVolumeClaim:
             claimName: {{ include "neutree.fullname" . }}-postgresql-pvc
         - name: postgresql-initdb
-          configMap:
-            name: {{ include "neutree.fullname" . }}-init-sql
+          emptyDir: {}
       {{- with .Values.db.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

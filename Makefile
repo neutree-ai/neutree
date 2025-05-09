@@ -9,6 +9,7 @@ IMAGE_PREFIX ?= ${IMAGE_REPO}/${IMAGE_PROJECT}/
 IMAGE_TAG ?= ${shell echo $(VERSION) | awk -F '/' '{print $$NF}'}
 NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
 NEUTREE_API_IMAGE := $(IMAGE_PREFIX)neutree-api
+NEUTREE_DB_SCRITPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
 
 ARCH ?= amd64
 ALL_ARCH = amd64 arm64
@@ -77,7 +78,7 @@ build-neutree-api:
 	$(GO) build -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
 
 # Choice of images to build/push
-ALL_DOCKER_BUILD ?= core api
+ALL_DOCKER_BUILD ?= core api db-scripts
 
 .PHONY: docker-build-all ## Build all the architecture docker images
 docker-build-all: $(addprefix docker-build-,$(ALL_ARCH))
@@ -97,6 +98,10 @@ docker-build-core: # build core docker image
 docker-build-api: # build api docker image
 	docker build --build-arg ARCH=$(ARCH) --build-arg UI_VERSION=$(UI_VERSION) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_API_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.api
 
+.PHONY: docker-build-db-scripts
+docker-build-db-scripts:
+	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_DB_SCRITPTS_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.db-scripts
+
 .PHONY: docker-push-all ## Push all the architecture docker images
 docker-push-all:
 	$(MAKE) ALL_ARCH="$(ALL_ARCH)" $(addprefix docker-push-,$(ALL_DOCKER_BUILD))
@@ -115,6 +120,10 @@ docker-push-core: # push core docker image
 docker-push-api: # push api docker image
 	docker push $(NEUTREE_API_IMAGE)-$(ARCH):$(IMAGE_TAG)
 
+.PHONY: docker-push-db-scripts
+docker-push-db-scripts: # push db scripts docker image
+	docker push $(NEUTREE_DB_SCRITPTS_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ALL_DOCKER_BUILD))
 
@@ -130,6 +139,11 @@ docker-push-manifest-api: ## Push the api manifest docker image.
 	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_API_IMAGE}:${IMAGE_TAG} ${NEUTREE_API_IMAGE}-$${arch}:${IMAGE_TAG}; done
 	docker manifest push --purge ${NEUTREE_API_IMAGE}:${IMAGE_TAG}
 
+.PHONY: docker-push-manifest-db-scripts
+docker-push-manifest-db-scripts: ## Push the db scripts manifest docker image.
+	docker manifest create --amend $(NEUTREE_DB_SCRITPTS_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_DB_SCRITPTS_IMAGE)\-&:$(IMAGE_TAG)~g")
+	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_DB_SCRITPTS_IMAGE}:${IMAGE_TAG} ${NEUTREE_DB_SCRITPTS_IMAGE}-$${arch}:${IMAGE_TAG}; done
+	docker manifest push --purge ${NEUTREE_DB_SCRITPTS_IMAGE}:${IMAGE_TAG}
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
@@ -190,13 +204,8 @@ release-binary:
 		go build $(GO_BUILD_ARGS) \
 		-o $(RELEASE_DIR)/$(notdir $(RELEASE_BINARY)) $(BUILD_PATH)
 
-.PHONY: prepare-chart
-prepare-chart:
-	rm -rf ./deploy/chart/neutree/db
-	cp -r db ./deploy/chart/neutree/
-
 .PHONY: release-chart
-release-chart: prepare-chart ## Build the chart to publish with a release
+release-chart: ## Build the chart to publish with a release
 	helm package ./deploy/chart/neutree -d $(RELEASE_DIR)
 
 MOCKERY := $(shell pwd)/bin/mockery
