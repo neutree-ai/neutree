@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "neutree.fullname" . }}-postgresql-service
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+    app.kubernetes.io/component: neutree-postgresql
+spec:
+  type: {{ .Values.db.service.type }}
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/component: neutree-postgresql
+

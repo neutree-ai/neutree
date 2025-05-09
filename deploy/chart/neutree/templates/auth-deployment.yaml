@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: {{  .Release.Namespace }}
+  name: {{ include "neutree.fullname" . }}-auth
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.auth.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: neutree-auth
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: neutree-auth
+    spec:
+      {{- with .Values.auth.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "neutree.fullname" . }}-sa
+      initContainers:
+        - name: wait-postgresql
+          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+          args:
+            - pod
+            - -lapp.kubernetes.io/component=neutree-postgresql
+      containers:
+        - name: auth
+          image: "{{ .Values.auth.image.repository }}:{{ .Values.auth.image.tag}}"
+          imagePullPolicy: {{ .Values.auth.image.pullPolicy }}
+          env:
+            - name: GOTRUE_MAILER_URLPATHS_CONFIRMATION
+              value: "/verify"
+            - name: GOTRUE_JWT_SECRET
+              value: {{.Values.jwtSecret }}
+            - name: GOTRUE_JWT_EXP
+              value: "3600"
+            - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
+              value: "api_user"
+            - name: GOTRUE_DB_DRIVER
+              value: "postgres"
+            - name: DB_NAMESPACE
+              value: auth
+            - name: GOTRUE_API_HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "9999"
+            - name: GOTRUE_DISABLE_SIGNUP
+              value: "false"
+            - name: API_EXTERNAL_URL
+              value: "http://localhost:9999"
+            - name: GOTRUE_SITE_URL
+              value: "http://localhost:9999"
+            - name: GOTRUE_MAILER_AUTOCONFIRM
+              value: "true"
+            - name: GOTRUE_LOG_LEVEL
+              value: "INFO"
+            - name: DATABASE_URL
+              value: postgres://auth_admin:auth_admin_password@{{ include "neutree.fullname" . }}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable
+            - name: GOTRUE_COOKIE_KEY
+              value: {{.Values.db.name }}
+          readinessProbe:
+            exec:
+              command:
+                - "sh"
+                - "-c"
+                - "wget -q -O /dev/null http://localhost:9999/health || exit 1"
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            timeoutSeconds: 15
+            failureThreshold: 10  
+          ports:
+            - name: http
+              containerPort: 9999
+              protocol: TCP
+          {{- with .Values.auth.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.auth.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.auth.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.auth.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+

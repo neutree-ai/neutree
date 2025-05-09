@@ -1,0 +1,7 @@
+ARG ARCH
+
+FROM --platform=linux/${ARCH} ubuntu:22.04
+
+WORKDIR /
+# Copy db scripts
+COPY ./db /db

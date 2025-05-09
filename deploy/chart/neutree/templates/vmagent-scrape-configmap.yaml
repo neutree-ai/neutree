@@ -1,0 +1,6 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: vmagent-scrape-config
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}

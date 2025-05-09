@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "neutree.fullname" . }}-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "neutree.fullname" . }}-role
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get","list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get","list"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "neutree.fullname" . }}-rolebinding
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "neutree.fullname" . }}-sa
+    namespace: {{ .Release.Namespace}}
+roleRef:
+  kind: Role
+  name: {{ include "neutree.fullname" . }}-role
+  apiGroup: rbac.authorization.k8s.io

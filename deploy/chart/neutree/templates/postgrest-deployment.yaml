@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "neutree.fullname" . }}-postgrest
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.postgrest.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: neutree-postgrest
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: neutree-postgrest
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName:  {{ include "neutree.fullname" . }}-sa
+      initContainers:
+        - name: wait-migration-job
+          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+          args:
+            - job
+            - {{ include "neutree.fullname" . }}-migration-job-{{.Release.Revision }}
+            - -n
+            - {{ .Release.Namespace }}  
+      containers:
+        - name: postgrest
+          image: "{{ .Values.postgrest.image.repository }}:{{ .Values.postgrest.image.tag }}"
+          imagePullPolicy: {{ .Values.postgrest.image.pullPolicy }}
+          env:
+            - name: PGRST_DB_URI
+              value: postgres://{{.Values.db.user }}:{{.Values.db.password }}@{{ include "neutree.fullname" .}}-postgresql-service:5432/{{.Values.db.name }}
+            - name: PGRST_DB_SCHEMA
+              value: api
+            - name: PGRST_SERVER_HOST
+              value: "0.0.0.0"
+            - name: PGRST_SERVER_PORT
+              value: "6432"
+            - name: PGRST_JWT_SECRET
+              value: "{{.Values.jwtSecret }}"
+            - name: PGRST_DB_EXTRA_SEARCH_PATH
+              value: "auth"
+            - name: PGRST_DB_AGGREGATES_ENABLED
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 6432
+              protocol: TCP
+          {{- with .Values.postgrest.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.postgrest.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgrest.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgrest.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "neutree.fullname" . }}-postgresmeta
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.postgresmeta.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: neutree-postgresmeta
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: neutree-postgresmeta
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: neutree-postgresmeta
+          image: "{{ .Values.postgresmeta.image.repository }}:{{ .Values.postgresmeta.image.tag}}"
+          imagePullPolicy: {{ .Values.postgresmeta.image.pullPolicy }}
+          env:
+            - name: PG_META_HOST
+              value: "0.0.0.0"
+            - name: PG_META_PORT
+              value: "8080"
+            - name: PG_META_DB_HOST
+              value: {{ include "neutree.fullname" . }}-postgresql-service
+            - name: PG_META_DB_PORT
+              value: "5432"
+            - name: PG_META_DB_NAME
+              value: {{.Values.db.name }}
+            - name: PG_META_DB_USER
+              value: {{.Values.db.user }}
+            - name: PG_META_DB_PASSWORD
+              value: {{.Values.db.password }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          {{- with .Values.postgresmeta.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.postgresmeta.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgresmeta.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgresmeta.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

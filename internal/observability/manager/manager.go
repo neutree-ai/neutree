@@ -2,7 +2,7 @@ package manager
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
@@ -19,8 +19,10 @@ type ObsCollectConfigManager interface {
 }
 
 type ObsCollectConfigOptions struct {
-	DeployType             string
-	LocalCollectConfigPath string
+	DeployType                            string
+	LocalCollectConfigPath                string
+	KubernetesMetricsCollectConfigMapName string
+	KubernetesCollectConfigNamespace      string
 }
 
 func NewObsCollectConfigManager(options ObsCollectConfigOptions) (ObsCollectConfigManager, error) {
@@ -29,8 +31,15 @@ func NewObsCollectConfigManager(options ObsCollectConfigOptions) (ObsCollectConf
 	switch options.DeployType {
 	case "local":
 		configSyncer = config.NewLocalConfigSync(options.LocalCollectConfigPath)
+	case "kubernetes":
+		var err error
+
+		configSyncer, err = config.NewKubernetesConfigSync(options.KubernetesMetricsCollectConfigMapName, options.KubernetesCollectConfigNamespace)
+		if err != nil {
+			return nil, err
+		}
 	default:
-		return nil, fmt.Errorf("unsupported obs deploy type: %s", options.DeployType)
+		return nil, errors.New("unsupported deploy type")
 	}
 
 	metricsCollectConfigManager := &metricsCollectConfigManager{
