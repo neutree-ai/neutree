@@ -128,8 +128,6 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 	}()
 
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.ModelRegistryPhasePENDING {
-		klog.Info("Connect model registry " + obj.Metadata.Name)
-
 		err = modelRegistry.Connect()
 		if err != nil {
 			return errors.Wrap(err, "failed to connect model registry "+obj.Metadata.Name)
@@ -139,8 +137,6 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 	}
 
 	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseFAILED {
-		klog.Info("Reconnect model registry " + obj.Metadata.Name)
-
 		if err = modelRegistry.Disconnect(); err != nil {
 			return errors.Wrap(err, "failed to disconnect model registry "+obj.Metadata.Name)
 		}
@@ -153,8 +149,6 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 	}
 
 	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseCONNECTED {
-		klog.Info("Health check model registry " + obj.Metadata.Name)
-
 		healthy := modelRegistry.HealthyCheck()
 		if !healthy {
 			return errors.New("health check model registry " + obj.Metadata.Name + " failed")

@@ -3,6 +3,7 @@ package launch
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/pkg/errors"
@@ -85,6 +86,19 @@ func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neut
 	err := prepareNeutreeCoreDeployConfig(options)
 	if err != nil {
 		return errors.Wrap(err, "prepare neutree core launch config failed")
+	}
+
+	if options.dryRun {
+		fmt.Println("dry run, skip install neutree core")
+
+		composeContent, err := os.ReadFile(filepath.Join(options.workDir, "neutree-core", "docker-compose.yml"))
+		if err != nil {
+			return errors.Wrap(err, "read docker compose file failed")
+		}
+
+		fmt.Println(string(composeContent))
+
+		return nil
 	}
 
 	output, err := exector.Execute(context.Background(), "docker",

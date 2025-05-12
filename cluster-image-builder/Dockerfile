@@ -1,4 +1,4 @@
-FROM rayproject/ray:2.43.0-py312-cu124
+FROM rayproject/ray:2.43.0-py312-cu121
 
 # Copy requirements file
 COPY requirements.txt .

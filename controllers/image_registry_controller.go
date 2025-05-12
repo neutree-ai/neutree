@@ -127,8 +127,6 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 		}
 	}()
 
-	klog.Info("Connect to image registry " + obj.Metadata.Name)
-
 	err = c.connectImageRegistry(obj)
 	if err != nil {
 		return errors.Wrap(err, "failed to connect image registry "+obj.Metadata.Name)

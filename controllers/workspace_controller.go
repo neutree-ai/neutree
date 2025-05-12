@@ -104,6 +104,12 @@ func (c *WorkspaceController) sync(obj *v1.Workspace) error {
 		}
 
 		klog.Info("Deleting workspace " + obj.Metadata.Name)
+
+		err = c.DeleteWorkspaceEngine(obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete workspace engine %s", obj.Metadata.Name)
+		}
+
 		// Update status to DELETED
 		err = c.updateStatus(obj, v1.WorkspacePhaseDELETED, nil)
 		if err != nil {
@@ -124,6 +130,13 @@ func (c *WorkspaceController) sync(obj *v1.Workspace) error {
 		}
 
 		return nil
+	}
+	// If status is CREATED, sync the workspace engine.
+	if obj.Status.Phase == v1.WorkspacePhaseCREATED {
+		err = c.syncWorkspaceEngine(*obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to sync workspace %s engine", obj.Metadata.Name)
+		}
 	}
 
 	// If already CREATED or DELETED (without deletion timestamp), do nothing.
@@ -165,4 +178,127 @@ func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.Workspace
 	workspaceIDStr := strconv.Itoa(obj.ID)
 
 	return c.storage.UpdateWorkspace(workspaceIDStr, &v1.Workspace{Status: newStatus})
+}
+
+func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error {
+	llamaCppV1Engine := &v1.Engine{
+		APIVersion: "v1",
+		Kind:       "Engine",
+		Metadata: &v1.Metadata{
+			Name:      "llama-cpp",
+			Workspace: workspace.Metadata.Name,
+		},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{
+				{
+					Version: "v1",
+					ValuesSchema: map[string]interface{}{
+						"$schema": "http://json-schema.org/draft-07/schema#",
+						"type":    "object",
+						"properties": map[string]interface{}{
+							"n_threads": map[string]interface{}{
+								"type": "number",
+							},
+						},
+					},
+				},
+			},
+			SupportedTasks: []string{"text-generation", "text-embedding"},
+		},
+	}
+
+	vllmV1Engine := &v1.Engine{
+		APIVersion: "v1",
+		Kind:       "Engine",
+		Metadata: &v1.Metadata{
+			Name:      "vllm",
+			Workspace: workspace.Metadata.Name,
+		},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{
+				{
+					Version: "v1",
+					ValuesSchema: map[string]interface{}{
+						"$schema": "http://json-schema.org/draft-07/schema#",
+						"type":    "object",
+						"properties": map[string]interface{}{
+							"dtype": map[string]interface{}{
+								"type": "string",
+							},
+							"gpu_memory_utilization": map[string]interface{}{
+								"type": "number",
+							},
+						},
+					},
+				},
+			},
+			SupportedTasks: []string{"text-generation"},
+		},
+	}
+
+	engines := []*v1.Engine{
+		llamaCppV1Engine,
+		vllmV1Engine,
+	}
+
+	for _, engine := range engines {
+		if err := c.createOrUpdateEngine(engine); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
+	engines, err := c.storage.ListEngine(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(engine.Metadata.Name),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(engine.Metadata.Workspace),
+			},
+		},
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if len(engines) == 0 {
+		return c.storage.CreateEngine(engine)
+	}
+
+	engines[0].Spec = engine.Spec
+
+	return c.storage.UpdateEngine(strconv.Itoa(engines[0].ID), &engines[0])
+}
+
+func (c *WorkspaceController) DeleteWorkspaceEngine(workspace *v1.Workspace) error {
+	engines, err := c.storage.ListEngine(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(workspace.Metadata.Name),
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, engine := range engines {
+		err = c.storage.DeleteEngine(strconv.Itoa(engine.ID))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

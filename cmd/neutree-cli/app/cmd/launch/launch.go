@@ -22,6 +22,8 @@ type commonOptions struct {
 	nodeIP     string
 
 	mirrorRegistry string
+
+	dryRun bool
 }
 
 func NewLaunchCmd() *cobra.Command {
@@ -64,6 +66,7 @@ Examples:
 	launchCmd.PersistentFlags().StringVar(&commonOptions.nodeIP, "node-ip", "", "current deploy node ip")
 
 	launchCmd.PersistentFlags().StringVar(&commonOptions.mirrorRegistry, "mirror-registry", "", "mirror registry")
+	launchCmd.PersistentFlags().BoolVar(&commonOptions.dryRun, "dry-run", false, "dry run")
 
 	exector := &command.OSExecutor{}
 	launchCmd.AddCommand(NewObsStackInstallCmd(exector, commonOptions))

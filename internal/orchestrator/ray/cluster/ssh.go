@@ -334,8 +334,8 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 	}
 
 	initializationCommands := []string{}
-	// set registry CA.
-	if imageRegistry.Spec.Ca != "" {
+	// only set registry CA if user is root.
+	if rayClusterConfig.Auth.SSHUser == "root" && imageRegistry.Spec.Ca != "" {
 		certPath := filepath.Join("/etc/docker/certs.d", registryURL.Host)
 		initializationCommands = append(initializationCommands, "mkdir -p "+certPath)
 		initializationCommands = append(initializationCommands, fmt.Sprintf(`echo "%s" | base64 -d > %s/ca.crt`, imageRegistry.Spec.Ca, certPath))

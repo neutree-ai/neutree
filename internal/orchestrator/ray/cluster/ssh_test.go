@@ -580,7 +580,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: "v1.0.0",
-					Config:  map[string]interface{}{},
+					Config: map[string]interface{}{
+						"auth": map[string]interface{}{
+							"ssh_user": "root",
+						},
+					},
 				},
 			},
 			imageRegistry: &v1.ImageRegistry{
@@ -633,7 +637,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: "v1.0.0",
-					Config:  map[string]interface{}{},
+					Config: map[string]interface{}{
+						"auth": map[string]interface{}{
+							"ssh_user": "root",
+						},
+					},
 				},
 			},
 			imageRegistry: &v1.ImageRegistry{
@@ -686,7 +694,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: "v1.0.0",
-					Config:  map[string]interface{}{},
+					Config: map[string]interface{}{
+						"auth": map[string]interface{}{
+							"ssh_user": "root",
+						},
+					},
 				},
 			},
 			imageRegistry: &v1.ImageRegistry{
@@ -739,7 +751,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: "v1.0.0",
-					Config:  map[string]interface{}{},
+					Config: map[string]interface{}{
+						"auth": map[string]interface{}{
+							"ssh_user": "root",
+						},
+					},
 				},
 			},
 			imageRegistry: &v1.ImageRegistry{
@@ -789,7 +805,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: "v1.0.0",
-					Config:  map[string]interface{}{},
+					Config: map[string]interface{}{
+						"auth": map[string]interface{}{
+							"ssh_user": "root",
+						},
+					},
 				},
 			},
 			imageRegistry: &v1.ImageRegistry{

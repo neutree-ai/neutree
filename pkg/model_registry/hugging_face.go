@@ -1,7 +1,9 @@
 package model_registry
 
 import (
+	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,11 +19,21 @@ const (
 
 type huggingFace struct {
 	apiToken string
+	client   *http.Client
 }
 
 func newHuggingFace(registry *v1.ModelRegistry) *huggingFace {
 	return &huggingFace{
 		apiToken: registry.Spec.Credentials,
+		client: &http.Client{
+			Timeout: 300 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					//nolint:gosec
+					InsecureSkipVerify: true,
+				},
+			},
+		},
 	}
 }
 
@@ -36,15 +48,15 @@ func (hf *huggingFace) Disconnect() error {
 type HuggingFaceModel struct {
 	ID            string    `json:"_id"`
 	ID0           string    `json:"id"`
-	Likes         int       `json:"likes"`
-	TrendingScore int       `json:"trendingScore"`
-	Private       bool      `json:"private"`
-	Downloads     int       `json:"downloads"`
-	Tags          []string  `json:"tags"`
-	PipelineTag   string    `json:"pipeline_tag"`
-	LibraryName   string    `json:"library_name"`
-	CreatedAt     time.Time `json:"createdAt"`
-	ModelID       string    `json:"modelId"`
+	Likes         int       `json:"likes,omitempty"`
+	TrendingScore float64   `json:"trendingScore,omitempty"`
+	Private       bool      `json:"private,omitempty"`
+	Downloads     int       `json:"downloads,omitempty"`
+	Tags          []string  `json:"tags,omitempty"`
+	PipelineTag   string    `json:"pipeline_tag,omitempty"`
+	LibraryName   string    `json:"library_name,omitempty"`
+	CreatedAt     time.Time `json:"createdAt,omitempty"`
+	ModelID       string    `json:"modelId,omitempty"`
 }
 
 // ListModels retrieves all models from the Hugging Face Hub API by page.
@@ -105,7 +117,7 @@ func (hf *huggingFace) getModelsList(options ListOption) ([]HuggingFaceModel, er
 		req.Header.Set("Authorization", "Bearer "+hf.apiToken)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := hf.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +126,10 @@ func (hf *huggingFace) getModelsList(options ListOption) ([]HuggingFaceModel, er
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list models: %s", string(body))
 	}
 
 	var models []HuggingFaceModel

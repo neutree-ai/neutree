@@ -3,6 +3,7 @@ package launch
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/pkg/errors"
@@ -80,6 +81,17 @@ func installObsStackSingleNodeByDocker(exector command.Executor, options obsStac
 	err := prepareObsStackDeployConfig(&options)
 	if err != nil {
 		return errors.Wrap(err, "prepare obs stack deploy config failed")
+	}
+
+	if options.dryRun {
+		fmt.Println("dry run, skip install obs stack")
+
+		composeContent, err := os.ReadFile(filepath.Join(options.workDir, "obs-stack", "docker-compose.yml"))
+		if err != nil {
+			return errors.Wrap(err, "read docker compose file failed")
+		}
+
+		fmt.Println(string(composeContent))
 	}
 
 	output, err := exector.Execute(context.Background(), "docker",
