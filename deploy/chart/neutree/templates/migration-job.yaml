@@ -19,6 +19,12 @@ spec:
       {{- end }}    
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
+        - name: wait-postgresql
+          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+          args:
+            - pod
+            - -lapp.kubernetes.io/component=neutree-postgresql
         - name: wait-auth-service
           image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
