@@ -59,7 +59,8 @@ spec:
             {{- toYaml .Values.db.resources | nindent 12 }}
           volumeMounts:
             - name: postgresql-data
-              mountPath: /var/lib/postgresql
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres-data
             - name: postgresql-initdb
               mountPath: /docker-entrypoint-initdb.d
       volumes:
