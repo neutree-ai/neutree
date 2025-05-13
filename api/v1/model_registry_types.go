@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 type ModelRegistryPhase string
 
 const (
@@ -14,6 +16,13 @@ type ModelRegistryType string
 const (
 	HuggingFaceModelRegistryType = "hugging-face"
 	BentoMLModelRegistryType     = "bentoml"
+)
+
+type BentoMLModelRegistryConnectType string
+
+const (
+	BentoMLModelRegistryConnectTypeNFS  = "nfs"
+	BentoMLModelRegistryConnectTypeFile = "file"
 )
 
 type ModelRegistrySpec struct {
@@ -35,4 +44,16 @@ type ModelRegistry struct {
 	Metadata   *Metadata            `json:"metadata,omitempty"`
 	Spec       *ModelRegistrySpec   `json:"spec,omitempty"`
 	Status     *ModelRegistryStatus `json:"status,omitempty"`
+}
+
+func (r ModelRegistry) Key() string {
+	if r.Metadata == nil {
+		return "default" + "-" + "modelregistry" + "-" + strconv.Itoa(r.ID)
+	}
+
+	if r.Metadata.Workspace == "" {
+		return "default" + "-" + "modelregistry" + "-" + strconv.Itoa(r.ID) + "-" + r.Metadata.Name
+	}
+
+	return r.Metadata.Workspace + "-" + "modelregistry" + "-" + strconv.Itoa(r.ID) + "-" + r.Metadata.Name
 }

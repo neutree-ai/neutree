@@ -101,6 +101,8 @@ func TestSearchModels_Success(t *testing.T) {
 			option.Filters[0].Operator == "eq" && option.Filters[0].Value == "\"test-registry\""
 	})).Return([]v1.ModelRegistry{modelRegistry}, nil)
 
+	mockModelRegistry.On("Connect").Return(nil)
+	mockModelRegistry.On("Disconnect").Return(nil)
 	mockModelRegistry.On("ListModels", mock.MatchedBy(func(option model_registry.ListOption) bool {
 		return option.Search == "test"
 	})).Return(mockModels, nil)
@@ -206,6 +208,8 @@ func TestSearchModels_ListModelsError(t *testing.T) {
 	// Configure mock behaviors
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
 
+	mockModelRegistry.On("Connect").Return(nil)
+	mockModelRegistry.On("Disconnect").Return(nil)
 	// Configure list models to return error
 	mockError := errors.New("list models error")
 	mockModelRegistry.On("ListModels", mock.Anything).Return(nil, mockError)

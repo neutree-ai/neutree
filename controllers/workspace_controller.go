@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -185,7 +186,7 @@ func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error 
 		APIVersion: "v1",
 		Kind:       "Engine",
 		Metadata: &v1.Metadata{
-			Name:      "llama-cpp",
+			Name:      "llama_cpp",
 			Workspace: workspace.Metadata.Name,
 		},
 		Spec: &v1.EngineSpec{
@@ -272,6 +273,10 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 
 	if len(engines) == 0 {
 		return c.storage.CreateEngine(engine)
+	}
+
+	if reflect.DeepEqual(engines[0].Spec, engine.Spec) {
+		return nil
 	}
 
 	engines[0].Spec = engine.Spec

@@ -246,7 +246,7 @@ func (d *DockerCommandRunner) generateDockerStartCommand(
 		"-d",
 		"-it",
 		strings.Join(envFlags, " "),
-		strings.Join(userOptions, ""),
+		strings.Join(userOptions, " "),
 		"--net=host",
 		image,
 		"bash",

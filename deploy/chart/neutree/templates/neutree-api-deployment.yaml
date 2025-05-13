@@ -30,6 +30,11 @@ spec:
             - --auth-endpoint=http://{{ include "neutree.fullname" . }}-auth-service:9999
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true          
           ports:
             - name: http
               containerPort: 3000

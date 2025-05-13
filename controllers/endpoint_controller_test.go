@@ -122,6 +122,7 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
 				s.On("ListEngine", mock.Anything).Return([]v1.Engine{engine}, nil).Maybe()
 				s.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil).Maybe()
+				o.On("ConnectEndpointModel", mock.Anything).Return(nil)
 				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
 				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(nil)
 			},
@@ -135,6 +136,7 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
 				s.On("ListEngine", mock.Anything).Return([]v1.Engine{engine}, nil).Maybe()
 				s.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil).Maybe()
+				o.On("ConnectEndpointModel", mock.Anything).Return(nil)
 				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
 				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(assert.AnError)
 			},
@@ -146,6 +148,7 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
 				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
+				o.On("ConnectEndpointModel", mock.Anything).Return(nil)
 				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
 			},
 			wantErr: false,

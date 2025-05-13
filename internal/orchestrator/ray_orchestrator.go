@@ -230,7 +230,7 @@ func NewRayOrchestrator(opts RayOptions) (*RayOrchestrator, error) {
 			StartNodeTimeout: time.Minute * 10,
 			StopNodeTimeout:  time.Minute * 2,
 			DrainNodeTimeout: time.Minute * 5,
-			CommonTimeout:    time.Minute * 1,
+			CommonTimeout:    time.Minute * 10,
 		},
 		clusterHelper: opts.clusterManager,
 	}
@@ -321,7 +321,6 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	}
 
 	// call ray dashboard API
-
 	dashboardService, err := o.getDashboardService(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get dashboard service for creating endpoint")
@@ -496,4 +495,67 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		ServiceURL:   serviceURL,
 		ErrorMessage: status.Message, // Use message from Ray if available
 	}, nil
+}
+
+func (o *RayOrchestrator) ConnectEndpointModel(endpoint *v1.Endpoint) error {
+	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
+	defer cancel()
+
+	modelRegistry, err := o.storage.ListModelRegistry(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(endpoint.Spec.Model.Registry),
+			},
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to list model registry")
+	}
+
+	if len(modelRegistry) == 0 {
+		return errors.New("model registry " + endpoint.Spec.Model.Registry + " not found")
+	}
+
+	if modelRegistry[0].Status == nil || modelRegistry[0].Status.Phase != v1.ModelRegistryPhaseCONNECTED {
+		return errors.New("model registry " + endpoint.Spec.Model.Registry + " not ready")
+	}
+
+	err = o.clusterHelper.ConnectEndpointModel(ctx, modelRegistry[0], *endpoint)
+	if err != nil {
+		return errors.Wrap(err, "failed to connect model")
+	}
+
+	return nil
+}
+
+func (o *RayOrchestrator) DisconnectEndpointModel(endpoint *v1.Endpoint) error {
+	ctx, cancel := context.WithTimeout(context.Background(), o.opTimeout.CommonTimeout)
+	defer cancel()
+
+	modelRegistry, err := o.storage.ListModelRegistry(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(endpoint.Spec.Model.Registry),
+			},
+		},
+	})
+
+	if err != nil {
+		return errors.Wrap(err, "failed to list model registry")
+	}
+
+	if len(modelRegistry) == 0 {
+		return errors.New("model registry " + endpoint.Spec.Model.Registry + " not found")
+	}
+
+	err = o.clusterHelper.DisconnectEndpointModel(ctx, modelRegistry[0], *endpoint)
+	if err != nil {
+		return errors.Wrap(err, "failed to connect model")
+	}
+
+	return nil
 }

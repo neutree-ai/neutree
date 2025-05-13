@@ -27,6 +27,9 @@ type Orchestrator interface {
 	CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error)
 	DeleteEndpoint(endpoint *v1.Endpoint) error
 	GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error)
+
+	ConnectEndpointModel(endpoint *v1.Endpoint) error
+	DisconnectEndpointModel(endpoint *v1.Endpoint) error
 }
 
 type Options struct {

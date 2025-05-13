@@ -32,6 +32,11 @@ spec:
             - --deploy-type=kubernetes
           image: "{{ .Values.core.image.repository }}:{{ .Values.core.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.core.image.pullPolicy }}
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true          
           {{- with .Values.core.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

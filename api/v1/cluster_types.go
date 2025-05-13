@@ -79,7 +79,11 @@ type ClusterStatus struct {
 }
 
 func (c Cluster) Key() string {
-	if c.Metadata == nil || c.Metadata.Workspace == "" {
+	if c.Metadata == nil {
+		return "default" + "-" + "clsuter" + "-" + strconv.Itoa(c.ID)
+	}
+
+	if c.Metadata.Workspace == "" {
 		return "default" + "-" + "clsuter" + "-" + strconv.Itoa(c.ID) + "-" + c.Metadata.Name
 	}
 

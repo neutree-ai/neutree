@@ -19,6 +19,9 @@ var (
 )
 
 type ClusterManager interface {
+	ConnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint) error
+	DisconnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint) error
+
 	UpCluster(ctx context.Context, restart bool) (string, error)
 	DownCluster(ctx context.Context) error
 	StartNode(ctx context.Context, nodeIP string) error
