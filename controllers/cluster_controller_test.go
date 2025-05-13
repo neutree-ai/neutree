@@ -151,6 +151,9 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 				Type:          "ssh",
 				Version:       "v2",
 			},
+			Status: &v1.ClusterStatus{
+				Initialized: true,
+			},
 		}
 	}
 
@@ -209,7 +212,7 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
-					assert.Equal(t, false, obj.Status.Initialized)
+					assert.Equal(t, true, obj.Status.Initialized)
 				}).Return(nil)
 			},
 			wantErr: true,
@@ -222,7 +225,7 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseDeleted, obj.Status.Phase)
-					assert.Equal(t, false, obj.Status.Initialized)
+					assert.Equal(t, true, obj.Status.Initialized)
 				}).Return(nil)
 			},
 			wantErr: false,
@@ -349,12 +352,11 @@ func TestClusterController_Sync_Running(t *testing.T) {
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("GetDesireStaticWorkersIP").Return([]string{testWorkerIP})
 				o.On("StartNode", testWorkerIP).Return(assert.AnError)
-				o.On("ClusterStatus").Return(testClusterStatus, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
 					assert.Equal(t, input.Status.DashboardURL, obj.Status.DashboardURL)
-					assert.Equal(t, testClusterStatus.DesireNodes, obj.Status.DesiredNodes)
+					assert.NotEqual(t, testClusterStatus.DesireNodes, obj.Status.DesiredNodes)
 					assert.Equal(t, input.Status.Initialized, obj.Status.Initialized)
 					assert.Equal(t, testClusterStatus.NeutreeServeVersion, obj.Status.Version)
 					assert.Equal(t, testClusterStatus.RayVersion, obj.Status.RayVersion)
@@ -370,13 +372,6 @@ func TestClusterController_Sync_Running(t *testing.T) {
 				o.On("GetDesireStaticWorkersIP").Return(nil)
 				o.On("SyncCluster").Return(nil)
 				o.On("HealthCheck").Return(assert.AnError)
-				o.On("ClusterStatus").Return(&v1.RayClusterStatus{
-					PythonVersion:       "3.10.10",
-					RayVersion:          "1.1.1",
-					ReadyNodes:          0,
-					DesireNodes:         0,
-					NeutreeServeVersion: "v2",
-				}, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
@@ -506,7 +501,6 @@ func TestClusterController_Sync_Failed(t *testing.T) {
 			mockSetup: func(input *v1.Cluster, s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("SyncCluster").Return(nil)
 				o.On("HealthCheck").Return(assert.AnError)
-				o.On("ClusterStatus").Return(testClusterStatus, nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
@@ -804,18 +798,6 @@ func TestClusterController_reconcileStaticNodes(t *testing.T) {
 
 func TestClusterContorller_updateStatus(t *testing.T) {
 	testHeadIP := "192.168.1.1"
-	getTestClusterWithNotInitialized := func() *v1.Cluster {
-		return &v1.Cluster{
-			ID: 1,
-			Metadata: &v1.Metadata{
-				Name: "test",
-			},
-			Status: &v1.ClusterStatus{
-				Initialized: false,
-			},
-		}
-	}
-
 	getTestClusterWithDeletionTimestamp := func() *v1.Cluster {
 		return &v1.Cluster{
 			ID: 1,
@@ -844,7 +826,8 @@ func TestClusterContorller_updateStatus(t *testing.T) {
 	}
 
 	testError := errors.New("test error")
-	testPhase := v1.ClusterPhaseRunning
+	testRunningPhase := v1.ClusterPhaseRunning
+	testFailedPhase := v1.ClusterPhaseFailed
 
 	testClusterStatus := &v1.RayClusterStatus{
 		PythonVersion:       "3.10.11",
@@ -864,13 +847,13 @@ func TestClusterContorller_updateStatus(t *testing.T) {
 		{
 			name:       "get ray cluster status failed",
 			cluster:    getTestClusterWithInitialized(),
-			inputPhase: testPhase,
+			inputPhase: testRunningPhase,
 			inputErr:   testError,
 			setupMock: func(input *v1.Cluster, m *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("ClusterStatus").Return(nil, assert.AnError)
 				m.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, testPhase, obj.Status.Phase)
+					assert.Equal(t, testRunningPhase, obj.Status.Phase)
 					assert.Equal(t, testError.Error(), obj.Status.ErrorMessage)
 					assert.Equal(t, 0, obj.Status.DesiredNodes)
 					assert.Equal(t, input.Status.DashboardURL, obj.Status.DashboardURL)
@@ -884,13 +867,13 @@ func TestClusterContorller_updateStatus(t *testing.T) {
 		},
 		{
 			name:       "without get ray cluster status due to cluster is not initialized",
-			cluster:    getTestClusterWithNotInitialized(),
-			inputPhase: testPhase,
+			cluster:    getTestClusterWithInitialized(),
+			inputPhase: testFailedPhase,
 			inputErr:   testError,
 			setupMock: func(input *v1.Cluster, m *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				m.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, testPhase, obj.Status.Phase)
+					assert.Equal(t, testFailedPhase, obj.Status.Phase)
 					assert.Equal(t, testError.Error(), obj.Status.ErrorMessage)
 				}).Return(nil)
 			},
@@ -899,12 +882,12 @@ func TestClusterContorller_updateStatus(t *testing.T) {
 		{
 			name:       "without get ray cluster status due to cluster deletion timestamp is not empty",
 			cluster:    getTestClusterWithDeletionTimestamp(),
-			inputPhase: testPhase,
+			inputPhase: testRunningPhase,
 			inputErr:   nil,
 			setupMock: func(input *v1.Cluster, m *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				m.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, testPhase, obj.Status.Phase)
+					assert.Equal(t, testRunningPhase, obj.Status.Phase)
 					assert.Equal(t, "", obj.Status.ErrorMessage)
 				}).Return(nil)
 			},
@@ -913,13 +896,13 @@ func TestClusterContorller_updateStatus(t *testing.T) {
 		{
 			name:       "update cluster status with error",
 			cluster:    getTestClusterWithInitialized(),
-			inputPhase: testPhase,
+			inputPhase: testRunningPhase,
 			inputErr:   testError,
 			setupMock: func(input *v1.Cluster, m *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("ClusterStatus").Return(testClusterStatus, nil)
 				m.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, testPhase, obj.Status.Phase)
+					assert.Equal(t, testRunningPhase, obj.Status.Phase)
 					assert.Equal(t, testError.Error(), obj.Status.ErrorMessage)
 					assert.Equal(t, 0, obj.Status.DesiredNodes)
 					assert.Equal(t, input.Status.DashboardURL, obj.Status.DashboardURL)
@@ -934,13 +917,13 @@ func TestClusterContorller_updateStatus(t *testing.T) {
 		{
 			name:       "update status success",
 			cluster:    getTestClusterWithInitialized(),
-			inputPhase: testPhase,
+			inputPhase: testRunningPhase,
 			inputErr:   testError,
 			setupMock: func(input *v1.Cluster, m *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				o.On("ClusterStatus").Return(testClusterStatus, nil)
 				m.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, testPhase, obj.Status.Phase)
+					assert.Equal(t, testRunningPhase, obj.Status.Phase)
 					assert.Equal(t, testError.Error(), obj.Status.ErrorMessage)
 					assert.Equal(t, 0, obj.Status.DesiredNodes)
 					assert.Equal(t, input.Status.DashboardURL, obj.Status.DashboardURL)

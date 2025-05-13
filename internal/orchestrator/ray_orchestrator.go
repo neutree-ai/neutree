@@ -316,7 +316,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 		return nil, errors.New("model registry " + endpoint.Spec.Model.Registry + " not found")
 	}
 
-	if modelRegistry[0].Status.Phase != v1.ModelRegistryPhaseCONNECTED {
+	if modelRegistry[0].Status == nil || modelRegistry[0].Status.Phase != v1.ModelRegistryPhaseCONNECTED {
 		return nil, errors.New("model registry " + endpoint.Spec.Model.Registry + " not ready")
 	}
 

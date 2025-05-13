@@ -88,6 +88,7 @@ func TestWorkspaceController_Sync_Deletion(t *testing.T) {
 			name:  "Deleting (Phase=CREATED) -> Set Phase=DELETED (Update success)",
 			input: testWorkspaceWithDeletionTimestamp(workspaceID, v1.WorkspacePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
+				s.On("ListEngine", mock.Anything).Return(nil, nil)
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseDELETED && r.Status.ErrorMessage == ""
 				})).Return(nil).Once()
@@ -98,6 +99,7 @@ func TestWorkspaceController_Sync_Deletion(t *testing.T) {
 			name:  "Deleting (Phase=PENDING) -> Set Phase=DELETED (Update failed)",
 			input: testWorkspaceWithDeletionTimestamp(workspaceID, v1.WorkspacePhasePENDING),
 			mockSetup: func(s *storagemocks.MockStorage) {
+				s.On("ListEngine", mock.Anything).Return(nil, nil)
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseDELETED
 				})).Return(assert.AnError).Once()
@@ -108,6 +110,7 @@ func TestWorkspaceController_Sync_Deletion(t *testing.T) {
 			name:  "Deleting (No Status) -> Set Phase=DELETED (Update success)",
 			input: testWorkspaceWithDeletionTimestamp(workspaceID, ""), // No initial status
 			mockSetup: func(s *storagemocks.MockStorage) {
+				s.On("ListEngine", mock.Anything).Return(nil, nil)
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseDELETED && r.Status.ErrorMessage == ""
 				})).Return(nil).Once()
@@ -178,7 +181,8 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 			name:  "Phase=CREATED -> No Change",
 			input: testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// Expect no calls to UpdateWorkspace or DeleteWorkspace.
+				s.On("ListEngine", mock.Anything).Return(nil, nil)
+				s.On("CreateEngine", mock.Anything).Return(nil)
 			},
 			wantErr: false,
 		},
@@ -295,6 +299,8 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 			name:     "Reconcile success (real sync, no status change)", // Test scenario using default sync handler.
 			inputKey: workspaceID,
 			mockSetup: func(s *storagemocks.MockStorage) {
+				s.On("ListEngine", mock.Anything).Return(nil, nil)
+				s.On("CreateEngine", mock.Anything).Return(nil)
 				// GetWorkspace succeeds, workspace is already in the desired state.
 				s.On("GetWorkspace", workspaceIDStr).Return(testWorkspace(workspaceID, v1.WorkspacePhaseCREATED), nil).Once()
 				// The real 'sync' method expects no further storage calls here.

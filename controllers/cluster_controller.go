@@ -104,17 +104,27 @@ func (c *ClusterController) Reconcile(key interface{}) error {
 }
 
 func (c *ClusterController) sync(obj *v1.Cluster) error {
-	var (
-		err error
-	)
-
 	// set default cluster version
 	if obj.Spec.Version == "" {
 		obj.Spec.Version = c.defaultClusterVersion
 	}
 
+	if obj.Metadata.DeletionTimestamp != "" {
+		return c.reconcileDelete(obj)
+	}
+
+	return c.reconcileNormal(obj)
+}
+
+func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
+	var (
+		err    error
+		headIP string
+		phase  v1.ClusterPhase
+	)
+
 	clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:               obj,
+		Cluster:               cluster,
 		ImageService:          c.imageService,
 		Storage:               c.storage,
 		MetricsRemoteWriteURL: c.MetricsRemoteWriteURL,
@@ -122,20 +132,6 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 	if err != nil {
 		return err
 	}
-
-	if obj.Metadata.DeletionTimestamp != "" {
-		return c.reconcileDelete(obj, clusterOrchestrator)
-	}
-
-	return c.reconcileNormal(obj, clusterOrchestrator)
-}
-
-func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error {
-	var (
-		err    error
-		headIP string
-		phase  v1.ClusterPhase
-	)
 
 	defer func() {
 		phase = v1.ClusterPhaseRunning
@@ -157,15 +153,15 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster, clusterOrchestr
 			return errors.Wrap(err, "failed to create cluster "+cluster.Metadata.Name)
 		}
 
-		err = clusterOrchestrator.HealthCheck()
-		if err != nil {
-			klog.Info("waiting for cluster " + cluster.Metadata.Name + " initializing")
-			return errors.Wrap(err, "failed to health check cluster "+cluster.Metadata.Name)
-		}
-
 		cluster.Status = &v1.ClusterStatus{
 			DashboardURL: fmt.Sprintf("http://%s:8265", headIP),
 			Initialized:  true,
+		}
+
+		err = clusterOrchestrator.HealthCheck()
+		if err != nil {
+			klog.Info("waiting for cluster " + cluster.Metadata.Name + " healthy")
+			return errors.Wrap(err, "failed to health check cluster "+cluster.Metadata.Name)
 		}
 
 		return nil
@@ -327,7 +323,7 @@ func (c *ClusterController) reconcileStaticNodes(cluster *v1.Cluster, clusterOrc
 	return nil
 }
 
-func (c *ClusterController) reconcileDelete(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error {
+func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 	if cluster.Status != nil && cluster.Status.Phase == v1.ClusterPhaseDeleted {
 		err := c.storage.DeleteCluster(strconv.Itoa(cluster.ID))
 		if err != nil {
@@ -341,12 +337,24 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster, clusterOrchestr
 
 	c.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(cluster.Key())
 
-	err := clusterOrchestrator.DeleteCluster()
-	if err != nil {
-		return errors.Wrap(err, "failed to delete ray cluster "+cluster.Metadata.Name)
+	if cluster.IsInitialized() {
+		clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
+			Cluster:               cluster,
+			ImageService:          c.imageService,
+			Storage:               c.storage,
+			MetricsRemoteWriteURL: c.MetricsRemoteWriteURL,
+		})
+		if err != nil {
+			return err
+		}
+
+		err = clusterOrchestrator.DeleteCluster()
+		if err != nil {
+			return errors.Wrap(err, "failed to delete ray cluster "+cluster.Metadata.Name)
+		}
 	}
 
-	err = c.updateStatus(cluster, clusterOrchestrator, v1.ClusterPhaseDeleted, nil)
+	err := c.updateStatus(cluster, nil, v1.ClusterPhaseDeleted, nil)
 	if err != nil {
 		klog.Errorf("failed to update cluster %s status, err: %v", cluster.Metadata.Name, err)
 	}
@@ -371,7 +379,7 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 	}
 
-	if obj.IsInitialized() && obj.Metadata.DeletionTimestamp == "" {
+	if newStatus.Phase == v1.ClusterPhaseRunning && obj.Metadata.DeletionTimestamp == "" {
 		clusterStatus, getClusterStatusErr := clusterOrchestrator.ClusterStatus()
 		if getClusterStatusErr == nil {
 			newStatus.ReadyNodes = clusterStatus.ReadyNodes

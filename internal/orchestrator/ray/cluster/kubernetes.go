@@ -33,6 +33,10 @@ const (
 	ResourceSkipPatchAnnotation = "neutree.io/skip-patch"
 )
 
+const (
+	nvidiaGPUResourceName = "nvidia.com/gpu"
+)
+
 var _ ClusterManager = &kubeRayClusterManager{}
 
 var (
@@ -560,15 +564,21 @@ func generateKubeRayCluster(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry
 }
 
 func buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec, clusterName string, clusterImage string, clusterVersion string) corev1.PodTemplateSpec {
+	needNvidiaGPU := false
+
 	resourceList := corev1.ResourceList{}
 	for k, v := range spec.Resources {
 		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
+
+		if k == nvidiaGPUResourceName && v != "0" {
+			needNvidiaGPU = true
+		}
 	}
 
 	workerStartRayCommands := fmt.Sprintf(`python /home/ray/start.py %s --block --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 		getHeadSvcName(clusterName), v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, clusterVersion)
 
-	return corev1.PodTemplateSpec{
+	podTemplate := corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Annotations: map[string]string{
 				// overwrite the container cmd to start ray worker
@@ -605,18 +615,33 @@ func buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec, clusterName string, clu
 			},
 		},
 	}
+
+	if !needNvidiaGPU {
+		podTemplate.Spec.Containers[0].Env = append(podTemplate.Spec.Containers[0].Env, corev1.EnvVar{
+			Name:  "NVIDIA_VISIBLE_DEVICES",
+			Value: "void",
+		})
+	}
+
+	return podTemplate
 }
 
 func buildHeadPodTemplateSpec(spec v1.HeadNodeSpec, clusterName string, clusterImage string, clusterVersion string) corev1.PodTemplateSpec {
+	needNvidiaGPU := false
+
 	resourceList := corev1.ResourceList{}
 	for k, v := range spec.Resources {
 		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
+
+		if k == nvidiaGPUResourceName && v != "0" {
+			needNvidiaGPU = true
+		}
 	}
 
-	headStartCommand := fmt.Sprintf(`ray start --disable-usage-stats --head --block --metrics-export-port=%d --port=6379 --object-manager-port=8076 --no-monitor --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+	headStartCommand := fmt.Sprintf(`ray start --num-cpus=0 --disable-usage-stats --head --block --metrics-export-port=%d --port=6379 --object-manager-port=8076 --no-monitor --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
 		v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, clusterVersion)
 
-	return corev1.PodTemplateSpec{
+	podTemplate := corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Annotations: map[string]string{
 				// overwrite the container cmd to start ray head
@@ -671,6 +696,15 @@ func buildHeadPodTemplateSpec(spec v1.HeadNodeSpec, clusterName string, clusterI
 			},
 		},
 	}
+
+	if !needNvidiaGPU {
+		podTemplate.Spec.Containers[0].Env = append(podTemplate.Spec.Containers[0].Env, corev1.EnvVar{
+			Name:  "NVIDIA_VISIBLE_DEVICES",
+			Value: "void",
+		})
+	}
+
+	return podTemplate
 }
 
 func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
