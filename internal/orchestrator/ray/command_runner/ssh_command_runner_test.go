@@ -29,9 +29,6 @@ var (
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ServerAliveInterval=5",
 		"-o", "ServerAliveCountMax=3",
-		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=/tmp/ray_ssh/7337224015/%C",
-		"-o", "ControlPersist=10s",
 		"-i", testSSHPrivateKey,
 		fmt.Sprintf("%s@%s", testSSHUser, testSSHIP),
 	}
@@ -53,8 +50,6 @@ func TestNewSSHCommandRunner(t *testing.T) {
 	assert.Equal(t, "test_private_key", runner.sshPrivateKey)
 	assert.Equal(t, "test_user", runner.sshUser)
 	assert.Equal(t, "127.0.0.1", runner.sshIP)
-	assert.Equal(t, "/tmp/ray_ssh/7337224015", runner.sshControlPath)
-	assert.NotEmpty(t, "/tmp/ray_ssh/7337224015")
 }
 
 func TestSSHCommandRunner_Run_Success(t *testing.T) {
@@ -168,9 +163,6 @@ func TestSSHCommandRunner_Run_WithSSHOptionsOverride(t *testing.T) {
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ServerAliveInterval=5",
 		"-o", "ServerAliveCountMax=3",
-		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=/tmp/ray_ssh/7337224015/%C",
-		"-o", "ControlPersist=10s",
 		"-i", overrideKey,
 		fmt.Sprintf("%s@%s", testSSHUser, testSSHIP),
 		testCommand,

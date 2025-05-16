@@ -11,18 +11,23 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func createTestTar(t *testing.T, files map[string]string) *bytes.Buffer {
+type testFile struct {
+	name string
+	data string
+}
+
+func createTestTar(t *testing.T, files []testFile) *bytes.Buffer {
 	buf := new(bytes.Buffer)
 	tw := tar.NewWriter(buf)
 
-	for name, content := range files {
+	for _, file := range files {
 		hdr := &tar.Header{
-			Name: name,
+			Name: file.name,
 			Mode: 0644,
-			Size: int64(len(content)),
+			Size: int64(len(file.data)),
 		}
 
-		if content == "" {
+		if file.data == "" {
 			hdr.Typeflag = tar.TypeDir
 			hdr.Mode = 0755
 		}
@@ -30,8 +35,8 @@ func createTestTar(t *testing.T, files map[string]string) *bytes.Buffer {
 		err := tw.WriteHeader(hdr)
 		assert.NoError(t, err)
 
-		if content != "" {
-			_, err = tw.Write([]byte(content))
+		if file.data != "" {
+			_, err = tw.Write([]byte(file.data))
 			assert.NoError(t, err)
 		}
 	}
@@ -43,43 +48,63 @@ func createTestTar(t *testing.T, files map[string]string) *bytes.Buffer {
 }
 
 func TestExtractTar(t *testing.T) {
-	tempDir := t.TempDir()
-	testDir := filepath.Join(tempDir, "test-extract")
-	defer os.RemoveAll(testDir)
-
 	tests := []struct {
 		name        string
-		files       map[string]string // filename: content (empty string for dir)
-		expectFiles map[string]string // expected files and their content
+		files       []testFile // filename: content (empty string for dir)
+		expectFiles []testFile // expected files and their content
 		expectError bool
 	}{
 		{
 			name: "extract single file",
-			files: map[string]string{
-				"test.txt": "hello world",
+			files: []testFile{
+				{
+					name: "test.txt",
+					data: "hello world",
+				},
 			},
-			expectFiles: map[string]string{
-				"test.txt": "hello world",
+			expectFiles: []testFile{
+				{
+					name: "test.txt",
+					data: "hello world",
+				},
 			},
 			expectError: false,
 		},
 		{
 			name: "extract directory structure",
-			files: map[string]string{
-				"dir/":         "",
-				"dir/test.txt": "file in dir",
-				"rootfile.txt": "root file",
+			files: []testFile{
+				{
+					name: "dir/",
+					data: "",
+				},
+				{
+					name: "rootfile.txt",
+					data: "root file",
+				},
+				{
+					name: "dir/test.txt",
+					data: "file in dir",
+				},
 			},
-			expectFiles: map[string]string{
-				"dir/test.txt": "file in dir",
-				"rootfile.txt": "root file",
+			expectFiles: []testFile{
+				{
+					name: "rootfile.txt",
+					data: "root file",
+				},
+				{
+					name: "dir/test.txt",
+					data: "file in dir",
+				},
 			},
 			expectError: false,
 		},
 		{
 			name: "invalid tar data",
-			files: map[string]string{
-				"": "invalid data",
+			files: []testFile{
+				{
+					name: "",
+					data: "invalid tar data",
+				},
 			},
 			expectError: true,
 		},
@@ -87,6 +112,8 @@ func TestExtractTar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			testDir := filepath.Join(tempDir, "test-extract")
 			// Create test tar
 			tarData := createTestTar(t, tt.files)
 			tarFile := bytes.NewReader(tarData.Bytes())
@@ -117,14 +144,11 @@ func TestExtractTar(t *testing.T) {
 			assert.NoError(t, err)
 
 			// Verify extracted files
-			for name, expectedContent := range tt.expectFiles {
-				content, err := os.ReadFile(filepath.Join(testDir, name))
+			for _, expectFile := range tt.expectFiles {
+				content, err := os.ReadFile(filepath.Join(testDir, expectFile.name))
 				assert.NoError(t, err)
-				assert.Equal(t, expectedContent, string(content))
+				assert.Equal(t, expectFile.data, string(content))
 			}
-
-			// Cleanup
-			os.RemoveAll(testDir)
 		})
 	}
 }

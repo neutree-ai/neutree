@@ -224,9 +224,7 @@ func handlePostgrestProxy(deps *Dependencies) gin.HandlerFunc {
 			path = path[1:]
 		}
 
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, func(req *http.Request) {
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", deps.ServiceToken))
-		})
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, nil)
 		proxyHandler(c)
 	}
 }
