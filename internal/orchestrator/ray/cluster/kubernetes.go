@@ -275,8 +275,6 @@ func (c *kubeRayClusterManager) ConnectEndpointModel(ctx context.Context, modelR
 			continue
 		}
 
-		klog.Info("connecting endpoint model to running pod" + pod.Name)
-
 		err := c.connectEndpointModel(ctx, modelRegistry, endpoint, pod.Name)
 		if err != nil {
 			return errors.Wrap(err, "failed to connect endpoint model")

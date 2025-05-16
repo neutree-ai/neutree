@@ -52,8 +52,6 @@ func newOrchestrator(opts Options) (Orchestrator, error) {
 		return nil, errors.Wrap(err, "failed to get relate image registry")
 	}
 
-	fmt.Println(imageRegistry.Metadata.Name)
-
 	switch opts.Cluster.Spec.Type {
 	case "ssh":
 		clustrManager, err := cluster.NewRaySSHClusterManager(opts.Cluster, imageRegistry, opts.ImageService, &command.OSExecutor{})

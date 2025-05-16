@@ -132,7 +132,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.EndpointPhasePENDING {
 		klog.Infof("Endpoint %s is PENDING or has no status, creating", obj.Metadata.Name)
 
-		status, err := c.createEndpoint(obj)
+		status, err := c.createOrUpdateEndpoint(obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create endpoint %s", obj.Metadata.Name)
 		}
@@ -154,7 +154,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			return errors.Wrapf(err, "failed to cleanup endpoint %s", obj.Metadata.Name)
 		}
 
-		status, err := c.createEndpoint(obj)
+		status, err := c.createOrUpdateEndpoint(obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create endpoint %s", obj.Metadata.Name)
 		}
@@ -168,7 +168,14 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	}
 
 	if obj.Status.Phase == v1.EndpointPhaseRUNNING {
-		klog.Infof("Endpoint %s is RUNNING, checking health", obj.Metadata.Name)
+		klog.V(4).Infof("Endpoint %s is RUNNING, updating", obj.Metadata.Name)
+
+		_, err = c.createOrUpdateEndpoint(obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to sync endpoint %s", obj.Metadata.Name)
+		}
+
+		klog.V(4).Infof("Endpoint %s is RUNNING, checking health", obj.Metadata.Name)
 
 		status, err := c.checkEndpointHealth(obj)
 		if err != nil {
@@ -190,7 +197,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	return nil
 }
 
-func (c *EndpointController) createEndpoint(obj *v1.Endpoint) (*v1.EndpointStatus, error) {
+func (c *EndpointController) createOrUpdateEndpoint(obj *v1.Endpoint) (*v1.EndpointStatus, error) {
 	o, err := c.getOrchestrator(obj)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get orchestrator for endpoint %s", obj.Metadata.Name)

@@ -13,6 +13,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/cluster"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -334,35 +335,53 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 	newApp := dashboard.EndpointToApplication(endpoint, &modelRegistry[0])
 
 	// Build the list of applications for the PUT request
-	need_append := true
+	needAppend := true
+	needUpdate := true
 
 	updatedAppsList := make([]dashboard.RayServeApplication, 0, len(currentAppsResp.Applications)+1)
 
 	for _, appStatus := range currentAppsResp.Applications {
 		if appStatus.DeployedAppConfig != nil {
 			updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+
 			if appStatus.DeployedAppConfig.Name == newApp.Name {
-				// If the application already exists, update it
-				updatedAppsList[len(updatedAppsList)-1] = newApp
-				need_append = false
+				needAppend = false
+
+				equal, diff, err := util.JsonEqual(appStatus.DeployedAppConfig, newApp)
+				if err != nil {
+					return &v1.EndpointStatus{
+						Phase:        v1.EndpointPhaseFAILED,
+						ErrorMessage: errors.Wrap(err, "failed to compare serve application").Error(),
+					}, nil // Return nil error as the operation failed but we captured status
+				}
+
+				if equal {
+					needUpdate = false
+				} else {
+					klog.Infof("Serve application diff: %s, need to update", diff)
+
+					updatedAppsList[len(updatedAppsList)-1] = newApp
+				}
 			}
 		}
 	}
 
-	if need_append {
+	if needAppend {
 		updatedAppsList = append(updatedAppsList, newApp)
 	}
 
-	updateReq := dashboard.RayServeApplicationsRequest{
-		Applications: updatedAppsList,
-	}
+	if needAppend || needUpdate {
+		updateReq := dashboard.RayServeApplicationsRequest{
+			Applications: updatedAppsList,
+		}
 
-	err = dashboardService.UpdateServeApplications(updateReq)
-	if err != nil {
-		return &v1.EndpointStatus{
-			Phase:        v1.EndpointPhaseFAILED,
-			ErrorMessage: errors.Wrap(err, "failed to update serve applications").Error(),
-		}, nil // Return nil error as the operation failed but we captured status
+		err = dashboardService.UpdateServeApplications(updateReq)
+		if err != nil {
+			return &v1.EndpointStatus{
+				Phase:        v1.EndpointPhaseFAILED,
+				ErrorMessage: errors.Wrap(err, "failed to update serve applications").Error(),
+			}, nil // Return nil error as the operation failed but we captured status
+		}
 	}
 
 	serviceURL, err := dashboard.FormatServiceURL(o.cluster, endpoint)
