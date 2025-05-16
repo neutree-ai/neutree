@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path/filepath"
 
 	"maps"
 
@@ -15,6 +16,7 @@ import (
 // RayServeApplication represents the structure expected by the Ray Serve API.
 type RayServeApplication struct {
 	Name        string                 `json:"name"`
+	RuntimeEnv  map[string]interface{} `json:"runtime_env,omitempty"`
 	RoutePrefix string                 `json:"route_prefix"`
 	ImportPath  string                 `json:"import_path"`
 	Args        map[string]interface{} `json:"args"`
@@ -74,12 +76,26 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 
 	maps.Copy(args, endpoint.Spec.Variables)
 
-	return RayServeApplication{
+	app := RayServeApplication{
 		Name:        endpoint.Metadata.Name,
 		RoutePrefix: fmt.Sprintf("/%s", endpoint.Metadata.Name),
 		ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", endpoint.Spec.Engine.Engine, endpoint.Spec.Engine.Version),
 		Args:        args,
 	}
+
+	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
+		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
+		// todo: support local file type env set
+		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+			app.RuntimeEnv = map[string]interface{}{
+				"env_vars": map[string]string{
+					"BENTOML_HOME": filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name),
+				},
+			}
+		}
+	}
+
+	return app
 }
 
 // GetServeApplications retrieves the current Ray Serve applications.

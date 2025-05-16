@@ -64,6 +64,17 @@ func searchModels(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		err = registry.Connect()
+		if err != nil {
+			errS := fmt.Sprintf("Failed to connect to model registry: %v", err)
+			klog.Errorf(errS)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": errS,
+			})
+		}
+
+		defer registry.Disconnect() //nolint:errcheck
+
 		models, err := registry.ListModels(model_registry.ListOption{
 			Search: search,
 		})

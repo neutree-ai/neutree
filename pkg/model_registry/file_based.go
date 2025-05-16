@@ -2,6 +2,7 @@ package model_registry
 
 import (
 	"net/url"
+	"os"
 
 	"github.com/pkg/errors"
 
@@ -50,6 +51,10 @@ func (n *nfsFile) ListModels(options ListOption) ([]v1.GeneralModel, error) {
 }
 
 func (n *nfsFile) HealthyCheck() bool {
+	if _, err := os.Stat(n.targetPath); err != nil {
+		return false
+	}
+
 	return true
 }
 
@@ -60,14 +65,14 @@ func newFileBased(registry *v1.ModelRegistry) (ModelRegistry, error) {
 	}
 
 	switch modelRegistryURL.Scheme {
-	case "file":
+	case v1.BentoMLModelRegistryConnectTypeFile:
 		return &localFile{
 			path: modelRegistryURL.Path,
 		}, nil
-	case "nfs":
+	case v1.BentoMLModelRegistryConnectTypeNFS:
 		return &nfsFile{
-			targetPath:    "/mnt/" + registry.Metadata.Name,
-			nfsServerPath: modelRegistryURL.Host + ":" + modelRegistryURL.Path,
+			targetPath:    "/mnt/" + registry.Key(),
+			nfsServerPath: modelRegistryURL.Host + modelRegistryURL.Path,
 		}, nil
 	default:
 		return nil, errors.New("unsupported model registry protocol: " + modelRegistryURL.Scheme)

@@ -133,6 +133,11 @@ services:
   neutree-core:
     image: neutree-ai/neutree-core:{{ .NeutreeCoreVersion}}
     container_name: neutree-core
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
     command:
       - ./neutree-core
       - --storage-access-url=http://postgrest:6432
@@ -151,6 +156,11 @@ services:
   neutree-api:
     image: neutree-ai/neutree-api:{{ .NeutreeAPIVersion}}
     container_name: neutree-api
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
     command:
       - ./neutree-api
       - --storage-access-url=http://postgrest:6432

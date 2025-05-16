@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 
 	"github.com/pkg/errors"
@@ -20,10 +21,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
+	"github.com/neutree-ai/neutree/internal/nfs"
+	"github.com/neutree-ai/neutree/internal/orchestrator/ray/command_runner"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -49,6 +53,7 @@ var (
 type kubeRayClusterManager struct {
 	cluster *v1.Cluster
 
+	kubeconfig       string
 	clusterNamespace string
 	installObjects   []client.Object
 	ctrClient        client.Client
@@ -80,6 +85,8 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to decode kubeconfig")
 	}
+
+	c.kubeconfig = string(kubeconfigContent)
 
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigContent)
 	if err != nil {
@@ -251,6 +258,118 @@ func (c *kubeRayClusterManager) getClusterAccessIP(ctx context.Context) (string,
 	}
 
 	return "", errors.New("only support load balancer service type")
+}
+
+func (c *kubeRayClusterManager) ConnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint) error {
+	podList := &corev1.PodList{}
+
+	err := c.ctrClient.List(ctx, podList, client.InNamespace(c.clusterNamespace), client.MatchingLabels{
+		"ray.io/cluster": c.cluster.Metadata.Name,
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to list pods")
+	}
+
+	for _, pod := range podList.Items {
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+
+		klog.Info("connecting endpoint model to running pod" + pod.Name)
+
+		err := c.connectEndpointModel(ctx, modelRegistry, endpoint, pod.Name)
+		if err != nil {
+			return errors.Wrap(err, "failed to connect endpoint model")
+		}
+	}
+
+	return nil
+}
+
+func (c *kubeRayClusterManager) connectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint, podName string) error {
+	klog.V(4).Infof("Connect endpoint %s model to pod %s", endpoint.Metadata.Name, podName)
+
+	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
+		return nil
+	}
+
+	commandRunner := command_runner.NewKubernetesCommandRunner(c.kubeconfig, podName, c.clusterNamespace, "ray-container")
+
+	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
+		modelRegistryURL, err := url.Parse(modelRegistry.Spec.Url)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse model registry url: %s", modelRegistry.Spec.Url)
+		}
+
+		if modelRegistryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+			err = nfs.NewKubernetesNfsMounter(*commandRunner).
+				MountNFS(ctx, modelRegistryURL.Host+modelRegistryURL.Path, filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name))
+			if err != nil {
+				return errors.Wrap(err, "failed to mount nfs")
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("unsupported model registry type %s and scheme %s", modelRegistry.Spec.Type, modelRegistryURL.Scheme)
+	}
+
+	return fmt.Errorf("unsupported model registry type %s", modelRegistry.Spec.Type)
+}
+
+func (c *kubeRayClusterManager) DisconnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint) error {
+	podList := &corev1.PodList{}
+	err := c.ctrClient.List(ctx, podList, client.InNamespace(c.clusterNamespace), client.MatchingLabels{
+		"ray.io/cluster": c.cluster.Metadata.Name,
+	})
+
+	if err != nil {
+		return errors.Wrap(err, "failed to list pods")
+	}
+
+	for _, pod := range podList.Items {
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+
+		err := c.disconnectEndpointModel(ctx, modelRegistry, endpoint, pod.Name)
+		if err != nil {
+			return errors.Wrap(err, "failed to disconnect endpoint model")
+		}
+	}
+
+	return nil
+}
+
+func (c *kubeRayClusterManager) disconnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint, podName string) error {
+	klog.V(4).Infof("Disconnect endpoint %s model from pod %s", endpoint.Metadata.Name, podName)
+
+	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
+		return nil
+	}
+
+	commandRunner := command_runner.NewKubernetesCommandRunner(c.kubeconfig, podName, c.clusterNamespace, "ray-container")
+
+	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
+		modelRegistryURL, err := url.Parse(modelRegistry.Spec.Url)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse model registry url: %s", modelRegistry.Spec.Url)
+		}
+
+		if modelRegistryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+			err = nfs.NewKubernetesNfsMounter(*commandRunner).
+				Unmount(ctx, filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name))
+			if err != nil {
+				return errors.Wrap(err, "failed to mount nfs")
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("unsupported model registry type %s and scheme %s", modelRegistry.Spec.Type, modelRegistryURL.Scheme)
+	}
+
+	return fmt.Errorf("unsupported model registry type %s", modelRegistry.Spec.Type)
 }
 
 func (c *kubeRayClusterManager) syncMetricsConfig(ctx context.Context) error {
@@ -595,12 +714,21 @@ func buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec, clusterName string, clu
 			},
 			Containers: []corev1.Container{
 				{
-					Name:            "ray-worker",
+					Name:            "ray-container",
 					ImagePullPolicy: corev1.PullIfNotPresent,
 					Image:           clusterImage,
 					Resources: corev1.ResourceRequirements{
 						Requests: resourceList,
 						Limits:   resourceList,
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: pointy.Bool(true),
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{
+								"SYS_ADMIN",
+							},
+						},
+						AllowPrivilegeEscalation: pointy.Bool(true),
 					},
 					Command: []string{"/bin/bash", "-lc", "--"},
 					Args:    []string{"ulimit -n 65536; " + workerStartRayCommands},
@@ -656,12 +784,21 @@ func buildHeadPodTemplateSpec(spec v1.HeadNodeSpec, clusterName string, clusterI
 			},
 			Containers: []corev1.Container{
 				{
-					Name:            "ray-head",
+					Name:            "ray-container",
 					ImagePullPolicy: corev1.PullIfNotPresent,
 					Image:           clusterImage,
 					Resources: corev1.ResourceRequirements{
 						Requests: resourceList,
 						Limits:   resourceList,
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: pointy.Bool(true),
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{
+								"SYS_ADMIN",
+							},
+						},
+						AllowPrivilegeEscalation: pointy.Bool(true),
 					},
 					Command: []string{"/bin/bash", "-lc", "--"},
 					Args:    []string{"ulimit -n 65536; " + headStartCommand},

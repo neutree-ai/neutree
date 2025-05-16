@@ -13,6 +13,7 @@ import (
 	"k8s.io/klog"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/nfs"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/command_runner"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/config"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
@@ -192,7 +193,6 @@ func (c *sshClusterManager) getNodeByIP(ctx context.Context, nodeIP string) (*v1
 	}
 
 	rayNodes, err := dashboardService.ListNodes()
-
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list ray nodes")
 	}
@@ -275,6 +275,132 @@ func (c *sshClusterManager) GetServeEndpoint(_ context.Context) (string, error) 
 	return fmt.Sprintf("http://%s:8000", c.config.Provider.HeadIP), nil
 }
 
+func (c *sshClusterManager) ConnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint) error {
+	dashboardService, err := c.GetDashboardService(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get dashboard service")
+	}
+
+	rayNodes, err := dashboardService.ListNodes()
+	if err != nil {
+		return errors.Wrap(err, "failed to list ray nodes")
+	}
+
+	connectIPs := []string{}
+
+	for i := range rayNodes {
+		if rayNodes[i].Raylet.State == v1.AliveNodeState {
+			connectIPs = append(connectIPs, rayNodes[i].IP)
+		}
+	}
+
+	for i := range connectIPs {
+		nodeIP := connectIPs[i]
+		err := c.connectEndpointModel(ctx, modelRegistry, endpoint, nodeIP)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed to connect endpoint %s model %s to node %s", endpoint.Key(), modelRegistry.Key(), nodeIP)
+		}
+	}
+
+	return nil
+}
+
+func (c *sshClusterManager) connectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint, nodeIP string) error {
+	klog.V(4).Infof("Connect endpoint %s model to node %s", endpoint.Metadata.Name, nodeIP)
+
+	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
+		return nil
+	}
+
+	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+
+	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
+		modelRegistryURL, err := url.Parse(modelRegistry.Spec.Url)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse model registry url %s", modelRegistry.Spec.Url)
+		}
+
+		if modelRegistryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+			err = nfs.NewDockerNfsMounter(*dockerCommandRunner).
+				MountNFS(ctx, modelRegistryURL.Host+modelRegistryURL.Path, filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name))
+			if err != nil {
+				return errors.Wrap(err, "failed to mount nfs")
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("unsupported model registry type %s and scheme %s", modelRegistry.Spec.Type, modelRegistryURL.Scheme)
+	}
+
+	return fmt.Errorf("unsupported model registry type %s", modelRegistry.Spec.Type)
+}
+
+func (c *sshClusterManager) DisconnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint) error {
+	dashboardService, err := c.GetDashboardService(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get dashboard service")
+	}
+
+	rayNodes, err := dashboardService.ListNodes()
+	if err != nil {
+		return errors.Wrap(err, "failed to list ray nodes")
+	}
+
+	connectIPs := []string{}
+
+	for i := range rayNodes {
+		if rayNodes[i].Raylet.State == v1.AliveNodeState {
+			connectIPs = append(connectIPs, rayNodes[i].IP)
+		}
+	}
+
+	for i := range connectIPs {
+		nodeIP := connectIPs[i]
+		err := c.disconnectEndpointModel(ctx, modelRegistry, endpoint, nodeIP)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed to connect endpoint %s model %s to node %s", endpoint.Key(), modelRegistry.Key(), nodeIP)
+		}
+	}
+
+	return nil
+}
+
+func (c *sshClusterManager) disconnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint, nodeIP string) error {
+	klog.V(4).Infof("Disconnect endpoint %s model to node %s", endpoint.Metadata.Name, nodeIP)
+
+	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
+		return nil
+	}
+
+	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+
+	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
+		modelRegistryURL, err := url.Parse(modelRegistry.Spec.Url)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse model registry url %s", modelRegistry.Spec.Url)
+		}
+
+		if modelRegistryURL.Scheme == "nfs" {
+			err = nfs.NewDockerNfsMounter(*dockerCommandRunner).
+				Unmount(ctx, filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name))
+			if err != nil {
+				return errors.Wrap(err, "failed to mount nfs")
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("unsupported model registry type %s and scheme %s", modelRegistry.Spec.Type, modelRegistryURL.Scheme)
+	}
+
+	return fmt.Errorf("unsupported model registry type %s", modelRegistry.Spec.Type)
+}
+
 func (c *sshClusterManager) buildSSHCommandArgs(nodeIP string) *command_runner.CommonArgs {
 	return &command_runner.CommonArgs{
 		NodeID: nodeIP,
@@ -316,6 +442,11 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 
 	rayClusterConfig.Docker.Image = registryURL.Host + "/" + imageRegistry.Spec.Repository + "/neutree-serve:" + cluster.Spec.Version
 	rayClusterConfig.Docker.PullBeforeRun = true
+	rayClusterConfig.Docker.RunOptions = []string{
+		"--privileged",
+		"--cap-add=SYS_ADMIN",
+		"--security-opt=seccomp=unconfined",
+	}
 
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",
@@ -334,13 +465,6 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 	}
 
 	initializationCommands := []string{}
-	// only set registry CA if user is root.
-	if rayClusterConfig.Auth.SSHUser == "root" && imageRegistry.Spec.Ca != "" {
-		certPath := filepath.Join("/etc/docker/certs.d", registryURL.Host)
-		initializationCommands = append(initializationCommands, "mkdir -p "+certPath)
-		initializationCommands = append(initializationCommands, fmt.Sprintf(`echo "%s" | base64 -d > %s/ca.crt`, imageRegistry.Spec.Ca, certPath))
-	}
-
 	// login registry.
 	var password string
 
@@ -353,9 +477,11 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 		password = imageRegistry.Spec.AuthConfig.RegistryToken
 	}
 
-	dockerLoginCommand := fmt.Sprintf("docker login %s -u '%s' -p '%s'", registryURL.Host, imageRegistry.Spec.AuthConfig.Username, password)
+	if imageRegistry.Spec.AuthConfig.Username != "" && password != "" {
+		dockerLoginCommand := fmt.Sprintf("docker login %s -u '%s' -p '%s'", registryURL.Host, imageRegistry.Spec.AuthConfig.Username, password)
+		initializationCommands = append(initializationCommands, dockerLoginCommand)
+	}
 
-	initializationCommands = append(initializationCommands, dockerLoginCommand)
 	rayClusterConfig.InitializationCommands = initializationCommands
 
 	return rayClusterConfig, nil

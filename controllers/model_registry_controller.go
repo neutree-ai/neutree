@@ -81,10 +81,9 @@ func (c *ModelRegistryController) ListKeys() ([]interface{}, error) {
 }
 
 func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
-	modelRegistry, err := model_registry.NewModelRegistry(obj)
-	if err != nil {
-		return err
-	}
+	var (
+		modelRegistry model_registry.ModelRegistry
+	)
 
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
 		if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
@@ -100,8 +99,12 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 		klog.Info("Deleting model registry " + obj.Metadata.Name)
 
-		if err = modelRegistry.Disconnect(); err != nil {
-			return errors.Wrap(err, "failed to disconnect model registry "+obj.Metadata.Name)
+		modelRegistry, err = model_registry.NewModelRegistry(obj)
+		if err == nil {
+			// only disconnect model registry when it config is correct.
+			if err = modelRegistry.Disconnect(); err != nil {
+				return errors.Wrap(err, "failed to disconnect model registry "+obj.Metadata.Name)
+			}
 		}
 
 		if err = c.updateStatus(obj, v1.ModelRegistryPhaseDELETED, nil); err != nil {
@@ -126,6 +129,11 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			klog.Errorf("failed to update model registry %s status, err: %v ", obj.Metadata.Name, updateStatusErr)
 		}
 	}()
+
+	modelRegistry, err = model_registry.NewModelRegistry(obj)
+	if err != nil {
+		return errors.Wrap(err, "failed to create model registry "+obj.Metadata.Name)
+	}
 
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.ModelRegistryPhasePENDING {
 		err = modelRegistry.Connect()

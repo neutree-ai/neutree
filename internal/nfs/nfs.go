@@ -1,9 +1,14 @@
 package nfs
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"strings"
 
 	kmount "k8s.io/utils/mount"
+
+	"github.com/neutree-ai/neutree/internal/orchestrator/ray/command_runner"
 )
 
 var (
@@ -49,4 +54,123 @@ func Unmount(mountPoint string) error {
 	}
 
 	return nil
+}
+
+type KubernetesNfsMounter struct {
+	commandRunner command_runner.KubernetesCommandRunner
+}
+
+func NewKubernetesNfsMounter(commandRunner command_runner.KubernetesCommandRunner) *KubernetesNfsMounter {
+	return &KubernetesNfsMounter{
+		commandRunner: commandRunner,
+	}
+}
+
+func (m *KubernetesNfsMounter) MountNFS(ctx context.Context, device string, mountPoint string) error {
+	output, err := m.commandRunner.Run(ctx, fmt.Sprintf(`sudo mount  -l; echo "EXIT_CODE:$?"`))
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(output, "EXIT_CODE:0") && strings.Contains(output, mountPoint) {
+		return nil
+	}
+
+	_, err = m.commandRunner.Run(ctx, fmt.Sprintf("sudo mkdir -p %s", mountPoint))
+	if err != nil {
+		return err
+	}
+
+	output, err = m.commandRunner.Run(ctx, fmt.Sprintf(`sudo mount -t nfs -o %s %s %s; echo "EXIT_CODE:$?"`, strings.Join(defaultNFSMountOptions, ","), device, mountPoint))
+	if err != nil {
+		return err
+	}
+
+	if !strings.Contains(output, "EXIT_CODE:0") {
+		return fmt.Errorf("mount nfs failed")
+	}
+
+	return nil
+}
+
+func (m *KubernetesNfsMounter) Unmount(ctx context.Context, mountPoint string) error {
+	output, err := m.commandRunner.Run(ctx, fmt.Sprintf(`sudo mount  -l; echo "EXIT_CODE:$?"`))
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(output, "EXIT_CODE:0") && !strings.Contains(output, mountPoint) {
+		return nil
+	}
+
+	_, err = m.commandRunner.Run(ctx, fmt.Sprintf(`sudo umount %s; echo "EXIT_CODE:$?"`, mountPoint))
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(output, "EXIT_CODE:0") {
+		return nil
+	}
+
+	return fmt.Errorf("unmount nfs failed")
+}
+
+type DockerNfsMounter struct {
+	commandRunner command_runner.DockerCommandRunner
+}
+
+func NewDockerNfsMounter(commandRunner command_runner.DockerCommandRunner) *DockerNfsMounter {
+	return &DockerNfsMounter{
+		commandRunner: commandRunner,
+	}
+}
+
+func (m *DockerNfsMounter) MountNFS(ctx context.Context, device string, mountPoint string) error {
+	output, err := m.commandRunner.Run(ctx, fmt.Sprintf(`sudo mount  -l; echo "EXIT_CODE:$?"`), true, nil, true, nil, "docker", "", false)
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(output, "EXIT_CODE:0") && strings.Contains(output, mountPoint) {
+		return nil
+	}
+
+	_, err = m.commandRunner.Run(ctx, fmt.Sprintf("sudo mkdir -p %s", mountPoint), true, nil, true, nil, "docker", "", false)
+	if err != nil {
+		return err
+	}
+
+	output, err = m.commandRunner.Run(ctx, fmt.Sprintf(`sudo mount -t nfs -o %s %s %s; echo "EXIT_CODE:$?"`,
+		strings.Join(defaultNFSMountOptions, ","), device, mountPoint), true, nil, true, nil, "docker", "", false)
+	if err != nil {
+		return err
+	}
+
+	if !strings.Contains(output, "EXIT_CODE:0") {
+		return fmt.Errorf("mount nfs failed")
+	}
+
+	return nil
+}
+
+func (m *DockerNfsMounter) Unmount(ctx context.Context, mountPoint string) error {
+	output, err := m.commandRunner.Run(ctx, fmt.Sprintf(`sudo mount  -l; echo "EXIT_CODE:$?"`), true, nil, true, nil, "docker", "", false)
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(output, "EXIT_CODE:0") && !strings.Contains(output, mountPoint) {
+		return nil
+	}
+
+	_, err = m.commandRunner.Run(ctx, fmt.Sprintf(`sudo umount %s; echo "EXIT_CODE:$?"`, mountPoint), true, nil, true, nil, "docker", "", false)
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(output, "EXIT_CODE:0") {
+		return nil
+	}
+
+	return fmt.Errorf("unmount nfs failed")
 }

@@ -106,6 +106,11 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			return errors.Wrapf(err, "failed to cleanup endpoint %s", obj.Metadata.Name)
 		}
 
+		err = c.disconnectModelFromCluster(obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to disconnect model %s to endpoint %s", obj.Spec.Model, obj.Metadata.Name)
+		}
+
 		// Update status to DELETED
 		err = c.updateStatus(obj, c.formatStatus(v1.EndpointPhaseDELETED, nil))
 		if err != nil {
@@ -113,6 +118,13 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 		}
 
 		return nil
+	}
+
+	// always exec connect model to cluster, for cluster may dynamic scale, we need ensure model exists on all cluster nodes.
+	// todo: In order to reduce model connection actions, a new controller may be created in the future to uniformly manage model connections on the cluster.
+	err = c.connectModelToCluster(obj)
+	if err != nil {
+		return errors.Wrapf(err, "failed to connect model %s to endpoint %s", obj.Spec.Model, obj.Metadata.Name)
 	}
 
 	// Handle creation/update (when not deleting)
@@ -195,6 +207,11 @@ func (c *EndpointController) createEndpoint(obj *v1.Endpoint) (*v1.EndpointStatu
 func (c *EndpointController) cleanupEndpoint(obj *v1.Endpoint) error {
 	o, err := c.getOrchestrator(obj)
 	if err != nil {
+		// skip to cleanup if orchestrator not found.
+		if err == storage.ErrResourceNotFound {
+			return nil
+		}
+
 		return errors.Wrapf(err, "failed to get orchestrator for endpoint %s", obj.Metadata.Name)
 	}
 
@@ -218,6 +235,39 @@ func (c *EndpointController) checkEndpointHealth(obj *v1.Endpoint) (*v1.Endpoint
 	}
 
 	return status, err
+}
+
+func (c *EndpointController) connectModelToCluster(obj *v1.Endpoint) error {
+	o, err := c.getOrchestrator(obj)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get orchestrator for endpoint %s", obj.Metadata.Name)
+	}
+
+	err = o.ConnectEndpointModel(obj)
+	if err != nil {
+		return errors.Wrapf(err, "failed to connect model %s to endpoint %s", obj.Spec.Model, obj.Metadata.Name)
+	}
+
+	return nil
+}
+
+func (c *EndpointController) disconnectModelFromCluster(obj *v1.Endpoint) error {
+	o, err := c.getOrchestrator(obj)
+	if err != nil {
+		// skip to disconnect if orchestrator not found.
+		if err == storage.ErrResourceNotFound {
+			return nil
+		}
+
+		return errors.Wrapf(err, "failed to get orchestrator for endpoint %s", obj.Metadata.Name)
+	}
+
+	err = o.DisconnectEndpointModel(obj)
+	if err != nil {
+		return errors.Wrapf(err, "failed to disconnect model %s to endpoint %s", obj.Spec.Model, obj.Metadata.Name)
+	}
+
+	return nil
 }
 
 func (c *EndpointController) updateStatus(obj *v1.Endpoint, status *v1.EndpointStatus) error {
@@ -260,7 +310,7 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	}
 
 	if len(cluster) == 0 {
-		return nil, errors.New("cluster not found")
+		return nil, storage.ErrResourceNotFound
 	}
 
 	orchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{

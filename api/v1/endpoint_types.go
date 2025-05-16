@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 type ModelSpec struct {
 	Registry string `json:"registry,omitempty"`
 	Name     string `json:"name,omitempty"`
@@ -57,4 +59,16 @@ type Endpoint struct {
 	Metadata   *Metadata       `json:"metadata,omitempty"`
 	Spec       *EndpointSpec   `json:"spec,omitempty"`
 	Status     *EndpointStatus `json:"status,omitempty"`
+}
+
+func (e Endpoint) Key() string {
+	if e.Metadata == nil {
+		return "default" + "-" + "endpint" + "-" + strconv.Itoa(e.ID)
+	}
+
+	if e.Metadata.Workspace == "" {
+		return "default" + "-" + "endpint" + "-" + strconv.Itoa(e.ID) + "-" + e.Metadata.Name
+	}
+
+	return e.Metadata.Workspace + "-" + "endpint" + "-" + strconv.Itoa(e.ID) + "-" + e.Metadata.Name
 }

@@ -1,6 +1,7 @@
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 VERSION ?= $(shell git describe --tags --always --dirty)
 UI_VERSION ?= main
+CLUSTER_VERSION ?= v18
 LATEST ?= false
 
 IMAGE_REPO ?= docker.io
@@ -96,7 +97,7 @@ docker-build-core: # build core docker image
 
 .PHONY: docker-build-api
 docker-build-api: # build api docker image
-	docker build --build-arg ARCH=$(ARCH) --build-arg UI_VERSION=$(UI_VERSION) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_API_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.api
+	docker build --build-arg ARCH=$(ARCH) --build-arg DEFAULT_CLUSTER_VERSION=$(CLUSTER_VERSION) --build-arg UI_VERSION=$(UI_VERSION) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_API_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.api
 
 .PHONY: docker-build-db-scripts
 docker-build-db-scripts:

@@ -624,8 +624,6 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
-					"mkdir -p /etc/docker/certs.d/registry.example.com",
-					"echo \"Y2EK\" | base64 -d > /etc/docker/certs.d/registry.example.com/ca.crt",
 					"docker login registry.example.com -u 'user' -p 'pass'",
 				},
 			},
@@ -681,8 +679,6 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
-					"mkdir -p /etc/docker/certs.d/registry.example.com",
-					"echo \"Y2EK\" | base64 -d > /etc/docker/certs.d/registry.example.com/ca.crt",
 					"docker login registry.example.com -u 'user' -p 'pass'",
 				},
 			},
@@ -738,8 +734,6 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
-					"mkdir -p /etc/docker/certs.d/registry.example.com",
-					"echo \"Y2EK\" | base64 -d > /etc/docker/certs.d/registry.example.com/ca.crt",
 					"docker login registry.example.com -u 'user' -p 'pass'",
 				},
 			},

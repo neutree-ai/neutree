@@ -27,6 +27,9 @@ type Orchestrator interface {
 	CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error)
 	DeleteEndpoint(endpoint *v1.Endpoint) error
 	GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error)
+
+	ConnectEndpointModel(endpoint *v1.Endpoint) error
+	DisconnectEndpointModel(endpoint *v1.Endpoint) error
 }
 
 type Options struct {
@@ -48,6 +51,8 @@ func newOrchestrator(opts Options) (Orchestrator, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get relate image registry")
 	}
+
+	fmt.Println(imageRegistry.Metadata.Name)
 
 	switch opts.Cluster.Spec.Type {
 	case "ssh":
