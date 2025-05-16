@@ -84,10 +84,14 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 	}
 
 	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
-		app.RuntimeEnv = map[string]interface{}{
-			"env_vars": map[string]string{
-				"BENTOML_HOME": filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name),
-			},
+		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
+		// todo: support local file type env set
+		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+			app.RuntimeEnv = map[string]interface{}{
+				"env_vars": map[string]string{
+					"BENTOML_HOME": filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name),
+				},
+			}
 		}
 	}
 
