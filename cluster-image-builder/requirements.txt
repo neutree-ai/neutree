@@ -8,7 +8,7 @@ pydantic_core==2.23.4
 pydantic-settings==2.8.1
 huggingface-hub==0.29.1
 ray[serve]
-bentoml==1.4.2
+bentoml==1.4.6
 PyYAML==6.0.1
 vllm==0.7.2
 kantoku==0.18.1

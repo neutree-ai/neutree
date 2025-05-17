@@ -1,6 +1,8 @@
 package model_registry
 
 import (
+	"io"
+
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -11,11 +13,21 @@ type ListOption struct {
 	Limit  int
 }
 
+// ModelRegistry defines the interface for model registry operations
 type ModelRegistry interface {
+	// Basic registry operations
 	ListModels(option ListOption) ([]v1.GeneralModel, error)
 	Connect() error
 	Disconnect() error
 	HealthyCheck() bool
+
+	// Model operations
+	GetModelVersion(name, version string) (*v1.ModelVersion, error) // 使用新的 ModelVersion 类型
+	DeleteModel(name, version string) error
+	ImportModel(modelPath string) error
+	ExportModel(name, version, outputPath string) error
+	GetModelPath(name, version string) (string, error)
+	SaveUploadedModel(reader io.Reader, name, version, tempDir string) (string, error)
 }
 
 type NewModelRegistryFunc func(registry *v1.ModelRegistry) (ModelRegistry, error)

@@ -10,11 +10,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pkg/errors"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 const (
-	listModelUrl = "https://huggingface.co/api/models"
+	listModelUrl               = "https://huggingface.co/api/models"
+	errHuggingFaceNotSupported = "operation not supported for Hugging Face registry"
 )
 
 type huggingFace struct {
@@ -74,9 +77,9 @@ func (hf *huggingFace) ListModels(option ListOption) ([]v1.GeneralModel, error) 
 	for i := range allHFModels {
 		result = append(result, v1.GeneralModel{
 			Name: allHFModels[i].ModelID,
-			Versions: []v1.Version{
+			Versions: []v1.ModelVersion{
 				{
-					Name:         "latest",
+					Name:         v1.LatestVersion,
 					CreationTime: allHFModels[i].CreatedAt.Format(time.RFC3339Nano),
 				},
 			},
@@ -139,4 +142,35 @@ func (hf *huggingFace) getModelsList(options ListOption) ([]HuggingFaceModel, er
 	}
 
 	return models, nil
+}
+
+// Implement the remaining ModelRegistry interface methods with "not supported" errors
+
+func (hf *huggingFace) GetModelVersion(name, version string) (*v1.ModelVersion, error) {
+	return nil, errors.New(errHuggingFaceNotSupported)
+}
+
+// DeleteModel returns an error for HuggingFace as it's read-only
+func (hf *huggingFace) DeleteModel(name, version string) error {
+	return errors.New(errHuggingFaceNotSupported)
+}
+
+// ImportModel returns an error for HuggingFace as it's read-only
+func (hf *huggingFace) ImportModel(modelPath string) error {
+	return errors.New(errHuggingFaceNotSupported)
+}
+
+// ExportModel returns an error for HuggingFace as it's read-only
+func (hf *huggingFace) ExportModel(name, version, outputPath string) error {
+	return errors.New(errHuggingFaceNotSupported)
+}
+
+// GetModelPath returns an error for HuggingFace as it's read-only
+func (hf *huggingFace) GetModelPath(name, version string) (string, error) {
+	return "", errors.New(errHuggingFaceNotSupported)
+}
+
+// SaveUploadedModel returns an error for HuggingFace as it's read-only
+func (hf *huggingFace) SaveUploadedModel(reader io.Reader, name, version, tempDir string) (string, error) {
+	return "", errors.New(errHuggingFaceNotSupported)
 }
