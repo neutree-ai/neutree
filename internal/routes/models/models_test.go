@@ -19,19 +19,39 @@ import (
 )
 
 // createMockContext creates a mock Gin context for testing
-func createMockContext(registryName, searchQuery string) (*gin.Context, *httptest.ResponseRecorder) {
+func createMockContext(workspace, registryName, modelName, searchQuery string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
+	// Construct URL based on parameters
+	url := "/api/v1/workspaces/" + workspace + "/model_registries/" + registryName + "/models"
+	if modelName != "" {
+		url += "/" + modelName
+	}
+	if searchQuery != "" {
+		url += "?search=" + searchQuery
+	}
+
 	// Setup request with params
-	c.Request = httptest.NewRequest("GET", "/api/v1/search-models/"+registryName+"?search="+searchQuery, nil)
+	c.Request = httptest.NewRequest("GET", url, nil)
 	c.Params = []gin.Param{
 		{
-			Key:   "name",
+			Key:   "workspace",
+			Value: workspace,
+		},
+		{
+			Key:   "registry",
 			Value: registryName,
 		},
+	}
+
+	if modelName != "" {
+		c.Params = append(c.Params, gin.Param{
+			Key:   "model",
+			Value: modelName,
+		})
 	}
 
 	// Add search query
@@ -62,19 +82,24 @@ func setupMocks(t *testing.T) (*mocks.MockStorage, *model_registry_mocks.MockMod
 	return mockStorage, mockModelRegistry
 }
 
-func TestSearchModels_Success(t *testing.T) {
+func TestListModels_Success(t *testing.T) {
 	// Setup mocks
 	mockStorage, mockModelRegistry := setupMocks(t)
 
-	// Create handler dependencies
+	// Create handler dependencies with a mock temp directory function
+	mockTempDir := t.TempDir()
 	deps := &Dependencies{
 		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return mockTempDir, nil
+		},
 	}
 
 	// Create test context
+	workspace := "default"
 	registryName := "test-registry"
 	searchQuery := "test"
-	c, w := createMockContext(registryName, searchQuery)
+	c, w := createMockContext(workspace, registryName, "", searchQuery)
 
 	// Prepare mock data
 	modelRegistry := v1.ModelRegistry{
@@ -87,18 +112,23 @@ func TestSearchModels_Success(t *testing.T) {
 	mockModels := []v1.GeneralModel{
 		{
 			Name:     "Test Model 1",
-			Versions: []v1.Version{},
+			Versions: []v1.ModelVersion{},
 		},
 		{
 			Name:     "Test Model 2",
-			Versions: []v1.Version{},
+			Versions: []v1.ModelVersion{},
 		},
 	}
 
 	// Configure mock behaviors
 	mockStorage.On("ListModelRegistry", mock.MatchedBy(func(option storage.ListOption) bool {
-		return len(option.Filters) > 0 && option.Filters[0].Column == "metadata->name" &&
-			option.Filters[0].Operator == "eq" && option.Filters[0].Value == "\"test-registry\""
+		return len(option.Filters) == 2 &&
+			option.Filters[0].Column == "metadata->workspace" &&
+			option.Filters[0].Operator == "eq" &&
+			option.Filters[0].Value == "\"default\"" &&
+			option.Filters[1].Column == "metadata->name" &&
+			option.Filters[1].Operator == "eq" &&
+			option.Filters[1].Value == "\"test-registry\""
 	})).Return([]v1.ModelRegistry{modelRegistry}, nil)
 
 	mockModelRegistry.On("Connect").Return(nil)
@@ -108,7 +138,7 @@ func TestSearchModels_Success(t *testing.T) {
 	})).Return(mockModels, nil)
 
 	// Call the handler function directly
-	handlerFunc := searchModels(deps)
+	handlerFunc := listModels(deps)
 	handlerFunc(c)
 
 	// Verify the results
@@ -125,54 +155,26 @@ func TestSearchModels_Success(t *testing.T) {
 	mockModelRegistry.AssertExpectations(t)
 }
 
-func TestSearchModels_RegistryNotFound(t *testing.T) {
+func TestListModels_RegistryNotFound(t *testing.T) {
 	// Setup mocks
 	mockStorage, _ := setupMocks(t)
 
 	// Create handler dependencies
 	deps := &Dependencies{
 		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
 	}
 
 	// Create test context
-	c, w := createMockContext("non-existent-registry", "")
+	c, w := createMockContext("default", "non-existent-registry", "", "")
 
 	// Configure mock behaviors - return empty result
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{}, nil)
 
 	// Call the handler function directly
-	handlerFunc := searchModels(deps)
-	handlerFunc(c)
-
-	// Verify the results
-	assert.Equal(t, http.StatusNotFound, w.Code)
-
-	var response map[string]string
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
-	assert.Equal(t, "model registry not found", response["message"])
-
-	mockStorage.AssertExpectations(t)
-}
-
-func TestSearchModels_StorageError(t *testing.T) {
-	// Setup mocks
-	mockStorage, _ := setupMocks(t)
-
-	// Create handler dependencies
-	deps := &Dependencies{
-		Storage: mockStorage,
-	}
-
-	// Create test context
-	c, w := createMockContext("test-registry", "")
-
-	// Configure mock behaviors - return error
-	mockError := errors.New("storage error")
-	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{}, mockError)
-
-	// Call the handler function directly
-	handlerFunc := searchModels(deps)
+	handlerFunc := listModels(deps)
 	handlerFunc(c)
 
 	// Verify the results
@@ -181,22 +183,59 @@ func TestSearchModels_StorageError(t *testing.T) {
 	var response map[string]string
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Contains(t, response["message"], "Failed to list model registries")
+	assert.Contains(t, response["message"], "model registry not found")
 
 	mockStorage.AssertExpectations(t)
 }
 
-func TestSearchModels_ListModelsError(t *testing.T) {
+func TestListModels_StorageError(t *testing.T) {
+	// Setup mocks
+	mockStorage, _ := setupMocks(t)
+
+	// Create handler dependencies
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	// Create test context
+	c, w := createMockContext("default", "test-registry", "", "")
+
+	// Configure mock behaviors - return error
+	mockError := errors.New("storage error")
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{}, mockError)
+
+	// Call the handler function directly
+	handlerFunc := listModels(deps)
+	handlerFunc(c)
+
+	// Verify the results
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["message"], "failed to find model registry")
+
+	mockStorage.AssertExpectations(t)
+}
+
+func TestListModels_ListModelsError(t *testing.T) {
 	// Setup mocks
 	mockStorage, mockModelRegistry := setupMocks(t)
 
 	// Create handler dependencies
 	deps := &Dependencies{
 		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
 	}
 
 	// Create test context
-	c, w := createMockContext("test-registry", "test-query")
+	c, w := createMockContext("default", "test-registry", "", "test-query")
 
 	// Prepare mock data
 	modelRegistry := v1.ModelRegistry{
@@ -215,7 +254,7 @@ func TestSearchModels_ListModelsError(t *testing.T) {
 	mockModelRegistry.On("ListModels", mock.Anything).Return(nil, mockError)
 
 	// Call the handler function directly
-	handlerFunc := searchModels(deps)
+	handlerFunc := listModels(deps)
 	handlerFunc(c)
 
 	// Verify the results
@@ -228,4 +267,165 @@ func TestSearchModels_ListModelsError(t *testing.T) {
 
 	mockStorage.AssertExpectations(t)
 	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestGetModel_Success(t *testing.T) {
+	// Setup mocks
+	mockStorage, mockModelRegistry := setupMocks(t)
+
+	// Create handler dependencies
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	// Create test context
+	c, w := createMockContext("default", "test-registry", "test-model", "")
+
+	// Prepare mock data
+	modelRegistry := v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: "bentoml",
+		},
+	}
+
+	mockModelVersion := &v1.ModelVersion{
+		Name:         "latest",
+		CreationTime: "2023-01-01T00:00:00Z",
+		Size:         "10MB",
+		Module:       "test-module",
+	}
+
+	// Configure mock behaviors
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
+	mockModelRegistry.On("Connect").Return(nil)
+	mockModelRegistry.On("Disconnect").Return(nil)
+	mockModelRegistry.On("GetModelVersion", "test-model", "latest").Return(mockModelVersion, nil)
+
+	// Call the handler function directly
+	handlerFunc := getModel(deps)
+	handlerFunc(c)
+
+	// Verify the results
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify mock expectations
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestGetModel_NotFound(t *testing.T) {
+	// Setup mocks
+	mockStorage, mockModelRegistry := setupMocks(t)
+
+	// Create handler dependencies
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	// Create test context
+	c, w := createMockContext("default", "test-registry", "non-existent-model", "")
+
+	// Prepare mock data
+	modelRegistry := v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: "bentoml",
+		},
+	}
+
+	// Configure mock behaviors
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
+	mockModelRegistry.On("Connect").Return(nil)
+	mockModelRegistry.On("Disconnect").Return(nil)
+	mockError := errors.New("model not found")
+	mockModelRegistry.On("GetModelVersion", "non-existent-model", "latest").Return(nil, mockError)
+
+	// Call the handler function directly
+	handlerFunc := getModel(deps)
+	handlerFunc(c)
+
+	// Verify the results
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["message"], "Failed to get model")
+
+	// Verify mock expectations
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestDeleteModel_Success(t *testing.T) {
+	// Setup mocks
+	mockStorage, mockModelRegistry := setupMocks(t)
+
+	// Create handler dependencies
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	// Create test context
+	c, w := createMockContext("default", "test-registry", "test-model", "")
+
+	// Prepare mock data
+	modelRegistry := v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: "bentoml",
+		},
+	}
+
+	// Configure mock behaviors
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
+	mockModelRegistry.On("Connect").Return(nil)
+	mockModelRegistry.On("Disconnect").Return(nil)
+	mockModelRegistry.On("DeleteModel", "test-model", "latest").Return(nil)
+
+	// Call the handler function directly
+	handlerFunc := deleteModel(deps)
+	handlerFunc(c)
+
+	// Verify the results
+	assert.Equal(t, http.StatusNoContent, w.Code)
+
+	// Verify mock expectations
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestTempDirFunc_Error(t *testing.T) {
+	// Setup mocks
+	mockStorage, _ := setupMocks(t)
+
+	// Create handler dependencies with a failing temp dir function
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return "", errors.New("failed to create temp dir")
+		},
+	}
+
+	// Create test context for upload (which requires a temp dir)
+	c, w := createMockContext("default", "test-registry", "", "")
+
+	// Call the handler function directly
+	handlerFunc := uploadModel(deps)
+	handlerFunc(c)
+
+	// Verify the results - should get an error due to temp dir failure
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["message"], "Failed to prepare for upload")
 }
