@@ -28,12 +28,14 @@ func GetModelDetail(homePath, modelName, version string) (*Model, error) {
 
 	cmd := exec.Command("bentoml", "models", "get", tag, "-o", "json")
 	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+
 	content, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get model detail: %s", string(content))
 	}
 
 	var model Model
+
 	err = json.Unmarshal(content, &model)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal model detail")
@@ -51,6 +53,7 @@ func DeleteModel(homePath, modelName, version string) error {
 
 	cmd := exec.Command("bentoml", "models", "delete", tag, "-y")
 	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to delete model: %s", string(output))
@@ -63,6 +66,7 @@ func DeleteModel(homePath, modelName, version string) error {
 func ImportModel(homePath, modelPath string) error {
 	cmd := exec.Command("bentoml", "models", "import", modelPath)
 	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to import model: %s", string(output))
@@ -80,6 +84,7 @@ func ExportModel(homePath, modelName, version, outputPath string) error {
 
 	cmd := exec.Command("bentoml", "models", "export", tag, outputPath)
 	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to export model: %s", string(output))
@@ -101,6 +106,7 @@ func GetModelPath(homePath, modelName, version string) (string, error) {
 	if len(parts) != 2 {
 		return "", errors.New("invalid model tag format")
 	}
+
 	actualVersion := parts[1]
 
 	// Construct the path to the model directory

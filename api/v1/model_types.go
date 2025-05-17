@@ -1,5 +1,9 @@
 package v1
 
+const (
+	LatestVersion = "latest"
+)
+
 type ModelVersion struct {
 	Name         string            `json:"name"`
 	CreationTime string            `json:"creation_time"`

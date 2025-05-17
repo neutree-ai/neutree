@@ -94,6 +94,7 @@ func (f *localFile) GetModelVersion(name, version string) (*v1.ModelVersion, err
 	// Parse tag to get the actual version
 	parts := strings.Split(bentomlModel.Tag, ":")
 	modelVersion := version
+
 	if len(parts) == 2 {
 		modelVersion = parts[1]
 	}
@@ -129,10 +130,12 @@ func (f *localFile) SaveUploadedModel(reader io.Reader, name, version, tempDir s
 	}
 
 	tempFile := filepath.Join(tempDir, name+"-"+version+".bentomodel")
+
 	out, err := os.Create(tempFile)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create temporary file")
 	}
+
 	defer out.Close()
 
 	// Copy the uploaded model to the temporary file
@@ -151,6 +154,7 @@ func (f *localFile) HealthyCheck() bool {
 
 	// Try to list models to verify BentoML functionality
 	_, err := bentoml.ListModels(f.path)
+
 	return err == nil
 }
 
@@ -187,6 +191,7 @@ func (n *nfsFile) GetModelVersion(name, version string) (*v1.ModelVersion, error
 	// Parse tag to get the actual version
 	parts := strings.Split(bentomlModel.Tag, ":")
 	modelVersion := version
+
 	if len(parts) == 2 {
 		modelVersion = parts[1]
 	}
@@ -222,10 +227,12 @@ func (n *nfsFile) SaveUploadedModel(reader io.Reader, name, version, tempDir str
 	}
 
 	tempFile := filepath.Join(tempDir, name+"-"+version+".bentomodel")
+
 	out, err := os.Create(tempFile)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create temporary file")
 	}
+
 	defer out.Close()
 
 	// Copy the uploaded model to the temporary file
@@ -244,6 +251,7 @@ func (n *nfsFile) HealthyCheck() bool {
 
 	// Try to list models to verify BentoML functionality
 	_, err := bentoml.ListModels(n.targetPath)
+
 	return err == nil
 }
 

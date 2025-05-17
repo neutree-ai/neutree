@@ -31,7 +31,11 @@ func NewDeleteCmd() *cobra.Command {
 			if !force {
 				fmt.Printf("Are you sure you want to delete model %s? [y/N]: ", modelTag)
 				var response string
-				fmt.Scanln(&response)
+				_, err := fmt.Scanln(&response)
+				if err != nil {
+					return fmt.Errorf("failed to read input: %w", err)
+				}
+
 				if response != "y" && response != "Y" {
 					fmt.Println("Operation cancelled")
 					return nil

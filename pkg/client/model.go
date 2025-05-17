@@ -60,7 +60,7 @@ func (s *ModelsService) List(workspace, registry, search string) ([]v1.GeneralMo
 // Get retrieves detailed information about a specific model version
 func (s *ModelsService) Get(workspace, registry, modelName, version string) (*v1.ModelVersion, error) {
 	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s", s.client.baseURL, workspace, registry, modelName)
-	if version != "" && version != "latest" {
+	if version != "" && version != v1.LatestVersion {
 		url = fmt.Sprintf("%s?version=%s", url, version)
 	}
 
@@ -91,7 +91,7 @@ func (s *ModelsService) Get(workspace, registry, modelName, version string) (*v1
 // Delete removes a specific model from the registry
 func (s *ModelsService) Delete(workspace, registry, modelName, version string) error {
 	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s", s.client.baseURL, workspace, registry, modelName)
-	if version != "" && version != "latest" {
+	if version != "" && version != v1.LatestVersion {
 		url = fmt.Sprintf("%s?version=%s", url, version)
 	}
 
@@ -123,6 +123,7 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 	// Add metadata fields
 	_ = writer.WriteField("name", name)
 	_ = writer.WriteField("version", version)
+
 	if description != "" {
 		_ = writer.WriteField("description", description)
 	}
@@ -133,6 +134,7 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 		if err != nil {
 			return fmt.Errorf("failed to marshal labels: %w", err)
 		}
+
 		_ = writer.WriteField("labels", string(labelsJSON))
 	}
 
@@ -147,6 +149,7 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 	if err != nil {
 		return err
 	}
+
 	_, err = io.Copy(part, file)
 	if err != nil {
 		return err
@@ -159,10 +162,12 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 
 	// Create request
 	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models", s.client.baseURL, workspace, registry)
+
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	// Send request
@@ -184,7 +189,7 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 func (s *ModelsService) Pull(workspace, registry, modelName, version, outputDir string) error {
 	// Create request
 	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s/download", s.client.baseURL, workspace, registry, modelName)
-	if version != "" && version != "latest" {
+	if version != "" && version != v1.LatestVersion {
 		url = fmt.Sprintf("%s?version=%s", url, version)
 	}
 
@@ -207,22 +212,26 @@ func (s *ModelsService) Pull(workspace, registry, modelName, version, outputDir 
 	// Parse filename
 	contentDisposition := resp.Header.Get("Content-Disposition")
 	filename := ""
+
 	if contentDisposition != "" {
 		if strings.Contains(contentDisposition, "filename=") {
 			filename = strings.Split(strings.Split(contentDisposition, "filename=")[1], ";")[0]
 			filename = strings.Trim(filename, "\"")
 		}
 	}
+
 	if filename == "" {
 		filename = fmt.Sprintf("%s-%s.bentomodel", modelName, version)
 	}
 
 	// Create output file
 	outputPath := filepath.Join(outputDir, filename)
+
 	out, err := os.Create(outputPath)
 	if err != nil {
 		return err
 	}
+
 	defer out.Close()
 
 	// Save file
@@ -232,6 +241,7 @@ func (s *ModelsService) Pull(workspace, registry, modelName, version, outputDir 
 	}
 
 	fmt.Printf("Model saved to %s\n", outputPath)
+
 	return nil
 }
 
@@ -239,9 +249,10 @@ func (s *ModelsService) Pull(workspace, registry, modelName, version, outputDir 
 func ParseModelTag(modelTag string) (name string, version string, err error) {
 	parts := strings.Split(modelTag, ":")
 	if len(parts) == 1 {
-		return parts[0], "latest", nil
+		return parts[0], v1.LatestVersion, nil
 	} else if len(parts) == 2 {
 		return parts[0], parts[1], nil
 	}
+
 	return "", "", fmt.Errorf("invalid model tag format, expected name:version")
 }

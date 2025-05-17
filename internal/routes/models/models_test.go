@@ -292,7 +292,7 @@ func TestGetModel_Success(t *testing.T) {
 	}
 
 	mockModelVersion := &v1.ModelVersion{
-		Name:         "latest",
+		Name:         v1.LatestVersion,
 		CreationTime: "2023-01-01T00:00:00Z",
 		Size:         "10MB",
 		Module:       "test-module",
@@ -302,7 +302,7 @@ func TestGetModel_Success(t *testing.T) {
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
 	mockModelRegistry.On("Connect").Return(nil)
 	mockModelRegistry.On("Disconnect").Return(nil)
-	mockModelRegistry.On("GetModelVersion", "test-model", "latest").Return(mockModelVersion, nil)
+	mockModelRegistry.On("GetModelVersion", "test-model", v1.LatestVersion).Return(mockModelVersion, nil)
 
 	// Call the handler function directly
 	handlerFunc := getModel(deps)
@@ -343,7 +343,7 @@ func TestGetModel_NotFound(t *testing.T) {
 	mockModelRegistry.On("Connect").Return(nil)
 	mockModelRegistry.On("Disconnect").Return(nil)
 	mockError := errors.New("model not found")
-	mockModelRegistry.On("GetModelVersion", "non-existent-model", "latest").Return(nil, mockError)
+	mockModelRegistry.On("GetModelVersion", "non-existent-model", v1.LatestVersion).Return(nil, mockError)
 
 	// Call the handler function directly
 	handlerFunc := getModel(deps)
@@ -388,7 +388,7 @@ func TestDeleteModel_Success(t *testing.T) {
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
 	mockModelRegistry.On("Connect").Return(nil)
 	mockModelRegistry.On("Disconnect").Return(nil)
-	mockModelRegistry.On("DeleteModel", "test-model", "latest").Return(nil)
+	mockModelRegistry.On("DeleteModel", "test-model", v1.LatestVersion).Return(nil)
 
 	// Call the handler function directly
 	handlerFunc := deleteModel(deps)

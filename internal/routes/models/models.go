@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/model_registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -29,6 +30,7 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 			if err := os.MkdirAll(tempDir, 0755); err != nil {
 				return "", fmt.Errorf("failed to create temporary directory: %w", err)
 			}
+
 			return tempDir, nil
 		}
 	}
@@ -108,13 +110,16 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		search := c.Query("search")
 		limit := 0
+
 		if limitStr := c.Query("limit"); limitStr != "" {
 			var err error
+
 			limit, err = strconv.Atoi(limitStr)
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"message": "Invalid limit parameter",
 				})
+
 				return
 			}
 		}
@@ -126,6 +131,7 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": err.Error(),
 			})
+
 			return
 		}
 		defer (*modelRegistry).Disconnect() //nolint:errcheck
@@ -140,6 +146,7 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to list models: %v", err),
 			})
+
 			return
 		}
 
@@ -151,9 +158,10 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 func getModel(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		modelName := c.Param("model")
+
 		version := c.Query("version")
 		if version == "" {
-			version = "latest"
+			version = v1.LatestVersion
 		}
 
 		// Get and connect to the model registry
@@ -163,6 +171,7 @@ func getModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": err.Error(),
 			})
+
 			return
 		}
 		defer (*modelRegistry).Disconnect() //nolint:errcheck
@@ -174,6 +183,7 @@ func getModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to get model %s:%s: %v", modelName, version, err),
 			})
+
 			return
 		}
 
@@ -190,12 +200,13 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "Model name is required",
 			})
+
 			return
 		}
 
 		version := c.PostForm("version")
 		if version == "" {
-			version = "latest"
+			version = v1.LatestVersion
 		}
 
 		// Get uploaded file
@@ -204,6 +215,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "No model file provided",
 			})
+
 			return
 		}
 		defer file.Close()
@@ -215,6 +227,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to prepare for upload: %v", err),
 			})
+
 			return
 		}
 
@@ -225,6 +238,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": err.Error(),
 			})
+
 			return
 		}
 		defer (*modelRegistry).Disconnect() //nolint:errcheck
@@ -236,6 +250,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to save uploaded model: %v", err),
 			})
+
 			return
 		}
 		defer os.Remove(tempFilePath) // Clean up temporary file
@@ -246,6 +261,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to import model: %v", err),
 			})
+
 			return
 		}
 
@@ -256,6 +272,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Model imported but failed to retrieve details: %v", err),
 			})
+
 			return
 		}
 
@@ -267,9 +284,10 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 func downloadModel(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		modelName := c.Param("model")
+
 		version := c.Query("version")
 		if version == "" {
-			version = "latest"
+			version = v1.LatestVersion
 		}
 
 		// Get temporary directory
@@ -279,6 +297,7 @@ func downloadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to prepare for download: %v", err),
 			})
+
 			return
 		}
 
@@ -289,6 +308,7 @@ func downloadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": err.Error(),
 			})
+
 			return
 		}
 		defer (*modelRegistry).Disconnect() //nolint:errcheck
@@ -303,6 +323,7 @@ func downloadModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to export model: %v", err),
 			})
+
 			return
 		}
 
@@ -319,9 +340,10 @@ func downloadModel(deps *Dependencies) gin.HandlerFunc {
 func deleteModel(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		modelName := c.Param("model")
+
 		version := c.Query("version")
 		if version == "" {
-			version = "latest"
+			version = v1.LatestVersion
 		}
 
 		// Get and connect to the model registry
@@ -331,6 +353,7 @@ func deleteModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": err.Error(),
 			})
+
 			return
 		}
 		defer (*modelRegistry).Disconnect() //nolint:errcheck
@@ -341,6 +364,7 @@ func deleteModel(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to delete model: %v", err),
 			})
+
 			return
 		}
 

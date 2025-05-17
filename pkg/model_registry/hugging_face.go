@@ -79,7 +79,7 @@ func (hf *huggingFace) ListModels(option ListOption) ([]v1.GeneralModel, error) 
 			Name: allHFModels[i].ModelID,
 			Versions: []v1.ModelVersion{
 				{
-					Name:         "latest",
+					Name:         v1.LatestVersion,
 					CreationTime: allHFModels[i].CreatedAt.Format(time.RFC3339Nano),
 				},
 			},

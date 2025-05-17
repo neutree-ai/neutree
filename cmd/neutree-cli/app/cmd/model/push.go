@@ -64,7 +64,9 @@ func NewPushCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Description of the model")
 	cmd.Flags().StringSliceVarP(&labelsFlag, "label", "l", nil, "Labels in the format key=value")
 
-	cmd.MarkFlagRequired("name")
+	if err := cmd.MarkFlagRequired("name"); err != nil {
+		panic(fmt.Sprintf("Failed to mark flag 'name' as required: %v", err))
+	}
 
 	return cmd
 }
@@ -75,5 +77,6 @@ func parseLabel(label string) (string, string, error) {
 	if !found {
 		return "", "", fmt.Errorf("invalid label format for %s, expected key=value", label)
 	}
+
 	return key, value, nil
 }
