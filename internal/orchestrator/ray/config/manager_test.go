@@ -34,6 +34,9 @@ func TestSSHKeyPath(t *testing.T) {
 }
 
 func TestGenerate_Success(t *testing.T) {
+	os.Setenv("TMPDIR", t.TempDir())
+	defer os.Unsetenv("TMPDIR")
+
 	// Setup test data
 	clusterName := "test-cluster"
 	manager := NewManager(clusterName)
@@ -48,9 +51,6 @@ func TestGenerate_Success(t *testing.T) {
 			WorkerIPs: []string{"1.1.1.1"},
 		},
 	}
-
-	os.Setenv("TMPDIR", t.TempDir())
-	defer os.Unsetenv("TMPDIR")
 
 	// Test
 	err := manager.Generate(config)
@@ -70,8 +70,9 @@ func TestGenerate_Success(t *testing.T) {
 }
 
 func TestGenerate_DecodeSSHKeyError(t *testing.T) {
+	os.Setenv("TMPDIR", t.TempDir())
+	defer os.Unsetenv("TMPDIR")
 	manager := NewManager("test-cluster")
-	defer os.RemoveAll(manager.baseDir) // Cleanup
 
 	config := &v1.RayClusterConfig{
 		Auth: v1.Auth{

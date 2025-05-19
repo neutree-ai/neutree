@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/util"
 )
 
 type ProcessExecute func(ctx context.Context, name string, args []string) ([]byte, error)
@@ -36,20 +34,13 @@ type CommonArgs struct {
 
 // NewSSHCommandRunner creates a new SSHCommandRunner instance.
 func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, clusterName string, processExecute ProcessExecute) *SSHCommandRunner {
-	var sshControlPath string
-
-	if clusterName != "" {
-		sshControlPath = fmt.Sprintf("/tmp/ray_ssh/%s", util.HashString(clusterName))
-		_ = os.MkdirAll(sshControlPath, 0700) //nolint:errcheck
-	}
-
 	return &SSHCommandRunner{
 		nodeID:         nodeID,
 		clusterName:    clusterName,
 		processExecute: processExecute,
 		sshPrivateKey:  authConfig.SSHPrivateKey,
 		sshUser:        authConfig.SSHUser,
-		sshControlPath: sshControlPath,
+		sshControlPath: "",
 		sshIP:          sshIP,
 	}
 }

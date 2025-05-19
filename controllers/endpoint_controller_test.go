@@ -148,6 +148,7 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
 				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
+				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
 				o.On("ConnectEndpointModel", mock.Anything).Return(nil)
 				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
 			},
