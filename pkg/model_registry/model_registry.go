@@ -22,7 +22,7 @@ type ModelRegistry interface {
 	HealthyCheck() bool
 
 	// Model operations
-	GetModelVersion(name, version string) (*v1.ModelVersion, error) // 使用新的 ModelVersion 类型
+	GetModelVersion(name, version string) (*v1.ModelVersion, error)
 	DeleteModel(name, version string) error
 	ImportModel(modelPath string) error
 	ExportModel(name, version, outputPath string) error

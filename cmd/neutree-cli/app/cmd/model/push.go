@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/neutree-ai/neutree/pkg/client"
+	"github.com/neutree-ai/neutree/pkg/model_registry/bentoml"
 )
 
 func NewPushCmd() *cobra.Command {
@@ -26,13 +27,24 @@ func NewPushCmd() *cobra.Command {
 			modelPath := args[0]
 
 			// Check if file or directory exists
-			if _, err := os.Stat(modelPath); os.IsNotExist(err) {
+			info, err := os.Stat(modelPath)
+			if err != nil {
 				return fmt.Errorf("model path %s does not exist", modelPath)
 			}
 
 			// If model name is not specified, use directory name
 			if modelName == "" {
 				modelName = filepath.Base(modelPath)
+			}
+
+			// Auto‑generate version if not provided
+			if version == "" {
+				v, err := bentoml.GenerateVersion()
+				if err != nil {
+					return fmt.Errorf("failed to generate version: %w", err)
+				}
+
+				version = *v
 			}
 
 			// Parse labels
@@ -43,6 +55,16 @@ func NewPushCmd() *cobra.Command {
 					return err
 				}
 				labels[key] = value
+			}
+
+			// If modelPath is a directory, tar‑gz it into a temp *.bentomodel
+			if info.IsDir() {
+				archivePath, err := bentoml.CreateArchive(modelPath, modelName, version)
+				if err != nil {
+					return err
+				}
+
+				modelPath = archivePath
 			}
 
 			// Create client
@@ -60,7 +82,7 @@ func NewPushCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&modelName, "name", "n", "", "Name of the model (default: directory name)")
-	cmd.Flags().StringVarP(&version, "version", "v", "latest", "Version of the model")
+	cmd.Flags().StringVarP(&version, "version", "v", "", "Version of the model, (default: auto‑generated)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Description of the model")
 	cmd.Flags().StringSliceVarP(&labelsFlag, "label", "l", nil, "Labels in the format key=value")
 

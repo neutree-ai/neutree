@@ -14,7 +14,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/model_registry/bentoml"
 )
 
-// convertBentoMLModelsToGeneralModels 将 BentoML 模型转换为 API 的 GeneralModel 格式
 func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options ListOption) []v1.GeneralModel {
 	// Convert to GeneralModel format
 	generalModelMap := make(map[string]*v1.GeneralModel)
