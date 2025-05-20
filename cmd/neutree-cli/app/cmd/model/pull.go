@@ -29,7 +29,7 @@ func NewPullCmd() *cobra.Command {
 			}
 
 			// Create client
-			c := client.NewClient(serverURL, client.WithAPIKey(apiKey))
+			c := client.NewClient(serverURL, client.WithAPIKey(apiKey), client.WithTimeout(0))
 
 			// If output directory is not specified, use current directory
 			if outputDir == "" {

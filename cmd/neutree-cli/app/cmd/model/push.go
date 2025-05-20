@@ -59,6 +59,8 @@ func NewPushCmd() *cobra.Command {
 
 			// If modelPath is a directory, tar‑gz it into a temp *.bentomodel
 			if info.IsDir() {
+				fmt.Printf("Creating archive for model %s...\n", modelName)
+
 				archivePath, err := bentoml.CreateArchive(modelPath, modelName, version)
 				if err != nil {
 					return err
