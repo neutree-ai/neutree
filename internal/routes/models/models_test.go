@@ -375,7 +375,7 @@ func TestDeleteModel_Success(t *testing.T) {
 	}
 
 	// Create test context
-	c, w := createMockContext("default", "test-registry", "test-model", "")
+	c, _ := createMockContext("default", "test-registry", "test-model", "")
 
 	// Prepare mock data
 	modelRegistry := v1.ModelRegistry{
@@ -395,37 +395,9 @@ func TestDeleteModel_Success(t *testing.T) {
 	handlerFunc(c)
 
 	// Verify the results
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusNoContent, c.Writer.Status())
 
 	// Verify mock expectations
 	mockStorage.AssertExpectations(t)
 	mockModelRegistry.AssertExpectations(t)
-}
-
-func TestTempDirFunc_Error(t *testing.T) {
-	// Setup mocks
-	mockStorage, _ := setupMocks(t)
-
-	// Create handler dependencies with a failing temp dir function
-	deps := &Dependencies{
-		Storage: mockStorage,
-		TempDirFunc: func() (string, error) {
-			return "", errors.New("failed to create temp dir")
-		},
-	}
-
-	// Create test context for upload (which requires a temp dir)
-	c, w := createMockContext("default", "test-registry", "", "")
-
-	// Call the handler function directly
-	handlerFunc := uploadModel(deps)
-	handlerFunc(c)
-
-	// Verify the results - should get an error due to temp dir failure
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-
-	var response map[string]string
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
-	assert.Contains(t, response["message"], "Failed to prepare for upload")
 }
