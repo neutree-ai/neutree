@@ -13,13 +13,13 @@ BEGIN
         );
     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM api.roles WHERE (metadata).name = 'workspace_user') THEN
+    IF NOT EXISTS (SELECT 1 FROM api.roles WHERE (metadata).name = 'workspace-user') THEN
         INSERT INTO api.roles (api_version, kind, metadata, spec)
         VALUES (
             'v1',
             'Role',
-            ROW('workspace_user', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
-            ROW('workspace_user'::api.role_preset, ARRAY[]::api.permission_action[])::api.role_spec
+            ROW('workspace-user', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
+            ROW('workspace-user'::api.role_preset, ARRAY[]::api.permission_action[])::api.role_spec
         );
     END IF;
 
