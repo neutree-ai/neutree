@@ -60,6 +60,7 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	r.Any("/api/v1/ray-dashboard-proxy/:name/*path", handleRayDashboardProxy(deps))
 	r.Any("/api/v1/auth/:path", handleAuthProxy(deps))
 	r.Any("/api/v1/:path", handlePostgrestProxy(deps))
+	r.Any("/api/v1/rpc/:path", handlePostgrestRPCProxy(deps))
 }
 
 func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
@@ -223,6 +224,20 @@ func handlePostgrestProxy(deps *Dependencies) gin.HandlerFunc {
 		if path != "" && path[0] == '/' {
 			path = path[1:]
 		}
+
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, nil)
+		proxyHandler(c)
+	}
+}
+
+func handlePostgrestRPCProxy(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Param("path")
+		if path != "" && path[0] == '/' {
+			path = path[1:]
+		}
+
+		path = "rpc/" + path
 
 		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, nil)
 		proxyHandler(c)

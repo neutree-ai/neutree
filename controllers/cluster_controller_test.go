@@ -8,6 +8,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
@@ -29,6 +30,9 @@ func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *regis
 		LocalCollectConfigPath: "tmp",
 	})
 
+	gw := &gatewaymocks.MockGateway{}
+	gw.On("SyncBackendService", mock.Anything, mock.Anything).Return(nil)
+	gw.On("DeleteBackendService", mock.Anything, mock.Anything).Return(nil)
 	return &ClusterController{
 		storage:      storage,
 		imageService: imageSvc,
@@ -39,6 +43,7 @@ func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *regis
 		},
 		defaultClusterVersion:   "v1",
 		obsCollectConfigManager: obsCollectConfigManager,
+		gw:                      gw,
 	}
 }
 

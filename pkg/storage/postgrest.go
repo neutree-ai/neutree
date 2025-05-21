@@ -625,3 +625,22 @@ func (s *postgrestStorage) ListEndpoint(option ListOption) ([]v1.Endpoint, error
 
 	return response, err
 }
+
+func (s *postgrestStorage) CallDatabaseFunction(method string, params map[string]interface{}, result interface{}) error {
+	resultString := s.postgrestClient.Rpc(method, "", params)
+
+	if s.postgrestClient.ClientError != nil {
+		return s.postgrestClient.ClientError
+	}
+
+	if result == nil {
+		return nil
+	}
+
+	err := json.Unmarshal([]byte(resultString), result)
+	if err != nil {
+		return errors.Wrapf(err, "failed to unmarshal response: %v Raw response: %s", err, resultString)
+	}
+
+	return nil
+}

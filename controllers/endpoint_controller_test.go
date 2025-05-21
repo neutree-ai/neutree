@@ -6,6 +6,7 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -19,7 +20,12 @@ func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratorm
 	orchestrator.NewOrchestrator = func(opts orchestrator.Options) (orchestrator.Orchestrator, error) {
 		return o, nil
 	}
-	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Workers: 1})
+
+	gw := &gatewaymocks.MockGateway{}
+	gw.On("SyncRoute", mock.Anything, mock.Anything).Return(nil)
+	gw.On("DeleteRoute", mock.Anything, mock.Anything).Return(nil)
+
+	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Workers: 1, Gw: gw})
 	c.baseController.queue = workqueue.NewRateLimitingQueueWithConfig(
 		workqueue.DefaultControllerRateLimiter(),
 		workqueue.RateLimitingQueueConfig{Name: "endpoint-test"},
