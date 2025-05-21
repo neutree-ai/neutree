@@ -186,7 +186,7 @@ func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error 
 		APIVersion: "v1",
 		Kind:       "Engine",
 		Metadata: &v1.Metadata{
-			Name:      "llama_cpp",
+			Name:      "llama-cpp",
 			Workspace: workspace.Metadata.Name,
 		},
 		Spec: &v1.EngineSpec{

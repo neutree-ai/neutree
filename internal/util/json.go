@@ -2,7 +2,9 @@ package util
 
 import (
 	"encoding/json"
+	"fmt"
 
+	jsonpatchv5 "github.com/evanphx/json-patch/v5"
 	jd "github.com/josephburnett/jd/lib"
 )
 
@@ -17,6 +19,8 @@ func JsonEqual(obj1, obj2 interface{}) (bool, string, error) {
 		return false, "", err
 	}
 
+	fmt.Println(string(json1))
+	fmt.Println(string(json2))
 	if string(json1) == string(json2) {
 		return true, "", nil
 	}
@@ -31,4 +35,29 @@ func JsonEqual(obj1, obj2 interface{}) (bool, string, error) {
 	}
 
 	return false, diff, nil
+}
+
+func JsonMerge(obj1, obj2, result interface{}) error {
+	json1, err := json.Marshal(obj1)
+	if err != nil {
+		return err
+	}
+	json2, err := json.Marshal(obj2)
+	if err != nil {
+		return err
+	}
+
+	merge, err := jsonpatchv5.MergePatch(json1, json2)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(string(json1))
+	fmt.Println(string(json2))
+	fmt.Println(string(merge))
+	err = json.Unmarshal(merge, result)
+	if err != nil {
+		return err
+	}
+	return nil
 }

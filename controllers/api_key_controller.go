@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -17,10 +18,13 @@ type ApiKeyController struct {
 
 	storage     storage.Storage
 	syncHandler func(apiKey *v1.ApiKey) error // Added syncHandler field
+
+	gw gateway.Gateway
 }
 
 type ApiKeyControllerOption struct {
 	Storage storage.Storage
+	Gw      gateway.Gateway
 	Workers int
 }
 
@@ -33,6 +37,7 @@ func NewApiKeyController(option *ApiKeyControllerOption) (*ApiKeyController, err
 			syncInterval: time.Second * 10,
 		},
 		storage: option.Storage,
+		gw:      option.Gw,
 	}
 
 	c.syncHandler = c.sync
@@ -92,6 +97,12 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 		}
 
 		klog.Info("Deleting api_key " + obj.Metadata.Name)
+
+		err = c.gw.DeleteAPIKey(obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete api_key in gateway %s", obj.Metadata.Name)
+		}
+
 		// Update status to DELETED
 		err = c.updateStatus(obj, v1.ApiKeyPhaseDELETED, nil)
 		if err != nil {
@@ -99,6 +110,12 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 		}
 
 		return nil
+	}
+
+	// sync api key when not deleting
+	err = c.gw.SyncAPIKey(obj)
+	if err != nil {
+		return errors.Wrapf(err, "failed to sync api_key %s in gateway", obj.Metadata.Name)
 	}
 
 	// Handle creation/update (when not deleting)
@@ -121,6 +138,7 @@ func (c *ApiKeyController) updateStatus(obj *v1.ApiKey, phase v1.ApiKeyPhase, er
 	newStatus := &v1.ApiKeyStatus{
 		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
 		Phase:              phase,
+		SkValue:            obj.Status.SkValue,
 	}
 	if err != nil {
 		newStatus.ErrorMessage = err.Error()

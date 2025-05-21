@@ -186,7 +186,7 @@ CREATE POLICY "workspace delete policy" ON api.workspaces
 -- ----------------------
 CREATE TYPE api.role_preset AS ENUM (
     'admin',
-    'workspace_user'
+    'workspace-user'
 );
 
 CREATE TYPE api.role_spec AS (
