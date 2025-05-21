@@ -67,6 +67,8 @@ func NewPushCmd() *cobra.Command {
 				}
 
 				modelPath = archivePath
+
+				defer os.Remove(archivePath)
 			}
 
 			// Create client
