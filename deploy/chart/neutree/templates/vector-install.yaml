@@ -34,7 +34,7 @@ data:
               .extracted_data.completion_tokens = .ai."proxy".usage.completion_tokens
               .extracted_data.timestamp = .started_at
               .extracted_data.status = .response.status
-              .extracted_data.model = .ai."ai-proxy".meta.response_model
+              .extracted_data.model = .ai."proxy".meta.response_model
               .extracted_data.api_key_id = .consumer.custom_id    
 
               if to_int!(.extracted_data.total_tokens) > 0 {
