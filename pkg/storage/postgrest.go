@@ -640,7 +640,73 @@ func (s *postgrestStorage) CallDatabaseFunction(method string, params map[string
 	err := json.Unmarshal([]byte(resultString), result)
 	if err != nil {
 		return errors.Wrapf(err, "failed to unmarshal response: %v Raw response: %s", err, resultString)
+		// ModelCatalog storage methods
 	}
 
 	return nil
+}
+
+func (s *postgrestStorage) CreateModelCatalog(data *v1.ModelCatalog) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_CATALOG_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteModelCatalog(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_CATALOG_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateModelCatalog(id string, data *v1.ModelCatalog) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_CATALOG_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetModelCatalog(id string) (*v1.ModelCatalog, error) {
+	var (
+		response []v1.ModelCatalog
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(MODEL_CATALOG_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListModelCatalog(option ListOption) ([]v1.ModelCatalog, error) {
+	var response []v1.ModelCatalog
+	err := s.genericList(MODEL_CATALOG_TABLE, &response, option)
+
+	return response, err
 }

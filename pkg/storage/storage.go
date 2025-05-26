@@ -18,6 +18,7 @@ const (
 	IMAGE_REGISTRY_TABLE  = "image_registries"
 	CLUSTERS_TABLE        = "clusters"
 	MODEL_REGISTRY_TABLE  = "model_registries"
+	MODEL_CATALOG_TABLE   = "model_catalogs"
 	ROLE_TABLE            = "roles"
 	ROLE_ASSIGNMENT_TABLE = "role_assignments"
 	WORKSPACE_TABLE       = "workspaces"
@@ -141,6 +142,19 @@ type EndpointStorage interface {
 	ListEndpoint(option ListOption) ([]v1.Endpoint, error)
 }
 
+type ModelCatalogStorage interface {
+	// CreateModelCatalog creates a new model catalog in the database.
+	CreateModelCatalog(data *v1.ModelCatalog) error
+	// DeleteModelCatalog deletes a model catalog by its ID.
+	DeleteModelCatalog(id string) error
+	// UpdateModelCatalog updates an existing model catalog in the database.
+	UpdateModelCatalog(id string, data *v1.ModelCatalog) error
+	// GetModelCatalog retrieves a model catalog by its ID.
+	GetModelCatalog(id string) (*v1.ModelCatalog, error)
+	// ListModelCatalog retrieves a list of model catalogs with optional filters.
+	ListModelCatalog(option ListOption) ([]v1.ModelCatalog, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -151,6 +165,7 @@ type Storage interface {
 	ApiKeyStorage
 	EngineStorage
 	EndpointStorage
+	ModelCatalogStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error
