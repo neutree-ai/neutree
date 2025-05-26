@@ -72,7 +72,7 @@ func NewPushCmd() *cobra.Command {
 			}
 
 			// Create client
-			c := client.NewClient(serverURL, client.WithAPIKey(apiKey))
+			c := client.NewClient(serverURL, client.WithAPIKey(apiKey), client.WithTimeout(0))
 
 			fmt.Printf("Pushing model %s:%s to registry...\n", modelName, version)
 

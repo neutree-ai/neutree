@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -116,59 +115,44 @@ func (s *ModelsService) Delete(workspace, registry, modelName, version string) e
 
 // Push uploads a model to the registry
 func (s *ModelsService) Push(workspace, registry, modelPath, name, version, description string, labels map[string]string) error {
-	// Prepare request body
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	// Add metadata fields
-	_ = writer.WriteField("name", name)
-	_ = writer.WriteField("version", version)
-
-	if description != "" {
-		_ = writer.WriteField("description", description)
-	}
-
-	// Add labels
-	if len(labels) > 0 {
-		labelsJSON, err := json.Marshal(labels)
-		if err != nil {
-			return fmt.Errorf("failed to marshal labels: %w", err)
-		}
-
-		_ = writer.WriteField("labels", string(labelsJSON))
-	}
-
-	// Add model file
+	// Open file
 	file, err := os.Open(modelPath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	part, err := writer.CreateFormFile("model", filepath.Base(modelPath))
+	// Create IO pipe for multipart writer
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+
+	// IO copy goroutine
+	go func() {
+		defer pw.Close()
+		_ = mw.WriteField("name", name)
+		_ = mw.WriteField("version", version)
+		if description != "" {
+			_ = mw.WriteField("description", description)
+		}
+		if len(labels) > 0 {
+			labelsJSON, _ := json.Marshal(labels)
+			_ = mw.WriteField("labels", string(labelsJSON))
+		}
+
+		part, _ := mw.CreateFormFile("model", filepath.Base(modelPath))
+		io.Copy(part, file)
+		mw.Close()
+	}()
+
+	// HTTP request
+	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models",
+		s.client.baseURL, workspace, registry)
+
+	req, err := http.NewRequest("POST", url, pr)
 	if err != nil {
 		return err
 	}
-
-	_, err = io.Copy(part, file)
-	if err != nil {
-		return err
-	}
-
-	err = writer.Close()
-	if err != nil {
-		return err
-	}
-
-	// Create request
-	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models", s.client.baseURL, workspace, registry)
-
-	req, err := http.NewRequest("POST", url, body)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	// Send request
 	resp, err := s.client.do(req)
@@ -179,9 +163,9 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned non-200/201 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("server returned non-200/201 status: %d, body: %s",
+			resp.StatusCode, string(bodyBytes))
 	}
-
 	return nil
 }
 
