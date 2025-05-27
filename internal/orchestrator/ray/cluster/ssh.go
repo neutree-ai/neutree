@@ -25,15 +25,14 @@ type sshClusterManager struct {
 	executor  command.Executor
 	configMgr *config.Manager
 	config    *v1.RayClusterConfig
+
+	cluster       *v1.Cluster
+	imageRegistry *v1.ImageRegistry
+	imageService  registry.ImageService
 }
 
 func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService,
 	executor command.Executor) (*sshClusterManager, error) {
-	err := checkClusterImage(imageService, cluster, imageRegistry)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to check cluster image")
-	}
-
 	rayClusterConfig, err := generateRayClusterConfig(cluster, imageRegistry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate ray cluster config")
@@ -56,6 +55,10 @@ func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 		executor:  executor,
 		configMgr: configMgr,
 		config:    rayClusterConfig,
+
+		cluster:       cluster,
+		imageRegistry: imageRegistry,
+		imageService:  imageService,
 	}
 
 	return manager, nil
@@ -107,6 +110,11 @@ func (c *sshClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
+	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to check cluster image")
+	}
+
 	upArgs := []string{
 		"up",
 		"--disable-usage-stats",
@@ -132,6 +140,11 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 }
 
 func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error {
+	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	if err != nil {
+		return errors.Wrap(err, "failed to check cluster image")
+	}
+
 	env := map[string]interface{}{
 		"RAY_HEAD_IP": c.getHeadIP(),
 	}

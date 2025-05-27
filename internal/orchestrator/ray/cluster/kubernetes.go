@@ -51,7 +51,9 @@ var (
 )
 
 type kubeRayClusterManager struct {
-	cluster *v1.Cluster
+	cluster       *v1.Cluster
+	imageRegistry *v1.ImageRegistry
+	imageService  registry.ImageService
 
 	kubeconfig       string
 	clusterNamespace string
@@ -63,13 +65,11 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 	metricsRemoteWriteURL string) (*kubeRayClusterManager, error) {
 	c := &kubeRayClusterManager{
 		installObjects:   []client.Object{},
-		cluster:          cluster,
 		clusterNamespace: Namespace(cluster),
-	}
 
-	err := checkClusterImage(imageService, cluster, imageRegistry)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to check cluster image")
+		cluster:       cluster,
+		imageRegistry: imageRegistry,
+		imageService:  imageService,
 	}
 
 	kubeconfig, err := getKubeconfig(cluster)
@@ -137,7 +137,12 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 }
 
 func (c *kubeRayClusterManager) Sync(ctx context.Context) error {
-	_, err := c.UpCluster(ctx, false)
+	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	if err != nil {
+		return errors.Wrap(err, "failed to check cluster image")
+	}
+
+	_, err = c.UpCluster(ctx, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to sync cluster")
 	}
@@ -151,6 +156,11 @@ func (c *kubeRayClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *kubeRayClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
+	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to check cluster image")
+	}
+
 	for _, object := range c.installObjects {
 		err := CreateOrPatch(ctx, object, c.ctrClient)
 		if err != nil {
