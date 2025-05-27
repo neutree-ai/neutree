@@ -19,7 +19,7 @@ BEGIN
             'v1',
             'Role',
             ROW('workspace-user', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
-            ROW('workspace-user'::api.role_preset, ARRAY[]::api.permission_action[])::api.role_spec
+            ROW('workspace_user'::api.role_preset, ARRAY[]::api.permission_action[])::api.role_spec
         );
     END IF;
 
