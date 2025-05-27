@@ -204,7 +204,7 @@ func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error 
 					},
 				},
 			},
-			SupportedTasks: []string{"text-generation", "text-embedding"},
+			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask},
 		},
 	}
 
@@ -233,7 +233,11 @@ func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error 
 					},
 				},
 			},
+<<<<<<< HEAD
 			SupportedTasks: []string{"text-generation", "text-embedding", "text-rerank"},
+=======
+			SupportedTasks: []string{v1.TextGenerationModelTask},
+>>>>>>> 4694d09 (feat: add ai statistics kong plugin)
 		},
 	}
 

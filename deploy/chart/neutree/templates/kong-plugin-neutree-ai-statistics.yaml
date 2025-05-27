@@ -1,0 +1,111 @@
+apiVersion: v1
+data:
+  handler.lua: "local cjson = require(\"cjson.safe\")\nlocal buffer = require(\"string.buffer\")\nlocal
+    ai_shared = require(\"kong.llm.drivers.shared\")\nlocal ai_driver = require(\"kong.llm.drivers.openai\")\nlocal
+    strip = require(\"kong.tools.string\").strip\n\nlocal AIStatisticsPluginHandler
+    = {\n    PRIORITY = 1000,\n    VERSION = \"0.0.1\",\n}\n\n-- copy from https://github.com/Kong/kong/blob/c415a933fc71865372c0891e7aa5421b10e85901/kong/llm/plugin/shared-filters/normalize-sse-chunk.lua#L25\n--
+    get the token text from an event frame\nlocal function get_token_text(event_t)\n
+    \   -- get: event_t.choices[1]\n    local first_choice = ((event_t or EMPTY).choices
+    or EMPTY)[1] or EMPTY\n    -- return:\n    --   - event_t.choices[1].delta.content\n
+    \   --   - event_t.choices[1].text\n    --   - \"\"\n    local token_text = (first_choice.delta
+    or EMPTY).content or first_choice.text or \"\"\n    return (type(token_text) ==
+    \"string\" and token_text) or \"\"\nend\n\nlocal function handle_json_response(conf)\n
+    \   local response_body = kong.service.response.get_raw_body()\n    if response_body
+    == nil then\n        -- response body is nil, ignore\n        return \n    end\n\n
+    \   local ai_response, err = cjson.decode(response_body)\n    if err then\n        --
+    not json format, ignore\n        return \n    end\n\n    kong.ctx.plugin.response_model
+    = ai_response.model\n    if ai_response.usage then\n        if conf.route_type
+    == \"/v1/chat/completions\" then\n            kong.ctx.plugin.completions_tokens
+    = ai_response.usage.completion_tokens\n            kong.ctx.plugin.prompt_tokens
+    = ai_response.usage.prompt_tokens\n            kong.ctx.plugin.total_tokens =
+    ai_response.usage.total_tokens\n        elseif conf.route_type == \"/v1/embeddings\"
+    then\n            kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens\n
+    \           kong.ctx.plugin.total_tokens = ai_response.usage.total_tokens\n        elseif
+    conf.route_type == \"/v1/rerank\" then\n            kong.ctx.plugin.prompt_tokens
+    = ai_response.usage.prompt_tokens\n            kong.ctx.plugin.total_tokens =
+    ai_response.usage.total_tokens\n        end\n    end\nend\n\nlocal function handle_stream_response(conf,
+    chunk, finished)\n    local content_type = kong.service.response.get_header(\"Content-Type\")\n
+    \   local normalized_content_type = content_type and content_type:sub(1, (content_type:find(\";\")
+    or 0) - 1)\n    if normalized_content_type and normalized_content_type ~= \"text/event-stream\"
+    then\n        return true\n    end\n\n    local body_buffer = kong.ctx.plugin.sse_body_buffer\n\n
+    \   if type(chunk) == \"string\" and chunk ~= \"\" then\n        local events
+    = ai_shared.frame_to_events(chunk, normalized_content_type)\n        if not events
+    then\n            return\n        end\n        \n        local frame_buffer =
+    buffer.new()\n        for _, event in ipairs(events) do\n            local formatted,
+    _, metadata = ai_driver.from_format(event, \"\", \"stream/llm/v1/chat\")\n            if
+    formatted and formatted ~= ai_shared._CONST.SSE_TERMINATOR then \n                local
+    event_t, err = cjson.decode(formatted)\n                if not err then\n                    local
+    token_t = get_token_text(event_t)\n                    body_buffer:put(token_t)\n
+    \                   if kong.ctx.plugin.response_model == nil and event_t.model
+    then\n                        kong.ctx.plugin.response_model = event_t.model\n
+    \                   end\n                    -- some upstream stream api return
+    token usage in the last event, if exist, record it.\n                    if event_t.usage
+    then\n                        kong.ctx.plugin.prompt_tokens = event_t.usage.prompt_tokens\n
+    \                       kong.ctx.plugin.completions_tokens = event_t.usage.completion_tokens\n
+    \                       kong.ctx.plugin.total_tokens = event_t.usage.total_tokens\n
+    \                   end\n                end\n            end\n        end\n    end\n\n
+    \   if finished and kong.ctx.plugin.total_tokens == nil and body_buffer ~= nil
+    then\n        -- in this, means upstream stream api never return token usage,
+    so we need to calucate it.\n        local response = body_buffer:get()\n        local
+    completion_tokens_count = math.ceil(#strip(response) / 4)\n        kong.ctx.plugin.completions_tokens
+    = completion_tokens_count\n        kong.ctx.plugin.total_tokens = kong.ctx.plugin.completions_tokens
+    + kong.ctx.plugin.prompt_tokens\n    end\nend\n\nlocal function fail(code, msg)\n
+    \   return kong.response.exit(code, msg and { error = { message = msg } } or nil)\nend\n\nfunction
+    AIStatisticsPluginHandler:access(conf)\n    local content_type = kong.request.get_header(\"Content-Type\")
+    or \"application/json\"\n    if string.find(content_type, \"application/json\",
+    nil, true) then\n        local request_body = kong.request.get_raw_body()\n        if
+    request_body == nil then\n            return fail(400, \"request body can not
+    be null\")\n        end\n        local ai_request, err = cjson.decode(request_body)\n
+    \       if err then\n            return fail(400, \"request body is not json format\")\n
+    \       end\n        kong.ctx.plugin.request_model = ai_request.model\n        if
+    not ai_request.stream then\n            kong.service.request.enable_buffering()\n
+    \       else\n            -- stream mode will may not return token usage, so we
+    need to calucate prompt_tokens and record it.\n            local prompt_tokens,
+    err = ai_shared.calculate_cost(ai_request or {}, {}, 1.0)\n            if err
+    then\n              kong.log.err(\"unable to estimate request token cost: \",
+    err)\n              return fail(500)\n            end\n            kong.ctx.plugin.prompt_tokens
+    = prompt_tokens\n        end\n    else\n        return fail(400, \"only support
+    content-type is application/json\")\n    end\nend\n\nfunction AIStatisticsPluginHandler:body_filter(conf)\n
+    \   local response_status = kong.service.response.get_status()\n    if response_status
+    ~= 200 then\n        return\n    end\n\n    handle_stream_response(conf, ngx.arg[1],
+    ngx.arg[2])\nend\n\nfunction AIStatisticsPluginHandler:header_filter(conf)\n    local
+    response_status = kong.service.response.get_status()\n    if response_status ~=
+    200 then\n        return\n    end\n\n    local content_type = kong.service.response.get_header(\"Content-Type\")\n
+    \   local normalized_content_type = content_type and content_type:sub(1, (content_type:find(\";\")
+    or 0) - 1)\n    if normalized_content_type and normalized_content_type == \"text/event-stream\"
+    then\n        kong.ctx.plugin.sse_body_buffer = buffer.new()\n        return true\n
+    \   end\n\n    handle_json_response(conf)\nend\n\nfunction AIStatisticsPluginHandler:log(conf)\n
+    \   local meta = {\n        plugin_id = conf.__plugin_id,\n        request_model
+    = kong.ctx.plugin.request_model,\n        response_model = kong.ctx.plugin.response_model,\n
+    \   }\n\n    kong.log.set_serialize_value(\"ai.statistics.meta\", meta)\n\n    local
+    usage = {\n        completion_tokens = kong.ctx.plugin.completions_tokens,\n        prompt_tokens
+    = kong.ctx.plugin.prompt_tokens,\n        total_tokens = kong.ctx.plugin.total_tokens,\n
+    \   }\n\n    kong.log.set_serialize_value(\"ai.statistics.usage\",usage)\nend\n\nreturn
+    AIStatisticsPluginHandler"
+  schema.lua: |-
+    local PLUGIN_NAME = "neutree-ai-statistics"
+
+    local schema = {
+      name = PLUGIN_NAME,
+      fields = {
+        { config = {
+            type = "record",
+            fields = {
+              {
+                route_type = {
+                  type = "string",
+                  required = true,
+                  one_of = {"/v1/chat/completions","/v1/embeddings","/v1/rerank"},
+                },
+              },
+            },
+          },
+        },
+      }
+    }
+
+    return schema
+kind: ConfigMap
+metadata:
+  creationTimestamp: null
+  name: neutree-ai-statistics

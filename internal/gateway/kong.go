@@ -212,18 +212,38 @@ func (k *Kong) SyncRoute(ep *v1.Endpoint) error {
 		}
 	}
 
-	var needPlugins []*kong.Plugin
+	// sync route plugins
+	needPluginMap := make(map[string]*kong.Plugin)
 
-	if ep.Spec.Model.Task == v1.TextGenerationModelTask {
-		needPlugins = append(needPlugins, k.generateAIProxyPlugin(ep, curRoute))
-	} else if ep.Spec.Model.Task == v1.TextEmbeddingModelTask {
-		needPlugins = append(needPlugins, k.generateRequestTransformPlugin(ep, curRoute))
-	}
+	reuqestTransfomerPlugin := k.generateRequestTransformPlugin(ep, curRoute)
+	needPluginMap[*reuqestTransfomerPlugin.InstanceName] = reuqestTransfomerPlugin
+	aiStatisticsPlugin := k.generateAIStatisticsPlugin(ep, curRoute)
+	needPluginMap[*aiStatisticsPlugin.InstanceName] = aiStatisticsPlugin
 
-	for _, plugin := range needPlugins {
+	for _, plugin := range needPluginMap {
 		err = k.syncPlugin(plugin)
 		if err != nil {
 			return errors.Wrapf(err, "failed to sync plugin %s", *plugin.Name)
+		}
+	}
+
+	curPlugins, err := k.kongClient.Plugins.ListAllForRoute(context.Background(), curRoute.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list plugins for route %s", *curRoute.Name)
+	}
+
+	var needDeletePlugins []*kong.Plugin
+
+	for _, curPlugin := range curPlugins {
+		if _, ok := needPluginMap[*curPlugin.InstanceName]; !ok {
+			needDeletePlugins = append(needDeletePlugins, curPlugin)
+		}
+	}
+
+	for _, needDeletePlugin := range needDeletePlugins {
+		err = k.kongClient.Plugins.Delete(context.Background(), needDeletePlugin.ID)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete plugin %s", *needDeletePlugin.Name)
 		}
 	}
 
@@ -282,46 +302,26 @@ end`,
 	}
 }
 
-func (k *Kong) generateAIProxyPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
-	urlPath := "/v1/chat/completions"
-	if ep.Spec.Model.Task == v1.TextEmbeddingModelTask {
-		urlPath = "/v1/embeddings"
-	}
-
+func (k *Kong) generateAIStatisticsPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
 	return &kong.Plugin{
-		Name:         pointy.String("ai-proxy"),
-		InstanceName: pointy.String("neutree-ai-proxy-" + util.HashString(ep.Key())),
+		Name:         pointy.String("neutree-ai-statistics"),
+		InstanceName: pointy.String("neutree-ai-statistics-" + util.HashString(ep.Key())),
 		Route:        curRoute,
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
 		Config: map[string]interface{}{
-			"route_type": "llm/v1/chat",
-			"model": map[string]interface{}{
-				"provider": "openai",
-				"options": map[string]interface{}{
-					"upstream_url": ep.Status.ServiceURL + urlPath,
-				},
-			},
-			"logging": map[string]interface{}{
-				"log_statistics": true,
-				"log_payloads":   true,
-			},
-			"response_streaming": "allow",
+			"route_type": getEndpointRouteType(ep),
 		},
 	}
 }
 
 func (k *Kong) generateRequestTransformPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
-	urlPath := "/v1/chat/completions"
-	if ep.Spec.Model.Task == v1.TextEmbeddingModelTask {
-		urlPath = "/v1/embeddings"
-	}
-
 	return &kong.Plugin{
 		Name:         pointy.String("request-transformer"),
 		InstanceName: pointy.String("neutree-request-transformer-" + util.HashString(ep.Key())),
 		Route:        curRoute,
 		Config: map[string]interface{}{
 			"replace": map[string]interface{}{
-				"uri": "/" + ep.Metadata.Name + urlPath,
+				"uri": "/" + ep.Metadata.Name + getEndpointRouteType(ep),
 			},
 		},
 	}
@@ -434,4 +434,18 @@ func isResourceNotFoundError(err error) bool {
 	}
 
 	return false
+}
+
+func getEndpointRouteType(ep *v1.Endpoint) string {
+	switch ep.Spec.Model.Task {
+	case v1.TextGenerationModelTask:
+		return "/v1/chat/completions"
+	case v1.TextEmbeddingModelTask:
+		return "/v1/embeddings"
+	case v1.TextRerankModelTask:
+		return "/v1/rerank"
+	}
+
+	// default return text generation route type.
+	return "/v1/chat/completions"
 }

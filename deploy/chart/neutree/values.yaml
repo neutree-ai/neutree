@@ -168,6 +168,8 @@ kong:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  proxyService:
+    type: LoadBalancer
 
 vector:
   image:

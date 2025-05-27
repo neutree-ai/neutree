@@ -300,7 +300,7 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  type: LoadBalancer
+  type: {{ .Values.kong.proxyService.type }}
   ports:
   - name: kong-proxy
     port: 80
@@ -575,6 +575,10 @@ spec:
           value: "0.0.0.0:8100, [::]:8100"
         - name: KONG_STREAM_LISTEN
           value: "off"
+        - name: LUA_PATH
+          value: "/neutree-kong-plugin/?.lua;;"
+        - name: KONG_PLUGINS
+          value: "bundled,neutree-ai-statistics"
         lifecycle:
           preStop:
             exec:
@@ -600,6 +604,8 @@ spec:
             mountPath: /kong_prefix/
           - name: kong-kong-tmp
             mountPath: /tmp
+          - name: neutree-ai-statistics
+            mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-statistics
         readinessProbe:
           failureThreshold: 3
           httpGet:
@@ -635,6 +641,9 @@ spec:
         - name: kong-kong-tmp
           emptyDir:
             sizeLimit: 1Gi
+        - name: neutree-ai-statistics
+          configMap:
+            name: neutree-ai-statistics
 ---
 apiVersion: batch/v1
 kind: Job

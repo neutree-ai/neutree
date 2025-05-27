@@ -26,15 +26,16 @@ data:
 
           # Access fields with hyphens using proper VRL syntax    
 
-          if exists(.ai) && exists(.ai."proxy") && exists(.ai."proxy".usage) {
+          if exists(.ai) && exists(.ai."statistics") && exists(.ai."statistics".usage) {
               # Extract fields one by one
               .extracted_data.request_id = .request.id
-              .extracted_data.total_tokens = .ai."proxy".usage.total_tokens
-              .extracted_data.prompt_tokens = .ai."proxy".usage.prompt_tokens
-              .extracted_data.completion_tokens = .ai."proxy".usage.completion_tokens
+              .extracted_data.total_tokens = .ai."statistics".usage.total_tokens
+              .extracted_data.prompt_tokens = .ai."statistics".usage.prompt_tokens
+              .extracted_data.completion_tokens = .ai."statistics".usage.completion_tokens
               .extracted_data.timestamp = .started_at
               .extracted_data.status = .response.status
-              .extracted_data.model = .ai."proxy".meta.response_model
+              .extracted_data.model_source = replace!(.request.uri, "/", ".")
+              .extracted_data.model = join!([.extracted_data.model_source, .ai."statistics".meta.response_model], separator: ".")
               .extracted_data.api_key_id = .consumer.custom_id    
 
               if to_int!(.extracted_data.total_tokens) > 0 {
