@@ -28,3 +28,9 @@ DROP TABLE IF EXISTS api.model_catalogs;
 -- Drop types
 DROP TYPE IF EXISTS api.model_catalog_status;
 DROP TYPE IF EXISTS api.model_catalog_spec;
+
+
+-- ----------------------
+-- Update admin role permissions to include new model_catalog permissions
+-- ----------------------
+SELECT api.update_admin_permissions();

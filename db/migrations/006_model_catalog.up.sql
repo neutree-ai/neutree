@@ -72,3 +72,8 @@ CREATE TRIGGER validate_workspace_on_model_catalogs
     BEFORE INSERT OR UPDATE ON api.model_catalogs
     FOR EACH ROW
     EXECUTE FUNCTION api.validate_metadata_workspace();
+
+-- ----------------------
+-- Update admin role permissions to include new model_catalog permissions
+-- ----------------------
+SELECT api.update_admin_permissions();

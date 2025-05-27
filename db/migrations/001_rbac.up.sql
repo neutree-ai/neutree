@@ -82,7 +82,6 @@ CREATE TYPE api.permission_action AS ENUM (
     'cluster:create',
     'cluster:update',
     'cluster:delete'
-    -- Add other permissions as needed
 );
 
 -- ----------------------
