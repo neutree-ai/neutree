@@ -151,6 +151,9 @@ type Storage interface {
 	ApiKeyStorage
 	EngineStorage
 	EndpointStorage
+
+	// CallDatabaseFunction calls a database function with the given name and parameters.
+	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error
 }
 
 type Options struct {
@@ -179,6 +182,9 @@ func New(o Options) (Storage, error) {
 	}
 
 	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil).SetAuthToken(*jwtAutoToken)
+	if postgrestClient.ClientError != nil {
+		return nil, errors.Wrap(err, "failed to init storage")
+	}
 
 	return &postgrestStorage{
 		postgrestClient: postgrestClient,

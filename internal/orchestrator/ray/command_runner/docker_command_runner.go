@@ -110,7 +110,7 @@ func (d *DockerCommandRunner) CheckContainerStatus(ctx context.Context) (bool, e
 		}
 	}
 
-	return strings.TrimSpace(output) == "true", nil
+	return strings.Contains(strings.TrimSpace(output), "true"), nil
 }
 
 // dockerExpandUser expands the ~ character in a string to the user's home directory.

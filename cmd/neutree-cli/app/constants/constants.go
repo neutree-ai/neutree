@@ -11,6 +11,16 @@ const (
 	GrafanaVersion = "11.5.3"
 )
 
+// vector constants
+const (
+	VectorVersion = "0.47.0-debian"
+)
+
+// kong constants
+const (
+	KongVersion = "3.9"
+)
+
 // deploy type
 const (
 	DeployTypeLocal = "local"

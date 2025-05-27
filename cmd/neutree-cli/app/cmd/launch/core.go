@@ -13,6 +13,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type neutreeCoreInstallOptions struct {
@@ -140,6 +141,12 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 	// parseTemplate
 	tempplateFiles := []string{
 		filepath.Join(coreWorkDir, "docker-compose.yml"),
+		filepath.Join(coreWorkDir, "vector", "vector.yml"),
+	}
+
+	jwtToken, err := storage.CreateServiceToken(options.jwtSecret)
+	if err != nil {
+		return errors.Wrap(err, "create jwt token failed")
 	}
 
 	templateParams := map[string]string{
@@ -149,6 +156,9 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		"VictoriaMetricsVersion": constants.VictoriaMetricsVersion,
 		"NeutreeCoreVersion":     options.version,
 		"NeutreeAPIVersion":      options.version,
+		"JwtToken":               *jwtToken,
+		"VectorVersion":          constants.VectorVersion,
+		"KongVersion":            constants.KongVersion,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)

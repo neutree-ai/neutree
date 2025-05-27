@@ -145,13 +145,17 @@ services:
       - --controller-workers=5
       - --default-cluster-version=v1
       - --metrics-remote-write-url={{.MetricsRemoteWriteURL}}
+      - --gateway-type=kong
+      - --gateway-admin-url=http://kong:8001
+      - --gateway-log-remote-write-url=http://vector:30122
     volumes:
       - {{.NeutreeCoreWorkDir}}/collect:/etc/neutree/collect
     networks:
       - neutree
     restart: always
     depends_on:
-      - postgrest
+       postgrest:
+          condition: service_started
 
   neutree-api:
     image: neutree-ai/neutree-api:{{ .NeutreeAPIVersion}}
@@ -176,13 +180,15 @@ services:
       - neutree
     restart: always
     depends_on:
-      - postgrest
+      postgrest:
+        condition: service_started
 
   vmagent:
     container_name: vmagent
     image: victoriametrics/vmagent:{{ .VictoriaMetricsVersion}}
     depends_on:
-      - "neutree-core"
+      neutree-core:
+          condition: service_started
     ports:
       - 8429:8429
     volumes:
@@ -195,6 +201,98 @@ services:
       - "--remoteWrite.url={{ .MetricsRemoteWriteURL}}"
     restart: always
 
+  kong-migrations:
+    image: kong/kong:{{ .KongVersion}}
+    container_name: kong-migrations
+    command: kong migrations bootstrap
+    environment:
+      KONG_DATABASE: "postgres"
+      KONG_PG_HOST: "postgres"
+      KONG_PG_DB: "aippp"
+      KONG_PG_USER: "kong_admin"
+      KONG_PG_PASSWORD: "kong_admin_password"
+      KONG_PG_SCHEME: "kong"
+    networks:
+      - neutree
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  kong-migrations-up:
+    image: kong/kong:{{ .KongVersion}}
+    container_name: kong-migrations-up
+    command: kong migrations up && kong migrations finish
+    environment:
+      KONG_DATABASE: "postgres"
+      KONG_PG_HOST: "postgres"
+      KONG_PG_DB: "aippp"
+      KONG_PG_USER: "kong_admin"
+      KONG_PG_PASSWORD: "kong_admin_password"
+      KONG_PG_SCHEME: "kong"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - neutree
+    restart: on-failure
+
+  vector:
+    container_name: vector
+    image: timberio/vector:{{ .VectorVersion}}
+    command:
+      - --config-dir
+      - /etc/vector/
+    ports:
+      - 30122:30122
+    volumes:
+      - {{ .NeutreeCoreWorkDir}}/vector:/etc/vector
+    restart: always
+    networks:
+      - neutree
+    depends_on:
+      neutree-api:
+        condition: service_started
+  kong:
+    image: kong/kong:{{ .KongVersion}}
+    container_name: kong
+    environment:
+      KONG_DATABASE: "postgres"
+      KONG_PG_HOST: "postgres"
+      KONG_PG_DB: "aippp"
+      KONG_PG_USER: "kong_admin"
+      KONG_PG_PASSWORD: "kong_admin_password"
+      KONG_PG_SCHEME: "kong"
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_ADMIN_GUI_LISTEN: "0.0.0.0:8002"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+    networks:
+      - neutree
+    ports:
+      - 80:8000
+      - 443:8443
+      - 8001:8001
+      - 8444:8444
+      - 8002:8002
+    depends_on:
+      kong-migrations-up:
+        condition: service_completed_successfully
+      kong-migrations:
+        condition: service_completed_successfully
+      vector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "kong", "health" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: always
 networks:
   neutree:
     driver: bridge

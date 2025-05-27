@@ -1,5 +1,10 @@
 package v1
 
+const (
+	TextGenerationModelTask = "text-generation"
+	TextEmbeddingModelTask  = "text-embedding"
+)
+
 type EngineVersion struct {
 	Version      string                 `json:"version,omitempty"`
 	ValuesSchema map[string]interface{} `json:"values_schema,omitempty"`

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strings"
 
 	"maps"
 
@@ -79,7 +80,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 	app := RayServeApplication{
 		Name:        endpoint.Metadata.Name,
 		RoutePrefix: fmt.Sprintf("/%s", endpoint.Metadata.Name),
-		ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", endpoint.Spec.Engine.Engine, endpoint.Spec.Engine.Version),
+		ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"), endpoint.Spec.Engine.Version),
 		Args:        args,
 	}
 

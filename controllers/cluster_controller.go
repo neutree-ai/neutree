@@ -15,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 
+	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
@@ -33,7 +34,9 @@ type ClusterController struct {
 
 	obsCollectConfigManager manager.ObsCollectConfigManager
 
-	MetricsRemoteWriteURL string
+	metricsRemoteWriteURL string
+
+	gw gateway.Gateway
 }
 
 type ClusterControllerOption struct {
@@ -44,6 +47,7 @@ type ClusterControllerOption struct {
 	MetricsRemoteWriteURL string
 
 	ObsCollectConfigManager manager.ObsCollectConfigManager
+	Gw                      gateway.Gateway
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
@@ -60,7 +64,9 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		defaultClusterVersion: opt.DefaultClusterVersion,
 
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
-		MetricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
+		metricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
+
+		gw: opt.Gw,
 	}
 
 	c.syncHandler = c.sync
@@ -127,7 +133,7 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 		Cluster:               cluster,
 		ImageService:          c.imageService,
 		Storage:               c.storage,
-		MetricsRemoteWriteURL: c.MetricsRemoteWriteURL,
+		MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
 	})
 	if err != nil {
 		return err
@@ -183,6 +189,11 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 	err = clusterOrchestrator.HealthCheck()
 	if err != nil {
 		return errors.Wrap(err, "health check cluster failed")
+	}
+
+	err = c.gw.SyncBackendService(cluster)
+	if err != nil {
+		return errors.Wrap(err, "sync cluster backend service failed")
 	}
 
 	// ssh cluster use local metrics collector.
@@ -342,7 +353,7 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 			Cluster:               cluster,
 			ImageService:          c.imageService,
 			Storage:               c.storage,
-			MetricsRemoteWriteURL: c.MetricsRemoteWriteURL,
+			MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
 		})
 		if err != nil {
 			return err
@@ -354,7 +365,12 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 		}
 	}
 
-	err := c.updateStatus(cluster, nil, v1.ClusterPhaseDeleted, nil)
+	err := c.gw.DeleteBackendService(cluster)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete cluster backend service "+cluster.Metadata.Name)
+	}
+
+	err = c.updateStatus(cluster, nil, v1.ClusterPhaseDeleted, nil)
 	if err != nil {
 		klog.Errorf("failed to update cluster %s status, err: %v", cluster.Metadata.Name, err)
 	}

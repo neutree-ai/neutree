@@ -10,6 +10,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -21,12 +22,16 @@ type EndpointController struct {
 	storage      storage.Storage
 	imageService registry.ImageService
 	syncHandler  func(endpoint *v1.Endpoint) error // Added syncHandler field
+
+	gw gateway.Gateway
 }
 
 type EndpointControllerOption struct {
 	ImageService registry.ImageService
 	Storage      storage.Storage
 	Workers      int
+
+	Gw gateway.Gateway
 }
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
@@ -39,6 +44,7 @@ func NewEndpointController(option *EndpointControllerOption) (*EndpointControlle
 		},
 		storage:      option.Storage,
 		imageService: option.ImageService,
+		gw:           option.Gw,
 	}
 
 	c.syncHandler = c.sync
@@ -100,6 +106,11 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 		}
 
 		klog.Info("Deleting endpoint " + obj.Metadata.Name)
+
+		err = c.gw.DeleteRoute(obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete route for endpoint %s", obj.Metadata.Name)
+		}
 
 		err = c.cleanupEndpoint(obj)
 		if err != nil {
@@ -169,6 +180,11 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 
 	if obj.Status.Phase == v1.EndpointPhaseRUNNING {
 		klog.V(4).Infof("Endpoint %s is RUNNING, updating", obj.Metadata.Name)
+
+		err = c.gw.SyncRoute(obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to sync route for endpoint %s", obj.Metadata.Name)
+		}
 
 		_, err = c.createOrUpdateEndpoint(obj)
 		if err != nil {

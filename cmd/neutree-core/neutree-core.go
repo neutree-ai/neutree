@@ -9,6 +9,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/internal/cron"
+	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -16,15 +18,22 @@ import (
 
 var (
 	// todo only support postgrest now.
-	storageAccessURL                  = flag.String("storage-access-url", "http://postgrest:6432", "postgrest url")
-	storageJwtSecret                  = flag.String("storage-jwt-secret", "jwt_secret", "storage auth token")
-	controllerWorkers                 = flag.Int("controller-workers", 5, "controller workers")
-	defaultClusterVersion             = flag.String("default-cluster-version", "v1", "default neutree cluster version")
-	deployType                        = flag.String("deploy-type", "local", "deploy type")
-	LocalCollecteConfigPath           = flag.String("local-collect-config-path", "/etc/neutree/collect", "local collect config path")
-	KubernetesMetricsCollectConfigMap = flag.String("kubernetes-metrics-collect-configmap", "vmagent-scrape-config", "kubernetes collect config name")
-	KubernetesCollectConfigNamespace  = flag.String("kubernetes-collect-config-namespace", "neutree", "kubernetes collect config namespace")
-	MetricsRemoteWriteURL             = flag.String("metrics-remote-write-url", "", "metrics remote write url")
+	storageAccessURL      = flag.String("storage-access-url", "http://postgrest:6432", "postgrest url")
+	storageJwtSecret      = flag.String("storage-jwt-secret", "jwt_secret", "storage auth token")
+	controllerWorkers     = flag.Int("controller-workers", 5, "controller workers")
+	defaultClusterVersion = flag.String("default-cluster-version", "v1", "default neutree cluster version")
+	deployType            = flag.String("deploy-type", "local", "deploy type")
+
+	// obs config
+	localCollecteConfigPath           = flag.String("local-collect-config-path", "/etc/neutree/collect", "local collect config path")
+	kubernetesMetricsCollectConfigMap = flag.String("kubernetes-metrics-collect-configmap", "vmagent-scrape-config", "kubernetes collect config name")
+	kubernetesCollectConfigNamespace  = flag.String("kubernetes-collect-config-namespace", "neutree", "kubernetes collect config namespace")
+	metricsRemoteWriteURL             = flag.String("metrics-remote-write-url", "", "metrics remote write url")
+
+	// gateway config
+	gatewayType              = flag.String("gateway-type", "none", "gateway type")
+	gatewayAdminUrl          = flag.String("gateway-admin-url", "", "gateway admin url")
+	gatewayLogRemoteWriteUrl = flag.String("gateway-log-remote-write-url", "", "log remote write url")
 )
 
 func main() {
@@ -37,9 +46,9 @@ func main() {
 
 	obsCollectConfigManager, err := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
 		DeployType:                            *deployType,
-		LocalCollectConfigPath:                *LocalCollecteConfigPath,
-		KubernetesMetricsCollectConfigMapName: *KubernetesMetricsCollectConfigMap,
-		KubernetesCollectConfigNamespace:      *KubernetesCollectConfigNamespace,
+		LocalCollectConfigPath:                *localCollecteConfigPath,
+		KubernetesMetricsCollectConfigMapName: *kubernetesMetricsCollectConfigMap,
+		KubernetesCollectConfigNamespace:      *kubernetesCollectConfigNamespace,
 	})
 	if err != nil {
 		klog.Fatalf("failed to init obs collect config manager: %s", err.Error())
@@ -55,6 +64,20 @@ func main() {
 	}
 
 	imageService := registry.NewImageService()
+
+	gw, err := gateway.GetGateway(*gatewayType, gateway.GatewayOptions{
+		AdminUrl:          *gatewayAdminUrl,
+		LogRemoteWriteUrl: *gatewayLogRemoteWriteUrl,
+		Storage:           s,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init gateway: %s", err.Error())
+	}
+
+	err = gw.Init()
+	if err != nil {
+		klog.Fatalf("failed to init gateway: %s", err.Error())
+	}
 
 	imageRegistryController, err := controllers.NewImageRegistryController(&controllers.ImageRegistryControllerOption{
 		Storage:      s,
@@ -80,7 +103,8 @@ func main() {
 		DefaultClusterVersion:   *defaultClusterVersion,
 		ImageService:            imageService,
 		ObsCollectConfigManager: obsCollectConfigManager,
-		MetricsRemoteWriteURL:   *MetricsRemoteWriteURL,
+		MetricsRemoteWriteURL:   *metricsRemoteWriteURL,
+		Gw:                      gw,
 	})
 
 	if err != nil {
@@ -99,6 +123,7 @@ func main() {
 		Storage:      s,
 		Workers:      *controllerWorkers,
 		ImageService: imageService,
+		Gw:           gw,
 	})
 	if err != nil {
 		klog.Fatalf("failed to init endpoint controller: %s", err.Error())
@@ -128,8 +153,21 @@ func main() {
 		klog.Fatalf("failed to init workspace controller: %s", err.Error())
 	}
 
+	apiKeyController, err := controllers.NewApiKeyController(&controllers.ApiKeyControllerOption{
+		Storage: s,
+		Workers: *controllerWorkers,
+		Gw:      gw,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init api key controller: %s", err.Error())
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	if err = cron.StartCrons(ctx, s); err != nil {
+		klog.Fatalf("failed to start crons: %s", err.Error())
+	}
 
 	go imageRegistryController.Start(ctx)
 	go modelRegistryController.Start(ctx)
@@ -139,6 +177,7 @@ func main() {
 	go roleController.Start(ctx)
 	go roleAssignmentController.Start(ctx)
 	go workspaceController.Start(ctx)
+	go apiKeyController.Start(ctx)
 
 	go obsCollectConfigManager.Start(ctx)
 

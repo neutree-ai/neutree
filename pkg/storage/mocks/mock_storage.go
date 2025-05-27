@@ -22,6 +22,54 @@ func (_m *MockStorage) EXPECT() *MockStorage_Expecter {
 	return &MockStorage_Expecter{mock: &_m.Mock}
 }
 
+// CallDatabaseFunction provides a mock function with given fields: name, params, result
+func (_m *MockStorage) CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error {
+	ret := _m.Called(name, params, result)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CallDatabaseFunction")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, map[string]interface{}, interface{}) error); ok {
+		r0 = rf(name, params, result)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CallDatabaseFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CallDatabaseFunction'
+type MockStorage_CallDatabaseFunction_Call struct {
+	*mock.Call
+}
+
+// CallDatabaseFunction is a helper method to define mock.On call
+//   - name string
+//   - params map[string]interface{}
+//   - result interface{}
+func (_e *MockStorage_Expecter) CallDatabaseFunction(name interface{}, params interface{}, result interface{}) *MockStorage_CallDatabaseFunction_Call {
+	return &MockStorage_CallDatabaseFunction_Call{Call: _e.mock.On("CallDatabaseFunction", name, params, result)}
+}
+
+func (_c *MockStorage_CallDatabaseFunction_Call) Run(run func(name string, params map[string]interface{}, result interface{})) *MockStorage_CallDatabaseFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(map[string]interface{}), args[2].(interface{}))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CallDatabaseFunction_Call) Return(_a0 error) *MockStorage_CallDatabaseFunction_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CallDatabaseFunction_Call) RunAndReturn(run func(string, map[string]interface{}, interface{}) error) *MockStorage_CallDatabaseFunction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateApiKey provides a mock function with given fields: data
 func (_m *MockStorage) CreateApiKey(data *v1.ApiKey) error {
 	ret := _m.Called(data)

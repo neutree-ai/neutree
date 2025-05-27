@@ -30,6 +30,9 @@ spec:
             - --kubernetes-metrics-collect-configmap=vmagent-scrape-config
             - --kubernetes-collect-config-namespace={{ .Release.Namespace}}
             - --deploy-type=kubernetes
+            - --gateway-type=kong
+            - --gateway-admin-url=http://{{ include "neutree.fullname" . }}-kong-admin:8001
+            - --gateway-log-remote-write-url=http://{{ include "neutree.fullname" . }}-vector:30122
           image: "{{ .Values.core.image.repository }}:{{ .Values.core.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.core.image.pullPolicy }}
           securityContext:

@@ -10,15 +10,21 @@ import (
 	"k8s.io/client-go/util/workqueue"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 // newTestApiKeyController is a helper to create a ApiKeyController with mocked storage for testing.
 func newTestApiKeyController(storage *storagemocks.MockStorage) *ApiKeyController {
+	gw := &gatewaymocks.MockGateway{}
+	gw.On("SyncAPIKey", mock.Anything).Return(nil)
+	gw.On("DeleteAPIKey", mock.Anything).Return(nil)
+
 	c, _ := NewApiKeyController(&ApiKeyControllerOption{
 		Storage: storage,
 		Workers: 1,
+		Gw:      gw,
 	})
 	// Use a predictable queue for testing.
 	c.baseController.queue = workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "api_key-test"})
@@ -33,6 +39,9 @@ func testApiKey(id string, phase v1.ApiKeyPhase) *v1.ApiKey {
 			Name: "test-api_key-" + id,
 		},
 		Spec: &v1.ApiKeySpec{},
+		Status: &v1.ApiKeyStatus{
+			SkValue: "sk-1234567890",
+		},
 	}
 	if phase != "" { // Only set status if phase is provided.
 		apiKey.Status = &v1.ApiKeyStatus{Phase: phase}
