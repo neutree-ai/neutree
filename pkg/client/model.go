@@ -129,18 +129,27 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 	// IO copy goroutine
 	go func() {
 		defer pw.Close()
+
 		_ = mw.WriteField("name", name)
 		_ = mw.WriteField("version", version)
+
 		if description != "" {
 			_ = mw.WriteField("description", description)
 		}
+
 		if len(labels) > 0 {
 			labelsJSON, _ := json.Marshal(labels)
 			_ = mw.WriteField("labels", string(labelsJSON))
 		}
 
 		part, _ := mw.CreateFormFile("model", filepath.Base(modelPath))
-		io.Copy(part, file)
+
+		_, err := io.Copy(part, file)
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+
 		mw.Close()
 	}()
 
@@ -152,6 +161,7 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	// Send request
@@ -166,6 +176,7 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 		return fmt.Errorf("server returned non-200/201 status: %d, body: %s",
 			resp.StatusCode, string(bodyBytes))
 	}
+
 	return nil
 }
 
