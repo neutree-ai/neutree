@@ -208,7 +208,7 @@ services:
     environment:
       KONG_DATABASE: "postgres"
       KONG_PG_HOST: "postgres"
-      KONG_PG_DB: "aippp"
+      KONG_PG_DATABASE: "aippp"
       KONG_PG_USER: "kong_admin"
       KONG_PG_PASSWORD: "kong_admin_password"
       KONG_PG_SCHEME: "kong"
@@ -226,7 +226,7 @@ services:
     environment:
       KONG_DATABASE: "postgres"
       KONG_PG_HOST: "postgres"
-      KONG_PG_DB: "aippp"
+      KONG_PG_DATABASE: "aippp"
       KONG_PG_USER: "kong_admin"
       KONG_PG_PASSWORD: "kong_admin_password"
       KONG_PG_SCHEME: "kong"
@@ -259,7 +259,7 @@ services:
     environment:
       KONG_DATABASE: "postgres"
       KONG_PG_HOST: "postgres"
-      KONG_PG_DB: "aippp"
+      KONG_PG_DATABASE: "aippp"
       KONG_PG_USER: "kong_admin"
       KONG_PG_PASSWORD: "kong_admin_password"
       KONG_PG_SCHEME: "kong"
