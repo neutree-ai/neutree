@@ -21,96 +21,6 @@ import (
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 )
 
-func TestNewRaySSHClusterManager(t *testing.T) {
-	setUp(t)
-	defer tearDown()
-
-	tests := []struct {
-		name        string
-		cluster     *v1.Cluster
-		registry    *v1.ImageRegistry
-		expectError bool
-	}{
-		{
-			name: "success_with_valid_config",
-			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{
-					Name: "test-cluster",
-				},
-				Spec: &v1.ClusterSpec{
-					Type:    "ssh",
-					Version: "v1.0.0",
-					Config: map[string]interface{}{
-						"provider": map[string]interface{}{
-							"type": "local",
-						},
-					},
-				},
-				Status: &v1.ClusterStatus{
-					Initialized: true,
-				},
-			},
-			registry: &v1.ImageRegistry{
-				Metadata: &v1.Metadata{
-					Name: "test-registry",
-				},
-				Spec: &v1.ImageRegistrySpec{
-					URL:        "http://registry.example.com",
-					Repository: "neutree",
-					AuthConfig: v1.ImageRegistryAuthConfig{
-						Username: "user",
-						Password: "pass",
-					},
-				},
-				Status: &v1.ImageRegistryStatus{
-					Phase: v1.ImageRegistryPhaseCONNECTED,
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "invalid_image_registry_status",
-			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{
-					Name: "test-cluster",
-				},
-				Spec: &v1.ClusterSpec{
-					Type: "ssh",
-				},
-			},
-			registry: &v1.ImageRegistry{
-				Metadata: &v1.Metadata{
-					Name: "test-registry",
-				},
-				Status: &v1.ImageRegistryStatus{
-					Phase: v1.ImageRegistryPhaseFAILED,
-				},
-			},
-			expectError: true,
-		},
-	}
-
-	mockImageService := new(registrymocks.MockImageService)
-	mockImageService.On("CheckImageExists", mock.Anything, mock.Anything).Return(true, nil)
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockExec := new(commandmocks.MockExecutor)
-
-			manager, err := NewRaySSHClusterManager(tt.cluster, tt.registry, mockImageService, mockExec)
-
-			if tt.expectError {
-				assert.Error(t, err)
-				assert.Nil(t, manager)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, manager)
-				assert.Contains(t, manager.config.Docker.Image, tt.cluster.Spec.Version)
-			}
-		})
-	}
-}
-
 func TestSSHClusterManager_DownCluster(t *testing.T) {
 	setUp(t)
 	defer tearDown()
@@ -242,10 +152,27 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 				},
 			}
 
+			mockImageRegistryService := &registrymocks.MockImageService{}
+			mockImageRegistryService.On("CheckImageExists", mock.Anything, mock.Anything).Return(true, nil)
 			manager := &sshClusterManager{
 				executor:  mockExec,
 				configMgr: config.NewManager(clusterConfig.ClusterName),
 				config:    clusterConfig,
+				cluster: &v1.Cluster{
+					Spec: &v1.ClusterSpec{
+						Version: "v2.3.4",
+					},
+				},
+				imageRegistry: &v1.ImageRegistry{
+					Spec: &v1.ImageRegistrySpec{
+						URL:        "https://registry.example.com:5000",
+						Repository: "prod",
+					},
+					Status: &v1.ImageRegistryStatus{
+						Phase: v1.ImageRegistryPhaseCONNECTED,
+					},
+				},
+				imageService: mockImageRegistryService,
 			}
 
 			// Test
@@ -303,10 +230,28 @@ func TestStartNode_Success(t *testing.T) {
 		StaticWorkerStartRayCommands: []string{"ray start"},
 	}
 
+	mockImageRegistryService := &registrymocks.MockImageService{}
+	mockImageRegistryService.On("CheckImageExists", mock.Anything, mock.Anything).Return(true, nil)
+
 	manager := &sshClusterManager{
 		executor:  mockExec,
 		configMgr: config.NewManager(clusterConfig.ClusterName),
 		config:    clusterConfig,
+		cluster: &v1.Cluster{
+			Spec: &v1.ClusterSpec{
+				Version: "v2.3.4",
+			},
+		},
+		imageRegistry: &v1.ImageRegistry{
+			Spec: &v1.ImageRegistrySpec{
+				URL:        "https://registry.example.com:5000",
+				Repository: "prod",
+			},
+			Status: &v1.ImageRegistryStatus{
+				Phase: v1.ImageRegistryPhaseCONNECTED,
+			},
+		},
+		imageService: mockImageRegistryService,
 	}
 
 	err := manager.StartNode(context.Background(), "2.2.2.2")
