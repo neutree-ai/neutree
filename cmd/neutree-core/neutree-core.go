@@ -162,6 +162,14 @@ func main() {
 		klog.Fatalf("failed to init api key controller: %s", err.Error())
 	}
 
+	modelCatalogController, err := controllers.NewModelCatalogController(&controllers.ModelCatalogControllerOption{
+		Storage: s,
+		Workers: *controllerWorkers,
+	})
+	if err != nil {
+		klog.Fatalf("failed to init model catalog controller: %s", err.Error())
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -178,6 +186,7 @@ func main() {
 	go roleAssignmentController.Start(ctx)
 	go workspaceController.Start(ctx)
 	go apiKeyController.Start(ctx)
+	go modelCatalogController.Start(ctx)
 
 	go obsCollectConfigManager.Start(ctx)
 

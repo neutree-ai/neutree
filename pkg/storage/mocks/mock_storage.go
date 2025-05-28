@@ -300,6 +300,52 @@ func (_c *MockStorage_CreateImageRegistry_Call) RunAndReturn(run func(*v1.ImageR
 	return _c
 }
 
+// CreateModelCatalog provides a mock function with given fields: data
+func (_m *MockStorage) CreateModelCatalog(data *v1.ModelCatalog) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateModelCatalog")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.ModelCatalog) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateModelCatalog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateModelCatalog'
+type MockStorage_CreateModelCatalog_Call struct {
+	*mock.Call
+}
+
+// CreateModelCatalog is a helper method to define mock.On call
+//   - data *v1.ModelCatalog
+func (_e *MockStorage_Expecter) CreateModelCatalog(data interface{}) *MockStorage_CreateModelCatalog_Call {
+	return &MockStorage_CreateModelCatalog_Call{Call: _e.mock.On("CreateModelCatalog", data)}
+}
+
+func (_c *MockStorage_CreateModelCatalog_Call) Run(run func(data *v1.ModelCatalog)) *MockStorage_CreateModelCatalog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.ModelCatalog))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateModelCatalog_Call) Return(_a0 error) *MockStorage_CreateModelCatalog_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateModelCatalog_Call) RunAndReturn(run func(*v1.ModelCatalog) error) *MockStorage_CreateModelCatalog_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateModelRegistry provides a mock function with given fields: data
 func (_m *MockStorage) CreateModelRegistry(data *v1.ModelRegistry) error {
 	ret := _m.Called(data)
@@ -710,6 +756,52 @@ func (_c *MockStorage_DeleteImageRegistry_Call) Return(_a0 error) *MockStorage_D
 }
 
 func (_c *MockStorage_DeleteImageRegistry_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteModelCatalog provides a mock function with given fields: id
+func (_m *MockStorage) DeleteModelCatalog(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteModelCatalog")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteModelCatalog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteModelCatalog'
+type MockStorage_DeleteModelCatalog_Call struct {
+	*mock.Call
+}
+
+// DeleteModelCatalog is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteModelCatalog(id interface{}) *MockStorage_DeleteModelCatalog_Call {
+	return &MockStorage_DeleteModelCatalog_Call{Call: _e.mock.On("DeleteModelCatalog", id)}
+}
+
+func (_c *MockStorage_DeleteModelCatalog_Call) Run(run func(id string)) *MockStorage_DeleteModelCatalog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteModelCatalog_Call) Return(_a0 error) *MockStorage_DeleteModelCatalog_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteModelCatalog_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteModelCatalog_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1184,6 +1276,64 @@ func (_c *MockStorage_GetImageRegistry_Call) Return(_a0 *v1.ImageRegistry, _a1 e
 }
 
 func (_c *MockStorage_GetImageRegistry_Call) RunAndReturn(run func(string) (*v1.ImageRegistry, error)) *MockStorage_GetImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetModelCatalog provides a mock function with given fields: id
+func (_m *MockStorage) GetModelCatalog(id string) (*v1.ModelCatalog, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetModelCatalog")
+	}
+
+	var r0 *v1.ModelCatalog
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.ModelCatalog, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.ModelCatalog); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.ModelCatalog)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetModelCatalog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetModelCatalog'
+type MockStorage_GetModelCatalog_Call struct {
+	*mock.Call
+}
+
+// GetModelCatalog is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetModelCatalog(id interface{}) *MockStorage_GetModelCatalog_Call {
+	return &MockStorage_GetModelCatalog_Call{Call: _e.mock.On("GetModelCatalog", id)}
+}
+
+func (_c *MockStorage_GetModelCatalog_Call) Run(run func(id string)) *MockStorage_GetModelCatalog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetModelCatalog_Call) Return(_a0 *v1.ModelCatalog, _a1 error) *MockStorage_GetModelCatalog_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetModelCatalog_Call) RunAndReturn(run func(string) (*v1.ModelCatalog, error)) *MockStorage_GetModelCatalog_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1710,6 +1860,64 @@ func (_c *MockStorage_ListImageRegistry_Call) RunAndReturn(run func(storage.List
 	return _c
 }
 
+// ListModelCatalog provides a mock function with given fields: option
+func (_m *MockStorage) ListModelCatalog(option storage.ListOption) ([]v1.ModelCatalog, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListModelCatalog")
+	}
+
+	var r0 []v1.ModelCatalog
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.ModelCatalog, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.ModelCatalog); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.ModelCatalog)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListModelCatalog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListModelCatalog'
+type MockStorage_ListModelCatalog_Call struct {
+	*mock.Call
+}
+
+// ListModelCatalog is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListModelCatalog(option interface{}) *MockStorage_ListModelCatalog_Call {
+	return &MockStorage_ListModelCatalog_Call{Call: _e.mock.On("ListModelCatalog", option)}
+}
+
+func (_c *MockStorage_ListModelCatalog_Call) Run(run func(option storage.ListOption)) *MockStorage_ListModelCatalog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListModelCatalog_Call) Return(_a0 []v1.ModelCatalog, _a1 error) *MockStorage_ListModelCatalog_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListModelCatalog_Call) RunAndReturn(run func(storage.ListOption) ([]v1.ModelCatalog, error)) *MockStorage_ListModelCatalog_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListModelRegistry provides a mock function with given fields: option
 func (_m *MockStorage) ListModelRegistry(option storage.ListOption) ([]v1.ModelRegistry, error) {
 	ret := _m.Called(option)
@@ -2173,6 +2381,53 @@ func (_c *MockStorage_UpdateImageRegistry_Call) Return(_a0 error) *MockStorage_U
 }
 
 func (_c *MockStorage_UpdateImageRegistry_Call) RunAndReturn(run func(string, *v1.ImageRegistry) error) *MockStorage_UpdateImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateModelCatalog provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateModelCatalog(id string, data *v1.ModelCatalog) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateModelCatalog")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.ModelCatalog) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateModelCatalog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateModelCatalog'
+type MockStorage_UpdateModelCatalog_Call struct {
+	*mock.Call
+}
+
+// UpdateModelCatalog is a helper method to define mock.On call
+//   - id string
+//   - data *v1.ModelCatalog
+func (_e *MockStorage_Expecter) UpdateModelCatalog(id interface{}, data interface{}) *MockStorage_UpdateModelCatalog_Call {
+	return &MockStorage_UpdateModelCatalog_Call{Call: _e.mock.On("UpdateModelCatalog", id, data)}
+}
+
+func (_c *MockStorage_UpdateModelCatalog_Call) Run(run func(id string, data *v1.ModelCatalog)) *MockStorage_UpdateModelCatalog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.ModelCatalog))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateModelCatalog_Call) Return(_a0 error) *MockStorage_UpdateModelCatalog_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateModelCatalog_Call) RunAndReturn(run func(string, *v1.ModelCatalog) error) *MockStorage_UpdateModelCatalog_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -926,6 +926,33 @@ type ApiClustersUpdate struct {
 	Status     map[string]interface{} `json:"status"`
 }
 
+type ApiModelCatalogsSelect struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         int32                  `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiModelCatalogsInsert struct {
+	ApiVersion string                 `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       string                 `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
+type ApiModelCatalogsUpdate struct {
+	ApiVersion sql.NullString         `json:"api_version"`
+	Id         sql.NullInt32          `json:"id"`
+	Kind       sql.NullString         `json:"kind"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Spec       map[string]interface{} `json:"spec"`
+	Status     map[string]interface{} `json:"status"`
+}
+
 type ApiMetadata struct {
 	Name              string      `json:"name"`
 	DisplayName       string      `json:"display_name"`
@@ -1102,4 +1129,19 @@ type ApiClusterStatus struct {
 	RayVersion          string      `json:"ray_version"`
 	Initialized         interface{} `json:"initialized"`
 	NodeProvisionStatus string      `json:"node_provision_status"`
+}
+
+type ApiModelCatalogSpec struct {
+	Model             interface{} `json:"model"`
+	Engine            interface{} `json:"engine"`
+	Resources         interface{} `json:"resources"`
+	Replicas          interface{} `json:"replicas"`
+	DeploymentOptions interface{} `json:"deployment_options"`
+	Variables         interface{} `json:"variables"`
+}
+
+type ApiModelCatalogStatus struct {
+	Phase              string      `json:"phase"`
+	LastTransitionTime interface{} `json:"last_transition_time"`
+	ErrorMessage       string      `json:"error_message"`
 }

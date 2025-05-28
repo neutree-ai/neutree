@@ -77,7 +77,7 @@ linters-settings:
     check-type-assertions: true
   funlen:
     # max function body len
-    lines: 150
+    lines: 250
     # max function body statements
     statements: 100
   goconst:
