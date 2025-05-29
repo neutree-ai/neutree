@@ -3,6 +3,7 @@ package v1
 const (
 	TextGenerationModelTask = "text-generation"
 	TextEmbeddingModelTask  = "text-embedding"
+	TextRerankModelTask     = "text-rerank"
 )
 
 type EngineVersion struct {
