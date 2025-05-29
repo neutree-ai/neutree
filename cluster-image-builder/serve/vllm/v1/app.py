@@ -85,7 +85,7 @@ class Backend:
             model_name: Name of the model in the registry
             model_version: Version of the model
             model_file: Specific model file name (for bentoml)
-            model_task: Task type (e.g., "text-generation", "text-embedding", "rerank")
+            model_task: Task type (e.g., "text-generation", "text-embedding", "text-rerank")
             **engine_kwargs: Additional keyword arguments passed directly to AsyncEngineArgs
         """
         # Configure model based on registry
@@ -105,7 +105,7 @@ class Backend:
             task = "generate"
         elif model_task == "text-embedding":
             task = "embed"
-        elif model_task in ["rerank", "score"]:
+        elif model_task in ["text-rerank", "score"]:
             task = "score"
 
         engine_args = AsyncEngineArgs(

@@ -233,7 +233,7 @@ func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error 
 					},
 				},
 			},
-			SupportedTasks: []string{"text-generation"},
+			SupportedTasks: []string{"text-generation", "text-embedding", "text-rerank"},
 		},
 	}
 
