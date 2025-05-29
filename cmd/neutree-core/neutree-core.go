@@ -32,6 +32,7 @@ var (
 
 	// gateway config
 	gatewayType              = flag.String("gateway-type", "none", "gateway type")
+	gatewayProxyUrl          = flag.String("gateway-proxy-url", "", "gateway proxy url")
 	gatewayAdminUrl          = flag.String("gateway-admin-url", "", "gateway admin url")
 	gatewayLogRemoteWriteUrl = flag.String("gateway-log-remote-write-url", "", "log remote write url")
 )
@@ -66,6 +67,8 @@ func main() {
 	imageService := registry.NewImageService()
 
 	gw, err := gateway.GetGateway(*gatewayType, gateway.GatewayOptions{
+		DeployType:        *deployType,
+		ProxyUrl:          *gatewayProxyUrl,
 		AdminUrl:          *gatewayAdminUrl,
 		LogRemoteWriteUrl: *gatewayLogRemoteWriteUrl,
 		Storage:           s,

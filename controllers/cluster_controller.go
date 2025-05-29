@@ -191,7 +191,7 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 		return errors.Wrap(err, "health check cluster failed")
 	}
 
-	err = c.gw.SyncBackendService(cluster)
+	err = c.gw.SyncCluster(cluster)
 	if err != nil {
 		return errors.Wrap(err, "sync cluster backend service failed")
 	}
@@ -365,7 +365,7 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 		}
 	}
 
-	err := c.gw.DeleteBackendService(cluster)
+	err := c.gw.DeleteCluster(cluster)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete cluster backend service "+cluster.Metadata.Name)
 	}

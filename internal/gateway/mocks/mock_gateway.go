@@ -66,12 +66,12 @@ func (_c *MockGateway_DeleteAPIKey_Call) RunAndReturn(run func(*v1.ApiKey) error
 	return _c
 }
 
-// DeleteBackendService provides a mock function with given fields: cluster
-func (_m *MockGateway) DeleteBackendService(cluster *v1.Cluster) error {
+// DeleteCluster provides a mock function with given fields: cluster
+func (_m *MockGateway) DeleteCluster(cluster *v1.Cluster) error {
 	ret := _m.Called(cluster)
 
 	if len(ret) == 0 {
-		panic("no return value specified for DeleteBackendService")
+		panic("no return value specified for DeleteCluster")
 	}
 
 	var r0 error
@@ -84,40 +84,40 @@ func (_m *MockGateway) DeleteBackendService(cluster *v1.Cluster) error {
 	return r0
 }
 
-// MockGateway_DeleteBackendService_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteBackendService'
-type MockGateway_DeleteBackendService_Call struct {
+// MockGateway_DeleteCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteCluster'
+type MockGateway_DeleteCluster_Call struct {
 	*mock.Call
 }
 
-// DeleteBackendService is a helper method to define mock.On call
+// DeleteCluster is a helper method to define mock.On call
 //   - cluster *v1.Cluster
-func (_e *MockGateway_Expecter) DeleteBackendService(cluster interface{}) *MockGateway_DeleteBackendService_Call {
-	return &MockGateway_DeleteBackendService_Call{Call: _e.mock.On("DeleteBackendService", cluster)}
+func (_e *MockGateway_Expecter) DeleteCluster(cluster interface{}) *MockGateway_DeleteCluster_Call {
+	return &MockGateway_DeleteCluster_Call{Call: _e.mock.On("DeleteCluster", cluster)}
 }
 
-func (_c *MockGateway_DeleteBackendService_Call) Run(run func(cluster *v1.Cluster)) *MockGateway_DeleteBackendService_Call {
+func (_c *MockGateway_DeleteCluster_Call) Run(run func(cluster *v1.Cluster)) *MockGateway_DeleteCluster_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*v1.Cluster))
 	})
 	return _c
 }
 
-func (_c *MockGateway_DeleteBackendService_Call) Return(_a0 error) *MockGateway_DeleteBackendService_Call {
+func (_c *MockGateway_DeleteCluster_Call) Return(_a0 error) *MockGateway_DeleteCluster_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockGateway_DeleteBackendService_Call) RunAndReturn(run func(*v1.Cluster) error) *MockGateway_DeleteBackendService_Call {
+func (_c *MockGateway_DeleteCluster_Call) RunAndReturn(run func(*v1.Cluster) error) *MockGateway_DeleteCluster_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// DeleteRoute provides a mock function with given fields: endpoint
-func (_m *MockGateway) DeleteRoute(endpoint *v1.Endpoint) error {
+// DeleteEndpoint provides a mock function with given fields: endpoint
+func (_m *MockGateway) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	ret := _m.Called(endpoint)
 
 	if len(ret) == 0 {
-		panic("no return value specified for DeleteRoute")
+		panic("no return value specified for DeleteEndpoint")
 	}
 
 	var r0 error
@@ -130,30 +130,86 @@ func (_m *MockGateway) DeleteRoute(endpoint *v1.Endpoint) error {
 	return r0
 }
 
-// MockGateway_DeleteRoute_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteRoute'
-type MockGateway_DeleteRoute_Call struct {
+// MockGateway_DeleteEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteEndpoint'
+type MockGateway_DeleteEndpoint_Call struct {
 	*mock.Call
 }
 
-// DeleteRoute is a helper method to define mock.On call
+// DeleteEndpoint is a helper method to define mock.On call
 //   - endpoint *v1.Endpoint
-func (_e *MockGateway_Expecter) DeleteRoute(endpoint interface{}) *MockGateway_DeleteRoute_Call {
-	return &MockGateway_DeleteRoute_Call{Call: _e.mock.On("DeleteRoute", endpoint)}
+func (_e *MockGateway_Expecter) DeleteEndpoint(endpoint interface{}) *MockGateway_DeleteEndpoint_Call {
+	return &MockGateway_DeleteEndpoint_Call{Call: _e.mock.On("DeleteEndpoint", endpoint)}
 }
 
-func (_c *MockGateway_DeleteRoute_Call) Run(run func(endpoint *v1.Endpoint)) *MockGateway_DeleteRoute_Call {
+func (_c *MockGateway_DeleteEndpoint_Call) Run(run func(endpoint *v1.Endpoint)) *MockGateway_DeleteEndpoint_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*v1.Endpoint))
 	})
 	return _c
 }
 
-func (_c *MockGateway_DeleteRoute_Call) Return(_a0 error) *MockGateway_DeleteRoute_Call {
+func (_c *MockGateway_DeleteEndpoint_Call) Return(_a0 error) *MockGateway_DeleteEndpoint_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockGateway_DeleteRoute_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockGateway_DeleteRoute_Call {
+func (_c *MockGateway_DeleteEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockGateway_DeleteEndpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetEndpointServeUrl provides a mock function with given fields: ep
+func (_m *MockGateway) GetEndpointServeUrl(ep *v1.Endpoint) (string, error) {
+	ret := _m.Called(ep)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEndpointServeUrl")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) (string, error)); ok {
+		return rf(ep)
+	}
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) string); ok {
+		r0 = rf(ep)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(*v1.Endpoint) error); ok {
+		r1 = rf(ep)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGateway_GetEndpointServeUrl_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEndpointServeUrl'
+type MockGateway_GetEndpointServeUrl_Call struct {
+	*mock.Call
+}
+
+// GetEndpointServeUrl is a helper method to define mock.On call
+//   - ep *v1.Endpoint
+func (_e *MockGateway_Expecter) GetEndpointServeUrl(ep interface{}) *MockGateway_GetEndpointServeUrl_Call {
+	return &MockGateway_GetEndpointServeUrl_Call{Call: _e.mock.On("GetEndpointServeUrl", ep)}
+}
+
+func (_c *MockGateway_GetEndpointServeUrl_Call) Run(run func(ep *v1.Endpoint)) *MockGateway_GetEndpointServeUrl_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Endpoint))
+	})
+	return _c
+}
+
+func (_c *MockGateway_GetEndpointServeUrl_Call) Return(_a0 string, _a1 error) *MockGateway_GetEndpointServeUrl_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGateway_GetEndpointServeUrl_Call) RunAndReturn(run func(*v1.Endpoint) (string, error)) *MockGateway_GetEndpointServeUrl_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -249,12 +305,12 @@ func (_c *MockGateway_SyncAPIKey_Call) RunAndReturn(run func(*v1.ApiKey) error) 
 	return _c
 }
 
-// SyncBackendService provides a mock function with given fields: cluster
-func (_m *MockGateway) SyncBackendService(cluster *v1.Cluster) error {
+// SyncCluster provides a mock function with given fields: cluster
+func (_m *MockGateway) SyncCluster(cluster *v1.Cluster) error {
 	ret := _m.Called(cluster)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SyncBackendService")
+		panic("no return value specified for SyncCluster")
 	}
 
 	var r0 error
@@ -267,40 +323,40 @@ func (_m *MockGateway) SyncBackendService(cluster *v1.Cluster) error {
 	return r0
 }
 
-// MockGateway_SyncBackendService_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncBackendService'
-type MockGateway_SyncBackendService_Call struct {
+// MockGateway_SyncCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncCluster'
+type MockGateway_SyncCluster_Call struct {
 	*mock.Call
 }
 
-// SyncBackendService is a helper method to define mock.On call
+// SyncCluster is a helper method to define mock.On call
 //   - cluster *v1.Cluster
-func (_e *MockGateway_Expecter) SyncBackendService(cluster interface{}) *MockGateway_SyncBackendService_Call {
-	return &MockGateway_SyncBackendService_Call{Call: _e.mock.On("SyncBackendService", cluster)}
+func (_e *MockGateway_Expecter) SyncCluster(cluster interface{}) *MockGateway_SyncCluster_Call {
+	return &MockGateway_SyncCluster_Call{Call: _e.mock.On("SyncCluster", cluster)}
 }
 
-func (_c *MockGateway_SyncBackendService_Call) Run(run func(cluster *v1.Cluster)) *MockGateway_SyncBackendService_Call {
+func (_c *MockGateway_SyncCluster_Call) Run(run func(cluster *v1.Cluster)) *MockGateway_SyncCluster_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*v1.Cluster))
 	})
 	return _c
 }
 
-func (_c *MockGateway_SyncBackendService_Call) Return(_a0 error) *MockGateway_SyncBackendService_Call {
+func (_c *MockGateway_SyncCluster_Call) Return(_a0 error) *MockGateway_SyncCluster_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockGateway_SyncBackendService_Call) RunAndReturn(run func(*v1.Cluster) error) *MockGateway_SyncBackendService_Call {
+func (_c *MockGateway_SyncCluster_Call) RunAndReturn(run func(*v1.Cluster) error) *MockGateway_SyncCluster_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// SyncRoute provides a mock function with given fields: endpoint
-func (_m *MockGateway) SyncRoute(endpoint *v1.Endpoint) error {
+// SyncEndpoint provides a mock function with given fields: endpoint
+func (_m *MockGateway) SyncEndpoint(endpoint *v1.Endpoint) error {
 	ret := _m.Called(endpoint)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SyncRoute")
+		panic("no return value specified for SyncEndpoint")
 	}
 
 	var r0 error
@@ -313,30 +369,30 @@ func (_m *MockGateway) SyncRoute(endpoint *v1.Endpoint) error {
 	return r0
 }
 
-// MockGateway_SyncRoute_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncRoute'
-type MockGateway_SyncRoute_Call struct {
+// MockGateway_SyncEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncEndpoint'
+type MockGateway_SyncEndpoint_Call struct {
 	*mock.Call
 }
 
-// SyncRoute is a helper method to define mock.On call
+// SyncEndpoint is a helper method to define mock.On call
 //   - endpoint *v1.Endpoint
-func (_e *MockGateway_Expecter) SyncRoute(endpoint interface{}) *MockGateway_SyncRoute_Call {
-	return &MockGateway_SyncRoute_Call{Call: _e.mock.On("SyncRoute", endpoint)}
+func (_e *MockGateway_Expecter) SyncEndpoint(endpoint interface{}) *MockGateway_SyncEndpoint_Call {
+	return &MockGateway_SyncEndpoint_Call{Call: _e.mock.On("SyncEndpoint", endpoint)}
 }
 
-func (_c *MockGateway_SyncRoute_Call) Run(run func(endpoint *v1.Endpoint)) *MockGateway_SyncRoute_Call {
+func (_c *MockGateway_SyncEndpoint_Call) Run(run func(endpoint *v1.Endpoint)) *MockGateway_SyncEndpoint_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*v1.Endpoint))
 	})
 	return _c
 }
 
-func (_c *MockGateway_SyncRoute_Call) Return(_a0 error) *MockGateway_SyncRoute_Call {
+func (_c *MockGateway_SyncEndpoint_Call) Return(_a0 error) *MockGateway_SyncEndpoint_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockGateway_SyncRoute_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockGateway_SyncRoute_Call {
+func (_c *MockGateway_SyncEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockGateway_SyncEndpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -384,15 +383,8 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 		}
 	}
 
-	serviceURL, err := dashboard.FormatServiceURL(o.cluster, endpoint)
-	if err != nil {
-		// Log the error, but the endpoint might still be running
-		klog.Warningf("Warning: failed to format service URL: %v", err)
-	}
-
 	return &v1.EndpointStatus{
 		Phase:        v1.EndpointPhaseRUNNING,
-		ServiceURL:   serviceURL,
 		ErrorMessage: "",
 	}, nil
 }
@@ -504,14 +496,8 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		phase = v1.EndpointPhaseRUNNING
 	}
 
-	serviceURL, err := dashboard.FormatServiceURL(o.cluster, endpoint)
-	if err != nil {
-		fmt.Printf("Warning: failed to format service URL while getting status: %v\n", err)
-	}
-
 	return &v1.EndpointStatus{
 		Phase:        phase,
-		ServiceURL:   serviceURL,
 		ErrorMessage: status.Message, // Use message from Ray if available
 	}, nil
 }

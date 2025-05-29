@@ -107,7 +107,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 
 		klog.Info("Deleting endpoint " + obj.Metadata.Name)
 
-		err = c.gw.DeleteRoute(obj)
+		err = c.gw.DeleteEndpoint(obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to delete route for endpoint %s", obj.Metadata.Name)
 		}
@@ -181,9 +181,9 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	if obj.Status.Phase == v1.EndpointPhaseRUNNING {
 		klog.V(4).Infof("Endpoint %s is RUNNING, updating", obj.Metadata.Name)
 
-		err = c.gw.SyncRoute(obj)
+		err = c.gw.SyncEndpoint(obj)
 		if err != nil {
-			return errors.Wrapf(err, "failed to sync route for endpoint %s", obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to sync gateway configuration for endpoint %s", obj.Metadata.Name)
 		}
 
 		_, err = c.createOrUpdateEndpoint(obj)
@@ -198,8 +198,24 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			return errors.Wrapf(err, "failed to check endpoint %s health", obj.Metadata.Name)
 		}
 
+		serviceURL, err := c.gw.GetEndpointServeUrl(obj)
+		if err != nil {
+			klog.Warningf("failed to get endpoint %s service url: %v", obj.Metadata.Name, err)
+		} else {
+			status.ServiceURL = serviceURL
+		}
+
 		if status.Phase != v1.EndpointPhaseRUNNING {
 			klog.Infof("Endpoint %s is not RUNNING, updating status", obj.Metadata.Name)
+
+			err = c.updateStatus(obj, status)
+			if err != nil {
+				return errors.Wrapf(err, "failed to update endpoint %s status", obj.Metadata.Name)
+			}
+		}
+
+		if status.ServiceURL != obj.Status.ServiceURL {
+			klog.Infof("Endpoint %s service url changed, updating", obj.Metadata.Name)
 
 			err = c.updateStatus(obj, status)
 			if err != nil {
@@ -295,6 +311,11 @@ func (c *EndpointController) disconnectModelFromCluster(obj *v1.Endpoint) error 
 
 func (c *EndpointController) updateStatus(obj *v1.Endpoint, status *v1.EndpointStatus) error {
 	status.LastTransitionTime = time.Now().Format(time.RFC3339Nano)
+
+	// If the new service URL is empty, use the old service URL to avoid it being set to empty.
+	if status.ServiceURL == "" && obj.Status != nil && obj.Status.ServiceURL != "" {
+		status.ServiceURL = obj.Status.ServiceURL
+	}
 
 	return c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Status: status})
 }

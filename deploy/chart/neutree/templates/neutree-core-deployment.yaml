@@ -21,6 +21,11 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       containers:
         - name: neutree-core
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           args:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
             - --storage-jwt-secret={{ .Values.jwtSecret }}
@@ -31,6 +36,7 @@ spec:
             - --kubernetes-collect-config-namespace={{ .Release.Namespace}}
             - --deploy-type=kubernetes
             - --gateway-type=kong
+            - --gateway-proxy-url=http://{{ include "neutree.fullname" . }}-kong-proxy:80
             - --gateway-admin-url=http://{{ include "neutree.fullname" . }}-kong-admin:8001
             - --gateway-log-remote-write-url=http://{{ include "neutree.fullname" . }}-vector:30122
           image: "{{ .Values.core.image.repository }}:{{ .Values.core.image.tag | default .Chart.AppVersion }}"

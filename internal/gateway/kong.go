@@ -26,6 +26,9 @@ type Kong struct {
 	kongClient        *kong.Client
 	storage           storage.Storage
 	logRemoteWriteUrl string
+
+	proxyUrl   string
+	deployType string
 }
 
 func newKong(opts GatewayOptions) (Gateway, error) {
@@ -38,6 +41,8 @@ func newKong(opts GatewayOptions) (Gateway, error) {
 		kongClient:        kongClient,
 		storage:           opts.Storage,
 		logRemoteWriteUrl: opts.LogRemoteWriteUrl,
+		deployType:        opts.DeployType,
+		proxyUrl:          opts.ProxyUrl,
 	}, nil
 }
 
@@ -115,136 +120,81 @@ func (k *Kong) DeleteAPIKey(apiKey *v1.ApiKey) error {
 	return nil
 }
 
-func (k *Kong) SyncBackendService(cluster *v1.Cluster) error {
-	dashboardURL, err := url.Parse(cluster.Status.DashboardURL)
-	if err != nil {
-		return errors.Wrapf(err, "failed to parse dashboard url %s", cluster.Status.DashboardURL)
-	}
-
-	gwName := "neutree-cluster-" + util.HashString(cluster.Key())
-	gw := &kong.Service{
-		Name:     &gwName,
-		Protocol: &dashboardURL.Scheme,
-		Host:     &strings.Split(dashboardURL.Host, ":")[0],
-		Port:     pointy.Int(8000),
-	}
-
-	curGw, err := k.kongClient.Services.Get(context.Background(), &gwName)
-	if err != nil && !isResourceNotFoundError(err) {
-		return errors.Wrapf(err, "failed to get service by name %s", gwName)
-	}
-
-	if isResourceNotFoundError(err) {
-		_, err = k.kongClient.Services.Create(context.Background(), gw)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create service by name %s", gwName)
-		}
-
-		return nil
-	}
-
-	if *curGw.Host != *gw.Host || *curGw.Port != *gw.Port {
-		curGw.Host = gw.Host
-		curGw.Port = gw.Port
-
-		_, err = k.kongClient.Services.Update(context.Background(), curGw)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update service by name %s", gwName)
-		}
-	}
-
+func (k *Kong) SyncCluster(cluster *v1.Cluster) error {
+	// not implemented
 	return nil
 }
 
-func (k *Kong) DeleteBackendService(cluster *v1.Cluster) error {
-	gwName := "neutree-cluster-" + util.HashString(cluster.Key())
-	gw, err := k.kongClient.Services.Get(context.Background(), &gwName)
-
-	if err != nil && !isResourceNotFoundError(err) {
-		return errors.Wrapf(err, "failed to get service by name %s", gwName)
-	}
-
-	if isResourceNotFoundError(err) {
-		return nil
-	}
-
-	err = k.kongClient.Services.Delete(context.Background(), gw.ID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to delete service by name %s", gwName)
-	}
-
+func (k *Kong) DeleteCluster(cluster *v1.Cluster) error {
+	// not implemented
 	return nil
 }
 
-func (k *Kong) SyncRoute(ep *v1.Endpoint) error {
-	gw, err := k.getGwService(ep)
+func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
+	gwService, err := k.syncEndpointService(ep)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get gateway service by endpoint %s", ep.Metadata.Name)
 	}
 
-	prefixPath := "/workspace/" + ep.Metadata.Workspace + "/endpoint"
-	route := &kong.Route{
-		Name:      pointy.String("neutree-endpoint-" + util.HashString(ep.Key())),
-		Paths:     []*string{pointy.String(prefixPath + "/" + ep.Metadata.Name)},
-		Service:   gw,
-		Protocols: []*string{pointy.String("http"), pointy.String("https")},
+	route, err := k.syncEndpointRoute(ep, gwService)
+	if err != nil {
+		return errors.Wrapf(err, "failed to sync endpoint route %s", ep.Metadata.Name)
 	}
 
-	curRoute, err := k.kongClient.Routes.Get(context.Background(), route.Name)
-	if err != nil && !isResourceNotFoundError(err) {
-		return errors.Wrapf(err, "failed to get route by name %s", *route.Name)
-	}
+	// sync route plugins
+	needPluginMap := make(map[string]*kong.Plugin)
 
-	if isResourceNotFoundError(err) {
-		curRoute, err = k.kongClient.Routes.Create(context.Background(), route)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create route by name %s", *route.Name)
-		}
-	}
+	aiStatisticsPlugin := k.generateAIStatisticsPlugin(ep, route)
+	needPluginMap[*aiStatisticsPlugin.InstanceName] = aiStatisticsPlugin
 
-	if *curRoute.Paths[0] != *route.Paths[0] || *curRoute.Service.ID != *route.Service.ID {
-		curRoute.Paths = route.Paths
-		curRoute.Service = route.Service
-
-		_, err = k.kongClient.Routes.Update(context.Background(), curRoute)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update route by name %s", *route.Name)
-		}
-	}
-
-	var needPlugins []*kong.Plugin
-
-	if ep.Spec.Model.Task == v1.TextGenerationModelTask {
-		needPlugins = append(needPlugins, k.generateAIProxyPlugin(ep, curRoute))
-	} else if ep.Spec.Model.Task == v1.TextEmbeddingModelTask {
-		needPlugins = append(needPlugins, k.generateRequestTransformPlugin(ep, curRoute))
-	}
-
-	for _, plugin := range needPlugins {
+	for _, plugin := range needPluginMap {
 		err = k.syncPlugin(plugin)
 		if err != nil {
 			return errors.Wrapf(err, "failed to sync plugin %s", *plugin.Name)
 		}
 	}
 
+	curPlugins, err := k.kongClient.Plugins.ListAllForRoute(context.Background(), route.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list plugins for route %s", *route.Name)
+	}
+
+	var needDeletePlugins []*kong.Plugin
+
+	for _, curPlugin := range curPlugins {
+		if _, ok := needPluginMap[*curPlugin.InstanceName]; !ok {
+			needDeletePlugins = append(needDeletePlugins, curPlugin)
+		}
+	}
+
+	for _, needDeletePlugin := range needDeletePlugins {
+		err = k.kongClient.Plugins.Delete(context.Background(), needDeletePlugin.ID)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete plugin %s", *needDeletePlugin.Name)
+		}
+	}
+
 	return nil
 }
 
-func (k *Kong) DeleteRoute(ep *v1.Endpoint) error {
-	routeName := "neutree-endpoint-" + util.HashString(ep.Key())
-	route, err := k.kongClient.Routes.Get(context.Background(), pointy.String(routeName))
-
-	if err != nil && !isResourceNotFoundError(err) {
-		return errors.Wrapf(err, "failed to get route by name %s", routeName)
-	}
-
-	if isResourceNotFoundError(err) {
-		return nil
-	}
-
-	err = k.kongClient.Routes.Delete(context.Background(), route.ID)
+func (k *Kong) GetEndpointServeUrl(ep *v1.Endpoint) (string, error) {
+	realProxyURL, err := getRealProxyUrl(k.deployType, k.proxyUrl)
 	if err != nil {
-		return errors.Wrapf(err, "failed to delete route by name %s", routeName)
+		return "", errors.Wrap(err, "failed to get real proxy url")
+	}
+
+	return realProxyURL + getEndpointRoutePath(ep), nil
+}
+
+func (k *Kong) DeleteEndpoint(ep *v1.Endpoint) error {
+	err := k.deleteEndpointRoute(ep)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete endpoint route %s", ep.Metadata.Name)
+	}
+
+	err = k.deleteEndpointService(ep)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete endpoint service %s", ep.Metadata.Name)
 	}
 
 	return nil
@@ -282,47 +232,14 @@ end`,
 	}
 }
 
-func (k *Kong) generateAIProxyPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
-	urlPath := "/v1/chat/completions"
-	if ep.Spec.Model.Task == v1.TextEmbeddingModelTask {
-		urlPath = "/v1/embeddings"
-	}
-
+func (k *Kong) generateAIStatisticsPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
 	return &kong.Plugin{
-		Name:         pointy.String("ai-proxy"),
-		InstanceName: pointy.String("neutree-ai-proxy-" + util.HashString(ep.Key())),
+		Name:         pointy.String("neutree-ai-statistics"),
+		InstanceName: pointy.String("neutree-ai-statistics-" + util.HashString(ep.Key())),
 		Route:        curRoute,
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
 		Config: map[string]interface{}{
-			"route_type": "llm/v1/chat",
-			"model": map[string]interface{}{
-				"provider": "openai",
-				"options": map[string]interface{}{
-					"upstream_url": ep.Status.ServiceURL + urlPath,
-				},
-			},
-			"logging": map[string]interface{}{
-				"log_statistics": true,
-				"log_payloads":   true,
-			},
-			"response_streaming": "allow",
-		},
-	}
-}
-
-func (k *Kong) generateRequestTransformPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
-	urlPath := "/v1/chat/completions"
-	if ep.Spec.Model.Task == v1.TextEmbeddingModelTask {
-		urlPath = "/v1/embeddings"
-	}
-
-	return &kong.Plugin{
-		Name:         pointy.String("request-transformer"),
-		InstanceName: pointy.String("neutree-request-transformer-" + util.HashString(ep.Key())),
-		Route:        curRoute,
-		Config: map[string]interface{}{
-			"replace": map[string]interface{}{
-				"uri": "/" + ep.Metadata.Name + urlPath,
-			},
+			"route_type": getEndpointRouteType(ep),
 		},
 	}
 }
@@ -389,39 +306,145 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 	return nil
 }
 
-func (k *Kong) getGwService(ep *v1.Endpoint) (*kong.Service, error) {
-	clusterList, err := k.storage.ListCluster(storage.ListOption{
+func (k *Kong) syncEndpointRoute(ep *v1.Endpoint, gwService *kong.Service) (*kong.Route, error) {
+	route := &kong.Route{
+		Name:      pointy.String("neutree-endpoint-" + util.HashString(ep.Key())),
+		Paths:     []*string{pointy.String("~" + getEndpointRoutePath(ep))},
+		Service:   gwService,
+		Protocols: []*string{pointy.String("http"), pointy.String("https")},
+	}
+
+	curRoute, err := k.kongClient.Routes.Get(context.Background(), route.Name)
+	if err != nil && !isResourceNotFoundError(err) {
+		return nil, errors.Wrapf(err, "failed to get route by name %s", *route.Name)
+	}
+
+	if isResourceNotFoundError(err) {
+		curRoute, err = k.kongClient.Routes.Create(context.Background(), route)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create route by name %s", *route.Name)
+		}
+	}
+
+	if *curRoute.Paths[0] != *route.Paths[0] || *curRoute.Service.ID != *route.Service.ID {
+		curRoute.Paths = route.Paths
+		curRoute.Service = route.Service
+
+		_, err = k.kongClient.Routes.Update(context.Background(), curRoute)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to update route by name %s", *route.Name)
+		}
+	}
+
+	return curRoute, nil
+}
+
+func (k *Kong) deleteEndpointRoute(ep *v1.Endpoint) error {
+	routeName := "neutree-endpoint-" + util.HashString(ep.Key())
+	route, err := k.kongClient.Routes.Get(context.Background(), pointy.String(routeName))
+
+	if err != nil && !isResourceNotFoundError(err) {
+		return errors.Wrapf(err, "failed to get route by name %s", routeName)
+	}
+
+	if isResourceNotFoundError(err) {
+		return nil
+	}
+
+	err = k.kongClient.Routes.Delete(context.Background(), route.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete route by name %s", routeName)
+	}
+
+	return nil
+}
+
+func (k *Kong) syncEndpointService(ep *v1.Endpoint) (*kong.Service, error) {
+	clusters, err := k.storage.ListCluster(storage.ListOption{
 		Filters: []storage.Filter{
-			{
-				Column:   "metadata->workspace",
-				Operator: "eq",
-				Value:    strconv.Quote(ep.Metadata.Workspace),
-			},
 			{
 				Column:   "metadata->name",
 				Operator: "eq",
 				Value:    strconv.Quote(ep.Spec.Cluster),
 			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(ep.Metadata.Workspace),
+			},
 		},
 	})
-
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to list cluster by workspace %s", ep.Metadata.Workspace)
+		return nil, errors.Wrapf(err, "failed to list cluster by name %s", ep.Spec.Cluster)
 	}
 
-	if len(clusterList) == 0 {
-		return nil, storage.ErrResourceNotFound
+	if len(clusters) == 0 {
+		return nil, errors.New("cluster not found")
 	}
 
-	cluster := clusterList[0]
-	gwName := "neutree-cluster-" + util.HashString(cluster.Key())
+	url, err := url.Parse(clusters[0].Status.DashboardURL)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse cluster dashboard url %s", clusters[0].Status.DashboardURL)
+	}
+
+	gwServiceName := "neutree-endpoint-" + util.HashString(ep.Key())
+	gwService := &kong.Service{
+		Name:        &gwServiceName,
+		Host:        pointy.String(url.Hostname()),
+		Port:        pointy.Int(8000),
+		Protocol:    &url.Scheme,
+		Path:        pointy.String("/" + ep.Metadata.Name),
+		ReadTimeout: pointy.Int(60000 * 60),
+	}
+
+	curGwService, err := k.kongClient.Services.Get(context.Background(), &gwServiceName)
+	if err != nil && !isResourceNotFoundError(err) {
+		return nil, errors.Wrapf(err, "failed to get service by name %s", gwServiceName)
+	}
+
+	if isResourceNotFoundError(err) {
+		curGwService, err = k.kongClient.Services.Create(context.Background(), gwService)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create service by name %s", gwServiceName)
+		}
+	}
+
+	if *curGwService.Host != *gwService.Host || *curGwService.Port != *gwService.Port ||
+		*curGwService.Protocol != *gwService.Protocol || *curGwService.Path != *gwService.Path ||
+		*curGwService.ReadTimeout != *gwService.ReadTimeout {
+		curGwService.Host = gwService.Host
+		curGwService.Port = gwService.Port
+		curGwService.Protocol = gwService.Protocol
+		curGwService.Path = gwService.Path
+		curGwService.ReadTimeout = gwService.ReadTimeout
+
+		_, err = k.kongClient.Services.Update(context.Background(), curGwService)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to update service by name %s", gwServiceName)
+		}
+	}
+
+	return curGwService, nil
+}
+
+func (k *Kong) deleteEndpointService(ep *v1.Endpoint) error {
+	gwName := "neutree-endpoint-" + util.HashString(ep.Key())
 	gw, err := k.kongClient.Services.Get(context.Background(), &gwName)
 
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get service by name %s", gwName)
+	if err != nil && !isResourceNotFoundError(err) {
+		return errors.Wrapf(err, "failed to get service by name %s", gwName)
 	}
 
-	return gw, nil
+	if isResourceNotFoundError(err) {
+		return nil
+	}
+
+	err = k.kongClient.Services.Delete(context.Background(), gw.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete service by name %s", gwName)
+	}
+
+	return nil
 }
 
 func isResourceNotFoundError(err error) bool {
@@ -434,4 +457,22 @@ func isResourceNotFoundError(err error) bool {
 	}
 
 	return false
+}
+
+func getEndpointRouteType(ep *v1.Endpoint) string {
+	switch ep.Spec.Model.Task {
+	case v1.TextGenerationModelTask:
+		return "/v1/chat/completions"
+	case v1.TextEmbeddingModelTask:
+		return "/v1/embeddings"
+	case v1.TextRerankModelTask:
+		return "/v1/rerank"
+	}
+
+	// default return text generation route type.
+	return "/v1/chat/completions"
+}
+
+func getEndpointRoutePath(ep *v1.Endpoint) string {
+	return "/workspace/" + ep.Metadata.Workspace + "/endpoint/" + ep.Metadata.Name
 }

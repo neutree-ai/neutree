@@ -56,8 +56,10 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 }
 
 func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
+	// todo: support workspace
 	r.Any("/api/v1/serve-proxy/:name/*path", handleServeProxy(deps))
 	r.Any("/api/v1/ray-dashboard-proxy/:name/*path", handleRayDashboardProxy(deps))
+
 	r.Any("/api/v1/auth/:path", handleAuthProxy(deps))
 	r.Any("/api/v1/:path", handlePostgrestProxy(deps))
 	r.Any("/api/v1/rpc/:path", handlePostgrestRPCProxy(deps))
@@ -102,14 +104,60 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		serviceURL := endpoints[0].Status.ServiceURL
-		if serviceURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "service_url not found",
+		// use internal serve access url
+		clusters, err := deps.Storage.ListCluster(storage.ListOption{
+			Filters: []storage.Filter{
+				{
+					Column:   "metadata->name",
+					Operator: "eq",
+					Value:    strconv.Quote(endpoints[0].Spec.Cluster),
+				},
+				{
+					Column:   "metadata->workspace",
+					Operator: "eq",
+					Value:    strconv.Quote(endpoints[0].Metadata.Workspace),
+				},
+			},
+		})
+
+		if err != nil {
+			errS := fmt.Sprintf("Failed to list clusters: %v", err)
+			klog.Errorf(errS)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": errS,
 			})
 
 			return
 		}
+
+		if len(clusters) == 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "endpoint relate cluster not found",
+			})
+
+			return
+		}
+
+		if clusters[0].Status.DashboardURL == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "cluster dashboard_url not found",
+			})
+
+			return
+		}
+
+		url, err := url.Parse(clusters[0].Status.DashboardURL)
+		if err != nil {
+			errS := fmt.Sprintf("Failed to parse url: %v", err)
+			klog.Errorf(errS)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": errS,
+			})
+
+			return
+		}
+
+		serviceURL := fmt.Sprintf("%s://%s:%d/%s", url.Scheme, url.Hostname(), 8000, endpoints[0].Metadata.Name)
 
 		path := c.Param("path")
 		if path != "" && path[0] == '/' {

@@ -54,6 +54,14 @@ Examples:
   # With remote metrics storage
   neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// set default node ip
+			if options.nodeIP == "" {
+				ip, err := util.GetHostIP()
+				if err != nil {
+					return err
+				}
+				options.nodeIP = ip
+			}
 			return installNeutreeCore(exector, options)
 		},
 	}
@@ -159,6 +167,7 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		"JwtToken":               *jwtToken,
 		"VectorVersion":          constants.VectorVersion,
 		"KongVersion":            constants.KongVersion,
+		"NodeIP":                 options.nodeIP,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)

@@ -178,13 +178,19 @@ func TestHandleServeProxy_StorageError(t *testing.T) {
 	mockStorage.AssertExpectations(t)
 }
 
-// TestHandleServeProxy_MissingServiceURL tests the case when service URL is missing
-func TestHandleServeProxy_MissingServiceURL(t *testing.T) {
+// TestHandleServeProxy_MissingServiceURL tests the case when the service URL is missing
+func TestHandleServeProxy_MissingClusterDashboardURL(t *testing.T) {
 	// Setup mock
 	mockStorage := setupMocks(t)
 
 	// Create test endpoint without service URL
 	endpoint := v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "test-workspace",
+		},
+		Spec: &v1.EndpointSpec{
+			Cluster: "test-cluster",
+		},
 		Status: &v1.EndpointStatus{
 			// ServiceURL intentionally left empty
 		},
@@ -197,6 +203,9 @@ func TestHandleServeProxy_MissingServiceURL(t *testing.T) {
 
 	// Configure mock behaviors
 	mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{endpoint}, nil)
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+		Status: &v1.ClusterStatus{},
+	}}, nil)
 
 	// Create test context
 	c, w := createMockContext("GET", "/api/v1/serve-proxy/test-endpoint", "")
@@ -206,12 +215,12 @@ func TestHandleServeProxy_MissingServiceURL(t *testing.T) {
 	handlerFunc(c)
 
 	// Verify the results
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
 	var response map[string]string
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Equal(t, "service_url not found", response["error"])
+	assert.Equal(t, "cluster dashboard_url not found", response["error"])
 
 	mockStorage.AssertExpectations(t)
 }
