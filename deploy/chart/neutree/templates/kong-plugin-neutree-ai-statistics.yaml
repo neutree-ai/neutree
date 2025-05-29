@@ -51,9 +51,12 @@ data:
     = completion_tokens_count\n        kong.ctx.plugin.total_tokens = kong.ctx.plugin.completions_tokens
     + kong.ctx.plugin.prompt_tokens\n    end\nend\n\nlocal function fail(code, msg)\n
     \   return kong.response.exit(code, msg and { error = { message = msg } } or nil)\nend\n\nfunction
-    AIStatisticsPluginHandler:access(conf)\n    local content_type = kong.request.get_header(\"Content-Type\")
-    or \"application/json\"\n    if string.find(content_type, \"application/json\",
-    nil, true) then\n        local request_body = kong.request.get_raw_body()\n        if
+    AIStatisticsPluginHandler:access(conf)\n    local request_path = kong.request.get_path()\n
+    \   -- skip request not match route_type    \n    if not string.match(request_path,
+    conf.route_type..\"$\") then\n        kong.ctx.plugin.skip = true\n        return\n
+    \   end\n    local content_type = kong.request.get_header(\"Content-Type\") or
+    \"application/json\"\n    if string.find(content_type, \"application/json\", nil,
+    true) then\n        local request_body = kong.request.get_raw_body()\n        if
     request_body == nil then\n            return fail(400, \"request body can not
     be null\")\n        end\n        local ai_request, err = cjson.decode(request_body)\n
     \       if err then\n            return fail(400, \"request body is not json format\")\n
@@ -66,16 +69,20 @@ data:
     err)\n              return fail(500)\n            end\n            kong.ctx.plugin.prompt_tokens
     = prompt_tokens\n        end\n    else\n        return fail(400, \"only support
     content-type is application/json\")\n    end\nend\n\nfunction AIStatisticsPluginHandler:body_filter(conf)\n
-    \   local response_status = kong.service.response.get_status()\n    if response_status
-    ~= 200 then\n        return\n    end\n\n    handle_stream_response(conf, ngx.arg[1],
-    ngx.arg[2])\nend\n\nfunction AIStatisticsPluginHandler:header_filter(conf)\n    local
-    response_status = kong.service.response.get_status()\n    if response_status ~=
-    200 then\n        return\n    end\n\n    local content_type = kong.service.response.get_header(\"Content-Type\")\n
-    \   local normalized_content_type = content_type and content_type:sub(1, (content_type:find(\";\")
-    or 0) - 1)\n    if normalized_content_type and normalized_content_type == \"text/event-stream\"
+    \   if kong.ctx.plugin.skip then\n        return\n    end\n\n    local response_status
+    = kong.service.response.get_status()\n    if response_status ~= 200 then\n        return\n
+    \   end\n\n    handle_stream_response(conf, ngx.arg[1], ngx.arg[2])\nend\n\nfunction
+    AIStatisticsPluginHandler:header_filter(conf)\n    if kong.ctx.plugin.skip then\n
+    \       return\n    end\n\n    local response_status = kong.service.response.get_status()\n
+    \   if response_status ~= 200 then\n        return\n    end\n\n    local content_type
+    = kong.service.response.get_header(\"Content-Type\")\n    local normalized_content_type
+    = content_type and content_type:sub(1, (content_type:find(\";\") or 0) - 1)\n
+    \   if normalized_content_type and normalized_content_type == \"text/event-stream\"
     then\n        kong.ctx.plugin.sse_body_buffer = buffer.new()\n        return true\n
     \   end\n\n    handle_json_response(conf)\nend\n\nfunction AIStatisticsPluginHandler:log(conf)\n
-    \   local meta = {\n        plugin_id = conf.__plugin_id,\n        request_model
+    \   if kong.ctx.plugin.skip then\n        return\n    end\n\n    local response_status
+    = kong.service.response.get_status()\n    if response_status ~= 200 then\n        return\n
+    \   end\n\n    local meta = {\n        plugin_id = conf.__plugin_id,\n        request_model
     = kong.ctx.plugin.request_model,\n        response_model = kong.ctx.plugin.response_model,\n
     \   }\n\n    kong.log.set_serialize_value(\"ai.statistics.meta\", meta)\n\n    local
     usage = {\n        completion_tokens = kong.ctx.plugin.completions_tokens,\n        prompt_tokens

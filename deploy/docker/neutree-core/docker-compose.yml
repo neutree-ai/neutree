@@ -146,6 +146,7 @@ services:
       - --default-cluster-version=v1
       - --metrics-remote-write-url={{.MetricsRemoteWriteURL}}
       - --gateway-type=kong
+      - --gateway-proxy-url=http://{{ .NodeIP}}:80
       - --gateway-admin-url=http://kong:8001
       - --gateway-log-remote-write-url=http://vector:30122
     volumes:

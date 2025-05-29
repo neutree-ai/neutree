@@ -34,8 +34,8 @@ data:
               .extracted_data.completion_tokens = .ai."statistics".usage.completion_tokens
               .extracted_data.timestamp = .started_at
               .extracted_data.status = .response.status
-              .extracted_data.model_source = replace!(.request.uri, "/", ".")
-              .extracted_data.model = join!([.extracted_data.model_source, .ai."statistics".meta.response_model], separator: ".")
+              .extracted_data.url_spilt = split!(.request.uri, "/")
+              .extracted_data.model = join!([.extracted_data.url_spilt[2], .extracted_data.url_spilt[4], .ai."statistics".meta.response_model], separator: ".")
               .extracted_data.api_key_id = .consumer.custom_id    
 
               if to_int!(.extracted_data.total_tokens) > 0 {

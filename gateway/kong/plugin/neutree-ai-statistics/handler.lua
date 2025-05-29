@@ -102,6 +102,12 @@ local function fail(code, msg)
 end
 
 function AIStatisticsPluginHandler:access(conf)
+    local request_path = kong.request.get_path()
+    -- skip request not match route_type    
+    if not string.match(request_path, conf.route_type.."$") then
+        kong.ctx.plugin.skip = true
+        return
+    end
     local content_type = kong.request.get_header("Content-Type") or "application/json"
     if string.find(content_type, "application/json", nil, true) then
         local request_body = kong.request.get_raw_body()
@@ -130,6 +136,10 @@ function AIStatisticsPluginHandler:access(conf)
 end
 
 function AIStatisticsPluginHandler:body_filter(conf)
+    if kong.ctx.plugin.skip then
+        return
+    end
+
     local response_status = kong.service.response.get_status()
     if response_status ~= 200 then
         return
@@ -139,6 +149,10 @@ function AIStatisticsPluginHandler:body_filter(conf)
 end
 
 function AIStatisticsPluginHandler:header_filter(conf)
+    if kong.ctx.plugin.skip then
+        return
+    end
+
     local response_status = kong.service.response.get_status()
     if response_status ~= 200 then
         return
@@ -155,6 +169,15 @@ function AIStatisticsPluginHandler:header_filter(conf)
 end
 
 function AIStatisticsPluginHandler:log(conf)
+    if kong.ctx.plugin.skip then
+        return
+    end
+
+    local response_status = kong.service.response.get_status()
+    if response_status ~= 200 then
+        return
+    end
+
     local meta = {
         plugin_id = conf.__plugin_id,
         request_model = kong.ctx.plugin.request_model,
