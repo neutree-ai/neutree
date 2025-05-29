@@ -3,7 +3,7 @@ import enum
 import logging
 import time
 import json
-from typing import Dict, Optional, Any, AsyncGenerator
+from typing import Dict, Optional, Any, AsyncGenerator, List
 
 from fastapi import FastAPI, Request
 from starlette.responses import StreamingResponse, JSONResponse
@@ -19,8 +19,14 @@ from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest, ChatCompletionResponse, ErrorResponse
+from vllm.entrypoints.openai.protocol import (
+    ChatCompletionRequest, ChatCompletionResponse, ErrorResponse,
+    EmbeddingRequest, EmbeddingResponse,
+    ScoreRequest, ScoreResponse
+)
 from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
+from vllm.entrypoints.openai.serving_embedding import OpenAIServingEmbedding
+from vllm.entrypoints.openai.serving_score import OpenAIServingScores
 from vllm.entrypoints.openai.serving_models import BaseModelPath, LoRAModulePath, PromptAdapterPath, OpenAIServingModels
 from vllm.engine.metrics import RayPrometheusStatLogger
 
@@ -31,6 +37,35 @@ class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
     CONSISTENT_HASH = "consistent_hash"
+
+from pydantic import BaseModel, Field
+from typing import List, Optional, Any
+
+class RerankRequest(BaseModel):
+    model: Optional[str] = None
+    query: str
+    documents: List[str]
+    top_n: int = Field(default=0)
+    truncate_prompt_tokens: Optional[int] = None
+    additional_data: Optional[Any] = None
+    priority: int = Field(default=0)
+
+class RerankDocument(BaseModel):
+    text: str
+
+class RerankResult(BaseModel):
+    index: int
+    document: RerankDocument
+    relevance_score: float
+
+class RerankUsage(BaseModel):
+    total_tokens: int
+
+class RerankResponse(BaseModel):
+    id: str
+    model: str
+    usage: RerankUsage
+    results: List[RerankResult]
 
 @serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})
 class Backend:
@@ -50,7 +85,7 @@ class Backend:
             model_name: Name of the model in the registry
             model_version: Version of the model
             model_file: Specific model file name (for bentoml)
-            model_task: Task type (e.g., "text-generation", "text-embedding")
+            model_task: Task type (e.g., "text-generation", "text-embedding", "rerank")
             **engine_kwargs: Additional keyword arguments passed directly to AsyncEngineArgs
         """
         # Configure model based on registry
@@ -62,12 +97,16 @@ class Backend:
             model_path = model_name
 
         self.model_id = f"{model_name}:{model_version}"
+        self.model_task = model_task
         
+        # Map model task to vLLM task
         task = "generate"
         if model_task == "text-generation":
             task = "generate"
         elif model_task == "text-embedding":
             task = "embed"
+        elif model_task in ["rerank", "score"]:
+            task = "score"
 
         engine_args = AsyncEngineArgs(
             task=task,
@@ -80,6 +119,8 @@ class Backend:
         self.engine = AsyncLLMEngine.from_engine_args(engine_args)
         self.model_config = None
         self.openai_serving_chat = None
+        self.openai_serving_embedding = None
+        self.openai_serving_score = None
         self.openai_serving_models = None
 
         stat_logger = RayPrometheusStatLogger(
@@ -118,9 +159,95 @@ class Backend:
             )
         return self.openai_serving_chat
 
+    async def _ensure_embedding(self):
+        if self.openai_serving_embedding is None:
+            model_config = await self._ensure_model_config()
+            models = await self._ensure_models()
+            self.openai_serving_embedding = OpenAIServingEmbedding(
+                self.engine,
+                model_config,
+                models,
+                request_logger=None,
+            )
+        return self.openai_serving_embedding
+
+    async def _ensure_score(self):
+        if self.openai_serving_score is None:
+            model_config = await self._ensure_model_config()
+            models = await self._ensure_models()
+            self.openai_serving_score = OpenAIServingScores(
+                self.engine,
+                model_config,
+                models,
+                request_logger=None,
+            )
+        return self.openai_serving_score
+
     async def generate(self, payload: Any):
         await self._ensure_chat()
         return await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
+
+    async def generate_embeddings(self, payload: Any):
+        await self._ensure_embedding()
+        return await self.openai_serving_embedding.create_embedding(EmbeddingRequest(**payload), None)
+
+    async def rerank(self, payload: Any):
+        """
+        Rerank documents based on their relevance to a query.
+        Implementation aligned with vLLM's do_rerank method.
+        """
+        await self._ensure_score()
+        
+        request = RerankRequest(**payload)
+        documents = request.documents
+        top_n = request.top_n if request.top_n > 0 else len(documents)
+        
+        # Use the score API to compute relevance scores
+        scores = []
+        total_prompt_tokens = 0
+        
+        for i, document in enumerate(documents):
+            # Create a score request for each document
+            score_request = ScoreRequest(
+                text_1=request.query,
+                text_2=document,
+                model=request.model,
+                truncate_prompt_tokens=request.truncate_prompt_tokens,
+                additional_data=request.additional_data,
+                priority=request.priority
+            )
+            
+            # Get the score result
+            result = await self.openai_serving_score.create_score(score_request, None)
+            
+            # Extract score and accumulate tokens
+            score = result.data[0].score
+            scores.append((i, document, score))
+            total_prompt_tokens += result.usage.prompt_tokens
+        
+        # Sort by relevance score in descending order
+        scores.sort(key=lambda x: x[2], reverse=True)
+        
+        # Apply top_n if specified
+        if top_n < len(documents):
+            scores = scores[:top_n]
+        
+        # Build response in vLLM format
+        results = [
+            RerankResult(
+                index=idx,
+                document=RerankDocument(text=doc),
+                relevance_score=score
+            )
+            for idx, doc, score in scores
+        ]
+        
+        return RerankResponse(
+            id=f"rerank-{time.time()}",
+            model=request.model or self.model_id,
+            usage=RerankUsage(total_tokens=total_prompt_tokens),
+            results=results
+        )
 
     async def show_available_models(self):
         models = await self._ensure_models()
@@ -204,6 +331,24 @@ class Controller:
             if isinstance(result, ErrorResponse):
                 return JSONResponse(content=result.model_dump(), status_code=result.code)
             return JSONResponse(content=result.model_dump())
+
+    @app.post("/v1/embeddings")
+    async def embeddings(self, request: Request):
+        """Embeddings endpoint for text-embedding models"""
+        req_obj = await request.json()
+        result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
+        if isinstance(result, ErrorResponse):
+            return JSONResponse(content=result.model_dump(), status_code=result.code)
+        return JSONResponse(content=result.model_dump())
+
+    @app.post("/v1/rerank")
+    async def rerank(self, request: Request):
+        """Rerank endpoint for cross-encoder/reranker models"""
+        req_obj = await request.json()
+        result = await self.backend.options(stream=False).rerank.remote(req_obj)
+        if isinstance(result, ErrorResponse):
+            return JSONResponse(content=result.model_dump(), status_code=result.code)
+        return JSONResponse(content=result.model_dump_json(), status_code=200, media_type="application/json")
 
     @app.get("/v1/models")
     async def models(self, request: Request):
