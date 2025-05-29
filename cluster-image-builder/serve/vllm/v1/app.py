@@ -348,7 +348,7 @@ class Controller:
         result = await self.backend.options(stream=False).rerank.remote(req_obj)
         if isinstance(result, ErrorResponse):
             return JSONResponse(content=result.model_dump(), status_code=result.code)
-        return JSONResponse(content=result.model_dump_json(), status_code=200, media_type="application/json")
+        return JSONResponse(content=result.model_dump())
 
     @app.get("/v1/models")
     async def models(self, request: Request):
