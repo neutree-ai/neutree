@@ -11,5 +11,5 @@ ray[serve]
 bentoml==1.4.6
 PyYAML==6.0.1
 vllm==0.7.2
-kantoku==0.18.1
+kantoku==0.18.3
 openai==1.65.2
