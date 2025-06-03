@@ -22,8 +22,9 @@ func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratorm
 	}
 
 	gw := &gatewaymocks.MockGateway{}
-	gw.On("SyncRoute", mock.Anything, mock.Anything).Return(nil)
-	gw.On("DeleteRoute", mock.Anything, mock.Anything).Return(nil)
+	gw.On("SyncEndpoint", mock.Anything).Return(nil)
+	gw.On("DeleteEndpoint", mock.Anything).Return(nil)
+	gw.On("GetEndpointServeUrl", mock.Anything).Return("", nil)
 
 	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Workers: 1, Gw: gw})
 	c.baseController.queue = workqueue.NewRateLimitingQueueWithConfig(

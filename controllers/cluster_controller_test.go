@@ -31,8 +31,8 @@ func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *regis
 	})
 
 	gw := &gatewaymocks.MockGateway{}
-	gw.On("SyncBackendService", mock.Anything, mock.Anything).Return(nil)
-	gw.On("DeleteBackendService", mock.Anything, mock.Anything).Return(nil)
+	gw.On("SyncCluster", mock.Anything, mock.Anything).Return(nil)
+	gw.On("DeleteCluster", mock.Anything, mock.Anything).Return(nil)
 	return &ClusterController{
 		storage:      storage,
 		imageService: imageSvc,

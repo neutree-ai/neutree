@@ -146,6 +146,7 @@ services:
       - --default-cluster-version=v1
       - --metrics-remote-write-url={{.MetricsRemoteWriteURL}}
       - --gateway-type=kong
+      - --gateway-proxy-url=http://{{ .NodeIP}}:80
       - --gateway-admin-url=http://kong:8001
       - --gateway-log-remote-write-url=http://vector:30122
     volumes:
@@ -257,6 +258,8 @@ services:
     image: kong/kong:{{ .KongVersion}}
     container_name: kong
     environment:
+      KONG_PLUGINS: bundled,neutree-ai-statistics
+      LUA_PATH: "/neutree-kong-plugin/?.lua;;"
       KONG_DATABASE: "postgres"
       KONG_PG_HOST: "postgres"
       KONG_PG_DATABASE: "aippp"
@@ -270,6 +273,8 @@ services:
       KONG_ADMIN_GUI_LISTEN: "0.0.0.0:8002"
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
+    volumes:
+      - {{.NeutreeCoreWorkDir}}/kong/plugin:/neutree-kong-plugin
     networks:
       - neutree
     ports:
