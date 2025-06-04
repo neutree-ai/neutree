@@ -110,7 +110,9 @@ func (c *sshClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	sshCommandArgs := c.buildSSHCommandArgs(c.getHeadIP())
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry, dockerCommandRunner.GetRuntime(ctx))
 	if err != nil {
 		return "", errors.Wrap(err, "failed to check cluster image")
 	}
@@ -140,7 +142,10 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 }
 
 func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+
+	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry, dockerCommandRunner.GetRuntime(ctx))
 	if err != nil {
 		return errors.Wrap(err, "failed to check cluster image")
 	}
@@ -148,9 +153,6 @@ func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error 
 	env := map[string]interface{}{
 		"RAY_HEAD_IP": c.getHeadIP(),
 	}
-
-	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
-	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
 
 	for _, command := range c.config.InitializationCommands {
 		_, err := dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)

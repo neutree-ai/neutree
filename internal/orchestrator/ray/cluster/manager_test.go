@@ -73,7 +73,7 @@ func TestGetClusterImage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := getClusterImage(tt.cluster, tt.imageRegistry)
+			got, err := getClusterImage(tt.cluster, tt.imageRegistry, "")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -183,7 +183,7 @@ func TestCheckClusterImage(t *testing.T) {
 			}
 
 			// Execute test
-			err := checkClusterImage(mockImageService, tt.cluster, tt.imageRegistry)
+			err := checkClusterImage(mockImageService, tt.cluster, tt.imageRegistry, "")
 
 			// Verify results
 			if tt.wantErr {

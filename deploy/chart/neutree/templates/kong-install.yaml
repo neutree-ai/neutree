@@ -110,7 +110,7 @@ spec:
         - name: KONG_STREAM_LISTEN
           value: "off"
         - name: KONG_NGINX_DAEMON
-          value: "off"      
+          value: "off"
         args: [ "kong", "migrations", "finish" ]
         volumeMounts:
         - name: kong-prefix-dir
@@ -239,7 +239,7 @@ spec:
         - name: KONG_STREAM_LISTEN
           value: "off"
         - name: KONG_NGINX_DAEMON
-          value: "off"      
+          value: "off"
         args: [ "kong", "migrations", "up" ]
         volumeMounts:
         - name: kong-prefix-dir
@@ -414,7 +414,7 @@ spec:
         - name: KONG_STATUS_LISTEN
           value: "0.0.0.0:8100, [::]:8100"
         - name: KONG_STREAM_LISTEN
-          value: "off"      
+          value: "off"
         volumeMounts:
         - name: kong-kong-prefix-dir
           mountPath: /kong_prefix/
@@ -761,7 +761,7 @@ spec:
         - name: KONG_STATUS_LISTEN
           value: "0.0.0.0:8100, [::]:8100"
         - name: KONG_STREAM_LISTEN
-          value: "off"  
+          value: "off"
         args: [ "kong", "migrations", "bootstrap" ]
         volumeMounts:
         - name: kong-kong-prefix-dir

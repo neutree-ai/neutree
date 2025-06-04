@@ -271,7 +271,37 @@ func (d *DockerCommandRunner) configureRuntime(ctx context.Context, runOptions [
 		klog.Info("Nvidia Container Runtime is present, but no GPUs found.")
 	}
 
+	if strings.Contains(runtimeOutput, "ascend-docker-runtime") {
+		_, err := d.sshCommandRunner.Run(ctx, "npu-smi info", false, nil, false, nil, "host", "", false)
+		if err == nil {
+			deviceOutput, err := d.sshCommandRunner.Run(ctx, "ls /dev/davinci[0-9]* | awk -F'davinci' '{print $2}'", false, nil, true, nil, "host", "", false)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to get Ascend devices")
+			}
+			deviceIds := strings.Split(strings.TrimSpace(deviceOutput), "\n")
+			return append(runOptions, fmt.Sprintf(" -e ASCEND_VISIBLE_DEVICES=%s ", strings.Join(deviceIds, ","))), nil
+		}
+
+		klog.Info("Ascend Container Runtime is present, but no NPUs found.")
+	}
+
 	return runOptions, nil
+}
+
+func (d *DockerCommandRunner) GetRuntime(ctx context.Context) string {
+	_, err := d.sshCommandRunner.Run(ctx, "nvidia-smi", false, nil, false, nil, "host", "", false)
+	if err == nil {
+		return "nvidia"
+	}
+	npusmiOutput, err := d.sshCommandRunner.Run(ctx, "npu-smi info", false, nil, true, nil, "host", "", false)
+	if err == nil {
+		if strings.Contains(string(npusmiOutput), "910P") {
+			return "asend910p"
+		}
+		return "ascend"
+	}
+
+	return ""
 }
 
 // autoConfigureShm auto - configures the SHM size.

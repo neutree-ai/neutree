@@ -32,12 +32,12 @@ type ClusterManager interface {
 	Sync(ctx context.Context) error
 }
 
-func checkClusterImage(imageService registry.ImageService, cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) error {
+func checkClusterImage(imageService registry.ImageService, cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, contianerRuntime string) error {
 	if imageRegistry.Status == nil || imageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
 		return errors.New("image registry " + imageRegistry.Metadata.Name + " not connected")
 	}
 
-	image, err := getClusterImage(cluster, imageRegistry)
+	image, err := getClusterImage(cluster, imageRegistry, contianerRuntime)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get cluster image for cluster %s", cluster.Metadata.Name)
 	}
@@ -61,10 +61,14 @@ func checkClusterImage(imageService registry.ImageService, cluster *v1.Cluster, 
 	return nil
 }
 
-func getClusterImage(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) (string, error) {
+func getClusterImage(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, contianerRuntime string) (string, error) {
 	registryURL, err := url.Parse(imageRegistry.Spec.URL)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
+	}
+
+	if contianerRuntime != "" && contianerRuntime != "nvidia" {
+		return registryURL.Host + "/" + imageRegistry.Spec.Repository + "/neutree-serve:" + cluster.Spec.Version + "-" + contianerRuntime, nil
 	}
 
 	return registryURL.Host + "/" + imageRegistry.Spec.Repository + "/neutree-serve:" + cluster.Spec.Version, nil
