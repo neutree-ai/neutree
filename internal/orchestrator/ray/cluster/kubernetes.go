@@ -39,6 +39,8 @@ const (
 
 const (
 	nvidiaGPUResourceName = "nvidia.com/gpu"
+	asend310PResourceName = "huawei.com/Ascend310P"
+	asend910BResourceName = "huawei.com/Ascend910B"
 )
 
 var _ ClusterManager = &kubeRayClusterManager{}
@@ -55,9 +57,12 @@ type kubeRayClusterManager struct {
 	imageRegistry *v1.ImageRegistry
 	imageService  registry.ImageService
 
+	config *v1.RayKubernetesProvisionClusterConfig
+
 	kubeconfig       string
 	clusterNamespace string
 	installObjects   []client.Object
+	dependencyImages []string
 	ctrClient        client.Client
 }
 
@@ -67,28 +72,32 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 		installObjects:   []client.Object{},
 		clusterNamespace: Namespace(cluster),
 
-		cluster:       cluster,
-		imageRegistry: imageRegistry,
-		imageService:  imageService,
+		cluster:          cluster,
+		imageRegistry:    imageRegistry,
+		imageService:     imageService,
+		dependencyImages: []string{},
 	}
 
-	kubeconfig, err := getKubeconfig(cluster)
+	config := &v1.RayKubernetesProvisionClusterConfig{}
+
+	configContent, err := json.Marshal(cluster.Spec.Config)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal kubernetes provision cluster config")
+	}
+
+	err = json.Unmarshal(configContent, config)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal kubernetes provision cluster config")
+	}
+
+	c.config = config
+
+	c.kubeconfig, err = c.getKubeconfig()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get kubeconfig")
 	}
 
-	if kubeconfig == "" {
-		return nil, errors.New("kubeconfig is required")
-	}
-
-	kubeconfigContent, err := base64.StdEncoding.DecodeString(kubeconfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to decode kubeconfig")
-	}
-
-	c.kubeconfig = string(kubeconfigContent)
-
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigContent)
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(c.kubeconfig))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create REST config")
 	}
@@ -109,21 +118,21 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 	// generate install objects
 	c.installObjects = append(c.installObjects, generateInstallNs(cluster))
 
-	imagePullSecret, err := generateImagePullSecret(cluster, imageRegistry)
+	imagePullSecret, err := c.generateImagePullSecret()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate image pull secret")
 	}
 
 	c.installObjects = append(c.installObjects, imagePullSecret)
 
-	vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment, err := generateVMAgent(cluster, imageRegistry, metricsRemoteWriteURL)
+	vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment, err := c.generateVMAgent(metricsRemoteWriteURL)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate vm agent")
 	}
 
 	c.installObjects = append(c.installObjects, vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment)
 
-	kuberayCluster, err := generateKubeRayCluster(cluster, imageRegistry)
+	kuberayCluster, err := c.generateKubeRayCluster()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate kuberay cluster")
 	}
@@ -137,12 +146,7 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 }
 
 func (c *kubeRayClusterManager) Sync(ctx context.Context) error {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
-	if err != nil {
-		return errors.Wrap(err, "failed to check cluster image")
-	}
-
-	_, err = c.UpCluster(ctx, false)
+	_, err := c.UpCluster(ctx, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to sync cluster")
 	}
@@ -156,9 +160,19 @@ func (c *kubeRayClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *kubeRayClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to check cluster image")
+	dependencyValidateFuncs := []dependencyValidateFunc{
+		validateImageRegistryFunc(c.imageRegistry),
+	}
+
+	for _, dependcyImage := range c.dependencyImages {
+		dependencyValidateFuncs = append(dependencyValidateFuncs, validateClusterImageFunc(c.imageService, c.imageRegistry.Spec.AuthConfig, dependcyImage))
+	}
+
+	for _, validateFunc := range dependencyValidateFuncs {
+		err := validateFunc()
+		if err != nil {
+			return "", errors.Wrap(err, "failed to validate dependency")
+		}
 	}
 
 	for _, object := range c.installObjects {
@@ -430,40 +444,37 @@ func (c *kubeRayClusterManager) syncMetricsConfig(ctx context.Context) error {
 	return nil
 }
 
-func getKubeconfig(cluster *v1.Cluster) (string, error) {
-	config := &v1.RayKubernetesProvisionClusterConfig{}
-
-	configContent, err := json.Marshal(cluster.Spec.Config)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to marshal kubernetes provision cluster config")
+func (c *kubeRayClusterManager) getKubeconfig() (string, error) {
+	if c.config.Kubeconfig == "" {
+		return "", errors.New("kubeconfig is required")
 	}
 
-	err = json.Unmarshal(configContent, config)
+	kubeconfigContent, err := base64.StdEncoding.DecodeString(c.config.Kubeconfig)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to unmarshal kubernetes provision cluster config")
+		return "", errors.Wrap(err, "failed to decode kubeconfig")
 	}
 
-	return config.Kubeconfig, nil
+	return string(kubeconfigContent), nil
 }
 
-func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) (*corev1.Secret, error) {
-	registryURL, err := url.Parse(imageRegistry.Spec.URL)
+func (c *kubeRayClusterManager) generateImagePullSecret() (*corev1.Secret, error) {
+	registryURL, err := url.Parse(c.imageRegistry.Spec.URL)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse image registry url: %s", imageRegistry.Spec.URL)
+		return nil, errors.Wrapf(err, "failed to parse image registry url: %s", c.imageRegistry.Spec.URL)
 	}
 
 	var password string
 
 	switch {
-	case imageRegistry.Spec.AuthConfig.Password != "":
-		password = imageRegistry.Spec.AuthConfig.Password
-	case imageRegistry.Spec.AuthConfig.IdentityToken != "":
-		password = imageRegistry.Spec.AuthConfig.IdentityToken
-	case imageRegistry.Spec.AuthConfig.RegistryToken != "":
-		password = imageRegistry.Spec.AuthConfig.RegistryToken
+	case c.imageRegistry.Spec.AuthConfig.Password != "":
+		password = c.imageRegistry.Spec.AuthConfig.Password
+	case c.imageRegistry.Spec.AuthConfig.IdentityToken != "":
+		password = c.imageRegistry.Spec.AuthConfig.IdentityToken
+	case c.imageRegistry.Spec.AuthConfig.RegistryToken != "":
+		password = c.imageRegistry.Spec.AuthConfig.RegistryToken
 	}
 
-	userName := removeEscapes(imageRegistry.Spec.AuthConfig.Username)
+	userName := removeEscapes(c.imageRegistry.Spec.AuthConfig.Username)
 	password = removeEscapes(password)
 	auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s",
 		userName,
@@ -488,8 +499,8 @@ func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "neutree-cluster-" + cluster.Metadata.Name + "-image-pull-secret",
-			Namespace: Namespace(cluster),
+			Name:      "neutree-cluster-" + c.cluster.Metadata.Name + "-image-pull-secret",
+			Namespace: Namespace(c.cluster),
 		},
 		Type: corev1.SecretTypeDockerConfigJson,
 		Data: map[string][]byte{
@@ -498,14 +509,14 @@ func generateImagePullSecret(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 	}, nil
 }
 
-func generateVMAgent(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, //nolint:funlen
-	metricsRemoteWriteURL string) (*corev1.ConfigMap, *corev1.ConfigMap, *appsv1.Deployment, error) {
-	registryURL, err := url.Parse(imageRegistry.Spec.URL)
+func (c *kubeRayClusterManager) generateVMAgent(metricsRemoteWriteURL string) (*corev1.ConfigMap, *corev1.ConfigMap, *appsv1.Deployment, error) {
+	registryURL, err := url.Parse(c.imageRegistry.Spec.URL)
 	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
+		return nil, nil, nil, errors.Wrap(err, "failed to parse image registry url "+c.imageRegistry.Spec.URL)
 	}
 
-	vmAgentImage := registryURL.Host + "/" + imageRegistry.Spec.Repository + "/victoriametrics/vmagent:" + constants.VictoriaMetricsVersion
+	vmAgentImage := registryURL.Host + "/" + c.imageRegistry.Spec.Repository + "/victoriametrics/vmagent:" + constants.VictoriaMetricsVersion
+	c.dependencyImages = append(c.dependencyImages, vmAgentImage)
 	vmAgentConfigMap := &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ConfigMap",
@@ -513,7 +524,7 @@ func generateVMAgent(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, //nol
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vmagent-config",
-			Namespace: Namespace(cluster),
+			Namespace: Namespace(c.cluster),
 		},
 		Data: map[string]string{
 			"prometheus.yml": `global:
@@ -534,7 +545,7 @@ scrape_configs:
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vmagent-scrape-config",
-			Namespace: Namespace(cluster),
+			Namespace: Namespace(c.cluster),
 			Annotations: map[string]string{
 				ResourceSkipPatchAnnotation: "true",
 			},
@@ -547,7 +558,7 @@ scrape_configs:
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vmagent",
-			Namespace: Namespace(cluster),
+			Namespace: Namespace(c.cluster),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
@@ -564,7 +575,7 @@ scrape_configs:
 				Spec: corev1.PodSpec{
 					ImagePullSecrets: []corev1.LocalObjectReference{
 						{
-							Name: "neutree-cluster-" + cluster.Metadata.Name + "-image-pull-secret",
+							Name: "neutree-cluster-" + c.cluster.Metadata.Name + "-image-pull-secret",
 						},
 					},
 					Containers: []corev1.Container{
@@ -628,23 +639,13 @@ scrape_configs:
 	return vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment, nil
 }
 
-func generateKubeRayCluster(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) (*rayv1.RayCluster, error) {
-	config := &v1.RayKubernetesProvisionClusterConfig{}
-
-	configContent, err := json.Marshal(cluster.Spec.Config)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal kubernetes provision cluster config")
-	}
-
-	err = json.Unmarshal(configContent, config)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal kubernetes provision cluster config")
-	}
-
-	clusterImage, err := getClusterImage(cluster, imageRegistry)
+func (c *kubeRayClusterManager) generateKubeRayCluster() (*rayv1.RayCluster, error) {
+	clusterImage, err := getBaseImage(c.cluster, c.imageRegistry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get cluster image")
 	}
+
+	c.dependencyImages = append(c.dependencyImages, clusterImage)
 
 	rayCluster := &rayv1.RayCluster{
 		TypeMeta: metav1.TypeMeta{
@@ -652,8 +653,8 @@ func generateKubeRayCluster(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry
 			APIVersion: rayv1.GroupVersion.String(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      cluster.Metadata.Name,
-			Namespace: Namespace(cluster),
+			Name:      c.cluster.Metadata.Name,
+			Namespace: Namespace(c.cluster),
 		},
 		Spec: rayv1.RayClusterSpec{
 			EnableInTreeAutoscaling: pointy.Bool(true),
@@ -663,25 +664,36 @@ func generateKubeRayCluster(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry
 		},
 	}
 
-	rayCluster.Spec.HeadGroupSpec = rayv1.HeadGroupSpec{
-		RayStartParams: map[string]string{},
-		Template:       buildHeadPodTemplateSpec(config.HeadNodeSpec, cluster.Metadata.Name, clusterImage, cluster.Spec.Version),
+	headPodTemplate, err := c.buildHeadPodTemplateSpec()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build head pod template spec")
 	}
 
-	if config.HeadNodeSpec.AccessMode == v1.KubernetesAccessModeLoadBalancer {
+	rayCluster.Spec.HeadGroupSpec = rayv1.HeadGroupSpec{
+		RayStartParams: map[string]string{},
+		Template:       headPodTemplate,
+	}
+
+	if c.config.HeadNodeSpec.AccessMode == v1.KubernetesAccessModeLoadBalancer {
 		rayCluster.Spec.HeadGroupSpec.ServiceType = corev1.ServiceTypeLoadBalancer
 	} else {
 		return nil, errors.New("unsupported access mode")
 	}
 
 	var workGroupSpecs []rayv1.WorkerGroupSpec
-	for _, workerGroup := range config.WorkerGroupSpecs {
+
+	for _, workerGroup := range c.config.WorkerGroupSpecs {
+		workerGroupPodTemplate, err := c.buildWorkerPodTemplateSpec(workerGroup)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to build worker pod template spec")
+		}
+
 		workGroupSpecs = append(workGroupSpecs, rayv1.WorkerGroupSpec{
 			GroupName:      workerGroup.GroupName,
 			MinReplicas:    &workerGroup.MinReplicas,
 			MaxReplicas:    &workerGroup.MaxReplicas,
 			RayStartParams: map[string]string{},
-			Template:       buildWorkerPodTemplateSpec(workerGroup, cluster.Metadata.Name, clusterImage, cluster.Spec.Version),
+			Template:       workerGroupPodTemplate,
 		})
 	}
 
@@ -690,19 +702,27 @@ func generateKubeRayCluster(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry
 	return rayCluster, nil
 }
 
-func buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec, clusterName string, clusterImage string, clusterVersion string) corev1.PodTemplateSpec {
-	needNvidiaGPU := false
-
+func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec) (corev1.PodTemplateSpec, error) {
 	resourceList := corev1.ResourceList{}
 	for k, v := range spec.Resources {
 		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
-
-		if k == nvidiaGPUResourceName && v != "0" {
-			needNvidiaGPU = true
-		}
 	}
 
-	workerStartRayCommands := fmt.Sprintf(`python /home/ray/start.py %s --block --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+	image, err := getBaseImage(c.cluster, c.imageRegistry)
+	if err != nil {
+		return corev1.PodTemplateSpec{}, errors.Wrap(err, "failed to get cluster image")
+	}
+
+	acceleratorType := c.getAcceleratorType(spec.Resources)
+	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+		image = image + "-" + suffix
+		c.dependencyImages = append(c.dependencyImages, image)
+	}
+
+	clusterName := c.cluster.Metadata.Name
+	clusterVersion := c.cluster.Spec.Version
+	workerStartRayCommands := fmt.Sprintf(`python /home/ray/start.py --address=%s:6379`+
+		` --block --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 		getHeadSvcName(clusterName), v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, clusterVersion)
 
 	podTemplate := corev1.PodTemplateSpec{
@@ -724,13 +744,19 @@ func buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec, clusterName string, clu
 				{
 					Name:            "ray-container",
 					ImagePullPolicy: corev1.PullIfNotPresent,
-					Image:           clusterImage,
+					Image:           image,
+					Env: []corev1.EnvVar{
+						{
+							Name:  "RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper",
+							Value: "true",
+						},
+					},
 					Resources: corev1.ResourceRequirements{
 						Requests: resourceList,
 						Limits:   resourceList,
 					},
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: pointy.Bool(true),
+						// Privileged: pointy.Bool(true),
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
 								"SYS_ADMIN",
@@ -752,30 +778,61 @@ func buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec, clusterName string, clu
 		},
 	}
 
-	if !needNvidiaGPU {
+	if acceleratorType != NvdiaAcceleratorType {
 		podTemplate.Spec.Containers[0].Env = append(podTemplate.Spec.Containers[0].Env, corev1.EnvVar{
 			Name:  "NVIDIA_VISIBLE_DEVICES",
 			Value: "void",
 		})
 	}
 
-	return podTemplate
+	if (acceleratorType != Ascend310PAcceleratorType) && (acceleratorType != Ascend910BAcceleratorType) {
+		podTemplate.Spec.Containers[0].Env = append(podTemplate.Spec.Containers[0].Env, corev1.EnvVar{
+			Name:  "ASCEND_VISIBLE_DEVICES",
+			Value: "void",
+		})
+	}
+
+	return podTemplate, nil
 }
 
-func buildHeadPodTemplateSpec(spec v1.HeadNodeSpec, clusterName string, clusterImage string, clusterVersion string) corev1.PodTemplateSpec {
-	needNvidiaGPU := false
-
-	resourceList := corev1.ResourceList{}
-	for k, v := range spec.Resources {
-		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
-
+func (c *kubeRayClusterManager) getAcceleratorType(resources map[string]string) string {
+	for k, v := range resources {
 		if k == nvidiaGPUResourceName && v != "0" {
-			needNvidiaGPU = true
+			return NvdiaAcceleratorType
+		}
+
+		if k == asend310PResourceName && v != "0" {
+			return Ascend310PAcceleratorType
+		}
+
+		if k == asend910BResourceName && v != "0" {
+			return Ascend910BAcceleratorType
 		}
 	}
 
-	headStartCommand := fmt.Sprintf(`ray start --num-cpus=0 --disable-usage-stats --head --block --metrics-export-port=%d --port=6379 --object-manager-port=8076 --no-monitor --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
-		v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, clusterVersion)
+	return ""
+}
+
+func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() (corev1.PodTemplateSpec, error) {
+	acceleratorType := c.getAcceleratorType(c.config.HeadNodeSpec.Resources)
+
+	resourceList := corev1.ResourceList{}
+	for k, v := range c.config.HeadNodeSpec.Resources {
+		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
+	}
+
+	image, err := getBaseImage(c.cluster, c.imageRegistry)
+	if err != nil {
+		return corev1.PodTemplateSpec{}, errors.Wrap(err, "failed to get cluster image")
+	}
+
+	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+		image = image + "-" + suffix
+		c.dependencyImages = append(c.dependencyImages, image)
+	}
+
+	headStartCommand := fmt.Sprintf(`python /home/ray/start.py --head --port=6379 --num-cpus=0 --disable-usage-stats --block --metrics-export-port=%d --no-monitor --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+		v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, c.cluster.Spec.Version)
 
 	podTemplate := corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
@@ -787,20 +844,26 @@ func buildHeadPodTemplateSpec(spec v1.HeadNodeSpec, clusterName string, clusterI
 		Spec: corev1.PodSpec{
 			ImagePullSecrets: []corev1.LocalObjectReference{
 				{
-					Name: "neutree-cluster-" + clusterName + "-image-pull-secret",
+					Name: "neutree-cluster-" + c.cluster.Metadata.Name + "-image-pull-secret",
 				},
 			},
 			Containers: []corev1.Container{
 				{
 					Name:            "ray-container",
 					ImagePullPolicy: corev1.PullIfNotPresent,
-					Image:           clusterImage,
+					Image:           image,
+					Env: []corev1.EnvVar{
+						{
+							Name:  "RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper",
+							Value: "true",
+						},
+					},
 					Resources: corev1.ResourceRequirements{
 						Requests: resourceList,
 						Limits:   resourceList,
 					},
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: pointy.Bool(true),
+						// Privileged: pointy.Bool(true),
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
 								"SYS_ADMIN",
@@ -842,14 +905,21 @@ func buildHeadPodTemplateSpec(spec v1.HeadNodeSpec, clusterName string, clusterI
 		},
 	}
 
-	if !needNvidiaGPU {
+	if acceleratorType != NvdiaAcceleratorType {
 		podTemplate.Spec.Containers[0].Env = append(podTemplate.Spec.Containers[0].Env, corev1.EnvVar{
 			Name:  "NVIDIA_VISIBLE_DEVICES",
 			Value: "void",
 		})
 	}
 
-	return podTemplate
+	if (acceleratorType != Ascend310PAcceleratorType) && (acceleratorType != Ascend910BAcceleratorType) {
+		podTemplate.Spec.Containers[0].Env = append(podTemplate.Spec.Containers[0].Env, corev1.EnvVar{
+			Name:  "ASCEND_VISIBLE_DEVICES",
+			Value: "void",
+		})
+	}
+
+	return podTemplate, nil
 }
 
 func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {

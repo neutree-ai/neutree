@@ -2,6 +2,32 @@
 import subprocess
 import json
 import sys
+import os
+
+def get_ascend_npu_names():
+    """
+    Call npu-smi to retrieve the names of all NPU devices.
+    """
+    try:
+        output = subprocess.check_output(
+            ["npu-smi", "info", "-m"],
+            encoding="utf-8"
+        )
+        npu_names = []
+        for index, line in enumerate(output.strip().splitlines()):
+            if index == 0:
+                continue
+            if len(line.split()) != 5:
+                continue
+            npu_id,chip_id,chip_logic_id,chip_type,chip_name = line.split()
+            npu_names.append(chip_type+chip_name)
+        return npu_names
+    except subprocess.CalledProcessError as e:
+        print("Error calling npu-smi:", e)
+        return []
+    except FileNotFoundError:
+        print("npu-smi not found, please ensure that the Ascend drivers are installed")
+        return []    
 
 def get_gpu_names():
     """
@@ -56,21 +82,26 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: {} <ray_head_ip> [additional ray start arguments]".format(sys.argv[0]))
         sys.exit(1)
-        
-    ray_head_ip = sys.argv[1]
-    additional_args = sys.argv[2:]
 
+    additional_args = sys.argv[1:]
+
+    accelerator_counts = {}
     # Retrieve GPU names and accelerator counts
     gpu_names = get_gpu_names()
     accelerator_counts = count_nvidia_accelerators(gpu_names)
 
+    npu_names = get_ascend_npu_names()
+    for npu_name in npu_names:
+        if "HUAWEI_"+npu_name not in accelerator_counts:
+            accelerator_counts["HUAWEI_"+npu_name] = 1
+        else:
+            accelerator_counts["HUAWEI_"+npu_name] += 1
     # Convert the accelerator counts to a JSON string for the --resources parameter
     resources_param = json.dumps(accelerator_counts)
 
     # Construct the ray start command with the head address and default parameters
     cmd = [
         "ray", "start",
-        f"--address={ray_head_ip}:6379",
         "--object-manager-port=8076",
         "--resources", resources_param
     ]

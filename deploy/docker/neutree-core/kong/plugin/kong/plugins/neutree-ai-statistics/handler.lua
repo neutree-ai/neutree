@@ -103,7 +103,7 @@ end
 
 function AIStatisticsPluginHandler:access(conf)
     local request_path = kong.request.get_path()
-    -- skip not match route_type
+    -- skip request not match route_type
     if not string.match(request_path, conf.route_type.."$") then
         kong.ctx.plugin.skip = true
         return
