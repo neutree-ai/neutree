@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -189,4 +190,172 @@ func TestModelCatalogController_Start(t *testing.T) {
 	assert.NotPanics(t, func() {
 		controller.Start(ctx)
 	})
+}
+
+func TestModelCatalogController_sync_Delete(t *testing.T) {
+	testModelCatalog := func() *v1.ModelCatalog {
+		return &v1.ModelCatalog{
+			ID: 1,
+			Metadata: &v1.Metadata{
+				Name:              "test-catalog",
+				Workspace:         "default",
+				DeletionTimestamp: time.Now().Format(time.RFC3339),
+			},
+			Status: &v1.ModelCatalogStatus{Phase: v1.ModelCatalogPhaseDELETED},
+		}
+	}
+
+	tests := []struct {
+		name      string
+		input     *v1.ModelCatalog
+		mockSetup func(*v1.ModelCatalog, *storageMocks.MockStorage)
+		wantErr   bool
+	}{
+		{
+			name:  "Deleted -> Deleted (storage delete success)",
+			input: testModelCatalog(),
+			mockSetup: func(input *v1.ModelCatalog, s *storageMocks.MockStorage) {
+				s.On("DeleteModelCatalog", "1").Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			name:  "Deleted -> Deleted (storage delete failed)",
+			input: testModelCatalog(),
+			mockSetup: func(input *v1.ModelCatalog, s *storageMocks.MockStorage) {
+				s.On("DeleteModelCatalog", "1").Return(errors.New("storage error"))
+			},
+			wantErr: true,
+		},
+		{
+			name: "Ready -> Deleting",
+			input: &v1.ModelCatalog{
+				ID: 1,
+				Metadata: &v1.Metadata{
+					Name:              "test-catalog",
+					Workspace:         "default",
+					DeletionTimestamp: time.Now().Format(time.RFC3339),
+				},
+				Status: &v1.ModelCatalogStatus{Phase: v1.ModelCatalogPhaseREADY},
+			},
+			mockSetup: func(input *v1.ModelCatalog, s *storageMocks.MockStorage) {
+				s.On("UpdateModelCatalog", "1", mock.MatchedBy(func(mc *v1.ModelCatalog) bool {
+					return mc.Status.Phase == v1.ModelCatalogPhaseDELETED
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Failed -> Deleted (already failed, should delete from DB)",
+			input: &v1.ModelCatalog{
+				ID: 1,
+				Metadata: &v1.Metadata{
+					Name:              "test-catalog",
+					Workspace:         "default",
+					DeletionTimestamp: time.Now().Format(time.RFC3339),
+				},
+				Status: &v1.ModelCatalogStatus{Phase: v1.ModelCatalogPhaseFAILED},
+			},
+			mockSetup: func(input *v1.ModelCatalog, s *storageMocks.MockStorage) {
+				s.On("DeleteModelCatalog", "1").Return(nil)
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storageMocks.MockStorage{}
+			tt.mockSetup(tt.input, mockStorage)
+
+			controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
+				Storage: mockStorage,
+				Workers: 1,
+			})
+
+			err := controller.sync(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
+func TestModelCatalogController_updateStatus(t *testing.T) {
+	mockStorage := &storageMocks.MockStorage{}
+	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
+		Storage: mockStorage,
+		Workers: 1,
+	})
+
+	modelCatalog := &v1.ModelCatalog{
+		ID: 1,
+		Metadata: &v1.Metadata{
+			Name:      "test-catalog",
+			Workspace: "default",
+		},
+	}
+
+	tests := []struct {
+		name        string
+		phase       v1.ModelCatalogPhase
+		inputError  error
+		mockSetup   func(*storageMocks.MockStorage)
+		wantErr     bool
+		wantMessage string
+	}{
+		{
+			name:  "Update to DELETED phase with no error",
+			phase: v1.ModelCatalogPhaseDELETED,
+			mockSetup: func(s *storageMocks.MockStorage) {
+				s.On("UpdateModelCatalog", "1", mock.MatchedBy(func(mc *v1.ModelCatalog) bool {
+					return mc.Status.Phase == v1.ModelCatalogPhaseDELETED &&
+						mc.Status.ErrorMessage == "" &&
+						mc.Status.LastTransitionTime != ""
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			name:       "Update to FAILED phase with error",
+			phase:      v1.ModelCatalogPhaseFAILED,
+			inputError: errors.New("test error"),
+			mockSetup: func(s *storageMocks.MockStorage) {
+				s.On("UpdateModelCatalog", "1", mock.MatchedBy(func(mc *v1.ModelCatalog) bool {
+					return mc.Status.Phase == v1.ModelCatalogPhaseFAILED &&
+						mc.Status.ErrorMessage == "test error" &&
+						mc.Status.LastTransitionTime != ""
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			name:  "Storage update fails",
+			phase: v1.ModelCatalogPhaseDELETED,
+			mockSetup: func(s *storageMocks.MockStorage) {
+				s.On("UpdateModelCatalog", "1", mock.Anything).Return(errors.New("storage error"))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storageMocks.MockStorage{}
+			tt.mockSetup(mockStorage)
+
+			controller.storage = mockStorage
+
+			err := controller.updateStatus(modelCatalog, tt.phase, tt.inputError)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			mockStorage.AssertExpectations(t)
+		})
+	}
 }

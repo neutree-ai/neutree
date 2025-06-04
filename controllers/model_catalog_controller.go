@@ -81,6 +81,29 @@ func (c *ModelCatalogController) Reconcile(key interface{}) error {
 func (c *ModelCatalogController) sync(modelCatalog *v1.ModelCatalog) error {
 	klog.V(4).Infof("Syncing model catalog %s/%s", modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name)
 
+	// Handle deletion
+	if modelCatalog.Metadata != nil && modelCatalog.Metadata.DeletionTimestamp != "" {
+		if modelCatalog.Status != nil && (modelCatalog.Status.Phase == v1.ModelCatalogPhaseDELETED || modelCatalog.Status.Phase == v1.ModelCatalogPhaseFAILED) {
+			klog.Infof("Model catalog %s already marked as deleted, removing from DB", modelCatalog.Metadata.Name)
+
+			err := c.storage.DeleteModelCatalog(strconv.Itoa(modelCatalog.ID))
+			if err != nil {
+				return errors.Wrapf(err, "failed to delete model catalog in DB %s", modelCatalog.Metadata.Name)
+			}
+
+			return nil
+		}
+
+		klog.Info("Deleting model catalog " + modelCatalog.Metadata.Name)
+		// Update status to DELETED
+		err := c.updateStatus(modelCatalog, v1.ModelCatalogPhaseDELETED, nil)
+		if err != nil {
+			return errors.Wrapf(err, "failed to update model catalog %s status to DELETED", modelCatalog.Metadata.Name)
+		}
+
+		return nil
+	}
+
 	// Set default values if not provided
 	if modelCatalog.APIVersion == "" {
 		modelCatalog.APIVersion = "v1"
@@ -179,4 +202,18 @@ func (c *ModelCatalogController) processFailedModelCatalog(modelCatalog *v1.Mode
 // Helper function to create int pointer
 func intPtr(i int) *int {
 	return &i
+}
+
+func (c *ModelCatalogController) updateStatus(obj *v1.ModelCatalog, phase v1.ModelCatalogPhase, err error) error {
+	newStatus := &v1.ModelCatalogStatus{
+		LastTransitionTime: time.Now().Format(time.RFC3339),
+		Phase:              phase,
+	}
+	if err != nil {
+		newStatus.ErrorMessage = err.Error()
+	} else {
+		newStatus.ErrorMessage = ""
+	}
+
+	return c.storage.UpdateModelCatalog(strconv.Itoa(obj.ID), &v1.ModelCatalog{Status: newStatus})
 }
