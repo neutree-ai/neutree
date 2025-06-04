@@ -1,4 +1,5 @@
-FROM rayproject/ray:2.43.0-py312-cu121
+ARG RAY_BASE_IMAGE
+FROM ${RAY_BASE_IMAGE}
 
 # Install NFS dependencies
 USER root

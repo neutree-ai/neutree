@@ -237,9 +237,36 @@ func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error 
 		},
 	}
 
+	mindieV1Engine := &v1.Engine{
+		APIVersion: "v1",
+		Kind:       "Engine",
+		Metadata: &v1.Metadata{
+			Name:      "mindie",
+			Workspace: workspace.Metadata.Name,
+		},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{
+				{
+					Version: "v1",
+					ValuesSchema: map[string]interface{}{
+						"$schema": "http://json-schema.org/draft-07/schema#",
+						"type":    "object",
+						"properties": map[string]interface{}{
+							"dtype": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+				},
+			},
+			SupportedTasks: []string{v1.TextGenerationModelTask},
+		},
+	}
+
 	engines := []*v1.Engine{
 		llamaCppV1Engine,
 		vllmV1Engine,
+		mindieV1Engine,
 	}
 
 	for _, engine := range engines {
