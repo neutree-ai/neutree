@@ -5,11 +5,14 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  type: {{ .Values.api.service.type }}
+  type: {{ .Values.api.service.type | default "ClusterIP" }}
   ports:
     - port: 3000
       targetPort: http
       protocol: TCP
       name: http
+      {{- if eq .Values.api.service.type "NodePort" }}
+      nodePort: {{ .Values.api.service.nodePort }}
+      {{- end }}
   selector:
     app.kubernetes.io/component: neutree-api
