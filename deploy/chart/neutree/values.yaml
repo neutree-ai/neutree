@@ -21,7 +21,6 @@ dbScripts:
     tag: ""
     pullPolicy: IfNotPresent
 
-
 db:
   image:
     repository: postgres
@@ -40,7 +39,7 @@ db:
   persistence:
     enabled: true
     size: 40Gi
-    accessModes: 
+    accessModes:
       - ReadWriteOnce
   service:
     type: ClusterIP
@@ -61,7 +60,7 @@ auth:
   tolerations: []
   affinity: {}
   service:
-    type: ClusterIP      
+    type: ClusterIP
 
 migration:
   image:
@@ -90,7 +89,7 @@ postgrest:
   affinity: {}
   service:
     type: ClusterIP
-  
+
 postgresmeta:
   image:
     repository: supabase/postgres-meta
@@ -124,7 +123,7 @@ api:
     repository: neutree-ai/neutree-api
     tag: ""
     pullPolicy: IfNotPresent
-  resources: 
+  resources:
     requests:
       cpu: 100m
       memory: 128Mi
@@ -150,7 +149,7 @@ vmagent:
   persistence:
     enabled: true
     size: 1Gi
-    accessModes: 
+    accessModes:
       - ReadWriteOnce
 
 kong:
