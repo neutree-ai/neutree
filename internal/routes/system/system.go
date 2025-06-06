@@ -1,6 +1,7 @@
 package system
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -50,15 +51,15 @@ func handleSystemInfo(deps *Dependencies) gin.HandlerFunc {
 
 // validateAndCleanURL validates and cleans a URL string
 func validateAndCleanURL(rawURL string) (string, error) {
+	// Ensure the URL starts with http:// or https://
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		return "", fmt.Errorf("URL must start with http:// or https://: %s", rawURL)
+	}
+
 	// Parse the URL to validate it
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
 		return "", err
-	}
-
-	// Ensure the URL has a scheme
-	if parsedURL.Scheme == "" {
-		parsedURL.Scheme = "http"
 	}
 
 	// Clean up the URL (remove trailing slashes, etc.)

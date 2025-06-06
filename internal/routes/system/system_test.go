@@ -101,6 +101,26 @@ func TestHandleSystemInfo_WithInvalidURL(t *testing.T) {
 	assert.Empty(t, response.GrafanaURL)
 }
 
+// TestHandleSystemInfo_WithURLWithoutScheme tests handling of URLs without scheme
+func TestHandleSystemInfo_WithURLWithoutScheme(t *testing.T) {
+	deps := &Dependencies{
+		GrafanaURL: "example.com:3030",
+	}
+
+	c, w := createTestContext("GET", "/api/v1/system/info")
+
+	handler := handleSystemInfo(deps)
+	handler(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response SystemInfo
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	// URL without scheme should be omitted
+	assert.Empty(t, response.GrafanaURL)
+}
+
 // TestValidateAndCleanURL tests the URL validation and cleaning function
 func TestValidateAndCleanURL(t *testing.T) {
 	tests := []struct {
@@ -124,12 +144,6 @@ func TestValidateAndCleanURL(t *testing.T) {
 		{
 			name:     "URL with trailing slash",
 			input:    "http://example.com:3030/",
-			expected: "http://example.com:3030",
-			hasError: false,
-		},
-		{
-			name:     "URL without scheme",
-			input:    "example.com:3030",
 			expected: "http://example.com:3030",
 			hasError: false,
 		},
