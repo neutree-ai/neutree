@@ -12,6 +12,7 @@ import (
 
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
+	"github.com/neutree-ai/neutree/internal/routes/system"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -23,6 +24,7 @@ var (
 	ginMode          = flag.String("gin-mode", "release", "gin mode: debug, release, test")
 	staticDir        = flag.String("static-dir", "./public", "directory for static files")
 	authEndpoint     = flag.String("auth-endpoint", "http://auth:9999", "auth service endpoint")
+	grafanaURL       = flag.String("grafana-url", "", "grafana url for system info API")
 )
 
 func main() {
@@ -66,6 +68,10 @@ func main() {
 		StorageAccessURL: *storageAccessURL,
 		ServiceToken:     *serviceToken,
 		AuthEndpoint:     *authEndpoint,
+	})
+
+	system.RegisterRoutes(r, &system.Dependencies{
+		GrafanaURL: *grafanaURL,
 	})
 
 	serverAddr := fmt.Sprintf("%s:%d", *host, *port)
