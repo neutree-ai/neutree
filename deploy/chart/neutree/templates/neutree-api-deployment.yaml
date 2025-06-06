@@ -28,6 +28,9 @@ spec:
             - --static-dir=./public
             - --gin-mode=release
             - --auth-endpoint=http://{{ include "neutree.fullname" . }}-auth-service:9999
+            {{- if .Values.system.grafana.url }}
+            - --grafana-url={{ .Values.system.grafana.url }}
+            {{- end }}
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:
