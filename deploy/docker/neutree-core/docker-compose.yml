@@ -175,6 +175,7 @@ services:
       - --static-dir=./public
       - --gin-mode=release
       - --auth-endpoint=http://auth:9999
+      - --grafana-url={{.GrafanaURL}}
     ports:
       - 3000:3000
     networks:

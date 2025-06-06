@@ -21,6 +21,7 @@ type neutreeCoreInstallOptions struct {
 
 	jwtSecret             string
 	metricsRemoteWriteURL string
+	grafanaURL            string
 	version               string
 }
 
@@ -42,6 +43,7 @@ Components Included:
 Configuration Options:
   --jwt-secret             JWT secret for authentication
   --metrics-remote-write-url Remote metrics storage URL
+  --grafana-url            Grafana dashboard URL for system info API
   --version                Component version (default: v0.0.1)
 
 Examples:
@@ -51,8 +53,8 @@ Examples:
   # Custom version installation
   neutree-cli launch neutree-core --version v1.2.0
   
-  # With remote metrics storage
-  neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com`,
+  # With remote metrics storage and Grafana
+  neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com --grafana-url http://grafana.example.com:3030`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// set default node ip
 			if options.nodeIP == "" {
@@ -68,6 +70,7 @@ Examples:
 
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.jwtSecret, "jwt-secret", "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp", "neutree core jwt secret")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", "v0.0.1", "neutree core version")
 
 	return neutreeCoreInstallCmd
@@ -161,6 +164,7 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		"NeutreeCoreWorkDir":     coreWorkDir,
 		"JwtSecret":              options.jwtSecret,
 		"MetricsRemoteWriteURL":  options.metricsRemoteWriteURL,
+		"GrafanaURL":             options.grafanaURL,
 		"VictoriaMetricsVersion": constants.VictoriaMetricsVersion,
 		"NeutreeCoreVersion":     options.version,
 		"NeutreeAPIVersion":      options.version,

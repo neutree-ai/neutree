@@ -5,6 +5,10 @@
 jwtSecret: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
 imagePullSecrets: []
 
+system:
+  grafana:
+    url: ""
+
 metrics:
   enabled: false
   remoteWriteUrl: ""
