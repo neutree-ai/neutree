@@ -1,12 +1,17 @@
+from math import e
 import os
 import enum
 import logging
 import subprocess
+import atexit
+import multiprocessing
+import sys
 import asyncio
 import time
 import json
 from typing import Dict, Optional, Any, AsyncGenerator, List
 from pathlib import Path
+import requests
 
 from fastapi import FastAPI, Request
 from starlette.responses import StreamingResponse, JSONResponse
@@ -15,7 +20,7 @@ from starlette_context.plugins import RequestIdPlugin
 from starlette_context.middleware import RawContextMiddleware
 from fastapi.middleware import Middleware
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 from huggingface_hub import snapshot_download
 
 import bentoml
@@ -142,51 +147,77 @@ class Backend:
         self.mindie_service_path = install_path
         self.mindie_service_bin_path = install_path.joinpath("bin", "mindieservice_daemon")
         self.openai_client = None
+        self.service_ready = False
+        self.management_url = "http://127.0.0.1:1026"
         print(os.environ)
+        self.proc = multiprocessing.Process(target=self.run_mindie_service)
+        self.proc.start()
+        # Register the process to be terminated when the application exits
+        atexit.register(self.proc.terminate)
+        self._ensure_mindie_service()
 
-    async def _ensure_mindie_service(self):
+    def _ensure_mindie_service(self):
         ""
         if self.openai_client is None:
-            await self.run_mindie_service()
-            self.openai_client = OpenAI(
+            self.openai_client = AsyncOpenAI(
                 base_url="http://127.0.0.1:50051/v1",
                 api_key="xxx",
             )
+            while not self.service_ready:
+                self.service_ready = self.is_mindie_service_ready()
+                time.sleep(1)  # Wait for the service to start
+            print("[Backend] MindLE service is ready")
 
-    async def run_mindie_service(self):
+    async def is_mindie_service_ready(self) -> bool:
+        """
+        Check if MindLE inference is ready.
+        """
+        try:
+            response = requests.get(self.management_url+"/v2/health/ready")
+        except Exception as e:
+            print(f"[Backend] Failed to check health: {e}")
+            return False
+
+        return response.status_code == 200
+
+    def run_mindie_service(self):
         """
         Run MindLE inference.
         """
-        proc = await asyncio.create_subprocess_exec(
-            self.mindie_service_bin_path,
-            env=self.mindie_service_env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=self.mindie_service_path,
+        try:
+            proc = subprocess.Popen(
+                self.mindie_service_bin_path,
+                env=self.mindie_service_env,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=self.mindie_service_path,
             # preexec_fn=os.setsid,
             # start_new_session=False,
-        )
+            )
+            self.proc = proc
 
-        print("[Backend] Starting MindLE service, process ID:", proc.pid)
-        asyncio.create_task(self.exit_with_code(proc))
+            print("[Backend] Starting MindLE service, process ID:", proc.pid)
+            exit_code = proc.wait()
+            print(f"[Backend] Process exited with code {exit_code}")
+            self.exit_with_code(exit_code)
+        except Exception as e:
+            print(f"[Backend] Failed to start MindLE service: {e}")
+            raise e
+        
 
-    async def exit_with_code(self,proc):
+    async def exit_with_code(self,exit_code):
         """
         Exit the process with the given code.
         """
-        exit_code = await proc.wait()
-        print(f"[Backend] Process exited with code {exit_code}")
         ray.actor.exit_actor()
 
     async def generate(self, payload: Any):
-        await self._ensure_mindie_service()
-        payload["response_format"] = {"type": "json_object"}
-        print(payload)
-        response =  self.openai_client.chat.responses.create(**payload)
-        print(response)
-        print(response.choices[0].message.content)
-        # print(json.load(response.choices[0].message.content))
-        return response
+        response =  await self.openai_client.chat.completions.create(**payload)
+        stream = payload.get("stream", False)
+        if not stream:
+            return response
+        else:
+            return response.__aiter__()
 
     async def show_available_models(self) -> Dict[str, Any]:
         """Return a list of available models"""
@@ -271,7 +302,7 @@ class Controller:
             
             async def event_generator():
                 async for chunk in r:
-                    yield f"data: {json.dumps(chunk)}\n\n"
+                    yield f"data: {chunk.to_json()}\n\n"
                 yield "data: [DONE]\n\n"
             
             return StreamingResponse(
@@ -281,7 +312,7 @@ class Controller:
         else:
             # Handle non-streaming response
             result = await self.backend.options(stream=False).generate.remote(req_obj)
-            return JSONResponse(content=result)
+            return JSONResponse(content=result.to_json())
 
     @app.get("/v1/models")
     async def models(self, request: Request):
