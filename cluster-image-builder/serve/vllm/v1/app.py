@@ -412,7 +412,8 @@ def app_builder(args: Dict[str, Any]) -> Application:
         num_replicas=backend_options.get('num_replicas', 1),
         ray_actor_options={
             "num_cpus": backend_options.get('num_cpus', 1),
-            "num_gpus": backend_options.get('num_gpus', 1)
+            "num_gpus": backend_options.get('num_gpus', 1),
+            "resources": backend_options.get('resources', {})
         }
     ).bind(
         model_registry_type=model.get('registry_type'),
