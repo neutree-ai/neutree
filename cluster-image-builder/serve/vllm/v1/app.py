@@ -122,10 +122,20 @@ class Backend:
         self.openai_serving_embedding = None
         self.openai_serving_score = None
         self.openai_serving_models = None
-
+        
+        ctx = serve.get_replica_context()
+        labels = {
+            "deployment":  ctx.deployment,
+            "replica":     ctx.replica_tag,
+            "model_name":  self.engine.engine.model_config.served_model_name,
+        }
+        
+        if hasattr(ctx, "app_name"):
+            labels["application"] = ctx.app_name
+        
         stat_logger = RayPrometheusStatLogger(
             local_interval=0.5,
-            labels=dict(model_name=self.engine.engine.model_config.served_model_name),
+            labels=labels,
             vllm_config=self.engine.engine.vllm_config)
         self.engine.add_logger("ray", stat_logger)
 
