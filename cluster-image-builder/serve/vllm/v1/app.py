@@ -133,6 +133,21 @@ class Backend:
         if hasattr(ctx, "app_name"):
             labels["application"] = ctx.app_name
         
+        # Tool calling configuration
+        self.enable_auto_tools = False
+        self.tool_parser = None
+        
+        # Extract tool calling parameters from engine_kwargs
+        if "tool_call_parser" in engine_kwargs:
+            self.tool_parser = engine_kwargs.pop("tool_call_parser")
+            if self.tool_parser:
+                self.enable_auto_tools = True
+        
+        # Extract other chat-specific parameters (keep defaults from vLLM)
+        self.response_role = engine_kwargs.pop("response_role", "assistant")
+        self.enable_prompt_tokens_details = engine_kwargs.pop(
+            "enable_prompt_tokens_details", False)
+
         stat_logger = RayPrometheusStatLogger(
             local_interval=0.5,
             labels=labels,
@@ -158,14 +173,18 @@ class Backend:
         if self.openai_serving_chat is None:
             model_config = await self._ensure_model_config()
             models = await self._ensure_models()
+                
             self.openai_serving_chat = OpenAIServingChat(
                 self.engine,
                 model_config,
                 models,
-                response_role="assistant",
+                response_role=self.response_role,
                 request_logger=None,
                 chat_template=None,
                 chat_template_content_format="auto",
+                enable_auto_tools=self.enable_auto_tools,
+                tool_parser=self.tool_parser,
+                enable_prompt_tokens_details=self.enable_prompt_tokens_details,
             )
         return self.openai_serving_chat
 
