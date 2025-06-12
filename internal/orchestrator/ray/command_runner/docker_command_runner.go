@@ -288,22 +288,6 @@ func (d *DockerCommandRunner) configureRuntime(ctx context.Context, runOptions [
 	return runOptions, nil
 }
 
-func (d *DockerCommandRunner) GetRuntime(ctx context.Context) string {
-	_, err := d.sshCommandRunner.Run(ctx, "nvidia-smi", false, nil, false, nil, "host", "", false)
-	if err == nil {
-		return "nvidia"
-	}
-	npusmiOutput, err := d.sshCommandRunner.Run(ctx, "npu-smi info", false, nil, true, nil, "host", "", false)
-	if err == nil {
-		if strings.Contains(string(npusmiOutput), "910P") {
-			return "asend910p"
-		}
-		return "ascend"
-	}
-
-	return ""
-}
-
 // autoConfigureShm auto - configures the SHM size.
 func (d *DockerCommandRunner) autoConfigureShm(ctx context.Context, runOptions []string) ([]string, error) {
 	for _, opt := range runOptions {

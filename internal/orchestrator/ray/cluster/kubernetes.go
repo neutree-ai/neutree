@@ -62,6 +62,7 @@ type kubeRayClusterManager struct {
 	kubeconfig       string
 	clusterNamespace string
 	installObjects   []client.Object
+	dependencyImages []string
 	ctrClient        client.Client
 }
 
@@ -71,9 +72,10 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 		installObjects:   []client.Object{},
 		clusterNamespace: Namespace(cluster),
 
-		cluster:       cluster,
-		imageRegistry: imageRegistry,
-		imageService:  imageService,
+		cluster:          cluster,
+		imageRegistry:    imageRegistry,
+		imageService:     imageService,
+		dependencyImages: []string{},
 	}
 
 	config := &v1.RayKubernetesProvisionClusterConfig{}
@@ -144,12 +146,7 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 }
 
 func (c *kubeRayClusterManager) Sync(ctx context.Context) error {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry, "")
-	if err != nil {
-		return errors.Wrap(err, "failed to check cluster image")
-	}
-
-	_, err = c.UpCluster(ctx, false)
+	_, err := c.UpCluster(ctx, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to sync cluster")
 	}
@@ -163,9 +160,19 @@ func (c *kubeRayClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *kubeRayClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry, "")
-	if err != nil {
-		return "", errors.Wrap(err, "failed to check cluster image")
+	dependencyValidateFuncs := []dependencyValidateFunc{
+		validateImageRegistryFunc(c.imageRegistry),
+	}
+
+	for _, dependcyImage := range c.dependencyImages {
+		dependencyValidateFuncs = append(dependencyValidateFuncs, validateClusterImageFunc(c.imageService, c.imageRegistry.Spec.AuthConfig, dependcyImage))
+	}
+
+	for _, validateFunc := range dependencyValidateFuncs {
+		err := validateFunc()
+		if err != nil {
+			return "", errors.Wrap(err, "failed to validate dependency")
+		}
 	}
 
 	for _, object := range c.installObjects {
@@ -509,6 +516,7 @@ func (c *kubeRayClusterManager) generateVMAgent(metricsRemoteWriteURL string) (*
 	}
 
 	vmAgentImage := registryURL.Host + "/" + c.imageRegistry.Spec.Repository + "/victoriametrics/vmagent:" + constants.VictoriaMetricsVersion
+	c.dependencyImages = append(c.dependencyImages, vmAgentImage)
 	vmAgentConfigMap := &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ConfigMap",
@@ -632,10 +640,12 @@ scrape_configs:
 }
 
 func (c *kubeRayClusterManager) generateKubeRayCluster() (*rayv1.RayCluster, error) {
-	clusterImage, err := getClusterImage(c.cluster, c.imageRegistry, "")
+	clusterImage, err := getBaseImage(c.cluster, c.imageRegistry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get cluster image")
 	}
+
+	c.dependencyImages = append(c.dependencyImages, clusterImage)
 
 	rayCluster := &rayv1.RayCluster{
 		TypeMeta: metav1.TypeMeta{
@@ -654,9 +664,14 @@ func (c *kubeRayClusterManager) generateKubeRayCluster() (*rayv1.RayCluster, err
 		},
 	}
 
+	headPodTemplate, err := c.buildHeadPodTemplateSpec()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build head pod template spec")
+	}
+
 	rayCluster.Spec.HeadGroupSpec = rayv1.HeadGroupSpec{
 		RayStartParams: map[string]string{},
-		Template:       c.buildHeadPodTemplateSpec(),
+		Template:       headPodTemplate,
 	}
 
 	if c.config.HeadNodeSpec.AccessMode == v1.KubernetesAccessModeLoadBalancer {
@@ -667,12 +682,16 @@ func (c *kubeRayClusterManager) generateKubeRayCluster() (*rayv1.RayCluster, err
 
 	var workGroupSpecs []rayv1.WorkerGroupSpec
 	for _, workerGroup := range c.config.WorkerGroupSpecs {
+		workerGroupPodTemplate, err := c.buildWorkerPodTemplateSpec(workerGroup)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to build worker pod template spec")
+		}
 		workGroupSpecs = append(workGroupSpecs, rayv1.WorkerGroupSpec{
 			GroupName:      workerGroup.GroupName,
 			MinReplicas:    &workerGroup.MinReplicas,
 			MaxReplicas:    &workerGroup.MaxReplicas,
 			RayStartParams: map[string]string{},
-			Template:       c.buildWorkerPodTemplateSpec(workerGroup),
+			Template:       workerGroupPodTemplate,
 		})
 	}
 
@@ -681,35 +700,21 @@ func (c *kubeRayClusterManager) generateKubeRayCluster() (*rayv1.RayCluster, err
 	return rayCluster, nil
 }
 
-func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec) corev1.PodTemplateSpec {
-	needNvidiaGPU := false
-	needAsend310 := false
-	needAsend910 := false
-
+func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec) (corev1.PodTemplateSpec, error) {
 	resourceList := corev1.ResourceList{}
 	for k, v := range spec.Resources {
 		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
-
-		if k == nvidiaGPUResourceName && v != "0" {
-			needNvidiaGPU = true
-		}
-
-		if k == asend310ResourceName && v != "0" {
-			needAsend310 = true
-		}
-
-		if k == asend910ResourceName && v != "0" {
-			needAsend910 = true
-		}
 	}
 
-	clusterImage, _ := getClusterImage(c.cluster, c.imageRegistry, "")
+	image, err := getBaseImage(c.cluster, c.imageRegistry)
+	if err != nil {
+		return corev1.PodTemplateSpec{}, errors.Wrap(err, "failed to get cluster image")
+	}
 
-	if needAsend310 {
-		clusterImage, _ = getClusterImage(c.cluster, c.imageRegistry, "asend")
-
-	} else if needAsend910 {
-		clusterImage, _ = getClusterImage(c.cluster, c.imageRegistry, "asend910p")
+	acceleratorType := c.getAcceleratorType(spec.Resources)
+	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+		image = image + "-" + suffix
+		c.dependencyImages = append(c.dependencyImages, image)
 	}
 
 	clusterName := c.cluster.Metadata.Name
@@ -736,7 +741,13 @@ func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSp
 				{
 					Name:            "ray-container",
 					ImagePullPolicy: corev1.PullIfNotPresent,
-					Image:           clusterImage,
+					Image:           image,
+					Env: []corev1.EnvVar{
+						{
+							Name:  "RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper",
+							Value: "true",
+						},
+					},
 					Resources: corev1.ResourceRequirements{
 						Requests: resourceList,
 						Limits:   resourceList,
@@ -764,45 +775,49 @@ func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSp
 		},
 	}
 
-	if !needNvidiaGPU {
+	if acceleratorType != "gpu" {
 		podTemplate.Spec.Containers[0].Env = append(podTemplate.Spec.Containers[0].Env, corev1.EnvVar{
 			Name:  "NVIDIA_VISIBLE_DEVICES",
 			Value: "void",
 		})
 	}
 
-	return podTemplate
+	return podTemplate, nil
 }
 
-func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() corev1.PodTemplateSpec {
-	needNvidiaGPU := false
-	needAsend310 := false
-	needAsend910 := false
-
-	resourceList := corev1.ResourceList{}
-	for k, v := range c.config.HeadNodeSpec.Resources {
-		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
-
+func (c *kubeRayClusterManager) getAcceleratorType(resources map[string]string) string {
+	for k, v := range resources {
 		if k == nvidiaGPUResourceName && v != "0" {
-			needNvidiaGPU = true
+			return "gpu"
 		}
 
 		if k == asend310ResourceName && v != "0" {
-			needAsend310 = true
+			return "asend310p"
 		}
 
 		if k == asend910ResourceName && v != "0" {
-			needAsend910 = true
+			return "asend910p"
 		}
 	}
 
-	clusterImage, _ := getClusterImage(c.cluster, c.imageRegistry, "")
+	return ""
+}
 
-	if needAsend310 {
-		clusterImage, _ = getClusterImage(c.cluster, c.imageRegistry, "asend")
+func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() (corev1.PodTemplateSpec, error) {
+	acceleratorType := c.getAcceleratorType(c.config.HeadNodeSpec.Resources)
+	resourceList := corev1.ResourceList{}
+	for k, v := range c.config.HeadNodeSpec.Resources {
+		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
+	}
 
-	} else if needAsend910 {
-		clusterImage, _ = getClusterImage(c.cluster, c.imageRegistry, "asend910p")
+	image, err := getBaseImage(c.cluster, c.imageRegistry)
+	if err != nil {
+		return corev1.PodTemplateSpec{}, errors.Wrap(err, "failed to get cluster image")
+	}
+
+	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+		image = image + "-" + suffix
+		c.dependencyImages = append(c.dependencyImages, image)
 	}
 
 	headStartCommand := fmt.Sprintf(`ray start --num-cpus=0 --disable-usage-stats --head --block --metrics-export-port=%d --port=6379 --object-manager-port=8076 --no-monitor --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
@@ -825,7 +840,13 @@ func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() corev1.PodTemplateSpe
 				{
 					Name:            "ray-container",
 					ImagePullPolicy: corev1.PullIfNotPresent,
-					Image:           clusterImage,
+					Image:           image,
+					Env: []corev1.EnvVar{
+						{
+							Name:  "RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper",
+							Value: "true",
+						},
+					},
 					Resources: corev1.ResourceRequirements{
 						Requests: resourceList,
 						Limits:   resourceList,
@@ -873,14 +894,14 @@ func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() corev1.PodTemplateSpe
 		},
 	}
 
-	if !needNvidiaGPU {
+	if acceleratorType != "gpu" {
 		podTemplate.Spec.Containers[0].Env = append(podTemplate.Spec.Containers[0].Env, corev1.EnvVar{
 			Name:  "NVIDIA_VISIBLE_DEVICES",
 			Value: "void",
 		})
 	}
 
-	return podTemplate
+	return podTemplate, nil
 }
 
 func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {

@@ -3,6 +3,34 @@ import subprocess
 import json
 import sys
 
+def get_npu_names():
+    """
+    Call npu-smi to retrieve the names of all NPU devices.
+    """
+    try:
+        output = subprocess.check_output(
+            ["npu-smi", "info", "-m"],
+            encoding="utf-8"
+        )
+        npu_names = []
+        for index, line in enumerate(output.strip().splitlines()):
+            if index == 0:
+                continue
+            npu_id,chip_id,chip_logic_id,chip_type,chip_name = line[index].split()
+            if chip_logic_id == "-":
+                continue
+            npu_names.append(chip_name+chip_type)
+
+
+        gpu_names = [line.strip() for line in output.strip().splitlines() if line.strip()]
+        return gpu_names
+    except subprocess.CalledProcessError as e:
+        print("Error calling nvidia-smi:", e)
+        return []
+    except FileNotFoundError:
+        print("nvidia-smi not found, please ensure that the NVIDIA drivers are installed")
+        return []    
+
 def get_gpu_names():
     """
     Call nvidia-smi to retrieve the names of all GPUs.

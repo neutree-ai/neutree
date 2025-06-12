@@ -2,6 +2,7 @@ from math import e
 import os
 import enum
 import logging
+from re import S
 import subprocess
 import atexit
 import multiprocessing
@@ -31,13 +32,20 @@ from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
 from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
 from serve._replica_scheduler.chwbl_scheduler import ConsistentHashReplicaScheduler
+from serve._util.port import get_available_port
 
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
     CONSISTENT_HASH = "consistent_hash"
 
-@serve.deployment(ray_actor_options={"num_cpus": 1, "resources":{"NPU": 1}})
+@serve.deployment(
+    graceful_shutdown_timeout_s=30,
+    graceful_shutdown_wait_loop_s=2,
+    health_check_period_s=5,
+    health_check_timeout_s=5,
+    ray_actor_options={"num_cpus": 1, "resources":{"NPU": 1}}
+    )
 class Backend:
     def __init__(self,
                  # Model config parameters
@@ -64,155 +72,189 @@ class Backend:
             model_file = model_ref.info.labels.get("model_file", "")
             model_path = model_ref.path_of(model_file)
         else:
-            try:
-                os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-                local_dir = os.path.join(os.getcwd(), "hf","models", model_name)
-                print(f"[Backend] Downloading model {model_name} to {local_dir}")
-                model_path = snapshot_download(
+            os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+            local_dir = os.path.join(os.getcwd(), "hf","models", model_name)
+            print(f"[Backend] Downloading model {model_name} to {local_dir}")
+            model_path = snapshot_download(
                     repo_id=model_name,
                     revision=model_version if model_version != "latest" else None,
                     local_dir=local_dir,
-                    )
-                print(f"model_path: {model_path}")
-            except Exception as e:
-                print(f"[Backend] Failed to download model: {e}")
-                raise e
+            )
 
         self.model_id = f"{model_name}:{model_version}"
+        self.model_path = model_path
         self.model_task = model_task
-        
-        task = "generate"
-        if model_task == "text-generation":
-            task = "generate"
+        self.model_name = model_name
 
-        print(engine_kwargs)
+        # Prepare the MindIE Server config
         # --- Mutating model config.
-        model_config_path = Path(model_path).joinpath("config.json")
+        model_config_path = Path(self.model_path).joinpath("config.json")
         with open(model_config_path, "r", encoding="utf-8") as f:
             model_config = json.load(f)
-        if engine_kwargs is not None:
-            for key, value in engine_kwargs.items():
-                if key == "dtype":
-                    if value == "half":
-                        model_config["torch_dtype"] = "float16"
-                    elif value == "float":
-                        model_config["torch_dtype"] = "float32"
-                else:
-                    model_config[key] = value
+        if engine_kwargs and engine_kwargs["dtype"]:
+            if engine_kwargs["dtype"] == "half":
+                model_config["torch_dtype"] = "float16"
+            elif engine_kwargs["dtype"] == "float":
+                model_config["torch_dtype"] = "float32"
         with open(model_config_path, "w", encoding="utf-8") as f:
             json.dump(model_config, f, indent=4)
         os.chmod(model_config_path, 0o750)
-         # --- Mutating model deploy config.          
-        install_path = Path(os.getenv("MIES_INSTALL_PATH","/usr/local/Ascend/mindie/latest/mindie-service"))
-        with open(install_path.joinpath("conf", "config.json"), "r", encoding="utf-8") as f:
+
+        self._install_path = Path(os.getenv("MIES_INSTALL_PATH","/usr/local/Ascend/mindie/latest/mindie-service"))
+        self._service_bin_path = self._install_path.joinpath("bin", "mindieservice_daemon")
+        
+        # --- Mutating MindIE config.          
+        with open(self._install_path.joinpath("conf", "config.json"), "r", encoding="utf-8") as f:
             config = json.load(f)   
         server_config = config["ServerConfig"]
         backend_config = config["BackendConfig"] 
         model_deploy_config = backend_config["ModelDeployConfig"]
         model_config = model_deploy_config["ModelConfig"][0]
         schedule_config = backend_config["ScheduleConfig"]
+        if engine_kwargs:
+            for key, value in engine_kwargs.items():
+                 if key in model_deploy_config:
+                     model_deploy_config[key] = value
+                 if key in schedule_config:
+                     schedule_config[key] = value
+                 if key in model_config:
+                     model_config[key] = value
         
-        # inject neutree default config
+        # --- Mutating MindIE default config. 
+        self._server_port = get_available_port()
+        self._mgmt_server_port = self._server_port
+        self._mgmt_metrics_port = self._server_port
+        self._server_url = f"http://127.0.0.1:{self._server_port}"
+        self._mgmt_url = f"http://127.0.0.1:{self._mgmt_server_port}"
+
         server_config["ipAddress"] = "127.0.0.1"
         server_config["managementIpAddress"] = "127.0.0.1"
         # todo random port
-        server_config["port"] = 50051
+        server_config["port"] = self._server_port
+        server_config["managementPort"] = self._mgmt_server_port
+        server_config["metricsPort"] = self._mgmt_metrics_port
         server_config["httpsEnabled"] = False
 
         backend_config["multiNodesInferEnabled"] = False
         backend_config["interNodeTLSEnabled"] = False
         backend_config["npuDeviceIds"][0]
         deviceIds = os.environ.get("ASCEND_RT_VISIBLE_DEVICES", "0").split(",")
+        world_size = len(deviceIds)
         backend_config["npuDeviceIds"][0] = [int(id) for id in deviceIds]
+        # todo tokenizerProcessNumber config
        
-        model_config["modelName"] = model_name.split("/")[1]
-        model_config["modelWeightPath"] = model_path
-        world_size = len(os.getenv("ASCEND_RT_VISIBLE_DEVICES", "0").split(","))
+        model_config["modelName"] = self.model_name.split("/")[1]
+        model_config["modelWeightPath"] = self.model_path
         model_config["worldSize"] = world_size
+        # default to use prefix cache
+        model_config["plugin_params"] = json.dumps(
+                    {
+                        "plugin_type": "prefix_cache",
+                    }
+        )        
         actor_id = ray.get_runtime_context().get_actor_id()
-        config_path = install_path.joinpath(
+        self._service_config_path = self._install_path.joinpath(
             "conf", f"config-{actor_id}.json"
         )
         config_str = json.dumps(config, indent=4, ensure_ascii=False)
         with open(
-            config_path,
+            self._service_config_path,
             "w",
             encoding="utf-8",
         ) as f:
             f.write(config_str)
-        os.chmod(config_path, 0o640)
-         # Start, configure environment variable to indicate the JSON configuration file.
-        self.mindie_service_env = os.environ.copy()
-        self.mindie_service_env["MIES_CONFIG_JSON_PATH"] = str(config_path)
-        self.mindie_service_path = install_path
-        self.mindie_service_bin_path = install_path.joinpath("bin", "mindieservice_daemon")
-        self.openai_client = None
-        self.service_ready = False
-        self.management_url = "http://127.0.0.1:1026"
-        print(os.environ)
-        self.proc = multiprocessing.Process(target=self.run_mindie_service)
-        self.proc.start()
-        # Register the process to be terminated when the application exits
-        atexit.register(self.proc.terminate)
-        self._ensure_mindie_service()
+        os.chmod(self._service_config_path, 0o640)
 
-    def _ensure_mindie_service(self):
-        ""
-        if self.openai_client is None:
-            self.openai_client = AsyncOpenAI(
-                base_url="http://127.0.0.1:50051/v1",
-                api_key="xxx",
-            )
-            while not self.service_ready:
-                self.service_ready = self.is_mindie_service_ready()
-                time.sleep(1)  # Wait for the service to start
-            print("[Backend] MindLE service is ready")
+        self._service_ready = False
+        self._service_initialized = False
+        self._openai_client = None        
+        self._init_service()
 
-    async def is_mindie_service_ready(self) -> bool:
+    def __del__(self):
         """
-        Check if MindLE inference is ready.
+        Clean up resources when the object is deleted.
+        """
+        print("[Backend] Cleaning up resources")
+        if self._service_config_path:
+            os.remove(self._service_config_path)
+
+        if self._stop_mindie_service():
+            print("[Backend] MindLE service stopped")
+           
+    def _stop_mindie_service(self):
+        """
+        Stop MindIE inference.
         """
         try:
-            response = requests.get(self.management_url+"/v2/health/ready")
+            response = requests.get(self._mgmt_url+"/stopService")
         except Exception as e:
-            print(f"[Backend] Failed to check health: {e}")
+            print(f"[Backend] Failed to stop MindLE service: {e}")
             return False
 
         return response.status_code == 200
 
-    def run_mindie_service(self):
+    def _init_service(self):
+        ""
+        if self._openai_client is None:
+            proc = multiprocessing.Process(target=self._run_service, args=(self._service_bin_path,self._service_config_path))
+            proc.start()
+            while not self._service_ready:
+                if not proc.is_alive():
+                    raise RuntimeError("MindLE service failed to start")
+                self._service_ready = self._is_mindie_service_ready()
+                time.sleep(1)  # Wait for the service to start
+            print("[Backend] MindLE service is ready")
+            self._openai_client = AsyncOpenAI(
+                base_url=f"{self._server_url}/v1",
+                api_key="mindie",
+            )
+            self._service_initialized = True      
+
+    def _is_mindie_service_ready(self) -> bool:
         """
-        Run MindLE inference.
+        Check if MindIE inference is ready.
         """
         try:
-            proc = subprocess.Popen(
-                self.mindie_service_bin_path,
-                env=self.mindie_service_env,
+            response = requests.get(self._mgmt_url+"/v2/health/ready")
+        except Exception as e:
+            print(f"[Backend] Failed to check MindLE service health: {e}")
+            return False
+
+        return response.status_code == 200
+
+    def _run_service(self,mindie_service_bin_path: str,mindie_service_config_path: str):
+        """
+        Run MindIE Server.
+        """
+
+        mindie_service_env = os.environ.copy()
+        mindie_service_env["MIES_CONFIG_JSON_PATH"] = str(mindie_service_config_path)
+        # del ASCEND_RT_VISIBLE_DEVICES env to avoid torch npu device set failed. 
+        mindie_service_env.pop("ASCEND_RT_VISIBLE_DEVICES","")    
+        proc = subprocess.Popen(
+                mindie_service_bin_path,
+                env=mindie_service_env,
                 stdout=sys.stdout,
                 stderr=sys.stderr,
-                cwd=self.mindie_service_path,
-            # preexec_fn=os.setsid,
-            # start_new_session=False,
-            )
-            self.proc = proc
+        )
 
-            print("[Backend] Starting MindLE service, process ID:", proc.pid)
-            exit_code = proc.wait()
-            print(f"[Backend] Process exited with code {exit_code}")
-            self.exit_with_code(exit_code)
-        except Exception as e:
-            print(f"[Backend] Failed to start MindLE service: {e}")
-            raise e
+        print("[Backend] Starting MindLE service, process ID:", proc.pid)
+        exit_code = proc.wait()
+        print(f"[Backend] Process exited with code {exit_code}")
         
-
-    async def exit_with_code(self,exit_code):
+    def check_health(self):
         """
-        Exit the process with the given code.
+        Check the health of the backend.
         """
-        ray.actor.exit_actor()
-
+        if self._service_initialized is False:
+            return
+        
+        if self._is_mindie_service_ready() is False:
+            raise RuntimeError("MindLE service is not ready")
+        
     async def generate(self, payload: Any):
-        response =  await self.openai_client.chat.completions.create(**payload)
+        payload["response_format"] = {"type": "json_object"}
+        response =  await self._openai_client.chat.completions.create(**payload)
         stream = payload.get("stream", False)
         if not stream:
             return response
@@ -302,6 +344,7 @@ class Controller:
             
             async def event_generator():
                 async for chunk in r:
+                    print(f"[Controller] Received chunk: {chunk.to_json()}")
                     yield f"data: {chunk.to_json()}\n\n"
                 yield "data: [DONE]\n\n"
             
@@ -312,6 +355,7 @@ class Controller:
         else:
             # Handle non-streaming response
             result = await self.backend.options(stream=False).generate.remote(req_obj)
+            print(f"[Controller] Received result: {result.to_json()}")
             return JSONResponse(content=result.to_json())
 
     @app.get("/v1/models")

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -110,11 +111,31 @@ func (c *sshClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
-	sshCommandArgs := c.buildSSHCommandArgs(c.getHeadIP())
-	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry, dockerCommandRunner.GetRuntime(ctx))
+	image, err := getBaseImage(c.cluster, c.imageRegistry)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to check cluster image")
+		return "", errors.Wrapf(err, "failed to get cluster base image for cluster %s", c.cluster.Metadata.Name)
+	}
+
+	acceleratorType := c.getNodeAcceleratorType(ctx, c.getHeadIP())
+	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+		image = image + "-" + suffix
+	}
+
+	validate := []dependencyValidateFunc{
+		validateImageRegistryFunc(c.imageRegistry),
+		validateClusterImageFunc(c.imageService, c.imageRegistry.Spec.AuthConfig, image),
+	}
+
+	for _, validateFunc := range validate {
+		if err = validateFunc(); err != nil {
+			return "", errors.Wrap(err, "failed to validate dependency")
+		}
+	}
+
+	c.config.Docker.Image = image
+	err = c.configMgr.Generate(c.config)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to update local cluster config")
 	}
 
 	upArgs := []string{
@@ -145,9 +166,25 @@ func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error 
 	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
 	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
 
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry, dockerCommandRunner.GetRuntime(ctx))
+	image, err := getBaseImage(c.cluster, c.imageRegistry)
 	if err != nil {
-		return errors.Wrap(err, "failed to check cluster image")
+		return errors.Wrapf(err, "failed to get cluster base image for cluster %s", c.cluster.Metadata.Name)
+	}
+
+	acceleratorType := c.getNodeAcceleratorType(ctx, nodeIP)
+	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+		image = image + "-" + suffix
+	}
+
+	validate := []dependencyValidateFunc{
+		validateImageRegistryFunc(c.imageRegistry),
+		validateClusterImageFunc(c.imageService, c.imageRegistry.Spec.AuthConfig, image),
+	}
+
+	for _, validateFunc := range validate {
+		if err = validateFunc(); err != nil {
+			return errors.Wrap(err, "failed to validate dependency")
+		}
 	}
 
 	env := map[string]interface{}{
@@ -155,7 +192,7 @@ func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error 
 	}
 
 	for _, command := range c.config.InitializationCommands {
-		_, err := dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)
+		_, err = dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)
 		if err != nil {
 			return errors.Wrap(err, "failed to run command "+command)
 		}
@@ -178,6 +215,25 @@ func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error 
 	}
 
 	return nil
+}
+
+func (c *sshClusterManager) getNodeAcceleratorType(ctx context.Context, nodeIP string) string {
+	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+	_, err := dockerCommandRunner.Run(ctx, "nvidia-smi", false, nil, false, nil, "host", "", false)
+	if err == nil {
+		return "gpu"
+	}
+
+	npusmiOutput, err := dockerCommandRunner.Run(ctx, "npu-smi info", false, nil, true, nil, "host", "", false)
+	if err == nil {
+		if strings.Contains(string(npusmiOutput), "910P") {
+			return "ascend910"
+		}
+		return "ascend310"
+	}
+
+	return ""
 }
 
 func (c *sshClusterManager) drainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error {
@@ -461,11 +517,12 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 		"--privileged",
 		"--cap-add=SYS_ADMIN",
 		"--security-opt=seccomp=unconfined",
+		"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 	}
 
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`ray start --disable-usage-stats --head --metrics-export-port=%d --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+		fmt.Sprintf(`python /home/ray/start.py --head --metrics-export-port=%d --disable-usage-stats --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
 			v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.WorkerStartRayCommands = []string{
