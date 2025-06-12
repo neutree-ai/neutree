@@ -119,6 +119,15 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 	acceleratorType := c.getNodeAcceleratorType(ctx, c.getHeadIP())
 	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
 		image = image + "-" + suffix
+		c.config.Docker.Image = image
+		err = os.Remove(c.configMgr.ConfigPath())
+		if err != nil {
+			return "", errors.Wrap(err, "failed to remove local cluster config")
+		}
+		err = c.configMgr.Generate(c.config)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to update local cluster config")
+		}
 	}
 
 	validate := []dependencyValidateFunc{
@@ -130,12 +139,6 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 		if err = validateFunc(); err != nil {
 			return "", errors.Wrap(err, "failed to validate dependency")
 		}
-	}
-
-	c.config.Docker.Image = image
-	err = c.configMgr.Generate(c.config)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to update local cluster config")
 	}
 
 	upArgs := []string{
