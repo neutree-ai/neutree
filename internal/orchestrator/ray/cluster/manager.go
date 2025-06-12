@@ -53,7 +53,7 @@ func validateImageRegistryFunc(imageRegistry *v1.ImageRegistry) dependencyValida
 	}
 }
 
-func validateClusterImageFunc(imageService registry.ImageService, registryAuth *v1.ImageRegistryAuthConfig, image string) dependencyValidateFunc {
+func validateClusterImageFunc(imageService registry.ImageService, registryAuth v1.ImageRegistryAuthConfig, image string) dependencyValidateFunc {
 	return func() error {
 		imageExisted, err := imageService.CheckImageExists(image, authn.FromConfig(authn.AuthConfig{
 			Username:      registryAuth.Username,
