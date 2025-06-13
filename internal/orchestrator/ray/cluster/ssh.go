@@ -124,12 +124,13 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 			c.config.Docker.Image = image
 		}
 
-		runOptions, err := c.getNodeDockerRuntimeConfiguration(ctx, c.getHeadIP())
+		runtimeOption, err := c.getNodeDockerRuntimeConfiguration(ctx, c.getHeadIP())
 		if err != nil {
 			return "", errors.Wrap(err, "failed to get node docker runtime configuration")
 		}
-
-		c.config.Docker.RunOptions = append(c.config.Docker.RunOptions, runOptions)
+		if runtimeOption != "" {
+			c.config.Docker.RunOptions = append(c.config.Docker.RunOptions, runtimeOption)
+		}
 
 		err = os.Remove(c.configMgr.ConfigPath())
 		if err != nil {
@@ -242,9 +243,9 @@ func (c *sshClusterManager) getNodeAcceleratorType(ctx context.Context, nodeIP s
 	npusmiOutput, err := dockerCommandRunner.Run(ctx, "npu-smi info", false, nil, true, nil, "host", "", false)
 	if err == nil {
 		if strings.Contains(string(npusmiOutput), "910P") {
-			return "ascend910"
+			return "ascend910p"
 		}
-		return "ascend310"
+		return "ascend310p"
 	}
 
 	return ""
@@ -270,8 +271,8 @@ func (c *sshClusterManager) getNodeDockerRuntimeConfiguration(ctx context.Contex
 	}
 
 	runtimeConfigurationFuncMap := map[string]func() (string, error){
-		"ascend910": npuRuntimeConfiguration,
-		"ascend310": npuRuntimeConfiguration,
+		"ascend910p": npuRuntimeConfiguration,
+		"ascend310p": npuRuntimeConfiguration,
 	}
 
 	if runtimeConfigurationFunc, ok := runtimeConfigurationFuncMap[c.getNodeAcceleratorType(ctx, nodeIP)]; ok {

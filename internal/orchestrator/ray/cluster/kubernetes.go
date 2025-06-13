@@ -39,8 +39,8 @@ const (
 
 const (
 	nvidiaGPUResourceName = "nvidia.com/gpu"
-	asend310ResourceName  = "huawei.com/Ascend310"
-	asend910ResourceName  = "huawei.com/Ascend910"
+	asend310ResourceName  = "huawei.com/Ascend310P"
+	asend910ResourceName  = "huawei.com/Ascend910P"
 )
 
 var _ ClusterManager = &kubeRayClusterManager{}

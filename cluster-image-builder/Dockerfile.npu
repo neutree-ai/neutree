@@ -50,9 +50,9 @@ ARG CANN_CHIP
 
 ENV CANN_VERSION=${CANN_VERSION} \
     CANN_CHIP=${CANN_CHIP} \
-    CANN_HOME="/usr/local/Ascend"
+    ASCEND_HOME="/usr/local/Ascend"
 
-ENV LD_LIBRARY_PATH=${CANN_HOME}/driver/lib64/common:${CANN_HOME}/driver/lib64/driver
+ENV LD_LIBRARY_PATH=${ASCEND_HOME}/driver/lib64/common:${ASCEND_HOME}/driver/lib64/driver
 ## Install CANN Toolkit
 
 RUN <<EOF
@@ -73,7 +73,7 @@ RUN <<EOF
     TOOLKIT_URL="${URL_PREFIX}/${TOOLKIT_FILE}?${URL_SUFFIX}"
     curl -H 'Referer: https://www.hiascend.com/' --retry 3 --retry-connrefused -fL -o "${TOOLKIT_PATH}" "${TOOLKIT_URL}"
     chmod a+x "${TOOLKIT_PATH}"
-    printf "Y\n" | "${TOOLKIT_PATH}" --install --install-for-all --install-path="${CANN_HOME}"
+    printf "Y\n" | "${TOOLKIT_PATH}" --install --install-for-all --install-path="${ASCEND_HOME}"
 
     # Cleanup
     rm -f "${TOOLKIT_PATH}" \
@@ -92,7 +92,7 @@ RUN <<EOF
     URL_SUFFIX="response-content-type=application/octet-stream"
 
     # Prepare environment
-    source ${CANN_HOME}/ascend-toolkit/set_env.sh
+    source ${ASCEND_HOME}/ascend-toolkit/set_env.sh
 
     # Install kernels
     KERNELS_FILE="Ascend-cann-kernels-${CANN_CHIP}_${DOWNLOAD_VERSION}_${OS}-${ARCH}.run"
@@ -104,7 +104,7 @@ RUN <<EOF
     KERNELS_URL="${URL_PREFIX}/${KERNELS_FILE}?${URL_SUFFIX}"
     curl -H 'Referer: https://www.hiascend.com/' --retry 3 --retry-connrefused -fL -o "${KERNELS_PATH}" "${KERNELS_URL}"
     chmod a+x "${KERNELS_PATH}"
-    printf "Y\n" |"${KERNELS_PATH}" --install --install-for-all --install-path="${CANN_HOME}"
+    printf "Y\n" |"${KERNELS_PATH}" --install --install-for-all --install-path="${ASCEND_HOME}"
 
     # Cleanup
     rm -f "${KERNELS_PATH}" \
@@ -125,7 +125,7 @@ RUN <<EOF
     URL_SUFFIX="response-content-type=application/octet-stream"
 
     # Prepare environment
-    source ${CANN_HOME}/ascend-toolkit/set_env.sh
+    source ${ASCEND_HOME}/ascend-toolkit/set_env.sh
 
     # Install NNAL
     NNAL_FILE="Ascend-cann-nnal_${DOWNLOAD_VERSION}_${OS}-${ARCH}.run"
@@ -133,7 +133,7 @@ RUN <<EOF
     NNAL_URL="${URL_PREFIX}/${NNAL_FILE}?${URL_SUFFIX}"
     curl -H 'Referer: https://www.hiascend.com/' --retry 3 --retry-connrefused -fL -o "${NNAL_PATH}" "${NNAL_URL}"
     chmod a+x "${NNAL_PATH}"
-    printf "Y\n" | "${NNAL_PATH}" --install --install-path="${CANN_HOME}"
+    printf "Y\n" | "${NNAL_PATH}" --install --install-path="${ASCEND_HOME}"
 
     # Cleanup
     rm -f "${NNAL_PATH}" \
@@ -152,6 +152,7 @@ RUN <<EOF
         pip install --no-cache-dir --root-user-action ignore torch==2.1.0
     fi
     pip install --no-cache-dir --root-user-action ignore torch-npu==2.1.0.post12 torchvision==0.16.0
+    pip cache purge
 EOF
 
 ## Install Python dependencies
@@ -203,13 +204,15 @@ zope.event==5.0
 zope.interface==7.0.3
 EOT
     pip install --no-cache-dir --root-user-action ignore -r /tmp/requirements.txt
+    pip cache purge
 EOF
 
 ## Install ATB Models
 
-COPY --from=docker.io/weihuang080513/mindie:2.0.RC2-300I-Duo-py311-openeuler24.03-lts --chown=root:root ${CANN_HOME}/atb-models ${CANN_HOME}/atb-models
+COPY --from=docker.io/weihuang080513/mindie:2.0.RC2-300I-Duo-py311-openeuler24.03-lts --chown=root:root ${ASCEND_HOME}/atb-models ${ASCEND_HOME}/atb-models
 RUN <<EOF
-    pip install --no-cache-dir --root-user-action ignore ${CANN_HOME}/atb-models/*.whl
+    pip install --no-cache-dir --root-user-action ignore ${ASCEND_HOME}/atb-models/*.whl
+    pip cache purge
 EOF
 
 ## Install MindIE
@@ -228,8 +231,8 @@ RUN <<EOF
     URL_SUFFIX="response-content-type=application/octet-stream"
 
     # Prepare environment
-    source ${CANN_HOME}/ascend-toolkit/set_env.sh
-    source ${CANN_HOME}/nnal/atb/set_env.sh
+    source ${ASCEND_HOME}/ascend-toolkit/set_env.sh
+    source ${ASCEND_HOME}/nnal/atb/set_env.sh
 
     # Install MindIE
     MINDIE_FILE="Ascend-mindie_${DOWNLOAD_VERSION}_${OS}-${ARCH}.run"
@@ -237,10 +240,10 @@ RUN <<EOF
     MINDIE_URL="${URL_PREFIX}/${MINDIE_FILE}?${URL_SUFFIX}"
     curl -H 'Referer: https://www.hiascend.com/' --retry 3 --retry-connrefused -fL -o "${MINDIE_PATH}" "${MINDIE_URL}"
     chmod a+x "${MINDIE_PATH}"
-    printf "Y\n" | "${MINDIE_PATH}" --install --install-path="${CANN_HOME}"
+    printf "Y\n" | "${MINDIE_PATH}" --install --install-path="${ASCEND_HOME}"
 
     # Post process
-    chmod +w "${CANN_HOME}/mindie/latest/mindie-service/conf"
+    chmod +w "${ASCEND_HOME}/mindie/latest/mindie-service/conf"
 
     # Review
     pip freeze \

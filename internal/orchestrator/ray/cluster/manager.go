@@ -14,10 +14,10 @@ import (
 )
 
 var acceleratorImageTagSuffix = map[string]string{
-	"cpu":       "",
-	"gpu":       "",
-	"ascend310": "npu-ascend310b",
-	"ascend910": "npu-ascend910b",
+	"cpu":        "",
+	"gpu":        "",
+	"ascend310p": "npu-ascend310p",
+	"ascend910p": "npu-ascend910p",
 }
 
 var (
