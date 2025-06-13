@@ -37,6 +37,7 @@ def count_nvidia_accelerators(gpu_names):
         ("A10G", "NVIDIA_TESLA_A10G"),
         ("L40S", "NVIDIA_L40S"),
         ("L4", "NVIDIA_L4"),
+        ("L20", "NVIDIA_L20"),
         ("A100", "NVIDIA_A100"),
         ("H100", "NVIDIA_H100"),
         ("H200", "NVIDIA_H200"),
