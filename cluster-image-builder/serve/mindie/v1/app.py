@@ -100,11 +100,12 @@ class Backend:
             json.dump(model_config, f, indent=4)
         os.chmod(model_config_path, 0o750)
 
-        self._install_path = Path(os.getenv("MIES_INSTALL_PATH","/usr/local/Ascend/mindie/latest/mindie-service"))
-        self._service_bin_path = self._install_path.joinpath("bin", "mindieservice_daemon")
+        self._ascend_home = Path(os.getenv("ASCEND_HOME","/usr/local/Ascend") )
+        self._mindie_home = self._ascend_home.joinpath("mindie","latest")
+        self._mindie_service_home = self._mindie_home.joinpath("mindie-service")
         
         # --- Mutating MindIE config.          
-        with open(self._install_path.joinpath("conf", "config.json"), "r", encoding="utf-8") as f:
+        with open(self._mindie_service_home.joinpath("conf", "config.json"), "r", encoding="utf-8") as f:
             config = json.load(f)   
         server_config = config["ServerConfig"]
         backend_config = config["BackendConfig"] 
@@ -153,7 +154,7 @@ class Backend:
                     }
         )        
         actor_id = ray.get_runtime_context().get_actor_id()
-        self._service_config_path = self._install_path.joinpath(
+        self._service_config_path = self._mindie_service_home.joinpath(
             "conf", f"config-{actor_id}.json"
         )
         config_str = json.dumps(config, indent=4, ensure_ascii=False)
@@ -196,7 +197,7 @@ class Backend:
     def _init_service(self):
         ""
         if self._openai_client is None:
-            proc = multiprocessing.Process(target=self._run_service, args=(self._service_bin_path,self._service_config_path))
+            proc = multiprocessing.Process(target=self._run_service)
             proc.start()
             while not self._service_ready:
                 if not proc.is_alive():
@@ -222,17 +223,26 @@ class Backend:
 
         return response.status_code == 200
 
-    def _run_service(self,mindie_service_bin_path: str,mindie_service_config_path: str):
+    def _run_service(self):
         """
         Run MindIE Server.
         """
 
         mindie_service_env = os.environ.copy()
-        mindie_service_env["MIES_CONFIG_JSON_PATH"] = str(mindie_service_config_path)
+        mindie_service_env["MIES_CONFIG_JSON_PATH"] = str(self._service_config_path)
         # del ASCEND_RT_VISIBLE_DEVICES env to avoid torch npu device set failed. 
-        mindie_service_env.pop("ASCEND_RT_VISIBLE_DEVICES","")    
+        mindie_service_env.pop("ASCEND_RT_VISIBLE_DEVICES","")
+
+        script_paths = [
+            self._mindie_home.joinpath("latest", "mindie-rt", "set_env.sh"),
+            self._mindie_home.joinpath("latest", "mindie-torch", "set_env.sh"),
+            self._mindie_home.joinpath("latest", "mindie-service", "set_env.sh"),
+            self._mindie_home.joinpath("latest", "mindie-llm", "set_env.sh"),
+        ]
+        init_mindie_env_shell = " && ".join([f"source {path}" for path in script_paths]) 
+        command = f"bash -c '{init_mindie_env_shell} && {self._mindie_service_bin_path}'"  
         proc = subprocess.Popen(
-                mindie_service_bin_path,
+                command,
                 env=mindie_service_env,
                 stdout=sys.stdout,
                 stderr=sys.stderr,
