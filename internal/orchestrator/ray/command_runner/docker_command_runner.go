@@ -285,7 +285,6 @@ func (d *DockerCommandRunner) configureRuntime(ctx context.Context, runOptions [
 				if _, err := strconv.Atoi(deviceId); err == nil {
 					deviceIds = append(deviceIds, deviceId)
 				}
-				deviceIds = append(deviceIds, deviceId)
 			}
 
 			return append(runOptions, fmt.Sprintf(" -e ASCEND_VISIBLE_DEVICES=%s ", strings.Join(deviceIds, ","))), nil

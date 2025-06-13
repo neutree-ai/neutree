@@ -264,7 +264,6 @@ func (c *sshClusterManager) getNodeDockerRuntimeConfiguration(ctx context.Contex
 			if _, err := strconv.Atoi(deviceId); err == nil {
 				deviceIds = append(deviceIds, deviceId)
 			}
-			deviceIds = append(deviceIds, deviceId)
 		}
 
 		return fmt.Sprintf("-e ASCEND_VISIBLE_DEVICES=%s", strings.Join(deviceIds, ",")), nil
