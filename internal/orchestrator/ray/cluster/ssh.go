@@ -117,9 +117,18 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 	}
 
 	acceleratorType := c.getNodeAcceleratorType(ctx, c.getHeadIP())
-	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
-		image = image + "-" + suffix
-		c.config.Docker.Image = image
+	if acceleratorType != "" && acceleratorType != "gpu" {
+		if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+			image = image + "-" + suffix
+			c.config.Docker.Image = image
+		}
+
+		runOptions, err := c.getNodeDockerRuntimeConfiguration(ctx, c.getHeadIP())
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get node docker runtime configuration")
+		}
+		c.config.Docker.RunOptions = append(c.config.Docker.RunOptions, runOptions)
+
 		err = os.Remove(c.configMgr.ConfigPath())
 		if err != nil {
 			return "", errors.Wrap(err, "failed to remove local cluster config")
@@ -237,6 +246,31 @@ func (c *sshClusterManager) getNodeAcceleratorType(ctx context.Context, nodeIP s
 	}
 
 	return ""
+}
+
+func (c *sshClusterManager) getNodeDockerRuntimeConfiguration(ctx context.Context, nodeIP string) (string, error) {
+	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+
+	npuRuntimeConfiguration := func() (string, error) {
+		deviceOutput, err := dockerCommandRunner.Run(ctx, "ls /dev/davinci[0-9]* | awk -F'davinci' '{print $2}'", false, nil, true, nil, "host", "", false)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get Ascend devices")
+		}
+		deviceIds := strings.Split(strings.TrimSpace(deviceOutput), "\n")
+		return fmt.Sprintf(" -e ASCEND_VISIBLE_DEVICES=%s ", strings.Join(deviceIds, ",")), nil
+	}
+
+	runtimeConfigurationFuncMap := map[string]func() (string, error){
+		"ascend910": npuRuntimeConfiguration,
+		"ascend310": npuRuntimeConfiguration,
+	}
+
+	if runtimeConfigurationFunc, ok := runtimeConfigurationFuncMap[c.getNodeAcceleratorType(ctx, nodeIP)]; ok {
+		return runtimeConfigurationFunc()
+	}
+
+	return "", nil
 }
 
 func (c *sshClusterManager) drainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error {
@@ -525,17 +559,17 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py --head --metrics-export-port=%d --disable-usage-stats --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+		fmt.Sprintf(`python /home/ray/start.py --head --port=6379 --metrics-export-port=%d --disable-usage-stats --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
 			v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.WorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+		fmt.Sprintf(`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.StaticWorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+		fmt.Sprintf(`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 
