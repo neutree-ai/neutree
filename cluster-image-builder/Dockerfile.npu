@@ -1,5 +1,5 @@
 ARG CANN_VERSION=8.1.rc1
-ARG CANN_CHIP=310b
+ARG CANN_CHIP=310p
 ARG MINDIE_VERSION=2.0.rc2
 ARG PYTHON_VERSION=3.11
 
@@ -28,7 +28,7 @@ RUN <<EOF
         ca-certificates build-essential binutils bash openssl \
         gcc g++ \
         make cmake libsqlite3-dev zlib1g-dev libssl-dev libffi-dev libbz2-dev liblzma-dev \
-        wget
+        wget curl
 
     # Update python
     PYTHON="python${PYTHON_VERSION}"
@@ -297,9 +297,15 @@ COPY requirements.txt.npu requirements.txt
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+ENV HOME=/home/ray
+RUN mkdir -p ${HOME}
+WORKDIR ${HOME}
+
 # Copy Python files
 COPY *.py ./
 COPY serve ./serve
+
+RUN chmod +x start.py
 
 EXPOSE 8265 6379 8000
 
