@@ -401,17 +401,13 @@ APT_PKGS=(
     cmake
     g++
     zlib1g-dev
+    tmux
+    screen
+    rsync
+    netbase
+    openssh-client
+    gnupg
 )
-if [[ "$AUTOSCALER" == "autoscaler" ]]; then
-    APT_PKGS+=(
-        tmux
-        screen
-        rsync
-        netbase
-        openssh-client
-        gnupg
-    )
-fi
 
 apt-get install -y "${APT_PKGS[@]}"
 
