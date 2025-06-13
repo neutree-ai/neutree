@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -127,6 +128,7 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 		if err != nil {
 			return "", errors.Wrap(err, "failed to get node docker runtime configuration")
 		}
+
 		c.config.Docker.RunOptions = append(c.config.Docker.RunOptions, runOptions)
 
 		err = os.Remove(c.configMgr.ConfigPath())
@@ -257,8 +259,15 @@ func (c *sshClusterManager) getNodeDockerRuntimeConfiguration(ctx context.Contex
 		if err != nil {
 			return "", errors.Wrap(err, "failed to get Ascend devices")
 		}
-		deviceIds := strings.Split(strings.TrimSpace(deviceOutput), "\n")
-		return fmt.Sprintf(" -e ASCEND_VISIBLE_DEVICES=%s ", strings.Join(deviceIds, ",")), nil
+		deviceIds := []string{}
+		for _, deviceId := range strings.Split(string(deviceOutput), "\n") {
+			if _, err := strconv.Atoi(deviceId); err == nil {
+				deviceIds = append(deviceIds, deviceId)
+			}
+			deviceIds = append(deviceIds, deviceId)
+		}
+
+		return fmt.Sprintf("-e ASCEND_VISIBLE_DEVICES=%s", strings.Join(deviceIds, ",")), nil
 	}
 
 	runtimeConfigurationFuncMap := map[string]func() (string, error){

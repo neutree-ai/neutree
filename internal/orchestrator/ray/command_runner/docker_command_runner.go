@@ -3,6 +3,7 @@ package command_runner
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -278,7 +279,15 @@ func (d *DockerCommandRunner) configureRuntime(ctx context.Context, runOptions [
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to get Ascend devices")
 			}
-			deviceIds := strings.Split(strings.TrimSpace(deviceOutput), "\n")
+
+			deviceIds := []string{}
+			for _, deviceId := range strings.Split(string(deviceOutput), "\n") {
+				if _, err := strconv.Atoi(deviceId); err == nil {
+					deviceIds = append(deviceIds, deviceId)
+				}
+				deviceIds = append(deviceIds, deviceId)
+			}
+
 			return append(runOptions, fmt.Sprintf(" -e ASCEND_VISIBLE_DEVICES=%s ", strings.Join(deviceIds, ","))), nil
 		}
 
