@@ -52,7 +52,7 @@ ENV CANN_VERSION=${CANN_VERSION} \
     CANN_CHIP=${CANN_CHIP} \
     ASCEND_HOME="/usr/local/Ascend"
 
-ENV LD_LIBRARY_PATH=${ASCEND_HOME}/driver/lib64/common:${ASCEND_HOME}/driver/lib64/driver
+ENV LD_LIBRARY_PATH=${ASCEND_HOME}/driver/lib64/common:${ASCEND_HOME}/driver/lib64/driver:${CANN_HOME}/driver/tools
 ## Install CANN Toolkit
 
 RUN <<EOF

@@ -8,6 +8,7 @@ import atexit
 import multiprocessing
 import sys
 import asyncio
+from textwrap import indent
 import time
 import json
 from typing import Dict, Optional, Any, AsyncGenerator, List
@@ -29,9 +30,6 @@ import ray
 from ray import serve
 from ray.serve import Application
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
-
-from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
-from serve._replica_scheduler.chwbl_scheduler import ConsistentHashReplicaScheduler
 from serve._util.port import get_available_port
 
 class SchedulerType(str, enum.Enum):
@@ -72,13 +70,9 @@ class Backend:
             model_file = model_ref.info.labels.get("model_file", "")
             model_path = model_ref.path_of(model_file)
         else:
-            os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-            local_dir = os.path.join(os.getcwd(), "hf","models", model_name)
-            print(f"[Backend] Downloading model {model_name} to {local_dir}")
             model_path = snapshot_download(
                     repo_id=model_name,
                     revision=model_version if model_version != "latest" else None,
-                    local_dir=local_dir,
             )
 
         self.model_id = f"{model_name}:{model_version}"
@@ -138,13 +132,14 @@ class Backend:
 
         backend_config["multiNodesInferEnabled"] = False
         backend_config["interNodeTLSEnabled"] = False
-        backend_config["npuDeviceIds"][0]
         deviceIds = os.environ.get("ASCEND_RT_VISIBLE_DEVICES", "0").split(",")
         world_size = len(deviceIds)
         backend_config["npuDeviceIds"][0] = [int(id) for id in deviceIds]
         # todo tokenizerProcessNumber config
-       
-        model_config["modelName"] = self.model_name.split("/")[1]
+        model_config["modelName"] = self.model_name
+        if len(self.model_name.split("/")) > 1:
+            model_config["modelName"] = self.model_name.split("/")[len(self.model_name.split("/"))-1]
+        
         model_config["modelWeightPath"] = self.model_path
         model_config["worldSize"] = world_size
         # default to use prefix cache
@@ -234,15 +229,19 @@ class Backend:
         mindie_service_env.pop("ASCEND_RT_VISIBLE_DEVICES","")
 
         script_paths = [
-            self._mindie_home.joinpath("latest", "mindie-rt", "set_env.sh"),
-            self._mindie_home.joinpath("latest", "mindie-torch", "set_env.sh"),
-            self._mindie_home.joinpath("latest", "mindie-service", "set_env.sh"),
-            self._mindie_home.joinpath("latest", "mindie-llm", "set_env.sh"),
+            self._ascend_home.joinpath("ascend-toolkit","set_env.sh"),
+            self._ascend_home.joinpath("nnal","atb", "set_env.sh"),
+            self._ascend_home.joinpath("atb-models","set_env.sh"),
+            self._mindie_home.joinpath("mindie-rt", "set_env.sh"),
+            self._mindie_home.joinpath("mindie-torch", "set_env.sh"),
+            self._mindie_home.joinpath("mindie-service", "set_env.sh"),
+            self._mindie_home.joinpath("mindie-llm", "set_env.sh"),
         ]
         init_mindie_env_shell = " && ".join([f"source {path}" for path in script_paths]) 
-        command = f"bash -c '{init_mindie_env_shell} && {self._mindie_service_bin_path}'"  
+        command = f"{init_mindie_env_shell} && {self._mindie_service_home.joinpath('bin', 'mindieservice_daemon')}"
+        print("[Backend] Starting MindLE service, command:", command)
         proc = subprocess.Popen(
-                command,
+                ["bash", "-c", command],
                 env=mindie_service_env,
                 stdout=sys.stdout,
                 stderr=sys.stderr,
@@ -251,6 +250,7 @@ class Backend:
         print("[Backend] Starting MindLE service, process ID:", proc.pid)
         exit_code = proc.wait()
         print(f"[Backend] Process exited with code {exit_code}")
+        exit(exit_code)
         
     def check_health(self):
         """
@@ -263,24 +263,27 @@ class Backend:
             raise RuntimeError("MindLE service is not ready")
         
     async def generate(self, payload: Any):
-        payload["response_format"] = {"type": "json_object"}
-        response =  await self._openai_client.chat.completions.create(**payload)
+        response = await self._openai_client.chat.completions.create(**payload)
         stream = payload.get("stream", False)
         if not stream:
             return response
         else:
-            return response.__aiter__()
+            return aiter(response)
 
     async def show_available_models(self) -> Dict[str, Any]:
-        """Return a list of available models"""
-        return {
-            "object": "list",
-            "data": [{
-                "id": self.model_id,
+        models = self._openai_client.models.list()
+        datas = []
+        async for model in models:
+            datas.append({
+                "id": model.id,
                 "object": "model",
                 "permissions": [],
                 "owned_by": "local",
-            }]
+            })
+        """Return a list of available models"""
+        return {
+            "object": "list",
+            "data": datas,
         }
 
 app = FastAPI()
@@ -354,8 +357,7 @@ class Controller:
             
             async def event_generator():
                 async for chunk in r:
-                    print(f"[Controller] Received chunk: {chunk.to_json()}")
-                    yield f"data: {chunk.to_json()}\n\n"
+                    yield f"data: {chunk.to_json(indent=None)}\n\n"
                 yield "data: [DONE]\n\n"
             
             return StreamingResponse(
@@ -365,8 +367,7 @@ class Controller:
         else:
             # Handle non-streaming response
             result = await self.backend.options(stream=False).generate.remote(req_obj)
-            print(f"[Controller] Received result: {result.to_json()}")
-            return JSONResponse(content=result.to_json())
+            return JSONResponse(content=result.to_json(indent=None))
 
     @app.get("/v1/models")
     async def models(self, request: Request):
@@ -401,6 +402,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         num_replicas=backend_options.get('num_replicas', 1),
         ray_actor_options={
             "num_cpus": backend_options.get('num_cpus', 1),
+            "memory": backend_options.get('memory', 0),
             "resources": backend_options.get('resources')
         }
     ).bind(
@@ -418,7 +420,6 @@ def app_builder(args: Dict[str, Any]) -> Application:
         num_replicas=controller_options.get('num_replicas', 1),
         ray_actor_options={
             "num_cpus": controller_options.get('num_cpus', 0.1),
-            "num_gpus": controller_options.get('num_gpus', 0)
         }
     ).bind(
         backend=backend_deployment,
