@@ -17,8 +17,6 @@ def get_ascend_npu_names():
         for index, line in enumerate(output.strip().splitlines()):
             if index == 0:
                 continue
-            print(line)
-            print(line.split())
             if len(line.split()) != 5:
                 continue
             npu_id,chip_id,chip_logic_id,chip_type,chip_name = line.split()

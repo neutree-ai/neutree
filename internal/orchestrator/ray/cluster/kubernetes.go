@@ -721,7 +721,7 @@ func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSp
 
 	clusterName := c.cluster.Metadata.Name
 	clusterVersion := c.cluster.Spec.Version
-	workerStartRayCommands := fmt.Sprintf(`python /home/ray/start.py %s --block --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+	workerStartRayCommands := fmt.Sprintf(`python /home/ray/start.py --address=%s:6379 --block --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 		getHeadSvcName(clusterName), v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, clusterVersion)
 
 	podTemplate := corev1.PodTemplateSpec{
@@ -823,7 +823,7 @@ func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() (corev1.PodTemplateSp
 		c.dependencyImages = append(c.dependencyImages, image)
 	}
 
-	headStartCommand := fmt.Sprintf(`ray start --num-cpus=0 --disable-usage-stats --head --block --metrics-export-port=%d --port=6379 --object-manager-port=8076 --no-monitor --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+	headStartCommand := fmt.Sprintf(`python /home/ray/start.py --head --port=6379 --num-cpus=0 --disable-usage-stats --block --metrics-export-port=%d --object-manager-port=8076 --no-monitor --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
 		v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, c.cluster.Spec.Version)
 
 	podTemplate := corev1.PodTemplateSpec{
