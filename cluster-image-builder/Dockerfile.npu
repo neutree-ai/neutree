@@ -2,6 +2,7 @@ ARG CANN_VERSION=8.1.rc1
 ARG CANN_CHIP=310p
 ARG MINDIE_VERSION=2.0.rc2
 ARG PYTHON_VERSION=3.11
+ARG PYTHON_PATCH_VERSION=11
 
 FROM ubuntu:22.04 AS base
 
@@ -10,9 +11,11 @@ SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 ## Prepare MindIE Install Environment
 
 ARG PYTHON_VERSION
+ARG PYTHON_PATCH_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHON_VERSION=${PYTHON_VERSION}
+    PYTHON_VERSION=${PYTHON_VERSION} \
+    PYTHON_PATCH_VERSION=${PYTHON_PATCH_VERSION}
 
 RUN <<EOF
     # Refresh
@@ -30,12 +33,17 @@ RUN <<EOF
         make cmake libsqlite3-dev zlib1g-dev libssl-dev libffi-dev libbz2-dev liblzma-dev \
         wget curl
 
-    # Update python
+    # install python tools
     PYTHON="python${PYTHON_VERSION}"
-    apt-get install -y --no-install-recommends \
-        ${PYTHON} ${PYTHON}-dev ${PYTHON}-venv ${PYTHON}-lib2to3
-    if [ -f /etc/alternatives/python ]; then update-alternatives --remove-all python; fi; update-alternatives --install /usr/bin/python python /usr/bin/${PYTHON} 10
-    if [ -f /etc/alternatives/python3 ]; then update-alternatives --remove-all python3; fi; update-alternatives --install /usr/bin/python3 python3 /usr/bin/${PYTHON} 10
+    apt-get install -y --no-install-recommends ${PYTHON}-dev ${PYTHON}-venv ${PYTHON}-lib2to3
+
+    # Install python
+    TARGET_PYTHON_VERSION="${PYTHON_VERSION}.${PYTHON_PATCH_VERSION}"
+    curl -o Python-${TARGET_PYTHON_VERSION}.tgz https://www.python.org/ftp/python/${TARGET_PYTHON_VERSION}/Python-${TARGET_PYTHON_VERSION}.tgz
+    tar -xf Python-${TARGET_PYTHON_VERSION}.tgz && cd Python-${TARGET_PYTHON_VERSION} && ./configure --enable-optimizations && make -j $(nproc) && make install && cd .. && rm -rf Python-${TARGET_PYTHON_VERSION} Python-${TARGET_PYTHON_VERSION}.tgz
+
+    if [ -f /etc/alternatives/python ]; then update-alternatives --remove-all python; fi; update-alternatives --install /usr/bin/python python /usr/local/bin/${PYTHON} 10
+    if [ -f /etc/alternatives/python3 ]; then update-alternatives --remove-all python3; fi; update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/${PYTHON} 10
     curl -sS https://bootstrap.pypa.io/get-pip.py | ${PYTHON}
     
     # Cleanup
