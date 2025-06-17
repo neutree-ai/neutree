@@ -28,6 +28,7 @@ from ray import serve
 from ray.serve import Application
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from serve._util.port import get_available_port
+from serve._util.symlink import create_symlinks
 
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
@@ -72,14 +73,23 @@ class Backend:
                     revision=model_version if model_version != "latest" else None,
             )
 
+
         self.model_id = f"{model_name}:{model_version}"
         self.model_path = model_path
         self.model_task = model_task
         self.model_name = model_name
 
+        # MindIE need modify model configs, so we need to create model mapping and avoid to modify real model config.
+        # use symlink to avoid modify real model config.
+        actor_id = ray.get_runtime_context().get_actor_id()
+        self._actor_workpath = os.path.join(os.getcwd(), actor_id)
+        os.makedirs(self._actor_workpath,exist_ok=True)
+        self._model_mapping_path = os.path.join(os.getcwd(), actor_id,"model")
+        create_symlinks(model_path,self._model_mapping_path)
+
         # Prepare the MindIE config
         # --- Mutating model config.
-        model_config_path = Path(self.model_path).joinpath("config.json")
+        model_config_path = Path(self._model_mapping_path).joinpath("config.json")
         with open(model_config_path, "r", encoding="utf-8") as f:
             model_config = json.load(f)
         if engine_kwargs and engine_kwargs["dtype"]:
@@ -87,6 +97,9 @@ class Backend:
                 model_config["torch_dtype"] = "float16"
             elif engine_kwargs["dtype"] == "float":
                 model_config["torch_dtype"] = "float32"
+
+        # only remove symlink
+        os.remove(model_config_path)
         with open(model_config_path, "w", encoding="utf-8") as f:
             json.dump(model_config, f, indent=4)
         os.chmod(model_config_path, 0o750)
@@ -94,7 +107,7 @@ class Backend:
         self._ascend_home = Path(os.getenv("ASCEND_HOME","/usr/local/Ascend") )
         self._mindie_home = self._ascend_home.joinpath("mindie","latest")
         self._mindie_service_home = self._mindie_home.joinpath("mindie-service")
-        
+
         # --- Mutating MindIE config.          
         with open(self._mindie_service_home.joinpath("conf", "config.json"), "r", encoding="utf-8") as f:
             config = json.load(f)   
@@ -136,7 +149,7 @@ class Backend:
         if len(self.model_name.split("/")) > 1:
             model_config["modelName"] = self.model_name.split("/")[len(self.model_name.split("/"))-1]
         
-        model_config["modelWeightPath"] = self.model_path
+        model_config["modelWeightPath"] = self._model_mapping_path
         model_config["worldSize"] = world_size
         # default to use prefix cache
         model_config["plugin_params"] = json.dumps(
@@ -144,9 +157,9 @@ class Backend:
                         "plugin_type": "prefix_cache",
                     }
         )
-        actor_id = ray.get_runtime_context().get_actor_id()
-        self._service_config_path = self._mindie_service_home.joinpath(
-            "conf", f"config-{actor_id}.json"
+
+        self._service_config_path = Path(self._actor_workpath).joinpath(
+            f"config-{actor_id}.json"
         )
         config_str = json.dumps(config, indent=4, ensure_ascii=False)
         with open(
@@ -167,8 +180,18 @@ class Backend:
         Clean up resources when the object is deleted.
         """
         print("[Backend] Cleaning up resources")
-        if self._service_config_path:
+        # clean model mapping
+        for item in Path(self._model_mapping_path).iterdir():
+            if item.is_symlink() or item.is_file():
+                item.unlink()
+            else:
+                item.rmdir()
+        os.rmdir(self._model_mapping_path)
+        # clean service config
+        if self._service_config_path is not None:
             os.remove(self._service_config_path)
+
+        os.rmdir(self._actor_workpath)
 
         if self._stop_mindie_service():
             print("[Backend] MindLE service stopped")
@@ -190,8 +213,16 @@ class Backend:
         if self._openai_client is None:
             proc = multiprocessing.Process(target=self._run_service)
             proc.start()
+
+            def check_process(pid):
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    return False
+                else:
+                    return True
             while not self._service_ready:
-                if not proc.is_alive():
+                if not check_process(proc.pid):
                     raise RuntimeError("MindLE service failed to start")
                 self._service_ready = self._is_mindie_service_ready()
                 time.sleep(1)  # Wait for the service to start
