@@ -1,7 +1,8 @@
 ARG CANN_VERSION=8.1.rc1
 ARG CANN_CHIP=310p
 ARG MINDIE_VERSION=2.0.rc2
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_MAJOR_VERSION=3
+ARG PYTHON_MINOR_VERSION=11
 ARG PYTHON_PATCH_VERSION=11
 
 FROM ubuntu:22.04 AS base
@@ -10,48 +11,40 @@ SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 
 ## Prepare MindIE Install Environment
 
-ARG PYTHON_VERSION
+ARG PYTHON_MAJOR_VERSION
+ARG PYTHON_MINOR_VERSION
 ARG PYTHON_PATCH_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHON_VERSION=${PYTHON_VERSION} \
-    PYTHON_PATCH_VERSION=${PYTHON_PATCH_VERSION}
+    PYTHON_VERSION=${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION} \
+    PYTHON_INSTALL_VERSION=${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION}.${PYTHON_PATCH_VERSION}
 
 RUN <<EOF
     # Refresh
-    apt-get update -y && apt-get install -y --no-install-recommends \
-        software-properties-common apt-transport-https \
-      && apt-get install -y --no-install-recommends gpg-agent \
-      && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
-      && add-apt-repository -y ppa:deadsnakes/ppa \
-      && apt-get update -y
+    apt-get update -y
 
-    # Install
     apt-get install -y --no-install-recommends \
         ca-certificates build-essential binutils bash openssl \
         gcc g++ \
         make cmake libsqlite3-dev zlib1g-dev libssl-dev libffi-dev libbz2-dev liblzma-dev \
         wget curl
 
-    # install python tools
-    PYTHON="python${PYTHON_VERSION}"
-    apt-get install -y --no-install-recommends ${PYTHON}-dev ${PYTHON}-venv ${PYTHON}-lib2to3
-
-    # Install python
-    TARGET_PYTHON_VERSION="${PYTHON_VERSION}.${PYTHON_PATCH_VERSION}"
-    curl -o Python-${TARGET_PYTHON_VERSION}.tgz https://www.python.org/ftp/python/${TARGET_PYTHON_VERSION}/Python-${TARGET_PYTHON_VERSION}.tgz
-    tar -xf Python-${TARGET_PYTHON_VERSION}.tgz && cd Python-${TARGET_PYTHON_VERSION} && ./configure --enable-optimizations && make -j $(nproc) && make install && cd .. && rm -rf Python-${TARGET_PYTHON_VERSION} Python-${TARGET_PYTHON_VERSION}.tgz
-
-    if [ -f /etc/alternatives/python ]; then update-alternatives --remove-all python; fi; update-alternatives --install /usr/bin/python python /usr/local/bin/${PYTHON} 10
-    if [ -f /etc/alternatives/python3 ]; then update-alternatives --remove-all python3; fi; update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/${PYTHON} 10
-    curl -sS https://bootstrap.pypa.io/get-pip.py | ${PYTHON}
     
+    # Install python
+    curl -o Python-${PYTHON_INSTALL_VERSION}.tgz https://www.python.org/ftp/python/${PYTHON_INSTALL_VERSION}/Python-${PYTHON_INSTALL_VERSION}.tgz
+    tar -xf Python-${PYTHON_INSTALL_VERSION}.tgz && cd Python-${PYTHON_INSTALL_VERSION} && ./configure --prefix=/usr/local/python${PYTHON_INSTALL_VERSION} --enable-loadable-sqlite-extensions --enable-shared && make && make install && cd .. && rm -rf Python-${PYTHON_INSTALL_VERSION} Python-${PYTHON_INSTALL_VERSION}.tgz
+
+    if [ -f /etc/alternatives/python ]; then update-alternatives --remove-all python; fi; update-alternatives --install /usr/bin/python python /usr/local/python${PYTHON_INSTALL_VERSION}/bin/python${PYTHON_VERSION} 10
+    if [ -f /etc/alternatives/python3 ]; then update-alternatives --remove-all python3; fi; update-alternatives --install /usr/bin/python3 python3 /usr/local/python${PYTHON_INSTALL_VERSION}/bin/python${PYTHON_VERSION} 10
+
     # Cleanup
     rm -rf /var/tmp/* \
         && rm -rf /tmp/* \
-        && rm -rf /var/cache/apt \
-        && pip cache purge
+        && rm -rf /var/cache/apt
 EOF
+
+ENV LD_LIBRARY_PATH=/usr/local/python${PYTHON_INSTALL_VERSION}/lib:$LD_LIBRARY_PATH
+ENV PATH=/usr/local/python${PYTHON_INSTALL_VERSION}/bin:$PATH
 
 ARG CANN_VERSION
 ARG CANN_CHIP
@@ -60,7 +53,7 @@ ENV CANN_VERSION=${CANN_VERSION} \
     CANN_CHIP=${CANN_CHIP} \
     ASCEND_HOME="/usr/local/Ascend"
 
-ENV LD_LIBRARY_PATH=${ASCEND_HOME}/driver/lib64/common:${ASCEND_HOME}/driver/lib64/driver:${ASCEND_HOME}/driver/tools
+ENV LD_LIBRARY_PATH=${ASCEND_HOME}/driver/lib64/common:${ASCEND_HOME}/driver/lib64/driver:${ASCEND_HOME}/driver/tools:$LD_LIBRARY_PATH
 ## Install CANN Toolkit
 
 RUN <<EOF
