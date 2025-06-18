@@ -1,6 +1,7 @@
 from math import e
 import os
 import enum
+from pyexpat import model
 from re import S
 import subprocess
 import multiprocessing
@@ -116,6 +117,9 @@ class Backend:
         model_deploy_config = backend_config["ModelDeployConfig"]
         model_config = model_deploy_config["ModelConfig"][0]
         schedule_config = backend_config["ScheduleConfig"]
+        
+        model_config["trustRemoteCode"] = True
+        
         if engine_kwargs:
             for key, value in engine_kwargs.items():
                  if key in model_deploy_config:
