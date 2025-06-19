@@ -13,7 +13,7 @@ import (
 	registrymocks "github.com/neutree-ai/neutree/internal/registry/mocks"
 )
 
-func TestGetClusterImage(t *testing.T) {
+func TestGetBaseImage(t *testing.T) {
 	tests := []struct {
 		name          string
 		cluster       *v1.Cluster
@@ -73,7 +73,7 @@ func TestGetClusterImage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := getClusterImage(tt.cluster, tt.imageRegistry)
+			got, err := getBaseImage(tt.cluster, tt.imageRegistry)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -89,86 +89,69 @@ func TestGetClusterImage(t *testing.T) {
 	}
 }
 
-func TestCheckClusterImage(t *testing.T) {
-	// Setup test cases with table-driven style
+func TestValidateImageRegistry(t *testing.T) {
 	tests := []struct {
 		name          string
-		setupMocks    func(*registrymocks.MockImageService)
-		cluster       *v1.Cluster
 		imageRegistry *v1.ImageRegistry
-		expectedErr   error
 		wantErr       bool
 	}{
+		{
+			name: "image registry URL is empty",
+			imageRegistry: &v1.ImageRegistry{
+				Metadata: &v1.Metadata{Name: "test-registry"},
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "",
+					Repository: "repo",
+				},
+			},
+			wantErr: true,
+		}, {
+			name: "image registry repository is empty",
+			imageRegistry: &v1.ImageRegistry{
+				Metadata: &v1.Metadata{Name: "test-registry"},
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "registry.example.com",
+					Repository: "",
+				},
+			},
+			wantErr: true,
+		},
 		{
 			name: "image registry not connected",
 			imageRegistry: &v1.ImageRegistry{
 				Metadata: &v1.Metadata{Name: "test-registry"},
-				Status:   &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseFAILED},
-			},
-			cluster:     &v1.Cluster{Metadata: &v1.Metadata{Name: "test-cluster"}},
-			expectedErr: errors.New("image registry test-registry not connected"),
-			wantErr:     true,
-		},
-		{
-			name: "image not found",
-			setupMocks: func(m *registrymocks.MockImageService) {
-				m.On("CheckImageExists", mock.Anything, mock.Anything).Return(false, nil)
-			},
-			imageRegistry: &v1.ImageRegistry{
-				Metadata: &v1.Metadata{Name: "test-registry"},
-				Status:   &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
 				Spec: &v1.ImageRegistrySpec{
-					URL:        "https://registry.example.com",
-					Repository: "repo",
-					AuthConfig: v1.ImageRegistryAuthConfig{
-						Username: "user",
-						Password: "pass",
-					},
+					URL:        "registry.example.com",
+					Repository: "test",
+				},
+				Status: &v1.ImageRegistryStatus{
+					Phase: v1.ImageRegistryPhaseFAILED,
 				},
 			},
-			cluster:     &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
-			expectedErr: errors.Wrap(ErrImageNotFound, "image registry.example.com/repo/neutree-serve:v1.0.0 not found"),
-			wantErr:     true,
-		},
-		{
-			name: "image check error",
-			setupMocks: func(m *registrymocks.MockImageService) {
-				m.On("CheckImageExists", mock.Anything, mock.Anything).Return(false, errors.New("connection error"))
-			},
-			imageRegistry: &v1.ImageRegistry{
-				Metadata: &v1.Metadata{Name: "test-registry"},
-				Status:   &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
-				Spec: &v1.ImageRegistrySpec{
-					URL:        "https://registry.example.com",
-					Repository: "repo",
-					AuthConfig: v1.ImageRegistryAuthConfig{
-						Username: "user",
-						Password: "pass",
-					},
-				},
-			},
-			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
 			wantErr: true,
 		},
 		{
-			name: "success case",
-			setupMocks: func(m *registrymocks.MockImageService) {
-				m.On("CheckImageExists", mock.Anything, mock.Anything).Return(true, nil)
-			},
+			name: "image registry status is nil",
 			imageRegistry: &v1.ImageRegistry{
 				Metadata: &v1.Metadata{Name: "test-registry"},
-				Status:   &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
 				Spec: &v1.ImageRegistrySpec{
-					URL:        "https://registry.example.com",
-					Repository: "repo",
-					AuthConfig: v1.ImageRegistryAuthConfig{
-						Username: "user",
-						Password: "pass",
-					},
+					URL:        "registry.example.com",
+					Repository: "test",
 				},
 			},
-			cluster: &v1.Cluster{
-				Spec: &v1.ClusterSpec{Version: "v1.0.0"},
+			wantErr: true,
+		},
+		{
+			name: "image registry connected",
+			imageRegistry: &v1.ImageRegistry{
+				Metadata: &v1.Metadata{Name: "test-registry"},
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "registry.example.com",
+					Repository: "test",
+				},
+				Status: &v1.ImageRegistryStatus{
+					Phase: v1.ImageRegistryPhaseCONNECTED,
+				},
 			},
 			wantErr: false,
 		},
@@ -176,25 +159,55 @@ func TestCheckClusterImage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup mocks
-			mockImageService := registrymocks.NewMockImageService(t)
-			if tt.setupMocks != nil {
-				tt.setupMocks(mockImageService)
-			}
-
-			// Execute test
-			err := checkClusterImage(mockImageService, tt.cluster, tt.imageRegistry)
-
-			// Verify results
+			err := validateImageRegistryFunc(tt.imageRegistry)()
 			if tt.wantErr {
 				assert.Error(t, err)
-				if tt.expectedErr != nil {
-					assert.Contains(t, err.Error(), tt.expectedErr.Error())
-				}
+				assert.Contains(t, err.Error(), "image registry")
 			} else {
 				assert.NoError(t, err)
 			}
-			mockImageService.AssertExpectations(t)
+		})
+	}
+}
+
+func TestValidateClusterImage(t *testing.T) {
+	tests := []struct {
+		name      string
+		mockSetup func(*registrymocks.MockImageService)
+		wantErr   bool
+	}{
+		{
+			name: "image exists",
+			mockSetup: func(m *registrymocks.MockImageService) {
+				m.On("CheckImageExists", "test-image", mock.Anything).Return(true, nil)
+			},
+			wantErr: false,
+		},
+		{
+			name: "image not exists",
+			mockSetup: func(m *registrymocks.MockImageService) {
+				m.On("CheckImageExists", "test-image", mock.Anything).Return(false, nil)
+			},
+			wantErr: true,
+		},
+		{
+			name: "image service error",
+			mockSetup: func(m *registrymocks.MockImageService) {
+				m.On("CheckImageExists", "test-image", mock.Anything).Return(false, errors.New("connection failed"))
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockImageService := registrymocks.NewMockImageService(t)
+			tt.mockSetup(mockImageService)
+			err := validateClusterImageFunc(mockImageService, v1.ImageRegistryAuthConfig{}, "test-image")()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

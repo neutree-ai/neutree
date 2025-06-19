@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -110,9 +112,47 @@ func (c *sshClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	image, err := getBaseImage(c.cluster, c.imageRegistry)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to check cluster image")
+		return "", errors.Wrapf(err, "failed to get cluster base image for cluster %s", c.cluster.Metadata.Name)
+	}
+
+	acceleratorType := c.getNodeAcceleratorType(ctx, c.getHeadIP())
+	if acceleratorType != "" && acceleratorType != NvdiaAcceleratorType {
+		if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+			image = image + "-" + suffix
+			c.config.Docker.Image = image
+		}
+
+		runtimeOption, err := c.getNodeDockerRuntimeConfiguration(ctx, c.getHeadIP())
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get node docker runtime configuration")
+		}
+
+		if runtimeOption != "" {
+			c.config.Docker.RunOptions = append(c.config.Docker.RunOptions, runtimeOption)
+		}
+
+		err = os.Remove(c.configMgr.ConfigPath())
+		if err != nil {
+			return "", errors.Wrap(err, "failed to remove local cluster config")
+		}
+
+		err = c.configMgr.Generate(c.config)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to update local cluster config")
+		}
+	}
+
+	validate := []dependencyValidateFunc{
+		validateImageRegistryFunc(c.imageRegistry),
+		validateClusterImageFunc(c.imageService, c.imageRegistry.Spec.AuthConfig, image),
+	}
+
+	for _, validateFunc := range validate {
+		if err = validateFunc(); err != nil {
+			return "", errors.Wrap(err, "failed to validate dependency")
+		}
 	}
 
 	upArgs := []string{
@@ -140,20 +180,36 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 }
 
 func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+
+	image, err := getBaseImage(c.cluster, c.imageRegistry)
 	if err != nil {
-		return errors.Wrap(err, "failed to check cluster image")
+		return errors.Wrapf(err, "failed to get cluster base image for cluster %s", c.cluster.Metadata.Name)
+	}
+
+	acceleratorType := c.getNodeAcceleratorType(ctx, nodeIP)
+	if suffix, ok := acceleratorImageTagSuffix[acceleratorType]; ok && suffix != "" {
+		image = image + "-" + suffix
+	}
+
+	validate := []dependencyValidateFunc{
+		validateImageRegistryFunc(c.imageRegistry),
+		validateClusterImageFunc(c.imageService, c.imageRegistry.Spec.AuthConfig, image),
+	}
+
+	for _, validateFunc := range validate {
+		if err = validateFunc(); err != nil {
+			return errors.Wrap(err, "failed to validate dependency")
+		}
 	}
 
 	env := map[string]interface{}{
 		"RAY_HEAD_IP": c.getHeadIP(),
 	}
 
-	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
-	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
-
 	for _, command := range c.config.InitializationCommands {
-		_, err := dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)
+		_, err = dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)
 		if err != nil {
 			return errors.Wrap(err, "failed to run command "+command)
 		}
@@ -176,6 +232,64 @@ func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error 
 	}
 
 	return nil
+}
+
+func (c *sshClusterManager) getNodeAcceleratorType(ctx context.Context, nodeIP string) string {
+	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+
+	_, err := dockerCommandRunner.Run(ctx, "nvidia-smi", false, nil, false, nil, "host", "", false)
+	if err == nil {
+		return NvdiaAcceleratorType
+	}
+
+	npusmiOutput, err := dockerCommandRunner.Run(ctx, "npu-smi info", false, nil, true, nil, "host", "", false)
+	if err == nil {
+		if strings.Contains(npusmiOutput, "910B") {
+			return Ascend910BAcceleratorType
+		}
+
+		if strings.Contains(npusmiOutput, "310P") {
+			return Ascend310PAcceleratorType
+		}
+		// default return ascend310p
+		return Ascend310PAcceleratorType
+	}
+
+	return ""
+}
+
+func (c *sshClusterManager) getNodeDockerRuntimeConfiguration(ctx context.Context, nodeIP string) (string, error) {
+	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
+
+	npuRuntimeConfiguration := func() (string, error) {
+		deviceOutput, err := dockerCommandRunner.Run(ctx, "ls /dev/davinci[0-9]* | awk -F'davinci' '{print $2}'", false, nil, true, nil, "host", "", false)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get Ascend devices")
+		}
+
+		deviceIds := []string{}
+
+		for _, deviceId := range strings.Split(deviceOutput, "\n") {
+			if _, err := strconv.Atoi(deviceId); err == nil {
+				deviceIds = append(deviceIds, deviceId)
+			}
+		}
+
+		return fmt.Sprintf("-e ASCEND_VISIBLE_DEVICES=%s", strings.Join(deviceIds, ",")), nil
+	}
+
+	runtimeConfigurationFuncMap := map[string]func() (string, error){
+		Ascend910BAcceleratorType: npuRuntimeConfiguration,
+		Ascend310PAcceleratorType: npuRuntimeConfiguration,
+	}
+
+	if runtimeConfigurationFunc, ok := runtimeConfigurationFuncMap[c.getNodeAcceleratorType(ctx, nodeIP)]; ok {
+		return runtimeConfigurationFunc()
+	}
+
+	return "", nil
 }
 
 func (c *sshClusterManager) drainNode(ctx context.Context, nodeID, reason, message string, deadlineRemainSeconds int) error {
@@ -459,21 +573,22 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 		"--privileged",
 		"--cap-add=SYS_ADMIN",
 		"--security-opt=seccomp=unconfined",
+		"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 	}
 
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`ray start --disable-usage-stats --head --metrics-export-port=%d --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+		fmt.Sprintf(`python /home/ray/start.py --head --port=6379 --metrics-export-port=%d --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
 			v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.WorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+		fmt.Sprintf(`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.StaticWorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+		fmt.Sprintf(`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 
