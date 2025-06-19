@@ -295,11 +295,9 @@ FROM ray-base
 
 RUN apt-get update && apt-get install util-linux nfs-common -y
 
-# Copy requirements file
-COPY requirements.txt.npu requirements.txt
-
 # Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=bind,src=requirements,target=requirements \
+    pip install --no-cache-dir -r requirements/common.txt
 
 ENV HOME=/home/ray
 RUN mkdir -p ${HOME}

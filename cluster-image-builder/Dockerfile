@@ -7,19 +7,15 @@ RUN apt-get update && apt-get install util-linux nfs-common -y
 
 
 USER ray
-# Copy requirements file
-COPY requirements.txt .
-
-SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
-RUN <<EOF
-    # Remove vllm for aarch64
-    if [ $(uname -m) = "aarch64" ]; then
-        sed -i '/^vllm/d' requirements.txt
-    fi
-EOF
 
 # Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=bind,src=requirements,target=requirements \
+    pip install --no-cache-dir -r requirements/common.txt && \
+    if [ $(uname -m) = "aarch64" ]; then \
+        pip install --no-cache-dir -r requirements/cuda_arm.txt; \
+    else \
+        pip install --no-cache-dir -r requirements/cuda.txt; \
+    fi
 
 # Copy Python files
 COPY *.py ./
