@@ -22,11 +22,12 @@ from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionRequest, ChatCompletionResponse, ErrorResponse,
     EmbeddingRequest, EmbeddingResponse,
-    ScoreRequest, ScoreResponse
+    ScoreRequest, ScoreResponse,
+    RerankRequest, RerankResponse
 )
 from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
 from vllm.entrypoints.openai.serving_embedding import OpenAIServingEmbedding
-from vllm.entrypoints.openai.serving_score import OpenAIServingScores
+from vllm.entrypoints.openai.serving_score import ServingScores
 from vllm.entrypoints.openai.serving_models import BaseModelPath, LoRAModulePath, PromptAdapterPath, OpenAIServingModels
 from vllm.engine.metrics import RayPrometheusStatLogger
 
@@ -37,35 +38,6 @@ class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
     CONSISTENT_HASH = "consistent_hash"
-
-from pydantic import BaseModel, Field
-from typing import List, Optional, Any
-
-class RerankRequest(BaseModel):
-    model: Optional[str] = None
-    query: str
-    documents: List[str]
-    top_n: int = Field(default=0)
-    truncate_prompt_tokens: Optional[int] = None
-    additional_data: Optional[Any] = None
-    priority: int = Field(default=0)
-
-class RerankDocument(BaseModel):
-    text: str
-
-class RerankResult(BaseModel):
-    index: int
-    document: RerankDocument
-    relevance_score: float
-
-class RerankUsage(BaseModel):
-    total_tokens: int
-
-class RerankResponse(BaseModel):
-    id: str
-    model: str
-    usage: RerankUsage
-    results: List[RerankResult]
 
 @serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})
 class Backend:
@@ -204,7 +176,7 @@ class Backend:
         if self.openai_serving_score is None:
             model_config = await self._ensure_model_config()
             models = await self._ensure_models()
-            self.openai_serving_score = OpenAIServingScores(
+            self.openai_serving_score = ServingScores(
                 self.engine,
                 model_config,
                 models,
@@ -223,60 +195,11 @@ class Backend:
     async def rerank(self, payload: Any):
         """
         Rerank documents based on their relevance to a query.
-        Implementation aligned with vLLM's do_rerank method.
+        Uses vLLM's native do_rerank method for maximum compatibility and performance.
         """
         await self._ensure_score()
-        
         request = RerankRequest(**payload)
-        documents = request.documents
-        top_n = request.top_n if request.top_n > 0 else len(documents)
-        
-        # Use the score API to compute relevance scores
-        scores = []
-        total_prompt_tokens = 0
-        
-        for i, document in enumerate(documents):
-            # Create a score request for each document
-            score_request = ScoreRequest(
-                text_1=request.query,
-                text_2=document,
-                model=request.model,
-                truncate_prompt_tokens=request.truncate_prompt_tokens,
-                additional_data=request.additional_data,
-                priority=request.priority
-            )
-            
-            # Get the score result
-            result = await self.openai_serving_score.create_score(score_request, None)
-            
-            # Extract score and accumulate tokens
-            score = result.data[0].score
-            scores.append((i, document, score))
-            total_prompt_tokens += result.usage.prompt_tokens
-        
-        # Sort by relevance score in descending order
-        scores.sort(key=lambda x: x[2], reverse=True)
-        
-        # Apply top_n if specified
-        if top_n < len(documents):
-            scores = scores[:top_n]
-        
-        # Build response in vLLM format
-        results = [
-            RerankResult(
-                index=idx,
-                document=RerankDocument(text=doc),
-                relevance_score=score
-            )
-            for idx, doc, score in scores
-        ]
-        
-        return RerankResponse(
-            id=f"rerank-{time.time()}",
-            model=request.model or self.model_id,
-            usage=RerankUsage(total_tokens=total_prompt_tokens),
-            results=results
-        )
+        return await self.openai_serving_score.do_rerank(request, None)
 
     async def show_available_models(self):
         models = await self._ensure_models()
