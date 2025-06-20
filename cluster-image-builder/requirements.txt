@@ -10,6 +10,6 @@ huggingface-hub==0.32.0
 ray[serve]==v2.43.0
 bentoml==1.4.6
 PyYAML==6.0.1
-vllm==0.9.1
+vllm==0.8.5
 kantoku==0.18.3
 openai==1.65.2
