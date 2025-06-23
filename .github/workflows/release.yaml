@@ -26,6 +26,10 @@ jobs:
         with:
           username: ${{ secrets.IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.IMAGE_PUSH_TOKEN }}
+      - name: Set up go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
       - name: build amd64 image
         run: export ARCH=amd64; make docker-build && make docker-push
         env:
@@ -44,6 +48,10 @@ jobs:
         with:
           username: ${{ secrets.IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.IMAGE_PUSH_TOKEN }}
+      - name: Set up go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
       - name: build arm64 image
         run: export ARCH=arm64; make docker-build && make docker-push
         env:

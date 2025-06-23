@@ -29,12 +29,16 @@ type ClusterSpec struct {
 type RaySSHProvisionClusterConfig struct {
 	Provider Provider `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Auth     Auth     `json:"auth,omitempty" yaml:"auth,omitempty"`
+	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
+	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
 }
 
 type RayKubernetesProvisionClusterConfig struct {
 	Kubeconfig       string            `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
 	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
 	WorkerGroupSpecs []WorkerGroupSpec `json:"worker_group_specs,omitempty" yaml:"worker_group_specs,omitempty"`
+	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
+	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
 }
 
 type KubernetesAccessMode string

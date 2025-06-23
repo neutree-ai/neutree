@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 
+	"github.com/gin-gonic/gin"
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/cron"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
@@ -35,6 +38,12 @@ var (
 	gatewayProxyUrl          = flag.String("gateway-proxy-url", "", "gateway proxy url")
 	gatewayAdminUrl          = flag.String("gateway-admin-url", "", "gateway admin url")
 	gatewayLogRemoteWriteUrl = flag.String("gateway-log-remote-write-url", "", "log remote write url")
+
+	// accelerator plugin config
+	acceleratorPluginServerPort = flag.Int("accelerator-plugin-server-port", 3001, "accelerator plugin server port")
+	acceleratorPluginServerHost = flag.String("accelerator-plugin-server-host", "0.0.0.0", "accelerator plugin server host")
+
+	ginMode = flag.String("gin-mode", "release", "gin mode: debug, release, test")
 )
 
 func main() {
@@ -45,6 +54,8 @@ func main() {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
+	gin.SetMode(*ginMode)
+
 	obsCollectConfigManager, err := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
 		DeployType:                            *deployType,
 		LocalCollectConfigPath:                *localCollecteConfigPath,
@@ -54,6 +65,8 @@ func main() {
 	if err != nil {
 		klog.Fatalf("failed to init obs collect config manager: %s", err.Error())
 	}
+
+	acceleratorManager := accelerator.NewManager(fmt.Sprintf("%s:%d", *acceleratorPluginServerHost, *acceleratorPluginServerPort))
 
 	s, err := storage.New(storage.Options{
 		AccessURL: *storageAccessURL,
@@ -108,6 +121,7 @@ func main() {
 		ObsCollectConfigManager: obsCollectConfigManager,
 		MetricsRemoteWriteURL:   *metricsRemoteWriteURL,
 		Gw:                      gw,
+		AcceleratorManager:      acceleratorManager,
 	})
 
 	if err != nil {
@@ -123,10 +137,11 @@ func main() {
 	}
 
 	endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
-		Storage:      s,
-		Workers:      *controllerWorkers,
-		ImageService: imageService,
-		Gw:           gw,
+		Storage:            s,
+		Workers:            *controllerWorkers,
+		ImageService:       imageService,
+		Gw:                 gw,
+		AcceleratorManager: acceleratorManager,
 	})
 	if err != nil {
 		klog.Fatalf("failed to init endpoint controller: %s", err.Error())
@@ -149,8 +164,9 @@ func main() {
 	}
 
 	workspaceController, err := controllers.NewWorkspaceController(&controllers.WorkspaceControllerOption{
-		Storage: s,
-		Workers: *controllerWorkers,
+		Storage:            s,
+		Workers:            *controllerWorkers,
+		AcceleratorManager: acceleratorManager,
 	})
 	if err != nil {
 		klog.Fatalf("failed to init workspace controller: %s", err.Error())
@@ -192,6 +208,7 @@ func main() {
 	go modelCatalogController.Start(ctx)
 
 	go obsCollectConfigManager.Start(ctx)
+	go acceleratorManager.Start(ctx)
 
 	<-ctx.Done()
 }

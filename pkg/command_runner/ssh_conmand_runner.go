@@ -16,7 +16,6 @@ type ProcessExecute func(ctx context.Context, name string, args []string) ([]byt
 // SSHCommandRunner represents an SSH command runner.
 type SSHCommandRunner struct {
 	nodeID         string
-	clusterName    string
 	processExecute ProcessExecute
 	sshPrivateKey  string
 	sshUser        string
@@ -28,26 +27,25 @@ type CommonArgs struct {
 	NodeID         string
 	SshIP          string
 	AuthConfig     v1.Auth
-	ClusterName    string
+	SSHControlPath string
 	ProcessExecute ProcessExecute
 }
 
 // NewSSHCommandRunner creates a new SSHCommandRunner instance.
-func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, clusterName string, processExecute ProcessExecute) *SSHCommandRunner {
+func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshControlPath string, processExecute ProcessExecute) *SSHCommandRunner {
 	return &SSHCommandRunner{
 		nodeID:         nodeID,
-		clusterName:    clusterName,
 		processExecute: processExecute,
 		sshPrivateKey:  authConfig.SSHPrivateKey,
 		sshUser:        authConfig.SSHUser,
-		sshControlPath: "",
+		sshControlPath: sshControlPath,
 		sshIP:          sshIP,
 	}
 }
 
 // Run runs a command over SSH.
 func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool, portForward []string, withOutput bool,
-	environmentVariables map[string]interface{}, runEnv string, sshOptionsOverrideSSHKey string, shutdownAfterRun bool) (string, error) {
+	environmentVariables map[string]interface{}, sshOptionsOverrideSSHKey string, shutdownAfterRun bool) (string, error) {
 	if shutdownAfterRun {
 		cmd += "; sudo shutdown -h now"
 	}

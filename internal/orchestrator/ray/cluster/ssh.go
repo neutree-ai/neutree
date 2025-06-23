@@ -7,36 +7,68 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/klog"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/nfs"
-	"github.com/neutree-ai/neutree/internal/orchestrator/ray/command_runner"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/config"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/command_runner"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type sshClusterManager struct {
-	executor  command.Executor
-	configMgr *config.Manager
-	config    *v1.RayClusterConfig
+	executor           command.Executor
+	imageService       registry.ImageService
+	acceleratorManager *accelerator.Manager
+	storage            storage.Storage
 
-	cluster       *v1.Cluster
-	imageRegistry *v1.ImageRegistry
-	imageService  registry.ImageService
+	configMgr *config.Manager
+
+	cluster          *v1.Cluster
+	imageRegistry    *v1.ImageRegistry
+	sshClusterConfig *v1.RaySSHProvisionClusterConfig
+
+	config *v1.RayClusterConfig
 }
 
-func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService,
-	executor command.Executor) (*sshClusterManager, error) {
-	rayClusterConfig, err := generateRayClusterConfig(cluster, imageRegistry)
+func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService, acceleratorManager *accelerator.Manager,
+	executor command.Executor, s storage.Storage) (*sshClusterManager, error) {
+	manager := &sshClusterManager{
+		executor: executor,
+
+		cluster:            cluster,
+		imageRegistry:      imageRegistry,
+		imageService:       imageService,
+		acceleratorManager: acceleratorManager,
+		storage:            s,
+	}
+
+	sshClusterConfig, err := parseSSHClusterConfig(cluster)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse ssh cluster config")
+	}
+
+	manager.sshClusterConfig = sshClusterConfig
+
+	err = manager.configClusterAcceleratorType()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to config cluster accelerator type")
+	}
+
+	rayClusterConfig, err := manager.generateRayClusterConfig()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate ray cluster config")
 	}
+
+	manager.config = rayClusterConfig
 
 	if cluster.IsInitialized() {
 		err = ensureLocalClusterStateFile(rayClusterConfig)
@@ -45,20 +77,10 @@ func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 		}
 	}
 
-	configMgr := config.NewManager(rayClusterConfig.ClusterName)
+	manager.configMgr = config.NewManager(rayClusterConfig.ClusterName)
 
-	if err := configMgr.Generate(rayClusterConfig); err != nil {
+	if err := manager.configMgr.Generate(rayClusterConfig); err != nil {
 		return nil, errors.Wrap(err, "failed to generate config")
-	}
-
-	manager := &sshClusterManager{
-		executor:  executor,
-		configMgr: configMgr,
-		config:    rayClusterConfig,
-
-		cluster:       cluster,
-		imageRegistry: imageRegistry,
-		imageService:  imageService,
 	}
 
 	return manager, nil
@@ -110,9 +132,32 @@ func (c *sshClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	changed, err := c.mutateAcceleratorRuntimeConfig(ctx, c.getHeadIP())
 	if err != nil {
-		return "", errors.Wrap(err, "failed to check cluster image")
+		return "", errors.Wrap(err, "failed to mutate accelerator runtime config")
+	}
+
+	if changed {
+		err = os.Remove(c.configMgr.ConfigPath())
+		if err != nil {
+			return "", errors.Wrap(err, "failed to remove config file")
+		}
+
+		err = c.configMgr.Generate(c.config)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to generate config")
+		}
+	}
+
+	validate := []dependencyValidateFunc{
+		validateImageRegistryFunc(c.imageRegistry),
+		validateClusterImageFunc(c.imageService, c.imageRegistry.Spec.AuthConfig, c.config.Docker.Image),
+	}
+
+	for _, validateFunc := range validate {
+		if err = validateFunc(); err != nil {
+			return "", errors.Wrap(err, "failed to validate dependency")
+		}
 	}
 
 	upArgs := []string{
@@ -140,20 +185,31 @@ func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string
 }
 
 func (c *sshClusterManager) StartNode(ctx context.Context, nodeIP string) error {
-	err := checkClusterImage(c.imageService, c.cluster, c.imageRegistry)
+	_, err := c.mutateAcceleratorRuntimeConfig(ctx, nodeIP)
 	if err != nil {
-		return errors.Wrap(err, "failed to check cluster image")
+		return errors.Wrap(err, "failed to mutate accelerator runtime config")
 	}
 
-	env := map[string]interface{}{
-		"RAY_HEAD_IP": c.getHeadIP(),
+	validate := []dependencyValidateFunc{
+		validateImageRegistryFunc(c.imageRegistry),
+		validateClusterImageFunc(c.imageService, c.imageRegistry.Spec.AuthConfig, c.config.Docker.Image),
+	}
+
+	for _, validateFunc := range validate {
+		if err = validateFunc(); err != nil {
+			return errors.Wrap(err, "failed to validate dependency")
+		}
 	}
 
 	sshCommandArgs := c.buildSSHCommandArgs(nodeIP)
 	dockerCommandRunner := command_runner.NewDockerCommandRunner(&c.config.Docker, sshCommandArgs)
 
+	env := map[string]interface{}{
+		"RAY_HEAD_IP": c.getHeadIP(),
+	}
+
 	for _, command := range c.config.InitializationCommands {
-		_, err := dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)
+		_, err = dockerCommandRunner.Run(ctx, command, true, nil, false, env, "host", "", false)
 		if err != nil {
 			return errors.Wrap(err, "failed to run command "+command)
 		}
@@ -422,24 +478,108 @@ func (c *sshClusterManager) buildSSHCommandArgs(nodeIP string) *command_runner.C
 			SSHUser:       c.config.Auth.SSHUser,
 			SSHPrivateKey: c.configMgr.SSHKeyPath(),
 		},
-		ClusterName:    c.config.ClusterName,
+		SSHControlPath: "",
 		ProcessExecute: c.executor.Execute,
 	}
 }
 
+func (c *sshClusterManager) configClusterAcceleratorType() error {
+	if c.sshClusterConfig.AcceleratorType != nil {
+		return nil
+	}
+
+	acceleratorType, err := c.detectClusterAcceleratorType()
+	if err != nil {
+		return errors.Wrapf(err, "failed to detect cluster accelerator type")
+	}
+
+	c.sshClusterConfig.AcceleratorType = &acceleratorType
+	c.cluster.Spec.Config = c.sshClusterConfig
+
+	return c.storage.UpdateCluster(strconv.Itoa(c.cluster.ID), &v1.Cluster{
+		Spec: c.cluster.Spec,
+	})
+}
+
+func (c *sshClusterManager) detectClusterAcceleratorType() (string, error) {
+	detectAcceleratorType := ""
+
+	acceleratorType, err := c.acceleratorManager.GetNodeAcceleratorType(context.Background(), c.sshClusterConfig.Provider.HeadIP, c.sshClusterConfig.Auth)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get node accelerator type")
+	}
+
+	detectAcceleratorType = acceleratorType
+
+	for _, workerIP := range c.sshClusterConfig.Provider.WorkerIPs {
+		acceleratorType, err = c.acceleratorManager.GetNodeAcceleratorType(context.Background(), workerIP, c.sshClusterConfig.Auth)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get node accelerator type")
+		}
+
+		if detectAcceleratorType == "" {
+			detectAcceleratorType = acceleratorType
+			continue
+		}
+
+		if acceleratorType == "" {
+			continue
+		}
+
+		if detectAcceleratorType != acceleratorType {
+			return "", errors.New("cluster has different accelerator type")
+		}
+	}
+
+	return detectAcceleratorType, nil
+}
+
+func (c *sshClusterManager) mutateAcceleratorRuntimeConfig(ctx context.Context, nodeIP string) (bool, error) {
+	runtimeConfig, err := c.acceleratorManager.GetNodeRuntimeConfig(ctx, *c.sshClusterConfig.AcceleratorType, nodeIP, c.config.Auth)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to get node runtime config")
+	}
+
+	changed := false
+
+	if runtimeConfig.ImageSuffix != "" {
+		changed = true
+		c.config.Docker.Image = c.config.Docker.Image + "-" + runtimeConfig.ImageSuffix
+	}
+
+	if runtimeConfig.Runtime != "" {
+		changed = true
+
+		c.config.Docker.RunOptions = append(c.config.Docker.RunOptions, "--runtime="+runtimeConfig.Runtime)
+	}
+
+	if runtimeConfig.Env != nil {
+		changed = true
+
+		for k, v := range runtimeConfig.Env {
+			c.config.Docker.RunOptions = append(c.config.Docker.RunOptions, fmt.Sprintf("-e %s=%s", k, v))
+		}
+	}
+
+	if runtimeConfig.Options != nil {
+		changed = true
+
+		for _, v := range runtimeConfig.Options {
+			c.config.Docker.RunOptions = append(c.config.Docker.RunOptions, v)
+		}
+	}
+
+	return changed, nil
+}
+
 // setDefaultRayClusterConfig set default ray cluster config.
-func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) (*v1.RayClusterConfig, error) {
+func (c *sshClusterManager) generateRayClusterConfig() (*v1.RayClusterConfig, error) {
 	rayClusterConfig := &v1.RayClusterConfig{}
+	rayClusterConfig.Provider = c.sshClusterConfig.Provider
+	rayClusterConfig.Auth = c.sshClusterConfig.Auth
 
-	rayConfig, err := json.Marshal(cluster.Spec.Config)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(rayConfig, rayClusterConfig)
-	if err != nil {
-		return nil, err
-	}
+	cluster := c.cluster
+	imageRegistry := c.imageRegistry
 
 	rayClusterConfig.ClusterName = cluster.Metadata.Name
 	rayClusterConfig.Provider.Type = "local"
@@ -459,21 +599,22 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 		"--privileged",
 		"--cap-add=SYS_ADMIN",
 		"--security-opt=seccomp=unconfined",
+		"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 	}
 
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`ray start --disable-usage-stats --head --metrics-export-port=%d --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+		fmt.Sprintf(`python /home/ray/start.py --head --port=6379 --metrics-export-port=%d --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
 			v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.WorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+		fmt.Sprintf(`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.StaticWorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+		fmt.Sprintf(`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 

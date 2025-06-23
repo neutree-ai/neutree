@@ -23,7 +23,6 @@ func newDockerCommandRunner(dockerConfig *v1.Docker, executor *commandmocks.Mock
 		NodeID:         testNode,
 		AuthConfig:     authConfig,
 		SshIP:          testSSHIP,
-		ClusterName:    testCluster,
 		ProcessExecute: executor.Execute,
 	}
 
@@ -241,11 +240,6 @@ func TestRunInit(t *testing.T) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker inspect -f")
 				}).Return([]byte("false"), nil).Once()
-				// check docker runtime
-				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
-					sshCommand := args.Get(2).([]string)
-					assert.Contains(t, strings.Join(sshCommand, " "), "docker info -f")
-				}).Return([]byte("runc"), nil).Once()
 				// run container
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
@@ -422,61 +416,6 @@ func TestGenerateDockerStartCommand(t *testing.T) {
 	assert.Contains(t, cmd, "--net=host")
 	assert.Contains(t, cmd, "test-image")
 	assert.Contains(t, cmd, "--gpus all")
-}
-
-func TestConfigureRuntime(t *testing.T) {
-	tests := []struct {
-		name          string
-		runtimeOutput string
-		nvidiaSMIErr  bool
-		expectGPU     bool
-	}{
-		{
-			name:          "nvidia runtime available",
-			runtimeOutput: "nvidia-container-runtime",
-			expectGPU:     true,
-		},
-		{
-			name:          "nvidia runtime but no GPU",
-			runtimeOutput: "nvidia-container-runtime",
-			nvidiaSMIErr:  true,
-			expectGPU:     false,
-		},
-		{
-			name:          "no nvidia runtime",
-			runtimeOutput: "runc",
-			expectGPU:     false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockExecutor := new(commandmocks.MockExecutor)
-			mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(tt.runtimeOutput), nil).Once()
-			if tt.runtimeOutput == "nvidia-container-runtime" {
-				if tt.nvidiaSMIErr {
-					mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), errors.New("nvidia-smi failed")).Once()
-				} else {
-					mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Once()
-				}
-			}
-
-			runner := newDockerCommandRunner(&v1.Docker{
-				ContainerName: "test-container",
-			}, mockExecutor)
-
-			options, err := runner.configureRuntime(context.Background(), []string{})
-			assert.NoError(t, err)
-
-			if tt.expectGPU {
-				assert.Contains(t, options[0], "--runtime=nvidia")
-			} else {
-				assert.Len(t, options, 0)
-			}
-
-			mockExecutor.AssertExpectations(t) // Ensure all expectations are met
-		})
-	}
 }
 
 func TestAutoConfigureShm(t *testing.T) {

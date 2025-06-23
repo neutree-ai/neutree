@@ -15,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
@@ -37,6 +38,8 @@ type ClusterController struct {
 	metricsRemoteWriteURL string
 
 	gw gateway.Gateway
+
+	acceleratorManager *accelerator.Manager
 }
 
 type ClusterControllerOption struct {
@@ -48,6 +51,7 @@ type ClusterControllerOption struct {
 
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	Gw                      gateway.Gateway
+	AcceleratorManager      *accelerator.Manager
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
@@ -66,7 +70,8 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
 		metricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
 
-		gw: opt.Gw,
+		gw:                 opt.Gw,
+		acceleratorManager: opt.AcceleratorManager,
 	}
 
 	c.syncHandler = c.sync
@@ -132,6 +137,7 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 	clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
 		Cluster:               cluster,
 		ImageService:          c.imageService,
+		AcceleratorManager:    c.acceleratorManager,
 		Storage:               c.storage,
 		MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
 	})
@@ -353,6 +359,7 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 			Cluster:               cluster,
 			ImageService:          c.imageService,
 			Storage:               c.storage,
+			AcceleratorManager:    c.acceleratorManager,
 			MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
 		})
 		if err != nil {

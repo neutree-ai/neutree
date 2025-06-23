@@ -6,6 +6,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/cluster"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/command"
@@ -33,9 +34,10 @@ type Orchestrator interface {
 }
 
 type Options struct {
-	Cluster      *v1.Cluster
-	Storage      storage.Storage
-	ImageService registry.ImageService
+	Cluster            *v1.Cluster
+	Storage            storage.Storage
+	ImageService       registry.ImageService
+	AcceleratorManager *accelerator.Manager
 
 	MetricsRemoteWriteURL string
 }
@@ -54,7 +56,8 @@ func newOrchestrator(opts Options) (Orchestrator, error) {
 
 	switch opts.Cluster.Spec.Type {
 	case "ssh":
-		clustrManager, err := cluster.NewRaySSHClusterManager(opts.Cluster, imageRegistry, opts.ImageService, &command.OSExecutor{})
+		clustrManager, err := cluster.NewRaySSHClusterManager(opts.Cluster, imageRegistry, opts.ImageService,
+			opts.AcceleratorManager, &command.OSExecutor{}, opts.Storage)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create ray ssh cluster manager: %w", err)
 		}
@@ -64,7 +67,8 @@ func newOrchestrator(opts Options) (Orchestrator, error) {
 			clusterManager: clustrManager,
 		})
 	case "kubernetes":
-		clusterManager, err := cluster.NewKubeRayClusterManager(opts.Cluster, imageRegistry, opts.ImageService, opts.MetricsRemoteWriteURL)
+		clusterManager, err := cluster.NewKubeRayClusterManager(opts.Cluster, imageRegistry, opts.ImageService,
+			opts.AcceleratorManager, opts.Storage, opts.MetricsRemoteWriteURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kube ray cluster manager: %w", err)
 		}

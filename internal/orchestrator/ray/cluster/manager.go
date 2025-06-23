@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 
@@ -32,36 +33,49 @@ type ClusterManager interface {
 	Sync(ctx context.Context) error
 }
 
-func checkClusterImage(imageService registry.ImageService, cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) error {
-	if imageRegistry.Status == nil || imageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
-		return errors.New("image registry " + imageRegistry.Metadata.Name + " not connected")
+type dependencyValidateFunc func() error
+
+func validateImageRegistryFunc(imageRegistry *v1.ImageRegistry) dependencyValidateFunc {
+	return func() error {
+		if imageRegistry.Spec.URL == "" {
+			return errors.New("image registry url is empty")
+		}
+
+		if imageRegistry.Spec.Repository == "" {
+			return errors.New("image registry repository is empty")
+		}
+
+		if imageRegistry.Status == nil || imageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
+			return errors.New("image registry " + imageRegistry.Metadata.Name + " not connected")
+		}
+
+		return nil
 	}
-
-	image, err := getClusterImage(cluster, imageRegistry)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get cluster image for cluster %s", cluster.Metadata.Name)
-	}
-
-	imageExisted, err := imageService.CheckImageExists(image, authn.FromConfig(authn.AuthConfig{
-		Username:      imageRegistry.Spec.AuthConfig.Username,
-		Password:      imageRegistry.Spec.AuthConfig.Password,
-		Auth:          imageRegistry.Spec.AuthConfig.Auth,
-		IdentityToken: imageRegistry.Spec.AuthConfig.IdentityToken,
-		RegistryToken: imageRegistry.Spec.AuthConfig.IdentityToken,
-	}))
-
-	if err != nil {
-		return err
-	}
-
-	if !imageExisted {
-		return errors.Wrap(ErrImageNotFound, "image "+image+" not found")
-	}
-
-	return nil
 }
 
-func getClusterImage(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) (string, error) {
+func validateClusterImageFunc(imageService registry.ImageService, registryAuth v1.ImageRegistryAuthConfig, image string) dependencyValidateFunc {
+	return func() error {
+		imageExisted, err := imageService.CheckImageExists(image, authn.FromConfig(authn.AuthConfig{
+			Username:      registryAuth.Username,
+			Password:      registryAuth.Password,
+			Auth:          registryAuth.Auth,
+			IdentityToken: registryAuth.IdentityToken,
+			RegistryToken: registryAuth.IdentityToken,
+		}))
+
+		if err != nil {
+			return err
+		}
+
+		if !imageExisted {
+			return errors.Wrap(ErrImageNotFound, "image "+image+" not found")
+		}
+
+		return nil
+	}
+}
+
+func getBaseImage(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry) (string, error) {
 	registryURL, err := url.Parse(imageRegistry.Spec.URL)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
@@ -98,4 +112,48 @@ func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster, dashboard
 	}
 
 	return metricsScrapeTargetConfig, nil
+}
+
+func parseSSHClusterConfig(cluster *v1.Cluster) (*v1.RaySSHProvisionClusterConfig, error) {
+	if cluster.Spec.Config == nil {
+		return nil, errors.New("cluster config is empty")
+	}
+
+	config := cluster.Spec.Config
+
+	configString, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+
+	sshClusterConfig := &v1.RaySSHProvisionClusterConfig{}
+
+	err = json.Unmarshal(configString, sshClusterConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return sshClusterConfig, nil
+}
+
+func parseKubernetesClusterConfig(cluster *v1.Cluster) (*v1.RayKubernetesProvisionClusterConfig, error) {
+	if cluster.Spec.Config == nil {
+		return nil, errors.New("cluster config is empty")
+	}
+
+	config := cluster.Spec.Config
+
+	configString, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+
+	kubernetesClusterConfig := &v1.RayKubernetesProvisionClusterConfig{}
+
+	err = json.Unmarshal(configString, kubernetesClusterConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return kubernetesClusterConfig, nil
 }

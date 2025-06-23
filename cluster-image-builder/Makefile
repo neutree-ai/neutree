@@ -1,0 +1,41 @@
+VERSION ?= $(shell git describe --tags --always --dirty)
+
+IMAGE_REPO ?= docker.io
+IMAGE_PROJECT ?= neutree-ai
+IMAGE_PREFIX ?= ${IMAGE_REPO}/${IMAGE_PROJECT}/
+IMAGE_TAG ?= ${shell echo $(VERSION) | awk -F '/' '{print $$NF}'}
+NEUTREE_SERVE_IMAGE := $(IMAGE_PREFIX)neutree-serve
+
+ARCH ?= amd64
+ACCELERATORS ?= gpu
+ALL_ARCH ?= amd64 arm64
+
+RAY_BASE_IMAGE ?= rayproject/ray:2.43.0-py311-cu121
+ifeq ($(ARCH), arm64)
+RAY_BASE_IMAGE := $(RAY_BASE_IMAGE)-aarch64
+endif
+
+.PHONY: docker-build
+docker-build: ## Run docker-build-* targets for all the images
+	$(MAKE) ARCH=$(ARCH) $(addprefix docker-build-,$(ACCELERATORS))
+
+.PHONY: docker-build-gpu
+docker-build-gpu: ## Build the GPU image
+	docker build --build-arg RAY_BASE_IMAGE=$(RAY_BASE_IMAGE) -f Dockerfile -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG) .
+
+.PHONY: docker-push
+docker-push: ## Run docker-push-* targets for all the images
+	$(MAKE) ARCH=$(ARCH) $(addprefix docker-push-,$(ACCELERATORS))
+
+.PHONY: docker-push-gpu
+docker-push-gpu: ## Push the GPU image
+	docker push $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
+.PHONY: docker-push-manifest
+docker-push-manifest: $(addprefix docker-push-manifest-,$(ACCELERATORS))
+
+.PHONY: docker-push-manifest-gpu
+docker-push-manifest-gpu: ## Push the core manifest docker image.
+	docker manifest create --amend $(NEUTREE_SERVE_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_SERVE_IMAGE)\-&:$(IMAGE_TAG)~g")
+	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_SERVE_IMAGE}:${IMAGE_TAG} ${NEUTREE_SERVE_IMAGE}-$${arch}:${IMAGE_TAG}; done
+	docker manifest push --purge ${NEUTREE_SERVE_IMAGE}:${IMAGE_TAG}

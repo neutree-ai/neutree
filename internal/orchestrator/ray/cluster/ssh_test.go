@@ -13,7 +13,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.openly.dev/pointy"
 
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/config"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard/mocks"
@@ -173,6 +175,10 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 					},
 				},
 				imageService: mockImageRegistryService,
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					AcceleratorType: pointy.String(""),
+				},
+				acceleratorManager: &accelerator.Manager{},
 			}
 
 			// Test
@@ -252,6 +258,10 @@ func TestStartNode_Success(t *testing.T) {
 			},
 		},
 		imageService: mockImageRegistryService,
+		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+			AcceleratorType: pointy.String(""),
+		},
+		acceleratorManager: &accelerator.Manager{},
 	}
 
 	err := manager.StartNode(context.Background(), "2.2.2.2")
@@ -558,15 +568,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
@@ -613,15 +623,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
@@ -668,15 +678,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
@@ -722,15 +732,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
@@ -768,7 +778,12 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config, err := generateRayClusterConfig(tt.cluster, tt.imageRegistry)
+			manager := sshClusterManager{
+				cluster:       tt.cluster,
+				imageRegistry: tt.imageRegistry,
+			}
+			manager.sshClusterConfig, _ = parseSSHClusterConfig(tt.cluster)
+			config, err := manager.generateRayClusterConfig()
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -915,16 +930,16 @@ func TestBuildSSHCommandArgs(t *testing.T) {
 	mockExec := &commandmocks.MockExecutor{}
 
 	manager := &sshClusterManager{
-		config:    clusterConfig,
-		configMgr: config.NewManager(clusterConfig.ClusterName),
-		executor:  mockExec,
+		config:             clusterConfig,
+		configMgr:          config.NewManager(clusterConfig.ClusterName),
+		executor:           mockExec,
+		acceleratorManager: &accelerator.Manager{},
 	}
 
 	args := manager.buildSSHCommandArgs("1.1.1.1")
 	assert.Equal(t, "1.1.1.1", args.NodeID)
 	assert.Equal(t, "1.1.1.1", args.SshIP)
 	assert.Equal(t, "user", args.AuthConfig.SSHUser)
-	assert.Equal(t, "test-cluster", args.ClusterName)
 }
 
 func TestGetRayTmpDir(t *testing.T) {

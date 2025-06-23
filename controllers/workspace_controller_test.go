@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -18,8 +19,9 @@ import (
 // newTestWorkspaceController is a helper to create a WorkspaceController with mocked storage for testing.
 func newTestWorkspaceController(storage *storagemocks.MockStorage) *WorkspaceController {
 	c, _ := NewWorkspaceController(&WorkspaceControllerOption{
-		Storage: storage,
-		Workers: 1,
+		Storage:            storage,
+		Workers:            1,
+		AcceleratorManager: accelerator.NewManager("127.0.0.1:3001"),
 	})
 	// Use a predictable queue for testing.
 	c.baseController.queue = workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "workspace-test"})

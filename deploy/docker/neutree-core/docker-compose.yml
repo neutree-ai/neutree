@@ -149,8 +149,12 @@ services:
       - --gateway-proxy-url=http://{{ .NodeIP}}:80
       - --gateway-admin-url=http://kong:8001
       - --gateway-log-remote-write-url=http://vector:30122
+      - --accelerator-plugin-server-port=3001
+      - --accelerator-plugin-server-host=0.0.0.0
     volumes:
       - {{.NeutreeCoreWorkDir}}/collect:/etc/neutree/collect
+    ports:
+      - 3001:3001
     networks:
       - neutree
     restart: always

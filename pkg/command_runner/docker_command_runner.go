@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -20,7 +19,7 @@ type DockerCommandRunner struct {
 
 func NewDockerCommandRunner(dockerConfig *v1.Docker, sshCommandConfig *CommonArgs) *DockerCommandRunner {
 	sshCommandRunner := NewSSHCommandRunner(sshCommandConfig.NodeID, sshCommandConfig.SshIP,
-		sshCommandConfig.AuthConfig, sshCommandConfig.ClusterName, sshCommandConfig.ProcessExecute)
+		sshCommandConfig.AuthConfig, "", sshCommandConfig.ProcessExecute)
 
 	return &DockerCommandRunner{
 		sshCommandRunner: sshCommandRunner,
@@ -61,7 +60,7 @@ func (d *DockerCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bo
 		cmd += "; sudo shutdown -h now"
 	}
 
-	return d.sshCommandRunner.Run(ctx, cmd, exitOnFail, portForward, withOutput, environmentVariables, runEnv, sshOptionsOverrideSSHKey, false)
+	return d.sshCommandRunner.Run(ctx, cmd, exitOnFail, portForward, withOutput, environmentVariables, sshOptionsOverrideSSHKey, false)
 }
 
 func WithDockerExec(
@@ -101,7 +100,7 @@ func WithDockerExec(
 // CheckContainerStatus checks if the Docker container is running.
 func (d *DockerCommandRunner) CheckContainerStatus(ctx context.Context) (bool, error) {
 	output, err := d.sshCommandRunner.Run(ctx, fmt.Sprintf("%s inspect -f '{{.State.Running}}' %s",
-		d.dockerCmd, d.dockerConfig.ContainerName), false, nil, true, nil, "host", "", false)
+		d.dockerCmd, d.dockerConfig.ContainerName), false, nil, true, nil, "", false)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no such object") {
 			return false, nil
@@ -119,7 +118,7 @@ func (d *DockerCommandRunner) dockerExpandUser(ctx context.Context, s string, an
 	if userPos > -1 {
 		if d.homeDir == "" {
 			output, err := d.sshCommandRunner.Run(ctx, fmt.Sprintf("%s exec %s printenv HOME",
-				d.dockerCmd, d.dockerConfig.ContainerName), false, nil, true, nil, "host", "", false)
+				d.dockerCmd, d.dockerConfig.ContainerName), false, nil, true, nil, "", false)
 			if err != nil {
 				return "", errors.Wrap(err, "failed to get docker home directory")
 			}
@@ -151,13 +150,13 @@ func (d *DockerCommandRunner) RunInit(ctx context.Context) (bool, error) {
 	}
 
 	if d.dockerConfig.PullBeforeRun {
-		_, err = d.sshCommandRunner.Run(ctx, fmt.Sprintf("%s pull %s", d.dockerCmd, clusterImage), true, nil, false, nil, "host", "", false)
+		_, err = d.sshCommandRunner.Run(ctx, fmt.Sprintf("%s pull %s", d.dockerCmd, clusterImage), true, nil, false, nil, "", false)
 		if err != nil {
 			return false, errors.Wrap(err, "failed to pull Docker image")
 		}
 	} else {
 		_, err = d.sshCommandRunner.Run(ctx, fmt.Sprintf("%s image inspect %s 1> /dev/null  2>&1 || %s pull %s",
-			d.dockerCmd, clusterImage, d.dockerCmd, clusterImage), true, nil, false, nil, "host", "", false)
+			d.dockerCmd, clusterImage, d.dockerCmd, clusterImage), true, nil, false, nil, "", false)
 		if err != nil {
 			return false, errors.Wrap(err, "failed to check or pull Docker image")
 		}
@@ -182,19 +181,14 @@ func (d *DockerCommandRunner) RunInit(ctx context.Context) (bool, error) {
 			return false, errors.Wrap(err, "failed to auto configure shm")
 		}
 
-		userOptions, err := d.configureRuntime(ctx, userDockerRunOptions)
-		if err != nil {
-			return false, errors.Wrap(err, "failed to configure runtime")
-		}
-
 		startCommand := d.generateDockerStartCommand(
 			clusterImage,
 			d.dockerConfig.ContainerName,
 			d.dockerCmd,
-			userOptions,
+			userDockerRunOptions,
 		)
 
-		_, err = d.sshCommandRunner.Run(ctx, startCommand, true, nil, false, nil, "host", "", false)
+		_, err = d.sshCommandRunner.Run(ctx, startCommand, true, nil, false, nil, "", false)
 		if err != nil {
 			return false, errors.Wrap(err, "failed to start Docker container")
 		}
@@ -207,7 +201,7 @@ func (d *DockerCommandRunner) RunInit(ctx context.Context) (bool, error) {
 func (d *DockerCommandRunner) CheckDockerInstalled(ctx context.Context) (bool, error) {
 	noExist := "NoExist"
 
-	output, err := d.sshCommandRunner.Run(ctx, fmt.Sprintf("command -v %s || echo '%s'", d.dockerCmd, noExist), false, nil, true, nil, "host", "", false)
+	output, err := d.sshCommandRunner.Run(ctx, fmt.Sprintf("command -v %s || echo '%s'", d.dockerCmd, noExist), false, nil, true, nil, "", false)
 	if err != nil {
 		return false, err
 	}
@@ -255,25 +249,6 @@ func (d *DockerCommandRunner) generateDockerStartCommand(
 	return strings.Join(dockerRunComands, " ")
 }
 
-// configureRuntime configures the Docker runtime.
-func (d *DockerCommandRunner) configureRuntime(ctx context.Context, runOptions []string) ([]string, error) {
-	runtimeOutput, err := d.sshCommandRunner.Run(ctx, fmt.Sprintf("%s info -f '{{.Runtimes}}' ", d.dockerCmd), true, nil, true, nil, "host", "", false)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get Docker runtimes")
-	}
-
-	if strings.Contains(runtimeOutput, "nvidia-container-runtime") {
-		_, err := d.sshCommandRunner.Run(ctx, "nvidia-smi", false, nil, false, nil, "host", "", false)
-		if err == nil {
-			return append(runOptions, " --runtime=nvidia --gpus all "), nil
-		}
-
-		klog.Info("Nvidia Container Runtime is present, but no GPUs found.")
-	}
-
-	return runOptions, nil
-}
-
 // autoConfigureShm auto - configures the SHM size.
 func (d *DockerCommandRunner) autoConfigureShm(ctx context.Context, runOptions []string) ([]string, error) {
 	for _, opt := range runOptions {
@@ -282,7 +257,7 @@ func (d *DockerCommandRunner) autoConfigureShm(ctx context.Context, runOptions [
 		}
 	}
 
-	shmOutput, err := d.sshCommandRunner.Run(ctx, "cat /proc/meminfo || true", true, nil, true, nil, "host", "", false)
+	shmOutput, err := d.sshCommandRunner.Run(ctx, "cat /proc/meminfo || true", true, nil, true, nil, "", false)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get system memory info")
 	}

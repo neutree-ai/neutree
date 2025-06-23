@@ -10,6 +10,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -19,11 +20,15 @@ type WorkspaceController struct {
 
 	storage     storage.Storage
 	syncHandler func(workspace *v1.Workspace) error // Added syncHandler field
+
+	acceleratorManager *accelerator.Manager
 }
 
 type WorkspaceControllerOption struct {
 	Storage storage.Storage
 	Workers int
+
+	AcceleratorManager *accelerator.Manager
 }
 
 func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceController, error) {
@@ -35,7 +40,8 @@ func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceContro
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},
-		storage: option.Storage,
+		storage:            option.Storage,
+		acceleratorManager: option.AcceleratorManager,
 	}
 
 	c.syncHandler = c.sync
@@ -182,64 +188,14 @@ func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.Workspace
 }
 
 func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error {
-	llamaCppV1Engine := &v1.Engine{
-		APIVersion: "v1",
-		Kind:       "Engine",
-		Metadata: &v1.Metadata{
-			Name:      "llama-cpp",
-			Workspace: workspace.Metadata.Name,
-		},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version: "v1",
-					ValuesSchema: map[string]interface{}{
-						"$schema": "http://json-schema.org/draft-07/schema#",
-						"type":    "object",
-						"properties": map[string]interface{}{
-							"n_threads": map[string]interface{}{
-								"type": "number",
-							},
-						},
-					},
-				},
-			},
-			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask},
-		},
+	engines, err := c.acceleratorManager.GetAllAcceleratorSupportEngines(context.Background())
+	if err != nil {
+		return err
 	}
 
-	vllmV1Engine := &v1.Engine{
-		APIVersion: "v1",
-		Kind:       "Engine",
-		Metadata: &v1.Metadata{
-			Name:      "vllm",
-			Workspace: workspace.Metadata.Name,
-		},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version: "v1",
-					ValuesSchema: map[string]interface{}{
-						"$schema": "http://json-schema.org/draft-07/schema#",
-						"type":    "object",
-						"properties": map[string]interface{}{
-							"dtype": map[string]interface{}{
-								"type": "string",
-							},
-							"gpu_memory_utilization": map[string]interface{}{
-								"type": "number",
-							},
-						},
-					},
-				},
-			},
-			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
-		},
-	}
-
-	engines := []*v1.Engine{
-		llamaCppV1Engine,
-		vllmV1Engine,
+	// set workspace name to engine metadata
+	for i := range engines {
+		engines[i].Metadata.Workspace = workspace.Metadata.Name
 	}
 
 	for _, engine := range engines {
