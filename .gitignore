@@ -10,3 +10,4 @@ tmp
 cmd/neutree-cli/app/cmd/launch/manifests/*.tar
 out
 neutree-deploy
+__pycache__/
