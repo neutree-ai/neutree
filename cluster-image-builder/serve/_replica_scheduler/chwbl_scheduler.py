@@ -31,6 +31,7 @@ class ConsistentHashReplicaScheduler(ReplicaScheduler):
         create_replica_wrapper_func=None,
         virtual_nodes_per_replica: int = 100,
         load_factor: float = 1.25,
+        max_user_messages_for_cache: int = 2,
     ):
         # Current replicas available to be scheduled
         self._replicas: Dict[ReplicaID, RunningReplica] = {}
@@ -43,6 +44,9 @@ class ConsistentHashReplicaScheduler(ReplicaScheduler):
         self._virtual_nodes = virtual_nodes_per_replica
         self._load_factor = load_factor
         
+        # Cache key extraction settings for chat completions
+        self._max_user_messages_for_cache = max_user_messages_for_cache
+        
         # Hash ring data structures
         self._hash_to_replica_id: Dict[int, str] = {}  # Maps hash points to replica IDs
         self._sorted_hashes: List[int] = []  # Sorted list of hash points for binary search
@@ -52,8 +56,9 @@ class ConsistentHashReplicaScheduler(ReplicaScheduler):
         
         logger.info(
             f"Initialized ConsistentHashReplicaScheduler with "
-            f"{virtual_nodes_per_replica} virtual nodes per replica and "
-            f"load factor of {load_factor}"
+            f"{virtual_nodes_per_replica} virtual nodes per replica, "
+            f"load factor of {load_factor}, "
+            f"max_user_messages_for_cache={max_user_messages_for_cache}"
         )
 
     async def choose_replica_for_request(
@@ -68,15 +73,11 @@ class ConsistentHashReplicaScheduler(ReplicaScheduler):
         payload = pending_request.args
         request_id = pending_request.metadata.request_id
         
-        # If we have no payload, fall back to using request_id
-        if not payload:
-            payload_str = str(request_id)
-            logger.info(f"No payload found, using request_id: {request_id}")
-        else:
-            payload_str = str(payload)
+        # Extract cache key for OpenAI-compatible chat completions
+        cache_key = self._extract_cache_key(payload, request_id)
         
-        # Calculate a hash of the payload
-        payload_hash = self._hash(payload_str)
+        # Calculate a hash of the cache key
+        payload_hash = self._hash(cache_key)
         
         # Find initial replica using consistent hashing
         replica_hash, replica_idx = self._search(payload_hash)
@@ -154,7 +155,7 @@ class ConsistentHashReplicaScheduler(ReplicaScheduler):
             
         # Calculate average load across all replicas
         total_load = self._get_total_load()
-        avg_load = (total_load + 1) / len(self._replicas)  # +1 for the current request
+        avg_load = (total_load + 1) / len(self._replicas) # +1 for the current request
         
         # Apply load factor threshold
         threshold = avg_load * self._load_factor
@@ -296,3 +297,71 @@ class ConsistentHashReplicaScheduler(ReplicaScheduler):
     def curr_replicas(self) -> Dict[ReplicaID, RunningReplica]:
         """Return the current replicas."""
         return self._replicas
+
+    def _extract_cache_key(self, payload, request_id: str) -> str:
+        """Extract cache key from OpenAI-compatible chat completions payload.
+        
+        For chat completions, we want to hash based on:
+        1. System prompt (if present)
+        2. First N user messages (configurable)
+        
+        This ensures that similar conversation contexts are routed to the same replica.
+        """
+        # Default fallback
+        if not payload:
+            logger.info(f"No payload found, using request_id: {request_id}")
+            return str(request_id)
+        
+        try:
+            # Handle different payload formats (args could be tuple, list, or dict)
+            if isinstance(payload, (tuple, list)) and len(payload) > 0:
+                # Assume first argument contains the request data
+                request_data = payload[0]
+            elif isinstance(payload, dict):
+                request_data = payload
+            else:
+                # Fallback to string representation
+                return str(payload)
+            
+            # Extract relevant fields for cache key
+            cache_components = []
+            
+            # System prompt and user messages
+            messages = request_data.get('messages', [])
+            system_prompt = None
+            user_messages = []
+            
+            for msg in messages:
+                if isinstance(msg, dict):
+                    role = msg.get('role', '')
+                    content = msg.get('content', '')
+                    
+                    if role == 'system':
+                        system_prompt = content
+                    elif role == 'user':
+                        user_messages.append(content)
+                        # Early exit when we have enough user messages
+                        if len(user_messages) >= self._max_user_messages_for_cache:
+                            break
+            
+            # Add system prompt to cache key
+            if system_prompt:
+                cache_components.append(f"system:{system_prompt}")
+            
+            # Add first N user messages (we already have at most N messages)
+            for i, user_msg in enumerate(user_messages):
+                cache_components.append(f"user_{i}:{user_msg}")
+            
+            # Join components
+            if cache_components:
+                cache_key = "|".join(cache_components)
+                logger.debug(f"Extracted cache key: {cache_key[:100]}...")  # Log first 100 chars
+                return cache_key
+            else:
+                # No recognizable chat completions format, fallback
+                logger.info(f"No chat completions format detected, using payload string")
+                return str(payload)
+                
+        except Exception as e:
+            logger.warning(f"Error extracting cache key from payload: {e}, using request_id")
+            return str(request_id)
