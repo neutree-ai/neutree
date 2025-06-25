@@ -20,7 +20,7 @@ import (
 type Dependencies struct {
 	Storage     storage.Storage
 	TempDirFunc func() (string, error) // Function to get a temporary directory
-	AuthConfig  middleware.AuthConfig  // JWT authentication configuration (required)
+	AuthConfig  middleware.AuthConfig
 }
 
 // RegisterRoutes registers model-related routes

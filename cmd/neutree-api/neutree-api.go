@@ -70,6 +70,7 @@ func main() {
 		Storage:          s,
 		StorageAccessURL: *storageAccessURL,
 		AuthEndpoint:     *authEndpoint,
+		AuthConfig:       authConfig,
 	})
 
 	system.RegisterRoutes(r, &system.Dependencies{

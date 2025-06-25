@@ -13,15 +13,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
 
+	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type Dependencies struct {
-	Storage storage.Storage
-
+	Storage          storage.Storage
 	StorageAccessURL string
-
-	AuthEndpoint string
+	AuthEndpoint     string
+	AuthConfig       middleware.AuthConfig
 }
 
 func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.Request)) gin.HandlerFunc {
@@ -55,8 +55,12 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 }
 
 func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
+
+	// Create JWT middleware
+	authMiddleware := middleware.JWTAuth(deps.AuthConfig)
+
 	// todo: support workspace
-	r.Any("/api/v1/serve-proxy/:name/*path", handleServeProxy(deps))
+	r.Any("/api/v1/serve-proxy/:name/*path", authMiddleware, handleServeProxy(deps))
 	r.Any("/api/v1/ray-dashboard-proxy/:name/*path", handleRayDashboardProxy(deps))
 
 	r.Any("/api/v1/auth/:path", handleAuthProxy(deps))
