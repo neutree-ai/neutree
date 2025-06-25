@@ -32,6 +32,7 @@ func JWTAuth(config AuthConfig) gin.HandlerFunc {
 				"error": "Authorization header is required",
 			})
 			c.Abort()
+
 			return
 		}
 
@@ -41,6 +42,7 @@ func JWTAuth(config AuthConfig) gin.HandlerFunc {
 				"error": "Authorization header must start with 'Bearer '",
 			})
 			c.Abort()
+
 			return
 		}
 
@@ -51,6 +53,7 @@ func JWTAuth(config AuthConfig) gin.HandlerFunc {
 				"error": "Token is required",
 			})
 			c.Abort()
+
 			return
 		}
 
@@ -60,6 +63,7 @@ func JWTAuth(config AuthConfig) gin.HandlerFunc {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
+
 			return []byte(config.JwtSecret), nil
 		})
 
@@ -69,6 +73,7 @@ func JWTAuth(config AuthConfig) gin.HandlerFunc {
 				"error": "Invalid token",
 			})
 			c.Abort()
+
 			return
 		}
 
@@ -78,6 +83,7 @@ func JWTAuth(config AuthConfig) gin.HandlerFunc {
 				"error": "Invalid token",
 			})
 			c.Abort()
+
 			return
 		}
 
@@ -88,6 +94,7 @@ func JWTAuth(config AuthConfig) gin.HandlerFunc {
 				"error": "Invalid token claims",
 			})
 			c.Abort()
+
 			return
 		}
 
@@ -112,6 +119,7 @@ func GetUserID(c *gin.Context) (string, bool) {
 	}
 
 	userIDStr, ok := userID.(string)
+
 	return userIDStr, ok
 }
 
@@ -123,6 +131,7 @@ func GetUserEmail(c *gin.Context) (string, bool) {
 	}
 
 	emailStr, ok := email.(string)
+
 	return emailStr, ok
 }
 
@@ -134,6 +143,7 @@ func GetUserRole(c *gin.Context) (string, bool) {
 	}
 
 	roleStr, ok := role.(string)
+
 	return roleStr, ok
 }
 
@@ -145,5 +155,6 @@ func GetJWTToken(c *gin.Context) (string, bool) {
 	}
 
 	tokenStr, ok := token.(string)
+
 	return tokenStr, ok
 }
