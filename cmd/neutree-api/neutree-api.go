@@ -34,11 +34,6 @@ func main() {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
-	serviceToken, err := storage.CreateServiceToken(*storageJwtSecret)
-	if err != nil {
-		klog.Fatalf("Failed to create service token: %s", err.Error())
-	}
-
 	gin.SetMode(*ginMode)
 
 	r := gin.Default()
@@ -66,7 +61,6 @@ func main() {
 	proxies.RegisterRoutes(r, &proxies.Dependencies{
 		Storage:          s,
 		StorageAccessURL: *storageAccessURL,
-		ServiceToken:     *serviceToken,
 		AuthEndpoint:     *authEndpoint,
 	})
 

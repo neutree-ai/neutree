@@ -20,7 +20,6 @@ type Dependencies struct {
 	Storage storage.Storage
 
 	StorageAccessURL string
-	ServiceToken     string
 
 	AuthEndpoint string
 }
