@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
 
+	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
@@ -54,8 +55,15 @@ func main() {
 		klog.Fatalf("Failed to init storage: %s", err.Error())
 	}
 
+	// Configure JWT authentication
+	authConfig := middleware.AuthConfig{
+		JwtSecret: *storageJwtSecret,
+	}
+
+	// Register routes with authentication configuration
 	models.RegisterRoutes(r, &models.Dependencies{
-		Storage: s,
+		Storage:    s,
+		AuthConfig: authConfig,
 	})
 
 	proxies.RegisterRoutes(r, &proxies.Dependencies{
@@ -66,6 +74,7 @@ func main() {
 
 	system.RegisterRoutes(r, &system.Dependencies{
 		GrafanaURL: *grafanaURL,
+		AuthConfig: authConfig,
 	})
 
 	serverAddr := fmt.Sprintf("%s:%d", *host, *port)

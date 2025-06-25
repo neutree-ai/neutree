@@ -11,6 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/model_registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -19,6 +20,7 @@ import (
 type Dependencies struct {
 	Storage     storage.Storage
 	TempDirFunc func() (string, error) // Function to get a temporary directory
+	AuthConfig  middleware.AuthConfig  // JWT authentication configuration (required)
 }
 
 // RegisterRoutes registers model-related routes
@@ -37,8 +39,12 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 
 	apiV1 := r.Group("/api/v1")
 
-	// Workspace-scoped model registry routes
+	// Create JWT middleware
+	authMiddleware := middleware.JWTAuth(deps.AuthConfig)
+
+	// Workspace-scoped model registry routes with authentication
 	workspaces := apiV1.Group("/workspaces/:workspace")
+	workspaces.Use(authMiddleware) // Apply JWT authentication
 	{
 		modelRegistries := workspaces.Group("/model_registries/:registry")
 		{
