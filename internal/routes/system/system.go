@@ -8,12 +8,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
+
+	"github.com/neutree-ai/neutree/internal/middleware"
 )
 
 // Dependencies defines the dependencies for system handlers
 type Dependencies struct {
 	// GrafanaURL is the URL to the Grafana instance for monitoring
 	GrafanaURL string
+	// AuthConfig is the JWT authentication configuration (required)
+	AuthConfig middleware.AuthConfig
 }
 
 // SystemInfo represents the system information response
@@ -25,6 +29,10 @@ type SystemInfo struct {
 // RegisterRoutes registers system-related routes
 func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	apiV1 := r.Group("/api/v1")
+
+	// Create JWT middleware
+	authMiddleware := middleware.JWTAuth(deps.AuthConfig)
+	apiV1.Use(authMiddleware) // Apply JWT authentication to system info endpoint
 
 	// System information endpoint
 	apiV1.GET("/system/info", handleSystemInfo(deps))
