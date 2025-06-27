@@ -143,7 +143,7 @@ func (a *Manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, ssh
 
 		if err != nil {
 			klog.V(4).ErrorS(err, "get node accelerator from plugin %s failed, err: %s", p.plugin.Resource())
-			continue
+			return "", err
 		}
 
 		// by default, nodes will only mount accelerator cards from the same manufacturer.
