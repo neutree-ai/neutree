@@ -79,3 +79,7 @@ func (m *Manager) ConfigPath() string {
 func (m *Manager) SSHKeyPath() string {
 	return filepath.Join(m.baseDir, "ssh_private_key")
 }
+
+func (m *Manager) Cleanup() error {
+	return os.RemoveAll(m.baseDir)
+}

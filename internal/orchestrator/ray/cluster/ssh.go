@@ -124,6 +124,11 @@ func (c *sshClusterManager) DownCluster(ctx context.Context) error {
 		}
 	}
 
+	err = c.configMgr.Cleanup()
+	if err != nil {
+		return errors.Wrap(err, "failed to cleanup cluster config")
+	}
+
 	return nil
 }
 
