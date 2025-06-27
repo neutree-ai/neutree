@@ -497,6 +497,23 @@ func generateRayClusterConfig(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 
 	rayClusterConfig.InitializationCommands = initializationCommands
 
+	modelCache := rayClusterConfig.ModelCache
+	if modelCache == nil || modelCache.HostPath != nil {
+		// set default model cache path.
+		hostPath := "/var/lib/neutree/model-cache"
+		if modelCache != nil && modelCache.HostPath != nil {
+			hostPath = modelCache.HostPath.Path
+		}
+
+		rayClusterConfig.Docker.RunOptions = append(rayClusterConfig.Docker.RunOptions,
+			"--volume "+hostPath+":"+defaultMountPath)
+		rayClusterConfig.Docker.RunOptions = append(rayClusterConfig.Docker.RunOptions,
+			"-e HF_HOME="+defaultMountPath)
+
+		rayClusterConfig.InitializationCommands = append(rayClusterConfig.InitializationCommands,
+			fmt.Sprintf("mkdir -p %s && chmoe 755 %s", hostPath, hostPath))
+	}
+
 	return rayClusterConfig, nil
 }
 

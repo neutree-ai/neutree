@@ -570,6 +570,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
+					"mkdir -p /var/lib/neutree/model-cache && chmoe 755 /var/lib/neutree/model-cache",
 				},
 			},
 			expectError: false,
@@ -625,6 +626,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
+					"mkdir -p /var/lib/neutree/model-cache && chmoe 755 /var/lib/neutree/model-cache",
 				},
 			},
 			expectError: false,
@@ -680,6 +682,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
+					"mkdir -p /var/lib/neutree/model-cache && chmoe 755 /var/lib/neutree/model-cache",
 				},
 			},
 			expectError: false,
@@ -734,6 +737,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
+					"mkdir -p /var/lib/neutree/model-cache && chmoe 755 /var/lib/neutree/model-cache",
 				},
 			},
 			expectError: false,

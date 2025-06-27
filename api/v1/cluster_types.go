@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 // Neutree node provision status.
 const (
@@ -27,14 +31,16 @@ type ClusterSpec struct {
 }
 
 type RaySSHProvisionClusterConfig struct {
-	Provider Provider `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Auth     Auth     `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Provider   Provider    `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Auth       Auth        `json:"auth,omitempty" yaml:"auth,omitempty"`
+	ModelCache *ModelCache `json:"model_cache,omitempty" yaml:"model_cache,omitempty"`
 }
 
 type RayKubernetesProvisionClusterConfig struct {
 	Kubeconfig       string            `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
 	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
 	WorkerGroupSpecs []WorkerGroupSpec `json:"worker_group_specs,omitempty" yaml:"worker_group_specs,omitempty"`
+	ModelCache       *ModelCache       `json:"model_cache,omitempty" yaml:"model_cache,omitempty"`
 }
 
 type KubernetesAccessMode string
@@ -55,6 +61,11 @@ type WorkerGroupSpec struct {
 	MinReplicas int32             `json:"min_replicas,omitempty" yaml:"min_replicas,omitempty"`
 	MaxReplicas int32             `json:"max_replicas,omitempty" yaml:"max_replicas,omitempty"`
 	Resources   map[string]string `json:"resources,omitempty" yaml:"resources,omitempty"`
+}
+
+type ModelCache struct {
+	HostPath *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
+	// todo: support other model cache type, e.g. pvc, nfs etc.
 }
 
 type ClusterStatus struct {

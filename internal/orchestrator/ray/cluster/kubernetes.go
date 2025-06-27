@@ -685,6 +685,44 @@ func generateKubeRayCluster(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry
 		})
 	}
 
+	modelCache := config.ModelCache
+	if modelCache == nil || modelCache.HostPath != nil {
+		// set default model cache path.
+		hostPath := "/var/lib/neutree/model-cache"
+		if modelCache != nil && modelCache.HostPath != nil {
+			hostPath = modelCache.HostPath.Path
+		}
+
+		hostPathType := corev1.HostPathDirectoryOrCreate
+		volume := corev1.Volume{
+			Name: "model-cache",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: hostPath,
+					Type: &hostPathType,
+				},
+			},
+		}
+
+		volumeMount := corev1.VolumeMount{
+			Name:      "model-cache",
+			MountPath: defaultMountPath,
+		}
+
+		for i := range workGroupSpecs {
+			workGroupSpecs[i].Template.Spec.Volumes = append(workGroupSpecs[i].Template.Spec.Volumes, volume)
+			for i := range workGroupSpecs[i].Template.Spec.Containers {
+				// append volume mount to container.
+				workGroupSpecs[i].Template.Spec.Containers[i].VolumeMounts = append(workGroupSpecs[i].Template.Spec.Containers[i].VolumeMounts, volumeMount)
+				// set hf cache env.
+				workGroupSpecs[i].Template.Spec.Containers[i].Env = append(workGroupSpecs[i].Template.Spec.Containers[i].Env, corev1.EnvVar{
+					Name:  "HF_HOME",
+					Value: defaultMountPath,
+				})
+			}
+		}
+	}
+
 	rayCluster.Spec.WorkerGroupSpecs = workGroupSpecs
 
 	return rayCluster, nil

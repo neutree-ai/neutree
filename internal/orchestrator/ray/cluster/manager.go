@@ -13,6 +13,10 @@ import (
 	"github.com/neutree-ai/neutree/internal/registry"
 )
 
+const (
+	defaultMountPath = "/var/lib/neutree/model-cache"
+)
+
 var (
 	ErrImageNotFound     = errors.New("image not found")
 	ErrorRayNodeNotFound = errors.New("ray node not found")

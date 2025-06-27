@@ -75,6 +75,8 @@ type RayClusterConfig struct {
 	IdleTimeoutMinutes int                          `json:"idle_timeout_minutes,omitempty" yaml:"idle_timeout_minutes,omitempty"`
 	AvailableNodeTypes map[string]AvailableNodeType `json:"available_node_types,omitempty" yaml:"available_node_types,omitempty"`
 	HeadNodeType       string                       `json:"head_node_type,omitempty" yaml:"head_node_type,omitempty"`
+
+	ModelCache *ModelCache `json:"model_cache,omitempty" yaml:"model_cache,omitempty"`
 }
 
 type AvailableNodeType struct {
