@@ -11,7 +11,9 @@ const (
 	GetContainerRuntimeConfigPath = "/v1/container/runtime-config"
 	GetSupportEnginesPath         = "/v1/support-engines"
 	PingPath                      = "/v1/ping"
-	RegisterPath                  = "/v1/register"
+
+	PluginAPIGroupPath = "/v1/plugin"
+	RegisterPath       = PluginAPIGroupPath + "/register"
 )
 
 type Accelerator struct {

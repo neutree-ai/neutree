@@ -40,8 +40,8 @@ var (
 	gatewayLogRemoteWriteUrl = flag.String("gateway-log-remote-write-url", "", "log remote write url")
 
 	// accelerator plugin config
-	acceleratorPluginServerPort = flag.Int("accelerator-plugin-server-port", 3001, "accelerator plugin server port")
-	acceleratorPluginServerHost = flag.String("accelerator-plugin-server-host", "0.0.0.0", "accelerator plugin server host")
+	coreServerPort = flag.Int("core-server-port", 3001, "core server port")
+	coreServerHost = flag.String("core-server-host", "0.0.0.0", "core server host")
 
 	ginMode = flag.String("gin-mode", "release", "gin mode: debug, release, test")
 )
@@ -55,6 +55,7 @@ func main() {
 	pflag.Parse()
 
 	gin.SetMode(*ginMode)
+	e := gin.Default()
 
 	obsCollectConfigManager, err := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
 		DeployType:                            *deployType,
@@ -66,7 +67,7 @@ func main() {
 		klog.Fatalf("failed to init obs collect config manager: %s", err.Error())
 	}
 
-	acceleratorManager := accelerator.NewManager(fmt.Sprintf("%s:%d", *acceleratorPluginServerHost, *acceleratorPluginServerPort))
+	acceleratorManager := accelerator.NewManager(e)
 
 	s, err := storage.New(storage.Options{
 		AccessURL: *storageAccessURL,
@@ -209,6 +210,15 @@ func main() {
 
 	go obsCollectConfigManager.Start(ctx)
 	go acceleratorManager.Start(ctx)
+
+	coreServerLinstenAddr := fmt.Sprintf("%s:%d", *coreServerHost, *coreServerPort)
+	klog.Infof("Starting core server on %s", coreServerLinstenAddr)
+
+	go func() {
+		if err = e.Run(coreServerLinstenAddr); err != nil {
+			klog.Fatalf("failed to start core server: %s", err.Error())
+		}
+	}()
 
 	<-ctx.Done()
 }

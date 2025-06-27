@@ -21,14 +21,14 @@ type WorkspaceController struct {
 	storage     storage.Storage
 	syncHandler func(workspace *v1.Workspace) error // Added syncHandler field
 
-	acceleratorManager *accelerator.Manager
+	acceleratorManager accelerator.Manager
 }
 
 type WorkspaceControllerOption struct {
 	Storage storage.Storage
 	Workers int
 
-	AcceleratorManager *accelerator.Manager
+	AcceleratorManager accelerator.Manager
 }
 
 func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceController, error) {

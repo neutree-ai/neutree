@@ -51,7 +51,7 @@ var (
 
 type kubeRayClusterManager struct {
 	imageService       registry.ImageService
-	acceleratorManager *accelerator.Manager
+	acceleratorManager accelerator.Manager
 	storage            storage.Storage
 
 	cluster                 *v1.Cluster
@@ -67,7 +67,7 @@ type kubeRayClusterManager struct {
 }
 
 func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService,
-	acceleratorManager *accelerator.Manager, s storage.Storage,
+	acceleratorManager accelerator.Manager, s storage.Storage,
 	metricsRemoteWriteURL string) (*kubeRayClusterManager, error) {
 	c := &kubeRayClusterManager{
 		installObjects:   []client.Object{},

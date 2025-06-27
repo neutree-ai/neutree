@@ -5,7 +5,7 @@ type acceleratorRestPlugin struct {
 	resource string
 }
 
-func newAcceleratorRestPlugin(resourceName, baseURL string) AcceleratorPlugin {
+func NewAcceleratorRestPlugin(resourceName, baseURL string) AcceleratorPlugin {
 	return &acceleratorRestPlugin{
 		client:   newAcceleratorPluginClient(baseURL),
 		resource: resourceName,

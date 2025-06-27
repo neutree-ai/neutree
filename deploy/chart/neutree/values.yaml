@@ -121,7 +121,7 @@ core:
   nodeSelector: {}
   tolerations: []
   affinity: {}
-  pluginServer:
+  server:
     service:
       type: ClusterIP
 

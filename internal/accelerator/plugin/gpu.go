@@ -23,12 +23,12 @@ const (
 
 func init() { //nolint:gochecknoinits
 	registerAcceleratorPlugin(&GPUAcceleratorPlugin{
-		exector: &command.OSExecutor{},
+		executor: &command.OSExecutor{},
 	})
 }
 
 type GPUAcceleratorPlugin struct {
-	exector command.Executor
+	executor command.Executor
 }
 
 func (p *GPUAcceleratorPlugin) Resource() string {
@@ -92,11 +92,10 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 		return nil, errors.Wrap(err, "write ssh key failed")
 	}
 
-	exector := &command.OSExecutor{}
 	sshRunner := command_runner.NewSSHCommandRunner(nodeIP, nodeIP, v1.Auth{
 		SSHUser:       auth.SSHUser,
 		SSHPrivateKey: sshKeyPath,
-	}, "", exector.Execute)
+	}, "", p.executor.Execute)
 
 	output, err := sshRunner.Run(ctx, "nvidia-smi --query-gpu=name,uuid --format=csv,noheader", true, nil, true, nil, "", false)
 	// if the node is not a GPU node, 'nvidia-smi' command will return an error, so ignore the command exec error.

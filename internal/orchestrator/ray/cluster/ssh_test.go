@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.openly.dev/pointy"
 
-	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/config"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard/mocks"
@@ -143,6 +143,8 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 				mockExec.On("Execute", mock.Anything, "ray", mock.Anything).Return(tt.mockExecOutput, tt.mockExecError).Once()
 			}
 
+			mockAcceleratorManager := &acceleratormocks.MockManager{}
+			mockAcceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
 			clusterConfig := &v1.RayClusterConfig{
 				ClusterName: "test-cluster",
 				Auth: v1.Auth{
@@ -178,7 +180,7 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
 					AcceleratorType: pointy.String(""),
 				},
-				acceleratorManager: &accelerator.Manager{},
+				acceleratorManager: mockAcceleratorManager,
 			}
 
 			// Test
@@ -193,6 +195,8 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 			}
 
 			mockExec.AssertExpectations(t)
+			mockImageRegistryService.AssertExpectations(t)
+			mockAcceleratorManager.AssertExpectations(t)
 		})
 	}
 }
@@ -200,6 +204,9 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 func TestStartNode_Success(t *testing.T) {
 	setUp(t)
 	defer tearDown()
+
+	mockAcceleratorManager := &acceleratormocks.MockManager{}
+	mockAcceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
 
 	mockExec := new(commandmocks.MockExecutor)
 	// init command
@@ -285,12 +292,14 @@ func TestStartNode_Success(t *testing.T) {
 		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
 			AcceleratorType: pointy.String(""),
 		},
-		acceleratorManager: &accelerator.Manager{},
+		acceleratorManager: mockAcceleratorManager,
 	}
 
 	err := manager.StartNode(context.Background(), "2.2.2.2")
 	assert.NoError(t, err)
 	mockExec.AssertExpectations(t)
+	mockImageRegistryService.AssertExpectations(t)
+	mockAcceleratorManager.AssertExpectations(t)
 }
 
 func TestSSHClusterManager_StopNode(t *testing.T) {
@@ -974,10 +983,9 @@ func TestBuildSSHCommandArgs(t *testing.T) {
 	mockExec := &commandmocks.MockExecutor{}
 
 	manager := &sshClusterManager{
-		config:             clusterConfig,
-		configMgr:          config.NewManager(clusterConfig.ClusterName),
-		executor:           mockExec,
-		acceleratorManager: &accelerator.Manager{},
+		config:    clusterConfig,
+		configMgr: config.NewManager(clusterConfig.ClusterName),
+		executor:  mockExec,
 	}
 
 	args := manager.buildSSHCommandArgs("1.1.1.1")

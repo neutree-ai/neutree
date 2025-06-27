@@ -382,6 +382,10 @@ func (k *Kong) syncEndpointService(ep *v1.Endpoint) (*kong.Service, error) {
 		return nil, errors.New("cluster not found")
 	}
 
+	if clusters[0].Status == nil {
+		return nil, errors.New("cluster is never initialized")
+	}
+
 	url, err := url.Parse(clusters[0].Status.DashboardURL)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse cluster dashboard url %s", clusters[0].Status.DashboardURL)

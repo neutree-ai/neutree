@@ -52,7 +52,7 @@ spec:
           {{- end }}
           ports:
             - containerPort: 3001
-              name: plugin-server
+              name: server
               protocol: TCP
       {{- with .Values.core.nodeSelector }}
       nodeSelector:

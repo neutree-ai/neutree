@@ -25,7 +25,7 @@ type EndpointController struct {
 	syncHandler  func(endpoint *v1.Endpoint) error // Added syncHandler field
 
 	gw                 gateway.Gateway
-	acceleratorManager *accelerator.Manager
+	acceleratorManager accelerator.Manager
 }
 
 type EndpointControllerOption struct {
@@ -34,7 +34,7 @@ type EndpointControllerOption struct {
 	Workers      int
 
 	Gw                 gateway.Gateway
-	AcceleratorManager *accelerator.Manager
+	AcceleratorManager accelerator.Manager
 }
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {

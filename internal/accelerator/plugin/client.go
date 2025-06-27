@@ -120,12 +120,7 @@ func (u *acceleratorPluginClient) doPost(ctx context.Context, path string, reque
 
 	defer resp.Body.Close()
 
-	err = parsePluginResonse(resp, response)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return parsePluginResponse(resp, response)
 }
 
 func (u *acceleratorPluginClient) doGet(ctx context.Context, path string, response interface{}) error {
@@ -145,22 +140,17 @@ func (u *acceleratorPluginClient) doGet(ctx context.Context, path string, respon
 		return nil
 	}
 
-	err = parsePluginResonse(resp, response)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return parsePluginResponse(resp, response)
 }
 
-func parsePluginResonse(resp *http.Response, result interface{}) error {
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("get node accelerator failed, status code: %d", resp.StatusCode)
-	}
-
+func parsePluginResponse(resp *http.Response, result interface{}) error {
 	content, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("get node accelerator failed, status code: %d, content: %s", resp.StatusCode, string(content))
 	}
 
 	err = json.Unmarshal(content, result)

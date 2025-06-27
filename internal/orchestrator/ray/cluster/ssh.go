@@ -27,7 +27,7 @@ import (
 type sshClusterManager struct {
 	executor           command.Executor
 	imageService       registry.ImageService
-	acceleratorManager *accelerator.Manager
+	acceleratorManager accelerator.Manager
 	storage            storage.Storage
 
 	configMgr *config.Manager
@@ -39,7 +39,7 @@ type sshClusterManager struct {
 	config *v1.RayClusterConfig
 }
 
-func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService, acceleratorManager *accelerator.Manager,
+func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService, acceleratorManager accelerator.Manager,
 	executor command.Executor, s storage.Storage) (*sshClusterManager, error) {
 	manager := &sshClusterManager{
 		executor: executor,

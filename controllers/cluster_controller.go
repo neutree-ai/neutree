@@ -39,7 +39,7 @@ type ClusterController struct {
 
 	gw gateway.Gateway
 
-	acceleratorManager *accelerator.Manager
+	acceleratorManager accelerator.Manager
 }
 
 type ClusterControllerOption struct {
@@ -51,7 +51,7 @@ type ClusterControllerOption struct {
 
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	Gw                      gateway.Gateway
-	AcceleratorManager      *accelerator.Manager
+	AcceleratorManager      accelerator.Manager
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {

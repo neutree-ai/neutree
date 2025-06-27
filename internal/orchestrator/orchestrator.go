@@ -37,7 +37,7 @@ type Options struct {
 	Cluster            *v1.Cluster
 	Storage            storage.Storage
 	ImageService       registry.ImageService
-	AcceleratorManager *accelerator.Manager
+	AcceleratorManager accelerator.Manager
 
 	MetricsRemoteWriteURL string
 }
