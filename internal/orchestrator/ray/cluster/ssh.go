@@ -643,7 +643,30 @@ func (c *sshClusterManager) generateRayClusterConfig() (*v1.RayClusterConfig, er
 
 	rayClusterConfig.InitializationCommands = initializationCommands
 
+	c.mutateModelCache(rayClusterConfig)
+
 	return rayClusterConfig, nil
+}
+
+func (c *sshClusterManager) mutateModelCache(config *v1.RayClusterConfig) {
+	modelCache := c.sshClusterConfig.ModelCache
+	if modelCache == nil {
+		return
+	}
+
+	if modelCache.HostPath != nil {
+		hostPath := modelCache.HostPath.Path
+		config.Docker.RunOptions = append(config.Docker.RunOptions,
+			"--volume "+hostPath+":"+defaultModelCacheMountPath)
+		config.Docker.RunOptions = append(config.Docker.RunOptions,
+			"-e HF_HOME="+defaultModelCacheMountPath)
+		config.InitializationCommands = append(config.InitializationCommands,
+			fmt.Sprintf("mkdir -p %s && chmod 755 %s", hostPath, hostPath))
+		modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", defaultModelCacheMountPath)
+		config.HeadStartRayCommands = append([]string{modifyPermissionCommand}, config.HeadStartRayCommands...)
+		config.WorkerStartRayCommands = append([]string{modifyPermissionCommand}, config.WorkerStartRayCommands...)
+		config.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand}, config.StaticWorkerStartRayCommands...)
+	}
 }
 
 func ensureLocalClusterStateFile(config *v1.RayClusterConfig) error {

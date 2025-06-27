@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 // Neutree node provision status.
 const (
@@ -30,7 +34,8 @@ type RaySSHProvisionClusterConfig struct {
 	Provider Provider `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Auth     Auth     `json:"auth,omitempty" yaml:"auth,omitempty"`
 	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
-	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+	AcceleratorType *string     `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+	ModelCache      *ModelCache `json:"model_cache,omitempty" yaml:"model_cache,omitempty"`
 }
 
 type RayKubernetesProvisionClusterConfig struct {
@@ -38,7 +43,8 @@ type RayKubernetesProvisionClusterConfig struct {
 	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
 	WorkerGroupSpecs []WorkerGroupSpec `json:"worker_group_specs,omitempty" yaml:"worker_group_specs,omitempty"`
 	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
-	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+	AcceleratorType *string     `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+	ModelCache      *ModelCache `json:"model_cache,omitempty" yaml:"model_cache,omitempty"`
 }
 
 type KubernetesAccessMode string
@@ -59,6 +65,13 @@ type WorkerGroupSpec struct {
 	MinReplicas int32             `json:"min_replicas,omitempty" yaml:"min_replicas,omitempty"`
 	MaxReplicas int32             `json:"max_replicas,omitempty" yaml:"max_replicas,omitempty"`
 	Resources   map[string]string `json:"resources,omitempty" yaml:"resources,omitempty"`
+}
+
+type ModelCache struct {
+	HostPath *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
+	// current only kubernetes type cluster is supported.
+	NFS *corev1.NFSVolumeSource
+	// todo: support other model cache type, e.g. pvc etc.
 }
 
 type ClusterStatus struct {

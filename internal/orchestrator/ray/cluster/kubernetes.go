@@ -773,6 +773,8 @@ func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSp
 		},
 	}
 
+	c.mutateModelCache(&podTemplate)
+
 	err = c.mutateContainerAcceleratorRuntimeConfig(&podTemplate.Spec.Containers[0])
 	if err != nil {
 		return corev1.PodTemplateSpec{}, errors.Wrap(err, "failed to mutate container accelerator runtime config")
@@ -781,6 +783,67 @@ func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSp
 	c.dependencyImages = append(c.dependencyImages, podTemplate.Spec.Containers[0].Image)
 
 	return podTemplate, nil
+}
+
+func (c *kubeRayClusterManager) mutateModelCache(podTemplate *corev1.PodTemplateSpec) {
+	modelCache := c.kubernetesClusterConfig.ModelCache
+	if modelCache == nil {
+		return
+	}
+
+	volume := corev1.Volume{
+		Name: "model-cache",
+	}
+
+	volumeMount := corev1.VolumeMount{
+		Name:      "model-cache",
+		MountPath: defaultModelCacheMountPath,
+	}
+
+	if modelCache.HostPath != nil {
+		hostPathType := corev1.HostPathDirectoryOrCreate
+		volume.VolumeSource = corev1.VolumeSource{
+			HostPath: &corev1.HostPathVolumeSource{
+				Path: modelCache.HostPath.Path,
+				Type: &hostPathType,
+			},
+		}
+	} else if modelCache.NFS != nil {
+		volume.VolumeSource = corev1.VolumeSource{
+			NFS: &corev1.NFSVolumeSource{
+				Server:   modelCache.NFS.Server,
+				Path:     modelCache.NFS.Path,
+				ReadOnly: modelCache.NFS.ReadOnly,
+			},
+		}
+	}
+
+	for i := range podTemplate.Spec.Containers {
+		// append volume mount to container.
+		podTemplate.Spec.Containers[i].VolumeMounts = append(podTemplate.Spec.Containers[i].VolumeMounts, volumeMount)
+		podTemplate.Spec.Containers[i].Env = append(podTemplate.Spec.Containers[i].Env, corev1.EnvVar{
+			Name:  "HF_HOME",
+			Value: defaultModelCacheMountPath,
+		})
+	}
+
+	podTemplate.Spec.Volumes = append(podTemplate.Spec.Volumes, volume)
+	// add init container to update model cache permission to the same user as the ray worker process.
+	podTemplate.Spec.InitContainers = append(podTemplate.Spec.InitContainers, corev1.Container{
+		Name:  "update-model-cache-permission",
+		Image: podTemplate.Spec.Containers[0].Image,
+		Command: []string{
+			"/bin/bash",
+			"-c",
+			"sudo chown -R $(id -u):$(id -g) " + defaultModelCacheMountPath,
+		},
+		SecurityContext: &corev1.SecurityContext{
+			Privileged: pointy.Bool(true),
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			volumeMount,
+		},
+	})
 }
 
 func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() (corev1.PodTemplateSpec, error) {
