@@ -63,7 +63,7 @@ all: build
 build: test build-neutree-core build-neutree-cli build-neutree-api
 
 build-neutree-core:
-	$(GO) build -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
+	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
 
 prepare-build-cli:
 	tar -cvf db.tar db
@@ -73,10 +73,10 @@ prepare-build-cli:
 	mv -f deploy/docker/obs-stack.tar cmd/neutree-cli/app/cmd/launch/manifests/
 
 build-neutree-cli: prepare-build-cli
-	$(GO) build "${GO_BUILD_ARGS}" -o bin/neutree-cli ./cmd/neutree-cli/neutree-cli.go
+	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-cli ./cmd/neutree-cli/neutree-cli.go
 
 build-neutree-api:
-	$(GO) build "${GO_BUILD_ARGS}" -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
+	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
 
 # Choice of images to build/push
 ALL_DOCKER_BUILD ?= core api db-scripts
