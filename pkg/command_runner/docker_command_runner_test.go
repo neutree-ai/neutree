@@ -55,6 +55,10 @@ func TestDockerCommandRunner_Run(t *testing.T) {
 			runEnv: "host",
 			cmd:    "echo hello",
 			setupMock: func(m *commandmocks.MockExecutor) {
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("success"), nil)
 			},
 		},
@@ -63,6 +67,10 @@ func TestDockerCommandRunner_Run(t *testing.T) {
 			runEnv: "docker",
 			cmd:    "echo hello",
 			setupMock: func(m *commandmocks.MockExecutor) {
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("success"), nil)
 			},
 		},
@@ -90,6 +98,10 @@ func TestDockerCommandRunner_Run(t *testing.T) {
 
 func TestCheckContainerStatus_ContainerRunning(t *testing.T) {
 	mockExecutor := new(commandmocks.MockExecutor)
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("true"), nil)
 
 	runner := newDockerCommandRunner(&v1.Docker{
@@ -103,6 +115,10 @@ func TestCheckContainerStatus_ContainerRunning(t *testing.T) {
 
 func TestCheckContainerStatus_ContainerNotRunning(t *testing.T) {
 	mockExecutor := new(commandmocks.MockExecutor)
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("false"), nil)
 
 	runner := newDockerCommandRunner(&v1.Docker{
@@ -116,6 +132,10 @@ func TestCheckContainerStatus_ContainerNotRunning(t *testing.T) {
 
 func TestCheckContainerStatus_ContainerNotFound(t *testing.T) {
 	mockExecutor := new(commandmocks.MockExecutor)
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).
 		Return([]byte("No such object"), errors.New(""))
 
@@ -130,6 +150,10 @@ func TestCheckContainerStatus_ContainerNotFound(t *testing.T) {
 
 func TestCheckContainerStatus_Error(t *testing.T) {
 	mockExecutor := new(commandmocks.MockExecutor)
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).
 		Return([]byte(""), errors.New("other error"))
 
@@ -143,6 +167,10 @@ func TestCheckContainerStatus_Error(t *testing.T) {
 
 func TestDockerExpandUser(t *testing.T) {
 	mockExecutor := new(commandmocks.MockExecutor)
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).
 		Return([]byte("/home/user"), nil)
 
@@ -183,15 +211,27 @@ func TestRunInit(t *testing.T) {
 			setupMock: func(m *commandmocks.MockExecutor) {
 				// check docker install
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker")
 				}).Return([]byte("docker"), nil).Once()
 				// pull image
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker pull")
 				}).Return([]byte(""), nil).Once()
 				// check container status
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker inspect -f")
@@ -205,15 +245,27 @@ func TestRunInit(t *testing.T) {
 			setupMock: func(m *commandmocks.MockExecutor) {
 				// check docker install
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker")
 				}).Return([]byte("docker"), nil).Once()
 				// pull image
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker image inspect")
 				}).Return([]byte(""), nil).Once()
 				// check container status
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker inspect -f")
@@ -227,20 +279,36 @@ func TestRunInit(t *testing.T) {
 			setupMock: func(m *commandmocks.MockExecutor) {
 				// check docker install
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker")
 				}).Return([]byte("docker"), nil).Once()
 				// pull image
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker image inspect")
 				}).Return([]byte(""), nil).Once()
 				// check container status
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker inspect -f")
 				}).Return([]byte("false"), nil).Once()
 				// run container
+				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+					cmd := args.Get(2).([]string)
+					assert.Contains(t, strings.Join(cmd, " "), "uptime")
+				}).Return([]byte("success"), nil).Once()
 				m.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 					sshCommand := args.Get(2).([]string)
 					assert.Contains(t, strings.Join(sshCommand, " "), "docker run")
@@ -314,6 +382,10 @@ func TestRun_AutoEnvironment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExecutor := new(commandmocks.MockExecutor)
+			mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+				cmd := args.Get(2).([]string)
+				assert.Contains(t, strings.Join(cmd, " "), "uptime")
+			}).Return([]byte("success"), nil).Once()
 			mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("success"), nil)
 
 			runner := newDockerCommandRunner(&v1.Docker{
@@ -335,6 +407,10 @@ func TestRun_AutoEnvironment(t *testing.T) {
 
 func TestRun_ShutdownAfterRun(t *testing.T) {
 	mockExecutor := new(commandmocks.MockExecutor)
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("success"), nil)
 
 	runner := newDockerCommandRunner(&v1.Docker{
@@ -379,6 +455,10 @@ func TestCheckDockerInstalled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExecutor := new(commandmocks.MockExecutor)
+			mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+				cmd := args.Get(2).([]string)
+				assert.Contains(t, strings.Join(cmd, " "), "uptime")
+			}).Return([]byte("success"), nil).Once()
 			mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(tt.mockOutput), tt.mockError)
 
 			runner := newDockerCommandRunner(&v1.Docker{
@@ -446,6 +526,10 @@ func TestAutoConfigureShm(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExecutor := new(commandmocks.MockExecutor)
+			mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+				cmd := args.Get(2).([]string)
+				assert.Contains(t, strings.Join(cmd, " "), "uptime")
+			}).Return([]byte("success"), nil).Once()
 			mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(tt.memInfo), nil)
 
 			runner := newDockerCommandRunner(&v1.Docker{

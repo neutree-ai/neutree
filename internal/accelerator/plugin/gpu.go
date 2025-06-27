@@ -107,6 +107,7 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 		}
 
 		klog.V(4).ErrorS(err, "run command failed", "output", output)
+
 		return nil, nil
 	}
 

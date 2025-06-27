@@ -108,9 +108,10 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 }
 
 func (s *SSHCommandRunner) checkConnection(ctx context.Context, sshCommand []string) error {
-	connectCommand := make([]string, len(sshCommand)+1)
+	var connectCommand []string
 	connectCommand = append(connectCommand, sshCommand...)
 	connectCommand = append(connectCommand, "uptime")
+
 	_, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
 	if err != nil {
 		return err

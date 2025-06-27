@@ -205,19 +205,43 @@ func TestStartNode_Success(t *testing.T) {
 	// init command
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "cmd1")
+	}).Return([]byte("success"), nil).Once()
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
 	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "cmd2")
 	}).Return([]byte("success"), nil).Once()
 	// check docker installed
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("docker"), nil).Once()
 	// check image
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Once()
 	// check container status
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("true"), nil).Once()
 	// ray start
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "ray start")
@@ -375,23 +399,43 @@ func TestSSHClusterManager_StopNode(t *testing.T) {
 			// Setup docker check mocks
 			if tt.nodeExists && tt.drainNodeError == nil {
 				if tt.dockerInstalled {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("docker"), nil).Once()
 				} else {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Once()
 				}
 
 				// Setup container status mock
 				if tt.dockerInstalled {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(fmt.Sprintf("%t", tt.containerRunning)), nil).Once()
 				}
 
 				// Setup stop ray mock
 				if tt.dockerInstalled && tt.containerRunning {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte{}, tt.stopRayError).Once()
 				}
 
 				// Setup stop container mock
 				if tt.dockerInstalled && tt.containerRunning && tt.stopRayError == nil {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte{}, tt.stopContainerError).Once()
 				}
 			}

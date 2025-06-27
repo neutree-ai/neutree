@@ -56,6 +56,10 @@ func TestSSHCommandRunner_Run_Success(t *testing.T) {
 	runner := newSSHCommandRunner(mockExec)
 
 	sshOptionsWithCommand := append(testSSHOptions, testCommand)
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("success"), nil)
 
 	output, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
@@ -70,6 +74,10 @@ func TestSSHCommandRunner_Run_WithError(t *testing.T) {
 	runner := newSSHCommandRunner(mockExec)
 
 	sshOptionsWithCommand := append(testSSHOptions, testCommand)
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("with error"), errors.New("ssh failed"))
 
 	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
@@ -85,6 +93,10 @@ func TestSSHCommandRunner_Run_ExitOnFail(t *testing.T) {
 	runner := newSSHCommandRunner(mockExec)
 
 	sshOptionsWithCommand := append(testSSHOptions, testCommand)
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("error"), errors.New("ssh failed"))
 
 	output, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
@@ -99,6 +111,10 @@ func TestSSHCommandRunner_Run_ShutdownAfterRun(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
 
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	sshOptionsWithShutdown := append(testSSHOptions, testCommand+"; sudo shutdown -h now")
 	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithShutdown).Return([]byte("success"), nil)
 
@@ -114,6 +130,10 @@ func TestSSHCommandRunner_Run_WithPortForward(t *testing.T) {
 
 	expectedArgs := append([]string{"ssh", "-L", "8080:localhost:8080"}, testSSHOptions...)
 	expectedArgs = append(expectedArgs, testCommand)
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", expectedArgs[1:]).Return([]byte("success"), nil)
 
 	_, err := runner.Run(context.Background(), testCommand, false, testPortForward, false, nil, "", false)
@@ -125,6 +145,10 @@ func TestSSHCommandRunner_Run_WithEnvironmentVariables(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
 
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "export ENV1=value1;")
@@ -142,6 +166,10 @@ func TestSSHCommandRunner_Run_EmptyCommand(t *testing.T) {
 
 	expectedCmd := "while true; do sleep 86400; done"
 	expectedArgs := append(testSSHOptions, expectedCmd)
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", expectedArgs).Return([]byte("success"), nil)
 
 	_, err := runner.Run(context.Background(), "", false, nil, false, nil, "", false)
@@ -166,6 +194,10 @@ func TestSSHCommandRunner_Run_WithSSHOptionsOverride(t *testing.T) {
 		fmt.Sprintf("%s@%s", testSSHUser, testSSHIP),
 		testCommand,
 	}
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", expectedArgs[1:]).Return([]byte("success"), nil)
 
 	_, err := runner.Run(context.Background(), testCommand, false, nil, false, nil, overrideKey, false)
@@ -191,6 +223,10 @@ func TestSSHCommandRunner_Run_WithOutputDisabled(t *testing.T) {
 	runner := newSSHCommandRunner(mockExec)
 
 	sshOptionsWithCommand := append(testSSHOptions, testCommand)
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("output should be ignored"), nil)
 
 	output, err := runner.Run(context.Background(), testCommand, false, nil, false, nil, "", false)
