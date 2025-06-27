@@ -68,7 +68,7 @@ func (p *GPUAcceleratorPlugin) GetNodeRuntimeConfig(ctx context.Context,
 		RuntimeConfig: v1.RuntimeConfig{
 			Runtime: "nvidia",
 			Env: map[string]string{
-				"ACCELETRATOR_TYPE": "gpu",
+				"ACCELERATOR_TYPE": "gpu",
 			},
 			Options: []string{"--gpus all"},
 		},
@@ -99,7 +99,13 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 	}, "", exector.Execute)
 
 	output, err := sshRunner.Run(ctx, "nvidia-smi --query-gpu=name,uuid --format=csv,noheader", true, nil, true, nil, "", false)
+	// if the node is not a GPU node, 'nvidia-smi' command will return an error, so ignore the command exec error.
+	// but also we need check the connect failed error.
 	if err != nil {
+		if err == command_runner.ErrConnectionFailed {
+			return nil, errors.Wrapf(err, "connect to node %s failed", nodeIP)
+		}
+
 		klog.V(4).ErrorS(err, "run command failed", "output", output)
 		return nil, nil
 	}
@@ -140,7 +146,7 @@ func (p *GPUAcceleratorPlugin) GetKubernetesContainerRuntimeConfig(ctx context.C
 	return &v1.GetContainerRuntimeConfigResponse{
 		RuntimeConfig: v1.RuntimeConfig{
 			Env: map[string]string{
-				"ACCELETRATOR_TYPE": "gpu",
+				"ACCELERATOR_TYPE": "gpu",
 			},
 		},
 	}, nil

@@ -13,7 +13,7 @@ def main():
     additional_args = sys.argv[1:]
 
     accelerator_counts = {}
-    accelerator_type = os.environ.get("ACCELETRATOR_TYPE", "")
+    accelerator_type = os.environ.get("ACCELERATOR_TYPE", "")
     if accelerator_type != "":
         acclerator = importlib.import_module(f"accelerator.{accelerator_type}")
         accelerator_counts = acclerator.get_accelerator_counts()
@@ -36,6 +36,7 @@ def main():
         subprocess.run(cmd, check=True)
     except subprocess.CalledProcessError as e:
         print("Error executing ray start command:", e)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
