@@ -47,7 +47,7 @@ func NewManager(e *gin.Engine) Manager {
 	}
 
 	// register plugin register handler
-	pluginGroup := e.Group("/v1/plugin")
+	pluginGroup := e.Group(v1.PluginAPIGroupPath)
 	pluginGroup.POST("/register", manager.registerHandler)
 
 	return manager
