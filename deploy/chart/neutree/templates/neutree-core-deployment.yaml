@@ -45,11 +45,15 @@ spec:
             privileged: true
             capabilities:
               add: ["SYS_ADMIN"]
-            allowPrivilegeEscalation: true          
+            allowPrivilegeEscalation: true
           {{- with .Values.core.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          ports:
+            - containerPort: 3001
+              name: server
+              protocol: TCP
       {{- with .Values.core.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

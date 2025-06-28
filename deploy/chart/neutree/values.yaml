@@ -121,6 +121,9 @@ core:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  server:
+    service:
+      type: ClusterIP
 
 api:
   image:

@@ -50,8 +50,8 @@ GO_BUILD_ARGS = \
 	-X '$(MODULE_PATH)/pkg/version.appVersion=$(IMAGE_TAG)' \
 	-X '$(MODULE_PATH)/pkg/version.buildTime=$(shell date --iso-8601=seconds)'"
 
-MOCKERY_DIRS=./ pkg/model_registry pkg/storage pkg/command internal/orchestrator internal/orchestrator/ray/cluster internal/orchestrator/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config internal/gateway
-MOCKERY_OUTPUT_DIRS=testing/mocks pkg/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/orchestrator/ray/cluster/mocks internal/orchestrator/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks internal/gateway/mocks
+MOCKERY_DIRS=./ pkg/model_registry pkg/storage pkg/command internal/orchestrator internal/orchestrator/ray/cluster internal/orchestrator/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config internal/gateway internal/accelerator
+MOCKERY_OUTPUT_DIRS=testing/mocks pkg/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/orchestrator/ray/cluster/mocks internal/orchestrator/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks internal/gateway/mocks internal/accelerator/mocks
 
 
 .PHONY: help
@@ -63,7 +63,7 @@ all: build
 build: test build-neutree-core build-neutree-cli build-neutree-api
 
 build-neutree-core:
-	$(GO) build -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
+	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
 
 prepare-build-cli:
 	tar -cvf db.tar db
@@ -73,10 +73,10 @@ prepare-build-cli:
 	mv -f deploy/docker/obs-stack.tar cmd/neutree-cli/app/cmd/launch/manifests/
 
 build-neutree-cli: prepare-build-cli
-	$(GO) build -o bin/neutree-cli ./cmd/neutree-cli/neutree-cli.go
+	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-cli ./cmd/neutree-cli/neutree-cli.go
 
 build-neutree-api:
-	$(GO) build -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
+	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
 
 # Choice of images to build/push
 ALL_DOCKER_BUILD ?= core api db-scripts

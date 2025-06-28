@@ -8,7 +8,7 @@ import (
 
 	kmount "k8s.io/utils/mount"
 
-	"github.com/neutree-ai/neutree/internal/orchestrator/ray/command_runner"
+	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
 var (

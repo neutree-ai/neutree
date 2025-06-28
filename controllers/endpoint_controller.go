@@ -10,6 +10,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	"github.com/neutree-ai/neutree/internal/registry"
@@ -23,7 +24,8 @@ type EndpointController struct {
 	imageService registry.ImageService
 	syncHandler  func(endpoint *v1.Endpoint) error // Added syncHandler field
 
-	gw gateway.Gateway
+	gw                 gateway.Gateway
+	acceleratorManager accelerator.Manager
 }
 
 type EndpointControllerOption struct {
@@ -31,7 +33,8 @@ type EndpointControllerOption struct {
 	Storage      storage.Storage
 	Workers      int
 
-	Gw gateway.Gateway
+	Gw                 gateway.Gateway
+	AcceleratorManager accelerator.Manager
 }
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
@@ -42,9 +45,10 @@ func NewEndpointController(option *EndpointControllerOption) (*EndpointControlle
 			workers:      option.Workers,
 			syncInterval: time.Second * 10,
 		},
-		storage:      option.Storage,
-		imageService: option.ImageService,
-		gw:           option.Gw,
+		storage:            option.Storage,
+		imageService:       option.ImageService,
+		gw:                 option.Gw,
+		acceleratorManager: option.AcceleratorManager,
 	}
 
 	c.syncHandler = c.sync
@@ -358,9 +362,10 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	}
 
 	orchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:      &cluster[0],
-		Storage:      c.storage,
-		ImageService: c.imageService,
+		Cluster:            &cluster[0],
+		Storage:            c.storage,
+		ImageService:       c.imageService,
+		AcceleratorManager: c.acceleratorManager,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create orchestrator for cluster %s", cluster[0].Metadata.Name)

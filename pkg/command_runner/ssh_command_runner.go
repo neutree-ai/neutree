@@ -11,12 +11,15 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+var (
+	ErrConnectionFailed = errors.New("connection failed")
+)
+
 type ProcessExecute func(ctx context.Context, name string, args []string) ([]byte, error)
 
 // SSHCommandRunner represents an SSH command runner.
 type SSHCommandRunner struct {
 	nodeID         string
-	clusterName    string
 	processExecute ProcessExecute
 	sshPrivateKey  string
 	sshUser        string
@@ -28,30 +31,25 @@ type CommonArgs struct {
 	NodeID         string
 	SshIP          string
 	AuthConfig     v1.Auth
-	ClusterName    string
+	SSHControlPath string
 	ProcessExecute ProcessExecute
 }
 
 // NewSSHCommandRunner creates a new SSHCommandRunner instance.
-func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, clusterName string, processExecute ProcessExecute) *SSHCommandRunner {
+func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshControlPath string, processExecute ProcessExecute) *SSHCommandRunner {
 	return &SSHCommandRunner{
 		nodeID:         nodeID,
-		clusterName:    clusterName,
 		processExecute: processExecute,
 		sshPrivateKey:  authConfig.SSHPrivateKey,
 		sshUser:        authConfig.SSHUser,
-		sshControlPath: "",
+		sshControlPath: sshControlPath,
 		sshIP:          sshIP,
 	}
 }
 
 // Run runs a command over SSH.
 func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool, portForward []string, withOutput bool,
-	environmentVariables map[string]interface{}, runEnv string, sshOptionsOverrideSSHKey string, shutdownAfterRun bool) (string, error) {
-	if shutdownAfterRun {
-		cmd += "; sudo shutdown -h now"
-	}
-
+	environmentVariables map[string]interface{}, sshOptionsOverrideSSHKey string, shutdownAfterRun bool) (string, error) {
 	sshCommand := []string{"ssh"}
 
 	if portForward != nil {
@@ -63,6 +61,16 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 	sshOptions := s.getSSHOptions(sshOptionsOverrideSSHKey)
 	sshCommand = append(sshCommand, sshOptions...)
 	sshCommand = append(sshCommand, fmt.Sprintf("%s@%s", s.sshUser, s.sshIP))
+
+	// before running the command, check if the connection is still alive
+	if err := s.checkConnection(ctx, sshCommand); err != nil {
+		klog.V(2).ErrorS(err, "SSH connection failed", "nodeID", s.nodeID)
+		return "", ErrConnectionFailed
+	}
+
+	if shutdownAfterRun {
+		cmd += "; sudo shutdown -h now"
+	}
 
 	if cmd != "" {
 		if environmentVariables != nil {
@@ -97,6 +105,19 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 	}
 
 	return "", nil
+}
+
+func (s *SSHCommandRunner) checkConnection(ctx context.Context, sshCommand []string) error {
+	var connectCommand []string
+	connectCommand = append(connectCommand, sshCommand...)
+	connectCommand = append(connectCommand, "uptime")
+
+	_, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []string {

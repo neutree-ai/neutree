@@ -13,7 +13,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.openly.dev/pointy"
 
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/config"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard/mocks"
@@ -141,6 +143,8 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 				mockExec.On("Execute", mock.Anything, "ray", mock.Anything).Return(tt.mockExecOutput, tt.mockExecError).Once()
 			}
 
+			mockAcceleratorManager := &acceleratormocks.MockManager{}
+			mockAcceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
 			clusterConfig := &v1.RayClusterConfig{
 				ClusterName: "test-cluster",
 				Auth: v1.Auth{
@@ -173,6 +177,10 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 					},
 				},
 				imageService: mockImageRegistryService,
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					AcceleratorType: pointy.String(""),
+				},
+				acceleratorManager: mockAcceleratorManager,
 			}
 
 			// Test
@@ -187,6 +195,8 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 			}
 
 			mockExec.AssertExpectations(t)
+			mockImageRegistryService.AssertExpectations(t)
+			mockAcceleratorManager.AssertExpectations(t)
 		})
 	}
 }
@@ -195,23 +205,50 @@ func TestStartNode_Success(t *testing.T) {
 	setUp(t)
 	defer tearDown()
 
+	mockAcceleratorManager := &acceleratormocks.MockManager{}
+	mockAcceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+
 	mockExec := new(commandmocks.MockExecutor)
 	// init command
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "cmd1")
 	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "cmd2")
 	}).Return([]byte("success"), nil).Once()
 	// check docker installed
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("docker"), nil).Once()
 	// check image
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Once()
 	// check container status
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("true"), nil).Once()
 	// ray start
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "ray start")
@@ -252,11 +289,17 @@ func TestStartNode_Success(t *testing.T) {
 			},
 		},
 		imageService: mockImageRegistryService,
+		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+			AcceleratorType: pointy.String(""),
+		},
+		acceleratorManager: mockAcceleratorManager,
 	}
 
 	err := manager.StartNode(context.Background(), "2.2.2.2")
 	assert.NoError(t, err)
 	mockExec.AssertExpectations(t)
+	mockImageRegistryService.AssertExpectations(t)
+	mockAcceleratorManager.AssertExpectations(t)
 }
 
 func TestSSHClusterManager_StopNode(t *testing.T) {
@@ -365,23 +408,43 @@ func TestSSHClusterManager_StopNode(t *testing.T) {
 			// Setup docker check mocks
 			if tt.nodeExists && tt.drainNodeError == nil {
 				if tt.dockerInstalled {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("docker"), nil).Once()
 				} else {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Once()
 				}
 
 				// Setup container status mock
 				if tt.dockerInstalled {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(fmt.Sprintf("%t", tt.containerRunning)), nil).Once()
 				}
 
 				// Setup stop ray mock
 				if tt.dockerInstalled && tt.containerRunning {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte{}, tt.stopRayError).Once()
 				}
 
 				// Setup stop container mock
 				if tt.dockerInstalled && tt.containerRunning && tt.stopRayError == nil {
+					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+						cmd := args.Get(2).([]string)
+						assert.Contains(t, strings.Join(cmd, " "), "uptime")
+					}).Return([]byte("success"), nil).Once()
 					mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte{}, tt.stopContainerError).Once()
 				}
 			}
@@ -558,15 +621,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
@@ -613,15 +676,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
@@ -668,15 +731,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
@@ -722,15 +785,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 				HeadStartRayCommands: []string{
 					"ray stop",
-					`ray start --disable-usage-stats --head --metrics-export-port=54311 --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				WorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				StaticWorkerStartRayCommands: []string{
 					"ray stop",
-					`python /home/ray/start.py $RAY_HEAD_IP --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 				},
 				InitializationCommands: []string{
 					"docker login registry.example.com -u 'user' -p 'pass'",
@@ -768,7 +831,12 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config, err := generateRayClusterConfig(tt.cluster, tt.imageRegistry)
+			manager := sshClusterManager{
+				cluster:       tt.cluster,
+				imageRegistry: tt.imageRegistry,
+			}
+			manager.sshClusterConfig, _ = parseSSHClusterConfig(tt.cluster)
+			config, err := manager.generateRayClusterConfig()
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -924,7 +992,6 @@ func TestBuildSSHCommandArgs(t *testing.T) {
 	assert.Equal(t, "1.1.1.1", args.NodeID)
 	assert.Equal(t, "1.1.1.1", args.SshIP)
 	assert.Equal(t, "user", args.AuthConfig.SSHUser)
-	assert.Equal(t, "test-cluster", args.ClusterName)
 }
 
 func TestGetRayTmpDir(t *testing.T) {

@@ -1,0 +1,77 @@
+name: release-serve
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the release tag (e.g : v0.1.0-nightly-20250405)"
+        required: true
+        type: string
+      version:
+        description: "the release version (e.g : 0.1.0)"
+        required: true
+        type: string
+
+jobs:
+  build-amd64-image:
+    runs-on: ["serve-builder","X64"]
+    name: build amd64 image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: build amd64 image
+        run: cd cluster-image-builder; export ARCH=amd64 VERSION=${{ github.event.inputs.version }}; make docker-build && make docker-push
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+  build-arm64-image:
+    runs-on: ["serve-builder","ARM64"]
+    name: build arm64 image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}        
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: build arm64 image
+        run: cd cluster-image-builder; export ARCH=arm64 VERSION=${{ github.event.inputs.version }}; make docker-build && make docker-push
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+  push-manifests:
+    runs-on: ["serve-builder","X64"]
+    name: merge and push manifests
+    needs:
+      - build-amd64-image
+      - build-arm64-image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}        
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: push manifests
+        run: |
+          cd cluster-image-builder
+          export VERSION=${{ github.event.inputs.version }}; make docker-push-manifest
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}

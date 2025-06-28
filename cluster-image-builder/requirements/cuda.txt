@@ -1,0 +1,2 @@
+llama_cpp_python==0.3.7
+vllm==0.8.5
