@@ -31,6 +31,7 @@ spec:
             {{- if .Values.system.grafana.url }}
             - --grafana-url={{ .Values.system.grafana.url }}
             {{- end }}
+            - --version={{ .Values.api.image.tag | default .Chart.AppVersion }}
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:

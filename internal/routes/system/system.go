@@ -16,6 +16,8 @@ import (
 type Dependencies struct {
 	// GrafanaURL is the URL to the Grafana instance for monitoring
 	GrafanaURL string
+	// Version is the application version
+	Version string
 	// AuthConfig is the JWT authentication configuration (required)
 	AuthConfig middleware.AuthConfig
 }
@@ -24,6 +26,8 @@ type Dependencies struct {
 type SystemInfo struct {
 	// GrafanaURL is the URL to access Grafana dashboard
 	GrafanaURL string `json:"grafana_url,omitempty"`
+	// Version is the application version
+	Version string `json:"version,omitempty"`
 }
 
 // RegisterRoutes registers system-related routes
@@ -42,6 +46,11 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 func handleSystemInfo(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		info := &SystemInfo{}
+
+		// Add version if configured
+		if deps.Version != "" {
+			info.Version = deps.Version
+		}
 
 		// Add Grafana URL if configured
 		if deps.GrafanaURL != "" {

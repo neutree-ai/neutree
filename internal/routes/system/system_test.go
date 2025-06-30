@@ -27,6 +27,7 @@ func createTestContext(method, path string) (*gin.Context, *httptest.ResponseRec
 func TestHandleSystemInfo_WithGrafanaURL(t *testing.T) {
 	deps := &Dependencies{
 		GrafanaURL: "http://example.com:3030",
+		Version:    "v1.0.0",
 	}
 
 	c, w := createTestContext("GET", "/api/v1/system/info")
@@ -40,12 +41,14 @@ func TestHandleSystemInfo_WithGrafanaURL(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "http://example.com:3030", response.GrafanaURL)
+	assert.Equal(t, "v1.0.0", response.Version)
 }
 
 // TestHandleSystemInfo_WithoutGrafanaURL tests system info without Grafana URL configured
 func TestHandleSystemInfo_WithoutGrafanaURL(t *testing.T) {
 	deps := &Dependencies{
 		GrafanaURL: "",
+		Version:    "v1.0.0",
 	}
 
 	c, w := createTestContext("GET", "/api/v1/system/info")
@@ -59,6 +62,7 @@ func TestHandleSystemInfo_WithoutGrafanaURL(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Empty(t, response.GrafanaURL)
+	assert.Equal(t, "v1.0.0", response.Version)
 }
 
 // TestHandleSystemInfo_WithTrailingSlash tests URL cleaning
@@ -118,6 +122,26 @@ func TestHandleSystemInfo_WithURLWithoutScheme(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	// URL without scheme should be omitted
+	assert.Empty(t, response.GrafanaURL)
+}
+
+// TestHandleSystemInfo_WithVersion tests system info with version configured
+func TestHandleSystemInfo_WithVersion(t *testing.T) {
+	deps := &Dependencies{
+		Version: "v1.2.3",
+	}
+
+	c, w := createTestContext("GET", "/api/v1/system/info")
+
+	handler := handleSystemInfo(deps)
+	handler(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response SystemInfo
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "v1.2.3", response.Version)
 	assert.Empty(t, response.GrafanaURL)
 }
 
