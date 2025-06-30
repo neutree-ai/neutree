@@ -26,6 +26,7 @@ var (
 	staticDir        = flag.String("static-dir", "./public", "directory for static files")
 	authEndpoint     = flag.String("auth-endpoint", "http://auth:9999", "auth service endpoint")
 	grafanaURL       = flag.String("grafana-url", "", "grafana url for system info API")
+	version          = flag.String("version", "dev", "application version for system info API")
 )
 
 func main() {
@@ -75,6 +76,7 @@ func main() {
 
 	system.RegisterRoutes(r, &system.Dependencies{
 		GrafanaURL: *grafanaURL,
+		Version:    *version,
 		AuthConfig: authConfig,
 	})
 
