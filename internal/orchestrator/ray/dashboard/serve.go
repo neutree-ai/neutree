@@ -94,6 +94,13 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 				},
 			}
 		}
+	} else if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
+		app.RuntimeEnv = map[string]interface{}{
+			"env_vars": map[string]string{
+				"HF_TOKEN":    modelRegistry.Spec.Credentials,
+				"HF_ENDPOINT": strings.TrimSuffix(modelRegistry.Spec.Url, "/"),
+			},
+		}
 	}
 
 	return app
