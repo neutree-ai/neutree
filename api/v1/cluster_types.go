@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 // Neutree node provision status.
 const (
@@ -29,16 +33,26 @@ type ClusterSpec struct {
 type RaySSHProvisionClusterConfig struct {
 	Provider Provider `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Auth     Auth     `json:"auth,omitempty" yaml:"auth,omitempty"`
-	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
-	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+
+	CommonClusterConfig `json:",inline" yaml:",inline"`
 }
 
 type RayKubernetesProvisionClusterConfig struct {
 	Kubeconfig       string            `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
 	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
 	WorkerGroupSpecs []WorkerGroupSpec `json:"worker_group_specs,omitempty" yaml:"worker_group_specs,omitempty"`
+
+	CommonClusterConfig `json:",inline" yaml:",inline"`
+}
+
+type CommonClusterConfig struct {
 	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
 	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+	// ModelCache is used to cache models downloaded from remote model registries, such as huggingface hub, bentoml cloud, etc.
+	// It does not apply to local model registries, such as bentoml nfs/local dir type.
+	// In addition, other data may be cached, which depends on the corresponding model registry download implementation,
+	// so it is not recommended to share a storage with the local model registry.
+	ModelCaches []ModelCache `json:"model_caches,omitempty" yaml:"model_caches,omitempty"`
 }
 
 type KubernetesAccessMode string
@@ -59,6 +73,14 @@ type WorkerGroupSpec struct {
 	MinReplicas int32             `json:"min_replicas,omitempty" yaml:"min_replicas,omitempty"`
 	MaxReplicas int32             `json:"max_replicas,omitempty" yaml:"max_replicas,omitempty"`
 	Resources   map[string]string `json:"resources,omitempty" yaml:"resources,omitempty"`
+}
+
+type ModelCache struct {
+	ModelRegistryType ModelRegistryType            `json:"model_registry_type,omitempty" yaml:"model_registry_type,omitempty"`
+	HostPath          *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
+	// Only Kubernetes type cluster support NFS.
+	NFS *corev1.NFSVolumeSource `json:"nfs,omitempty" yaml:"nfs,omitempty"`
+	// todo: support other model cache type, e.g. pvc etc.
 }
 
 type ClusterStatus struct {

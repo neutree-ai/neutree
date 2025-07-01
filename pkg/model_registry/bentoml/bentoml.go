@@ -18,6 +18,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 type Model struct {
@@ -39,7 +41,7 @@ func GetModelDetail(homePath, modelName, version string) (*Model, error) {
 	}
 
 	cmd := exec.Command("bentoml", "models", "get", tag, "-o", "json")
-	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v1.BentoMLHomeEnv, homePath))
 
 	content, err := cmd.CombinedOutput()
 	if err != nil {
@@ -64,7 +66,7 @@ func DeleteModel(homePath, modelName, version string) error {
 	}
 
 	cmd := exec.Command("bentoml", "models", "delete", tag, "-y")
-	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v1.BentoMLHomeEnv, homePath))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -77,7 +79,7 @@ func DeleteModel(homePath, modelName, version string) error {
 // ImportModel imports a model file to BentoML store
 func ImportModel(homePath, modelPath string) error {
 	cmd := exec.Command("bentoml", "models", "import", modelPath)
-	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v1.BentoMLHomeEnv, homePath))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -95,7 +97,7 @@ func ExportModel(homePath, modelName, version, outputPath string) error {
 	}
 
 	cmd := exec.Command("bentoml", "models", "export", tag, outputPath)
-	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v1.BentoMLHomeEnv, homePath))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -138,7 +140,7 @@ func ListModels(homePath string) ([]Model, error) {
 	)
 
 	cmd := exec.Command("bentoml", "models", "list", "-o", "json")
-	cmd.Env = append(cmd.Env, "BENTOML_HOME="+homePath)
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v1.BentoMLHomeEnv, homePath))
 
 	content, err := cmd.CombinedOutput()
 	if err != nil {

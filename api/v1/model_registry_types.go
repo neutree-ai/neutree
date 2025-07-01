@@ -25,6 +25,11 @@ const (
 	BentoMLModelRegistryConnectTypeFile = "file"
 )
 
+const (
+	HFHomeEnv      = "HF_HOME"
+	BentoMLHomeEnv = "BENTOML_HOME"
+)
+
 type ModelRegistrySpec struct {
 	Type        ModelRegistryType `json:"type"` // only support 'bentoml' | 'hugging-face'
 	Url         string            `json:"url"`  // only support 'file://path/to/model' | 'https://huggingface.co' | 'nfs://path/to/model';

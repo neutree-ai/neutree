@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 
@@ -643,7 +644,44 @@ func (c *sshClusterManager) generateRayClusterConfig() (*v1.RayClusterConfig, er
 
 	rayClusterConfig.InitializationCommands = initializationCommands
 
+	c.mutateModelCaches(rayClusterConfig)
+
 	return rayClusterConfig, nil
+}
+
+func (c *sshClusterManager) mutateModelCaches(config *v1.RayClusterConfig) {
+	modelCaches := c.sshClusterConfig.ModelCaches
+	if modelCaches == nil {
+		return
+	}
+
+	for _, modelCache := range modelCaches {
+		mountPath := path.Join(defaultModelCacheMountPath, string(modelCache.ModelRegistryType))
+
+		switch modelCache.ModelRegistryType {
+		case v1.HuggingFaceModelRegistryType:
+			config.Docker.RunOptions = append(config.Docker.RunOptions,
+				fmt.Sprintf("-e %s=%s", v1.HFHomeEnv, mountPath))
+		case v1.BentoMLModelRegistryType:
+			config.Docker.RunOptions = append(config.Docker.RunOptions,
+				fmt.Sprintf("-e %s=%s", v1.BentoMLHomeEnv, mountPath))
+		default:
+			klog.Warningf("Model registry type %s is not supported, skip", modelCache.ModelRegistryType)
+			continue
+		}
+
+		if modelCache.HostPath != nil {
+			hostPath := modelCache.HostPath.Path
+			config.Docker.RunOptions = append(config.Docker.RunOptions,
+				"--volume "+hostPath+":"+mountPath)
+			config.InitializationCommands = append(config.InitializationCommands,
+				fmt.Sprintf("mkdir -p %s && chmod 755 %s", hostPath, hostPath))
+			modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", mountPath)
+			config.HeadStartRayCommands = append([]string{modifyPermissionCommand}, config.HeadStartRayCommands...)
+			config.WorkerStartRayCommands = append([]string{modifyPermissionCommand}, config.WorkerStartRayCommands...)
+			config.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand}, config.StaticWorkerStartRayCommands...)
+		}
+	}
 }
 
 func ensureLocalClusterStateFile(config *v1.RayClusterConfig) error {

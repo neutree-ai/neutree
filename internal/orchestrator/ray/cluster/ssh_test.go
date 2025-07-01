@@ -178,7 +178,9 @@ func TestSSHClusterManager_UpCluster(t *testing.T) {
 				},
 				imageService: mockImageRegistryService,
 				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-					AcceleratorType: pointy.String(""),
+					CommonClusterConfig: v1.CommonClusterConfig{
+						AcceleratorType: pointy.String(""),
+					},
 				},
 				acceleratorManager: mockAcceleratorManager,
 			}
@@ -290,7 +292,9 @@ func TestStartNode_Success(t *testing.T) {
 		},
 		imageService: mockImageRegistryService,
 		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-			AcceleratorType: pointy.String(""),
+			CommonClusterConfig: v1.CommonClusterConfig{
+				AcceleratorType: pointy.String(""),
+			},
 		},
 		acceleratorManager: mockAcceleratorManager,
 	}
