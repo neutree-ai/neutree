@@ -793,7 +793,7 @@ func (c *kubeRayClusterManager) mutateModelCaches(podTemplate *corev1.PodTemplat
 		return
 	}
 
-	var modifyPermissionComands []string
+	var modifyPermissionCommands []string
 	modifyPermissionContainer := corev1.Container{
 		Name:  "update-model-cache-permission",
 		Image: podTemplate.Spec.Containers[0].Image,
@@ -863,10 +863,10 @@ func (c *kubeRayClusterManager) mutateModelCaches(podTemplate *corev1.PodTemplat
 
 		podTemplate.Spec.Volumes = append(podTemplate.Spec.Volumes, volume)
 		modifyPermissionContainer.VolumeMounts = append(modifyPermissionContainer.VolumeMounts, volumeMount)
-		modifyPermissionComands = append(modifyPermissionComands, "sudo chown -R $(id -u):$(id -g) "+mountPath)
+		modifyPermissionCommands = append(modifyPermissionCommands, "sudo chown -R $(id -u):$(id -g) "+mountPath)
 	}
 
-	modifyPermissionContainer.Command = append(modifyPermissionContainer.Command, strings.Join(modifyPermissionComands, "&&"))
+	modifyPermissionContainer.Command = append(modifyPermissionContainer.Command, strings.Join(modifyPermissionCommands, "&&"))
 	// add init container to update model cache permission to the same user as the ray worker process.
 	podTemplate.Spec.InitContainers = append(podTemplate.Spec.InitContainers, modifyPermissionContainer)
 }

@@ -79,7 +79,7 @@ type ModelCache struct {
 	ModelRegistryType ModelRegistryType            `json:"model_registry_type,omitempty" yaml:"model_registry_type,omitempty"`
 	HostPath          *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
 	// Only Kubernetes type cluster support NFS.
-	NFS *corev1.NFSVolumeSource
+	NFS *corev1.NFSVolumeSource `json:"nfs,omitempty" yaml:"nfs,omitempty"`
 	// todo: support other model cache type, e.g. pvc etc.
 }
 
