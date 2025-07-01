@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
@@ -773,7 +775,7 @@ func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSp
 		},
 	}
 
-	c.mutateModelCache(&podTemplate)
+	c.mutateModelCaches(&podTemplate)
 
 	err = c.mutateContainerAcceleratorRuntimeConfig(&podTemplate.Spec.Containers[0])
 	if err != nil {
@@ -785,65 +787,88 @@ func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSp
 	return podTemplate, nil
 }
 
-func (c *kubeRayClusterManager) mutateModelCache(podTemplate *corev1.PodTemplateSpec) {
-	modelCache := c.kubernetesClusterConfig.ModelCache
-	if modelCache == nil {
+func (c *kubeRayClusterManager) mutateModelCaches(podTemplate *corev1.PodTemplateSpec) {
+	modelCaches := c.kubernetesClusterConfig.ModelCaches
+	if modelCaches == nil {
 		return
 	}
 
-	volume := corev1.Volume{
-		Name: "model-cache",
-	}
-
-	volumeMount := corev1.VolumeMount{
-		Name:      "model-cache",
-		MountPath: defaultModelCacheMountPath,
-	}
-
-	if modelCache.HostPath != nil {
-		hostPathType := corev1.HostPathDirectoryOrCreate
-		volume.VolumeSource = corev1.VolumeSource{
-			HostPath: &corev1.HostPathVolumeSource{
-				Path: modelCache.HostPath.Path,
-				Type: &hostPathType,
-			},
-		}
-	} else if modelCache.NFS != nil {
-		volume.VolumeSource = corev1.VolumeSource{
-			NFS: &corev1.NFSVolumeSource{
-				Server:   modelCache.NFS.Server,
-				Path:     modelCache.NFS.Path,
-				ReadOnly: modelCache.NFS.ReadOnly,
-			},
-		}
-	}
-
-	for i := range podTemplate.Spec.Containers {
-		// append volume mount to container.
-		podTemplate.Spec.Containers[i].VolumeMounts = append(podTemplate.Spec.Containers[i].VolumeMounts, volumeMount)
-		podTemplate.Spec.Containers[i].Env = append(podTemplate.Spec.Containers[i].Env, corev1.EnvVar{
-			Name:  "HF_HOME",
-			Value: defaultModelCacheMountPath,
-		})
-	}
-
-	podTemplate.Spec.Volumes = append(podTemplate.Spec.Volumes, volume)
-	// add init container to update model cache permission to the same user as the ray worker process.
-	podTemplate.Spec.InitContainers = append(podTemplate.Spec.InitContainers, corev1.Container{
+	var modifyPermissionComands []string
+	modifyPermissionContainer := corev1.Container{
 		Name:  "update-model-cache-permission",
 		Image: podTemplate.Spec.Containers[0].Image,
 		Command: []string{
 			"/bin/bash",
 			"-c",
-			"sudo chown -R $(id -u):$(id -g) " + defaultModelCacheMountPath,
 		},
 		SecurityContext: &corev1.SecurityContext{
 			Privileged: pointy.Bool(true),
 		},
-		VolumeMounts: []corev1.VolumeMount{
-			volumeMount,
-		},
-	})
+		VolumeMounts: []corev1.VolumeMount{},
+	}
+
+	for _, modelCache := range modelCaches {
+		volumeName := fmt.Sprintf("%s-model-cache", modelCache.ModelRegistryType)
+		mountPath := path.Join(defaultModelCacheMountPath, string(modelCache.ModelRegistryType))
+		var env corev1.EnvVar
+
+		switch modelCache.ModelRegistryType {
+		case v1.HuggingFaceModelRegistryType:
+			env = corev1.EnvVar{
+				Name:  v1.HFHomeEnv,
+				Value: mountPath,
+			}
+		case v1.BentoMLModelRegistryType:
+			env = corev1.EnvVar{
+				Name:  v1.BentoMLHomeEnv,
+				Value: mountPath,
+			}
+		default:
+			klog.Warningf("Model registry type %s is not supported, skip", modelCache.ModelRegistryType)
+			continue
+		}
+
+		volume := corev1.Volume{
+			Name: volumeName,
+		}
+
+		volumeMount := corev1.VolumeMount{
+			Name:      volumeName,
+			MountPath: mountPath,
+		}
+
+		if modelCache.HostPath != nil {
+			hostPathType := corev1.HostPathDirectoryOrCreate
+			volume.VolumeSource = corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: modelCache.HostPath.Path,
+					Type: &hostPathType,
+				},
+			}
+		} else if modelCache.NFS != nil {
+			volume.VolumeSource = corev1.VolumeSource{
+				NFS: &corev1.NFSVolumeSource{
+					Server:   modelCache.NFS.Server,
+					Path:     modelCache.NFS.Path,
+					ReadOnly: modelCache.NFS.ReadOnly,
+				},
+			}
+		}
+
+		for i := range podTemplate.Spec.Containers {
+			// append volume mount to container.
+			podTemplate.Spec.Containers[i].VolumeMounts = append(podTemplate.Spec.Containers[i].VolumeMounts, volumeMount)
+			podTemplate.Spec.Containers[i].Env = append(podTemplate.Spec.Containers[i].Env, env)
+		}
+
+		podTemplate.Spec.Volumes = append(podTemplate.Spec.Volumes, volume)
+		modifyPermissionContainer.VolumeMounts = append(modifyPermissionContainer.VolumeMounts, volumeMount)
+		modifyPermissionComands = append(modifyPermissionComands, "sudo chown -R $(id -u):$(id -g) "+mountPath)
+	}
+
+	modifyPermissionContainer.Command = append(modifyPermissionContainer.Command, strings.Join(modifyPermissionComands, "&&"))
+	// add init container to update model cache permission to the same user as the ray worker process.
+	podTemplate.Spec.InitContainers = append(podTemplate.Spec.InitContainers, modifyPermissionContainer)
 }
 
 func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() (corev1.PodTemplateSpec, error) {

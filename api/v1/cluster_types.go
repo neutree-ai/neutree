@@ -33,18 +33,26 @@ type ClusterSpec struct {
 type RaySSHProvisionClusterConfig struct {
 	Provider Provider `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Auth     Auth     `json:"auth,omitempty" yaml:"auth,omitempty"`
-	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
-	AcceleratorType *string     `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
-	ModelCache      *ModelCache `json:"model_cache,omitempty" yaml:"model_cache,omitempty"`
+
+	CommonClusterConfig `json:",inline" yaml:",inline"`
 }
 
 type RayKubernetesProvisionClusterConfig struct {
 	Kubeconfig       string            `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
 	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
 	WorkerGroupSpecs []WorkerGroupSpec `json:"worker_group_specs,omitempty" yaml:"worker_group_specs,omitempty"`
+
+	CommonClusterConfig `json:",inline" yaml:",inline"`
+}
+
+type CommonClusterConfig struct {
 	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
-	AcceleratorType *string     `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
-	ModelCache      *ModelCache `json:"model_cache,omitempty" yaml:"model_cache,omitempty"`
+	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+	// ModelCache is used to cache models downloaded from remote model registries, such as huggingface hub, bentoml cloud, etc.
+	// It does not apply to local model registries, such as bentoml nfs/local dir type.
+	// In addition, other data may be cached, which depends on the corresponding model registry download implementation,
+	// so it is not recommended to share a storage with the local model registry.
+	ModelCaches []ModelCache `json:"model_caches,omitempty" yaml:"model_caches,omitempty"`
 }
 
 type KubernetesAccessMode string
@@ -68,8 +76,9 @@ type WorkerGroupSpec struct {
 }
 
 type ModelCache struct {
-	HostPath *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
-	// current only kubernetes type cluster is supported.
+	ModelRegistryType ModelRegistryType            `json:"model_registry_type,omitempty" yaml:"model_registry_type,omitempty"`
+	HostPath          *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
+	// Only Kubernetes type cluster support NFS.
 	NFS *corev1.NFSVolumeSource
 	// todo: support other model cache type, e.g. pvc etc.
 }
