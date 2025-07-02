@@ -84,23 +84,22 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 		Args:        args,
 	}
 
+	applicationEnv := map[string]string{}
 	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		// todo: support local file type env set
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			app.RuntimeEnv = map[string]interface{}{
-				"env_vars": map[string]string{
-					v1.BentoMLHomeEnv: filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name),
-				},
-			}
+			applicationEnv[v1.BentoMLHomeEnv] = filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name)
 		}
 	} else if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
-		app.RuntimeEnv = map[string]interface{}{
-			"env_vars": map[string]string{
-				"HF_TOKEN":    modelRegistry.Spec.Credentials,
-				"HF_ENDPOINT": strings.TrimSuffix(modelRegistry.Spec.Url, "/"),
-			},
+		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
+		if modelRegistry.Spec.Credentials != "" {
+			applicationEnv[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
+	}
+
+	app.RuntimeEnv = map[string]interface{}{
+		"env_vars": applicationEnv,
 	}
 
 	return app
