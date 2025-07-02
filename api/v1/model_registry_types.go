@@ -25,8 +25,12 @@ const (
 	BentoMLModelRegistryConnectTypeFile = "file"
 )
 
+// The environment variable name for model registry
 const (
-	HFHomeEnv      = "HF_HOME"
+	HFHomeEnv  = "HF_HOME"
+	HFTokenEnv = "HF_TOKEN"
+	HFEndpoint = "HF_ENDPOINT"
+
 	BentoMLHomeEnv = "BENTOML_HOME"
 )
 
