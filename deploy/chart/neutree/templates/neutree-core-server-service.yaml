@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "neutree.fullname" . }}-server-service
+  name: {{ include "neutree.fullname" . }}-core-server-service
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
