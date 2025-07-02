@@ -85,6 +85,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 	}
 
 	applicationEnv := map[string]string{}
+
 	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		// todo: support local file type env set
