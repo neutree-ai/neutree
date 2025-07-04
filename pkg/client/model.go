@@ -151,8 +151,9 @@ func (s *ModelsService) PushWithProgress(
 			reader = io.TeeReader(file, progressWriter)
 		}
 
-		// Copy with progress tracking
-		_, err := io.Copy(part, reader)
+		buf := make([]byte, 16*1024*1024)
+
+		_, err := io.CopyBuffer(part, reader, buf)
 		if err != nil {
 			pw.CloseWithError(err)
 			return

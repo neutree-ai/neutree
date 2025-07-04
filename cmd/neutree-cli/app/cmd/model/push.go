@@ -98,7 +98,6 @@ func NewPushCmd() *cobra.Command {
 				return fmt.Errorf("failed to push model: %w", err)
 			}
 
-			fmt.Printf("Model %s:%s pushed successfully\n", modelName, version)
 			return nil
 		},
 	}

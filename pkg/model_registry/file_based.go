@@ -137,8 +137,9 @@ func (f *localFile) SaveUploadedModel(reader io.Reader, name, version, tempDir s
 
 	defer out.Close()
 
-	// Copy the uploaded model to the temporary file
-	_, err = io.Copy(out, reader)
+	buf := make([]byte, 16*1024*1024)
+
+	_, err = io.CopyBuffer(out, reader, buf)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to save uploaded model")
 	}
@@ -234,8 +235,9 @@ func (n *nfsFile) SaveUploadedModel(reader io.Reader, name, version, tempDir str
 
 	defer out.Close()
 
-	// Copy the uploaded model to the temporary file
-	_, err = io.Copy(out, reader)
+	buf := make([]byte, 16*1024*1024)
+
+	_, err = io.CopyBuffer(out, reader, buf)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to save uploaded model")
 	}
