@@ -230,7 +230,10 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 		}
 	}()
 
-	gzw := gzip.NewWriter(tmpFile)
+	gzw, err := gzip.NewWriterLevel(tmpFile, gzip.BestSpeed)
+	if err != nil {
+		return "", err
+	}
 	tw := tar.NewWriter(gzw)
 
 	// Add model.yaml
@@ -249,10 +252,13 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 		return "", err
 	}
 
-	// Update progress with yaml file size
+	// Update progress for yaml file
 	if progressWriter != nil {
 		progressWriter.Write(make([]byte, len(yamlBytes)))
 	}
+
+	// Pre-allocate buffer for better performance - reuse across files
+	buf := make([]byte, 16*1024*1024)
 
 	// Add all files with progress
 	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
@@ -293,7 +299,7 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 			reader = io.TeeReader(f, progressWriter)
 		}
 
-		_, err = io.Copy(tw, reader)
+		_, err = io.CopyBuffer(tw, reader, buf)
 		if err != nil {
 			return err
 		}

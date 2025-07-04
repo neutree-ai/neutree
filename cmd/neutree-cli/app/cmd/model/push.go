@@ -20,10 +20,11 @@ func NewPushCmd() *cobra.Command {
 	var labelsFlag []string
 
 	cmd := &cobra.Command{
-		Use:   "push [local_model_path]",
-		Short: "Push a model to the registry",
-		Long:  `Push a local model to the registry with specified metadata`,
-		Args:  cobra.ExactArgs(1),
+		Use:          "push [local_model_path]",
+		Short:        "Push a model to the registry",
+		Long:         `Push a local model to the registry with specified metadata`,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modelPath := args[0]
 
@@ -63,15 +64,18 @@ func NewPushCmd() *cobra.Command {
 				// Calculate directory size for progress bar
 				totalSize, _, err := calculateDirectorySize(modelPath)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to calculate directory size: %w", err)
 				}
+
+				// Add some buffer for YAML file modifications and compression overhead
+				totalSize = totalSize + 100*1024
 
 				// Create progress bar for archive
 				archiveBar := progressbar.DefaultBytes(totalSize, "Creating archive")
 
 				archivePath, err := bentoml.CreateArchiveWithProgress(modelPath, modelName, version, archiveBar)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to create archive: %w", err)
 				}
 
 				modelPath = archivePath
@@ -84,7 +88,7 @@ func NewPushCmd() *cobra.Command {
 			// Get file size for progress bar
 			fileInfo, err := os.Stat(modelPath)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to get model file info: %w", err)
 			}
 
 			// Create progress bar for upload
