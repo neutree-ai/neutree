@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,27 +134,75 @@ func GetModelPath(homePath, modelName, version string) (string, error) {
 	return modelDir, nil
 }
 
-// ListModels lists all models in BentoML store
+// ListModels traverses $homePath/bentoml/models and aggregates model.yaml /
+// model.json files.  It is API‑compatible with the original CLI‑based ListModels
+// but avoids forking Python.
 func ListModels(homePath string) ([]Model, error) {
-	var (
-		err           error
-		bentoMLModels []Model
-	)
+	root := filepath.Join(homePath, "models")
 
-	cmd := exec.Command("bentoml", "models", "list", "-o", "json")
-	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v1.BentoMLHomeEnv, homePath))
-
-	content, err := cmd.CombinedOutput()
+	stat, err := os.Stat(root)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to list models: %s", string(content))
+		return nil, errors.Wrap(err, "model store not found")
+	}
+	if !stat.IsDir() {
+		return nil, errors.Errorf("%s is not a directory", root)
 	}
 
-	err = json.Unmarshal(content, &bentoMLModels)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal models list")
+	var models []Model
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if name != "model.yaml" && name != "model.json" {
+			return nil
+		}
+
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		// Minimal superset of fields we care about
+		var meta struct {
+			Name         string `yaml:"name" json:"name"`
+			Version      string `yaml:"version" json:"version"`
+			Module       string `yaml:"module" json:"module"`
+			Size         string `yaml:"size" json:"size"`
+			CreationTime string `yaml:"creation_time" json:"creation_time"`
+		}
+
+		if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
+			if err := yaml.Unmarshal(raw, &meta); err != nil {
+				return err
+			}
+		} else {
+			if err := json.Unmarshal(raw, &meta); err != nil {
+				return err
+			}
+		}
+
+		models = append(models, Model{
+			Tag:          fmt.Sprintf("%s:%s", meta.Name, meta.Version),
+			Module:       meta.Module,
+			Size:         meta.Size,
+			CreationTime: meta.CreationTime,
+		})
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
 	}
 
-	return bentoMLModels, nil
+	// 2) Sort by CreationTime desc (same as BentoML CLI output)
+	sort.Slice(models, func(i, j int) bool {
+		return models[i].CreationTime > models[j].CreationTime
+	})
+
+	return models, nil
 }
 
 // CopyModelFile copies a model file to a temporary location
