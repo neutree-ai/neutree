@@ -192,10 +192,7 @@ func GenerateVersion() (*string, error) {
 	return &lower, nil
 }
 
-// CreateArchive walks srcDir and produces a gzip‑compressed tar file with
-// everything placed at archive root.  It returns the full
-// path of the tmp *.bentomodel file.
-func CreateArchive(srcDir, modelName, version string) (string, error) {
+func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter io.Writer) (string, error) {
 	yamlPath := filepath.Join(srcDir, ModelYAMLFileName)
 	var yamlBytes []byte
 
@@ -236,6 +233,7 @@ func CreateArchive(srcDir, modelName, version string) (string, error) {
 	gzw := gzip.NewWriter(tmpFile)
 	tw := tar.NewWriter(gzw)
 
+	// Add model.yaml
 	hdr := &tar.Header{
 		Name:     ModelYAMLFileName,
 		Mode:     0o644,
@@ -251,6 +249,12 @@ func CreateArchive(srcDir, modelName, version string) (string, error) {
 		return "", err
 	}
 
+	// Update progress with yaml file size
+	if progressWriter != nil {
+		progressWriter.Write(make([]byte, len(yamlBytes)))
+	}
+
+	// Add all files with progress
 	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -281,12 +285,22 @@ func CreateArchive(srcDir, modelName, version string) (string, error) {
 		if err != nil {
 			return err
 		}
-
 		defer f.Close()
-		_, err = io.Copy(tw, f)
 
-		return err
+		// Use io.TeeReader to copy data and update progress simultaneously
+		var reader io.Reader = f
+		if progressWriter != nil {
+			reader = io.TeeReader(f, progressWriter)
+		}
+
+		_, err = io.Copy(tw, reader)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	})
+
 	if err != nil {
 		return "", err
 	}

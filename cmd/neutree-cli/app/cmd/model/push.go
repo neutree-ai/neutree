@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/neutree-ai/neutree/pkg/client"
@@ -59,24 +60,37 @@ func NewPushCmd() *cobra.Command {
 
 			// If modelPath is a directory, tar‑gz it into a temp *.bentomodel
 			if info.IsDir() {
-				fmt.Printf("Creating archive for model %s...\n", modelName)
+				// Calculate directory size for progress bar
+				totalSize, _, err := calculateDirectorySize(modelPath)
+				if err != nil {
+					return err
+				}
 
-				archivePath, err := bentoml.CreateArchive(modelPath, modelName, version)
+				// Create progress bar for archive
+				archiveBar := progressbar.DefaultBytes(totalSize, "Creating archive")
+
+				archivePath, err := bentoml.CreateArchiveWithProgress(modelPath, modelName, version, archiveBar)
 				if err != nil {
 					return err
 				}
 
 				modelPath = archivePath
-
 				defer os.Remove(archivePath)
 			}
 
 			// Create client
 			c := client.NewClient(serverURL, client.WithAPIKey(apiKey), client.WithTimeout(0))
 
-			fmt.Printf("Pushing model %s:%s to registry...\n", modelName, version)
+			// Get file size for progress bar
+			fileInfo, err := os.Stat(modelPath)
+			if err != nil {
+				return err
+			}
 
-			if err := c.Models.Push(workspace, registry, modelPath, modelName, version, description, labels); err != nil {
+			// Create progress bar for upload
+			uploadBar := progressbar.DefaultBytes(fileInfo.Size(), "Uploading model")
+
+			if err := c.Models.PushWithProgress(workspace, registry, modelPath, modelName, version, description, labels, uploadBar); err != nil {
 				return fmt.Errorf("failed to push model: %w", err)
 			}
 
@@ -95,6 +109,27 @@ func NewPushCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+// calculateDirectorySize calculates the total size of all files in a directory
+func calculateDirectorySize(dir string) (int64, int, error) {
+	var totalSize int64
+	var fileCount int
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !info.IsDir() {
+			totalSize += info.Size()
+			fileCount++
+		}
+
+		return nil
+	})
+
+	return totalSize, fileCount, err
 }
 
 // parseLabel parses a "key=value" format string into key-value pair

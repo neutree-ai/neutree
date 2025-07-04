@@ -113,9 +113,10 @@ func (s *ModelsService) Delete(workspace, registry, modelName, version string) e
 	return nil
 }
 
-// Push uploads a model to the registry
-func (s *ModelsService) Push(workspace, registry, modelPath, name, version, description string, labels map[string]string) error {
-	// Open file
+// PushWithProgress uploads a model to the registry with progress reporting
+func (s *ModelsService) PushWithProgress(
+	workspace, registry, modelPath, name, version, description string, labels map[string]string, progressWriter io.Writer,
+) error {
 	file, err := os.Open(modelPath)
 	if err != nil {
 		return err
@@ -144,7 +145,14 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 
 		part, _ := mw.CreateFormFile("model", filepath.Base(modelPath))
 
-		_, err := io.Copy(part, file)
+		// Use TeeReader to copy data and update progress simultaneously
+		var reader io.Reader = file
+		if progressWriter != nil {
+			reader = io.TeeReader(file, progressWriter)
+		}
+
+		// Copy with progress tracking
+		_, err := io.Copy(part, reader)
 		if err != nil {
 			pw.CloseWithError(err)
 			return
