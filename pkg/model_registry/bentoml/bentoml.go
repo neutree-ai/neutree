@@ -2,7 +2,6 @@ package bentoml
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"encoding/base32"
 	"encoding/json"
 	"fmt"
@@ -18,6 +17,7 @@ import (
 	"slices"
 
 	"github.com/google/uuid"
+	"github.com/klauspost/pgzip"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 
@@ -78,18 +78,56 @@ func DeleteModel(homePath, modelName, version string) error {
 	return nil
 }
 
-// ImportModel imports a model file to BentoML store
-func ImportModel(homePath, modelPath string) error {
-	cmd := exec.Command("bentoml", "models", "import", modelPath)
-	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v1.BentoMLHomeEnv, homePath))
+// ImportModel imports a model from reader to BentoML store
+func ImportModel(homePath string, reader io.Reader, name, version string, force bool, progress io.Writer) error {
+	if name == "" || version == "" {
+		return errors.New("model name and version are required")
+	}
 
-	output, err := cmd.CombinedOutput()
+	finalDir := filepath.Join(homePath, "models", name, version)
+
+	if exists(finalDir) {
+		if !force {
+			return errors.Errorf("model %s:%s already exists", name, version)
+		}
+		// Remove old version to replace.
+		if err := os.RemoveAll(finalDir); err != nil {
+			return errors.Wrap(err, "cleanup existing model dir")
+		}
+	}
+
+	// Step 1: create temporary directory for atomic import.
+	tmpParent := filepath.Dir(finalDir)
+	if err := os.MkdirAll(tmpParent, 0o755); err != nil {
+		return errors.Wrap(err, "mkdir model parent")
+	}
+
+	tmpDir, err := os.MkdirTemp(tmpParent, ".tmp-*-")
 	if err != nil {
-		return errors.Wrapf(err, "failed to import model: %s", string(output))
+		return errors.Wrap(err, "create temp dir")
+	}
+	// Ensure tmpDir removed on failure.
+	defer func() {
+		if err != nil {
+			os.RemoveAll(tmpDir)
+		}
+	}()
+
+	// Step 2: extract archive from reader into tmpDir.
+	if err = untarGzFromReader(reader, tmpDir, progress); err != nil {
+		return err
+	}
+
+	// Step 3: atomic rename to final destination.
+	if err = os.Rename(tmpDir, finalDir); err != nil {
+		return errors.Wrap(err, "atomic rename")
 	}
 
 	return nil
 }
+
+// exists returns true if path exists.
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // ExportModel exports a model from BentoML store to a file
 func ExportModel(homePath, modelName, version, outputPath string) error {
@@ -144,18 +182,22 @@ func ListModels(homePath string) ([]Model, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "model store not found")
 	}
+
 	if !stat.IsDir() {
 		return nil, errors.Errorf("%s is not a directory", root)
 	}
 
 	var models []Model
+
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
+
 		if d.IsDir() {
 			return nil
 		}
+
 		name := d.Name()
 		if name != "model.yaml" && name != "model.json" {
 			return nil
@@ -191,6 +233,7 @@ func ListModels(homePath string) ([]Model, error) {
 			Size:         meta.Size,
 			CreationTime: meta.CreationTime,
 		})
+
 		return nil
 	})
 	if walkErr != nil {
@@ -280,10 +323,11 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 		}
 	}()
 
-	gzw, err := gzip.NewWriterLevel(tmpFile, gzip.BestSpeed)
+	gzw, err := pgzip.NewWriterLevel(tmpFile, pgzip.BestSpeed)
 	if err != nil {
 		return "", err
 	}
+
 	tw := tar.NewWriter(gzw)
 
 	// Add model.yaml
@@ -304,7 +348,7 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 
 	// Update progress for yaml file
 	if progressWriter != nil {
-		progressWriter.Write(make([]byte, len(yamlBytes)))
+		_, _ = progressWriter.Write(make([]byte, len(yamlBytes)))
 	}
 
 	// Pre-allocate buffer for better performance - reuse across files
@@ -413,6 +457,73 @@ func FillMinimalModelYAML(y *ModelYAML, name, version, hfRepo string) error {
 	y.Context.FrameworkVersion = map[string]string{}
 	y.Context.BentoVersion = "1.4.6"
 	y.Context.PythonVersion = "3.12"
+
+	return nil
+}
+
+func untarGzFromReader(reader io.Reader, dest string, progressWriter io.Writer) error {
+	gr, err := pgzip.NewReader(reader)
+	if err != nil {
+		return errors.Wrap(err, "pgzip reader")
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+
+	buf := make([]byte, 16*1024*1024)
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return errors.Wrap(err, "iterate tar")
+		}
+
+		clean := filepath.Clean(hdr.Name)
+		if clean == "." || strings.Contains(clean, "..") || filepath.IsAbs(clean) {
+			return fmt.Errorf("unsafe path %q in archive", hdr.Name)
+		}
+
+		target := filepath.Join(dest, clean)
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			mode := fs.FileMode(hdr.Mode & 0o777)
+			if err := os.MkdirAll(target, mode); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+
+			mode := fs.FileMode(hdr.Mode & 0o777)
+
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			if err != nil {
+				return err
+			}
+
+			var r io.Reader = tr
+			if progressWriter != nil {
+				r = io.TeeReader(tr, progressWriter)
+			}
+
+			if _, err := io.CopyBuffer(out, r, buf); err != nil {
+				out.Close()
+				return err
+			}
+
+			out.Close()
+
+			_ = os.Chtimes(target, time.Now(), hdr.ModTime)
+		default:
+			// skip other types (symlink, etc) for safety
+		}
+	}
 
 	return nil
 }

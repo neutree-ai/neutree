@@ -111,6 +111,9 @@ linters-settings:
     allow-trailing-comment: true
     # Allow leading comments to be separated with empty liens
     allow-separated-leading-comment: true
+  gosec:
+    excludes:
+      - G115
 
 issues:
   exclude-files:

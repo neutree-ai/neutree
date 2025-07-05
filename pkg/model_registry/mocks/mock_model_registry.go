@@ -370,17 +370,17 @@ func (_c *MockModelRegistry_HealthyCheck_Call) RunAndReturn(run func() bool) *Mo
 	return _c
 }
 
-// ImportModel provides a mock function with given fields: modelPath
-func (_m *MockModelRegistry) ImportModel(modelPath string) error {
-	ret := _m.Called(modelPath)
+// ImportModel provides a mock function with given fields: reader, name, version, progress
+func (_m *MockModelRegistry) ImportModel(reader io.Reader, name string, version string, progress io.Writer) error {
+	ret := _m.Called(reader, name, version, progress)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ImportModel")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(modelPath)
+	if rf, ok := ret.Get(0).(func(io.Reader, string, string, io.Writer) error); ok {
+		r0 = rf(reader, name, version, progress)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -394,14 +394,17 @@ type MockModelRegistry_ImportModel_Call struct {
 }
 
 // ImportModel is a helper method to define mock.On call
-//   - modelPath string
-func (_e *MockModelRegistry_Expecter) ImportModel(modelPath interface{}) *MockModelRegistry_ImportModel_Call {
-	return &MockModelRegistry_ImportModel_Call{Call: _e.mock.On("ImportModel", modelPath)}
+//   - reader io.Reader
+//   - name string
+//   - version string
+//   - progress io.Writer
+func (_e *MockModelRegistry_Expecter) ImportModel(reader interface{}, name interface{}, version interface{}, progress interface{}) *MockModelRegistry_ImportModel_Call {
+	return &MockModelRegistry_ImportModel_Call{Call: _e.mock.On("ImportModel", reader, name, version, progress)}
 }
 
-func (_c *MockModelRegistry_ImportModel_Call) Run(run func(modelPath string)) *MockModelRegistry_ImportModel_Call {
+func (_c *MockModelRegistry_ImportModel_Call) Run(run func(reader io.Reader, name string, version string, progress io.Writer)) *MockModelRegistry_ImportModel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(io.Reader), args[1].(string), args[2].(string), args[3].(io.Writer))
 	})
 	return _c
 }
@@ -411,7 +414,7 @@ func (_c *MockModelRegistry_ImportModel_Call) Return(_a0 error) *MockModelRegist
 	return _c
 }
 
-func (_c *MockModelRegistry_ImportModel_Call) RunAndReturn(run func(string) error) *MockModelRegistry_ImportModel_Call {
+func (_c *MockModelRegistry_ImportModel_Call) RunAndReturn(run func(io.Reader, string, string, io.Writer) error) *MockModelRegistry_ImportModel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -470,65 +473,6 @@ func (_c *MockModelRegistry_ListModels_Call) Return(_a0 []v1.GeneralModel, _a1 e
 }
 
 func (_c *MockModelRegistry_ListModels_Call) RunAndReturn(run func(model_registry.ListOption) ([]v1.GeneralModel, error)) *MockModelRegistry_ListModels_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveUploadedModel provides a mock function with given fields: reader, name, version, tempDir
-func (_m *MockModelRegistry) SaveUploadedModel(reader io.Reader, name string, version string, tempDir string) (string, error) {
-	ret := _m.Called(reader, name, version, tempDir)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveUploadedModel")
-	}
-
-	var r0 string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(io.Reader, string, string, string) (string, error)); ok {
-		return rf(reader, name, version, tempDir)
-	}
-	if rf, ok := ret.Get(0).(func(io.Reader, string, string, string) string); ok {
-		r0 = rf(reader, name, version, tempDir)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	if rf, ok := ret.Get(1).(func(io.Reader, string, string, string) error); ok {
-		r1 = rf(reader, name, version, tempDir)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockModelRegistry_SaveUploadedModel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveUploadedModel'
-type MockModelRegistry_SaveUploadedModel_Call struct {
-	*mock.Call
-}
-
-// SaveUploadedModel is a helper method to define mock.On call
-//   - reader io.Reader
-//   - name string
-//   - version string
-//   - tempDir string
-func (_e *MockModelRegistry_Expecter) SaveUploadedModel(reader interface{}, name interface{}, version interface{}, tempDir interface{}) *MockModelRegistry_SaveUploadedModel_Call {
-	return &MockModelRegistry_SaveUploadedModel_Call{Call: _e.mock.On("SaveUploadedModel", reader, name, version, tempDir)}
-}
-
-func (_c *MockModelRegistry_SaveUploadedModel_Call) Run(run func(reader io.Reader, name string, version string, tempDir string)) *MockModelRegistry_SaveUploadedModel_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(io.Reader), args[1].(string), args[2].(string), args[3].(string))
-	})
-	return _c
-}
-
-func (_c *MockModelRegistry_SaveUploadedModel_Call) Return(_a0 string, _a1 error) *MockModelRegistry_SaveUploadedModel_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockModelRegistry_SaveUploadedModel_Call) RunAndReturn(run func(io.Reader, string, string, string) (string, error)) *MockModelRegistry_SaveUploadedModel_Call {
 	_c.Call.Return(run)
 	return _c
 }

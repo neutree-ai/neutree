@@ -1,9 +1,12 @@
 package model
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/schollz/progressbar/v3"
@@ -68,7 +71,7 @@ func NewPushCmd() *cobra.Command {
 				}
 
 				// Add some buffer for YAML file modifications and compression overhead
-				totalSize = totalSize + 100*1024
+				totalSize += 100 * 1024
 
 				// Create progress bar for archive
 				archiveBar := progressbar.DefaultBytes(totalSize, "Creating archive")
@@ -91,13 +94,38 @@ func NewPushCmd() *cobra.Command {
 				return fmt.Errorf("failed to get model file info: %w", err)
 			}
 
-			// Create progress bar for upload
+			// Upload with progress
 			uploadBar := progressbar.DefaultBytes(fileInfo.Size(), "Uploading model")
-
-			if err := c.Models.PushWithProgress(workspace, registry, modelPath, modelName, version, description, labels, uploadBar); err != nil {
+			importProgressReader, err := c.Models.PushWithProgress(workspace, registry, modelPath, modelName, version, description, labels, uploadBar)
+			if err != nil {
 				return fmt.Errorf("failed to push model: %w", err)
 			}
 
+			// Close the reader when done
+			if closer, ok := importProgressReader.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Create progress bar for import (0-100%)
+			importBar := progressbar.Default(100, "Importing model")
+
+			scanner := bufio.NewScanner(importProgressReader)
+			for scanner.Scan() {
+				line := scanner.Text()
+				line = strings.TrimSpace(line)
+
+				// Try to parse percentage from server
+				if percentage, err := strconv.ParseFloat(line, 64); err == nil {
+					// Update progress bar with percentage
+					_ = importBar.Set(int(percentage))
+				}
+			}
+
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("error reading import progress: %w", err)
+			}
+
+			fmt.Println("Model pushed successfully!")
 			return nil
 		},
 	}
