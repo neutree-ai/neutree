@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +22,32 @@ type Dependencies struct {
 	Storage     storage.Storage
 	TempDirFunc func() (string, error) // Function to get a temporary directory
 	AuthConfig  middleware.AuthConfig
+}
+
+// progressWriter implements io.Writer for progress reporting via HTTP chunked encoding
+type progressWriter struct {
+	writer    io.Writer
+	ctx       *gin.Context
+	sent      int64
+	totalSize int64
+}
+
+func (pw *progressWriter) Write(p []byte) (n int, err error) {
+	n = len(p)
+	pw.sent += int64(n)
+
+	// Write progress information only if total size is available
+	if pw.totalSize > 0 {
+		percentage := float64(pw.sent) / float64(pw.totalSize) * 100
+		fmt.Fprintf(pw.writer, "%.2f\n", percentage)
+	}
+
+	// Flush the response
+	if flusher, ok := pw.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	return n, nil
 }
 
 // RegisterRoutes registers model-related routes
@@ -216,7 +243,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		// Get uploaded file
-		file, _, err := c.Request.FormFile("model")
+		file, header, err := c.Request.FormFile("model")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "No model file provided",
@@ -226,16 +253,8 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		}
 		defer file.Close()
 
-		// Get temporary directory
-		tempDir, err := deps.TempDirFunc()
-		if err != nil {
-			klog.Errorf("Failed to get temporary directory: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": fmt.Sprintf("Failed to prepare for upload: %v", err),
-			})
-
-			return
-		}
+		// Get file size for progress calculation
+		fileSize := header.Size
 
 		// Get and connect to the model registry
 		modelRegistry, err := getModelRegistry(c, deps)
@@ -249,40 +268,29 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		}
 		defer (*modelRegistry).Disconnect() //nolint:errcheck
 
-		// Save uploaded model to temporary file
-		tempFilePath, err := (*modelRegistry).SaveUploadedModel(file, name, version, tempDir)
-		if err != nil {
-			klog.Errorf("Failed to save uploaded model: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": fmt.Sprintf("Failed to save uploaded model: %v", err),
-			})
+		// Use chunked encoding for progress reporting
+		c.Header("Transfer-Encoding", "chunked")
+		c.Header("Content-Type", "text/plain")
+		c.Status(http.StatusOK)
 
-			return
+		// Create a progress writer that writes to the response
+		progressWriter := &progressWriter{
+			writer:    c.Writer,
+			ctx:       c,
+			totalSize: fileSize,
 		}
-		defer os.Remove(tempFilePath) // Clean up temporary file
 
-		// Import model to registry
-		if err := (*modelRegistry).ImportModel(tempFilePath); err != nil {
+		// Import directly from uploaded file reader with progress
+		if err := (*modelRegistry).ImportModel(file, name, version, progressWriter); err != nil {
 			klog.Errorf("Failed to import model: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": fmt.Sprintf("Failed to import model: %v", err),
-			})
+			fmt.Fprintf(c.Writer, "Error: Failed to import model: %v\n", err)
 
 			return
 		}
 
-		// Get the imported model details using GetModelVersion
-		modelVersion, err := (*modelRegistry).GetModelVersion(name, version)
-		if err != nil {
-			klog.Errorf("Failed to get imported model: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": fmt.Sprintf("Model imported but failed to retrieve details: %v", err),
-			})
-
-			return
-		}
-
-		c.JSON(http.StatusCreated, modelVersion)
+		// Finalize progress
+		fmt.Fprintf(c.Writer, "Success: Model imported successfully\n")
+		c.Writer.Flush()
 	}
 }
 

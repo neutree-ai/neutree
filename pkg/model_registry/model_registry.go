@@ -24,10 +24,9 @@ type ModelRegistry interface {
 	// Model operations
 	GetModelVersion(name, version string) (*v1.ModelVersion, error)
 	DeleteModel(name, version string) error
-	ImportModel(modelPath string) error
+	ImportModel(reader io.Reader, name, version string, progress io.Writer) error
 	ExportModel(name, version, outputPath string) error
 	GetModelPath(name, version string) (string, error)
-	SaveUploadedModel(reader io.Reader, name, version, tempDir string) (string, error)
 }
 
 type NewModelRegistryFunc func(registry *v1.ModelRegistry) (ModelRegistry, error)

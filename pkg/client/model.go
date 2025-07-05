@@ -113,12 +113,14 @@ func (s *ModelsService) Delete(workspace, registry, modelName, version string) e
 	return nil
 }
 
-// Push uploads a model to the registry
-func (s *ModelsService) Push(workspace, registry, modelPath, name, version, description string, labels map[string]string) error {
-	// Open file
+// PushWithProgress uploads a model to the registry with progress reporting
+// Returns a reader for import progress updates after upload completes
+func (s *ModelsService) PushWithProgress(
+	workspace, registry, modelPath, name, version, description string, labels map[string]string, progressWriter io.Writer,
+) (io.Reader, error) {
 	file, err := os.Open(modelPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer file.Close()
 
@@ -144,7 +146,15 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 
 		part, _ := mw.CreateFormFile("model", filepath.Base(modelPath))
 
-		_, err := io.Copy(part, file)
+		// Use TeeReader to copy data and update progress simultaneously
+		var reader io.Reader = file
+		if progressWriter != nil {
+			reader = io.TeeReader(file, progressWriter)
+		}
+
+		buf := make([]byte, 16*1024*1024)
+
+		_, err := io.CopyBuffer(part, reader, buf)
 		if err != nil {
 			pw.CloseWithError(err)
 			return
@@ -153,13 +163,12 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 		mw.Close()
 	}()
 
-	// HTTP request
 	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models",
 		s.client.baseURL, workspace, registry)
 
 	req, err := http.NewRequest("POST", url, pr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -167,17 +176,19 @@ func (s *ModelsService) Push(workspace, registry, modelPath, name, version, desc
 	// Send request
 	resp, err := s.client.do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned non-200/201 status: %d, body: %s",
+		resp.Body.Close()
+
+		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s",
 			resp.StatusCode, string(bodyBytes))
 	}
 
-	return nil
+	// Return the response body for the caller to read import progress
+	return resp.Body, nil
 }
 
 // Pull downloads a model from the registry
