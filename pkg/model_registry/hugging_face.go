@@ -156,7 +156,7 @@ func (hf *huggingFace) DeleteModel(name, version string) error {
 }
 
 // ImportModel returns an error for HuggingFace as it's read-only
-func (hf *huggingFace) ImportModel(modelPath string) error {
+func (hf *huggingFace) ImportModel(reader io.Reader, name, version string, progress io.Writer) error {
 	return errors.New(errHuggingFaceNotSupported)
 }
 
@@ -167,10 +167,5 @@ func (hf *huggingFace) ExportModel(name, version, outputPath string) error {
 
 // GetModelPath returns an error for HuggingFace as it's read-only
 func (hf *huggingFace) GetModelPath(name, version string) (string, error) {
-	return "", errors.New(errHuggingFaceNotSupported)
-}
-
-// SaveUploadedModel returns an error for HuggingFace as it's read-only
-func (hf *huggingFace) SaveUploadedModel(reader io.Reader, name, version, tempDir string) (string, error) {
 	return "", errors.New(errHuggingFaceNotSupported)
 }

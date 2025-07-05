@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -110,8 +109,8 @@ func (f *localFile) DeleteModel(name, version string) error {
 	return bentoml.DeleteModel(f.path, name, version)
 }
 
-func (f *localFile) ImportModel(modelPath string) error {
-	return bentoml.ImportModel(f.path, modelPath)
+func (f *localFile) ImportModel(reader io.Reader, name, version string, progress io.Writer) error {
+	return bentoml.ImportModel(f.path, reader, name, version, true, progress)
 }
 
 func (f *localFile) ExportModel(name, version, outputPath string) error {
@@ -120,31 +119,6 @@ func (f *localFile) ExportModel(name, version, outputPath string) error {
 
 func (f *localFile) GetModelPath(name, version string) (string, error) {
 	return bentoml.GetModelPath(f.path, name, version)
-}
-
-func (f *localFile) SaveUploadedModel(reader io.Reader, name, version, tempDir string) (string, error) {
-	// Create a temporary file to store the uploaded model
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
-		return "", errors.Wrap(err, "failed to create temporary directory")
-	}
-
-	tempFile := filepath.Join(tempDir, name+"-"+version+".bentomodel")
-
-	out, err := os.Create(tempFile)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create temporary file")
-	}
-
-	defer out.Close()
-
-	buf := make([]byte, 16*1024*1024)
-
-	_, err = io.CopyBuffer(out, reader, buf)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to save uploaded model")
-	}
-
-	return tempFile, nil
 }
 
 func (f *localFile) HealthyCheck() bool {
@@ -208,8 +182,8 @@ func (n *nfsFile) DeleteModel(name, version string) error {
 	return bentoml.DeleteModel(n.targetPath, name, version)
 }
 
-func (n *nfsFile) ImportModel(modelPath string) error {
-	return bentoml.ImportModel(n.targetPath, modelPath)
+func (n *nfsFile) ImportModel(reader io.Reader, name, version string, progress io.Writer) error {
+	return bentoml.ImportModel(n.targetPath, reader, name, version, true, progress)
 }
 
 func (n *nfsFile) ExportModel(name, version, outputPath string) error {
@@ -218,31 +192,6 @@ func (n *nfsFile) ExportModel(name, version, outputPath string) error {
 
 func (n *nfsFile) GetModelPath(name, version string) (string, error) {
 	return bentoml.GetModelPath(n.targetPath, name, version)
-}
-
-func (n *nfsFile) SaveUploadedModel(reader io.Reader, name, version, tempDir string) (string, error) {
-	// Create a temporary file to store the uploaded model
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
-		return "", errors.Wrap(err, "failed to create temporary directory")
-	}
-
-	tempFile := filepath.Join(tempDir, name+"-"+version+".bentomodel")
-
-	out, err := os.Create(tempFile)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create temporary file")
-	}
-
-	defer out.Close()
-
-	buf := make([]byte, 16*1024*1024)
-
-	_, err = io.CopyBuffer(out, reader, buf)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to save uploaded model")
-	}
-
-	return tempFile, nil
 }
 
 func (n *nfsFile) HealthyCheck() bool {
