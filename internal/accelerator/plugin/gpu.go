@@ -170,6 +170,11 @@ func (p *GPUAcceleratorPlugin) getKubernetesContainerAcceleratorInfo(container c
 }
 
 func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error) {
+	llamaCppV1EngineSchema, err := GetLlamaCppV1EngineSchema()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load Llama.cpp V1 engine schema")
+	}
+
 	llamaCppV1Engine := &v1.Engine{
 		APIVersion: "v1",
 		Kind:       "Engine",
@@ -179,20 +184,17 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 		Spec: &v1.EngineSpec{
 			Versions: []*v1.EngineVersion{
 				{
-					Version: "v1",
-					ValuesSchema: map[string]interface{}{
-						"$schema": "http://json-schema.org/draft-07/schema#",
-						"type":    "object",
-						"properties": map[string]interface{}{
-							"n_threads": map[string]interface{}{
-								"type": "number",
-							},
-						},
-					},
+					Version:      "v1",
+					ValuesSchema: llamaCppV1EngineSchema,
 				},
 			},
 			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask},
 		},
+	}
+
+	vllmV1EngineSchema, err := GetVLLMV1EngineSchema()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load vLLM V1 engine schema")
 	}
 
 	vllmV1Engine := &v1.Engine{
@@ -204,19 +206,8 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 		Spec: &v1.EngineSpec{
 			Versions: []*v1.EngineVersion{
 				{
-					Version: "v1",
-					ValuesSchema: map[string]interface{}{
-						"$schema": "http://json-schema.org/draft-07/schema#",
-						"type":    "object",
-						"properties": map[string]interface{}{
-							"dtype": map[string]interface{}{
-								"type": "string",
-							},
-							"gpu_memory_utilization": map[string]interface{}{
-								"type": "number",
-							},
-						},
-					},
+					Version:      "v1",
+					ValuesSchema: vllmV1EngineSchema,
 				},
 			},
 			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
