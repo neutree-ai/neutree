@@ -1,11 +1,15 @@
 package model
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/neutree-ai/neutree/pkg/client"
@@ -19,10 +23,11 @@ func NewPushCmd() *cobra.Command {
 	var labelsFlag []string
 
 	cmd := &cobra.Command{
-		Use:   "push [local_model_path]",
-		Short: "Push a model to the registry",
-		Long:  `Push a local model to the registry with specified metadata`,
-		Args:  cobra.ExactArgs(1),
+		Use:          "push [local_model_path]",
+		Short:        "Push a model to the registry",
+		Long:         `Push a local model to the registry with specified metadata`,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modelPath := args[0]
 
@@ -59,28 +64,68 @@ func NewPushCmd() *cobra.Command {
 
 			// If modelPath is a directory, tar‑gz it into a temp *.bentomodel
 			if info.IsDir() {
-				fmt.Printf("Creating archive for model %s...\n", modelName)
-
-				archivePath, err := bentoml.CreateArchive(modelPath, modelName, version)
+				// Calculate directory size for progress bar
+				totalSize, _, err := calculateDirectorySize(modelPath)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to calculate directory size: %w", err)
+				}
+
+				// Add some buffer for YAML file modifications and compression overhead
+				totalSize += 100 * 1024
+
+				// Create progress bar for archive
+				archiveBar := progressbar.DefaultBytes(totalSize, "Creating archive")
+
+				archivePath, err := bentoml.CreateArchiveWithProgress(modelPath, modelName, version, archiveBar)
+				if err != nil {
+					return fmt.Errorf("failed to create archive: %w", err)
 				}
 
 				modelPath = archivePath
-
 				defer os.Remove(archivePath)
 			}
 
 			// Create client
 			c := client.NewClient(serverURL, client.WithAPIKey(apiKey), client.WithTimeout(0))
 
-			fmt.Printf("Pushing model %s:%s to registry...\n", modelName, version)
+			// Get file size for progress bar
+			fileInfo, err := os.Stat(modelPath)
+			if err != nil {
+				return fmt.Errorf("failed to get model file info: %w", err)
+			}
 
-			if err := c.Models.Push(workspace, registry, modelPath, modelName, version, description, labels); err != nil {
+			// Upload with progress
+			uploadBar := progressbar.DefaultBytes(fileInfo.Size(), "Uploading model")
+			importProgressReader, err := c.Models.PushWithProgress(workspace, registry, modelPath, modelName, version, description, labels, uploadBar)
+			if err != nil {
 				return fmt.Errorf("failed to push model: %w", err)
 			}
 
-			fmt.Printf("Model %s:%s pushed successfully\n", modelName, version)
+			// Close the reader when done
+			if closer, ok := importProgressReader.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Create progress bar for import (0-100%)
+			importBar := progressbar.Default(100, "Importing model")
+
+			scanner := bufio.NewScanner(importProgressReader)
+			for scanner.Scan() {
+				line := scanner.Text()
+				line = strings.TrimSpace(line)
+
+				// Try to parse percentage from server
+				if percentage, err := strconv.ParseFloat(line, 64); err == nil {
+					// Update progress bar with percentage
+					_ = importBar.Set(int(percentage))
+				}
+			}
+
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("error reading import progress: %w", err)
+			}
+
+			fmt.Println("Model pushed successfully!")
 			return nil
 		},
 	}
@@ -95,6 +140,27 @@ func NewPushCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+// calculateDirectorySize calculates the total size of all files in a directory
+func calculateDirectorySize(dir string) (int64, int, error) {
+	var totalSize int64
+	var fileCount int
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !info.IsDir() {
+			totalSize += info.Size()
+			fileCount++
+		}
+
+		return nil
+	})
+
+	return totalSize, fileCount, err
 }
 
 // parseLabel parses a "key=value" format string into key-value pair
