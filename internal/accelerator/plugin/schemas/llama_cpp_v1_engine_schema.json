@@ -1,0 +1,219 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Llama.cpp V1 Engine Configuration",
+  "description": "Configuration schema for Llama.cpp V1 engine parameters",
+  "properties": {
+    "n_threads": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 4,
+      "description": "Number of threads to use for inference"
+    },
+    "n_ctx": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 2048,
+      "description": "Context size for the model"
+    },
+    "n_batch": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 512,
+      "description": "Batch size for prompt processing"
+    },
+    "n_gpu_layers": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Number of layers to store in VRAM"
+    },
+    "main_gpu": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "The GPU that is used for scratch and small tensors"
+    },
+    "split_mode": {
+      "type": "string",
+      "enum": ["none", "layer", "row"],
+      "default": "layer",
+      "description": "How to split the model across multiple GPUs"
+    },
+    "tensor_split": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0
+      },
+      "description": "Fraction of the model to offload to each GPU"
+    },
+    "rope_scaling_type": {
+      "type": "string",
+      "enum": ["none", "linear", "yarn"],
+      "default": "none",
+      "description": "RoPE scaling type"
+    },
+    "rope_freq_base": {
+      "type": "number",
+      "minimum": 0,
+      "default": 10000.0,
+      "description": "RoPE base frequency"
+    },
+    "rope_freq_scale": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.0,
+      "description": "RoPE frequency scaling factor"
+    },
+    "yarn_ext_factor": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.0,
+      "description": "YaRN extrapolation mix factor"
+    },
+    "yarn_attn_factor": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.0,
+      "description": "YaRN magnitude scaling factor"
+    },
+    "yarn_beta_fast": {
+      "type": "number",
+      "minimum": 0,
+      "default": 32.0,
+      "description": "YaRN low correction dim"
+    },
+    "yarn_beta_slow": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.0,
+      "description": "YaRN high correction dim"
+    },
+    "mul_mat_q": {
+      "type": "boolean",
+      "default": true,
+      "description": "Use mul_mat_q CUDA kernels instead of cuBLAS"
+    },
+    "f16_kv": {
+      "type": "boolean",
+      "default": true,
+      "description": "Use fp16 for KV cache"
+    },
+    "logits_all": {
+      "type": "boolean",
+      "default": false,
+      "description": "Return logits for all tokens in the batch"
+    },
+    "embedding": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable embedding mode"
+    },
+    "offload_kqv": {
+      "type": "boolean",
+      "default": true,
+      "description": "Offload K, Q, V to GPU"
+    },
+    "use_mmap": {
+      "type": "boolean",
+      "default": true,
+      "description": "Use memory mapping for faster loading"
+    },
+    "use_mlock": {
+      "type": "boolean",
+      "default": false,
+      "description": "Force system to keep model in RAM"
+    },
+    "numa": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable NUMA optimization"
+    },
+    "verbose": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable verbose output"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": -1,
+      "default": -1,
+      "description": "Random seed (-1 for random)"
+    },
+    "n_keep": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Number of tokens to keep from the initial prompt"
+    },
+    "n_predict": {
+      "type": "integer",
+      "minimum": -1,
+      "default": -1,
+      "description": "Number of tokens to predict (-1 for infinite)"
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.8,
+      "description": "Sampling temperature"
+    },
+    "top_k": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 40,
+      "description": "Top-k sampling"
+    },
+    "top_p": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.95,
+      "description": "Top-p sampling"
+    },
+    "repeat_last_n": {
+      "type": "integer",
+      "minimum": -1,
+      "default": 64,
+      "description": "Last n tokens to consider for penalties"
+    },
+    "repeat_penalty": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.1,
+      "description": "Penalty for repeating tokens"
+    },
+    "frequency_penalty": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.0,
+      "description": "Frequency penalty"
+    },
+    "presence_penalty": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.0,
+      "description": "Presence penalty"
+    },
+    "mirostat": {
+      "type": "integer",
+      "enum": [0, 1, 2],
+      "default": 0,
+      "description": "Mirostat sampling (0=disabled, 1=v1, 2=v2)"
+    },
+    "mirostat_tau": {
+      "type": "number",
+      "minimum": 0,
+      "default": 5.0,
+      "description": "Mirostat target entropy"
+    },
+    "mirostat_eta": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.1,
+      "description": "Mirostat learning rate"
+    }
+  },
+  "additionalProperties": false
+}
