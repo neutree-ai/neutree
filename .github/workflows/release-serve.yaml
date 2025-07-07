@@ -43,11 +43,11 @@ jobs:
       - name: Login docker
         uses: docker/login-action@v2
         with:
-          registry: ${{ secrets.SERVE_IMAGE_REPO }}        
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
           username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
       - name: build arm64 image
-        run: cd cluster-image-builder; export ARCH=arm64 VERSION=${{ github.event.inputs.version }}; make docker-build && make docker-push
+        run: cd cluster-image-builder; export ARCH=arm64 ACCELERATORS=gpu VERSION=${{ github.event.inputs.version }}; make docker-build && make docker-push
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
@@ -65,13 +65,15 @@ jobs:
       - name: Login docker
         uses: docker/login-action@v2
         with:
-          registry: ${{ secrets.SERVE_IMAGE_REPO }}        
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
           username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
       - name: push manifests
         run: |
           cd cluster-image-builder
-          export VERSION=${{ github.event.inputs.version }}; make docker-push-manifest
+          export VERSION=${{ github.event.inputs.version }} ACCELERATORS=gpu; make docker-push-manifest
+          export VERSION=${{ github.event.inputs.version }} ACCELERATORS=amd-gpu ALL_ARCH=amd64; make docker-push-manifest
+
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
