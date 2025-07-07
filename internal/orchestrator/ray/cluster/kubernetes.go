@@ -518,7 +518,7 @@ func (c *kubeRayClusterManager) generateVMAgent(metricsRemoteWriteURL string) (*
 		return nil, nil, nil, errors.Wrap(err, "failed to parse image registry url "+c.imageRegistry.Spec.URL)
 	}
 
-	vmAgentImage := registryURL.Host + "/" + c.imageRegistry.Spec.Repository + "/victoriametrics/vmagent:" + constants.VictoriaMetricsVersion
+	vmAgentImage := registryURL.Host + "/" + c.imageRegistry.Spec.Repository + "/vmagent:" + constants.VictoriaMetricsVersion
 	c.dependencyImages = append(c.dependencyImages, vmAgentImage)
 	vmAgentConfigMap := &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
