@@ -140,7 +140,16 @@ func (p *GPUAcceleratorPlugin) GetKubernetesContainerRuntimeConfig(ctx context.C
 	acclerators := p.getKubernetesContainerAcceleratorInfo(request.Container)
 
 	if len(acclerators) == 0 {
-		return &v1.GetContainerRuntimeConfigResponse{}, nil
+		return &v1.GetContainerRuntimeConfigResponse{
+			RuntimeConfig: v1.RuntimeConfig{
+				// cuda base image has NVIDIA_VISIBLE_DEVICES=all env, it will cause the nvidia-container-runtime
+				// mount all gpu to container even has no gpu request,
+				// so set NVIDIA_VISIBLE_DEVICES=void to avoid this problem.
+				Env: map[string]string{
+					"NVIDIA_VISIBLE_DEVICES": "void",
+				},
+			},
+		}, nil
 	}
 
 	return &v1.GetContainerRuntimeConfigResponse{
