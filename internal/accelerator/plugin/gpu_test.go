@@ -112,7 +112,7 @@ func TestGPUAcceleratorPlugin_GetKubernetesContainerRuntimeConfig(t *testing.T) 
 			if tt.expectGPUEnv {
 				assert.Equal(t, "gpu", response.RuntimeConfig.Env["ACCELERATOR_TYPE"])
 			} else {
-				assert.Empty(t, response.RuntimeConfig.Env)
+				assert.Equal(t, "void", response.RuntimeConfig.Env["NVIDIA_VISIBLE_DEVICES"])
 			}
 		})
 	}
