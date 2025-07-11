@@ -707,8 +707,14 @@ func (c *kubeRayClusterManager) generateKubeRayCluster() (*rayv1.RayCluster, err
 
 func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec) (corev1.PodTemplateSpec, error) {
 	resourceList := corev1.ResourceList{}
+
 	for k, v := range spec.Resources {
-		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
+		q, err := resource.ParseQuantity(v)
+		if err != nil {
+			return corev1.PodTemplateSpec{}, errors.Wrap(err, "failed to parse resource quantity")
+		}
+
+		resourceList[corev1.ResourceName(k)] = q
 	}
 
 	image, err := getBaseImage(c.cluster, c.imageRegistry)
@@ -989,8 +995,14 @@ func (c *kubeRayClusterManager) detectClusterAcceleratorType() (string, error) {
 
 	for _, workerGroup := range c.kubernetesClusterConfig.WorkerGroupSpecs {
 		resourceList := corev1.ResourceList{}
+
 		for k, v := range workerGroup.Resources {
-			resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
+			q, err := resource.ParseQuantity(v)
+			if err != nil {
+				return "", errors.Wrap(err, "failed to parse resource quantity")
+			}
+
+			resourceList[corev1.ResourceName(k)] = q
 		}
 
 		acceleratorType, err := c.acceleratorManager.GetKubernetesContainerAcceleratorType(context.Background(), corev1.Container{
