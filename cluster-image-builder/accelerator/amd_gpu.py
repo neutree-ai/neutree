@@ -42,10 +42,10 @@ def get_accelerator_counts():
                 accelerator_counts[accelerator_type] += 1
     except subprocess.CalledProcessError as e:
         print("Error calling rocminfo:", e)
-        return []
+        return {}
     except FileNotFoundError:
         print("rocminfo not found, please ensure that the AMD ROCM are installed")
-        return []
+        return {}
 
 
     return accelerator_counts
