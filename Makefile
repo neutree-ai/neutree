@@ -207,6 +207,8 @@ release-binary:
 
 .PHONY: release-chart
 release-chart: ## Build the chart to publish with a release
+	sed -i "s/version: .*/version: ${VERSION}/" deploy/chart/neutree/Chart.yaml
+	sed -i "s/appVersion: .*/appVersion: ${VERSION}/" deploy/chart/neutree/Chart.yaml
 	helm package ./deploy/chart/neutree -d $(RELEASE_DIR)
 
 MOCKERY := $(shell pwd)/bin/mockery

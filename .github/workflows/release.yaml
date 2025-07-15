@@ -11,16 +11,29 @@ on:
         description: "the release tag (e.g : v0.1.0-nightly-20250405)"
         required: true
         type: string
-
+      ui_version:
+        description: "the ui release version (e.g : v0.1.0)"
+        required: true
+        type: string
+      cluster_version:
+        description: "the default cluster version (e.g : v1)"
+        required: true
+        type: string
 jobs:
   build-amd64-image:
+    env:
+      UI_VERSION: ${{ secrets.RELEASE_UI_VERSION }}
+      CLUSTER_VERSION: ${{ secrets.RELEASE_CLUSTER_VERSION }}
     runs-on: ubuntu-22.04
     name: build amd64 image
     steps:
       - uses: actions/checkout@v2
       - name: Check out specific tag when manually triggered
         if: github.event_name == 'workflow_dispatch'
-        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+        run: |
+          git fetch --all && git checkout ${{ github.event.inputs.tag }}
+          echo "UI_VERSION=${{ github.event.inputs.ui_version }}" >> $GITHUB_ENV
+          echo "CLUSTER_VERSION=${{ github.event.inputs.cluster_version }}" >> $GITHUB_ENV
       - name: Login docker
         uses: docker/login-action@v2
         with:
@@ -36,13 +49,19 @@ jobs:
           IMAGE_PROJECT: ${{ secrets.RELEASE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.IMAGE_REPO }}
   build-arm64-image:
+    env:
+      UI_VERSION: ${{ secrets.RELEASE_UI_VERSION }}
+      CLUSTER_VERSION: ${{ secrets.RELEASE_CLUSTER_VERSION }}
     runs-on: ubuntu-22.04-arm
     name: build arm64 image
     steps:
       - uses: actions/checkout@v2
       - name: Check out specific tag when manually triggered
         if: github.event_name == 'workflow_dispatch'
-        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+        run: |
+          git fetch --all && git checkout ${{ github.event.inputs.tag }}
+          echo "UI_VERSION=${{ github.event.inputs.ui_version }}" >> $GITHUB_ENV
+          echo "CLUSTER_VERSION=${{ github.event.inputs.cluster_version }}" >> $GITHUB_ENV
       - name: Login docker
         uses: docker/login-action@v2
         with:
