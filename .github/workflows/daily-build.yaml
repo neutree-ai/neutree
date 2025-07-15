@@ -16,7 +16,7 @@ jobs:
       - name: Configure Git
         run: |
             git config user.name "${{ github.actor }}"
-            git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"     
+            git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
       - name: Create Nightly Tag
         id: create_nightly_tag
         run: |
@@ -26,6 +26,9 @@ jobs:
           echo "tag=v0.1.0-nightly-$DATE" >> $GITHUB_OUTPUT
       - name: Trigger Workflow
         uses: actions/github-script@v6
+        env:
+          NGIGHTLY_UI_VERSION: ${{ secrets.NGIGHTLY_UI_VERSION }}
+          NGIGHTLY_CLUSTER_VERSION: ${{ secrets.NGIGHTLY_CLUSTER_VERSION }}
         with:
           script: |
             github.rest.actions.createWorkflowDispatch({
@@ -34,6 +37,8 @@ jobs:
               workflow_id: 'release.yaml',
               ref: 'main',
               inputs: {
-                tag: '${{ steps.create_nightly_tag.outputs.tag }}'
+                tag: '${{ steps.create_nightly_tag.outputs.tag }}',
+                ui_version: '${{ env.NGIGHTLY_UI_VERSION }}',
+                cluster_version:'${{ env.NGIGHTLY_CLUSTER_VERSION }}'
               },
             })
