@@ -7,7 +7,7 @@ ARG RAY_REPO="https://github.com/neutree-ai/ray.git"
 ARG USE_CYTHON="0"
 ARG BUILD_RPD="1"
 ARG COMMON_WORKDIR=/app
-ARG BASE_IMAGE=rocm/neutree-dev:base
+ARG BASE_IMAGE=neutree-ai/neutree-serve:rocm-base
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
 
 FROM ${BASE_IMAGE} AS base
