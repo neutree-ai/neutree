@@ -1,0 +1,171 @@
+# # Refer to and modify the Dockerfile: https://github.com/vllm-project/vllm/blob/v0.8.5/docker/Dockerfile.rocm
+# default base image
+ARG VLLM_BRANCH="v0.8.5-neutree"
+ARG VLLM_REPO="https://github.com/neutree-ai/vllm.git"
+ARG RAY_BRANCH="ray-2.43.0-neutree"
+ARG RAY_REPO="https://github.com/neutree-ai/ray.git"
+ARG USE_CYTHON="0"
+ARG BUILD_RPD="1"
+ARG COMMON_WORKDIR=/app
+ARG BASE_IMAGE=rocm/neutree-dev:base
+ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
+
+FROM ${BASE_IMAGE} AS base
+
+ARG ARG_PYTORCH_ROCM_ARCH
+ENV PYTORCH_ROCM_ARCH=${ARG_PYTORCH_ROCM_ARCH:-${PYTORCH_ROCM_ARCH}}
+
+# Install some basic utilities
+RUN apt-get update -q -y && apt-get install -q -y \
+    sqlite3 libsqlite3-dev libfmt-dev libmsgpack-dev libsuitesparse-dev \
+    apt-transport-https ca-certificates wget curl
+# Remove sccache
+RUN python3 -m pip install --upgrade pip && pip install setuptools_scm
+RUN apt-get purge -y sccache || python3 -m pip uninstall -y sccache || rm -f "$(which sccache)" || true
+ARG COMMON_WORKDIR
+WORKDIR ${COMMON_WORKDIR}
+
+# -----------------------
+# vLLM build stages
+FROM base AS build_vllm
+ARG VLLM_REPO
+ARG VLLM_BRANCH
+RUN git clone ${VLLM_REPO} \
+	    && cd vllm \
+	    && git checkout ${VLLM_BRANCH}
+
+ARG USE_CYTHON
+# Build vLLM
+RUN cd vllm \
+    && python3 -m pip install -r requirements/rocm.txt \
+    && python3 setup.py clean --all  \
+    && if [ ${USE_CYTHON} -eq "1" ]; then python3 tests/build_cython.py build_ext --inplace; fi \
+    && python3 setup.py bdist_wheel --dist-dir=dist
+FROM scratch AS export_vllm
+ARG COMMON_WORKDIR
+COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/dist/*.whl /
+COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/requirements /requirements
+COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/benchmarks /benchmarks
+COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/tests /tests
+COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/examples /examples
+COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/.buildkite /.buildkite
+
+# -----------------------
+# Ray build stages
+FROM base AS ray_fetch
+ARG RAY_REPO
+ARG RAY_BRANCH
+RUN git clone ${RAY_REPO} \
+	    && cd ray \
+	    && git checkout ${RAY_BRANCH}
+
+
+FROM ${RAY_BUILD_BASE_IMAGE} AS build_ray
+ARG COMMON_WORKDIR
+ARG RAY_BRANCH
+ENV BUILDKITE_COMMIT=${RAY_BRANCH}
+ENV TRAVIS_COMMIT=${BUILDKITE_COMMIT}
+ENV BUILD_ONE_PYTHON_ONLY=py311
+ENV RAY_DISABLE_EXTRA_CPP=1
+WORKDIR /ray
+COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
+RUN /ray/python/build-wheel-manylinux2014.sh
+
+
+# -----------------------
+# Server base image
+FROM base AS serve-base
+
+ARG COMMON_WORKDIR
+
+RUN python3 -m pip install --upgrade pip && rm -rf /var/lib/apt/lists/*
+# Error related to odd state for numpy 1.20.3 where there is no METADATA etc, but an extra LICENSES_bundled.txt.
+# Manually remove it so that later steps of numpy upgrade can continue
+RUN case "$(which python3)" in \
+        *"/opt/conda/envs/py_3.9"*) \
+            rm -rf /opt/conda/envs/py_3.9/lib/python3.9/site-packages/numpy-1.20.3.dist-info/;; \
+        *) ;; esac
+
+RUN python3 -m pip install --upgrade huggingface-hub[cli]
+ARG BUILD_RPD
+RUN if [ ${BUILD_RPD} -eq "1" ]; then \
+    git clone -b nvtx_enabled https://github.com/ROCm/rocmProfileData.git \
+    && cd rocmProfileData/rpd_tracer \
+    && pip install -r requirements.txt && cd ../ \
+    && make && make install \
+    && cd hipMarker && python3 setup.py install ; fi
+
+# Install vLLM
+RUN --mount=type=bind,from=build_vllm,src=/app/vllm,target=/install \
+    cd /install \
+    && pip install -U -r requirements/rocm.txt \
+    && pip uninstall -y vllm \
+    && pip install dist/*.whl
+
+
+# Install ray
+RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
+    cd /install \
+    && pip install -U -r python/requirements.txt \
+    && pip uninstall -y ray \
+    && pip install .whl/*.whl
+
+# ENV RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES=1
+ENV TOKENIZERS_PARALLELISM=false
+
+# Performance environment variable.
+# ENV HIP_FORCE_DEV_KERNARG=1
+
+# Install dependencies
+RUN <<EOF
+#!/bin/bash
+
+set -euo pipefail
+
+apt-get update -y
+apt-get upgrade -y
+
+APT_PKGS=(
+    sudo
+    tzdata
+    git
+    libjemalloc-dev
+    wget
+    cmake
+    g++
+    zlib1g-dev
+    tmux
+    screen
+    rsync
+    netbase
+    openssh-client
+    gnupg
+    util-linux
+    nfs-common
+)
+
+apt-get install -y "${APT_PKGS[@]}"
+
+EOF
+
+RUN --mount=type=bind,src=requirements,target=requirements \
+    pip install --no-cache-dir -r requirements/common.txt && \
+    pip install --no-cache-dir -r requirements/rocm.txt
+
+
+FROM serve-base
+
+ENV HOME=/home/ray
+RUN mkdir -p ${HOME}
+WORKDIR ${HOME}
+
+# Copy Python files
+COPY *.py ./
+COPY serve ./serve
+COPY accelerator ./accelerator
+
+RUN chmod +x start.py
+
+EXPOSE 8265 6379 8000
+
+CMD ["/bin/bash"]

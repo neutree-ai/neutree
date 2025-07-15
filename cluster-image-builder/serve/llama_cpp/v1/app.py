@@ -39,7 +39,7 @@ class Backend:
                  **model_settings):
         """
         Backend deployment for LlamaCpp model inference.
-        
+
         Args:
             model_registry_type: Type of model registry ("bentoml" or "hugging-face")
             model_name: Name of the model in the registry
@@ -61,14 +61,14 @@ class Backend:
             model_settings["model"] = model_file
         else:
             raise ValueError(f"Unsupported MODEL_REGISTRY_TYPE: {model_registry_type}")
-        
+
         if model_task == "text-embedding":
             # Set embedding flag for embedding tasks
             model_settings["embedding"] = True
 
         # Create model settings and model instance
         self.model_settings = ModelSettings(**model_settings)
-        
+
         # Store model info
         self.model_id = f"{model_name}:{model_version}"
 
@@ -82,12 +82,12 @@ class Backend:
             # Regular completion
             response = llama.create_completion(**payload)
             return response
-    
+
     async def generate_embeddings(self, payload: Any):
         llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
         response = llama.create_embedding(**payload)
         return response
-    
+
     async def show_available_models(self) -> Dict[str, Any]:
         """Return a list of available models"""
         return {
@@ -113,14 +113,14 @@ app.add_middleware(RawContextMiddleware, plugins=(RequestIdPlugin(),))
 @serve.deployment
 @serve.ingress(app)
 class Controller:
-    def __init__(self, 
+    def __init__(self,
                  backend: DeploymentHandle,
                  scheduler_type: str = SchedulerType.POW2,
-                 virtual_nodes: int = 100, 
+                 virtual_nodes: int = 100,
                  load_factor: float = 1.25):
         """
         Controller deployment that handles HTTP routing and calls the backend.
-        
+
         Args:
             backend: Handle to the Backend deployment
             scheduler_type: Type of scheduler to use
@@ -128,18 +128,18 @@ class Controller:
             load_factor: Load factor for consistent hash scheduler
         """
         self.backend = backend
-        
+
         # Setup router with custom scheduler if specified
         handle = self.backend
         if not handle.is_initialized:
             handle._init()
-            
+
         # Only modify the scheduler if necessary
         if scheduler_type != SchedulerType.POW2:
             try:
                 router = handle._router._asyncio_router
                 original_scheduler = router._replica_scheduler
-                
+
                 if scheduler_type == SchedulerType.STATIC_HASH:
                     from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
                     new_scheduler = StaticHashReplicaScheduler()
@@ -149,7 +149,7 @@ class Controller:
                         virtual_nodes_per_replica=virtual_nodes,
                         load_factor=load_factor
                     )
-                
+
                 new_scheduler.update_replicas(list(original_scheduler.curr_replicas.values()))
                 router._replica_scheduler = new_scheduler
                 print(f"[Controller] Replaced scheduler with {scheduler_type}")
@@ -164,16 +164,16 @@ class Controller:
         """Chat completions endpoint"""
         req_obj = await request.json()
         stream = req_obj.get("stream", False)
-        
+
         if stream:
             # Get the streaming generator from the backend
             r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
-            
+
             async def event_generator():
                 async for chunk in r:
                     yield f"data: {json.dumps(chunk)}\n\n"
                 yield "data: [DONE]\n\n"
-            
+
             return StreamingResponse(
                 content=event_generator(),
                 media_type="text/event-stream"
@@ -215,17 +215,17 @@ def app_builder(args: Dict[str, Any]) -> Application:
     model = args.get('model', {})
     deployment_options = args.get('deployment_options', {})
     model_settings = args.get('engine_args', {})
-    
+
     # Extract backend deployment options
     backend_options = deployment_options.get('backend', {})
     controller_options = deployment_options.get('controller', {})
-    
+
     # Extract scheduler configuration
     scheduler_config = deployment_options.get('scheduler', {})
     scheduler_type = scheduler_config.get('type', SchedulerType.POW2)
     virtual_nodes = scheduler_config.get('virtual_nodes', 100)
     load_factor = scheduler_config.get('load_factor', 1.25)
-    
+
     # Configure backend deployment
     backend_deployment = Backend.options(
         num_replicas=backend_options.get('num_replicas', 1),
@@ -242,7 +242,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         model_task=model.get('task', ""),
         **model_settings
     )
-    
+
     # Configure controller deployment with scheduler config
     controller_deployment = Controller.options(
         num_replicas=controller_options.get('num_replicas', 1),
@@ -256,5 +256,5 @@ def app_builder(args: Dict[str, Any]) -> Application:
         virtual_nodes=virtual_nodes,
         load_factor=load_factor
     )
-    
+
     return controller_deployment
