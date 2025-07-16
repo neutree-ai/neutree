@@ -10,6 +10,8 @@ system:
     url: ""
 
 metrics:
+  # Specify the URL for remote write if using an external metrics storage system.
+  # Leave this empty to use the embedded Victoria Metrics cluster.
   remoteWriteUrl: ""
 
 k8sWaitFor:
