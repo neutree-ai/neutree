@@ -1,0 +1,10 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+data:
+{{ (.Files.Glob "grafana-dashboards/*").AsConfig | indent 2 }}
+{{- end }}

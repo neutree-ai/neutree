@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -27,6 +28,7 @@ var (
 	authEndpoint     = flag.String("auth-endpoint", "http://auth:9999", "auth service endpoint")
 	grafanaURL       = flag.String("grafana-url", "", "grafana url for system info API")
 	version          = flag.String("version", "dev", "application version for system info API")
+	deployType       = flag.String("deploy-type", "local", "deploy type")
 )
 
 func main() {
@@ -74,8 +76,13 @@ func main() {
 		AuthConfig:       authConfig,
 	})
 
+	grafanaExternalURL, err := util.GetExternalAccessUrl(*deployType, *grafanaURL)
+	if err != nil {
+		klog.Fatalf("Failed to get grafana external url: %s", err.Error())
+	}
+
 	system.RegisterRoutes(r, &system.Dependencies{
-		GrafanaURL: *grafanaURL,
+		GrafanaURL: grafanaExternalURL,
 		Version:    *version,
 		AuthConfig: authConfig,
 	})

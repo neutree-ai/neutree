@@ -10,7 +10,6 @@ system:
     url: ""
 
 metrics:
-  enabled: false
   remoteWriteUrl: ""
 
 k8sWaitFor:
@@ -194,3 +193,90 @@ jwtCli:
     repository: bitnami/jwt-cli
     tag: "latest"
     pullPolicy: IfNotPresent
+
+victoria-metrics-cluster:
+  enabled: true
+  global:
+    image:
+      # -- Image registry, that can be shared across multiple helm charts
+      registry: ""
+  vmselect:
+    replicaCount: 1
+  vminsert:
+    replicaCount: 1
+    service:
+      type: LoadBalancer
+  vmstorage:
+    replicaCount: 1
+    persistentVolume:
+      size: 40Gi
+
+grafana:
+  enabled: true
+  image:
+    # -- The Docker registry
+    registry: docker.io
+    # -- Docker image repository
+    repository: grafana/grafana
+    # Overrides the Grafana image tag whose default is the chart appVersion
+    tag: "11.5.3"
+
+  testFramework:
+    enabled: false
+
+  persistence:
+    enabled: true
+    size: 1Gi
+
+  initChownData:
+    enabled: false
+
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+    dashboards:
+    # Path to the default home dashboard. If this value is empty, then Grafana uses StaticRootPath + "dashboards/home.json"
+      default_home_dashboard_path: /var/lib/grafana/dashboards/default_grafana_dashboard.json
+    analytics:
+      check_for_plugin_updates: false
+      check_for_updates: false
+      enabled: false
+      reporting_enabled: false
+    plugins:
+      public_key_retrieval_disabled: true
+    security:
+      preinstall_disabled: true
+      allow_embedding: true
+    grafana_net:
+      url: ""
+  dashboardProviders:
+    dashboardproviders.yaml:
+      - name: neutree
+        orgId: 1
+        folder: ''
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+  assertNoLeakedSecrets: false
+
+  adminUser: admin
+  adminPassword: admin123
+
+  extraConfigmapMounts:
+  - name: datasources
+    mountPath: /etc/grafana/provisioning/datasources
+    configMap: grafana-datasources
+    readOnly: true
+    optional: false
+  - name: dashboards
+    mountPath: /var/lib/grafana/dashboards
+    configMap: grafana-dashboards
+    readOnly: true
+  service:
+    enabled: true
+    type: LoadBalancer
+
+
+
+
+
