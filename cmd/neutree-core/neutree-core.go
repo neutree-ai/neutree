@@ -16,6 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -114,13 +115,18 @@ func main() {
 		klog.Fatalf("failed to init model registry controller: %s", err.Error())
 	}
 
+	metricsRemoteWriteExternalURL, err := util.GetExternalAccessUrl(*deployType, *metricsRemoteWriteURL)
+	if err != nil {
+		klog.Fatalf("failed to get real metrics remote write url: %s", err.Error())
+	}
+
 	clusterController, err := controllers.NewClusterController(&controllers.ClusterControllerOption{
 		Storage:                 s,
 		Workers:                 *controllerWorkers,
 		DefaultClusterVersion:   *defaultClusterVersion,
 		ImageService:            imageService,
 		ObsCollectConfigManager: obsCollectConfigManager,
-		MetricsRemoteWriteURL:   *metricsRemoteWriteURL,
+		MetricsRemoteWriteURL:   metricsRemoteWriteExternalURL,
 		Gw:                      gw,
 		AcceleratorManager:      acceleratorManager,
 	})

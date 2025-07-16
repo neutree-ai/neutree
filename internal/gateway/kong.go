@@ -178,7 +178,7 @@ func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
 }
 
 func (k *Kong) GetEndpointServeUrl(ep *v1.Endpoint) (string, error) {
-	realProxyURL, err := getRealProxyUrl(k.deployType, k.proxyUrl)
+	realProxyURL, err := util.GetExternalAccessUrl(k.deployType, k.proxyUrl)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get real proxy url")
 	}

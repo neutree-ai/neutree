@@ -1,16 +1,8 @@
 package gateway
 
 import (
-	"context"
 	"errors"
-	"net/url"
-	"os"
 	"sync"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -73,40 +65,4 @@ func GetGateway(gatewayType string, opts GatewayOptions) (Gateway, error) {
 	}
 
 	return gatewayFactory[gatewayType](opts)
-}
-
-func getRealProxyUrl(deployType, proxyUrl string) (string, error) {
-	if deployType == "local" {
-		return proxyUrl, nil
-	}
-
-	if deployType == "kubernetes" {
-		kubeClient, err := kubernetes.NewForConfig(config.GetConfigOrDie())
-		if err != nil {
-			return "", err
-		}
-
-		parse, err := url.Parse(proxyUrl)
-		if err != nil {
-			return "", err
-		}
-
-		proxyService, err := kubeClient.CoreV1().Services(os.Getenv("NAMESPACE")).Get(context.Background(), parse.Hostname(), metav1.GetOptions{})
-		if err != nil {
-			return "", err
-		}
-
-		// todo: current only support http, need to support https in the future
-		if proxyService.Spec.Type == "LoadBalancer" {
-			if len(proxyService.Status.LoadBalancer.Ingress) == 0 {
-				return "", errors.New("load balancer ingress not found")
-			}
-
-			return "http://" + proxyService.Status.LoadBalancer.Ingress[0].IP + ":" + parse.Port(), nil
-		} else {
-			return "http://" + proxyService.Spec.ClusterIP + ":" + parse.Port(), nil
-		}
-	}
-
-	return "", nil
 }

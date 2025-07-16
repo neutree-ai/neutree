@@ -14,12 +14,18 @@ spec:
       labels:
         app.kubernetes.io/component: neutree-api
     spec:
+      serviceAccountName: {{ include "neutree.fullname" . }}-sa
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: neutree-api
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           args:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
             - --storage-jwt-secret={{.Values.jwtSecret  }}
@@ -28,17 +34,20 @@ spec:
             - --static-dir=./public
             - --gin-mode=release
             - --auth-endpoint=http://{{ include "neutree.fullname" . }}-auth-service:9999
-            {{- if .Values.system.grafana.url }}
+            {{- if .Values.grafana.enabled }}
+            - --grafana-url=http://{{ include "neutree.fullname" . }}-grafana:80
+            {{- else if .Values.system.grafana.url }}
             - --grafana-url={{ .Values.system.grafana.url }}
             {{- end }}
             - --version={{ .Values.api.image.tag | default .Chart.AppVersion }}
+            - --deploy-type=kubernetes
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:
             privileged: true
             capabilities:
               add: ["SYS_ADMIN"]
-            allowPrivilegeEscalation: true          
+            allowPrivilegeEscalation: true
           ports:
             - name: http
               containerPort: 3000
