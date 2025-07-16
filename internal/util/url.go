@@ -25,21 +25,25 @@ func GetExternalAccessUrl(deployType, accessUrl string) (string, error) {
 			return "", err
 		}
 
-		proxyService, err := kubeClient.CoreV1().Services(os.Getenv("NAMESPACE")).Get(context.Background(), parse.Hostname(), metav1.GetOptions{})
+		s, err := kubeClient.CoreV1().Services(os.Getenv("NAMESPACE")).Get(context.Background(), parse.Hostname(), metav1.GetOptions{})
 		if err != nil {
 			return "", err
 		}
 
 		var externalIP string
 		// todo: current only support http, need to support https in the future
-		if proxyService.Spec.Type == "LoadBalancer" {
-			if len(proxyService.Status.LoadBalancer.Ingress) == 0 {
+		if s.Spec.Type == "LoadBalancer" {
+			if len(s.Status.LoadBalancer.Ingress) == 0 {
 				return "", errors.New("load balancer ingress not found")
 			}
 
-			externalIP = proxyService.Status.LoadBalancer.Ingress[0].IP
+			if s.Status.LoadBalancer.Ingress[0].IP == "" {
+				return "", errors.New("load balancer ingress ip not found")
+			}
+
+			externalIP = s.Status.LoadBalancer.Ingress[0].IP
 		} else {
-			externalIP = proxyService.Spec.ClusterIP
+			externalIP = s.Spec.ClusterIP
 		}
 
 		port := parse.Port()
