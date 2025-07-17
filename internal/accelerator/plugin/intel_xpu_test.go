@@ -68,7 +68,7 @@ func TestIntelXPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "xpu", resp.RuntimeConfig.ImageSuffix)
 	assert.Equal(t, "intel", resp.RuntimeConfig.Runtime)
-	assert.Equal(t, map[string]string{"ACCELERATOR_TYPE": "intel_xpu"}, resp.RuntimeConfig.Env)
+	assert.Equal(t, map[string]string{"ACCELERATOR_TYPE": "intel_xpu", "SYCL_DEVICE_FILTER": "level_zero:gpu"}, resp.RuntimeConfig.Env)
 }
 
 func TestIntelXPUAcceleratorPlugin_GetSupportEngines(t *testing.T) {

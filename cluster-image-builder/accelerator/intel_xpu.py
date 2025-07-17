@@ -45,3 +45,21 @@ def get_accelerator_counts():
         return {}
 
     return accelerator_counts
+
+def get_start_args():
+    """
+    Return custom ray start args for Intel XPU, e.g. --num-gpus=N
+    """
+    try:
+        output = subprocess.check_output(
+            ["xpu-smi", "discovery", "-j"],
+            encoding="utf-8"
+        )
+        data = json.loads(output)
+        device_list = data.get("device_list", [])
+        gpu_count = sum(1 for device in device_list if device.get("device_type", "Unknown") == "GPU")
+        if gpu_count > 0:
+            return [f"--num-gpus={gpu_count}"]
+    except Exception:
+        pass
+    return []

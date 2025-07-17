@@ -52,8 +52,21 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install intel-extension-for-pytorch==2.6.10+xpu --extra-index-url=https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
 
+# RAY VERSION FIX: Check Ray version before vLLM installation
+RUN echo "=== Ray version before vLLM install ===" && \
+  python3 -c "import ray; print(f'Ray version: {ray.__version__}')" 2>/dev/null || echo "Ray not yet installed"
+
+# Install vLLM (this may upgrade Ray version)
 RUN --mount=type=cache,target=/root/.cache/pip \
   python3 setup.py install
+
+# RAY VERSION FIX: Check Ray version after vLLM installation and force correct version
+RUN echo "=== Ray version after vLLM install ===" && \
+  python3 -c "import ray; print(f'Ray version: {ray.__version__}')" 2>/dev/null && \
+  echo "=== Forcing Ray version to 2.43.0 ===" && \
+  pip install "ray[serve]==2.43.0" --force-reinstall && \
+  echo "=== Final Ray version ===" && \
+  python3 -c "import ray; print(f'Final Ray version: {ray.__version__}')"
 
 # Copy requirements
 COPY requirements/xpu.txt /workspace/vllm/requirements/xpu.txt
@@ -62,6 +75,9 @@ COPY requirements/common.txt /workspace/vllm/requirements/common.txt
 # Install huggingface-hub cli and common requirements
 RUN python3 -m pip install --upgrade huggingface-hub[cli]
 RUN pip install --no-cache-dir -r requirements/common.txt
+
+# RAY VERSION FIX: Final verification that Ray version is correct
+RUN python3 -c "import ray; assert ray.__version__.startswith('2.43.'), f'❌ Expected Ray 2.43.x, got {ray.__version__}'; print('✅ Ray version verified: ' + ray.__version__)"
 
 FROM base
 
