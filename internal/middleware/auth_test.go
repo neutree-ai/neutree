@@ -217,37 +217,3 @@ func TestGetUserEmail(t *testing.T) {
 	assert.False(t, ok2)
 	assert.Equal(t, "", email2)
 }
-
-func TestGetUserRole(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Set("user_role", "admin")
-
-	role, ok := GetUserRole(c)
-	assert.True(t, ok)
-	assert.Equal(t, "admin", role)
-
-	// Test missing role
-	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
-	role2, ok2 := GetUserRole(c2)
-	assert.False(t, ok2)
-	assert.Equal(t, "", role2)
-}
-
-func TestGetJWTToken(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Set("jwt_token", "test-token")
-
-	token, ok := GetJWTToken(c)
-	assert.True(t, ok)
-	assert.Equal(t, "test-token", token)
-
-	// Test missing token
-	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
-	token2, ok2 := GetJWTToken(c2)
-	assert.False(t, ok2)
-	assert.Equal(t, "", token2)
-}

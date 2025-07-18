@@ -101,12 +101,9 @@ func JWTAuth(config AuthConfig) gin.HandlerFunc {
 		// Set user information in context
 		c.Set("user_id", claims.UserID)
 		c.Set("user_email", claims.Email)
-		c.Set("user_role", claims.Role)
-		c.Set("jwt_token", tokenString)
 
 		klog.V(4).Infof("Authenticated user: %s", claims.UserID)
 
-		// Continue to next handler
 		c.Next()
 	}
 }
@@ -133,28 +130,4 @@ func GetUserEmail(c *gin.Context) (string, bool) {
 	emailStr, ok := email.(string)
 
 	return emailStr, ok
-}
-
-// GetUserRole extracts user role from Gin context
-func GetUserRole(c *gin.Context) (string, bool) {
-	role, exists := c.Get("user_role")
-	if !exists {
-		return "", false
-	}
-
-	roleStr, ok := role.(string)
-
-	return roleStr, ok
-}
-
-// GetJWTToken extracts JWT token from Gin context
-func GetJWTToken(c *gin.Context) (string, bool) {
-	token, exists := c.Get("jwt_token")
-	if !exists {
-		return "", false
-	}
-
-	tokenStr, ok := token.(string)
-
-	return tokenStr, ok
 }
