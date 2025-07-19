@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,10 +10,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
-func TestJWTAuth(t *testing.T) {
+func TestAuth(t *testing.T) {
 	// Set Gin to test mode
 	gin.SetMode(gin.TestMode)
 
@@ -25,6 +30,7 @@ func TestJWTAuth(t *testing.T) {
 	tests := []struct {
 		name           string
 		setupAuth      func() string
+		setupMock      func(*storagemocks.MockStorage)
 		expectedStatus int
 		expectUserID   string
 	}{
@@ -33,8 +39,6 @@ func TestJWTAuth(t *testing.T) {
 			setupAuth: func() string {
 				claims := &Claims{
 					UserID: "user-123",
-					Email:  "test@example.com",
-					Role:   "user",
 					RegisteredClaims: jwt.RegisteredClaims{
 						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 						IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -45,13 +49,60 @@ func TestJWTAuth(t *testing.T) {
 				tokenString, _ := token.SignedString([]byte(jwtSecret))
 				return "Bearer " + tokenString
 			},
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				// No mock setup needed for JWT
+			},
 			expectedStatus: http.StatusOK,
 			expectUserID:   "user-123",
+		},
+		{
+			name: "Valid API Key",
+			setupAuth: func() string {
+				return "sk_test_api_key_123"
+			},
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				apiKeys := []v1.ApiKey{
+					{
+						UserID: "user-456",
+					},
+				}
+				mockStorage.On("ListApiKey", mock.MatchedBy(func(opt storage.ListOption) bool {
+					return len(opt.Filters) == 1 &&
+						opt.Filters[0].Column == "status->sk_value" &&
+						opt.Filters[0].Operator == "eq" &&
+						opt.Filters[0].Value == `"sk_test_api_key_123"`
+				})).Return(apiKeys, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectUserID:   "user-456",
+		},
+		{
+			name: "API Key not found",
+			setupAuth: func() string {
+				return "sk_invalid_key"
+			},
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				mockStorage.On("ListApiKey", mock.Anything).Return([]v1.ApiKey{}, nil)
+			},
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "API Key storage error",
+			setupAuth: func() string {
+				return "sk_test_api_key"
+			},
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				mockStorage.On("ListApiKey", mock.Anything).Return(nil, errors.New("database error"))
+			},
+			expectedStatus: http.StatusUnauthorized,
 		},
 		{
 			name: "Missing Authorization header",
 			setupAuth: func() string {
 				return ""
+			},
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				// No mock setup needed
 			},
 			expectedStatus: http.StatusUnauthorized,
 		},
@@ -60,24 +111,33 @@ func TestJWTAuth(t *testing.T) {
 			setupAuth: func() string {
 				return "Invalid header"
 			},
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				// No mock setup needed
+			},
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{
-			name: "Empty token",
+			name: "Empty Bearer token",
 			setupAuth: func() string {
 				return "Bearer "
 			},
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name: "Invalid token",
-			setupAuth: func() string {
-				return "Bearer invalid-token"
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				// No mock setup needed
 			},
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{
-			name: "Expired token",
+			name: "Invalid JWT token",
+			setupAuth: func() string {
+				return "Bearer invalid-token"
+			},
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "Expired JWT token",
 			setupAuth: func() string {
 				claims := &Claims{
 					UserID: "user-123",
@@ -91,23 +151,8 @@ func TestJWTAuth(t *testing.T) {
 				tokenString, _ := token.SignedString([]byte(jwtSecret))
 				return "Bearer " + tokenString
 			},
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name: "Token with wrong signing method",
-			setupAuth: func() string {
-				claims := &Claims{
-					UserID: "user-123",
-					RegisteredClaims: jwt.RegisteredClaims{
-						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-						IssuedAt:  jwt.NewNumericDate(time.Now()),
-					},
-				}
-
-				// Use wrong signing method
-				token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-				tokenString, _ := token.SignedString([]byte(jwtSecret))
-				return "Bearer " + tokenString
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				// No mock setup needed
 			},
 			expectedStatus: http.StatusUnauthorized,
 		},
@@ -115,9 +160,16 @@ func TestJWTAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create mock storage
+			mockStorage := &storagemocks.MockStorage{}
+			tt.setupMock(mockStorage)
+
 			// Create test router
 			r := gin.New()
-			r.Use(JWTAuth(config))
+			r.Use(Auth(Dependencies{
+				Config:  config,
+				Storage: mockStorage,
+			}))
 			r.GET("/test", func(c *gin.Context) {
 				userID, _ := GetUserID(c)
 				c.JSON(http.StatusOK, gin.H{
@@ -150,6 +202,133 @@ func TestJWTAuth(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectUserID, response["user_id"])
 			}
+
+			// Assert mock expectations
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
+func TestParseBearerToken(t *testing.T) {
+	jwtSecret := "test-secret"
+	config := AuthConfig{
+		JwtSecret: jwtSecret,
+	}
+
+	tests := []struct {
+		name        string
+		authHeader  string
+		setupToken  func() string
+		expectError bool
+		expectID    string
+	}{
+		{
+			name: "Valid bearer token",
+			setupToken: func() string {
+				claims := &Claims{
+					UserID: "user-123",
+					RegisteredClaims: jwt.RegisteredClaims{
+						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+						IssuedAt:  jwt.NewNumericDate(time.Now()),
+					},
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				tokenString, _ := token.SignedString([]byte(jwtSecret))
+				return "Bearer " + tokenString
+			},
+			expectError: false,
+			expectID:    "user-123",
+		},
+		{
+			name:        "Empty token",
+			authHeader:  "Bearer ",
+			expectError: true,
+		},
+		{
+			name:        "Invalid token",
+			authHeader:  "Bearer invalid-token",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authHeader := tt.authHeader
+			if tt.setupToken != nil {
+				authHeader = tt.setupToken()
+			}
+
+			parsedInfo, err := parseBearerToken(config, authHeader)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, parsedInfo)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, parsedInfo)
+				assert.Equal(t, tt.expectID, parsedInfo.UserID)
+			}
+		})
+	}
+}
+
+func TestParseApiKey(t *testing.T) {
+	tests := []struct {
+		name        string
+		apiKey      string
+		setupMock   func(*storagemocks.MockStorage)
+		expectError bool
+		expectID    string
+	}{
+		{
+			name:   "Valid API key",
+			apiKey: "sk_test_key",
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				apiKeys := []v1.ApiKey{
+					{
+						UserID: "user-456",
+					},
+				}
+				mockStorage.On("ListApiKey", mock.Anything).Return(apiKeys, nil)
+			},
+			expectError: false,
+			expectID:    "user-456",
+		},
+		{
+			name:   "API key not found",
+			apiKey: "sk_invalid_key",
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				mockStorage.On("ListApiKey", mock.Anything).Return([]v1.ApiKey{}, nil)
+			},
+			expectError: true,
+		},
+		{
+			name:   "Storage error",
+			apiKey: "sk_test_key",
+			setupMock: func(mockStorage *storagemocks.MockStorage) {
+				mockStorage.On("ListApiKey", mock.Anything).Return(nil, errors.New("database error"))
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storagemocks.MockStorage{}
+			tt.setupMock(mockStorage)
+
+			parsedInfo, err := parseApiKey(mockStorage, tt.apiKey)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, parsedInfo)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, parsedInfo)
+				assert.Equal(t, tt.expectID, parsedInfo.UserID)
+			}
+
+			mockStorage.AssertExpectations(t)
 		})
 	}
 }
@@ -199,55 +378,4 @@ func TestGetUserID(t *testing.T) {
 			assert.Equal(t, tt.expectedOK, ok)
 		})
 	}
-}
-
-func TestGetUserEmail(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Set("user_email", "test@example.com")
-
-	email, ok := GetUserEmail(c)
-	assert.True(t, ok)
-	assert.Equal(t, "test@example.com", email)
-
-	// Test missing email
-	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
-	email2, ok2 := GetUserEmail(c2)
-	assert.False(t, ok2)
-	assert.Equal(t, "", email2)
-}
-
-func TestGetUserRole(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Set("user_role", "admin")
-
-	role, ok := GetUserRole(c)
-	assert.True(t, ok)
-	assert.Equal(t, "admin", role)
-
-	// Test missing role
-	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
-	role2, ok2 := GetUserRole(c2)
-	assert.False(t, ok2)
-	assert.Equal(t, "", role2)
-}
-
-func TestGetJWTToken(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Set("jwt_token", "test-token")
-
-	token, ok := GetJWTToken(c)
-	assert.True(t, ok)
-	assert.Equal(t, "test-token", token)
-
-	// Test missing token
-	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
-	token2, ok2 := GetJWTToken(c2)
-	assert.False(t, ok2)
-	assert.Equal(t, "", token2)
 }

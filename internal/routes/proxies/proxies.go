@@ -56,7 +56,10 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 
 func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	// Create JWT middleware
-	authMiddleware := middleware.JWTAuth(deps.AuthConfig)
+	authMiddleware := middleware.Auth(middleware.Dependencies{
+		Config:  deps.AuthConfig,
+		Storage: deps.Storage,
+	})
 
 	// todo: support workspace
 	r.Any("/api/v1/serve-proxy/:name/*path", authMiddleware, handleServeProxy(deps))

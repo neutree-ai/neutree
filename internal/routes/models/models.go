@@ -67,7 +67,10 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	apiV1 := r.Group("/api/v1")
 
 	// Create JWT middleware
-	authMiddleware := middleware.JWTAuth(deps.AuthConfig)
+	authMiddleware := middleware.Auth(middleware.Dependencies{
+		Config:  deps.AuthConfig,
+		Storage: deps.Storage,
+	})
 
 	// Workspace-scoped model registry routes with authentication
 	workspaces := apiV1.Group("/workspaces/:workspace")
