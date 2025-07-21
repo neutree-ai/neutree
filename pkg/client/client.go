@@ -72,7 +72,7 @@ func NewClient(baseURL string, options ...ClientOption) *Client {
 func (c *Client) do(req *http.Request) (*http.Response, error) {
 	// Add authorization header if API key is set
 	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		req.Header.Set("Authorization", c.apiKey)
 	}
 
 	return c.httpClient.Do(req)
