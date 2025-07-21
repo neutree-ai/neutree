@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -16,17 +17,19 @@ import (
 )
 
 const (
-	listModelUrl               = "https://huggingface.co/api/models"
+	listModelPath              = "/api/models"
 	errHuggingFaceNotSupported = "operation not supported for Hugging Face registry"
 )
 
 type huggingFace struct {
 	apiToken string
 	client   *http.Client
+	url      string
 }
 
 func newHuggingFace(registry *v1.ModelRegistry) *huggingFace {
 	return &huggingFace{
+		url:      strings.TrimSuffix(registry.Spec.Url, "/"),
 		apiToken: registry.Spec.Credentials,
 		client: &http.Client{
 			Timeout: 300 * time.Second,
@@ -109,7 +112,7 @@ func (hf *huggingFace) getModelsList(options ListOption) ([]HuggingFaceModel, er
 		params.Add("search", options.Search)
 	}
 
-	requestURL := listModelUrl + "?" + params.Encode()
+	requestURL := hf.url + listModelPath + "?" + params.Encode()
 
 	req, err := http.NewRequest("GET", requestURL, nil)
 	if err != nil {
