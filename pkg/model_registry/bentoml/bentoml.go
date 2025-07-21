@@ -84,11 +84,13 @@ func ImportModel(homePath string, reader io.Reader, name, version string, force 
 		return errors.New("model name and version are required")
 	}
 
-	finalDir := filepath.Join(homePath, "models", name, version)
+	lname := strings.ToLower(name)
+	lversion := strings.ToLower(version)
+	finalDir := filepath.Join(homePath, "models", lname, lversion)
 
 	if exists(finalDir) {
 		if !force {
-			return errors.Errorf("model %s:%s already exists", name, version)
+			return errors.Errorf("model %s:%s already exists", lname, lversion)
 		}
 		// Remove old version to replace.
 		if err := os.RemoveAll(finalDir); err != nil {
@@ -228,7 +230,7 @@ func ListModels(homePath string) ([]Model, error) {
 		}
 
 		models = append(models, Model{
-			Tag:          fmt.Sprintf("%s:%s", meta.Name, meta.Version),
+			Tag:          fmt.Sprintf("%s:%s", strings.ToLower(meta.Name), strings.ToLower(meta.Version)),
 			Module:       meta.Module,
 			Size:         meta.Size,
 			CreationTime: meta.CreationTime,
