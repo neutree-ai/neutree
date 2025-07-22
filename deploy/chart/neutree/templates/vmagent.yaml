@@ -1,4 +1,4 @@
-{{ if .Values.metrics.enabled}}
+{{ if or .Values.metrics.remoteWriteUrl (index .Values "victoria-metrics-cluster" "enabled") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,7 +26,11 @@ spec:
           args:
             - "--promscrape.config=/etc/prometheus/prometheus.yml"
             - "--promscrape.configCheckInterval=10s"
-            - "--remoteWrite.url={{ .Values.metrics.remoteWriteUrl}}"
+            {{- if index .Values "victoria-metrics-cluster" "enabled"  }}
+            - "--remoteWrite.url=http://{{ include "neutree.fullname" . }}-victoria-metrics-cluster-vminsert:8480/insert/0/prometheus/"
+            {{- else if .Values.metrics.remoteWriteUrl }}
+            - "--remoteWrite.url={{ .Values.metrics.remoteWriteUrl }}"
+            {{- end }}
           image: "{{ .Values.vmagent.image.repository }}:{{ .Values.vmagent.image.tag}}"
           imagePullPolicy: {{ .Values.vmagent.image.pullPolicy }}
           ports:
