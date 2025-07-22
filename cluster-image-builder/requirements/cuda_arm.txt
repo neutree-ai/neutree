@@ -1,2 +1,4 @@
 llama_cpp_python==0.3.7
 ray[serve]==2.43.0
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
