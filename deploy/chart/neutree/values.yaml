@@ -219,7 +219,8 @@ grafana:
     # -- The Docker registry
     registry: docker.io
     # -- Docker image repository
-    repository: grafana/grafana
+    repository:
+
     # Overrides the Grafana image tag whose default is the chart appVersion
     tag: "11.5.3"
 
@@ -277,6 +278,8 @@ grafana:
   service:
     enabled: true
     type: LoadBalancer
+
+  datasourceURL: ""
 
 
 

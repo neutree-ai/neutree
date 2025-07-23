@@ -11,7 +11,11 @@ data:
       datasources:
       - name: neutree-cluster
         type: prometheus
+        {{- if  index .Values "victoria-metrics-cluster" "enabled" }}
         url: http://{{ include "neutree.fullname" . }}-victoria-metrics-cluster-vmselect:8481/select/0/prometheus
+        {{- else }}
+        url: {{ .Values.grafana.datasourceURL}}
+        {{- end }}
         isDefault: true
         jsonData:
           prometheusType: Prometheus
