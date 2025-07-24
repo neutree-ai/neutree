@@ -199,7 +199,16 @@ class Backend:
 
     async def generate_embeddings(self, payload: Any):
         await self._ensure_embedding()
-        return await self.openai_serving_embedding.create_embedding(EmbeddingCompletionRequest(**payload), None)
+        try:
+            # Validate and convert the payload to an EmbeddingCompletionRequest
+            request = EmbeddingCompletionRequest(**payload)
+        except (TypeError, ValueError) as e:
+            logging.error(f"Invalid payload for EmbeddingCompletionRequest: {e}")
+            return ErrorResponse(
+                message={"error": "Invalid payload for EmbeddingCompletionRequest", "details": str(e)},
+                status_code=400,
+            )
+        return await self.openai_serving_embedding.create_embedding(request, None)
 
     async def rerank(self, payload: Any):
         """
@@ -345,7 +354,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         ray_actor_options={
             "num_cpus": backend_options.get('num_cpus', 1),
             "num_gpus": backend_options.get('num_gpus', 1),
-            "memory": backend_options.get('memory', 0),
+            "memory": backend_options.get('memory', None),
             "resources": backend_options.get('resources', {})
         }
     ).bind(

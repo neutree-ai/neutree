@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	GiB = 1024 * 1024 * 1024
+	BytesPerGiB = 1024 * 1024 * 1024
 )
 
 // RayServeApplication represents the structure expected by the Ray Serve API.
@@ -62,8 +62,9 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 	}
 
 	if endpoint.Spec.Resources.Memory != nil {
-		backendConfig["memory"] = *endpoint.Spec.Resources.Memory * GiB
+		backendConfig["memory"] = *endpoint.Spec.Resources.Memory * BytesPerGiB
 	}
+
 	endpoint.Spec.DeploymentOptions["backend"] = backendConfig
 
 	endpoint.Spec.DeploymentOptions["controller"] = map[string]interface{}{
