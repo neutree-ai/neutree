@@ -31,9 +31,13 @@ func newHuggingFace(registry *v1.ModelRegistry) (*huggingFace, error) {
 	if registry.Spec.Url == "" {
 		return nil, errors.New("registry.Spec.Url cannot be empty")
 	}
-	parsedUrl, err := url.Parse(strings.TrimSpace(registry.Spec.Url))
-	if err != nil || parsedUrl.Scheme == "" || parsedUrl.Host == "" {
+	parsedUrl, err := url.Parse(registry.Spec.Url)
+	if err != nil {
 		return nil, errors.Wrap(err, "invalid registry.Spec.Url")
+	}
+
+	if parsedUrl.Host == "" || parsedUrl.Scheme == "" {
+		return nil, errors.New("invalid registry.Spec.Url")
 	}
 
 	return &huggingFace{
@@ -48,7 +52,7 @@ func newHuggingFace(registry *v1.ModelRegistry) (*huggingFace, error) {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 func (hf *huggingFace) Connect() error {

@@ -38,7 +38,7 @@ var (
 func new(registry *v1.ModelRegistry) (ModelRegistry, error) {
 	switch registry.Spec.Type {
 	case v1.HuggingFaceModelRegistryType:
-		return newHuggingFace(registry), nil
+		return newHuggingFace(registry)
 	case v1.BentoMLModelRegistryType:
 		return newFileBased(registry)
 	default:
