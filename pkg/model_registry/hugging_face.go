@@ -27,9 +27,17 @@ type huggingFace struct {
 	url      string
 }
 
-func newHuggingFace(registry *v1.ModelRegistry) *huggingFace {
+func newHuggingFace(registry *v1.ModelRegistry) (*huggingFace, error) {
+	if registry.Spec.Url == "" {
+		return nil, errors.New("registry.Spec.Url cannot be empty")
+	}
+	parsedUrl, err := url.Parse(strings.TrimSpace(registry.Spec.Url))
+	if err != nil || parsedUrl.Scheme == "" || parsedUrl.Host == "" {
+		return nil, errors.Wrap(err, "invalid registry.Spec.Url")
+	}
+
 	return &huggingFace{
-		url:      strings.TrimSuffix(registry.Spec.Url, "/"),
+		url:      strings.TrimSuffix(parsedUrl.String(), "/"),
 		apiToken: registry.Spec.Credentials,
 		client: &http.Client{
 			Timeout: 300 * time.Second,
