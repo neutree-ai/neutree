@@ -129,21 +129,11 @@ func (c *ClusterController) sync(obj *v1.Cluster) error {
 
 func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 	var (
-		err    error
-		headIP string
-		phase  v1.ClusterPhase
+		err                 error
+		headIP              string
+		phase               v1.ClusterPhase
+		clusterOrchestrator orchestrator.Orchestrator
 	)
-
-	clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:               cluster,
-		ImageService:          c.imageService,
-		AcceleratorManager:    c.acceleratorManager,
-		Storage:               c.storage,
-		MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
-	})
-	if err != nil {
-		return err
-	}
 
 	defer func() {
 		phase = v1.ClusterPhaseRunning
@@ -156,6 +146,17 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 			klog.Errorf("failed to update cluster %s status, err: %v", cluster.Metadata.Name, updateStatusErr)
 		}
 	}()
+
+	clusterOrchestrator, err = orchestrator.NewOrchestrator(orchestrator.Options{
+		Cluster:               cluster,
+		ImageService:          c.imageService,
+		AcceleratorManager:    c.acceleratorManager,
+		Storage:               c.storage,
+		MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to create cluster orchestrator for cluster %s", cluster.Metadata.Name)
+	}
 
 	if !cluster.IsInitialized() {
 		klog.Info("Initializing cluster " + cluster.Metadata.Name)
@@ -175,6 +176,8 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 			klog.Info("waiting for cluster " + cluster.Metadata.Name + " healthy")
 			return errors.Wrap(err, "failed to health check cluster "+cluster.Metadata.Name)
 		}
+
+		klog.Info("Cluster " + cluster.Metadata.Name + " initialized")
 
 		return nil
 	}
@@ -342,6 +345,8 @@ func (c *ClusterController) reconcileStaticNodes(cluster *v1.Cluster, clusterOrc
 
 func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 	if cluster.Status != nil && cluster.Status.Phase == v1.ClusterPhaseDeleted {
+		klog.Info("Cluster " + cluster.Metadata.Name + " already deleted, delete resource from storage")
+
 		err := c.storage.DeleteCluster(strconv.Itoa(cluster.ID))
 		if err != nil {
 			return errors.Wrap(err, "failed to delete cluster "+cluster.Metadata.Name)
@@ -377,6 +382,8 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 		return errors.Wrap(err, "failed to delete cluster backend service "+cluster.Metadata.Name)
 	}
 
+	klog.Info("Cluster " + cluster.Metadata.Name + " delete finished, mark as deleted")
+
 	err = c.updateStatus(cluster, nil, v1.ClusterPhaseDeleted, nil)
 	if err != nil {
 		klog.Errorf("failed to update cluster %s status, err: %v", cluster.Metadata.Name, err)
@@ -402,7 +409,7 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 	}
 
-	if newStatus.Phase == v1.ClusterPhaseRunning && obj.Metadata.DeletionTimestamp == "" {
+	if newStatus.Phase == v1.ClusterPhaseRunning && clusterOrchestrator != nil && obj.Metadata.DeletionTimestamp == "" {
 		clusterStatus, getClusterStatusErr := clusterOrchestrator.ClusterStatus()
 		if getClusterStatusErr == nil {
 			newStatus.ReadyNodes = clusterStatus.ReadyNodes
