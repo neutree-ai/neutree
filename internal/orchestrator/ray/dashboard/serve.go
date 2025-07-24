@@ -14,6 +14,10 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+const (
+	GiB = 1024 * 1024 * 1024
+)
+
 // RayServeApplication represents the structure expected by the Ray Serve API.
 type RayServeApplication struct {
 	Name        string                 `json:"name"`
@@ -50,13 +54,17 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 		}
 	}
 
-	endpoint.Spec.DeploymentOptions["backend"] = map[string]interface{}{
+	backendConfig := map[string]interface{}{
 		"num_replicas": endpoint.Spec.Replicas.Num,
 		"num_cpus":     endpoint.Spec.Resources.CPU,
 		"num_gpus":     endpoint.Spec.Resources.GPU,
-		"memory":       endpoint.Spec.Resources.Memory,
 		"resources":    accelerator,
 	}
+
+	if endpoint.Spec.Resources.Memory != nil {
+		backendConfig["memory"] = *endpoint.Spec.Resources.Memory * GiB
+	}
+	endpoint.Spec.DeploymentOptions["backend"] = backendConfig
 
 	endpoint.Spec.DeploymentOptions["controller"] = map[string]interface{}{
 		"num_replicas": 1,
