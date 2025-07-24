@@ -345,6 +345,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         ray_actor_options={
             "num_cpus": backend_options.get('num_cpus', 1),
             "num_gpus": backend_options.get('num_gpus', 1),
+            "memory": backend_options.get('memory', 0),
             "resources": backend_options.get('resources', {})
         }
     ).bind(
