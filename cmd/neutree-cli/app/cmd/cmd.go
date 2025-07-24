@@ -22,12 +22,12 @@ Available Commands:
 Examples:
   # Show help information
   neutree-cli --help
-  
+
   # Deploy Neutree components
   neutree-cli launch [options]
-	
-	# Manage Neutree models
-	neutree-cli model [options]
+
+  # Manage Neutree models
+  neutree-cli model [options]
 	`,
 	}
 
