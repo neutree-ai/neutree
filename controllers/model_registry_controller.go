@@ -87,7 +87,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
 		if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
-			klog.Info("Deleted model registry " + obj.Metadata.Name)
+			klog.Info("Model registry " + obj.Metadata.Name + " is already deleted, delete resource from storage")
 
 			err = c.storage.DeleteModelRegistry(strconv.Itoa(obj.ID))
 			if err != nil {
@@ -106,6 +106,8 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 				return errors.Wrap(err, "failed to disconnect model registry "+obj.Metadata.Name)
 			}
 		}
+
+		klog.Info("Model registry " + obj.Metadata.Name + " is deleted")
 
 		if err = c.updateStatus(obj, v1.ModelRegistryPhaseDELETED, nil); err != nil {
 			klog.Errorf("failed to update model registry %s, err: %v", obj.Metadata.Name, err)

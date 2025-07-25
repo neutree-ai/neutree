@@ -57,6 +57,10 @@ func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 		return nil, errors.Wrap(err, "failed to parse ssh cluster config")
 	}
 
+	if sshClusterConfig.Provider.HeadIP == "" {
+		return nil, errors.New("head IP can not be empty")
+	}
+
 	manager.sshClusterConfig = sshClusterConfig
 
 	err = manager.configClusterAcceleratorType()

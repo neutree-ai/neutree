@@ -91,7 +91,7 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
 		if obj.Status != nil && obj.Status.Phase == v1.ImageRegistryPhaseDELETED {
-			klog.Info("Deleted image registry " + obj.Metadata.Name)
+			klog.Info("Image registry " + obj.Metadata.Name + " is already deleted, delete resource from storage")
 
 			err = c.storage.DeleteImageRegistry(strconv.Itoa(obj.ID))
 			if err != nil {
@@ -101,7 +101,7 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 			return nil
 		}
 
-		klog.Info("Deleting image registry " + obj.Metadata.Name)
+		klog.Info("Image registry " + obj.Metadata.Name + " is deleted")
 
 		err = c.updateStatus(obj, v1.ImageRegistryPhaseDELETED, nil)
 		if err != nil {
