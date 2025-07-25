@@ -275,8 +275,15 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 
 func (a *manager) GetKubernetesContainerRuntimeConfig(ctx context.Context, acceleratorType string, container corev1.Container) (v1.RuntimeConfig, error) {
 	resource := acceleratorType
+
+	// if acceleratorType is empty string, means it was cpu cluster,
+	// cpu cluster use default cuda base image, so set NVIDIA_VISIBLE_DEVICES=void to avoid nvidia-container-runtime mount all gpu on node to container.
 	if resource == "" {
-		return v1.RuntimeConfig{}, nil
+		return v1.RuntimeConfig{
+			Env: map[string]string{
+				"NVIDIA_VISIBLE_DEVICES": "void",
+			},
+		}, nil
 	}
 
 	value, ok := a.acceleratorsMap.Load(resource)
