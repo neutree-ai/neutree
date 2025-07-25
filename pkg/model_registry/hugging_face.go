@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -16,17 +17,32 @@ import (
 )
 
 const (
-	listModelUrl               = "https://huggingface.co/api/models"
+	listModelPath              = "/api/models"
 	errHuggingFaceNotSupported = "operation not supported for Hugging Face registry"
 )
 
 type huggingFace struct {
 	apiToken string
 	client   *http.Client
+	url      string
 }
 
-func newHuggingFace(registry *v1.ModelRegistry) *huggingFace {
+func newHuggingFace(registry *v1.ModelRegistry) (*huggingFace, error) {
+	if registry.Spec.Url == "" {
+		return nil, errors.New("registry.Spec.Url cannot be empty")
+	}
+
+	parsedUrl, err := url.Parse(registry.Spec.Url)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid registry.Spec.Url")
+	}
+
+	if parsedUrl.Host == "" || parsedUrl.Scheme == "" {
+		return nil, errors.New("invalid registry.Spec.Url")
+	}
+
 	return &huggingFace{
+		url:      strings.TrimSuffix(parsedUrl.String(), "/"),
 		apiToken: registry.Spec.Credentials,
 		client: &http.Client{
 			Timeout: 300 * time.Second,
@@ -37,7 +53,7 @@ func newHuggingFace(registry *v1.ModelRegistry) *huggingFace {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 func (hf *huggingFace) Connect() error {
@@ -109,7 +125,7 @@ func (hf *huggingFace) getModelsList(options ListOption) ([]HuggingFaceModel, er
 		params.Add("search", options.Search)
 	}
 
-	requestURL := listModelUrl + "?" + params.Encode()
+	requestURL := hf.url + listModelPath + "?" + params.Encode()
 
 	req, err := http.NewRequest("GET", requestURL, nil)
 	if err != nil {
