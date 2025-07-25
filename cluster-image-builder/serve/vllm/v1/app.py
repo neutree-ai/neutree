@@ -23,7 +23,8 @@ from vllm.entrypoints.openai.protocol import (
     ChatCompletionRequest, ChatCompletionResponse, ErrorResponse,
     EmbeddingRequest, EmbeddingResponse,
     ScoreRequest, ScoreResponse,
-    RerankRequest, RerankResponse
+    RerankRequest, RerankResponse,
+    EmbeddingCompletionRequest
 )
 from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
 from vllm.entrypoints.openai.serving_embedding import OpenAIServingEmbedding
@@ -51,7 +52,7 @@ class Backend:
                  **engine_kwargs):
         """
         Backend deployment for vLLM inference.
-        
+
         Args:
             model_registry_type: Type of model registry ("bentoml" or "hugging-face")
             model_name: Name of the model in the registry
@@ -70,26 +71,26 @@ class Backend:
 
         self.model_id = f"{model_name}:{model_version}"
         self.model_task = model_task
-        
+
         # Extract our custom parameters BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors
         # Tool calling configuration
         self.enable_auto_tools = False
         self.tool_parser = engine_kwargs.pop("tool_call_parser", None)
         if self.tool_parser:
             self.enable_auto_tools = True
-        
+
         # Reasoning configuration (read but don't pop - engine needs these too)
         self.enable_reasoning = engine_kwargs.get("enable_reasoning", False)
         self.reasoning_parser = engine_kwargs.get("reasoning_parser", None)
-        
+
         # Extract chat template parameters
         self.chat_template = engine_kwargs.pop("chat_template", None)
         self.chat_template_content_format = engine_kwargs.pop("chat_template_content_format", "auto")
-        
+
         # Extract other chat-specific parameters (keep defaults from vLLM)
         self.response_role = engine_kwargs.pop("response_role", "assistant")
         self.enable_prompt_tokens_details = engine_kwargs.pop("enable_prompt_tokens_details", False)
-        
+
         # Map model task to vLLM task
         task = "generate"
         if model_task == "text-generation":
@@ -113,14 +114,14 @@ class Backend:
         self.openai_serving_embedding = None
         self.openai_serving_score = None
         self.openai_serving_models = None
-        
+
         ctx = serve.get_replica_context()
         labels = {
             "deployment":  ctx.deployment,
             "replica":     ctx.replica_tag,
             "model_name":  self.engine.engine.model_config.served_model_name,
         }
-        
+
         if hasattr(ctx, "app_name"):
             labels["application"] = ctx.app_name
 
@@ -149,7 +150,7 @@ class Backend:
         if self.openai_serving_chat is None:
             model_config = await self._ensure_model_config()
             models = await self._ensure_models()
-                
+
             self.openai_serving_chat = OpenAIServingChat(
                 self.engine,
                 model_config,
@@ -175,6 +176,8 @@ class Backend:
                 model_config,
                 models,
                 request_logger=None,
+                chat_template=self.chat_template,
+                chat_template_content_format=self.chat_template_content_format,
             )
         return self.openai_serving_embedding
 
@@ -196,7 +199,16 @@ class Backend:
 
     async def generate_embeddings(self, payload: Any):
         await self._ensure_embedding()
-        return await self.openai_serving_embedding.create_embedding(EmbeddingRequest(**payload), None)
+        try:
+            # Validate and convert the payload to an EmbeddingCompletionRequest
+            request = EmbeddingCompletionRequest(**payload)
+        except (TypeError, ValueError) as e:
+            logging.error(f"Invalid payload for EmbeddingCompletionRequest: {e}")
+            return ErrorResponse(
+                message={"error": "Invalid payload for EmbeddingCompletionRequest", "details": str(e)},
+                status_code=400,
+            )
+        return await self.openai_serving_embedding.create_embedding(request, None)
 
     async def rerank(self, payload: Any):
         """
@@ -224,14 +236,14 @@ app.add_middleware(
 @serve.deployment(ray_actor_options={"num_cpus": 0.1})
 @serve.ingress(app)
 class Controller:
-    def __init__(self, 
+    def __init__(self,
                  backend: DeploymentHandle,
                  scheduler_type: str = SchedulerType.POW2,
-                 virtual_nodes: int = 100, 
+                 virtual_nodes: int = 100,
                  load_factor: float = 1.25):
         """
         Controller deployment that handles HTTP routing and calls the backend.
-        
+
         Args:
             backend: Handle to the Backend deployment
             scheduler_type: Type of scheduler to use
@@ -245,13 +257,13 @@ class Controller:
         handle = self.backend
         if not handle.is_initialized:
             handle._init()
-            
+
         # Only modify the scheduler if necessary
         if scheduler_type != SchedulerType.POW2:
             try:
                 router = handle._router._asyncio_router
                 original_scheduler = router._replica_scheduler
-                
+
                 if scheduler_type == SchedulerType.STATIC_HASH:
                     from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
                     new_scheduler = StaticHashReplicaScheduler()
@@ -261,7 +273,7 @@ class Controller:
                         virtual_nodes_per_replica=virtual_nodes,
                         load_factor=load_factor
                     )
-                
+
                 new_scheduler.update_replicas(list(original_scheduler.curr_replicas.values()))
                 router._replica_scheduler = new_scheduler
                 print(f"[Controller] Replaced scheduler with {scheduler_type}")
@@ -275,7 +287,7 @@ class Controller:
     async def chat(self, request: Request):
         req_obj = await request.json()
         stream = req_obj.get("stream", False)
-        
+
         if stream:
             # Get the streaming generator from the backend
             r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
@@ -325,23 +337,24 @@ def app_builder(args: Dict[str, Any]) -> Application:
     model = args.get('model', {})
     deployment_options = args.get('deployment_options', {})
     engine_args = args.get('engine_args', {})  # vLLM-specific engine arguments
-    
+
     # Extract backend deployment options
     backend_options = deployment_options.get('backend', {})
     controller_options = deployment_options.get('controller', {})
-    
+
     # Extract scheduler configuration
     scheduler_config = deployment_options.get('scheduler', {})
     scheduler_type = scheduler_config.get('type', SchedulerType.POW2)
     virtual_nodes = scheduler_config.get('virtual_nodes', 100)
     load_factor = scheduler_config.get('load_factor', 1.25)
-    
+
     # Configure backend deployment
     backend_deployment = Backend.options(
         num_replicas=backend_options.get('num_replicas', 1),
         ray_actor_options={
             "num_cpus": backend_options.get('num_cpus', 1),
             "num_gpus": backend_options.get('num_gpus', 1),
+            "memory": backend_options.get('memory', None),
             "resources": backend_options.get('resources', {})
         }
     ).bind(
@@ -353,7 +366,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         # Pass all other engine args directly through
         **engine_args
     )
-    
+
     # Configure controller deployment with scheduler config
     controller_deployment = Controller.options(
         num_replicas=controller_options.get('num_replicas', 1),
@@ -367,5 +380,5 @@ def app_builder(args: Dict[str, Any]) -> Application:
         virtual_nodes=virtual_nodes,
         load_factor=load_factor
     )
-    
+
     return controller_deployment
