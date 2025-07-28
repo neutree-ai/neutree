@@ -195,7 +195,27 @@ class Backend:
 
     async def generate(self, payload: Any):
         await self._ensure_chat()
-        return await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
+        result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
+        
+        is_stream = payload.get("stream") is True
+        
+        if isinstance(result, ErrorResponse):
+            if is_stream:
+                logging.error(f"Error during chat completion: {result.message}")
+                async def error_generator():
+                    import json
+                    error_data = {
+                        "error": {
+                            "message": "Request processing failed",
+                            "type": "internal_server_error",
+                            "details": str(result.message)
+                        }
+                    }
+                    yield f"data: {json.dumps(error_data)}\n\n"
+                    yield "data: [DONE]\n\n"
+                return error_generator()
+
+        return result
 
     async def generate_embeddings(self, payload: Any):
         await self._ensure_embedding()
@@ -291,6 +311,19 @@ class Controller:
         if stream:
             # Get the streaming generator from the backend
             r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
+
+            try:
+                first_chunk = await r.__anext__()
+                if isinstance(first_chunk, str) and "error" in first_chunk:
+                    import json
+                    error_data = json.loads(first_chunk.replace("data: ", "").strip())
+                    return JSONResponse(
+                        content=error_data["error"], 
+                        status_code=400
+                    )
+            except:
+                pass
+        
             return StreamingResponse(
                 content=r,
                 media_type="text/event-stream"
