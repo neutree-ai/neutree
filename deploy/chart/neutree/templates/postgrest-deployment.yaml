@@ -27,7 +27,7 @@ spec:
             - job
             - {{ include "neutree.fullname" . }}-migration-job-{{.Release.Revision }}
             - -n
-            - {{ .Release.Namespace }}  
+            - {{ .Release.Namespace }}
       containers:
         - name: postgrest
           image: "{{ .Values.postgrest.image.repository }}:{{ .Values.postgrest.image.tag }}"
@@ -47,6 +47,8 @@ spec:
               value: "auth"
             - name: PGRST_DB_AGGREGATES_ENABLED
               value: "1"
+            - name: PGRST_DB_ANON_ROLE
+              value: "anonymous"
           ports:
             - name: http
               containerPort: 6432
