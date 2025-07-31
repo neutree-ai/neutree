@@ -18,7 +18,7 @@ spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
-      {{- end }}    
+      {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
@@ -110,7 +110,7 @@ spec:
         - name: KONG_STREAM_LISTEN
           value: "off"
         - name: KONG_NGINX_DAEMON
-          value: "off"      
+          value: "off"
         args: [ "kong", "migrations", "finish" ]
         volumeMounts:
         - name: kong-prefix-dir
@@ -146,7 +146,7 @@ spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
-      {{- end }}    
+      {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
@@ -239,7 +239,7 @@ spec:
         - name: KONG_STREAM_LISTEN
           value: "off"
         - name: KONG_NGINX_DAEMON
-          value: "off"      
+          value: "off"
         args: [ "kong", "migrations", "up" ]
         volumeMounts:
         - name: kong-prefix-dir
@@ -333,7 +333,7 @@ spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
-      {{- end }}    
+      {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
       - name: clear-stale-pid
@@ -414,7 +414,7 @@ spec:
         - name: KONG_STATUS_LISTEN
           value: "0.0.0.0:8100, [::]:8100"
         - name: KONG_STREAM_LISTEN
-          value: "off"      
+          value: "off"
         volumeMounts:
         - name: kong-kong-prefix-dir
           mountPath: /kong_prefix/
@@ -496,7 +496,7 @@ spec:
         - name: LUA_PATH
           value: "/neutree-kong-plugin/?.lua;;"
         - name: KONG_PLUGINS
-          value: "bundled,neutree-ai-statistics"          
+          value: "bundled,neutree-ai-statistics"
         args: [ "/bin/bash", "-c", "export KONG_NGINX_DAEMON=on KONG_PREFIX=`mktemp -d` KONG_KEYRING_ENABLED=off; until kong start; do echo 'waiting for db'; sleep 1; done; kong stop"]
         volumeMounts:
           - name: kong-kong-prefix-dir
@@ -504,7 +504,7 @@ spec:
           - name: kong-kong-tmp
             mountPath: /tmp
           - name: neutree-ai-statistics
-            mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-statistics            
+            mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-statistics
         resources:
           {}
       containers:
@@ -523,6 +523,8 @@ spec:
           seccompProfile:
             type: RuntimeDefault
         env:
+        - name: KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE
+          value: "20m"
         - name: KONG_ADMIN_ACCESS_LOG
           value: "/dev/stdout"
         - name: KONG_ADMIN_ERROR_LOG
@@ -761,7 +763,7 @@ spec:
         - name: KONG_STATUS_LISTEN
           value: "0.0.0.0:8100, [::]:8100"
         - name: KONG_STREAM_LISTEN
-          value: "off"  
+          value: "off"
         args: [ "kong", "migrations", "bootstrap" ]
         volumeMounts:
         - name: kong-kong-prefix-dir
