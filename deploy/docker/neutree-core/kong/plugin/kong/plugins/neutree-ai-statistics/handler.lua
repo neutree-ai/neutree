@@ -26,13 +26,13 @@ local function handle_json_response(conf)
     local response_body = kong.service.response.get_raw_body()
     if response_body == nil then
         -- response body is nil, ignore
-        return 
+        return
     end
 
     local ai_response, err = cjson.decode(response_body)
     if err then
         -- not json format, ignore
-        return 
+        return
     end
 
     kong.ctx.plugin.response_model = ai_response.model
@@ -65,15 +65,17 @@ local function handle_stream_response(conf, chunk, finished)
         if not events then
             return
         end
-        
+
         local frame_buffer = buffer.new()
         for _, event in ipairs(events) do
             local formatted, _, metadata = ai_driver.from_format(event, "", "stream/llm/v1/chat")
-            if formatted and formatted ~= ai_shared._CONST.SSE_TERMINATOR then 
+            if formatted and formatted ~= ai_shared._CONST.SSE_TERMINATOR then
                 local event_t, err = cjson.decode(formatted)
                 if not err then
-                    local token_t = get_token_text(event_t)
-                    body_buffer:put(token_t)
+                    if event_t.choices and #event_t.choices > 0 then
+                        local token_t = get_token_text(event_t)
+                        body_buffer:put(token_t)
+                    end
                     if kong.ctx.plugin.response_model == nil and event_t.model then
                         kong.ctx.plugin.response_model = event_t.model
                     end
@@ -103,7 +105,7 @@ end
 
 function AIStatisticsPluginHandler:access(conf)
     local request_path = kong.request.get_path()
-    -- skip not match route_type
+    -- skip request not match route_type
     if not string.match(request_path, conf.route_type.."$") then
         kong.ctx.plugin.skip = true
         return
