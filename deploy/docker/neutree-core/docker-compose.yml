@@ -265,6 +265,7 @@ services:
     image: kong/kong:{{ .KongVersion}}
     container_name: kong
     environment:
+      KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE: 20m
       KONG_PLUGINS: bundled,neutree-ai-statistics
       LUA_PATH: "/neutree-kong-plugin/?.lua;;"
       KONG_DATABASE: "postgres"
