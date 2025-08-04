@@ -1,28 +1,112 @@
 package middleware
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/storage"
-	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
+// Helper function to create a test self-contained API key
+func createTestAPIKey(userID, keyID, secret string, expiresAt int64) (string, error) {
+	// Create 40-byte payload: user_id (16) + key_id (16) + expires_at (8)
+	userIDBytes := make([]byte, 16)
+	keyIDBytes := make([]byte, 16)
+	expiresAtBytes := make([]byte, 8)
+
+	// Parse UUIDs (remove hyphens and convert to bytes)
+	userIDHex := strings.ReplaceAll(userID, "-", "")
+	keyIDHex := strings.ReplaceAll(keyID, "-", "")
+
+	// Convert hex to bytes
+	for i := 0; i < 16; i++ {
+		if i*2 < len(userIDHex) {
+			userIDBytes[i] = byte((hexToByte(userIDHex[i*2]) << 4) | hexToByte(userIDHex[i*2+1]))
+		}
+		if i*2 < len(keyIDHex) {
+			keyIDBytes[i] = byte((hexToByte(keyIDHex[i*2]) << 4) | hexToByte(keyIDHex[i*2+1]))
+		}
+	}
+
+	// Convert expires_at to big-endian 8 bytes
+	for i := 7; i >= 0; i-- {
+		expiresAtBytes[i] = byte(expiresAt & 0xFF)
+		expiresAt >>= 8
+	}
+
+	// Combine payload
+	payload := make([]byte, 40)
+	copy(payload[0:16], userIDBytes)
+	copy(payload[16:32], keyIDBytes)
+	copy(payload[32:40], expiresAtBytes)
+
+	// Add PKCS#7 padding to make it 48 bytes (3 AES blocks)
+	paddingLen := 8
+	paddedPayload := make([]byte, 48)
+	copy(paddedPayload, payload)
+	for i := 40; i < 48; i++ {
+		paddedPayload[i] = byte(paddingLen)
+	}
+
+	// Encrypt with AES-256-CBC (32-byte key)
+	key := make([]byte, 32)
+	copy(key, []byte(secret))
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	iv := make([]byte, aes.BlockSize) // All zeros
+	mode := cipher.NewCBCEncrypter(block, iv)
+
+	encrypted := make([]byte, 48)
+	mode.CryptBlocks(encrypted, paddedPayload)
+
+	// Create HMAC signature (truncated to 16 bytes)
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write(encrypted)
+	signature := h.Sum(nil)[:16]
+
+	// Combine encrypted data and signature
+	combined := append(encrypted, signature...)
+
+	// Convert to base64url
+	b64 := base64.StdEncoding.EncodeToString(combined)
+	b64url := strings.ReplaceAll(strings.ReplaceAll(b64, "+", "-"), "/", "_")
+	b64url = strings.TrimRight(b64url, "=")
+
+	return "sk_" + b64url, nil
+}
+
+func hexToByte(c byte) byte {
+	if c >= '0' && c <= '9' {
+		return c - '0'
+	}
+	if c >= 'a' && c <= 'f' {
+		return c - 'a' + 10
+	}
+	if c >= 'A' && c <= 'F' {
+		return c - 'A' + 10
+	}
+	return 0
+}
+
 func TestAuth(t *testing.T) {
-	// Set Gin to test mode
 	gin.SetMode(gin.TestMode)
 
-	// Test JWT secret
-	jwtSecret := "test-secret"
+	jwtSecret := "test-secret-32bytes-for-aes256!!"
 	config := AuthConfig{
 		JwtSecret: jwtSecret,
 	}
@@ -30,7 +114,6 @@ func TestAuth(t *testing.T) {
 	tests := []struct {
 		name           string
 		setupAuth      func() string
-		setupMock      func(*storagemocks.MockStorage)
 		expectedStatus int
 		expectUserID   string
 	}{
@@ -49,50 +132,27 @@ func TestAuth(t *testing.T) {
 				tokenString, _ := token.SignedString([]byte(jwtSecret))
 				return "Bearer " + tokenString
 			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				// No mock setup needed for JWT
-			},
 			expectedStatus: http.StatusOK,
 			expectUserID:   "user-123",
 		},
 		{
-			name: "Valid API Key",
+			name: "Valid self-contained API key",
 			setupAuth: func() string {
-				return "sk_test_api_key_123"
-			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				apiKeys := []v1.ApiKey{
-					{
-						UserID: "user-456",
-					},
-				}
-				mockStorage.On("ListApiKey", mock.MatchedBy(func(opt storage.ListOption) bool {
-					return len(opt.Filters) == 1 &&
-						opt.Filters[0].Column == "status->sk_value" &&
-						opt.Filters[0].Operator == "eq" &&
-						opt.Filters[0].Value == `"sk_test_api_key_123"`
-				})).Return(apiKeys, nil)
+				apiKey, _ := createTestAPIKey(
+					"12345678-1234-1234-1234-123456789abc",
+					"87654321-4321-4321-4321-abcdef123456",
+					jwtSecret,
+					0, // Never expires
+				)
+				return apiKey
 			},
 			expectedStatus: http.StatusOK,
-			expectUserID:   "user-456",
+			expectUserID:   "12345678-1234-1234-1234-123456789abc",
 		},
 		{
-			name: "API Key not found",
+			name: "Invalid API Key format",
 			setupAuth: func() string {
-				return "sk_invalid_key"
-			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				mockStorage.On("ListApiKey", mock.Anything).Return([]v1.ApiKey{}, nil)
-			},
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name: "API Key storage error",
-			setupAuth: func() string {
-				return "sk_test_api_key"
-			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				mockStorage.On("ListApiKey", mock.Anything).Return(nil, errors.New("database error"))
+				return "sk_invalid_format"
 			},
 			expectedStatus: http.StatusUnauthorized,
 		},
@@ -101,9 +161,6 @@ func TestAuth(t *testing.T) {
 			setupAuth: func() string {
 				return ""
 			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				// No mock setup needed
-			},
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{
@@ -111,64 +168,15 @@ func TestAuth(t *testing.T) {
 			setupAuth: func() string {
 				return "Invalid header"
 			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name: "Empty Bearer token",
-			setupAuth: func() string {
-				return "Bearer "
-			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name: "Invalid JWT token",
-			setupAuth: func() string {
-				return "Bearer invalid-token"
-			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name: "Expired JWT token",
-			setupAuth: func() string {
-				claims := &Claims{
-					UserID: "user-123",
-					RegisteredClaims: jwt.RegisteredClaims{
-						ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)), // Expired
-						IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
-					},
-				}
-
-				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-				tokenString, _ := token.SignedString([]byte(jwtSecret))
-				return "Bearer " + tokenString
-			},
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				// No mock setup needed
-			},
 			expectedStatus: http.StatusUnauthorized,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock storage
-			mockStorage := &storagemocks.MockStorage{}
-			tt.setupMock(mockStorage)
-
-			// Create test router
 			r := gin.New()
 			r.Use(Auth(Dependencies{
-				Config:  config,
-				Storage: mockStorage,
+				Config: config,
 			}))
 			r.GET("/test", func(c *gin.Context) {
 				userID, _ := GetUserID(c)
@@ -177,40 +185,30 @@ func TestAuth(t *testing.T) {
 				})
 			})
 
-			// Create test request
 			req := httptest.NewRequest("GET", "/test", nil)
 
-			// Set up authorization header
 			authHeader := tt.setupAuth()
 			if authHeader != "" {
 				req.Header.Set("Authorization", authHeader)
 			}
 
-			// Create response recorder
 			w := httptest.NewRecorder()
-
-			// Perform request
 			r.ServeHTTP(w, req)
 
-			// Check status code
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
-			// Check user ID if successful
 			if tt.expectedStatus == http.StatusOK && tt.expectUserID != "" {
 				var response map[string]interface{}
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectUserID, response["user_id"])
 			}
-
-			// Assert mock expectations
-			mockStorage.AssertExpectations(t)
 		})
 	}
 }
 
 func TestParseBearerToken(t *testing.T) {
-	jwtSecret := "test-secret"
+	jwtSecret := "test-secret-32bytes-for-aes256!!"
 	config := AuthConfig{
 		JwtSecret: jwtSecret,
 	}
@@ -272,63 +270,188 @@ func TestParseBearerToken(t *testing.T) {
 	}
 }
 
-func TestParseApiKey(t *testing.T) {
+func TestParseSelfContainedAPIKey(t *testing.T) {
+	jwtSecret := "test-secret-32bytes-for-aes256!!"
+
 	tests := []struct {
-		name        string
-		apiKey      string
-		setupMock   func(*storagemocks.MockStorage)
-		expectError bool
-		expectID    string
+		name         string
+		setupAPIKey  func() string
+		secret       string
+		expectError  bool
+		expectUserID string
+		expectKeyID  string
 	}{
 		{
-			name:   "Valid API key",
-			apiKey: "sk_test_key",
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				apiKeys := []v1.ApiKey{
-					{
-						UserID: "user-456",
-					},
-				}
-				mockStorage.On("ListApiKey", mock.Anything).Return(apiKeys, nil)
+			name: "Valid API key",
+			setupAPIKey: func() string {
+				apiKey, _ := createTestAPIKey(
+					"12345678-1234-1234-1234-123456789abc",
+					"87654321-4321-4321-4321-abcdef123456",
+					jwtSecret,
+					0,
+				)
+				return apiKey
 			},
-			expectError: false,
-			expectID:    "user-456",
+			secret:       jwtSecret,
+			expectError:  false,
+			expectUserID: "12345678-1234-1234-1234-123456789abc",
+			expectKeyID:  "87654321-4321-4321-4321-abcdef123456",
 		},
 		{
-			name:   "API key not found",
-			apiKey: "sk_invalid_key",
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				mockStorage.On("ListApiKey", mock.Anything).Return([]v1.ApiKey{}, nil)
+			name: "Valid API key with expiration",
+			setupAPIKey: func() string {
+				// Set expiration to far future
+				apiKey, _ := createTestAPIKey(
+					"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+					"11111111-2222-3333-4444-555555555555",
+					jwtSecret,
+					time.Now().Add(24*time.Hour).Unix(),
+				)
+				return apiKey
 			},
+			secret:       jwtSecret,
+			expectError:  false,
+			expectUserID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			expectKeyID:  "11111111-2222-3333-4444-555555555555",
+		},
+		{
+			name: "Invalid prefix",
+			setupAPIKey: func() string {
+				return "invalid_prefix_12345"
+			},
+			secret:      jwtSecret,
 			expectError: true,
 		},
 		{
-			name:   "Storage error",
-			apiKey: "sk_test_key",
-			setupMock: func(mockStorage *storagemocks.MockStorage) {
-				mockStorage.On("ListApiKey", mock.Anything).Return(nil, errors.New("database error"))
+			name: "Invalid base64",
+			setupAPIKey: func() string {
+				return "sk_invalid-base64-characters!"
 			},
+			secret:      jwtSecret,
+			expectError: true,
+		},
+		{
+			name: "Empty secret",
+			setupAPIKey: func() string {
+				apiKey, _ := createTestAPIKey(
+					"12345678-1234-1234-1234-123456789abc",
+					"87654321-4321-4321-4321-abcdef123456",
+					jwtSecret,
+					0,
+				)
+				return apiKey
+			},
+			secret:      "", // Empty secret
+			expectError: true,
+		},
+		{
+			name: "Wrong secret",
+			setupAPIKey: func() string {
+				apiKey, _ := createTestAPIKey(
+					"12345678-1234-1234-1234-123456789abc",
+					"87654321-4321-4321-4321-abcdef123456",
+					jwtSecret,
+					0,
+				)
+				return apiKey
+			},
+			secret:      "wrong-secret",
+			expectError: true,
+		},
+		{
+			name: "Too short data",
+			setupAPIKey: func() string {
+				return "sk_dGVzdA"
+			},
+			secret:      jwtSecret,
 			expectError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.setupMock(mockStorage)
-
-			parsedInfo, err := parseApiKey(mockStorage, tt.apiKey)
+			apiKey := tt.setupAPIKey()
+			payload, err := parseSelfContainedAPIKey(apiKey, tt.secret)
 
 			if tt.expectError {
 				assert.Error(t, err)
-				assert.Nil(t, parsedInfo)
+				assert.Nil(t, payload)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, parsedInfo)
-				assert.Equal(t, tt.expectID, parsedInfo.UserID)
+				assert.NotNil(t, payload)
+				assert.Equal(t, tt.expectUserID, payload.UserID)
+				assert.Equal(t, tt.expectKeyID, payload.KeyID)
+			}
+		})
+	}
+}
+
+func TestDecryptAESPayload(t *testing.T) {
+	tests := []struct {
+		name        string
+		secret      string
+		expectError bool
+	}{
+		{
+			name:        "AES-256 key (32 bytes)",
+			secret:      "12345678901234567890123456789012",
+			expectError: false,
+		},
+		{
+			name:        "Short key (padded to 16)",
+			secret:      "short",
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test payload
+			payload := make([]byte, 40)
+			for i := 0; i < 40; i++ {
+				payload[i] = byte(i)
 			}
 
-			mockStorage.AssertExpectations(t)
+			// Add PKCS#7 padding
+			paddingLen := 8
+			paddedPayload := make([]byte, 48)
+			copy(paddedPayload, payload)
+			for i := 40; i < 48; i++ {
+				paddedPayload[i] = byte(paddingLen)
+			}
+
+			// Encrypt with the same logic as our implementation
+			key := []byte(tt.secret)
+			var finalKey []byte
+			if len(key) <= 16 {
+				finalKey = make([]byte, 16)
+				copy(finalKey, key)
+			} else if len(key) <= 24 {
+				finalKey = make([]byte, 24)
+				copy(finalKey, key)
+			} else {
+				finalKey = make([]byte, 32)
+				copy(finalKey, key)
+			}
+
+			block, err := aes.NewCipher(finalKey)
+			assert.NoError(t, err)
+
+			iv := make([]byte, aes.BlockSize)
+			mode := cipher.NewCBCEncrypter(block, iv)
+
+			encrypted := make([]byte, 48)
+			mode.CryptBlocks(encrypted, paddedPayload)
+
+			// Test decryption
+			decrypted, err := decryptAESPayload(encrypted, tt.secret)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, payload, decrypted)
+			}
 		})
 	}
 }

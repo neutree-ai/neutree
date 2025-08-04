@@ -10,7 +10,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // Dependencies defines the dependencies for system handlers
@@ -21,7 +20,6 @@ type Dependencies struct {
 	Version string
 	// AuthConfig is the JWT authentication configuration (required)
 	AuthConfig middleware.AuthConfig
-	Storage    storage.Storage
 }
 
 // SystemInfo represents the system information response
@@ -37,8 +35,7 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	apiV1 := r.Group("/api/v1")
 
 	authMiddleware := middleware.Auth(middleware.Dependencies{
-		Config:  deps.AuthConfig,
-		Storage: deps.Storage,
+		Config: deps.AuthConfig,
 	})
 	apiV1.Use(authMiddleware)
 

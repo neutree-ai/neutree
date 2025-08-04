@@ -100,6 +100,7 @@ services:
       PGRST_SERVER_HOST: 0.0.0.0
       PGRST_SERVER_PORT: 6432
       PGRST_JWT_SECRET: {{ .JwtSecret}}
+      PGRST_APP_SETTINGS_JWT_SECRET: {{ .JwtSecret}}
       PGRST_DB_EXTRA_SEARCH_PATH: auth
       PGRST_DB_AGGREGATES_ENABLED: 1
       PGRST_DB_ANON_ROLE: anonymous
