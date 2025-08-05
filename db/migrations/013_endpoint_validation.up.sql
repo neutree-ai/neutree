@@ -43,7 +43,7 @@ CREATE TRIGGER validate_endpoint_model_version_on_endpoints
 CREATE OR REPLACE FUNCTION api.validate_endpoint_replica_count()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF (NEW.spec).replicas.num IS NULL OR (NEW.spec).replicas.num < 1 THEN
+    IF (NEW.spec).replicas.num IS NOT NULL AND (NEW.spec).replicas.num < 1 THEN
         RAISE sqlstate 'PGRST'
             USING message = '{"code": "10106","message": "spec.replicas.num must be at least 1","hint": "Provide a valid replica count"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
