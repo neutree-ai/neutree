@@ -11,3 +11,6 @@ cmd/neutree-cli/app/cmd/launch/manifests/*.tar
 out
 neutree-deploy
 __pycache__/
+
+.air.toml
+*.dev.yml
