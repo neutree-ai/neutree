@@ -40,25 +40,6 @@ CREATE TRIGGER validate_endpoint_model_version_on_endpoints
     FOR EACH ROW
     EXECUTE FUNCTION api.validate_endpoint_model_version();
 
-
-CREATE OR REPLACE FUNCTION api.validate_endpoint_model_file()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF (NEW.spec).model.file IS NULL OR trim((NEW.spec).model.file) = '' THEN
-        RAISE sqlstate 'PGRST'
-            USING message = '{"code": "10009","message": "spec.model.file is required","hint": "Provide model file"}',
-            detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER validate_endpoint_model_file_on_endpoints
-    BEFORE INSERT OR UPDATE ON api.endpoints
-    FOR EACH ROW
-    EXECUTE FUNCTION api.validate_endpoint_model_file();
-
-
 CREATE OR REPLACE FUNCTION api.validate_endpoint_replica_count()
 RETURNS TRIGGER AS $$
 BEGIN
