@@ -4,15 +4,9 @@
 CREATE OR REPLACE FUNCTION api.validate_model_registry_url()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF (NEW.spec).type = 'bentoml' AND ((NEW.spec).url IS NULL OR (NEW.spec).url = '') THEN
+    IF (NEW.spec).url IS NULL OR trim((NEW.spec).url) = '' THEN
         RAISE sqlstate 'PGRST'
-            USING message = '{"code": "10008","message": "spec.url is required","hint": "Provide file system path"}',
-            detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
-    END IF;
-
-    IF (NEW.spec).type = 'hugging-face' AND ((NEW.spec).url IS NULL OR (NEW.spec).url = '') THEN
-        RAISE sqlstate 'PGRST'
-            USING message = '{"code": "10008","message": "spec.url is required","hint": "Provide Hugging Face URL"}',
+            USING message = '{"code": "10011","message": "spec.url is required","hint": "Provide Model Registry URL"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
 
@@ -32,9 +26,9 @@ CREATE TRIGGER validate_model_registry_url_on_model_registry
 CREATE OR REPLACE FUNCTION api.validate_image_registry_url()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF (NEW.spec).url IS NULL OR (NEW.spec).url = '' THEN
+    IF (NEW.spec).url IS NULL OR trim((NEW.spec).url) = '' THEN
         RAISE sqlstate 'PGRST'
-            USING message = '{"code": "10009","message": "spec.url is required","hint": "Provide Image Registry URL"}',
+            USING message = '{"code": "10012","message": "spec.url is required","hint": "Provide Image Registry URL"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
 
@@ -53,9 +47,9 @@ CREATE TRIGGER validate_image_registry_url_on_image_registry
 CREATE OR REPLACE FUNCTION api.validate_image_registry_repo()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF (NEW.spec).repository IS NULL OR (NEW.spec).repository = '' THEN
+    IF (NEW.spec).repository IS NULL OR trim((NEW.spec).repository) = '' THEN
         RAISE sqlstate 'PGRST'
-            USING message = '{"code": "10010","message": "spec.repository is required","hint": "Provide Image Registry Repo"}',
+            USING message = '{"code": "10013","message": "spec.repository is required","hint": "Provide Image Registry Repo"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
 
