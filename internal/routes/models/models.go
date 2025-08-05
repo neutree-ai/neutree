@@ -68,8 +68,7 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 
 	// Create JWT middleware
 	authMiddleware := middleware.Auth(middleware.Dependencies{
-		Config:  deps.AuthConfig,
-		Storage: deps.Storage,
+		Config: deps.AuthConfig,
 	})
 
 	// Workspace-scoped model registry routes with authentication
