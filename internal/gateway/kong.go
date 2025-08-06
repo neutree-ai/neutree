@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -397,7 +398,7 @@ func (k *Kong) syncEndpointService(ep *v1.Endpoint) (*kong.Service, error) {
 		Host:        pointy.String(url.Hostname()),
 		Port:        pointy.Int(8000),
 		Protocol:    &url.Scheme,
-		Path:        pointy.String("/" + ep.Metadata.Name),
+		Path:        pointy.String(fmt.Sprintf("/%s/%s", ep.Metadata.Workspace, ep.Metadata.Name)),
 		ReadTimeout: pointy.Int(60000 * 60),
 	}
 
