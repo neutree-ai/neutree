@@ -98,7 +98,7 @@ BEGIN
         END IF;
 
         -- Validate memory format follows Kubernetes convention (e.g., 4Gi, 512Mi)
-        IF NOT (NEW.spec).config->'head_node_spec'->'resources'->>'memory' ~ '^[0-9]+([.][0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|[kKMGTPE]i?)?$' THEN
+        IF NOT (NEW.spec).config->'head_node_spec'->'resources'->>'memory' ~ '^[0-9]+([.][0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|[kKMGTPE]i?)$' THEN
             RAISE sqlstate 'PGRST'
                 USING message = '{"code": "10114","message": "head_node_spec.resources.memory must follow Kubernetes format (e.g., 4Gi, 512Mi)","hint": "Provide memory in correct format like 4Gi, 512Mi, 2Ti"}',
                 detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
@@ -106,45 +106,36 @@ BEGIN
         
         -- Check for accelerator resource fields (gpus or other accelerators)
         -- Since we don't know the exact key name, we validate any key that's not cpu or memory
-        DECLARE
-            resources_keys TEXT[];
-            res_key TEXT;
-            res_val TEXT;
-            is_integer BOOLEAN;
-            resource_as_int INTEGER;
-        BEGIN
-            -- Get array of keys from the resources object
-            SELECT array_agg(key) INTO resources_keys
-            FROM json_object_keys((NEW.spec).config->'head_node_spec'->'resources') AS key;
-            
-            -- For each key that's not cpu or memory
-            FOREACH res_key IN ARRAY resources_keys LOOP
-                IF res_key != 'cpu' AND res_key != 'memory' THEN
-                    res_val := (NEW.spec).config->'head_node_spec'->'resources'->>(res_key);
-                    
-                    -- Check if the value is an integer
-                    BEGIN
-                        resource_as_int := res_val::INTEGER;
-                        is_integer := TRUE;
-                    EXCEPTION WHEN others THEN
-                        is_integer := FALSE;
-                    END;
-                    
-                    -- Raise error if not an integer or if value < 1
-                    IF NOT is_integer THEN
-                        RAISE sqlstate 'PGRST'
-                            USING message = format('{"code": "10110","message": "head_node_spec.resources.%s must be an integer","hint": "Provide integer value for %s"}', res_key, res_key),
-                            detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
-                    ELSIF resource_as_int < 1 THEN
-                        RAISE sqlstate 'PGRST'
-                            USING message = format('{"code": "10111","message": "head_node_spec.resources.%s must be at least 1","hint": "Provide value >= 1 for %s"}', res_key, res_key),
-                            detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
-                    END IF;
+        -- Get array of keys from the resources object
+        SELECT array_agg(key) INTO resources_keys
+        FROM json_object_keys((NEW.spec).config->'head_node_spec'->'resources') AS key;
+        
+        -- For each key that's not cpu or memory
+        FOREACH res_key IN ARRAY resources_keys LOOP
+            IF res_key != 'cpu' AND res_key != 'memory' THEN
+                res_val := (NEW.spec).config->'head_node_spec'->'resources'->>(res_key);
+                
+                -- Check if the value is an integer
+                BEGIN
+                    resource_as_int := res_val::INTEGER;
+                    is_integer := TRUE;
+                EXCEPTION WHEN others THEN
+                    is_integer := FALSE;
+                END;
+                
+                -- Raise error if not an integer or if value < 1
+                IF NOT is_integer THEN
+                    RAISE sqlstate 'PGRST'
+                        USING message = format('{"code": "10110","message": "head_node_spec.resources.%s must be an integer","hint": "Provide integer value for %s"}', res_key, res_key),
+                        detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
+                ELSIF resource_as_int < 1 THEN
+                    RAISE sqlstate 'PGRST'
+                        USING message = format('{"code": "10111","message": "head_node_spec.resources.%s must be at least 1","hint": "Provide value >= 1 for %s"}', res_key, res_key),
+                        detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
                 END IF;
-            END LOOP;
-        END;
+            END IF;
+        END LOOP;
 
-        ----
 
 
         -- Check for required worker node spec
@@ -185,7 +176,7 @@ BEGIN
         END IF;
 
         -- Validate worker memory format follows Kubernetes convention (e.g., 4Gi, 512Mi)
-        IF NOT (NEW.spec).config->'worker_group_specs'->0->'resources'->>'memory' ~ '^[0-9]+([.][0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|[kKMGTPE]i?)?$' THEN
+        IF NOT (NEW.spec).config->'worker_group_specs'->0->'resources'->>'memory' ~ '^[0-9]+([.][0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei)$' THEN
             RAISE sqlstate 'PGRST'
                 USING message = '{"code": "10115","message": "worker_group_specs[0].resources.memory must follow Kubernetes format (e.g., 4Gi, 512Mi)","hint": "Provide memory in correct format like 4Gi, 512Mi, 2Ti"}',
                 detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
