@@ -72,20 +72,20 @@ class Backend:
         # Store model info
         self.model_id = f"{model_name}:{model_version}"
 
+        self.llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
+
     async def generate(self, payload: Any):
-        llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
         if "messages" in payload:
             # Chat completion
-            response = llama.create_chat_completion(**payload)
+            response = self.llama.create_chat_completion(**payload)
             return response
         else:
             # Regular completion
-            response = llama.create_completion(**payload)
+            response = self.llama.create_completion(**payload)
             return response
 
     async def generate_embeddings(self, payload: Any):
-        llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
-        response = llama.create_embedding(**payload)
+        response = self.llama.create_embedding(**payload)
         return response
 
     async def show_available_models(self) -> Dict[str, Any]:

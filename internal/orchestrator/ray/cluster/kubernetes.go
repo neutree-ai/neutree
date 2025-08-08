@@ -810,7 +810,6 @@ func (c *kubeRayClusterManager) mutateModelCaches(podTemplate *corev1.PodTemplat
 		SecurityContext: &corev1.SecurityContext{
 			Privileged: pointy.Bool(true),
 		},
-		VolumeMounts: []corev1.VolumeMount{},
 	}
 
 	for _, modelCache := range modelCaches {
