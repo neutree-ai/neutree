@@ -82,7 +82,7 @@ BEGIN
     IF (NEW.spec).model.registry IS NULL OR trim((NEW.spec).model.registry) = ''
     THEN
         RAISE sqlstate 'PGRST'
-            USING message = '{"code": "10011","message": "spec.model.registry is required","hint": "Provide model registry"}',
+            USING message = '{"code": "10009","message": "spec.model.registry is required","hint": "Provide model registry"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
 
