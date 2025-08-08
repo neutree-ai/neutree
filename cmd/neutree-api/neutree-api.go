@@ -11,6 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/internal/routes/admin"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
@@ -62,6 +63,12 @@ func main() {
 	authConfig := middleware.AuthConfig{
 		JwtSecret: *storageJwtSecret,
 	}
+
+	// Register admin routes FIRST (before catch-all proxy routes)
+	admin.RegisterRoutes(r, &admin.Dependencies{
+		AuthConfig:   authConfig,
+		AuthEndpoint: *authEndpoint,
+	})
 
 	// Register routes with authentication configuration
 	models.RegisterRoutes(r, &models.Dependencies{
