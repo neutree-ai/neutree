@@ -36,7 +36,7 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	adminGroup.Use(middleware.Auth(middleware.Dependencies{
 		Config: deps.AuthConfig,
 	}))
-	
+
 	adminGroup.POST("/users", createUser(deps))
 }
 
@@ -55,12 +55,10 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// TODO: Check against your RBAC system in the database
-
 		gotureUser := map[string]interface{}{
 			"email":         reqData.Email,
 			"password":      reqData.Password,
-			"email_confirm": true, // Auto-confirm emails for admin-created users
+			"email_confirm": true,
 		}
 
 		if reqData.Username != "" {
@@ -100,6 +98,7 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 			return
 		}
+
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
@@ -120,7 +119,10 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 // createServiceRoleToken creates a JWT token with service_role claim for GoTrue admin API
 func createServiceRoleToken(jwtSecret string) (string, error) {
 	token := jwt.New(jwt.SigningMethodHS256)
-	claims := token.Claims.(jwt.MapClaims)
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", fmt.Errorf("failed to create claims")
+	}
 	claims["role"] = "service_role"
 	claims["iss"] = "neutree"
 	claims["iat"] = time.Now().Unix()

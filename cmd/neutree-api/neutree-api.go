@@ -64,7 +64,7 @@ func main() {
 		JwtSecret: *storageJwtSecret,
 	}
 
-	// Register admin routes FIRST (before catch-all proxy routes)
+	// Register admin routes
 	admin.RegisterRoutes(r, &admin.Dependencies{
 		AuthConfig:   authConfig,
 		AuthEndpoint: *authEndpoint,
