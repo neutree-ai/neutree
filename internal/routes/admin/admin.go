@@ -45,13 +45,13 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var reqData CreateUserRequest
 
-		if reqData.Username == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
+		if err := c.ShouldBindJSON(&reqData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		if err := c.ShouldBindJSON(&reqData); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if reqData.Username == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
 			return
 		}
 
@@ -64,7 +64,7 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 		// Create GoTrue client and set service role token
 		tokenStr, err := createServiceRoleToken(deps.AuthConfig.JwtSecret)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token."})
 			return
 		}
 
