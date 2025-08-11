@@ -67,8 +67,8 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token: " + err.Error()})
 			return
 		}
-		client := gotrue.New("", "").WithCustomGoTrueURL(deps.AuthEndpoint).WithToken(tokenStr)
 
+		client := gotrue.New("", "").WithCustomGoTrueURL(deps.AuthEndpoint).WithToken(tokenStr)
 		userParams := types.AdminCreateUserRequest{
 			Email:        reqData.Email,
 			Password:     &reqData.Password,
@@ -100,6 +100,9 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 
 // createServiceRoleToken creates a JWT token with service_role claim for GoTrue admin API
 func createServiceRoleToken(jwtSecret string) (string, error) {
+	const (
+		JWTServiceRoleTokenExpiry = time.Hour
+	)
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims, ok := token.Claims.(jwt.MapClaims)
 
@@ -110,7 +113,7 @@ func createServiceRoleToken(jwtSecret string) (string, error) {
 	claims["role"] = "service_role"
 	claims["iss"] = "neutree"
 	claims["iat"] = time.Now().Unix()
-	claims["exp"] = time.Now().Add(time.Hour).Unix()
+	claims["exp"] = time.Now().Add(JWTServiceRoleTokenExpiry).Unix()
 
 	tokenString, err := token.SignedString([]byte(jwtSecret))
 	if err != nil {
