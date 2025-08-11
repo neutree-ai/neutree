@@ -1,14 +1,14 @@
 package admin
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/supabase-community/gotrue-go"
+	"github.com/supabase-community/gotrue-go/types"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
 )
@@ -44,77 +44,57 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 func createUser(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var reqData CreateUserRequest
+
+		if reqData.Username == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
+			return
+		}
+
 		if err := c.ShouldBindJSON(&reqData); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Check if current user has admin permissions
-		_, exists := middleware.GetUserID(c)
-		if !exists {
+		// Ensure current user is authenticated (admin check can be added here)
+		if _, exists := middleware.GetUserID(c); !exists {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
 			return
 		}
 
-		gotureUser := map[string]interface{}{
-			"email":         reqData.Email,
-			"password":      reqData.Password,
-			"email_confirm": true,
+		// Create GoTrue client and set service role token
+		tokenStr, err := createServiceRoleToken(deps.AuthConfig.JwtSecret)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token: " + err.Error()})
+			return
 		}
+		client := gotrue.New("", "").WithCustomGoTrueURL(deps.AuthEndpoint).WithToken(tokenStr)
 
-		if reqData.Username != "" {
-			gotureUser["user_metadata"] = map[string]string{
+		userParams := types.AdminCreateUserRequest{
+			Email:        reqData.Email,
+			Password:     &reqData.Password,
+			EmailConfirm: true,
+			UserMetadata: map[string]any{
 				"username": reqData.Username,
-			}
+			},
 		}
 
-		jsonData, err := json.Marshal(gotureUser)
+		user, err := client.AdminCreateUser(userParams)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Call GoTrue admin endpoint with service role token
-		adminURL := fmt.Sprintf("%s/admin/users", deps.AuthEndpoint)
-
-		// Create service role JWT token for GoTrue admin API
-		serviceToken, err := createServiceRoleToken(deps.AuthConfig.JwtSecret)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token"})
-			return
+		resp := CreateUserResponse{
+			ID:       user.ID.String(),
+			Email:    user.Email,
+			Username: "",
 		}
 
-		httpReq, err := http.NewRequest("POST", adminURL, bytes.NewBuffer(jsonData))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
-			return
+		if val, ok := user.UserMetadata["username"].(string); ok {
+			resp.Username = val
 		}
 
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+serviceToken)
-
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(httpReq)
-
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
-			return
-		}
-
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-			c.JSON(resp.StatusCode, gin.H{"error": "Failed to create user in auth service"})
-			return
-		}
-
-		var createdUser CreateUserResponse
-		if err := json.NewDecoder(resp.Body).Decode(&createdUser); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse response"})
-			return
-		}
-
-		c.JSON(http.StatusCreated, createdUser)
+		c.JSON(http.StatusCreated, resp)
 	}
 }
 
