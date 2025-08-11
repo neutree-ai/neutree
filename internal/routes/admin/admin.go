@@ -61,6 +61,18 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Validate AuthEndpoint is configured
+		if deps.AuthEndpoint == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Auth endpoint not configured"})
+			return
+		}
+
+		// Validate JWT secret is configured
+		if deps.AuthConfig.JwtSecret == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "JWT secret not configured"})
+			return
+		}
+
 		// Create GoTrue client and set service role token
 		tokenStr, err := createServiceRoleToken(deps.AuthConfig.JwtSecret)
 		if err != nil {
