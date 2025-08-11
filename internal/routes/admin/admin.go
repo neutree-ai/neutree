@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
+
 	"github.com/neutree-ai/neutree/internal/middleware"
 )
 
@@ -94,6 +95,7 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 
 		client := &http.Client{Timeout: 30 * time.Second}
 		resp, err := client.Do(httpReq)
+
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 			return
@@ -120,9 +122,11 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 func createServiceRoleToken(jwtSecret string) (string, error) {
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims, ok := token.Claims.(jwt.MapClaims)
+
 	if !ok {
 		return "", fmt.Errorf("failed to create claims")
 	}
+
 	claims["role"] = "service_role"
 	claims["iss"] = "neutree"
 	claims["iat"] = time.Now().Unix()
