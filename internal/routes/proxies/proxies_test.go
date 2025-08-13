@@ -37,8 +37,13 @@ func createMockContext(method, path string, body string) (*gin.Context, *httptes
 	// Parse URL path parameters
 	parts := strings.Split(path, "/")
 	if len(parts) >= 4 {
-		name := parts[4] // Extract name from URL pattern /api/v1/xxx-proxy/:name/*path
+		workspace := parts[4] // Extract workspace from URL pattern /api/v1/xxx-proxy/:workspace/:name/*path
+		name := parts[5]      // Extract name from URL pattern /api/v1/xxx-proxy/:workspace/:name/*path
 		c.Params = []gin.Param{
+			{
+				Key:   "workspace",
+				Value: workspace,
+			},
 			{
 				Key:   "name",
 				Value: name,
@@ -100,7 +105,7 @@ func TestHandleServeProxy_MissingName(t *testing.T) {
 	}
 
 	// Create test context without name
-	c, w := createMockContext("GET", "/api/v1/serve-proxy/", "")
+	c, w := createMockContext("GET", "/api/v1/serve-proxy/default/", "")
 
 	// Call the handler function directly
 	handlerFunc := handleServeProxy(deps)
@@ -129,7 +134,7 @@ func TestHandleServeProxy_EndpointNotFound(t *testing.T) {
 	mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil)
 
 	// Create test context
-	c, w := createMockContext("GET", "/api/v1/serve-proxy/non-existent-endpoint", "")
+	c, w := createMockContext("GET", "/api/v1/serve-proxy/default/non-existent-endpoint/", "")
 
 	// Call the handler function directly
 	handlerFunc := handleServeProxy(deps)
@@ -161,7 +166,7 @@ func TestHandleServeProxy_StorageError(t *testing.T) {
 	mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, mockError)
 
 	// Create test context
-	c, w := createMockContext("GET", "/api/v1/serve-proxy/test-endpoint", "")
+	c, w := createMockContext("GET", "/api/v1/serve-proxy/default/test-endpoint", "")
 
 	// Call the handler function directly
 	handlerFunc := handleServeProxy(deps)
@@ -208,7 +213,7 @@ func TestHandleServeProxy_MissingClusterDashboardURL(t *testing.T) {
 	}}, nil)
 
 	// Create test context
-	c, w := createMockContext("GET", "/api/v1/serve-proxy/test-endpoint", "")
+	c, w := createMockContext("GET", "/api/v1/serve-proxy/default/test-endpoint", "")
 
 	// Call the handler function directly
 	handlerFunc := handleServeProxy(deps)
@@ -236,7 +241,7 @@ func TestHandleRayDashboardProxy_MissingName(t *testing.T) {
 	}
 
 	// Create test context without name
-	c, w := createMockContext("GET", "/api/v1/ray-dashboard-proxy/", "")
+	c, w := createMockContext("GET", "/api/v1/ray-dashboard-proxy/default/", "")
 
 	// Call the handler function directly
 	handlerFunc := handleRayDashboardProxy(deps)
@@ -265,7 +270,7 @@ func TestHandleRayDashboardProxy_ClusterNotFound(t *testing.T) {
 	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
 
 	// Create test context
-	c, w := createMockContext("GET", "/api/v1/ray-dashboard-proxy/non-existent-cluster", "")
+	c, w := createMockContext("GET", "/api/v1/ray-dashboard-proxy/default/non-existent-cluster", "")
 
 	// Call the handler function directly
 	handlerFunc := handleRayDashboardProxy(deps)
@@ -297,7 +302,7 @@ func TestHandleRayDashboardProxy_StorageError(t *testing.T) {
 	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, mockError)
 
 	// Create test context
-	c, w := createMockContext("GET", "/api/v1/ray-dashboard-proxy/test-cluster", "")
+	c, w := createMockContext("GET", "/api/v1/ray-dashboard-proxy/default/test-cluster", "")
 
 	// Call the handler function directly
 	handlerFunc := handleRayDashboardProxy(deps)
@@ -335,7 +340,7 @@ func TestHandleRayDashboardProxy_MissingDashboardURL(t *testing.T) {
 	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
 
 	// Create test context
-	c, w := createMockContext("GET", "/api/v1/ray-dashboard-proxy/test-cluster", "")
+	c, w := createMockContext("GET", "/api/v1/ray-dashboard-proxy/default/test-cluster", "")
 
 	// Call the handler function directly
 	handlerFunc := handleRayDashboardProxy(deps)
