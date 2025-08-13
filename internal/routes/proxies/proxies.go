@@ -60,9 +60,8 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 		Config: deps.AuthConfig,
 	})
 
-	// todo: support workspace
-	r.Any("/api/v1/serve-proxy/:name/*path", authMiddleware, handleServeProxy(deps))
-	r.Any("/api/v1/ray-dashboard-proxy/:name/*path", handleRayDashboardProxy(deps))
+	r.Any("/api/v1/serve-proxy/:workspace/:name/*path", authMiddleware, handleServeProxy(deps))
+	r.Any("/api/v1/ray-dashboard-proxy/:workspace/:name/*path", handleRayDashboardProxy(deps))
 
 	r.Any("/api/v1/auth/:path", handleAuthProxy(deps))
 	r.Any("/api/v1/:path", handlePostgrestProxy(deps))
@@ -80,12 +79,26 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		workspace := c.Param("workspace")
+		if workspace == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "workspace is required",
+			})
+
+			return
+		}
+
 		endpoints, err := deps.Storage.ListEndpoint(storage.ListOption{
 			Filters: []storage.Filter{
 				{
 					Column:   "metadata->name",
 					Operator: "eq",
 					Value:    strconv.Quote(name),
+				},
+				{
+					Column:   "metadata->workspace",
+					Operator: "eq",
+					Value:    strconv.Quote(workspace),
 				},
 			},
 		})
@@ -161,7 +174,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		serviceURL := fmt.Sprintf("%s://%s:%d/%s", url.Scheme, url.Hostname(), 8000, endpoints[0].Metadata.Name)
+		serviceURL := fmt.Sprintf("%s://%s:%d/%s/%s", url.Scheme, url.Hostname(), 8000, workspace, endpoints[0].Metadata.Name)
 
 		path := c.Param("path")
 		if path != "" && path[0] == '/' {
@@ -210,12 +223,26 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		workspace := c.Param("workspace")
+		if workspace == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "workspace is required",
+			})
+
+			return
+		}
+
 		clusters, err := deps.Storage.ListCluster(storage.ListOption{
 			Filters: []storage.Filter{
 				{
 					Column:   "metadata->name",
 					Operator: "eq",
 					Value:    strconv.Quote(name),
+				},
+				{
+					Column:   "metadata->workspace",
+					Operator: "eq",
+					Value:    strconv.Quote(workspace),
 				},
 			},
 		})
