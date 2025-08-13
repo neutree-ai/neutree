@@ -23,7 +23,7 @@ transforms:
           .extracted_data.status = .response.status
           .extracted_data.api_version =.request.api_version
           .extracted_data.url_spilt = split!(.request.uri, "/")
-          .extracted_data.model = join!([.extracted_data.url_spilt[2], .extracted_data.url_spilt[4], .ai."statistics".meta.response_model], separator: ".")
+          .extracted_data.endpoint_name = .extracted_data.url_spilt[4]  # endpoint name from /workspace/{workspace}/endpoint/{endpoint_name}
           .extracted_data.api_key_id = .consumer.custom_id
 
           if to_int!(.extracted_data.total_tokens) > 0 {
@@ -48,7 +48,7 @@ transforms:
           "p_api_key_id": .extracted_data.api_key_id,
           "p_request_id": .extracted_data.request_id,
           "p_usage_amount": .extracted_data.total_tokens,
-          "p_model": .extracted_data.model
+          "p_endpoint_name": .extracted_data.endpoint_name
       }
 sinks:
   postgrest_rpc:
