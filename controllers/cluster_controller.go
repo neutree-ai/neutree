@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -10,7 +9,6 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -25,8 +23,6 @@ import (
 )
 
 type ClusterController struct {
-	baseController *BaseController
-
 	storage               storage.Storage
 	imageService          registry.ImageService
 	defaultClusterVersion string
@@ -45,7 +41,6 @@ type ClusterController struct {
 type ClusterControllerOption struct {
 	ImageService          registry.ImageService
 	Storage               storage.Storage
-	Workers               int
 	DefaultClusterVersion string
 	MetricsRemoteWriteURL string
 
@@ -56,13 +51,6 @@ type ClusterControllerOption struct {
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
 	c := &ClusterController{
-		baseController: &BaseController{
-			//nolint:staticcheck
-			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
-				workqueue.RateLimitingQueueConfig{Name: "cluster"}),
-			workers:      opt.Workers,
-			syncInterval: time.Second * 10,
-		},
 		storage:               opt.Storage,
 		imageService:          opt.ImageService,
 		defaultClusterVersion: opt.DefaultClusterVersion,
@@ -77,11 +65,6 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 	c.syncHandler = c.sync
 
 	return c, nil
-}
-
-func (c *ClusterController) Start(ctx context.Context) {
-	klog.Infof("Starting cluster controller")
-	c.baseController.Start(ctx, c, c)
 }
 
 func (c *ClusterController) ListKeys() ([]interface{}, error) {

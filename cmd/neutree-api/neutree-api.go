@@ -1,96 +1,54 @@
 package main
 
 import (
+	"context"
 	"flag"
-	"fmt"
-	"net/http"
 
-	"github.com/gin-contrib/static"
-	"github.com/gin-gonic/gin"
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
 
-	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/internal/routes/models"
-	"github.com/neutree-ai/neutree/internal/routes/proxies"
-	"github.com/neutree-ai/neutree/internal/routes/system"
-	"github.com/neutree-ai/neutree/internal/util"
-	"github.com/neutree-ai/neutree/pkg/storage"
-)
-
-var (
-	port             = flag.Int("port", 3000, "API server port")
-	host             = flag.String("host", "0.0.0.0", "API server host")
-	storageAccessURL = flag.String("storage-access-url", "http://postgrest:6432", "postgrest url")
-	storageJwtSecret = flag.String("storage-jwt-secret", "", "storage auth token (JWT_SECRET)")
-	ginMode          = flag.String("gin-mode", "release", "gin mode: debug, release, test")
-	staticDir        = flag.String("static-dir", "./public", "directory for static files")
-	authEndpoint     = flag.String("auth-endpoint", "http://auth:9999", "auth service endpoint")
-	grafanaURL       = flag.String("grafana-url", "", "grafana url for system info API")
-	version          = flag.String("version", "dev", "application version for system info API")
-	deployType       = flag.String("deploy-type", "local", "deploy type")
+	"github.com/neutree-ai/neutree/cmd/neutree-api/app"
+	"github.com/neutree-ai/neutree/cmd/neutree-api/app/options"
 )
 
 func main() {
 	klog.InitFlags(nil)
 	defer klog.Flush()
 
+	// Initialize options
+	opts := options.NewOptions()
+
+	// Add flags from options
+	opts.AddFlags(pflag.CommandLine)
+
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
-	gin.SetMode(*ginMode)
+	// Validate options
+	if err := opts.Validate(); err != nil {
+		klog.Fatalf("Options validation failed: %s", err.Error())
+	}
 
-	r := gin.Default()
-
-	r.Use(static.Serve("/", static.LocalFile(*staticDir, true)))
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
-		})
-	})
-
-	s, err := storage.New(storage.Options{
-		AccessURL: *storageAccessURL,
-		Scheme:    "api",
-		JwtSecret: *storageJwtSecret,
-	})
+	// Convert options to configuration
+	config, err := opts.Config()
 	if err != nil {
-		klog.Fatalf("Failed to init storage: %s", err.Error())
+		klog.Fatalf("Failed to create configuration: %s", err.Error())
 	}
 
-	// Configure JWT authentication
-	authConfig := middleware.AuthConfig{
-		JwtSecret: *storageJwtSecret,
-	}
+	// Create and build application
+	builder := app.NewBuilder().WithConfig(config)
 
-	// Register routes with authentication configuration
-	models.RegisterRoutes(r, &models.Dependencies{
-		Storage:    s,
-		AuthConfig: authConfig,
-	})
-
-	proxies.RegisterRoutes(r, &proxies.Dependencies{
-		Storage:          s,
-		StorageAccessURL: *storageAccessURL,
-		AuthEndpoint:     *authEndpoint,
-		AuthConfig:       authConfig,
-	})
-
-	grafanaExternalURL, err := util.GetExternalAccessUrl(*deployType, *grafanaURL)
+	application, err := builder.Build()
 	if err != nil {
-		klog.Fatalf("Failed to get grafana external url: %s", err.Error())
+		klog.Fatalf("Failed to build application: %s", err.Error())
 	}
 
-	system.RegisterRoutes(r, &system.Dependencies{
-		GrafanaURL: grafanaExternalURL,
-		Version:    *version,
-		AuthConfig: authConfig,
-	})
+	// Run application
+	// Create context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	serverAddr := fmt.Sprintf("%s:%d", *host, *port)
-	klog.Infof("Starting API server on %s", serverAddr)
-
-	if err := r.Run(serverAddr); err != nil {
-		klog.Fatalf("Failed to start API server: %s", err.Error())
+	if err := application.Run(ctx); err != nil {
+		klog.Fatalf("Failed to run application: %s", err.Error())
 	}
 }

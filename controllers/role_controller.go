@@ -1,12 +1,10 @@
 package controllers
 
 import (
-	"context"
 	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -14,37 +12,22 @@ import (
 )
 
 type RoleController struct {
-	baseController *BaseController
-
 	storage     storage.Storage
 	syncHandler func(role *v1.Role) error // Added syncHandler field
 }
 
 type RoleControllerOption struct {
 	Storage storage.Storage
-	Workers int
 }
 
 func NewRoleController(option *RoleControllerOption) (*RoleController, error) {
 	c := &RoleController{
-		baseController: &BaseController{
-			//nolint:staticcheck
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "role"}),
-			workers:      option.Workers,
-			syncInterval: time.Second * 10,
-		},
 		storage: option.Storage,
 	}
 
 	c.syncHandler = c.sync
 
 	return c, nil
-}
-
-func (c *RoleController) Start(ctx context.Context) {
-	klog.Infof("Starting role controller")
-
-	c.baseController.Start(ctx, c, c)
 }
 
 func (c *RoleController) Reconcile(key interface{}) error {
