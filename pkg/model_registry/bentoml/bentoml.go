@@ -20,6 +20,7 @@ import (
 	"github.com/klauspost/pgzip"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -182,6 +183,11 @@ func ListModels(homePath string) ([]Model, error) {
 
 	stat, err := os.Stat(root)
 	if err != nil {
+		if os.IsNotExist(err) {
+			klog.Warningf("Model store %s not found, returning empty list", root)
+			return []Model{}, nil
+		}
+
 		return nil, errors.Wrap(err, "model store not found")
 	}
 
