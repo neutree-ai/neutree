@@ -185,7 +185,7 @@ func ListModels(homePath string) ([]Model, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			klog.Warningf("Model store %s not found, returning empty list", root)
-			return nil, nil
+			return []Model{}, nil
 		}
 
 		return nil, errors.Wrap(err, "model store not found")
