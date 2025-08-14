@@ -1,12 +1,10 @@
 package controllers
 
 import (
-	"context"
 	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -14,8 +12,6 @@ import (
 )
 
 type ModelCatalogController struct {
-	baseController *BaseController
-
 	storage storage.Storage
 
 	syncHandler func(modelCatalog *v1.ModelCatalog) error
@@ -23,29 +19,16 @@ type ModelCatalogController struct {
 
 type ModelCatalogControllerOption struct {
 	Storage storage.Storage
-	Workers int
 }
 
 func NewModelCatalogController(opt *ModelCatalogControllerOption) (*ModelCatalogController, error) {
 	c := &ModelCatalogController{
-		baseController: &BaseController{
-			//nolint:staticcheck
-			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
-				workqueue.RateLimitingQueueConfig{Name: "modelcatalog"}),
-			workers:      opt.Workers,
-			syncInterval: time.Second * 10,
-		},
 		storage: opt.Storage,
 	}
 
 	c.syncHandler = c.sync
 
 	return c, nil
-}
-
-func (c *ModelCatalogController) Start(ctx context.Context) {
-	klog.Infof("Starting model catalog controller")
-	c.baseController.Start(ctx, c, c)
 }
 
 func (c *ModelCatalogController) ListKeys() ([]interface{}, error) {

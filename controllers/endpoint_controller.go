@@ -1,12 +1,10 @@
 package controllers
 
 import (
-	"context"
 	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -18,8 +16,6 @@ import (
 )
 
 type EndpointController struct {
-	baseController *BaseController
-
 	storage      storage.Storage
 	imageService registry.ImageService
 	syncHandler  func(endpoint *v1.Endpoint) error // Added syncHandler field
@@ -31,7 +27,6 @@ type EndpointController struct {
 type EndpointControllerOption struct {
 	ImageService registry.ImageService
 	Storage      storage.Storage
-	Workers      int
 
 	Gw                 gateway.Gateway
 	AcceleratorManager accelerator.Manager
@@ -39,12 +34,6 @@ type EndpointControllerOption struct {
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
 	c := &EndpointController{
-		baseController: &BaseController{
-			//nolint:staticcheck
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "endpoint"}),
-			workers:      option.Workers,
-			syncInterval: time.Second * 10,
-		},
 		storage:            option.Storage,
 		imageService:       option.ImageService,
 		gw:                 option.Gw,
@@ -54,12 +43,6 @@ func NewEndpointController(option *EndpointControllerOption) (*EndpointControlle
 	c.syncHandler = c.sync
 
 	return c, nil
-}
-
-func (c *EndpointController) Start(ctx context.Context) {
-	klog.Infof("Starting endpoint controller")
-
-	c.baseController.Start(ctx, c, c)
 }
 
 func (c *EndpointController) Reconcile(key interface{}) error {
