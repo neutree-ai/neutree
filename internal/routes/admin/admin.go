@@ -73,11 +73,10 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 
 		// Create GoTrue client and set service role token
 		tokenPtr, err := storage.CreateServiceToken(deps.AuthConfig.JwtSecret)
-        
 		if err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token."})
-            return
-        }
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token."})
+			return
+		}
 
 		client := gotrue.New("", "").WithCustomGoTrueURL(deps.AuthEndpoint).WithToken(*tokenPtr)
 		userParams := types.AdminCreateUserRequest{
