@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
@@ -15,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // createTestContext creates a test context for testing
@@ -47,7 +47,7 @@ func createTestContextWithAuth(method, path string, body interface{}) (*gin.Cont
 	return c, w
 }
 
-func TestCreateServiceRoleToken(t *testing.T) {
+func TestCreateServiceToken(t *testing.T) {
 	tests := []struct {
 		name      string
 		jwtSecret string
@@ -67,17 +67,19 @@ func TestCreateServiceRoleToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			token, err := createServiceRoleToken(tt.jwtSecret)
+			tokenPtr, err := storage.CreateServiceToken(tt.jwtSecret)
 
 			if tt.wantErr {
 				assert.Error(t, err)
-				assert.Empty(t, token)
+				assert.Nil(t, tokenPtr)
 			} else {
 				assert.NoError(t, err)
-				assert.NotEmpty(t, token)
+				if assert.NotNil(t, tokenPtr) {
+					assert.NotEmpty(t, *tokenPtr)
+				}
 
 				// Verify token can be parsed and has correct claims
-				parsedToken, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+				parsedToken, err := jwt.Parse(*tokenPtr, func(token *jwt.Token) (interface{}, error) {
 					return []byte(tt.jwtSecret), nil
 				})
 
@@ -87,14 +89,6 @@ func TestCreateServiceRoleToken(t *testing.T) {
 				claims, ok := parsedToken.Claims.(jwt.MapClaims)
 				assert.True(t, ok)
 				assert.Equal(t, "service_role", claims["role"])
-				assert.Equal(t, "neutree", claims["iss"])
-				assert.NotNil(t, claims["iat"])
-				assert.NotNil(t, claims["exp"])
-
-				// Verify expiry is approximately 1 hour from now
-				exp := int64(claims["exp"].(float64))
-				expectedExp := time.Now().Add(time.Hour).Unix()
-				assert.InDelta(t, expectedExp, exp, 10) // Allow 10 seconds tolerance
 			}
 		})
 	}

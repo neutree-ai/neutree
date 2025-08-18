@@ -1,16 +1,14 @@
 package admin
 
 import (
-	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v4"
 	"github.com/supabase-community/gotrue-go"
 	"github.com/supabase-community/gotrue-go/types"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type Dependencies struct {
@@ -74,13 +72,13 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		// Create GoTrue client and set service role token
-		tokenStr, err := createServiceRoleToken(deps.AuthConfig.JwtSecret)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token."})
-			return
-		}
+		tokenPtr, err := storage.CreateServiceToken(deps.AuthConfig.JwtSecret)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create service token."})
+            return
+        }
 
-		client := gotrue.New("", "").WithCustomGoTrueURL(deps.AuthEndpoint).WithToken(tokenStr)
+		client := gotrue.New("", "").WithCustomGoTrueURL(deps.AuthEndpoint).WithToken(*tokenPtr)
 		userParams := types.AdminCreateUserRequest{
 			Email:        reqData.Email,
 			Password:     &reqData.Password,
@@ -108,29 +106,4 @@ func createUser(deps *Dependencies) gin.HandlerFunc {
 
 		c.JSON(http.StatusCreated, resp)
 	}
-}
-
-// createServiceRoleToken creates a JWT token with service_role claim for GoTrue admin API
-func createServiceRoleToken(jwtSecret string) (string, error) {
-	const (
-		JWTServiceRoleTokenExpiry = time.Hour
-	)
-	token := jwt.New(jwt.SigningMethodHS256)
-	claims, ok := token.Claims.(jwt.MapClaims)
-
-	if !ok {
-		return "", fmt.Errorf("failed to create claims")
-	}
-
-	claims["role"] = "service_role"
-	claims["iss"] = "neutree"
-	claims["iat"] = time.Now().Unix()
-	claims["exp"] = time.Now().Add(JWTServiceRoleTokenExpiry).Unix()
-
-	tokenString, err := token.SignedString([]byte(jwtSecret))
-	if err != nil {
-		return "", err
-	}
-
-	return tokenString, nil
 }
