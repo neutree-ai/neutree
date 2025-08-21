@@ -70,7 +70,7 @@ auth:
 migration:
   image:
     repository: migrate/migrate
-    tag: "latest"
+    tag: v4.18.3
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -83,7 +83,7 @@ migration:
 postgrest:
   image:
     repository: postgrest/postgrest
-    tag: "latest"
+    tag: v13.0.4
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -193,7 +193,7 @@ vector:
 jwtCli:
   image:
     repository: bitnami/jwt-cli
-    tag: "latest"
+    tag: 6.2.0
     pullPolicy: IfNotPresent
 
 victoria-metrics-cluster:
