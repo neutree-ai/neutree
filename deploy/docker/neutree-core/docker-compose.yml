@@ -60,7 +60,7 @@ services:
       retries: 10
 
   migration:
-    image: migrate/migrate
+    image: migrate/migrate:v4.18.3
     container_name: migration
     depends_on:
       auth:
@@ -92,7 +92,7 @@ services:
         condition: none
 
   postgrest:
-    image: postgrest/postgrest:latest
+    image: postgrest/postgrest:v13.0.4
     container_name: postgrest
     environment:
       PGRST_DB_URI: postgres://postgres:pgpassword@postgres:5432/aippp
