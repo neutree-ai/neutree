@@ -810,6 +810,16 @@ func (c *kubeRayClusterManager) mutateModelCaches(podTemplate *corev1.PodTemplat
 		SecurityContext: &corev1.SecurityContext{
 			Privileged: pointy.Bool(true),
 		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+		},
 		VolumeMounts: []corev1.VolumeMount{},
 	}
 
