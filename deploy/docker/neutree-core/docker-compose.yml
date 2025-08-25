@@ -133,7 +133,7 @@ services:
         condition: service_completed_successfully
 
   neutree-core:
-    image: neutree-ai/neutree-core:{{ .NeutreeCoreVersion}}
+    image: neutree/neutree-core:{{ .NeutreeCoreVersion}}
     container_name: neutree-core
     privileged: true
     cap_add:
@@ -165,7 +165,7 @@ services:
           condition: service_started
 
   neutree-api:
-    image: neutree-ai/neutree-api:{{ .NeutreeAPIVersion}}
+    image: neutree/neutree-api:{{ .NeutreeAPIVersion}}
     container_name: neutree-api
     privileged: true
     cap_add:
