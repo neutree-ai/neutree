@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
+	"k8s.io/klog"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
@@ -77,7 +78,10 @@ func (b *Builder) WithConfig(c *config.APIConfig) *Builder {
 
 // WithRoute registers a route
 func (b *Builder) WithRoute(name string, routeInit RouteFactory) *Builder {
+	klog.Info("Registering route:", name)
+
 	b.routeInits[name] = routeInit
+
 	return b
 }
 
@@ -131,10 +135,10 @@ func (b *Builder) Build() (*App, error) {
 		b.config.GinEngine.Use(mw(middlewareOptions))
 	}
 
-	middlewareHanleMap := make(map[string]gin.HandlerFunc)
+	middlewareHandleMap := make(map[string]gin.HandlerFunc)
 	// initialize middleware handlers
 	for name, factory := range b.middlewareInits {
-		middlewareHanleMap[name] = factory(middlewareOptions)
+		middlewareHandleMap[name] = factory(middlewareOptions)
 	}
 
 	// register static file serving middleware
@@ -153,7 +157,7 @@ func (b *Builder) Build() (*App, error) {
 
 		if routeMiddlewares, exists := b.routesToMiddlewares[name]; exists {
 			for _, mwName := range routeMiddlewares {
-				if mw, exists := middlewareHanleMap[mwName]; exists {
+				if mw, exists := middlewareHandleMap[mwName]; exists {
 					middlewares = append(middlewares, mw)
 				} else {
 					return nil, fmt.Errorf("middleware %s not found for route %s", mwName, name)
@@ -167,6 +171,7 @@ func (b *Builder) Build() (*App, error) {
 			Middlewares: middlewares,
 		}
 
+		klog.Info("Initializing route:", name)
 		factory(opts)
 	}
 
