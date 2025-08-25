@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty)
 
 IMAGE_REPO ?= docker.io
-IMAGE_PROJECT ?= neutree-ai
+IMAGE_PROJECT ?= neutree
 IMAGE_PREFIX ?= ${IMAGE_REPO}/${IMAGE_PROJECT}/
 IMAGE_TAG ?= ${shell echo $(VERSION) | awk -F '/' '{print $$NF}'}
 NEUTREE_SERVE_IMAGE := $(IMAGE_PREFIX)neutree-serve

@@ -5,7 +5,7 @@ CLUSTER_VERSION ?= v21
 LATEST ?= false
 
 IMAGE_REPO ?= docker.io
-IMAGE_PROJECT ?= neutree-ai
+IMAGE_PROJECT ?= neutree
 IMAGE_PREFIX ?= ${IMAGE_REPO}/${IMAGE_PROJECT}/
 IMAGE_TAG ?= ${shell echo $(VERSION) | awk -F '/' '{print $$NF}'}
 NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
