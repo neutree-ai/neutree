@@ -1007,7 +1007,7 @@ func TestGetRayTmpDir(t *testing.T) {
 		{
 			name:     "default value",
 			envValue: "",
-			expected: "/tmp/ray",
+			expected: filepath.Join(os.TempDir(), "ray"),
 		},
 		{
 			name:     "custom value",
