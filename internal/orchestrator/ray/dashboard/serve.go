@@ -87,7 +87,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 	maps.Copy(args, endpoint.Spec.Variables)
 
 	app := RayServeApplication{
-		Name:        fmt.Sprintf("%s_%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
+		Name:        EndpointToServeApplicationName(endpoint),
 		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
 		ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"), endpoint.Spec.Engine.Version),
 		Args:        args,
@@ -152,4 +152,8 @@ func FormatServiceURL(cluster *v1.Cluster, endpoint *v1.Endpoint) (string, error
 	}
 	// Ray serve applications are typically exposed on port 8000 by default
 	return fmt.Sprintf("%s://%s:8000/%s/%s", dashboardURL.Scheme, dashboardURL.Hostname(), endpoint.Metadata.Workspace, endpoint.Metadata.Name), nil
+}
+
+func EndpointToServeApplicationName(endpoint *v1.Endpoint) string {
+	return fmt.Sprintf("%s_%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
 }

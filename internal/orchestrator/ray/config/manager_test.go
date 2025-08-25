@@ -16,7 +16,7 @@ func TestNewManager(t *testing.T) {
 	clusterName := "test-cluster"
 	manager := NewManager(clusterName)
 
-	expectedDir := filepath.Join("/tmp", "ray_cluster", clusterName)
+	expectedDir := filepath.Join(os.TempDir(), "ray_cluster", clusterName)
 	assert.Equal(t, clusterName, manager.clusterName)
 	assert.Equal(t, expectedDir, manager.baseDir)
 }

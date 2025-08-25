@@ -146,7 +146,7 @@ func (c *ModelCatalogController) processPendingModelCatalog(modelCatalog *v1.Mod
 	}
 
 	if modelCatalog.Spec.Replicas == nil {
-		modelCatalog.Spec.Replicas = &v1.ReplicaSepc{
+		modelCatalog.Spec.Replicas = &v1.ReplicaSpec{
 			Num: intPtr(1),
 		}
 	}
