@@ -19,15 +19,6 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName:  {{ include "neutree.fullname" . }}-sa
-      initContainers:
-        - name: wait-migration-job
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
-          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
-          args:
-            - job
-            - {{ include "neutree.fullname" . }}-migration-job-{{.Release.Revision }}
-            - -n
-            - {{ .Release.Namespace }}
       containers:
         - name: postgrest
           image: "{{ .Values.postgrest.image.repository }}:{{ .Values.postgrest.image.tag }}"
