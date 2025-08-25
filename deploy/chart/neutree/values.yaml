@@ -22,7 +22,7 @@ k8sWaitFor:
 
 dbScripts:
   image:
-    repository: neutree-ai/neutree-db-scripts
+    repository: neutree/neutree-db-scripts
     tag: ""
     pullPolicy: IfNotPresent
 
@@ -112,7 +112,7 @@ postgresmeta:
 
 core:
   image:
-    repository: neutree-ai/neutree-core
+    repository: neutree/neutree-core
     tag: ""
     pullPolicy: IfNotPresent
   resources:
@@ -128,7 +128,7 @@ core:
 
 api:
   image:
-    repository: neutree-ai/neutree-api
+    repository: neutree/neutree-api
     tag: ""
     pullPolicy: IfNotPresent
   resources:
