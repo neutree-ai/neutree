@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/util/workqueue"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
@@ -34,13 +32,8 @@ func newTestClusterController(storage *storagemocks.MockStorage, imageSvc *regis
 	gw.On("SyncCluster", mock.Anything, mock.Anything).Return(nil)
 	gw.On("DeleteCluster", mock.Anything, mock.Anything).Return(nil)
 	return &ClusterController{
-		storage:      storage,
-		imageService: imageSvc,
-		baseController: &BaseController{
-			queue:        workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
-			workers:      1,
-			syncInterval: time.Second * 10,
-		},
+		storage:                 storage,
+		imageService:            imageSvc,
 		defaultClusterVersion:   "v1",
 		obsCollectConfigManager: obsCollectConfigManager,
 		gw:                      gw,

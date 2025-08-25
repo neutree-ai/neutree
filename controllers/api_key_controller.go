@@ -1,11 +1,9 @@
 package controllers
 
 import (
-	"context"
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -14,8 +12,6 @@ import (
 )
 
 type ApiKeyController struct {
-	baseController *BaseController
-
 	storage     storage.Storage
 	syncHandler func(apiKey *v1.ApiKey) error // Added syncHandler field
 
@@ -25,17 +21,10 @@ type ApiKeyController struct {
 type ApiKeyControllerOption struct {
 	Storage storage.Storage
 	Gw      gateway.Gateway
-	Workers int
 }
 
 func NewApiKeyController(option *ApiKeyControllerOption) (*ApiKeyController, error) {
 	c := &ApiKeyController{
-		baseController: &BaseController{
-			//nolint:staticcheck
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "api_key"}),
-			workers:      option.Workers,
-			syncInterval: time.Second * 10,
-		},
 		storage: option.Storage,
 		gw:      option.Gw,
 	}
@@ -43,12 +32,6 @@ func NewApiKeyController(option *ApiKeyControllerOption) (*ApiKeyController, err
 	c.syncHandler = c.sync
 
 	return c, nil
-}
-
-func (c *ApiKeyController) Start(ctx context.Context) {
-	klog.Infof("Starting api_key controller")
-
-	c.baseController.Start(ctx, c, c)
 }
 
 func (c *ApiKeyController) Reconcile(key interface{}) error {

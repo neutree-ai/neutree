@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -16,8 +15,6 @@ import (
 )
 
 type WorkspaceController struct {
-	baseController *BaseController
-
 	storage     storage.Storage
 	syncHandler func(workspace *v1.Workspace) error // Added syncHandler field
 
@@ -25,21 +22,12 @@ type WorkspaceController struct {
 }
 
 type WorkspaceControllerOption struct {
-	Storage storage.Storage
-	Workers int
-
+	Storage            storage.Storage
 	AcceleratorManager accelerator.Manager
 }
 
 func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceController, error) {
 	c := &WorkspaceController{
-		baseController: &BaseController{
-			//nolint:staticcheck
-			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
-				workqueue.RateLimitingQueueConfig{Name: "workspace"}),
-			workers:      option.Workers,
-			syncInterval: time.Second * 10,
-		},
 		storage:            option.Storage,
 		acceleratorManager: option.AcceleratorManager,
 	}
@@ -47,12 +35,6 @@ func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceContro
 	c.syncHandler = c.sync
 
 	return c, nil
-}
-
-func (c *WorkspaceController) Start(ctx context.Context) {
-	klog.Infof("Starting workspace controller")
-
-	c.baseController.Start(ctx, c, c)
 }
 
 func (c *WorkspaceController) Reconcile(key interface{}) error {

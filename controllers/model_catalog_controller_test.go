@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -19,20 +18,17 @@ func TestNewModelCatalogController(t *testing.T) {
 
 	controller, err := NewModelCatalogController(&ModelCatalogControllerOption{
 		Storage: mockStorage,
-		Workers: 1,
 	})
 
 	assert.NoError(t, err)
 	assert.NotNil(t, controller)
 	assert.Equal(t, mockStorage, controller.storage)
-	assert.Equal(t, 1, controller.baseController.workers)
 }
 
 func TestModelCatalogController_ListKeys(t *testing.T) {
 	mockStorage := &storageMocks.MockStorage{}
 	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
 		Storage: mockStorage,
-		Workers: 1,
 	})
 
 	expectedModelCatalogs := []v1.ModelCatalog{
@@ -56,7 +52,6 @@ func TestModelCatalogController_Reconcile(t *testing.T) {
 	mockStorage := &storageMocks.MockStorage{}
 	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
 		Storage: mockStorage,
-		Workers: 1,
 	})
 
 	modelCatalog := &v1.ModelCatalog{
@@ -91,7 +86,6 @@ func TestModelCatalogController_processPendingModelCatalog(t *testing.T) {
 	mockStorage := &storageMocks.MockStorage{}
 	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
 		Storage: mockStorage,
-		Workers: 1,
 	})
 
 	modelCatalog := &v1.ModelCatalog{
@@ -140,7 +134,6 @@ func TestModelCatalogController_processFailedModelCatalog(t *testing.T) {
 	mockStorage := &storageMocks.MockStorage{}
 	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
 		Storage: mockStorage,
-		Workers: 1,
 	})
 
 	modelCatalog := &v1.ModelCatalog{
@@ -171,25 +164,6 @@ func TestModelCatalogController_processFailedModelCatalog(t *testing.T) {
 	assert.Equal(t, v1.ModelCatalogPhasePENDING, modelCatalog.Status.Phase)
 
 	mockStorage.AssertExpectations(t)
-}
-
-func TestModelCatalogController_Start(t *testing.T) {
-	mockStorage := &storageMocks.MockStorage{}
-	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
-		Storage: mockStorage,
-		Workers: 1,
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	// Mock the ListModelCatalog to return empty list to avoid endless loop in test
-	mockStorage.On("ListModelCatalog", storage.ListOption{}).Return([]v1.ModelCatalog{}, nil).Maybe()
-
-	// Start should not block or panic
-	assert.NotPanics(t, func() {
-		controller.Start(ctx)
-	})
 }
 
 func TestModelCatalogController_sync_Delete(t *testing.T) {
@@ -270,7 +244,6 @@ func TestModelCatalogController_sync_Delete(t *testing.T) {
 
 			controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
 				Storage: mockStorage,
-				Workers: 1,
 			})
 
 			err := controller.sync(tt.input)
@@ -288,7 +261,6 @@ func TestModelCatalogController_updateStatus(t *testing.T) {
 	mockStorage := &storageMocks.MockStorage{}
 	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
 		Storage: mockStorage,
-		Workers: 1,
 	})
 
 	modelCatalog := &v1.ModelCatalog{

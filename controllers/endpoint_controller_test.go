@@ -13,7 +13,6 @@ import (
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"k8s.io/client-go/util/workqueue"
 )
 
 func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) *EndpointController {
@@ -26,11 +25,7 @@ func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratorm
 	gw.On("DeleteEndpoint", mock.Anything).Return(nil)
 	gw.On("GetEndpointServeUrl", mock.Anything).Return("", nil)
 
-	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Workers: 1, Gw: gw})
-	c.baseController.queue = workqueue.NewRateLimitingQueueWithConfig(
-		workqueue.DefaultControllerRateLimiter(),
-		workqueue.RateLimitingQueueConfig{Name: "endpoint-test"},
-	)
+	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Gw: gw})
 	return c
 }
 

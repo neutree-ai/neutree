@@ -1,12 +1,10 @@
 package controllers
 
 import (
-	"context"
 	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -14,37 +12,22 @@ import (
 )
 
 type EngineController struct {
-	baseController *BaseController
-
 	storage     storage.Storage
 	syncHandler func(engine *v1.Engine) error // Added syncHandler field
 }
 
 type EngineControllerOption struct {
 	Storage storage.Storage
-	Workers int
 }
 
 func NewEngineController(option *EngineControllerOption) (*EngineController, error) {
 	c := &EngineController{
-		baseController: &BaseController{
-			//nolint:staticcheck
-			queue:        workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "engine"}),
-			workers:      option.Workers,
-			syncInterval: time.Second * 10,
-		},
 		storage: option.Storage,
 	}
 
 	c.syncHandler = c.sync
 
 	return c, nil
-}
-
-func (c *EngineController) Start(ctx context.Context) {
-	klog.Infof("Starting engine controller")
-
-	c.baseController.Start(ctx, c, c)
 }
 
 func (c *EngineController) Reconcile(key interface{}) error {

@@ -30,6 +30,13 @@ type SystemInfo struct {
 	Version string `json:"version,omitempty"`
 }
 
+func RegisterSystemRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	systemGroup := group.Group("/system")
+
+	systemGroup.Use(middlewares...)
+	systemGroup.GET("/info", handleSystemInfo(deps))
+}
+
 // RegisterRoutes registers system-related routes
 func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	apiV1 := r.Group("/api/v1")

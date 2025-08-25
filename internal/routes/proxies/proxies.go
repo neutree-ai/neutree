@@ -68,6 +68,41 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	r.Any("/api/v1/rpc/:path", handlePostgrestRPCProxy(deps))
 }
 
+func RegisterRayServeProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("/serve-proxy")
+
+	proxyGroup.Use(middlewares...)
+	proxyGroup.Any("/:workspace/:name/*path", handleServeProxy(deps))
+}
+
+func RegisterRayDashboardProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("/ray-dashboard-proxy")
+
+	proxyGroup.Use(middlewares...)
+	proxyGroup.Any("/:workspace/:name/*path", handleRayDashboardProxy(deps))
+}
+
+func RegisterAuthProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("/auth")
+
+	proxyGroup.Use(middlewares...)
+	proxyGroup.Any("/:path", handleAuthProxy(deps))
+}
+
+func RegisterPostgrestProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("")
+
+	proxyGroup.Use(middlewares...)
+	proxyGroup.Any("/:path", handlePostgrestProxy(deps))
+}
+
+func RegisterPostgrestRPCProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("/rpc")
+
+	proxyGroup.Use(middlewares...)
+	proxyGroup.Any("/:path", handlePostgrestRPCProxy(deps))
+}
+
 func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
