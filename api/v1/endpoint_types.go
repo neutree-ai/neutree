@@ -22,7 +22,7 @@ type ResourceSpec struct {
 	Memory      *float64           `json:"memory,omitempty"`
 }
 
-type ReplicaSepc struct {
+type ReplicaSpec struct {
 	Num *int `json:"num,omitempty"`
 }
 
@@ -31,7 +31,7 @@ type EndpointSpec struct {
 	Model             *ModelSpec             `json:"model,omitempty"`
 	Engine            *EndpointEngineSpec    `json:"engine,omitempty"`
 	Resources         *ResourceSpec          `json:"resources,omitempty"`
-	Replicas          ReplicaSepc            `json:"replicas,omitempty"`
+	Replicas          ReplicaSpec            `json:"replicas,omitempty"`
 	DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
 	Variables         map[string]interface{} `json:"variables,omitempty"`
 }
