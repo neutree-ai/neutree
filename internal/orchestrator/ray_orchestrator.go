@@ -428,7 +428,7 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	found := false
 
 	for name, appStatus := range currentAppsResp.Applications {
-		if name == endpoint.Metadata.Name {
+		if name == dashboard.EndpointToServeApplicationName(endpoint) {
 			found = true
 			continue // Skip the endpoint to be deleted
 		}
@@ -475,7 +475,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}, nil
 	}
 
-	status, exists := currentAppsResp.Applications[endpoint.Metadata.Name]
+	status, exists := currentAppsResp.Applications[dashboard.EndpointToServeApplicationName(endpoint)]
 	if !exists {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhasePENDING,
