@@ -50,6 +50,46 @@ func (pw *progressWriter) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
+func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	// Set default temporary directory function if not provided
+	if deps.TempDirFunc == nil {
+		deps.TempDirFunc = func() (string, error) {
+			tempDir := filepath.Join(os.TempDir(), "neutree-models")
+			if err := os.MkdirAll(tempDir, 0755); err != nil {
+				return "", fmt.Errorf("failed to create temporary directory: %w", err)
+			}
+
+			return tempDir, nil
+		}
+	}
+
+	// Workspace-scoped model registry routes with authentication
+	workspaces := group.Group("/workspaces/:workspace")
+	workspaces.Use(middlewares...) // Apply JWT authentication
+	{
+		modelRegistries := workspaces.Group("/model_registries/:registry")
+		{
+			models := modelRegistries.Group("/models")
+			{
+				// List all models in a registry
+				models.GET("", listModels(deps))
+
+				// Get a specific model
+				models.GET("/:model", getModel(deps))
+
+				// Upload a new model
+				models.POST("", uploadModel(deps))
+
+				// Download a model
+				models.GET("/:model/download", downloadModel(deps))
+
+				// Delete a model
+				models.DELETE("/:model", deleteModel(deps))
+			}
+		}
+	}
+}
+
 // RegisterRoutes registers model-related routes
 func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	// Set default temporary directory function if not provided

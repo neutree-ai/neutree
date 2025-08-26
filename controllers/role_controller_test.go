@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"k8s.io/client-go/util/workqueue"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -19,10 +18,8 @@ import (
 func newTestRoleController(storage *storagemocks.MockStorage) *RoleController {
 	c, _ := NewRoleController(&RoleControllerOption{
 		Storage: storage,
-		Workers: 1,
 	})
-	// Use a predictable queue for testing.
-	c.baseController.queue = workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: "role-test"})
+
 	return c
 }
 

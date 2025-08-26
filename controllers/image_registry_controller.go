@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/pkg/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -18,8 +16,6 @@ import (
 )
 
 type ImageRegistryController struct {
-	baseController *BaseController
-
 	storage      storage.Storage
 	imageService registry.ImageService
 
@@ -29,18 +25,10 @@ type ImageRegistryController struct {
 type ImageRegistryControllerOption struct {
 	ImageService registry.ImageService
 	Storage      storage.Storage
-	Workers      int
 }
 
 func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRegistryController, error) {
 	c := &ImageRegistryController{
-		baseController: &BaseController{
-			//nolint:staticcheck
-			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
-				workqueue.RateLimitingQueueConfig{Name: "image-registry"}),
-			workers:      option.Workers,
-			syncInterval: time.Second * 10,
-		},
 		storage:      option.Storage,
 		imageService: option.ImageService,
 	}
@@ -48,12 +36,6 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 	c.syncHandler = c.sync
 
 	return c, nil
-}
-
-func (c *ImageRegistryController) Start(ctx context.Context) {
-	klog.Infof("Starting image registry controller")
-
-	c.baseController.Start(ctx, c, c)
 }
 
 func (c *ImageRegistryController) Reconcile(key interface{}) error {

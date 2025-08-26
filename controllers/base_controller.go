@@ -9,6 +9,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
+type HookFunc func(key interface{}) error
+
 type Reconciler interface {
 	Reconcile(key interface{}) error
 }
@@ -18,9 +20,11 @@ type Lister interface {
 }
 
 type BaseController struct {
-	queue        workqueue.RateLimitingInterface //nolint:staticcheck
-	workers      int
-	syncInterval time.Duration
+	queue                workqueue.RateLimitingInterface //nolint:staticcheck
+	workers              int
+	syncInterval         time.Duration
+	beforeReconcileHooks []HookFunc
+	afterReconcileHooks  []HookFunc
 }
 
 func (bc *BaseController) Start(ctx context.Context, r Reconciler, l Lister) {
@@ -49,8 +53,24 @@ func (bc *BaseController) processNextWorkItem(r Reconciler) bool {
 	}
 	defer bc.queue.Done(key)
 
+	for _, hook := range bc.beforeReconcileHooks {
+		if err := hook(key); err != nil {
+			klog.Error(err)
+			// stop processing this item and continue with the next one
+			return true
+		}
+	}
+
 	if err := r.Reconcile(key); err != nil {
 		klog.Error(err)
+	}
+
+	for _, hook := range bc.afterReconcileHooks {
+		if err := hook(key); err != nil {
+			klog.Error(err)
+			// stop processing this item and continue with the next one
+			return true
+		}
 	}
 
 	return true

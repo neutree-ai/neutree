@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"k8s.io/client-go/util/workqueue"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/model_registry"
@@ -22,12 +21,6 @@ func newTestModelRegistryController(storage *storagemocks.MockStorage, model *mo
 
 	return &ModelRegistryController{
 		storage: storage,
-		baseController: &BaseController{
-			queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
-				workqueue.RateLimitingQueueConfig{Name: "model-registry"}),
-			workers:      1,
-			syncInterval: time.Second * 10,
-		},
 	}
 }
 
