@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -152,10 +153,33 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 		neutreeServingVersion string
 	)
 
-	for _, node := range nodes {
-		if !node.Raylet.IsHeadNode && node.Raylet.State == v1.AliveNodeState {
-			readyNodes++
+	var (
+		resourceInfo = map[string]float64{}
+	)
+
+	addNodeResource := func(node v1.Raylet) {
+		for resource, value := range node.Resources {
+			if strings.HasPrefix(resource, "node:") {
+				continue
+			}
+
+			if _, ok := resourceInfo[resource]; !ok {
+				resourceInfo[resource] = 0
+			}
+
+			resourceInfo[resource] += value
 		}
+	}
+
+	for _, node := range nodes {
+		// skip dead nodes
+		if node.Raylet.State != v1.AliveNodeState {
+			continue
+		}
+
+		readyNodes++
+
+		addNodeResource(node.Raylet)
 
 		if _, ok := node.Raylet.Labels[v1.NeutreeServingVersionLabel]; !ok {
 			continue
@@ -190,12 +214,7 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 		pendingLauncherNodes        int
 	)
 
-	for key, activeNodeNumber := range autoScaleStatus.ActiveNodes {
-		// skip calculate headgroup active nodes.
-		if key == "headgroup" || key == "local.cluster.node" {
-			continue
-		}
-
+	for _, activeNodeNumber := range autoScaleStatus.ActiveNodes {
 		currentAutoScaleActiveNodes += activeNodeNumber
 	}
 
@@ -216,6 +235,7 @@ func (o *RayOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 	clusterStatus.RayVersion = clusterMetadata.Data.RayVersion
 	clusterStatus.DesireNodes = len(o.clusterHelper.GetDesireStaticWorkersIP(context.Background())) + clusterStatus.AutoScaleStatus.PendingNodes +
 		clusterStatus.AutoScaleStatus.ActiveNodes + clusterStatus.AutoScaleStatus.FailedNodes
+	clusterStatus.ResourceInfo = resourceInfo
 
 	return clusterStatus, nil
 }

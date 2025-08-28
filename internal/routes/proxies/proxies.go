@@ -82,18 +82,66 @@ func RegisterRayDashboardProxyRoutes(group *gin.RouterGroup, middlewares []gin.H
 	proxyGroup.Any("/:workspace/:name/*path", handleRayDashboardProxy(deps))
 }
 
+func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/clusters", "clusters")
+}
+
+func RegisterImageRegistryRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/image_registries", "image_registries")
+}
+
+func RegisterModelRegistryRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/model_registries", "model_registries")
+}
+
+func RegisterEndpointRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/endpoints", "endpoints")
+}
+
+func RegisterEngineRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/engines", "engines")
+}
+
+func RegisterModelCatalogRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/model_catalogs", "model_catalogs")
+}
+
+func RegisterRoleAssignmentRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/role_assignments", "role_assignments")
+}
+
+func RegisterRoleRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/roles", "roles")
+}
+
+func RegisterWorkspaceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/workspaces", "workspaces")
+}
+
+func RegisterUserProfileRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/user_profiles", "user_profiles")
+}
+
+func RegisterAPIKeyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/api_keys", "api_keys")
+}
+
+func RegisterOEMConfigRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	RegisterResourceProxyRoute(group, middlewares, deps, "/oem_configs", "oem_configs")
+}
+
+// Generic function to register a resource proxy route
+func RegisterResourceProxyRoute(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies, routePath string, resourceName string) {
+	proxyGroup := group.Group(routePath)
+	proxyGroup.Use(middlewares...)
+	proxyGroup.Any("", handlePostgrestResourceProxy(deps, resourceName))
+}
+
 func RegisterAuthProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	proxyGroup := group.Group("/auth")
 
 	proxyGroup.Use(middlewares...)
 	proxyGroup.Any("/:path", handleAuthProxy(deps))
-}
-
-func RegisterPostgrestProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
-	proxyGroup := group.Group("")
-
-	proxyGroup.Use(middlewares...)
-	proxyGroup.Any("/:path", handlePostgrestProxy(deps))
 }
 
 func RegisterPostgrestRPCProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
@@ -328,6 +376,13 @@ func handleAuthProxy(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		proxyHandler := CreateProxyHandler(deps.AuthEndpoint, path, nil)
+		proxyHandler(c)
+	}
+}
+
+func handlePostgrestResourceProxy(deps *Dependencies, resource string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, resource, nil)
 		proxyHandler(c)
 	}
 }

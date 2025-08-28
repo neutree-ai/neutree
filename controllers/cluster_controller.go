@@ -399,6 +399,7 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 			newStatus.Version = clusterStatus.NeutreeServeVersion
 			newStatus.RayVersion = clusterStatus.RayVersion
 			newStatus.DesiredNodes = clusterStatus.DesireNodes
+			newStatus.ResourceInfo = clusterStatus.ResourceInfo
 		}
 	}
 
