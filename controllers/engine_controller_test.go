@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -196,73 +195,17 @@ func TestEngineController_Sync_CreateOrUpdate(t *testing.T) {
 	}
 }
 
-// --- Test for ListKeys ---
-
-func TestEngineController_ListKeys(t *testing.T) {
-	tests := []struct {
-		name      string
-		mockSetup func(*storagemocks.MockStorage)
-		wantKeys  []interface{}
-		wantErr   bool
-	}{
-		{
-			name: "List success",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListEngine", storage.ListOption{}).Return([]v1.Engine{
-					{ID: 1}, {ID: 5}, {ID: 10},
-				}, nil).Once()
-			},
-			wantKeys: []interface{}{1, 5, 10},
-			wantErr:  false,
-		},
-		{
-			name: "List returns empty",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListEngine", storage.ListOption{}).Return([]v1.Engine{}, nil).Once()
-			},
-			wantKeys: []interface{}{},
-			wantErr:  false,
-		},
-		{
-			name: "List returns error",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListEngine", storage.ListOption{}).Return(nil, assert.AnError).Once()
-			},
-			wantKeys: nil,
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-			c := newTestEngineController(mockStorage)
-
-			keys, err := c.ListKeys()
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, keys)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.wantKeys, keys)
-			}
-			mockStorage.AssertExpectations(t)
-		})
-	}
-}
-
 // --- Test for Reconcile ---
 
 func TestEngineController_Reconcile(t *testing.T) {
 	engineID := 1
+	failedEngineID := 2
 	engineIDStr := strconv.Itoa(engineID)
 
 	// mockSyncHandler provides a controllable sync function for Reconcile tests.
 	mockSyncHandler := func(obj *v1.Engine) error {
 		// Check for a condition to simulate failure.
-		if obj != nil && obj.Metadata != nil && obj.Metadata.Name == "sync-should-fail" {
+		if obj != nil && obj.ID == failedEngineID {
 			return errors.New("mock sync failed")
 		}
 		// Simulate successful sync.
@@ -279,21 +222,16 @@ func TestEngineController_Reconcile(t *testing.T) {
 	}{
 		{
 			name:     "Reconcile success (real sync, no status change)", // Test scenario using default sync handler.
-			inputKey: engineID,
+			inputKey: testEngine(engineID, v1.EnginePhaseCreated),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetEngine succeeds, engine is already in the desired state.
-				s.On("GetEngine", engineIDStr).Return(testEngine(engineID, v1.EnginePhaseCreated), nil).Once()
-				// The real 'sync' method expects no further storage calls here.
 			},
 			useMockSync: false, // Use the default c.sync via syncHandler.
 			wantErr:     false,
 		},
 		{
 			name:     "Reconcile success (real sync, status updated)", // Test scenario using default sync handler.
-			inputKey: engineID,
+			inputKey: testEngine(engineID, v1.EnginePhasePending),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetEngine succeeds, engine needs status update.
-				s.On("GetEngine", engineIDStr).Return(testEngine(engineID, v1.EnginePhasePending), nil).Once()
 				// The real 'sync' method expects UpdateEngine to be called.
 				s.On("UpdateEngine", engineIDStr, mock.MatchedBy(func(r *v1.Engine) bool {
 					return r.Status != nil && r.Status.Phase == v1.EnginePhaseCreated
@@ -304,10 +242,8 @@ func TestEngineController_Reconcile(t *testing.T) {
 		},
 		{
 			name:     "Reconcile success (mock sync)", // Test Reconcile isolation using mock handler.
-			inputKey: engineID,
+			inputKey: testEngine(engineID, v1.EnginePhaseCreated),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetEngine succeeds.
-				s.On("GetEngine", engineIDStr).Return(testEngine(engineID, v1.EnginePhaseCreated), nil).Once()
 				// No further storage calls expected by Reconcile before calling syncHandler.
 			},
 			useMockSync: true, // Override with mockSyncHandler.
@@ -321,26 +257,12 @@ func TestEngineController_Reconcile(t *testing.T) {
 			},
 			useMockSync:   false, // Fails before sync handler.
 			wantErr:       true,
-			expectedError: errors.New("failed to assert key to engineID"),
-		},
-		{
-			name:     "GetEngine returns error",
-			inputKey: engineID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// Mock GetEngine to return an error.
-				s.On("GetEngine", engineIDStr).Return(nil, assert.AnError).Once()
-			},
-			useMockSync: false, // Fails before sync handler.
-			wantErr:     true,  // Expect error from GetEngine to be propagated.
+			expectedError: errors.New("failed to assert obj to *v1.Engine"),
 		},
 		{
 			name:     "Sync handler returns error (mock sync)",
-			inputKey: engineID,
+			inputKey: testEngine(failedEngineID, v1.EnginePhaseCreated), // Use ID that triggers mock failure.
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetEngine succeeds, providing the engine that triggers mock failure.
-				engine := testEngine(engineID, v1.EnginePhaseCreated)
-				engine.Metadata.Name = "sync-should-fail" // Condition for mockSyncHandler failure.
-				s.On("GetEngine", engineIDStr).Return(engine, nil).Once()
 			},
 			useMockSync: true, // Use the mock handler.
 			wantErr:     true, // Expect error from mock sync handler to be propagated.

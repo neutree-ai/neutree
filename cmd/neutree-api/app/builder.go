@@ -34,13 +34,24 @@ func NewBuilder() *Builder {
 
 	// Register default route handlers
 	defaultRouteInits := map[string]RouteFactory{
-		"models":          ModelsRouteFactory(models.RegisterModelsRoutes),
-		"auth":            ProxiesRouteFactory(proxies.RegisterAuthProxyRoutes),
-		"serve-proxy":     ProxiesRouteFactory(proxies.RegisterRayServeProxyRoutes),
-		"dashboard-proxy": ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
-		"rest":            ProxiesRouteFactory(proxies.RegisterPostgrestProxyRoutes),
-		"rest-rpc":        ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
-		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
+		"models":                ModelsRouteFactory(models.RegisterModelsRoutes),
+		"auth":                  ProxiesRouteFactory(proxies.RegisterAuthProxyRoutes),
+		"serve-proxy":           ProxiesRouteFactory(proxies.RegisterRayServeProxyRoutes),
+		"dashboard-proxy":       ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
+		"rest/api-keys":         ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
+		"rest/workspaces":       ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
+		"rest/roles":            ProxiesRouteFactory(proxies.RegisterRoleRoutes),
+		"rest/role-assignments": ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),
+		"rest/user-profiles":    ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
+		"rest/clusters":         ProxiesRouteFactory(proxies.RegisterClusterRoutes),
+		"rest/image-registries": ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
+		"rest/model-registries": ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
+		"rest/endpoints":        ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
+		"rest/engines":          ProxiesRouteFactory(proxies.RegisterEngineRoutes),
+		"rest/model-catalogs":   ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
+		"rest/oem-configs":      ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
+		"rest/rpc":              ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
+		"system":                SystemRouteFactory(system.RegisterSystemRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {

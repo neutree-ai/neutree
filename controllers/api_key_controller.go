@@ -34,34 +34,15 @@ func NewApiKeyController(option *ApiKeyControllerOption) (*ApiKeyController, err
 	return c, nil
 }
 
-func (c *ApiKeyController) Reconcile(key interface{}) error {
-	apiKeyID, ok := key.(string)
+func (c *ApiKeyController) Reconcile(obj interface{}) error {
+	apiKey, ok := obj.(*v1.ApiKey)
 	if !ok {
-		return errors.New("failed to assert key to apiKeyID")
+		return errors.New("failed to assert obj to *v1.ApiKey")
 	}
 
-	obj, err := c.storage.GetApiKey(apiKeyID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get api_key %s", apiKeyID)
-	}
+	klog.V(4).Info("Reconcile api_key " + apiKey.Metadata.Name)
 
-	klog.V(4).Info("Reconcile api_key " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
-}
-
-func (c *ApiKeyController) ListKeys() ([]interface{}, error) {
-	apiKeys, err := c.storage.ListApiKey(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(apiKeys))
-	for i := range apiKeys {
-		keys[i] = apiKeys[i].ID
-	}
-
-	return keys, nil
+	return c.syncHandler(apiKey)
 }
 
 func (c *ApiKeyController) sync(obj *v1.ApiKey) error {

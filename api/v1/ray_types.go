@@ -136,6 +136,7 @@ type RayClusterStatus struct {
 	ReadyNodes          int
 	DesireNodes         int
 	AutoScaleStatus     AutoScaleStatus
+	ResourceInfo        map[string]float64
 }
 
 type AutoScaleStatus struct {

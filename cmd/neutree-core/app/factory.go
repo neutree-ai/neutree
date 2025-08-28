@@ -3,8 +3,11 @@ package app
 import (
 	"github.com/pkg/errors"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/pkg/scheme"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type ControllerOptions struct {
@@ -12,6 +15,9 @@ type ControllerOptions struct {
 	beforeHooks []controllers.HookFunc
 	afterHooks  []controllers.HookFunc
 	name        string
+
+	scheme  *scheme.Scheme
+	storage storage.ObjectStorage
 }
 
 // ControllerFactory defines a function type for creating controllers
@@ -40,8 +46,10 @@ func NewClusterControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(clusterController),
 			controllers.WithReconciler(clusterController),
+			controllers.WithObject(&v1.Cluster{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -61,8 +69,10 @@ func NewEngineControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(engineController),
 			controllers.WithReconciler(engineController),
+			controllers.WithObject(&v1.Engine{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -85,8 +95,10 @@ func NewEndpointControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(endpointController),
 			controllers.WithReconciler(endpointController),
+			controllers.WithObject(&v1.Endpoint{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -106,8 +118,10 @@ func NewRoleControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(roleController),
 			controllers.WithReconciler(roleController),
+			controllers.WithObject(&v1.Role{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -127,8 +141,10 @@ func NewRoleAssignmentControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(roleAssignmentController),
 			controllers.WithReconciler(roleAssignmentController),
+			controllers.WithObject(&v1.RoleAssignment{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -149,8 +165,10 @@ func NewWorkspaceControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(workspaceController),
 			controllers.WithReconciler(workspaceController),
+			controllers.WithObject(&v1.Workspace{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -171,8 +189,10 @@ func NewApiKeyControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(apiKeyController),
 			controllers.WithReconciler(apiKeyController),
+			controllers.WithObject(&v1.ApiKey{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -193,8 +213,10 @@ func NewImageRegistryControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(imageRegistryController),
 			controllers.WithReconciler(imageRegistryController),
+			controllers.WithObject(&v1.ImageRegistry{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -214,8 +236,10 @@ func NewModelCatalogControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(modelCatalogController),
 			controllers.WithReconciler(modelCatalogController),
+			controllers.WithObject(&v1.ModelCatalog{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil
@@ -235,8 +259,10 @@ func NewModelRegistryControllerFactory() ControllerFactory {
 			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
 			controllers.WithBeforeReconcileHook(opts.beforeHooks),
 			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(modelRegistryController),
 			controllers.WithReconciler(modelRegistryController),
+			controllers.WithObject(&v1.ModelRegistry{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
 		)
 
 		return ctrl, nil

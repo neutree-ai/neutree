@@ -222,73 +222,16 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 	}
 }
 
-// --- Test for ListKeys ---
-
-func TestWorkspaceController_ListKeys(t *testing.T) {
-	tests := []struct {
-		name      string
-		mockSetup func(*storagemocks.MockStorage)
-		wantKeys  []interface{}
-		wantErr   bool
-	}{
-		{
-			name: "List success",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListWorkspace", storage.ListOption{}).Return([]v1.Workspace{
-					{ID: 1}, {ID: 5}, {ID: 10},
-				}, nil).Once()
-			},
-			wantKeys: []interface{}{1, 5, 10},
-			wantErr:  false,
-		},
-		{
-			name: "List returns empty",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListWorkspace", storage.ListOption{}).Return([]v1.Workspace{}, nil).Once()
-			},
-			wantKeys: []interface{}{},
-			wantErr:  false,
-		},
-		{
-			name: "List returns error",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListWorkspace", storage.ListOption{}).Return(nil, assert.AnError).Once()
-			},
-			wantKeys: nil,
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-			c := newTestWorkspaceController(mockStorage, nil)
-
-			keys, err := c.ListKeys()
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, keys)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.wantKeys, keys)
-			}
-			mockStorage.AssertExpectations(t)
-		})
-	}
-}
-
 // --- Test for Reconcile ---
 
 func TestWorkspaceController_Reconcile(t *testing.T) {
 	workspaceID := 1
+	failedWorkspaceID := 2
 	workspaceIDStr := strconv.Itoa(workspaceID)
-
 	// mockSyncHandler provides a controllable sync function for Reconcile tests.
 	mockSyncHandler := func(obj *v1.Workspace) error {
 		// Check for a condition to simulate failure.
-		if obj != nil && obj.Metadata != nil && obj.Metadata.Name == "sync-should-fail" {
+		if obj != nil && obj.ID == failedWorkspaceID {
 			return errors.New("mock sync failed")
 		}
 		// Simulate successful sync.
@@ -305,7 +248,7 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 	}{
 		{
 			name:     "Reconcile success (real sync, no status change)", // Test scenario using default sync handler.
-			inputKey: workspaceID,
+			inputKey: testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage, a *acceleratormocks.MockManager) {
 				a.On("GetAllAcceleratorSupportEngines", mock.Anything).Return([]*v1.Engine{
 					{
@@ -316,19 +259,14 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 				}, nil)
 				s.On("ListEngine", mock.Anything).Return(nil, nil)
 				s.On("CreateEngine", mock.Anything).Return(nil)
-				// GetWorkspace succeeds, workspace is already in the desired state.
-				s.On("GetWorkspace", workspaceIDStr).Return(testWorkspace(workspaceID, v1.WorkspacePhaseCREATED), nil).Once()
-				// The real 'sync' method expects no further storage calls here.
 			},
 			useMockSync: false, // Use the default c.sync via syncHandler.
 			wantErr:     false,
 		},
 		{
 			name:     "Reconcile success (real sync, status updated)", // Test scenario using default sync handler.
-			inputKey: workspaceID,
+			inputKey: testWorkspace(workspaceID, v1.WorkspacePhasePENDING),
 			mockSetup: func(s *storagemocks.MockStorage, a *acceleratormocks.MockManager) {
-				// GetWorkspace succeeds, workspace needs status update.
-				s.On("GetWorkspace", workspaceIDStr).Return(testWorkspace(workspaceID, v1.WorkspacePhasePENDING), nil).Once()
 				// The real 'sync' method expects UpdateWorkspace to be called.
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseCREATED
@@ -339,53 +277,26 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 		},
 		{
 			name:     "Reconcile success (mock sync)", // Test Reconcile isolation using mock handler.
-			inputKey: workspaceID,
+			inputKey: testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage, a *acceleratormocks.MockManager) {
-				// GetWorkspace succeeds.
-				s.On("GetWorkspace", workspaceIDStr).Return(testWorkspace(workspaceID, v1.WorkspacePhaseCREATED), nil).Once()
-				// No further storage calls expected by Reconcile before calling syncHandler.
 			},
 			useMockSync: true, // Override with mockSyncHandler.
 			wantErr:     false,
 		},
 		{
 			name:     "Invalid key type",
-			inputKey: "not-an-int",
+			inputKey: "not-an-obj",
 			mockSetup: func(s *storagemocks.MockStorage, a *acceleratormocks.MockManager) {
 				// No storage calls expected.
 			},
 			useMockSync:   false, // Fails before sync handler.
 			wantErr:       true,
-			expectedError: errors.New("failed to assert key to workspaceID"),
-		},
-		{
-			name:     "GetWorkspace returns error",
-			inputKey: workspaceID,
-			mockSetup: func(s *storagemocks.MockStorage, a *acceleratormocks.MockManager) {
-				// Mock GetWorkspace to return an error.
-				s.On("GetWorkspace", workspaceIDStr).Return(nil, assert.AnError).Once()
-			},
-			useMockSync: false, // Fails before sync handler.
-			wantErr:     true,  // Expect error from GetWorkspace to be propagated.
-		},
-		{
-			name:     "GetWorkspace returns ErrResourceNotFound", // Specific check for NotFound
-			inputKey: workspaceID,
-			mockSetup: func(s *storagemocks.MockStorage, a *acceleratormocks.MockManager) {
-				s.On("GetWorkspace", workspaceIDStr).Return(nil, storage.ErrResourceNotFound).Once()
-			},
-			useMockSync:   false,
-			wantErr:       true, // Reconcile propagates the error
-			expectedError: storage.ErrResourceNotFound,
+			expectedError: errors.New("failed to assert obj to *v1.Workspace"),
 		},
 		{
 			name:     "Sync handler returns error (mock sync)",
-			inputKey: workspaceID,
+			inputKey: testWorkspace(failedWorkspaceID, v1.WorkspacePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage, a *acceleratormocks.MockManager) {
-				// GetWorkspace succeeds, providing the workspace that triggers mock failure.
-				workspace := testWorkspace(workspaceID, v1.WorkspacePhaseCREATED)
-				workspace.Metadata.Name = "sync-should-fail" // Condition for mockSyncHandler failure.
-				s.On("GetWorkspace", workspaceIDStr).Return(workspace, nil).Once()
 			},
 			useMockSync: true, // Use the mock handler.
 			wantErr:     true, // Expect error from mock sync handler to be propagated.

@@ -11,7 +11,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
 	registrymocks "github.com/neutree-ai/neutree/internal/registry/mocks"
-	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -956,46 +955,6 @@ func TestClusterContorller_updateStatus(t *testing.T) {
 	}
 }
 
-func TestClusterController_ListKeys(t *testing.T) {
-	tests := []struct {
-		name      string
-		mockSetup func(*storagemocks.MockStorage)
-		wantErr   bool
-	}{
-		{
-			name: "success",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListCluster", storage.ListOption{}).Return([]v1.Cluster{{ID: 1}}, nil)
-			},
-			wantErr: false,
-		},
-		{
-			name: "storage error",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListCluster", storage.ListOption{}).Return(nil, assert.AnError)
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-
-			c := &ClusterController{storage: mockStorage}
-			_, err := c.ListKeys()
-
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-			mockStorage.AssertExpectations(t)
-		})
-	}
-}
-
 func TestClusterController_Reconcile(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1005,23 +964,14 @@ func TestClusterController_Reconcile(t *testing.T) {
 	}{
 		{
 			name:  "success",
-			input: 1,
+			input: &v1.Cluster{Metadata: &v1.Metadata{Name: "test"}},
 			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("GetCluster", "1").Return(&v1.Cluster{Metadata: &v1.Metadata{Name: "test"}}, nil)
 			},
 			wantErr: false,
 		},
 		{
 			name:    "invalid key type",
 			input:   "invalid",
-			wantErr: true,
-		},
-		{
-			name:  "get cluster error",
-			input: 1,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("GetCluster", "1").Return(nil, assert.AnError)
-			},
 			wantErr: true,
 		},
 	}

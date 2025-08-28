@@ -31,34 +31,15 @@ func NewModelCatalogController(opt *ModelCatalogControllerOption) (*ModelCatalog
 	return c, nil
 }
 
-func (c *ModelCatalogController) ListKeys() ([]interface{}, error) {
-	modelCatalogs, err := c.storage.ListModelCatalog(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(modelCatalogs))
-	for i := range modelCatalogs {
-		keys[i] = modelCatalogs[i].ID
-	}
-
-	return keys, nil
-}
-
-func (c *ModelCatalogController) Reconcile(key interface{}) error {
-	modelCatalogID, ok := key.(int)
+func (c *ModelCatalogController) Reconcile(obj interface{}) error {
+	modelCatalog, ok := obj.(*v1.ModelCatalog)
 	if !ok {
-		return errors.New("failed to assert key to modelCatalogID")
+		return errors.New("failed to assert obj to *v1.ModelCatalog")
 	}
 
-	obj, err := c.storage.GetModelCatalog(strconv.Itoa(modelCatalogID))
-	if err != nil {
-		return errors.Wrapf(err, "failed to get model catalog %s", strconv.Itoa(modelCatalogID))
-	}
+	klog.V(4).Info("Reconciling model catalog " + modelCatalog.Metadata.Name)
 
-	klog.V(4).Info("Reconciling model catalog " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
+	return c.syncHandler(modelCatalog)
 }
 
 func (c *ModelCatalogController) sync(modelCatalog *v1.ModelCatalog) error {

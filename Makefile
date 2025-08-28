@@ -10,7 +10,7 @@ IMAGE_PREFIX ?= ${IMAGE_REPO}/${IMAGE_PROJECT}/
 IMAGE_TAG ?= ${shell echo $(VERSION) | awk -F '/' '{print $$NF}'}
 NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
 NEUTREE_API_IMAGE := $(IMAGE_PREFIX)neutree-api
-NEUTREE_DB_SCRITPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
+NEUTREE_DB_SCRIPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
 
 ARCH ?= amd64
 ALL_ARCH = amd64 arm64
@@ -101,7 +101,7 @@ docker-build-api: # build api docker image
 
 .PHONY: docker-build-db-scripts
 docker-build-db-scripts:
-	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_DB_SCRITPTS_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.db-scripts
+	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_DB_SCRIPTS_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.db-scripts
 
 .PHONY: docker-push-all ## Push all the architecture docker images
 docker-push-all:
@@ -123,7 +123,7 @@ docker-push-api: # push api docker image
 
 .PHONY: docker-push-db-scripts
 docker-push-db-scripts: # push db scripts docker image
-	docker push $(NEUTREE_DB_SCRITPTS_IMAGE)-$(ARCH):$(IMAGE_TAG)
+	docker push $(NEUTREE_DB_SCRIPTS_IMAGE)-$(ARCH):$(IMAGE_TAG)
 
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ALL_DOCKER_BUILD))
@@ -142,9 +142,9 @@ docker-push-manifest-api: ## Push the api manifest docker image.
 
 .PHONY: docker-push-manifest-db-scripts
 docker-push-manifest-db-scripts: ## Push the db scripts manifest docker image.
-	docker manifest create --amend $(NEUTREE_DB_SCRITPTS_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_DB_SCRITPTS_IMAGE)\-&:$(IMAGE_TAG)~g")
-	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_DB_SCRITPTS_IMAGE}:${IMAGE_TAG} ${NEUTREE_DB_SCRITPTS_IMAGE}-$${arch}:${IMAGE_TAG}; done
-	docker manifest push --purge ${NEUTREE_DB_SCRITPTS_IMAGE}:${IMAGE_TAG}
+	docker manifest create --amend $(NEUTREE_DB_SCRIPTS_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_DB_SCRIPTS_IMAGE)\-&:$(IMAGE_TAG)~g")
+	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_DB_SCRIPTS_IMAGE}:${IMAGE_TAG} ${NEUTREE_DB_SCRIPTS_IMAGE}-$${arch}:${IMAGE_TAG}; done
+	docker manifest push --purge ${NEUTREE_DB_SCRIPTS_IMAGE}:${IMAGE_TAG}
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
@@ -226,3 +226,15 @@ mockgen: mockery
 		cd $$dir; \
 		$(MOCKERY); \
     done
+
+.PHONY: docker-test-api
+docker-test-api: ## Redeploy local neutree-api for testing
+	$(MAKE) build-neutree-api
+	docker cp bin/neutree-api neutree-api:/neutree-api
+	docker restart neutree-api
+
+.PHONY: docker-test-core
+docker-test-core: ## Redeploy local neutree-core for testing
+	$(MAKE) build-neutree-core
+	docker cp bin/neutree-core neutree-core:/neutree-core
+	docker restart neutree-core

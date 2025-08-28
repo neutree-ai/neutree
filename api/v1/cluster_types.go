@@ -4,6 +4,8 @@ import (
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
 // Neutree node provision status.
@@ -102,6 +104,8 @@ type ClusterStatus struct {
 	// the cluster all node provision status.
 	// current only record the static node provision status.
 	NodeProvisionStatus string `json:"node_provision_status,omitempty"`
+	// the resource information of the cluster.
+	ResourceInfo map[string]float64 `json:"resource_info,omitempty"`
 }
 
 func (c Cluster) Key() string {
@@ -132,3 +136,183 @@ const (
 	ClusterPhaseFailed  ClusterPhase = "Failed"
 	ClusterPhaseDeleted ClusterPhase = "Deleted"
 )
+
+func (obj *Cluster) GetName() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.Name
+}
+
+func (obj *Cluster) SetName(name string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.Name = name
+}
+
+func (obj *Cluster) GetWorkspace() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.Workspace
+}
+
+func (obj *Cluster) SetWorkspace(workspace string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.Workspace = workspace
+}
+
+func (obj *Cluster) GetLabels() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+
+	return obj.Metadata.Labels
+}
+
+func (obj *Cluster) SetLabels(labels map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.Labels = labels
+}
+
+func (obj *Cluster) GetAnnotations() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+
+	return obj.Metadata.Annotations
+}
+
+func (obj *Cluster) SetAnnotations(annotations map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.Annotations = annotations
+}
+
+func (obj *Cluster) GetCreationTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.CreationTimestamp
+}
+
+func (obj *Cluster) SetCreationTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.CreationTimestamp = timestamp
+}
+
+func (obj *Cluster) GetUpdateTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.UpdateTimestamp
+}
+
+func (obj *Cluster) SetUpdateTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.UpdateTimestamp = timestamp
+}
+
+func (obj *Cluster) GetDeletionTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.DeletionTimestamp
+}
+
+func (obj *Cluster) SetDeletionTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.DeletionTimestamp = timestamp
+}
+
+func (obj *Cluster) GetSpec() interface{} {
+	return obj.Spec
+}
+
+func (obj *Cluster) SetSpec(spec interface{}) {
+	obj.Spec = spec.(*ClusterSpec) //nolint:errcheck
+}
+
+func (obj *Cluster) GetStatus() interface{} {
+	return obj.Status
+}
+
+func (obj *Cluster) SetStatus(status interface{}) {
+	obj.Status = status.(*ClusterStatus) //nolint:errcheck
+}
+
+func (obj *Cluster) GetKind() string {
+	return obj.Kind
+}
+
+func (obj *Cluster) SetKind(kind string) {
+	obj.Kind = kind
+}
+
+func (obj *Cluster) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *Cluster) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *Cluster) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata) //nolint:errcheck
+}
+
+// ClusterList is a list of Cluster resources
+type ClusterList struct {
+	Kind  string    `json:"kind"`
+	Items []Cluster `json:"items"`
+}
+
+func (in *ClusterList) GetKind() string {
+	return in.Kind
+}
+
+func (in *ClusterList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *ClusterList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+
+	return objs
+}
+
+func (in *ClusterList) SetItems(objs []scheme.Object) {
+	items := make([]Cluster, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*Cluster) //nolint:errcheck
+	}
+
+	in.Items = items
+}

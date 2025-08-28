@@ -200,73 +200,17 @@ func TestRoleAssignmentController_Sync_CreateOrUpdate(t *testing.T) {
 	}
 }
 
-// --- Test for ListKeys ---
-
-func TestRoleAssignmentController_ListKeys(t *testing.T) {
-	tests := []struct {
-		name      string
-		mockSetup func(*storagemocks.MockStorage)
-		wantKeys  []interface{}
-		wantErr   bool
-	}{
-		{
-			name: "List success",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListRoleAssignment", storage.ListOption{}).Return([]v1.RoleAssignment{
-					{ID: 1}, {ID: 5}, {ID: 10},
-				}, nil).Once()
-			},
-			wantKeys: []interface{}{1, 5, 10},
-			wantErr:  false,
-		},
-		{
-			name: "List returns empty",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListRoleAssignment", storage.ListOption{}).Return([]v1.RoleAssignment{}, nil).Once()
-			},
-			wantKeys: []interface{}{},
-			wantErr:  false,
-		},
-		{
-			name: "List returns error",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListRoleAssignment", storage.ListOption{}).Return(nil, assert.AnError).Once()
-			},
-			wantKeys: nil,
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-			c := newTestRoleAssignmentController(mockStorage)
-
-			keys, err := c.ListKeys()
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, keys)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.wantKeys, keys)
-			}
-			mockStorage.AssertExpectations(t)
-		})
-	}
-}
-
 // --- Test for Reconcile ---
 
 func TestRoleAssignmentController_Reconcile(t *testing.T) {
 	raID := 1
+	failedRAID := 2
 	raIDStr := strconv.Itoa(raID)
 
 	// mockSyncHandler provides a controllable sync function for Reconcile tests.
 	mockSyncHandler := func(obj *v1.RoleAssignment) error {
 		// Check for a condition to simulate failure.
-		if obj != nil && obj.Metadata != nil && obj.Metadata.Name == "sync-should-fail" {
+		if obj != nil && obj.ID == failedRAID {
 			return errors.New("mock sync failed")
 		}
 		// Simulate successful sync.
@@ -283,10 +227,8 @@ func TestRoleAssignmentController_Reconcile(t *testing.T) {
 	}{
 		{
 			name:     "Reconcile success (real sync, no status change)", // Test scenario using default sync handler.
-			inputKey: raID,
+			inputKey: testRoleAssignment(raID, v1.RoleAssignmentPhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetRoleAssignment succeeds, role assignment is already in the desired state.
-				s.On("GetRoleAssignment", raIDStr).Return(testRoleAssignment(raID, v1.RoleAssignmentPhaseCREATED), nil).Once()
 				// The real 'sync' method expects no further storage calls here.
 			},
 			useMockSync: false, // Use the default c.sync via syncHandler.
@@ -294,10 +236,8 @@ func TestRoleAssignmentController_Reconcile(t *testing.T) {
 		},
 		{
 			name:     "Reconcile success (real sync, status updated)", // Test scenario using default sync handler.
-			inputKey: raID,
+			inputKey: testRoleAssignment(raID, v1.RoleAssignmentPhasePENDING),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetRoleAssignment succeeds, role assignment needs status update.
-				s.On("GetRoleAssignment", raIDStr).Return(testRoleAssignment(raID, v1.RoleAssignmentPhasePENDING), nil).Once()
 				// The real 'sync' method expects UpdateRoleAssignment to be called.
 				s.On("UpdateRoleAssignment", raIDStr, mock.MatchedBy(func(r *v1.RoleAssignment) bool {
 					return r.Status != nil && r.Status.Phase == v1.RoleAssignmentPhaseCREATED
@@ -308,10 +248,8 @@ func TestRoleAssignmentController_Reconcile(t *testing.T) {
 		},
 		{
 			name:     "Reconcile success (mock sync)", // Test Reconcile isolation using mock handler.
-			inputKey: raID,
+			inputKey: testRoleAssignment(raID, v1.RoleAssignmentPhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetRoleAssignment succeeds.
-				s.On("GetRoleAssignment", raIDStr).Return(testRoleAssignment(raID, v1.RoleAssignmentPhaseCREATED), nil).Once()
 				// No further storage calls expected by Reconcile before calling syncHandler.
 			},
 			useMockSync: true, // Override with mockSyncHandler.
@@ -325,36 +263,12 @@ func TestRoleAssignmentController_Reconcile(t *testing.T) {
 			},
 			useMockSync:   false, // Fails before sync handler.
 			wantErr:       true,
-			expectedError: errors.New("failed to assert key to roleAssignmentID"),
-		},
-		{
-			name:     "GetRoleAssignment returns error",
-			inputKey: raID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// Mock GetRoleAssignment to return an error.
-				s.On("GetRoleAssignment", raIDStr).Return(nil, assert.AnError).Once()
-			},
-			useMockSync: false, // Fails before sync handler.
-			wantErr:     true,  // Expect error from GetRoleAssignment to be propagated.
-		},
-		{
-			name:     "GetRoleAssignment returns NotFound",
-			inputKey: raID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// Mock GetRoleAssignment to return NotFound.
-				s.On("GetRoleAssignment", raIDStr).Return(nil, storage.ErrResourceNotFound).Once()
-			},
-			useMockSync: false, // Fails before sync handler.
-			wantErr:     false, // NotFound should be handled gracefully (logged and skipped).
+			expectedError: errors.New("failed to assert obj to *v1.RoleAssignment"),
 		},
 		{
 			name:     "Sync handler returns error (mock sync)",
-			inputKey: raID,
+			inputKey: testRoleAssignment(failedRAID, v1.RoleAssignmentPhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetRoleAssignment succeeds, providing the role assignment that triggers mock failure.
-				ra := testRoleAssignment(raID, v1.RoleAssignmentPhaseCREATED)
-				ra.Metadata.Name = "sync-should-fail" // Condition for mockSyncHandler failure.
-				s.On("GetRoleAssignment", raIDStr).Return(ra, nil).Once()
 			},
 			useMockSync: true, // Use the mock handler.
 			wantErr:     true, // Expect error from mock sync handler to be propagated.

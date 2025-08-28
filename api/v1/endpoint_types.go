@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 type ModelSpec struct {
 	Registry string `json:"registry,omitempty"`
@@ -71,4 +75,188 @@ func (e Endpoint) Key() string {
 	}
 
 	return e.Metadata.Workspace + "-" + "endpint" + "-" + strconv.Itoa(e.ID) + "-" + e.Metadata.Name
+}
+
+func (obj *Endpoint) GetName() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.Name
+}
+
+func (obj *Endpoint) SetName(name string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.Name = name
+}
+
+func (obj *Endpoint) GetWorkspace() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.Workspace
+}
+
+func (obj *Endpoint) SetWorkspace(workspace string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.Workspace = workspace
+}
+
+func (obj *Endpoint) GetLabels() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+
+	return obj.Metadata.Labels
+}
+
+func (obj *Endpoint) SetLabels(labels map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.Labels = labels
+}
+
+func (obj *Endpoint) GetAnnotations() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+
+	return obj.Metadata.Annotations
+}
+
+func (obj *Endpoint) SetAnnotations(annotations map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.Annotations = annotations
+}
+
+func (obj *Endpoint) GetCreationTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.CreationTimestamp
+}
+
+func (obj *Endpoint) SetCreationTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.CreationTimestamp = timestamp
+}
+
+func (obj *Endpoint) GetUpdateTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.UpdateTimestamp
+}
+
+func (obj *Endpoint) SetUpdateTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.UpdateTimestamp = timestamp
+}
+
+func (obj *Endpoint) GetDeletionTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+
+	return obj.Metadata.DeletionTimestamp
+}
+
+func (obj *Endpoint) SetDeletionTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+
+	obj.Metadata.DeletionTimestamp = timestamp
+}
+
+func (obj *Endpoint) GetSpec() interface{} {
+	return obj.Spec
+}
+
+func (obj *Endpoint) SetSpec(spec interface{}) {
+	obj.Spec = spec.(*EndpointSpec) //nolint:errcheck
+}
+
+func (obj *Endpoint) GetStatus() interface{} {
+	return obj.Status
+}
+
+func (obj *Endpoint) SetStatus(status interface{}) {
+	obj.Status = status.(*EndpointStatus) //nolint:errcheck
+}
+
+func (obj *Endpoint) GetKind() string {
+	return obj.Kind
+}
+
+func (obj *Endpoint) SetKind(kind string) {
+	obj.Kind = kind
+}
+
+func (obj *Endpoint) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *Endpoint) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
+}
+
+func (obj *Endpoint) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *Endpoint) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata) //nolint:errcheck
+}
+
+// EndpointList is a list of Endpoint resources
+type EndpointList struct {
+	Kind  string     `json:"kind"`
+	Items []Endpoint `json:"items"`
+}
+
+func (in *EndpointList) GetKind() string {
+	return in.Kind
+}
+
+func (in *EndpointList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *EndpointList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+
+	return objs
+}
+
+func (in *EndpointList) SetItems(objs []scheme.Object) {
+	items := make([]Endpoint, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*Endpoint) //nolint:errcheck
+	}
+
+	in.Items = items
 }

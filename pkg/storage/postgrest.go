@@ -2,11 +2,13 @@ package storage
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/pkg/errors"
 	postgrest "github.com/supabase-community/postgrest-go"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
 // explicitly check that postgrestStorage implements the interfaces
@@ -709,4 +711,114 @@ func (s *postgrestStorage) ListModelCatalog(option ListOption) ([]v1.ModelCatalo
 	err := s.genericList(MODEL_CATALOG_TABLE, &response, option)
 
 	return response, err
+}
+
+type postgrestObjectStorage struct {
+	postgrestClient *postgrest.Client
+	scheme          *scheme.Scheme
+}
+
+func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {
+	table, ok := s.scheme.KindToTable(obj.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", obj.GetKind())
+	}
+
+	responseContent, _, err := s.postgrestClient.From(table).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return err
+	}
+
+	var rawItems []json.RawMessage
+	if err := parseResponse(&rawItems, responseContent); err != nil {
+		return errors.Wrapf(err, "failed to parse list response. Raw response: %s", string(responseContent))
+	}
+
+	if len(rawItems) == 0 {
+		return ErrResourceNotFound
+	}
+
+	return parseResponse(obj, rawItems[0])
+}
+
+func (s *postgrestObjectStorage) List(obj scheme.ObjectList, option ListOption) error {
+	table, ok := s.scheme.KindToTable(strings.TrimSuffix(obj.GetKind(), "List"))
+	if !ok {
+		return errors.Errorf("unregistered type: %s", obj.GetKind())
+	}
+
+	builder := s.postgrestClient.From(table).Select("*", "", false)
+	applyListOption(builder, option)
+
+	responseContent, _, err := builder.Execute()
+	if err != nil {
+		return err
+	}
+
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(responseContent, &rawItems); err != nil {
+		return errors.Wrapf(err, "failed to parse list response. Raw response: %s", string(responseContent))
+	}
+
+	items := make([]scheme.Object, 0, len(rawItems))
+	itemKind := strings.TrimSuffix(obj.GetKind(), "List")
+
+	for _, rawItem := range rawItems {
+		item, err := s.scheme.New(itemKind)
+		if err != nil {
+			return err
+		}
+
+		if err := json.Unmarshal(rawItem, item); err != nil {
+			return errors.Wrapf(err, "failed to parse item in list")
+		}
+
+		items = append(items, item)
+	}
+
+	obj.SetItems(items)
+
+	return nil
+}
+
+func (s *postgrestObjectStorage) UpdateMetadata(id string, data scheme.Object) error {
+	table, ok := s.scheme.KindToTable(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+
+	updateData := map[string]interface{}{
+		"metadata": data.GetMetadata(),
+	}
+	_, _, err := s.postgrestClient.From(table).Update(updateData, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestObjectStorage) UpdateSpec(id string, data scheme.Object) error {
+	table, ok := s.scheme.KindToTable(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+
+	updateData := map[string]interface{}{
+		"spec": data.GetSpec(),
+	}
+	_, _, err := s.postgrestClient.From(table).Update(updateData, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestObjectStorage) UpdateStatus(id string, data scheme.Object) error {
+	table, ok := s.scheme.KindToTable(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+
+	updateData := map[string]interface{}{
+		"status": data.GetStatus(),
+	}
+	_, _, err := s.postgrestClient.From(table).Update(updateData, "", "").Filter("id", "eq", id).Execute()
+
+	return err
 }

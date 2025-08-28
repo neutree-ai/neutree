@@ -5,7 +5,54 @@ import (
 	"time"
 
 	"k8s.io/client-go/util/workqueue"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+type ObjectReader interface {
+	List() (scheme.ObjectList, error)
+	Get(id string) (scheme.Object, error)
+}
+
+type objectReader struct {
+	storage storage.ObjectStorage
+	obj     scheme.Object
+	scheme  *scheme.Scheme
+}
+
+func (r *objectReader) List() (scheme.ObjectList, error) {
+	kind := r.scheme.ObjectKind(r.obj)
+	listKind := kind + "List"
+
+	listObj, err := r.scheme.NewList(listKind)
+	if err != nil {
+		return nil, err
+	}
+
+	err = r.storage.List(listObj, storage.ListOption{})
+	if err != nil {
+		return nil, err
+	}
+
+	return listObj, nil
+}
+
+func (r *objectReader) Get(id string) (scheme.Object, error) {
+	kind := r.scheme.ObjectKind(r.obj)
+
+	obj, err := r.scheme.New(kind)
+	if err != nil {
+		return nil, err
+	}
+
+	err = r.storage.Get(id, obj)
+	if err != nil {
+		return nil, err
+	}
+
+	return obj, nil
+}
 
 type Controller interface {
 	Start(ctx context.Context)
@@ -15,14 +62,17 @@ type Controller interface {
 type Options func(*controller)
 
 type controller struct {
-	name string
+	name    string
+	storage storage.ObjectStorage
+	obj     scheme.Object
+	scheme  *scheme.Scheme
+
 	BaseController
 	Reconciler
-	Lister
 }
 
 func (c *controller) Start(ctx context.Context) {
-	c.BaseController.Start(ctx, c.Reconciler, c.Lister)
+	c.BaseController.Start(ctx, c.Reconciler)
 }
 
 func (c *controller) Name() string {
@@ -41,6 +91,14 @@ func NewController(name string, opts ...Options) *controller {
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+
+	if c.objReader == nil {
+		c.objReader = &objectReader{
+			storage: c.storage,
+			obj:     c.obj,
+			scheme:  c.scheme,
+		}
 	}
 
 	return c
@@ -76,8 +134,20 @@ func WithReconciler(r Reconciler) func(*controller) {
 	}
 }
 
-func WithLister(l Lister) func(*controller) {
+func WithObject(obj scheme.Object) func(*controller) {
 	return func(bc *controller) {
-		bc.Lister = l
+		bc.obj = obj
+	}
+}
+
+func WithScheme(s *scheme.Scheme) func(*controller) {
+	return func(bc *controller) {
+		bc.scheme = s
+	}
+}
+
+func WithStorage(s storage.ObjectStorage) func(*controller) {
+	return func(bc *controller) {
+		bc.storage = s
 	}
 }

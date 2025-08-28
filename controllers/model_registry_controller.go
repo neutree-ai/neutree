@@ -32,34 +32,15 @@ func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRe
 	return c, nil
 }
 
-func (c *ModelRegistryController) Reconcile(key interface{}) error {
-	modelRegistryID, ok := key.(int)
+func (c *ModelRegistryController) Reconcile(obj interface{}) error {
+	modelRegistry, ok := obj.(*v1.ModelRegistry)
 	if !ok {
-		return errors.New("failed to assert key to modelRegistryID")
+		return errors.New("failed to assert obj to *v1.ModelRegistry")
 	}
 
-	obj, err := c.storage.GetModelRegistry(strconv.Itoa(modelRegistryID))
-	if err != nil {
-		return errors.Wrapf(err, "failed to get model registry %s", strconv.Itoa(modelRegistryID))
-	}
+	klog.V(4).Info("Reconcile model registry " + modelRegistry.Metadata.Name)
 
-	klog.V(4).Info("Reconcile model registry " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
-}
-
-func (c *ModelRegistryController) ListKeys() ([]interface{}, error) {
-	registries, err := c.storage.ListModelRegistry(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(registries))
-	for i := range registries {
-		keys[i] = registries[i].ID
-	}
-
-	return keys, nil
+	return c.syncHandler(modelRegistry)
 }
 
 func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
