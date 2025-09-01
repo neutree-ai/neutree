@@ -14,6 +14,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/model_registry"
+	"github.com/neutree-ai/neutree/pkg/model_registry/bentoml"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -280,8 +281,23 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		version := c.PostForm("version")
-		if version == "" {
-			version = v1.LatestVersion
+		if version == v1.LatestVersion {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": "Cannot use 'latest' as version, please specify a concrete version or leave it empty for auto-generation",
+			})
+
+			return
+		} else if version == "" {
+			autoGenerateVersion, err := bentoml.GenerateVersion()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"message": fmt.Sprintf("Failed to auto generate version: %v", err),
+				})
+
+				return
+			}
+
+			version = *autoGenerateVersion
 		}
 
 		// Get uploaded file
