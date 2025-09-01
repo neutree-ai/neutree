@@ -87,7 +87,8 @@ func ImportModel(homePath string, reader io.Reader, name, version string, force 
 
 	lname := strings.ToLower(name)
 	lversion := strings.ToLower(version)
-	finalDir := filepath.Join(homePath, "models", lname, lversion)
+	modelDir := filepath.Join(homePath, "models", lname)
+	finalDir := filepath.Join(modelDir, lversion)
 
 	if exists(finalDir) {
 		if !force {
@@ -124,6 +125,37 @@ func ImportModel(homePath string, reader io.Reader, name, version string, force 
 	// Step 3: atomic rename to final destination.
 	if err = os.Rename(tmpDir, finalDir); err != nil {
 		return errors.Wrap(err, "atomic rename")
+	}
+
+	// Step 4: update version dir mode
+	if err = os.Chmod(finalDir, 0o755); err != nil {
+		return errors.Wrap(err, "chmod model dir")
+	}
+
+	// Step 5: recreate latest tag
+	if err = recreateLatestTag(modelDir, lversion); err != nil {
+		return errors.Wrapf(err, "failed to recreate latest tag")
+	}
+
+	return nil
+}
+
+func recreateLatestTag(modelDir, version string) error {
+	latestFilePath := filepath.Join(modelDir, v1.LatestVersion)
+
+	latestFile, err := os.OpenFile(latestFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return errors.Wrap(err, "create latest file")
+	}
+	defer latestFile.Close()
+
+	_, err = latestFile.WriteString(version)
+	if err != nil {
+		return errors.Wrap(err, "write latest file")
+	}
+
+	if err := latestFile.Sync(); err != nil {
+		return errors.Wrap(err, "sync latest file to disk")
 	}
 
 	return nil

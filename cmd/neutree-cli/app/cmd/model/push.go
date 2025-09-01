@@ -12,6 +12,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/client"
 	"github.com/neutree-ai/neutree/pkg/model_registry/bentoml"
 )
@@ -40,6 +41,10 @@ func NewPushCmd() *cobra.Command {
 			// If model name is not specified, use directory name
 			if modelName == "" {
 				modelName = filepath.Base(modelPath)
+			}
+
+			if version == v1.LatestVersion {
+				return fmt.Errorf("cannot use 'latest' as version, please specify a concrete version or leave it empty for auto-generation")
 			}
 
 			// Auto‑generate version if not provided

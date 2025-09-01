@@ -477,7 +477,7 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
 					Applications: map[string]dashboard.RayServeApplicationStatus{},
 				}, nil)
-				
+
 				// Verify the application name is correct when creating new application
 				mockDashboard.On("UpdateServeApplications", mock.MatchedBy(func(req dashboard.RayServeApplicationsRequest) bool {
 					if len(req.Applications) != 1 {
@@ -527,7 +527,7 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 						},
 					},
 				}, nil)
-				
+
 				// Verify the application name remains consistent when updating
 				mockDashboard.On("UpdateServeApplications", mock.MatchedBy(func(req dashboard.RayServeApplicationsRequest) bool {
 					if len(req.Applications) != 1 {
@@ -545,7 +545,7 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 		t.Run(tt.name, func(t *testing.T) {
 			mockDashboard := dashboardmocks.NewMockDashboardService(t)
 			mockStorage := storagemocks.NewMockStorage(t)
-			
+
 			if tt.setupMock != nil {
 				tt.setupMock(mockDashboard, mockStorage)
 			}
