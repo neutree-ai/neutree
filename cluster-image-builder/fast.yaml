@@ -1,0 +1,28 @@
+proxy_location: EveryNode
+http_options:
+  host: 0.0.0.0
+  port: 8000
+grpc_options:
+  port: 9001
+  grpc_servicer_functions: []
+logging_config:
+  encoding: TEXT
+  log_level: INFO
+  logs_dir: null
+  enable_access_log: true
+applications:
+  - name: ns_app
+    route_prefix: /ns/vllm
+    import_path: serve.fast-vllm.v2.app:app_builder
+    args:
+      models:
+        - name: Qwen/Qwen2.5-7B-Instruct
+          engine_args:
+            tensorizer_uri: /home/ec2-user/e-vllm-test/output/vllm/Qwen/Qwen2.5-7B-Instruct/v1/model.tensors
+            num_readers: 4
+      deployment_options:
+        warm_pool:
+          total_gpus: 1
+          warm_pool_size: 1
+          gpu_per_instance: 1
+          cooldown_delay: 30
