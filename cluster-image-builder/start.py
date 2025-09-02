@@ -14,9 +14,14 @@ def main():
 
     accelerator_counts = {}
     accelerator_type = os.environ.get("ACCELERATOR_TYPE", "")
+    accelerator_args = []
     if accelerator_type != "":
         acclerator = importlib.import_module(f"accelerator.{accelerator_type}")
         accelerator_counts = acclerator.get_accelerator_counts()
+        if hasattr(acclerator, "get_start_args"):
+            custom_args = acclerator.get_start_args()
+            if custom_args:
+                accelerator_args = custom_args if isinstance(custom_args, list) else [custom_args]
 
     resources_param = json.dumps(accelerator_counts)
 
@@ -27,7 +32,8 @@ def main():
         "--resources", resources_param
     ]
 
-    # Append any additional arguments passed after the IP address
+    cmd.extend(accelerator_args)
+
     cmd.extend(additional_args)
 
     print("Executing command:", " ".join(cmd))
