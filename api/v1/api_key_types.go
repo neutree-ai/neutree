@@ -1,5 +1,9 @@
 package v1
 
+import (
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
+
 type ApiKeySpec struct {
 	Quota int64 `json:"quota,omitempty"`
 }
@@ -164,4 +168,34 @@ func (obj *ApiKey) GetMetadata() interface{} {
 
 func (obj *ApiKey) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// ApiKeyList is a list of ApiKey resources
+type ApiKeyList struct {
+	Kind  string   `json:"kind"`
+	Items []ApiKey `json:"items"`
+}
+
+func (in *ApiKeyList) GetKind() string {
+	return in.Kind
+}
+
+func (in *ApiKeyList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *ApiKeyList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *ApiKeyList) SetItems(objs []scheme.Object) {
+	items := make([]ApiKey, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*ApiKey)
+	}
+	in.Items = items
 }

@@ -119,10 +119,20 @@ func (b *Builder) Build() (*App, error) {
 
 		klog.Info("Initializing controller:", name)
 
-		ctrl, err := factory(opts)
+		reconciler, err := factory(opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create controller %s: %w", name, err)
 		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithObject(opts.obj),
+			controllers.WithStorage(opts.storage),
+			controllers.WithReconciler(reconciler),
+		)
 
 		registerControllers[name] = ctrl
 	}

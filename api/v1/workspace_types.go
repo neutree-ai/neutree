@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 type WorkspacePhase string
 
@@ -160,4 +164,34 @@ func (obj *Workspace) GetMetadata() interface{} {
 
 func (obj *Workspace) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// WorkspaceList is a list of Workspace resources
+type WorkspaceList struct {
+	Kind  string      `json:"kind"`
+	Items []Workspace `json:"items"`
+}
+
+func (in *WorkspaceList) GetKind() string {
+	return in.Kind
+}
+
+func (in *WorkspaceList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *WorkspaceList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *WorkspaceList) SetItems(objs []scheme.Object) {
+	items := make([]Workspace, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*Workspace)
+	}
+	in.Items = items
 }

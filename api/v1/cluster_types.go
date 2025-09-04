@@ -3,6 +3,7 @@ package v1
 import (
 	"strconv"
 
+	"github.com/neutree-ai/neutree/pkg/scheme"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -267,4 +268,34 @@ func (obj *Cluster) GetMetadata() interface{} {
 
 func (obj *Cluster) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// ClusterList is a list of Cluster resources
+type ClusterList struct {
+	Kind  string    `json:"kind"`
+	Items []Cluster `json:"items"`
+}
+
+func (in *ClusterList) GetKind() string {
+	return in.Kind
+}
+
+func (in *ClusterList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *ClusterList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *ClusterList) SetItems(objs []scheme.Object) {
+	items := make([]Cluster, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*Cluster)
+	}
+	in.Items = items
 }

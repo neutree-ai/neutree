@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -49,7 +50,7 @@ func (o *NeutreeCoreOptions) Validate() error {
 	return nil
 }
 
-func (o *NeutreeCoreOptions) Config() (*config.CoreConfig, error) {
+func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, error) {
 	c := &config.CoreConfig{}
 
 	gin.SetMode(o.Server.GinMode)
@@ -68,6 +69,17 @@ func (o *NeutreeCoreOptions) Config() (*config.CoreConfig, error) {
 		return nil, errors.Wrapf(err, "failed to init storage")
 	}
 
+	objStorage, err := storage.NewObjectStorage(storage.Options{
+		AccessURL: o.Storage.AccessURL,
+		Scheme:    "api",
+		JwtSecret: o.Storage.JwtSecret,
+	}, scheme)
+
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to init object storage")
+	}
+
+	c.ObjectStorage = objStorage
 	c.Storage = s
 
 	imageService := registry.NewImageService()

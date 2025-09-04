@@ -41,3 +41,9 @@ type Object interface {
 	Status
 	GetID() string
 }
+
+type ObjectList interface {
+	ObjectKind
+	GetItems() []Object
+	SetItems([]Object)
+}

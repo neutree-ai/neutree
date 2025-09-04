@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 type ModelCatalogPhase string
 
@@ -183,4 +187,34 @@ func (obj *ModelCatalog) GetMetadata() interface{} {
 
 func (obj *ModelCatalog) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// ModelCatalogList is a list of ModelCatalog resources
+type ModelCatalogList struct {
+	Kind  string         `json:"kind"`
+	Items []ModelCatalog `json:"items"`
+}
+
+func (in *ModelCatalogList) GetKind() string {
+	return in.Kind
+}
+
+func (in *ModelCatalogList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *ModelCatalogList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *ModelCatalogList) SetItems(objs []scheme.Object) {
+	items := make([]ModelCatalog, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*ModelCatalog)
+	}
+	in.Items = items
 }

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/pkg/errors"
 	postgrest "github.com/supabase-community/postgrest-go"
@@ -729,6 +730,44 @@ func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {
 	}
 
 	return parseResponse(obj, responseContent)
+}
+
+func (s *postgrestObjectStorage) List(obj scheme.ObjectList, option ListOption) error {
+	table, ok := s.scheme.PluralKind(strings.TrimSuffix(obj.GetKind(), "List"))
+	if !ok {
+		return errors.Errorf("unregistered type: %s", obj.GetKind())
+	}
+
+	builder := s.postgrestClient.From(table).Select("*", "", false)
+	applyListOption(builder, option)
+
+	responseContent, _, err := builder.Execute()
+	if err != nil {
+		return err
+	}
+
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(responseContent, &rawItems); err != nil {
+		return errors.Wrapf(err, "failed to parse list response: %v Raw response: %s", err, string(responseContent))
+	}
+
+	items := make([]scheme.Object, 0, len(rawItems))
+	itemKind := strings.TrimSuffix(obj.GetKind(), "List")
+
+	for _, rawItem := range rawItems {
+		item, err := s.scheme.New(itemKind)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(rawItem, item); err != nil {
+			return errors.Wrapf(err, "failed to parse item in list: %v", err)
+		}
+		items = append(items, item)
+	}
+
+	obj.SetItems(items)
+
+	return nil
 }
 
 func (s *postgrestObjectStorage) UpdateMetadata(id string, data scheme.Object) error {

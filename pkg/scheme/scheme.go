@@ -25,7 +25,7 @@ func NewScheme() *Scheme {
 }
 
 // AddKnownTypes registers the given types with the Scheme for a specific version.
-func (s *Scheme) AddKnownTypes(types ...Object) {
+func (s *Scheme) AddKnownTypes(types ...ObjectKind) {
 	for _, obj := range types {
 		t := reflect.TypeOf(obj)
 		if t.Kind() == reflect.Ptr {
@@ -69,6 +69,40 @@ func (s *Scheme) New(kind string) (Object, error) {
 
 	obj.SetKind(kind)
 	return obj, nil
+}
+
+// New creates a new v1.ObjectList instance from a version and kind.
+func (s *Scheme) NewList(kind string) (ObjectList, error) {
+	t, ok := s.vkToType[kind]
+	if !ok {
+		singularKind, isPlural := s.pluralToKind[kind]
+		if !isPlural {
+			return nil, fmt.Errorf("unregistered type: %s", kind)
+		}
+		t, ok = s.vkToType[singularKind]
+		if !ok {
+			return nil, fmt.Errorf("unregistered type for singular kind %s (from plural %s)", singularKind, kind)
+		}
+		kind = singularKind
+	}
+
+	instance := reflect.New(t).Interface()
+	obj, ok := instance.(ObjectList)
+	if !ok {
+		return nil, fmt.Errorf("type %T does not implement Object", instance)
+	}
+
+	obj.SetKind(kind)
+	return obj, nil
+}
+
+// ObjectKind returns the kind of the given object.
+func (s *Scheme) ObjectKind(obj ObjectKind) string {
+	t := reflect.TypeOf(obj)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t.Name()
 }
 
 // CodecFactory is a simplified factory for creating decoders.
@@ -143,9 +177,9 @@ type Builder struct {
 }
 
 // Register adds one or more objects to the SchemeBuilder so they can be added to a Scheme.  Register mutates bld.
-func (bld *Builder) Register(object ...Object) *Builder {
+func (bld *Builder) Register(objectKind ...ObjectKind) *Builder {
 	bld.SchemeBuilder.Register(func(scheme *Scheme) error {
-		scheme.AddKnownTypes(object...)
+		scheme.AddKnownTypes(objectKind...)
 		return nil
 	})
 	return bld

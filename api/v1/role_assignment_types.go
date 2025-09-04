@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 // RoleAssignmentSpec defines the desired state of RoleAssignment
 type RoleAssignmentSpec struct {
@@ -173,4 +177,34 @@ func (obj *RoleAssignment) GetMetadata() interface{} {
 
 func (obj *RoleAssignment) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// RoleAssignmentList is a list of RoleAssignment resources
+type RoleAssignmentList struct {
+	Kind  string           `json:"kind"`
+	Items []RoleAssignment `json:"items"`
+}
+
+func (in *RoleAssignmentList) GetKind() string {
+	return in.Kind
+}
+
+func (in *RoleAssignmentList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *RoleAssignmentList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *RoleAssignmentList) SetItems(objs []scheme.Object) {
+	items := make([]RoleAssignment, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*RoleAssignment)
+	}
+	in.Items = items
 }

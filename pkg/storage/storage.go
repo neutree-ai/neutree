@@ -231,6 +231,7 @@ type Patcher interface {
 
 type Reader interface {
 	Get(id string, obj scheme.Object) error
+	List(obj scheme.ObjectList, option ListOption) error
 }
 
 type ObjectStorage interface {

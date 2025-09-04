@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 type ModelRegistryPhase string
 
@@ -203,4 +207,34 @@ func (obj *ModelRegistry) GetMetadata() interface{} {
 
 func (obj *ModelRegistry) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// ModelRegistryList is a list of ModelRegistry resources
+type ModelRegistryList struct {
+	Kind  string          `json:"kind"`
+	Items []ModelRegistry `json:"items"`
+}
+
+func (in *ModelRegistryList) GetKind() string {
+	return in.Kind
+}
+
+func (in *ModelRegistryList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *ModelRegistryList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *ModelRegistryList) SetItems(objs []scheme.Object) {
+	items := make([]ModelRegistry, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*ModelRegistry)
+	}
+	in.Items = items
 }

@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 const (
 	TextGenerationModelTask = "text-generation"
@@ -178,4 +182,34 @@ func (obj *Engine) GetMetadata() interface{} {
 
 func (obj *Engine) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// EngineList is a list of Engine resources
+type EngineList struct {
+	Kind  string   `json:"kind"`
+	Items []Engine `json:"items"`
+}
+
+func (in *EngineList) GetKind() string {
+	return in.Kind
+}
+
+func (in *EngineList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *EngineList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *EngineList) SetItems(objs []scheme.Object) {
+	items := make([]Engine, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*Engine)
+	}
+	in.Items = items
 }

@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 type ImageRegistryPhase string
 
@@ -177,4 +181,34 @@ func (obj *ImageRegistry) GetMetadata() interface{} {
 
 func (obj *ImageRegistry) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// ImageRegistryList is a list of ImageRegistry resources
+type ImageRegistryList struct {
+	Kind  string          `json:"kind"`
+	Items []ImageRegistry `json:"items"`
+}
+
+func (in *ImageRegistryList) GetKind() string {
+	return in.Kind
+}
+
+func (in *ImageRegistryList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *ImageRegistryList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *ImageRegistryList) SetItems(objs []scheme.Object) {
+	items := make([]ImageRegistry, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*ImageRegistry)
+	}
+	in.Items = items
 }

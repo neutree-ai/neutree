@@ -5,6 +5,8 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/pkg/scheme"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type ControllerOptions struct {
@@ -12,13 +14,17 @@ type ControllerOptions struct {
 	beforeHooks []controllers.HookFunc
 	afterHooks  []controllers.HookFunc
 	name        string
+
+	obj     scheme.Object
+	scheme  *scheme.Scheme
+	storage storage.ObjectStorage
 }
 
 // ControllerFactory defines a function type for creating controllers
-type ControllerFactory func(opts *ControllerOptions) (controllers.Controller, error)
+type ControllerFactory func(opts *ControllerOptions) (controllers.Reconciler, error)
 
 func NewClusterControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		clusterController, err := controllers.NewClusterController(
 			&controllers.ClusterControllerOption{
 				Storage:                 opts.config.Storage,
@@ -35,21 +41,12 @@ func NewClusterControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create cluster controller")
 		}
 
-		// Create a new controller with the provided options
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(clusterController),
-			controllers.WithReconciler(clusterController),
-		)
-
-		return ctrl, nil
+		return clusterController, nil
 	}
 }
 
 func NewEngineControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		engineController, err := controllers.NewEngineController(&controllers.EngineControllerOption{
 			Storage: opts.config.Storage,
 		})
@@ -57,20 +54,12 @@ func NewEngineControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create engine controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(engineController),
-			controllers.WithReconciler(engineController),
-		)
-
-		return ctrl, nil
+		return engineController, nil
 	}
 }
 
 func NewEndpointControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
 			Storage:            opts.config.Storage,
 			ImageService:       opts.config.ImageService,
@@ -81,20 +70,12 @@ func NewEndpointControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create endpoint controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(endpointController),
-			controllers.WithReconciler(endpointController),
-		)
-
-		return ctrl, nil
+		return endpointController, nil
 	}
 }
 
 func NewRoleControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		roleController, err := controllers.NewRoleController(&controllers.RoleControllerOption{
 			Storage: opts.config.Storage,
 		})
@@ -102,20 +83,12 @@ func NewRoleControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create role controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(roleController),
-			controllers.WithReconciler(roleController),
-		)
-
-		return ctrl, nil
+		return roleController, nil
 	}
 }
 
 func NewRoleAssignmentControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		roleAssignmentController, err := controllers.NewRoleAssignmentController(&controllers.RoleAssignmentControllerOption{
 			Storage: opts.config.Storage,
 		})
@@ -123,20 +96,12 @@ func NewRoleAssignmentControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create role assignment controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(roleAssignmentController),
-			controllers.WithReconciler(roleAssignmentController),
-		)
-
-		return ctrl, nil
+		return roleAssignmentController, nil
 	}
 }
 
 func NewWorkspaceControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		workspaceController, err := controllers.NewWorkspaceController(&controllers.WorkspaceControllerOption{
 			Storage:            opts.config.Storage,
 			AcceleratorManager: opts.config.AcceleratorManager,
@@ -145,20 +110,12 @@ func NewWorkspaceControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create workspace controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(workspaceController),
-			controllers.WithReconciler(workspaceController),
-		)
-
-		return ctrl, nil
+		return workspaceController, nil
 	}
 }
 
 func NewApiKeyControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		apiKeyController, err := controllers.NewApiKeyController(&controllers.ApiKeyControllerOption{
 			Storage: opts.config.Storage,
 			Gw:      opts.config.Gateway,
@@ -167,20 +124,12 @@ func NewApiKeyControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create api key controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(apiKeyController),
-			controllers.WithReconciler(apiKeyController),
-		)
-
-		return ctrl, nil
+		return apiKeyController, nil
 	}
 }
 
 func NewImageRegistryControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		imageRegistryController, err := controllers.NewImageRegistryController(&controllers.ImageRegistryControllerOption{
 			Storage:      opts.config.Storage,
 			ImageService: opts.config.ImageService,
@@ -189,20 +138,12 @@ func NewImageRegistryControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create image registry controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(imageRegistryController),
-			controllers.WithReconciler(imageRegistryController),
-		)
-
-		return ctrl, nil
+		return imageRegistryController, nil
 	}
 }
 
 func NewModelCatalogControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		modelCatalogController, err := controllers.NewModelCatalogController(&controllers.ModelCatalogControllerOption{
 			Storage: opts.config.Storage,
 		})
@@ -210,20 +151,12 @@ func NewModelCatalogControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create model catalog controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(modelCatalogController),
-			controllers.WithReconciler(modelCatalogController),
-		)
-
-		return ctrl, nil
+		return modelCatalogController, nil
 	}
 }
 
 func NewModelRegistryControllerFactory() ControllerFactory {
-	return func(opts *ControllerOptions) (controllers.Controller, error) {
+	return func(opts *ControllerOptions) (controllers.Reconciler, error) {
 		modelRegistryController, err := controllers.NewModelRegistryController(&controllers.ModelRegistryControllerOption{
 			Storage: opts.config.Storage,
 		})
@@ -231,14 +164,6 @@ func NewModelRegistryControllerFactory() ControllerFactory {
 			return nil, errors.Wrapf(err, "failed to create model registry controller")
 		}
 
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithLister(modelRegistryController),
-			controllers.WithReconciler(modelRegistryController),
-		)
-
-		return ctrl, nil
+		return modelRegistryController, nil
 	}
 }

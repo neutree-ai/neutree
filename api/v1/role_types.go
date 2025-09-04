@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 type RolePreset string
 
@@ -168,4 +172,34 @@ func (obj *Role) GetMetadata() interface{} {
 
 func (obj *Role) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// RoleList is a list of Role resources
+type RoleList struct {
+	Kind  string `json:"kind"`
+	Items []Role `json:"items"`
+}
+
+func (in *RoleList) GetKind() string {
+	return in.Kind
+}
+
+func (in *RoleList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *RoleList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *RoleList) SetItems(objs []scheme.Object) {
+	items := make([]Role, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*Role)
+	}
+	in.Items = items
 }

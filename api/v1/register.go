@@ -13,15 +13,25 @@ var (
 func init() {
 	SchemeBuilder.Register(
 		&ApiKey{},
+		&ApiKeyList{},
 		&Cluster{},
+		&ClusterList{},
 		&Endpoint{},
+		&EndpointList{},
 		&Engine{},
+		&EngineList{},
 		&ImageRegistry{},
+		&ImageRegistryList{},
 		&ModelCatalog{},
+		&ModelCatalogList{},
 		&ModelRegistry{},
+		&ModelRegistryList{},
 		&RoleAssignment{},
+		&RoleAssignmentList{},
 		&Role{},
+		&RoleList{},
 		&Workspace{},
+		&WorkspaceList{},
 	)
 
 	SchemeBuilder.RegisterPlural(

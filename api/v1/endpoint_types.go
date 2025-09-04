@@ -1,6 +1,10 @@
 package v1
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/scheme"
+)
 
 type ModelSpec struct {
 	Registry string `json:"registry,omitempty"`
@@ -209,4 +213,34 @@ func (obj *Endpoint) GetMetadata() interface{} {
 
 func (obj *Endpoint) SetMetadata(m interface{}) {
 	obj.Metadata = m.(*Metadata)
+}
+
+// EndpointList is a list of Endpoint resources
+type EndpointList struct {
+	Kind  string     `json:"kind"`
+	Items []Endpoint `json:"items"`
+}
+
+func (in *EndpointList) GetKind() string {
+	return in.Kind
+}
+
+func (in *EndpointList) SetKind(kind string) {
+	in.Kind = kind
+}
+
+func (in *EndpointList) GetItems() []scheme.Object {
+	var objs []scheme.Object
+	for i := range in.Items {
+		objs = append(objs, &in.Items[i])
+	}
+	return objs
+}
+
+func (in *EndpointList) SetItems(objs []scheme.Object) {
+	items := make([]Endpoint, len(objs))
+	for i, obj := range objs {
+		items[i] = *obj.(*Endpoint)
+	}
+	in.Items = items
 }
