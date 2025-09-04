@@ -191,21 +191,21 @@ func CreateServiceToken(jwtSecret string) (*string, error) {
 	return &jwtAutoToken, nil
 }
 
-func New(o Options) (Storage, ObjectPatcher, error) {
+func New(o Options) (Storage, error) {
 	jwtAutoToken, err := CreateServiceToken(o.JwtSecret)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to init storage")
+		return nil, errors.Wrap(err, "failed to init storage")
 	}
 
 	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil).SetAuthToken(*jwtAutoToken)
 	if postgrestClient.ClientError != nil {
-		return nil, nil, errors.Wrap(err, "failed to init storage")
+		return nil, errors.Wrap(err, "failed to init storage")
 	}
 
 	s := &postgrestStorage{
 		postgrestClient: postgrestClient,
 	}
-	return s, s, nil
+	return s, nil
 }
 
 type Filter struct {
