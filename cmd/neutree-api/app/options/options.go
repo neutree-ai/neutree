@@ -89,10 +89,9 @@ func (o *Options) Config() (*config.APIConfig, error) {
 	}
 
 	return &config.APIConfig{
-		Storage:       s,
-		ObjectPatcher: op,
-		GinEngine:     engine,
-		AuthConfig:    authConfig,
+		Storage:    s,
+		GinEngine:  engine,
+		AuthConfig: authConfig,
 
 		ServerConfig: &config.ServerConfig{
 			Port: o.Server.Port,

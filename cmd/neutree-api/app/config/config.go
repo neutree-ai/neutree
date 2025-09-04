@@ -21,10 +21,9 @@ type StaticConfig struct {
 // APIConfig holds the main API configuration
 type APIConfig struct {
 	// Core dependencies
-	Storage       storage.Storage
-	ObjectPatcher storage.ObjectPatcher
-	GinEngine     *gin.Engine
-	AuthConfig    middleware.AuthConfig
+	Storage    storage.Storage
+	GinEngine  *gin.Engine
+	AuthConfig middleware.AuthConfig
 
 	// Server configuration
 	ServerConfig *ServerConfig

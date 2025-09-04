@@ -59,7 +59,7 @@ func (o *NeutreeCoreOptions) Config() (*config.CoreConfig, error) {
 	acceleratorManager := accelerator.NewManager(e)
 	c.AcceleratorManager = acceleratorManager
 
-	s, op, err := storage.New(storage.Options{
+	s, err := storage.New(storage.Options{
 		AccessURL: o.Storage.AccessURL,
 		Scheme:    "api",
 		JwtSecret: o.Storage.JwtSecret,
@@ -69,7 +69,6 @@ func (o *NeutreeCoreOptions) Config() (*config.CoreConfig, error) {
 	}
 
 	c.Storage = s
-	c.ObjectPatcher = op
 
 	imageService := registry.NewImageService()
 	c.ImageService = imageService
