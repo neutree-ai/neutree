@@ -8,15 +8,17 @@ import (
 
 // Scheme defines a simple type registry for mapping VersionKind to Go types.
 type Scheme struct {
-	vkToType map[string]reflect.Type
-	typeToVK map[reflect.Type]string
+	vkToType     map[string]reflect.Type
+	typeToVK     map[reflect.Type]string
+	pluralToKind map[string]string
 }
 
 // NewScheme creates a new Scheme.
 func NewScheme() *Scheme {
 	return &Scheme{
-		vkToType: make(map[string]reflect.Type),
-		typeToVK: make(map[reflect.Type]string),
+		vkToType:     make(map[string]reflect.Type),
+		typeToVK:     make(map[reflect.Type]string),
+		pluralToKind: make(map[string]string),
 	}
 }
 
@@ -34,17 +36,32 @@ func (s *Scheme) AddKnownTypes(types ...Object) {
 	}
 }
 
+// AddKnownPluralTypes registers mappings from plural resource names to their singular kind.
+func (s *Scheme) AddKnownPluralTypes(pluralToKind map[string]string) {
+	for plural, kind := range pluralToKind {
+		s.pluralToKind[plural] = kind
+	}
+}
+
 // New creates a new v1.Object instance from a version and kind.
 func (s *Scheme) New(kind string) (Object, error) {
 	t, ok := s.vkToType[kind]
 	if !ok {
-		return nil, fmt.Errorf("unregistered type: %s", kind)
+		singularKind, isPlural := s.pluralToKind[kind]
+		if !isPlural {
+			return nil, fmt.Errorf("unregistered type: %s", kind)
+		}
+		t, ok = s.vkToType[singularKind]
+		if !ok {
+			return nil, fmt.Errorf("unregistered type for singular kind %s (from plural %s)", singularKind, kind)
+		}
+		kind = singularKind
 	}
 
 	instance := reflect.New(t).Interface()
-	obj, ok := instance.(v1.Object)
+	obj, ok := instance.(Object)
 	if !ok {
-		return nil, fmt.Errorf("type %T does not implement v1.Object", instance)
+		return nil, fmt.Errorf("type %T does not implement Object", instance)
 	}
 
 	obj.SetKind(kind)
@@ -126,6 +143,15 @@ type Builder struct {
 func (bld *Builder) Register(object ...Object) *Builder {
 	bld.SchemeBuilder.Register(func(scheme *Scheme) error {
 		scheme.AddKnownTypes(object...)
+		return nil
+	})
+	return bld
+}
+
+// RegisterPlural adds one or more plural mappings to the SchemeBuilder.
+func (bld *Builder) RegisterPlural(pluralToKind map[string]string) *Builder {
+	bld.SchemeBuilder.Register(func(scheme *Scheme) error {
+		scheme.AddKnownPluralTypes(pluralToKind)
 		return nil
 	})
 	return bld
