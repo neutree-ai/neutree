@@ -1,8 +1,6 @@
 package v1
 
-import (
-	"github.com/neutree-ai/neutree/pkg/scheme"
-)
+import "github.com/neutree-ai/neutree/pkg/scheme"
 
 var (
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.

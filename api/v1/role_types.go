@@ -29,3 +29,125 @@ type Role struct {
 	Spec       *RoleSpec   `json:"spec,omitempty"`
 	Status     *RoleStatus `json:"status,omitempty"`
 }
+
+func (obj *Role) GetName() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Name
+}
+
+func (obj *Role) SetName(name string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Name = name
+}
+
+func (obj *Role) GetWorkspace() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Workspace
+}
+
+func (obj *Role) SetWorkspace(workspace string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Workspace = workspace
+}
+
+func (obj *Role) GetLabels() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Labels
+}
+
+func (obj *Role) SetLabels(labels map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Labels = labels
+}
+
+func (obj *Role) GetAnnotations() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Annotations
+}
+
+func (obj *Role) SetAnnotations(annotations map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Annotations = annotations
+}
+
+func (obj *Role) GetCreationTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.CreationTimestamp
+}
+
+func (obj *Role) SetCreationTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.CreationTimestamp = timestamp
+}
+
+func (obj *Role) GetUpdateTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.UpdateTimestamp
+}
+
+func (obj *Role) SetUpdateTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.UpdateTimestamp = timestamp
+}
+
+func (obj *Role) GetDeletionTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.DeletionTimestamp
+}
+
+func (obj *Role) SetDeletionTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.DeletionTimestamp = timestamp
+}
+
+func (obj *Role) GetSpec() interface{} {
+	return obj.Spec
+}
+
+func (obj *Role) SetSpec(spec interface{}) {
+	obj.Spec = spec.(*RoleSpec)
+}
+
+func (obj *Role) GetStatus() interface{} {
+	return obj.Status
+}
+
+func (obj *Role) SetStatus(status interface{}) {
+	obj.Status = status.(*RoleStatus)
+}
+
+func (obj *Role) GetKind() string {
+	return obj.Kind
+}
+
+func (obj *Role) SetKind(kind string) {
+	obj.Kind = kind
+}

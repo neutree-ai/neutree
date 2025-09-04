@@ -39,3 +39,125 @@ type Engine struct {
 	Spec       *EngineSpec   `json:"spec,omitempty"`
 	Status     *EngineStatus `json:"status,omitempty"`
 }
+
+func (obj *Engine) GetName() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Name
+}
+
+func (obj *Engine) SetName(name string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Name = name
+}
+
+func (obj *Engine) GetWorkspace() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Workspace
+}
+
+func (obj *Engine) SetWorkspace(workspace string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Workspace = workspace
+}
+
+func (obj *Engine) GetLabels() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Labels
+}
+
+func (obj *Engine) SetLabels(labels map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Labels = labels
+}
+
+func (obj *Engine) GetAnnotations() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Annotations
+}
+
+func (obj *Engine) SetAnnotations(annotations map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Annotations = annotations
+}
+
+func (obj *Engine) GetCreationTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.CreationTimestamp
+}
+
+func (obj *Engine) SetCreationTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.CreationTimestamp = timestamp
+}
+
+func (obj *Engine) GetUpdateTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.UpdateTimestamp
+}
+
+func (obj *Engine) SetUpdateTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.UpdateTimestamp = timestamp
+}
+
+func (obj *Engine) GetDeletionTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.DeletionTimestamp
+}
+
+func (obj *Engine) SetDeletionTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.DeletionTimestamp = timestamp
+}
+
+func (obj *Engine) GetSpec() interface{} {
+	return obj.Spec
+}
+
+func (obj *Engine) SetSpec(spec interface{}) {
+	obj.Spec = spec.(*EngineSpec)
+}
+
+func (obj *Engine) GetStatus() interface{} {
+	return obj.Status
+}
+
+func (obj *Engine) SetStatus(status interface{}) {
+	obj.Status = status.(*EngineStatus)
+}
+
+func (obj *Engine) GetKind() string {
+	return obj.Kind
+}
+
+func (obj *Engine) SetKind(kind string) {
+	obj.Kind = kind
+}

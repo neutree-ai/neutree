@@ -46,3 +46,125 @@ func (r ModelCatalog) Key() string {
 
 	return r.Metadata.Workspace + "-" + "modelcatalog" + "-" + strconv.Itoa(r.ID) + "-" + r.Metadata.Name
 }
+
+func (obj *ModelCatalog) GetName() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Name
+}
+
+func (obj *ModelCatalog) SetName(name string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Name = name
+}
+
+func (obj *ModelCatalog) GetWorkspace() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Workspace
+}
+
+func (obj *ModelCatalog) SetWorkspace(workspace string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Workspace = workspace
+}
+
+func (obj *ModelCatalog) GetLabels() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Labels
+}
+
+func (obj *ModelCatalog) SetLabels(labels map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Labels = labels
+}
+
+func (obj *ModelCatalog) GetAnnotations() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Annotations
+}
+
+func (obj *ModelCatalog) SetAnnotations(annotations map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Annotations = annotations
+}
+
+func (obj *ModelCatalog) GetCreationTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.CreationTimestamp
+}
+
+func (obj *ModelCatalog) SetCreationTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.CreationTimestamp = timestamp
+}
+
+func (obj *ModelCatalog) GetUpdateTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.UpdateTimestamp
+}
+
+func (obj *ModelCatalog) SetUpdateTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.UpdateTimestamp = timestamp
+}
+
+func (obj *ModelCatalog) GetDeletionTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.DeletionTimestamp
+}
+
+func (obj *ModelCatalog) SetDeletionTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.DeletionTimestamp = timestamp
+}
+
+func (obj *ModelCatalog) GetSpec() interface{} {
+	return obj.Spec
+}
+
+func (obj *ModelCatalog) SetSpec(spec interface{}) {
+	obj.Spec = spec.(*ModelCatalogSpec)
+}
+
+func (obj *ModelCatalog) GetStatus() interface{} {
+	return obj.Status
+}
+
+func (obj *ModelCatalog) SetStatus(status interface{}) {
+	obj.Status = status.(*ModelCatalogStatus)
+}
+
+func (obj *ModelCatalog) GetKind() string {
+	return obj.Kind
+}
+
+func (obj *ModelCatalog) SetKind(kind string) {
+	obj.Kind = kind
+}

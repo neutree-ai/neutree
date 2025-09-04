@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // Scheme defines a simple type registry for mapping VersionKind to Go types.
@@ -23,7 +21,7 @@ func NewScheme() *Scheme {
 }
 
 // AddKnownTypes registers the given types with the Scheme for a specific version.
-func (s *Scheme) AddKnownTypes(types ...v1.Object) {
+func (s *Scheme) AddKnownTypes(types ...Object) {
 	for _, obj := range types {
 		t := reflect.TypeOf(obj)
 		if t.Kind() == reflect.Ptr {
@@ -37,7 +35,7 @@ func (s *Scheme) AddKnownTypes(types ...v1.Object) {
 }
 
 // New creates a new v1.Object instance from a version and kind.
-func (s *Scheme) New(kind string) (v1.Object, error) {
+func (s *Scheme) New(kind string) (Object, error) {
 	t, ok := s.vkToType[kind]
 	if !ok {
 		return nil, fmt.Errorf("unregistered type: %s", kind)
@@ -69,7 +67,7 @@ func (f *CodecFactory) Decoder() Decoder {
 }
 
 type Decoder interface {
-	Decode(data []byte, defaultKind string) (v1.Object, error)
+	Decode(data []byte, defaultKind string) (Object, error)
 }
 
 type decoder struct {
@@ -77,7 +75,7 @@ type decoder struct {
 }
 
 // Decode deserializes JSON data into a registered v1.Object.
-func (d *decoder) Decode(data []byte, defaultKind string) (v1.Object, error) {
+func (d *decoder) Decode(data []byte, defaultKind string) (Object, error) {
 	var k struct {
 		Kind string `json:"kind,omitempty"`
 	}
@@ -125,7 +123,7 @@ type Builder struct {
 }
 
 // Register adds one or more objects to the SchemeBuilder so they can be added to a Scheme.  Register mutates bld.
-func (bld *Builder) Register(object ...v1.Object) *Builder {
+func (bld *Builder) Register(object ...Object) *Builder {
 	bld.SchemeBuilder.Register(func(scheme *Scheme) error {
 		scheme.AddKnownTypes(object...)
 		return nil

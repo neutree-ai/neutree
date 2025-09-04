@@ -22,3 +22,124 @@ type Workspace struct {
 	Metadata   *Metadata        `json:"metadata,omitempty"`
 	Status     *WorkspaceStatus `json:"status,omitempty"`
 }
+
+func (obj *Workspace) GetName() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Name
+}
+
+func (obj *Workspace) SetName(name string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Name = name
+}
+
+func (obj *Workspace) GetWorkspace() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Workspace
+}
+
+func (obj *Workspace) SetWorkspace(workspace string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Workspace = workspace
+}
+
+func (obj *Workspace) GetLabels() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Labels
+}
+
+func (obj *Workspace) SetLabels(labels map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Labels = labels
+}
+
+func (obj *Workspace) GetAnnotations() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Annotations
+}
+
+func (obj *Workspace) SetAnnotations(annotations map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Annotations = annotations
+}
+
+func (obj *Workspace) GetCreationTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.CreationTimestamp
+}
+
+func (obj *Workspace) SetCreationTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.CreationTimestamp = timestamp
+}
+
+func (obj *Workspace) GetUpdateTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.UpdateTimestamp
+}
+
+func (obj *Workspace) SetUpdateTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.UpdateTimestamp = timestamp
+}
+
+func (obj *Workspace) GetDeletionTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.DeletionTimestamp
+}
+
+func (obj *Workspace) SetDeletionTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.DeletionTimestamp = timestamp
+}
+
+func (obj *Workspace) GetSpec() interface{} {
+	return nil
+}
+
+func (obj *Workspace) SetSpec(spec interface{}) {
+}
+
+func (obj *Workspace) GetStatus() interface{} {
+	return obj.Status
+}
+
+func (obj *Workspace) SetStatus(status interface{}) {
+	obj.Status = status.(*WorkspaceStatus)
+}
+
+func (obj *Workspace) GetKind() string {
+	return obj.Kind
+}
+
+func (obj *Workspace) SetKind(kind string) {
+	obj.Kind = kind
+}

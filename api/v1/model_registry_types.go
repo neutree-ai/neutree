@@ -66,3 +66,125 @@ func (r ModelRegistry) Key() string {
 
 	return r.Metadata.Workspace + "-" + "modelregistry" + "-" + strconv.Itoa(r.ID) + "-" + r.Metadata.Name
 }
+
+func (obj *ModelRegistry) GetName() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Name
+}
+
+func (obj *ModelRegistry) SetName(name string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Name = name
+}
+
+func (obj *ModelRegistry) GetWorkspace() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.Workspace
+}
+
+func (obj *ModelRegistry) SetWorkspace(workspace string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Workspace = workspace
+}
+
+func (obj *ModelRegistry) GetLabels() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Labels
+}
+
+func (obj *ModelRegistry) SetLabels(labels map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Labels = labels
+}
+
+func (obj *ModelRegistry) GetAnnotations() map[string]string {
+	if obj.Metadata == nil {
+		return nil
+	}
+	return obj.Metadata.Annotations
+}
+
+func (obj *ModelRegistry) SetAnnotations(annotations map[string]string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.Annotations = annotations
+}
+
+func (obj *ModelRegistry) GetCreationTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.CreationTimestamp
+}
+
+func (obj *ModelRegistry) SetCreationTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.CreationTimestamp = timestamp
+}
+
+func (obj *ModelRegistry) GetUpdateTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.UpdateTimestamp
+}
+
+func (obj *ModelRegistry) SetUpdateTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.UpdateTimestamp = timestamp
+}
+
+func (obj *ModelRegistry) GetDeletionTimestamp() string {
+	if obj.Metadata == nil {
+		return ""
+	}
+	return obj.Metadata.DeletionTimestamp
+}
+
+func (obj *ModelRegistry) SetDeletionTimestamp(timestamp string) {
+	if obj.Metadata == nil {
+		obj.Metadata = &Metadata{}
+	}
+	obj.Metadata.DeletionTimestamp = timestamp
+}
+
+func (obj *ModelRegistry) GetSpec() interface{} {
+	return obj.Spec
+}
+
+func (obj *ModelRegistry) SetSpec(spec interface{}) {
+	obj.Spec = spec.(*ModelRegistrySpec)
+}
+
+func (obj *ModelRegistry) GetStatus() interface{} {
+	return obj.Status
+}
+
+func (obj *ModelRegistry) SetStatus(status interface{}) {
+	obj.Status = status.(*ModelRegistryStatus)
+}
+
+func (obj *ModelRegistry) GetKind() string {
+	return obj.Kind
+}
+
+func (obj *ModelRegistry) SetKind(kind string) {
+	obj.Kind = kind
+}
