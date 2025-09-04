@@ -55,6 +55,7 @@ func main() {
 	// Build application
 	app, err := app.NewBuilder().
 		WithConfig(c).
+		WithScheme(scheme).
 		Build()
 
 	if err != nil {

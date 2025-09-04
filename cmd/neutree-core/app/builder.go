@@ -7,12 +7,14 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
 // Builder is the application builder
 type Builder struct {
 	controllerInits map[string]ControllerFactory
 	config          *config.CoreConfig
+	scheme          *scheme.Scheme
 
 	beforeHooks       map[string][]controllers.HookFunc
 	afterHooks        map[string][]controllers.HookFunc
@@ -96,6 +98,11 @@ func (b *Builder) WithAfterReconcileHook(controllerName string, hook controllers
 	return b
 }
 
+func (b *Builder) WithScheme(s *scheme.Scheme) *Builder {
+	b.scheme = s
+	return b
+}
+
 // Build creates and initializes all components
 func (b *Builder) Build() (*App, error) {
 	if b.config == nil {
@@ -110,6 +117,8 @@ func (b *Builder) Build() (*App, error) {
 			beforeHooks: []controllers.HookFunc{},
 			afterHooks:  []controllers.HookFunc{},
 			name:        name,
+			scheme:      b.scheme,
+			storage:     b.config.ObjectStorage,
 		}
 
 		opts.afterHooks = append(opts.afterHooks, b.globalAfterHooks...)
@@ -119,20 +128,10 @@ func (b *Builder) Build() (*App, error) {
 
 		klog.Info("Initializing controller:", name)
 
-		reconciler, err := factory(opts)
+		ctrl, err := factory(opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create controller %s: %w", name, err)
 		}
-
-		ctrl := controllers.NewController(opts.name,
-			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
-			controllers.WithBeforeReconcileHook(opts.beforeHooks),
-			controllers.WithAfterReconcileHook(opts.afterHooks),
-			controllers.WithScheme(opts.scheme),
-			controllers.WithObject(opts.obj),
-			controllers.WithStorage(opts.storage),
-			controllers.WithReconciler(reconciler),
-		)
 
 		registerControllers[name] = ctrl
 	}
