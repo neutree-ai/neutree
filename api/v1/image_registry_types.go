@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 type ImageRegistryPhase string
 
 const (
@@ -159,4 +161,20 @@ func (obj *ImageRegistry) GetKind() string {
 
 func (obj *ImageRegistry) SetKind(kind string) {
 	obj.Kind = kind
+}
+
+func (obj *ImageRegistry) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *ImageRegistry) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
+}
+
+func (obj *ImageRegistry) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *ImageRegistry) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
 }

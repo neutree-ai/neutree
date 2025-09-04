@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 type RolePreset string
 
 type RoleSpec struct {
@@ -150,4 +152,20 @@ func (obj *Role) GetKind() string {
 
 func (obj *Role) SetKind(kind string) {
 	obj.Kind = kind
+}
+
+func (obj *Role) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *Role) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
+}
+
+func (obj *Role) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *Role) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
 }

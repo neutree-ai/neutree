@@ -62,7 +62,7 @@ func (o *Options) Validate() error {
 // Config converts options to API configuration
 func (o *Options) Config() (*config.APIConfig, error) {
 	// Initialize storage
-	s, err := storage.New(storage.Options{
+	s, op, err := storage.New(storage.Options{
 		AccessURL: o.Storage.AccessURL,
 		Scheme:    "api",
 		JwtSecret: o.Storage.JwtSecret,
@@ -89,9 +89,10 @@ func (o *Options) Config() (*config.APIConfig, error) {
 	}
 
 	return &config.APIConfig{
-		Storage:    s,
-		GinEngine:  engine,
-		AuthConfig: authConfig,
+		Storage:       s,
+		ObjectPatcher: op,
+		GinEngine:     engine,
+		AuthConfig:    authConfig,
 
 		ServerConfig: &config.ServerConfig{
 			Port: o.Server.Port,

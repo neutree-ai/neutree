@@ -256,3 +256,15 @@ func (obj *Cluster) GetKind() string {
 func (obj *Cluster) SetKind(kind string) {
 	obj.Kind = kind
 }
+
+func (obj *Cluster) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *Cluster) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *Cluster) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
+}

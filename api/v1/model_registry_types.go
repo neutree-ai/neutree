@@ -188,3 +188,19 @@ func (obj *ModelRegistry) GetKind() string {
 func (obj *ModelRegistry) SetKind(kind string) {
 	obj.Kind = kind
 }
+
+func (obj *ModelRegistry) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *ModelRegistry) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
+}
+
+func (obj *ModelRegistry) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *ModelRegistry) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
+}

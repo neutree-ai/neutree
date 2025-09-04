@@ -15,6 +15,8 @@ type MetadataObject interface {
 	SetUpdateTimestamp(timestamp string)
 	GetDeletionTimestamp() string
 	SetDeletionTimestamp(timestamp string)
+	GetMetadata() interface{}
+	SetMetadata(m interface{})
 }
 
 type Spec interface {
@@ -37,4 +39,5 @@ type Object interface {
 	MetadataObject
 	Spec
 	Status
+	GetID() string
 }

@@ -168,3 +168,19 @@ func (obj *ModelCatalog) GetKind() string {
 func (obj *ModelCatalog) SetKind(kind string) {
 	obj.Kind = kind
 }
+
+func (obj *ModelCatalog) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *ModelCatalog) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
+}
+
+func (obj *ModelCatalog) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *ModelCatalog) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
+}

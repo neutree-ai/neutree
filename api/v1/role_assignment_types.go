@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 // RoleAssignmentSpec defines the desired state of RoleAssignment
 type RoleAssignmentSpec struct {
 	UserID    string `json:"user_id"` // UUID represented as string
@@ -33,6 +35,14 @@ type RoleAssignment struct {
 	Metadata   *Metadata             `json:"metadata,omitempty"` // Assuming Metadata type exists
 	Spec       *RoleAssignmentSpec   `json:"spec,omitempty"`
 	Status     *RoleAssignmentStatus `json:"status,omitempty"`
+}
+
+func (obj *RoleAssignment) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *RoleAssignment) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
 }
 
 func (obj *RoleAssignment) GetName() string {
@@ -155,4 +165,12 @@ func (obj *RoleAssignment) GetKind() string {
 
 func (obj *RoleAssignment) SetKind(kind string) {
 	obj.Kind = kind
+}
+
+func (obj *RoleAssignment) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *RoleAssignment) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
 }

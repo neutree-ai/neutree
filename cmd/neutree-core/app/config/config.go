@@ -26,6 +26,7 @@ type ServerConfig struct {
 
 type CoreConfig struct {
 	Storage                 storage.Storage
+	ObjectPatcher           storage.ObjectPatcher
 	ImageService            registry.ImageService
 	Gateway                 gateway.Gateway
 	AcceleratorManager      accelerator.Manager

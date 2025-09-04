@@ -153,3 +153,15 @@ func (obj *ApiKey) GetKind() string {
 func (obj *ApiKey) SetKind(kind string) {
 	obj.Kind = kind
 }
+
+func (obj *ApiKey) GetID() string {
+	return obj.ID
+}
+
+func (obj *ApiKey) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *ApiKey) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
+}

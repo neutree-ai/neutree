@@ -7,6 +7,7 @@ import (
 	postgrest "github.com/supabase-community/postgrest-go"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
 // explicitly check that postgrestStorage implements the interfaces
@@ -709,4 +710,59 @@ func (s *postgrestStorage) ListModelCatalog(option ListOption) ([]v1.ModelCatalo
 	err := s.genericList(MODEL_CATALOG_TABLE, &response, option)
 
 	return response, err
+}
+
+type postgrestObjectStorage struct {
+	postgrestClient *postgrest.Client
+	scheme          scheme.Scheme
+}
+
+func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {
+	table, ok := s.scheme.PluralKind(obj.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", obj.GetKind())
+	}
+
+	responseContent, _, err := s.postgrestClient.From(table).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return err
+	}
+
+	return parseResponse(obj, responseContent)
+}
+
+func (s *postgrestObjectStorage) UpdateMetadata(id string, data scheme.Object) error {
+	table, ok := s.scheme.PluralKind(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+	updateData := map[string]interface{}{
+		"metadata": data.GetMetadata(),
+	}
+	_, _, err := s.postgrestClient.From(table).Update(updateData, "", "").Filter("id", "eq", id).Execute()
+	return err
+}
+
+func (s *postgrestObjectStorage) UpdateSpec(id string, data scheme.Object) error {
+	table, ok := s.scheme.PluralKind(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+	updateData := map[string]interface{}{
+		"spec": data.GetSpec(),
+	}
+	_, _, err := s.postgrestClient.From(table).Update(updateData, "", "").Filter("id", "eq", id).Execute()
+	return err
+}
+
+func (s *postgrestObjectStorage) UpdateStatus(id string, data scheme.Object) error {
+	table, ok := s.scheme.PluralKind(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+	updateData := map[string]interface{}{
+		"status": data.GetStatus(),
+	}
+	_, _, err := s.postgrestClient.From(table).Update(updateData, "", "").Filter("id", "eq", id).Execute()
+	return err
 }

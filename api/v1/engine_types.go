@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 const (
 	TextGenerationModelTask = "text-generation"
 	TextEmbeddingModelTask  = "text-embedding"
@@ -160,4 +162,20 @@ func (obj *Engine) GetKind() string {
 
 func (obj *Engine) SetKind(kind string) {
 	obj.Kind = kind
+}
+
+func (obj *Engine) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *Engine) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
+}
+
+func (obj *Engine) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *Engine) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
 }

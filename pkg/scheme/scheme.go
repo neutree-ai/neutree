@@ -11,6 +11,7 @@ type Scheme struct {
 	vkToType     map[string]reflect.Type
 	typeToVK     map[reflect.Type]string
 	pluralToKind map[string]string
+	kindToPlural map[string]string
 }
 
 // NewScheme creates a new Scheme.
@@ -19,6 +20,7 @@ func NewScheme() *Scheme {
 		vkToType:     make(map[string]reflect.Type),
 		typeToVK:     make(map[reflect.Type]string),
 		pluralToKind: make(map[string]string),
+		kindToPlural: make(map[string]string),
 	}
 }
 
@@ -40,6 +42,7 @@ func (s *Scheme) AddKnownTypes(types ...Object) {
 func (s *Scheme) AddKnownPluralTypes(pluralToKind map[string]string) {
 	for plural, kind := range pluralToKind {
 		s.pluralToKind[plural] = kind
+		s.kindToPlural[kind] = plural
 	}
 }
 
@@ -155,4 +158,10 @@ func (bld *Builder) RegisterPlural(pluralToKind map[string]string) *Builder {
 		return nil
 	})
 	return bld
+}
+
+// PluralKind returns the plural form of a kind.
+func (s *Scheme) PluralKind(kind string) (string, bool) {
+	plural, ok := s.kindToPlural[kind]
+	return plural, ok
 }

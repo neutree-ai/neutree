@@ -194,3 +194,19 @@ func (obj *Endpoint) GetKind() string {
 func (obj *Endpoint) SetKind(kind string) {
 	obj.Kind = kind
 }
+
+func (obj *Endpoint) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *Endpoint) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
+}
+
+func (obj *Endpoint) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *Endpoint) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
+}

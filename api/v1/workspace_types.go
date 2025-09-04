@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 type WorkspacePhase string
 
 const (
@@ -142,4 +144,20 @@ func (obj *Workspace) GetKind() string {
 
 func (obj *Workspace) SetKind(kind string) {
 	obj.Kind = kind
+}
+
+func (obj *Workspace) GetID() string {
+	return strconv.Itoa(obj.ID)
+}
+
+func (obj *Workspace) SetID(id string) {
+	obj.ID, _ = strconv.Atoi(id)
+}
+
+func (obj *Workspace) GetMetadata() interface{} {
+	return obj.Metadata
+}
+
+func (obj *Workspace) SetMetadata(m interface{}) {
+	obj.Metadata = m.(*Metadata)
 }
