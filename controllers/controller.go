@@ -20,10 +20,6 @@ type controller struct {
 	name string
 	BaseController
 	Reconciler
-
-	obj     scheme.Object
-	scheme  *scheme.Scheme
-	storage storage.ObjectStorage
 }
 
 func (c *controller) Start(ctx context.Context) {
@@ -83,18 +79,18 @@ func WithReconciler(r Reconciler) func(*controller) {
 
 func WithObject(obj scheme.Object) func(*controller) {
 	return func(bc *controller) {
-		bc.obj = obj
+		bc.BaseController.obj = obj
 	}
 }
 
 func WithScheme(s *scheme.Scheme) func(*controller) {
 	return func(bc *controller) {
-		bc.scheme = s
+		bc.BaseController.scheme = s
 	}
 }
 
 func WithStorage(s storage.ObjectStorage) func(*controller) {
 	return func(bc *controller) {
-		bc.storage = s
+		bc.BaseController.storage = s
 	}
 }
