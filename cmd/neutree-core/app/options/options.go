@@ -51,7 +51,9 @@ func (o *NeutreeCoreOptions) Validate() error {
 }
 
 func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, error) {
-	c := &config.CoreConfig{}
+	c := &config.CoreConfig{
+		Scheme: scheme,
+	}
 
 	gin.SetMode(o.Server.GinMode)
 	e := gin.Default()

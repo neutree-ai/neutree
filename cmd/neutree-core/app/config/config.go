@@ -7,6 +7,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -41,4 +42,6 @@ type CoreConfig struct {
 
 	// core server config
 	ServerConfig *ServerConfig
+
+	Scheme *scheme.Scheme
 }
