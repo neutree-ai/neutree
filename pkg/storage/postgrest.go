@@ -714,7 +714,7 @@ func (s *postgrestStorage) ListModelCatalog(option ListOption) ([]v1.ModelCatalo
 
 type postgrestObjectStorage struct {
 	postgrestClient *postgrest.Client
-	scheme          scheme.Scheme
+	scheme          *scheme.Scheme
 }
 
 func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {

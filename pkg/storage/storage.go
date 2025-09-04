@@ -238,7 +238,7 @@ type ObjectStorage interface {
 	Reader
 }
 
-func NewObjectStorage(o Options, s scheme.Scheme) (ObjectStorage, error) {
+func NewObjectStorage(o Options, s *scheme.Scheme) (ObjectStorage, error) {
 	jwtAutoToken, err := CreateServiceToken(o.JwtSecret)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init storage")
