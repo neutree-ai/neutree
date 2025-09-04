@@ -729,7 +729,16 @@ func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {
 		return err
 	}
 
-	return parseResponse(obj, responseContent)
+	var rawItems []json.RawMessage
+	if err := parseResponse(&rawItems, responseContent); err != nil {
+		return errors.Wrapf(err, "failed to parse list response. Raw response: %s", string(responseContent))
+	}
+
+	if len(rawItems) == 0 {
+		return ErrResourceNotFound
+	}
+
+	return parseResponse(obj, rawItems[0])
 }
 
 func (s *postgrestObjectStorage) List(obj scheme.ObjectList, option ListOption) error {
@@ -748,7 +757,7 @@ func (s *postgrestObjectStorage) List(obj scheme.ObjectList, option ListOption) 
 
 	var rawItems []json.RawMessage
 	if err := json.Unmarshal(responseContent, &rawItems); err != nil {
-		return errors.Wrapf(err, "failed to parse list response: %v Raw response: %s", err, string(responseContent))
+		return errors.Wrapf(err, "failed to parse list response. Raw response: %s", string(responseContent))
 	}
 
 	items := make([]scheme.Object, 0, len(rawItems))
@@ -760,7 +769,7 @@ func (s *postgrestObjectStorage) List(obj scheme.ObjectList, option ListOption) 
 			return err
 		}
 		if err := json.Unmarshal(rawItem, item); err != nil {
-			return errors.Wrapf(err, "failed to parse item in list: %v", err)
+			return errors.Wrapf(err, "failed to parse item in list")
 		}
 		items = append(items, item)
 	}
