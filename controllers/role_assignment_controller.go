@@ -30,48 +30,21 @@ func NewRoleAssignmentController(option *RoleAssignmentControllerOption) (*RoleA
 	return c, nil
 }
 
-func (c *RoleAssignmentController) Reconcile(key interface{}) error {
-	_roleAssignmentID, ok := key.(int)
+func (c *RoleAssignmentController) Reconcile(obj interface{}) error {
+	roleAssignment, ok := obj.(*v1.RoleAssignment)
 	if !ok {
-		return errors.New("failed to assert key to roleAssignmentID")
-	}
-
-	roleAssignmentID := strconv.Itoa(_roleAssignmentID)
-
-	obj, err := c.storage.GetRoleAssignment(roleAssignmentID)
-	if err != nil {
-		// Handle not found error specifically if needed, otherwise wrap
-		if errors.Is(err, storage.ErrResourceNotFound) {
-			klog.Warningf("RoleAssignment %s not found, skipping reconcile", roleAssignmentID)
-			return nil // Or return a specific error if reconciliation should stop
-		}
-
-		return errors.Wrapf(err, "failed to get role assignment %s", roleAssignmentID)
+		return errors.New("failed to assert obj to *v1.RoleAssignment")
 	}
 
 	// Use a consistent name if Metadata is guaranteed to exist
-	objName := roleAssignmentID
-	if obj.Metadata != nil && obj.Metadata.Name != "" {
-		objName = obj.Metadata.Name
+	objName := roleAssignment.GetID()
+	if roleAssignment.Metadata != nil && roleAssignment.Metadata.Name != "" {
+		objName = roleAssignment.Metadata.Name
 	}
 
-	klog.V(4).Infof("Reconcile role assignment %s (ID: %s)", objName, roleAssignmentID)
+	klog.V(4).Infof("Reconcile role assignment %s (ID: %s)", objName, roleAssignment.GetID())
 
-	return c.syncHandler(obj)
-}
-
-func (c *RoleAssignmentController) ListKeys() ([]interface{}, error) {
-	roleAssignments, err := c.storage.ListRoleAssignment(storage.ListOption{})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list role assignments")
-	}
-
-	keys := make([]interface{}, len(roleAssignments))
-	for i := range roleAssignments {
-		keys[i] = roleAssignments[i].ID
-	}
-
-	return keys, nil
+	return c.syncHandler(roleAssignment)
 }
 
 func (c *RoleAssignmentController) sync(obj *v1.RoleAssignment) error {
