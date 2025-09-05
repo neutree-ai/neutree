@@ -30,36 +30,15 @@ func NewRoleController(option *RoleControllerOption) (*RoleController, error) {
 	return c, nil
 }
 
-func (c *RoleController) Reconcile(key interface{}) error {
-	_roleID, ok := key.(int)
+func (c *RoleController) Reconcile(obj interface{}) error {
+	role, ok := obj.(*v1.Role)
 	if !ok {
-		return errors.New("failed to assert key to roleID")
+		return errors.New("failed to assert obj to *v1.Role")
 	}
 
-	roleID := strconv.Itoa(_roleID)
+	klog.V(4).Info("Reconcile role " + role.Metadata.Name)
 
-	obj, err := c.storage.GetRole(roleID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get role %s", roleID)
-	}
-
-	klog.V(4).Info("Reconcile role " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
-}
-
-func (c *RoleController) ListKeys() ([]interface{}, error) {
-	roles, err := c.storage.ListRole(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(roles))
-	for i := range roles {
-		keys[i] = roles[i].ID
-	}
-
-	return keys, nil
+	return c.syncHandler(role)
 }
 
 func (c *RoleController) sync(obj *v1.Role) error {

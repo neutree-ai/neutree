@@ -6,3 +6,7 @@ import (
 
 //go:embed obs-stack.tar
 var ObsStackDeployManifestsTar embed.FS
+
+func OverWriteObsStackDeployManifests(config embed.FS) {
+	ObsStackDeployManifestsTar = config
+}

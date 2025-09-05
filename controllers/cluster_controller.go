@@ -67,34 +67,15 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 	return c, nil
 }
 
-func (c *ClusterController) ListKeys() ([]interface{}, error) {
-	clusters, err := c.storage.ListCluster(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(clusters))
-	for i := range clusters {
-		keys[i] = clusters[i].ID
-	}
-
-	return keys, nil
-}
-
-func (c *ClusterController) Reconcile(key interface{}) error {
-	clusterID, ok := key.(int)
+func (c *ClusterController) Reconcile(obj interface{}) error {
+	cluster, ok := obj.(*v1.Cluster)
 	if !ok {
-		return errors.New("failed to assert key to clusterID")
+		return errors.New("failed to assert obj to *v1.Cluster")
 	}
 
-	obj, err := c.storage.GetCluster(strconv.Itoa(clusterID))
-	if err != nil {
-		return errors.Wrapf(err, "failed to get cluster %s", strconv.Itoa(clusterID))
-	}
+	klog.V(4).Info("Reconciling cluster " + cluster.Metadata.Name)
 
-	klog.V(4).Info("Reconciling cluster " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
+	return c.syncHandler(cluster)
 }
 
 func (c *ClusterController) sync(obj *v1.Cluster) error {
@@ -399,6 +380,7 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 			newStatus.Version = clusterStatus.NeutreeServeVersion
 			newStatus.RayVersion = clusterStatus.RayVersion
 			newStatus.DesiredNodes = clusterStatus.DesireNodes
+			newStatus.ResourceInfo = clusterStatus.ResourceInfo
 		}
 	}
 

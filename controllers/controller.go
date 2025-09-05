@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/neutree-ai/neutree/pkg/scheme"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -18,11 +20,10 @@ type controller struct {
 	name string
 	BaseController
 	Reconciler
-	Lister
 }
 
 func (c *controller) Start(ctx context.Context) {
-	c.BaseController.Start(ctx, c.Reconciler, c.Lister)
+	c.BaseController.Start(ctx, c.Reconciler)
 }
 
 func (c *controller) Name() string {
@@ -76,8 +77,20 @@ func WithReconciler(r Reconciler) func(*controller) {
 	}
 }
 
-func WithLister(l Lister) func(*controller) {
+func WithObject(obj scheme.Object) func(*controller) {
 	return func(bc *controller) {
-		bc.Lister = l
+		bc.BaseController.obj = obj
+	}
+}
+
+func WithScheme(s *scheme.Scheme) func(*controller) {
+	return func(bc *controller) {
+		bc.BaseController.scheme = s
+	}
+}
+
+func WithStorage(s storage.ObjectStorage) func(*controller) {
+	return func(bc *controller) {
+		bc.BaseController.storage = s
 	}
 }

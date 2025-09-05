@@ -38,34 +38,15 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 	return c, nil
 }
 
-func (c *ImageRegistryController) Reconcile(key interface{}) error {
-	imageRegistryID, ok := key.(int)
+func (c *ImageRegistryController) Reconcile(obj interface{}) error {
+	imageRegistry, ok := obj.(*v1.ImageRegistry)
 	if !ok {
-		return errors.New("failed to assert key to imageRegistryID")
+		return errors.New("failed to assert obj to *v1.ImageRegistry")
 	}
 
-	obj, err := c.storage.GetImageRegistry(strconv.Itoa(imageRegistryID))
-	if err != nil {
-		return errors.Wrapf(err, "failed to get image registry %s", strconv.Itoa(imageRegistryID))
-	}
+	klog.V(4).Info("Reconcile image registry " + imageRegistry.Metadata.Name)
 
-	klog.V(4).Info("Reconcile image registry " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
-}
-
-func (c *ImageRegistryController) ListKeys() ([]interface{}, error) {
-	registries, err := c.storage.ListImageRegistry(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(registries))
-	for i := range registries {
-		keys[i] = registries[i].ID
-	}
-
-	return keys, nil
+	return c.syncHandler(imageRegistry)
 }
 
 func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {

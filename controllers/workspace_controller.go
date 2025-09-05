@@ -37,37 +37,15 @@ func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceContro
 	return c, nil
 }
 
-func (c *WorkspaceController) Reconcile(key interface{}) error {
-	_workspaceID, ok := key.(int)
+func (c *WorkspaceController) Reconcile(obj interface{}) error {
+	workspace, ok := obj.(*v1.Workspace)
 	if !ok {
-		return errors.New("failed to assert key to workspaceID")
+		return errors.New("failed to assert obj to *v1.Workspace")
 	}
 
-	workspaceID := strconv.Itoa(_workspaceID)
+	klog.V(4).Info("Reconcile workspace " + workspace.Metadata.Name)
 
-	obj, err := c.storage.GetWorkspace(workspaceID)
-	if err != nil {
-		// Let the sync loop handle ErrResourceNotFound if necessary, or retry on other errors.
-		return errors.Wrapf(err, "failed to get workspace %s", workspaceID)
-	}
-
-	klog.V(4).Info("Reconcile workspace " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
-}
-
-func (c *WorkspaceController) ListKeys() ([]interface{}, error) {
-	workspaces, err := c.storage.ListWorkspace(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(workspaces))
-	for i := range workspaces {
-		keys[i] = workspaces[i].ID
-	}
-
-	return keys, nil
+	return c.syncHandler(workspace)
 }
 
 func (c *WorkspaceController) sync(obj *v1.Workspace) error {

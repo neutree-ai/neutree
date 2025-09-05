@@ -65,52 +65,7 @@ func TestClusterStatus(t *testing.T) {
 				},
 				PythonVersion: "3.8.10",
 				RayVersion:    "2.0.0",
-			},
-			expectError: false,
-		},
-		{
-			name: "success - skip head node",
-			setupMock: func(mock *dashboardmocks.MockDashboardService) {
-				mock.On("ListNodes").Return([]v1.NodeSummary{
-					{
-						IP: "192.168.1.1",
-						Raylet: v1.Raylet{
-							IsHeadNode: true,
-							State:      v1.AliveNodeState,
-							Labels: map[string]string{
-								v1.NeutreeServingVersionLabel: "v1.0.0",
-							},
-						},
-					},
-				}, nil)
-
-				// Mock GetClusterAutoScaleStatus
-				mock.On("GetClusterAutoScaleStatus").Return(v1.AutoscalerReport{
-					ActiveNodes:     map[string]int{"headgroup": 1},
-					PendingLaunches: map[string]int{},
-					PendingNodes:    []v1.NodeInfo{},
-					FailedNodes:     []v1.NodeInfo{},
-				}, nil)
-
-				// Mock GetClusterMetadata
-				mock.On("GetClusterMetadata").Return(&dashboard.ClusterMetadataResponse{
-					Data: v1.RayClusterMetadataData{
-						PythonVersion: "3.8.10",
-						RayVersion:    "2.0.0",
-					},
-				}, nil)
-			},
-			expectedStatus: &v1.RayClusterStatus{
-				ReadyNodes:          0,
-				DesireNodes:         0,
-				NeutreeServeVersion: "v1.0.0",
-				AutoScaleStatus: v1.AutoScaleStatus{
-					PendingNodes: 0,
-					ActiveNodes:  0,
-					FailedNodes:  0,
-				},
-				PythonVersion: "3.8.10",
-				RayVersion:    "2.0.0",
+				ResourceInfo:  map[string]float64{},
 			},
 			expectError: false,
 		},
@@ -163,6 +118,7 @@ func TestClusterStatus(t *testing.T) {
 				},
 				PythonVersion: "3.8.10",
 				RayVersion:    "2.0.0",
+				ResourceInfo:  map[string]float64{},
 			},
 			expectError: false,
 		},
@@ -180,6 +136,140 @@ func TestClusterStatus(t *testing.T) {
 				mock.On("GetClusterAutoScaleStatus").Return(v1.AutoscalerReport{}, errors.New("autoscale error"))
 			},
 			expectError: true,
+		},
+		{
+			name: "success - calucate resource info",
+			setupMock: func(mock *dashboardmocks.MockDashboardService) {
+				mock.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						IP: "192.168.1.1",
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+							Labels: map[string]string{
+								v1.NeutreeServingVersionLabel: "v1.0.0",
+							},
+							Resources: map[string]float64{
+								"CPU":    8,
+								"GPU":    1,
+								"memory": 1024,
+							},
+						},
+					},
+					{
+						IP: "192.168.1.2",
+						Raylet: v1.Raylet{
+							IsHeadNode: false,
+							State:      v1.AliveNodeState,
+							Labels: map[string]string{
+								v1.NeutreeServingVersionLabel: "v1.1.0",
+							},
+							Resources: map[string]float64{
+								"CPU":    8,
+								"GPU":    1,
+								"memory": 1024,
+							},
+						},
+					},
+				}, nil)
+				mock.On("GetClusterAutoScaleStatus").Return(v1.AutoscalerReport{
+					ActiveNodes:     map[string]int{"worker": 2},
+					PendingLaunches: map[string]int{},
+					PendingNodes:    []v1.NodeInfo{},
+					FailedNodes:     []v1.NodeInfo{},
+				}, nil)
+				mock.On("GetClusterMetadata").Return(&dashboard.ClusterMetadataResponse{
+					Data: v1.RayClusterMetadataData{
+						PythonVersion: "3.8.10",
+						RayVersion:    "2.0.0",
+					},
+				}, nil)
+			},
+			expectedStatus: &v1.RayClusterStatus{
+				ReadyNodes:          2,
+				DesireNodes:         2,
+				NeutreeServeVersion: "v1.1.0",
+				AutoScaleStatus: v1.AutoScaleStatus{
+					PendingNodes: 0,
+					ActiveNodes:  2,
+					FailedNodes:  0,
+				},
+				PythonVersion: "3.8.10",
+				RayVersion:    "2.0.0",
+				ResourceInfo: map[string]float64{
+					"CPU":    16,
+					"GPU":    2,
+					"memory": 2048,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "success - calucate resource info",
+			setupMock: func(mock *dashboardmocks.MockDashboardService) {
+				mock.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						IP: "192.168.1.1",
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+							Labels: map[string]string{
+								v1.NeutreeServingVersionLabel: "v1.0.0",
+							},
+							Resources: map[string]float64{
+								"CPU":    8,
+								"GPU":    1,
+								"memory": 1024,
+							},
+						},
+					},
+					{
+						IP: "192.168.1.2",
+						Raylet: v1.Raylet{
+							IsHeadNode: false,
+							State:      v1.DeadNodeState,
+							Labels: map[string]string{
+								v1.NeutreeServingVersionLabel: "v1.1.0",
+							},
+							Resources: map[string]float64{
+								"CPU":    8,
+								"GPU":    1,
+								"memory": 1024,
+							},
+						},
+					},
+				}, nil)
+				mock.On("GetClusterAutoScaleStatus").Return(v1.AutoscalerReport{
+					ActiveNodes:     map[string]int{"worker": 2},
+					PendingLaunches: map[string]int{},
+					PendingNodes:    []v1.NodeInfo{},
+					FailedNodes:     []v1.NodeInfo{},
+				}, nil)
+				mock.On("GetClusterMetadata").Return(&dashboard.ClusterMetadataResponse{
+					Data: v1.RayClusterMetadataData{
+						PythonVersion: "3.8.10",
+						RayVersion:    "2.0.0",
+					},
+				}, nil)
+			},
+			expectedStatus: &v1.RayClusterStatus{
+				ReadyNodes:          1,
+				DesireNodes:         2,
+				NeutreeServeVersion: "v1.0.0",
+				AutoScaleStatus: v1.AutoScaleStatus{
+					PendingNodes: 0,
+					ActiveNodes:  2,
+					FailedNodes:  0,
+				},
+				PythonVersion: "3.8.10",
+				RayVersion:    "2.0.0",
+				ResourceInfo: map[string]float64{
+					"CPU":    8,
+					"GPU":    1,
+					"memory": 1024,
+				},
+			},
+			expectError: false,
 		},
 	}
 
