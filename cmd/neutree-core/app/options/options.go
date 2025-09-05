@@ -75,7 +75,7 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		AccessURL: o.Storage.AccessURL,
 		Scheme:    "api",
 		JwtSecret: o.Storage.JwtSecret,
-	}, scheme)
+	}, c.Scheme)
 
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init object storage")

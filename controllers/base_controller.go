@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -101,6 +102,7 @@ func (bc *BaseController) processNextWorkItem(r Reconciler) bool {
 }
 
 func (bc *BaseController) reconcileAll() error {
+	fmt.Println(bc.scheme)
 	kind := bc.scheme.ObjectKind(bc.obj)
 	listKind := kind + "List"
 	listObj, err := bc.scheme.NewList(listKind)

@@ -7,14 +7,12 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
-	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
 // Builder is the application builder
 type Builder struct {
 	controllerInits map[string]ControllerFactory
 	config          *config.CoreConfig
-	scheme          *scheme.Scheme
 
 	beforeHooks       map[string][]controllers.HookFunc
 	afterHooks        map[string][]controllers.HookFunc
@@ -95,11 +93,6 @@ func (b *Builder) WithAfterReconcileHook(controllerName string, hook controllers
 
 	b.afterHooks[controllerName] = append(b.afterHooks[controllerName], hook)
 
-	return b
-}
-
-func (b *Builder) WithScheme(s *scheme.Scheme) *Builder {
-	b.scheme = s
 	return b
 }
 
