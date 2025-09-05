@@ -34,18 +34,18 @@ func init() {
 		&WorkspaceList{},
 	)
 
-	SchemeBuilder.RegisterPlural(
+	SchemeBuilder.RegisterTable(
 		map[string]string{
-			"apikeys":         "ApiKey",
-			"clusters":        "Cluster",
-			"endpoints":       "Endpoint",
-			"engines":         "Engine",
-			"imageregistries": "ImageRegistry",
-			"modelcatalogs":   "ModelCatalog",
-			"modelregistries": "ModelRegistry",
-			"roleassignments": "RoleAssignment",
-			"roles":           "Role",
-			"workspaces":      "Workspace",
+			"api_keys":         "ApiKey",
+			"clusters":         "Cluster",
+			"endpoints":        "Endpoint",
+			"engines":          "Engine",
+			"image_registries": "ImageRegistry",
+			"model_catalogs":   "ModelCatalog",
+			"model_registries": "ModelRegistry",
+			"role_assignments": "RoleAssignment",
+			"roles":            "Role",
+			"workspaces":       "Workspace",
 		},
 	)
 }

@@ -719,7 +719,7 @@ type postgrestObjectStorage struct {
 }
 
 func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {
-	table, ok := s.scheme.PluralKind(obj.GetKind())
+	table, ok := s.scheme.TableKind(obj.GetKind())
 	if !ok {
 		return errors.Errorf("unregistered type: %s", obj.GetKind())
 	}
@@ -742,7 +742,7 @@ func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {
 }
 
 func (s *postgrestObjectStorage) List(obj scheme.ObjectList, option ListOption) error {
-	table, ok := s.scheme.PluralKind(strings.TrimSuffix(obj.GetKind(), "List"))
+	table, ok := s.scheme.TableKind(strings.TrimSuffix(obj.GetKind(), "List"))
 	if !ok {
 		return errors.Errorf("unregistered type: %s", obj.GetKind())
 	}
@@ -780,7 +780,7 @@ func (s *postgrestObjectStorage) List(obj scheme.ObjectList, option ListOption) 
 }
 
 func (s *postgrestObjectStorage) UpdateMetadata(id string, data scheme.Object) error {
-	table, ok := s.scheme.PluralKind(data.GetKind())
+	table, ok := s.scheme.TableKind(data.GetKind())
 	if !ok {
 		return errors.Errorf("unregistered type: %s", data.GetKind())
 	}
@@ -792,7 +792,7 @@ func (s *postgrestObjectStorage) UpdateMetadata(id string, data scheme.Object) e
 }
 
 func (s *postgrestObjectStorage) UpdateSpec(id string, data scheme.Object) error {
-	table, ok := s.scheme.PluralKind(data.GetKind())
+	table, ok := s.scheme.TableKind(data.GetKind())
 	if !ok {
 		return errors.Errorf("unregistered type: %s", data.GetKind())
 	}
@@ -804,7 +804,7 @@ func (s *postgrestObjectStorage) UpdateSpec(id string, data scheme.Object) error
 }
 
 func (s *postgrestObjectStorage) UpdateStatus(id string, data scheme.Object) error {
-	table, ok := s.scheme.PluralKind(data.GetKind())
+	table, ok := s.scheme.TableKind(data.GetKind())
 	if !ok {
 		return errors.Errorf("unregistered type: %s", data.GetKind())
 	}

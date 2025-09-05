@@ -8,19 +8,19 @@ import (
 
 // Scheme defines a simple type registry for mapping VersionKind to Go types.
 type Scheme struct {
-	vkToType     map[string]reflect.Type
-	typeToVK     map[reflect.Type]string
-	pluralToKind map[string]string
-	kindToPlural map[string]string
+	vkToType    map[string]reflect.Type
+	typeToVK    map[reflect.Type]string
+	tableToKind map[string]string
+	kindToTable map[string]string
 }
 
 // NewScheme creates a new Scheme.
 func NewScheme() *Scheme {
 	return &Scheme{
-		vkToType:     make(map[string]reflect.Type),
-		typeToVK:     make(map[reflect.Type]string),
-		pluralToKind: make(map[string]string),
-		kindToPlural: make(map[string]string),
+		vkToType:    make(map[string]reflect.Type),
+		typeToVK:    make(map[reflect.Type]string),
+		tableToKind: make(map[string]string),
+		kindToTable: make(map[string]string),
 	}
 }
 
@@ -38,11 +38,11 @@ func (s *Scheme) AddKnownTypes(types ...ObjectKind) {
 	}
 }
 
-// AddKnownPluralTypes registers mappings from plural resource names to their singular kind.
-func (s *Scheme) AddKnownPluralTypes(pluralToKind map[string]string) {
-	for plural, kind := range pluralToKind {
-		s.pluralToKind[plural] = kind
-		s.kindToPlural[kind] = plural
+// AddKnownTableTypes registers mappings from table names to their singular kind.
+func (s *Scheme) AddKnownTableTypes(tableToKind map[string]string) {
+	for table, kind := range tableToKind {
+		s.tableToKind[table] = kind
+		s.kindToTable[kind] = table
 	}
 }
 
@@ -50,21 +50,21 @@ func (s *Scheme) AddKnownPluralTypes(pluralToKind map[string]string) {
 func (s *Scheme) New(kind string) (Object, error) {
 	t, ok := s.vkToType[kind]
 	if !ok {
-		singularKind, isPlural := s.pluralToKind[kind]
+		tableKind, isPlural := s.tableToKind[kind]
 		if !isPlural {
 			return nil, fmt.Errorf("unregistered type: %s", kind)
 		}
-		t, ok = s.vkToType[singularKind]
+		t, ok = s.vkToType[tableKind]
 		if !ok {
-			return nil, fmt.Errorf("unregistered type for singular kind %s (from plural %s)", singularKind, kind)
+			return nil, fmt.Errorf("unregistered type for kind %s (from table %s)", tableKind, kind)
 		}
-		kind = singularKind
+		kind = tableKind
 	}
 
 	instance := reflect.New(t).Interface()
 	obj, ok := instance.(Object)
 	if !ok {
-		return nil, fmt.Errorf("type %T does not implement Object", instance)
+		return nil, fmt.Errorf("type %T does not implement ObjectList", instance)
 	}
 
 	obj.SetKind(kind)
@@ -75,15 +75,15 @@ func (s *Scheme) New(kind string) (Object, error) {
 func (s *Scheme) NewList(kind string) (ObjectList, error) {
 	t, ok := s.vkToType[kind]
 	if !ok {
-		singularKind, isPlural := s.pluralToKind[kind]
+		tableKind, isPlural := s.tableToKind[kind]
 		if !isPlural {
 			return nil, fmt.Errorf("unregistered type: %s", kind)
 		}
-		t, ok = s.vkToType[singularKind]
+		t, ok = s.vkToType[tableKind]
 		if !ok {
-			return nil, fmt.Errorf("unregistered type for singular kind %s (from plural %s)", singularKind, kind)
+			return nil, fmt.Errorf("unregistered type for singular kind %s (from table %s)", tableKind, kind)
 		}
-		kind = singularKind
+		kind = tableKind
 	}
 
 	instance := reflect.New(t).Interface()
@@ -185,17 +185,17 @@ func (bld *Builder) Register(objectKind ...ObjectKind) *Builder {
 	return bld
 }
 
-// RegisterPlural adds one or more plural mappings to the SchemeBuilder.
-func (bld *Builder) RegisterPlural(pluralToKind map[string]string) *Builder {
+// RegisterTable adds one or more table mappings to the SchemeBuilder.
+func (bld *Builder) RegisterTable(tableToKind map[string]string) *Builder {
 	bld.SchemeBuilder.Register(func(scheme *Scheme) error {
-		scheme.AddKnownPluralTypes(pluralToKind)
+		scheme.AddKnownTableTypes(tableToKind)
 		return nil
 	})
 	return bld
 }
 
-// PluralKind returns the plural form of a kind.
-func (s *Scheme) PluralKind(kind string) (string, bool) {
-	plural, ok := s.kindToPlural[kind]
-	return plural, ok
+// TableKind returns the table form of a kind.
+func (s *Scheme) TableKind(kind string) (string, bool) {
+	table, ok := s.tableToKind[kind]
+	return table, ok
 }
