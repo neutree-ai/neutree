@@ -35,6 +35,8 @@ func (s *Scheme) AddKnownTypes(types ...ObjectKind) {
 
 		s.vkToType[kind] = t
 		s.typeToVK[t] = kind
+
+		fmt.Println("Registered type:", kind)
 	}
 }
 
@@ -75,8 +77,8 @@ func (s *Scheme) New(kind string) (Object, error) {
 func (s *Scheme) NewList(kind string) (ObjectList, error) {
 	t, ok := s.vkToType[kind]
 	if !ok {
-		tableKind, isPlural := s.tableToKind[kind]
-		if !isPlural {
+		tableKind, isTable := s.tableToKind[kind]
+		if !isTable {
 			return nil, fmt.Errorf("unregistered type: %s", kind)
 		}
 		t, ok = s.vkToType[tableKind]
