@@ -35,8 +35,6 @@ func (s *Scheme) AddKnownTypes(types ...ObjectKind) {
 
 		s.vkToType[kind] = t
 		s.typeToVK[t] = kind
-
-		fmt.Println("Registered type:", kind)
 	}
 }
 
@@ -196,8 +194,8 @@ func (bld *Builder) RegisterTable(tableToKind map[string]string) *Builder {
 	return bld
 }
 
-// TableKind returns the table form of a kind.
-func (s *Scheme) TableKind(kind string) (string, bool) {
-	table, ok := s.tableToKind[kind]
+// KindToTable returns the table name for a given kind, if registered.
+func (s *Scheme) KindToTable(kind string) (string, bool) {
+	table, ok := s.kindToTable[kind]
 	return table, ok
 }
