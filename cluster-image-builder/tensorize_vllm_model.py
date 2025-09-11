@@ -172,7 +172,10 @@ def deserialize():
     llm = LLM(model=args.model,
               load_format="tensorizer",
               tensor_parallel_size=args.tensor_parallel_size,
-              model_loader_extra_config=tensorizer_config
+              max_model_len=16,
+              gpu_memory_utilization=0.85,
+              model_loader_extra_config=tensorizer_config,
+              enforce_eager=True,
     )
     return llm
 
