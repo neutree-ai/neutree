@@ -85,28 +85,12 @@ func (obj *Endpoint) GetName() string {
 	return obj.Metadata.Name
 }
 
-func (obj *Endpoint) SetName(name string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Name = name
-}
-
 func (obj *Endpoint) GetWorkspace() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.Workspace
-}
-
-func (obj *Endpoint) SetWorkspace(workspace string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Workspace = workspace
 }
 
 func (obj *Endpoint) GetLabels() map[string]string {
@@ -149,28 +133,12 @@ func (obj *Endpoint) GetCreationTimestamp() string {
 	return obj.Metadata.CreationTimestamp
 }
 
-func (obj *Endpoint) SetCreationTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.CreationTimestamp = timestamp
-}
-
 func (obj *Endpoint) GetUpdateTimestamp() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.UpdateTimestamp
-}
-
-func (obj *Endpoint) SetUpdateTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.UpdateTimestamp = timestamp
 }
 
 func (obj *Endpoint) GetDeletionTimestamp() string {
@@ -181,28 +149,12 @@ func (obj *Endpoint) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *Endpoint) SetDeletionTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.DeletionTimestamp = timestamp
-}
-
 func (obj *Endpoint) GetSpec() interface{} {
 	return obj.Spec
 }
 
-func (obj *Endpoint) SetSpec(spec interface{}) {
-	obj.Spec = spec.(*EndpointSpec) //nolint:errcheck
-}
-
 func (obj *Endpoint) GetStatus() interface{} {
 	return obj.Status
-}
-
-func (obj *Endpoint) SetStatus(status interface{}) {
-	obj.Status = status.(*EndpointStatus) //nolint:errcheck
 }
 
 func (obj *Endpoint) GetKind() string {
@@ -223,10 +175,6 @@ func (obj *Endpoint) SetID(id string) {
 
 func (obj *Endpoint) GetMetadata() interface{} {
 	return obj.Metadata
-}
-
-func (obj *Endpoint) SetMetadata(m interface{}) {
-	obj.Metadata = m.(*Metadata) //nolint:errcheck
 }
 
 // EndpointList is a list of Endpoint resources

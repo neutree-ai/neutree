@@ -44,28 +44,12 @@ func (obj *Role) GetName() string {
 	return obj.Metadata.Name
 }
 
-func (obj *Role) SetName(name string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Name = name
-}
-
 func (obj *Role) GetWorkspace() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.Workspace
-}
-
-func (obj *Role) SetWorkspace(workspace string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Workspace = workspace
 }
 
 func (obj *Role) GetLabels() map[string]string {
@@ -108,28 +92,12 @@ func (obj *Role) GetCreationTimestamp() string {
 	return obj.Metadata.CreationTimestamp
 }
 
-func (obj *Role) SetCreationTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.CreationTimestamp = timestamp
-}
-
 func (obj *Role) GetUpdateTimestamp() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.UpdateTimestamp
-}
-
-func (obj *Role) SetUpdateTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.UpdateTimestamp = timestamp
 }
 
 func (obj *Role) GetDeletionTimestamp() string {
@@ -140,28 +108,12 @@ func (obj *Role) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *Role) SetDeletionTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.DeletionTimestamp = timestamp
-}
-
 func (obj *Role) GetSpec() interface{} {
 	return obj.Spec
 }
 
-func (obj *Role) SetSpec(spec interface{}) {
-	obj.Spec = spec.(*RoleSpec) //nolint:errcheck
-}
-
 func (obj *Role) GetStatus() interface{} {
 	return obj.Status
-}
-
-func (obj *Role) SetStatus(status interface{}) {
-	obj.Status = status.(*RoleStatus) //nolint:errcheck
 }
 
 func (obj *Role) GetKind() string {
@@ -182,10 +134,6 @@ func (obj *Role) SetID(id string) {
 
 func (obj *Role) GetMetadata() interface{} {
 	return obj.Metadata
-}
-
-func (obj *Role) SetMetadata(m interface{}) {
-	obj.Metadata = m.(*Metadata) //nolint:errcheck
 }
 
 // RoleList is a list of Role resources

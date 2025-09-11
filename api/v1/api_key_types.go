@@ -44,28 +44,12 @@ func (obj *ApiKey) GetName() string {
 	return obj.Metadata.Name
 }
 
-func (obj *ApiKey) SetName(name string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Name = name
-}
-
 func (obj *ApiKey) GetWorkspace() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.Workspace
-}
-
-func (obj *ApiKey) SetWorkspace(workspace string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Workspace = workspace
 }
 
 func (obj *ApiKey) GetLabels() map[string]string {
@@ -108,28 +92,12 @@ func (obj *ApiKey) GetCreationTimestamp() string {
 	return obj.Metadata.CreationTimestamp
 }
 
-func (obj *ApiKey) SetCreationTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.CreationTimestamp = timestamp
-}
-
 func (obj *ApiKey) GetUpdateTimestamp() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.UpdateTimestamp
-}
-
-func (obj *ApiKey) SetUpdateTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.UpdateTimestamp = timestamp
 }
 
 func (obj *ApiKey) GetDeletionTimestamp() string {
@@ -140,28 +108,12 @@ func (obj *ApiKey) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *ApiKey) SetDeletionTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.DeletionTimestamp = timestamp
-}
-
 func (obj *ApiKey) GetSpec() interface{} {
 	return obj.Spec
 }
 
-func (obj *ApiKey) SetSpec(spec interface{}) {
-	obj.Spec = spec.(*ApiKeySpec) //nolint:errcheck
-}
-
 func (obj *ApiKey) GetStatus() interface{} {
 	return obj.Status
-}
-
-func (obj *ApiKey) SetStatus(status interface{}) {
-	obj.Status = status.(*ApiKeyStatus) //nolint:errcheck
 }
 
 func (obj *ApiKey) GetKind() string {
@@ -178,10 +130,6 @@ func (obj *ApiKey) GetID() string {
 
 func (obj *ApiKey) GetMetadata() interface{} {
 	return obj.Metadata
-}
-
-func (obj *ApiKey) SetMetadata(m interface{}) {
-	obj.Metadata = m.(*Metadata) //nolint:errcheck
 }
 
 // ApiKeyList is a list of ApiKey resources

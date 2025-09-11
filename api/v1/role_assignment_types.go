@@ -57,28 +57,12 @@ func (obj *RoleAssignment) GetName() string {
 	return obj.Metadata.Name
 }
 
-func (obj *RoleAssignment) SetName(name string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Name = name
-}
-
 func (obj *RoleAssignment) GetWorkspace() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.Workspace
-}
-
-func (obj *RoleAssignment) SetWorkspace(workspace string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Workspace = workspace
 }
 
 func (obj *RoleAssignment) GetLabels() map[string]string {
@@ -121,28 +105,12 @@ func (obj *RoleAssignment) GetCreationTimestamp() string {
 	return obj.Metadata.CreationTimestamp
 }
 
-func (obj *RoleAssignment) SetCreationTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.CreationTimestamp = timestamp
-}
-
 func (obj *RoleAssignment) GetUpdateTimestamp() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.UpdateTimestamp
-}
-
-func (obj *RoleAssignment) SetUpdateTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.UpdateTimestamp = timestamp
 }
 
 func (obj *RoleAssignment) GetDeletionTimestamp() string {
@@ -153,28 +121,12 @@ func (obj *RoleAssignment) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *RoleAssignment) SetDeletionTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.DeletionTimestamp = timestamp
-}
-
 func (obj *RoleAssignment) GetSpec() interface{} {
 	return obj.Spec
 }
 
-func (obj *RoleAssignment) SetSpec(spec interface{}) {
-	obj.Spec = spec.(*RoleAssignmentSpec) //nolint:errcheck
-}
-
 func (obj *RoleAssignment) GetStatus() interface{} {
 	return obj.Status
-}
-
-func (obj *RoleAssignment) SetStatus(status interface{}) {
-	obj.Status = status.(*RoleAssignmentStatus) //nolint:errcheck
 }
 
 func (obj *RoleAssignment) GetKind() string {
@@ -187,10 +139,6 @@ func (obj *RoleAssignment) SetKind(kind string) {
 
 func (obj *RoleAssignment) GetMetadata() interface{} {
 	return obj.Metadata
-}
-
-func (obj *RoleAssignment) SetMetadata(m interface{}) {
-	obj.Metadata = m.(*Metadata) //nolint:errcheck
 }
 
 // RoleAssignmentList is a list of RoleAssignment resources

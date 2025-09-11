@@ -53,28 +53,12 @@ func (obj *ImageRegistry) GetName() string {
 	return obj.Metadata.Name
 }
 
-func (obj *ImageRegistry) SetName(name string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Name = name
-}
-
 func (obj *ImageRegistry) GetWorkspace() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.Workspace
-}
-
-func (obj *ImageRegistry) SetWorkspace(workspace string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Workspace = workspace
 }
 
 func (obj *ImageRegistry) GetLabels() map[string]string {
@@ -117,28 +101,12 @@ func (obj *ImageRegistry) GetCreationTimestamp() string {
 	return obj.Metadata.CreationTimestamp
 }
 
-func (obj *ImageRegistry) SetCreationTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.CreationTimestamp = timestamp
-}
-
 func (obj *ImageRegistry) GetUpdateTimestamp() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.UpdateTimestamp
-}
-
-func (obj *ImageRegistry) SetUpdateTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.UpdateTimestamp = timestamp
 }
 
 func (obj *ImageRegistry) GetDeletionTimestamp() string {
@@ -149,28 +117,12 @@ func (obj *ImageRegistry) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *ImageRegistry) SetDeletionTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.DeletionTimestamp = timestamp
-}
-
 func (obj *ImageRegistry) GetSpec() interface{} {
 	return obj.Spec
 }
 
-func (obj *ImageRegistry) SetSpec(spec interface{}) {
-	obj.Spec = spec.(*ImageRegistrySpec) //nolint:errcheck
-}
-
 func (obj *ImageRegistry) GetStatus() interface{} {
 	return obj.Status
-}
-
-func (obj *ImageRegistry) SetStatus(status interface{}) {
-	obj.Status = status.(*ImageRegistryStatus) //nolint:errcheck
 }
 
 func (obj *ImageRegistry) GetKind() string {
@@ -191,10 +143,6 @@ func (obj *ImageRegistry) SetID(id string) {
 
 func (obj *ImageRegistry) GetMetadata() interface{} {
 	return obj.Metadata
-}
-
-func (obj *ImageRegistry) SetMetadata(m interface{}) {
-	obj.Metadata = m.(*Metadata) //nolint:errcheck
 }
 
 // ImageRegistryList is a list of ImageRegistry resources

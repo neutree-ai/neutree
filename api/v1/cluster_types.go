@@ -145,28 +145,12 @@ func (obj *Cluster) GetName() string {
 	return obj.Metadata.Name
 }
 
-func (obj *Cluster) SetName(name string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Name = name
-}
-
 func (obj *Cluster) GetWorkspace() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.Workspace
-}
-
-func (obj *Cluster) SetWorkspace(workspace string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Workspace = workspace
 }
 
 func (obj *Cluster) GetLabels() map[string]string {
@@ -209,28 +193,12 @@ func (obj *Cluster) GetCreationTimestamp() string {
 	return obj.Metadata.CreationTimestamp
 }
 
-func (obj *Cluster) SetCreationTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.CreationTimestamp = timestamp
-}
-
 func (obj *Cluster) GetUpdateTimestamp() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.UpdateTimestamp
-}
-
-func (obj *Cluster) SetUpdateTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.UpdateTimestamp = timestamp
 }
 
 func (obj *Cluster) GetDeletionTimestamp() string {
@@ -241,28 +209,12 @@ func (obj *Cluster) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *Cluster) SetDeletionTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.DeletionTimestamp = timestamp
-}
-
 func (obj *Cluster) GetSpec() interface{} {
 	return obj.Spec
 }
 
-func (obj *Cluster) SetSpec(spec interface{}) {
-	obj.Spec = spec.(*ClusterSpec) //nolint:errcheck
-}
-
 func (obj *Cluster) GetStatus() interface{} {
 	return obj.Status
-}
-
-func (obj *Cluster) SetStatus(status interface{}) {
-	obj.Status = status.(*ClusterStatus) //nolint:errcheck
 }
 
 func (obj *Cluster) GetKind() string {
@@ -279,10 +231,6 @@ func (obj *Cluster) GetID() string {
 
 func (obj *Cluster) GetMetadata() interface{} {
 	return obj.Metadata
-}
-
-func (obj *Cluster) SetMetadata(m interface{}) {
-	obj.Metadata = m.(*Metadata) //nolint:errcheck
 }
 
 // ClusterList is a list of Cluster resources

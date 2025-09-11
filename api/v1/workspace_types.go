@@ -37,28 +37,12 @@ func (obj *Workspace) GetName() string {
 	return obj.Metadata.Name
 }
 
-func (obj *Workspace) SetName(name string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Name = name
-}
-
 func (obj *Workspace) GetWorkspace() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.Workspace
-}
-
-func (obj *Workspace) SetWorkspace(workspace string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Workspace = workspace
 }
 
 func (obj *Workspace) GetLabels() map[string]string {
@@ -101,28 +85,12 @@ func (obj *Workspace) GetCreationTimestamp() string {
 	return obj.Metadata.CreationTimestamp
 }
 
-func (obj *Workspace) SetCreationTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.CreationTimestamp = timestamp
-}
-
 func (obj *Workspace) GetUpdateTimestamp() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.UpdateTimestamp
-}
-
-func (obj *Workspace) SetUpdateTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.UpdateTimestamp = timestamp
 }
 
 func (obj *Workspace) GetDeletionTimestamp() string {
@@ -133,27 +101,12 @@ func (obj *Workspace) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *Workspace) SetDeletionTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.DeletionTimestamp = timestamp
-}
-
 func (obj *Workspace) GetSpec() interface{} {
 	return nil
 }
 
-func (obj *Workspace) SetSpec(spec interface{}) {
-}
-
 func (obj *Workspace) GetStatus() interface{} {
 	return obj.Status
-}
-
-func (obj *Workspace) SetStatus(status interface{}) {
-	obj.Status = status.(*WorkspaceStatus) //nolint:errcheck
 }
 
 func (obj *Workspace) GetKind() string {
@@ -174,10 +127,6 @@ func (obj *Workspace) SetID(id string) {
 
 func (obj *Workspace) GetMetadata() interface{} {
 	return obj.Metadata
-}
-
-func (obj *Workspace) SetMetadata(m interface{}) {
-	obj.Metadata = m.(*Metadata) //nolint:errcheck
 }
 
 // WorkspaceList is a list of Workspace resources

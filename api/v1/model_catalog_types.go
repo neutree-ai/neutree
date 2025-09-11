@@ -59,28 +59,12 @@ func (obj *ModelCatalog) GetName() string {
 	return obj.Metadata.Name
 }
 
-func (obj *ModelCatalog) SetName(name string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Name = name
-}
-
 func (obj *ModelCatalog) GetWorkspace() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.Workspace
-}
-
-func (obj *ModelCatalog) SetWorkspace(workspace string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.Workspace = workspace
 }
 
 func (obj *ModelCatalog) GetLabels() map[string]string {
@@ -123,28 +107,12 @@ func (obj *ModelCatalog) GetCreationTimestamp() string {
 	return obj.Metadata.CreationTimestamp
 }
 
-func (obj *ModelCatalog) SetCreationTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.CreationTimestamp = timestamp
-}
-
 func (obj *ModelCatalog) GetUpdateTimestamp() string {
 	if obj.Metadata == nil {
 		return ""
 	}
 
 	return obj.Metadata.UpdateTimestamp
-}
-
-func (obj *ModelCatalog) SetUpdateTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.UpdateTimestamp = timestamp
 }
 
 func (obj *ModelCatalog) GetDeletionTimestamp() string {
@@ -155,28 +123,12 @@ func (obj *ModelCatalog) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *ModelCatalog) SetDeletionTimestamp(timestamp string) {
-	if obj.Metadata == nil {
-		obj.Metadata = &Metadata{}
-	}
-
-	obj.Metadata.DeletionTimestamp = timestamp
-}
-
 func (obj *ModelCatalog) GetSpec() interface{} {
 	return obj.Spec
 }
 
-func (obj *ModelCatalog) SetSpec(spec interface{}) {
-	obj.Spec = spec.(*ModelCatalogSpec) //nolint:errcheck
-}
-
 func (obj *ModelCatalog) GetStatus() interface{} {
 	return obj.Status
-}
-
-func (obj *ModelCatalog) SetStatus(status interface{}) {
-	obj.Status = status.(*ModelCatalogStatus) //nolint:errcheck
 }
 
 func (obj *ModelCatalog) GetKind() string {
@@ -197,10 +149,6 @@ func (obj *ModelCatalog) SetID(id string) {
 
 func (obj *ModelCatalog) GetMetadata() interface{} {
 	return obj.Metadata
-}
-
-func (obj *ModelCatalog) SetMetadata(m interface{}) {
-	obj.Metadata = m.(*Metadata) //nolint:errcheck
 }
 
 // ModelCatalogList is a list of ModelCatalog resources
