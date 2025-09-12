@@ -17,9 +17,9 @@ func (_m *MockReconciler) EXPECT() *MockReconciler_Expecter {
 	return &MockReconciler_Expecter{mock: &_m.Mock}
 }
 
-// Reconcile provides a mock function with given fields: key
-func (_m *MockReconciler) Reconcile(key interface{}) error {
-	ret := _m.Called(key)
+// Reconcile provides a mock function with given fields: obj
+func (_m *MockReconciler) Reconcile(obj interface{}) error {
+	ret := _m.Called(obj)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Reconcile")
@@ -27,7 +27,7 @@ func (_m *MockReconciler) Reconcile(key interface{}) error {
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
-		r0 = rf(key)
+		r0 = rf(obj)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -41,12 +41,12 @@ type MockReconciler_Reconcile_Call struct {
 }
 
 // Reconcile is a helper method to define mock.On call
-//   - key interface{}
-func (_e *MockReconciler_Expecter) Reconcile(key interface{}) *MockReconciler_Reconcile_Call {
-	return &MockReconciler_Reconcile_Call{Call: _e.mock.On("Reconcile", key)}
+//   - obj interface{}
+func (_e *MockReconciler_Expecter) Reconcile(obj interface{}) *MockReconciler_Reconcile_Call {
+	return &MockReconciler_Reconcile_Call{Call: _e.mock.On("Reconcile", obj)}
 }
 
-func (_c *MockReconciler_Reconcile_Call) Run(run func(key interface{})) *MockReconciler_Reconcile_Call {
+func (_c *MockReconciler_Reconcile_Call) Run(run func(obj interface{})) *MockReconciler_Reconcile_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(interface{}))
 	})

@@ -68,6 +68,7 @@ auth:
     type: ClusterIP
 
 migration:
+  enabled: true
   image:
     repository: migrate/migrate
     tag: v4.18.3

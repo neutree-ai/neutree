@@ -45,36 +45,15 @@ func NewEndpointController(option *EndpointControllerOption) (*EndpointControlle
 	return c, nil
 }
 
-func (c *EndpointController) Reconcile(key interface{}) error {
-	_endpointID, ok := key.(int)
+func (c *EndpointController) Reconcile(obj interface{}) error {
+	endpoint, ok := obj.(*v1.Endpoint)
 	if !ok {
-		return errors.New("failed to assert key to endpointID")
+		return errors.New("failed to assert obj to *v1.Endpoint")
 	}
 
-	endpointID := strconv.Itoa(_endpointID)
+	klog.V(4).Info("Reconcile endpoint " + endpoint.Metadata.Name)
 
-	obj, err := c.storage.GetEndpoint(endpointID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get endpoint %s", endpointID)
-	}
-
-	klog.V(4).Info("Reconcile endpoint " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
-}
-
-func (c *EndpointController) ListKeys() ([]interface{}, error) {
-	endpoints, err := c.storage.ListEndpoint(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(endpoints))
-	for i := range endpoints {
-		keys[i] = endpoints[i].ID
-	}
-
-	return keys, nil
+	return c.syncHandler(endpoint)
 }
 
 func (c *EndpointController) sync(obj *v1.Endpoint) error {

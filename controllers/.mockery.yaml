@@ -7,4 +7,4 @@ packages:
   github.com/neutree-ai/neutree/controllers:
     interfaces:
       Reconciler:
-      Lister:
+      ObjectReader:

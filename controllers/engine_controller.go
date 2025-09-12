@@ -30,36 +30,15 @@ func NewEngineController(option *EngineControllerOption) (*EngineController, err
 	return c, nil
 }
 
-func (c *EngineController) Reconcile(key interface{}) error {
-	_engineID, ok := key.(int)
+func (c *EngineController) Reconcile(obj interface{}) error {
+	engine, ok := obj.(*v1.Engine)
 	if !ok {
-		return errors.New("failed to assert key to engineID")
+		return errors.New("failed to assert obj to *v1.Engine")
 	}
 
-	engineID := strconv.Itoa(_engineID)
+	klog.V(4).Info("Reconcile engine " + engine.Metadata.Name)
 
-	obj, err := c.storage.GetEngine(engineID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get engine %s", engineID)
-	}
-
-	klog.V(4).Info("Reconcile engine " + obj.Metadata.Name)
-
-	return c.syncHandler(obj)
-}
-
-func (c *EngineController) ListKeys() ([]interface{}, error) {
-	engines, err := c.storage.ListEngine(storage.ListOption{})
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]interface{}, len(engines))
-	for i := range engines {
-		keys[i] = engines[i].ID
-	}
-
-	return keys, nil
+	return c.syncHandler(engine)
 }
 
 func (c *EngineController) sync(obj *v1.Engine) error {

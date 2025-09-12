@@ -5,6 +5,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/supabase-community/postgrest-go"
 
+	"github.com/neutree-ai/neutree/pkg/scheme"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
@@ -198,12 +200,14 @@ func New(o Options) (Storage, error) {
 
 	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil).SetAuthToken(*jwtAutoToken)
 	if postgrestClient.ClientError != nil {
-		return nil, errors.Wrap(err, "failed to init storage")
+		return nil, errors.Wrap(postgrestClient.ClientError, "failed to init storage")
 	}
 
-	return &postgrestStorage{
+	s := &postgrestStorage{
 		postgrestClient: postgrestClient,
-	}, nil
+	}
+
+	return s, nil
 }
 
 type Filter struct {
@@ -219,4 +223,37 @@ func applyListOption(builder *postgrest.FilterBuilder, option ListOption) {
 	for _, filter := range option.Filters {
 		builder.Filter(filter.Column, filter.Operator, filter.Value)
 	}
+}
+
+type Patcher interface {
+	UpdateMetadata(id string, data scheme.Object) error
+	UpdateSpec(id string, data scheme.Object) error
+	UpdateStatus(id string, data scheme.Object) error
+}
+
+type Reader interface {
+	Get(id string, obj scheme.Object) error
+	List(obj scheme.ObjectList, option ListOption) error
+}
+
+type ObjectStorage interface {
+	Patcher
+	Reader
+}
+
+func NewObjectStorage(o Options, s *scheme.Scheme) (ObjectStorage, error) {
+	jwtAutoToken, err := CreateServiceToken(o.JwtSecret)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to init storage")
+	}
+
+	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil).SetAuthToken(*jwtAutoToken)
+	if postgrestClient.ClientError != nil {
+		return nil, errors.Wrap(postgrestClient.ClientError, "failed to init storage")
+	}
+
+	return &postgrestObjectStorage{
+		postgrestClient: postgrestClient,
+		scheme:          s,
+	}, nil
 }

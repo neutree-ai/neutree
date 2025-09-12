@@ -6,5 +6,6 @@ type Metadata struct {
 	CreationTimestamp string            `json:"creation_timestamp,omitempty"`
 	UpdateTimestamp   string            `json:"update_timestamp,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
 	Name              string            `json:"name"`
 }

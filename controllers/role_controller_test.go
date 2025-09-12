@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -189,73 +188,17 @@ func TestRoleController_Sync_CreateOrUpdate(t *testing.T) {
 	}
 }
 
-// --- Test for ListKeys ---
-
-func TestRoleController_ListKeys(t *testing.T) {
-	tests := []struct {
-		name      string
-		mockSetup func(*storagemocks.MockStorage)
-		wantKeys  []interface{}
-		wantErr   bool
-	}{
-		{
-			name: "List success",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListRole", storage.ListOption{}).Return([]v1.Role{
-					{ID: 1}, {ID: 5}, {ID: 10},
-				}, nil).Once()
-			},
-			wantKeys: []interface{}{1, 5, 10},
-			wantErr:  false,
-		},
-		{
-			name: "List returns empty",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListRole", storage.ListOption{}).Return([]v1.Role{}, nil).Once()
-			},
-			wantKeys: []interface{}{},
-			wantErr:  false,
-		},
-		{
-			name: "List returns error",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListRole", storage.ListOption{}).Return(nil, assert.AnError).Once()
-			},
-			wantKeys: nil,
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-			c := newTestRoleController(mockStorage)
-
-			keys, err := c.ListKeys()
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, keys)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.wantKeys, keys)
-			}
-			mockStorage.AssertExpectations(t)
-		})
-	}
-}
-
 // --- Test for Reconcile ---
 
 func TestRoleController_Reconcile(t *testing.T) {
 	roleID := 1
+	failedRoleID := 2
 	roleIDStr := strconv.Itoa(roleID)
 
 	// mockSyncHandler provides a controllable sync function for Reconcile tests.
 	mockSyncHandler := func(obj *v1.Role) error {
 		// Check for a condition to simulate failure.
-		if obj != nil && obj.Metadata != nil && obj.Metadata.Name == "sync-should-fail" {
+		if obj != nil && obj.ID == failedRoleID {
 			return errors.New("mock sync failed")
 		}
 		// Simulate successful sync.
@@ -272,10 +215,8 @@ func TestRoleController_Reconcile(t *testing.T) {
 	}{
 		{
 			name:     "Reconcile success (real sync, no status change)", // Test scenario using default sync handler.
-			inputKey: roleID,
+			inputKey: testRole(roleID, v1.RolePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetRole succeeds, role is already in the desired state.
-				s.On("GetRole", roleIDStr).Return(testRole(roleID, v1.RolePhaseCREATED), nil).Once()
 				// The real 'sync' method expects no further storage calls here.
 			},
 			useMockSync: false, // Use the default c.sync via syncHandler.
@@ -283,10 +224,8 @@ func TestRoleController_Reconcile(t *testing.T) {
 		},
 		{
 			name:     "Reconcile success (real sync, status updated)", // Test scenario using default sync handler.
-			inputKey: roleID,
+			inputKey: testRole(roleID, v1.RolePhasePENDING),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetRole succeeds, role needs status update.
-				s.On("GetRole", roleIDStr).Return(testRole(roleID, v1.RolePhasePENDING), nil).Once()
 				// The real 'sync' method expects UpdateRole to be called.
 				s.On("UpdateRole", roleIDStr, mock.MatchedBy(func(r *v1.Role) bool {
 					return r.Status != nil && r.Status.Phase == v1.RolePhaseCREATED
@@ -297,10 +236,8 @@ func TestRoleController_Reconcile(t *testing.T) {
 		},
 		{
 			name:     "Reconcile success (mock sync)", // Test Reconcile isolation using mock handler.
-			inputKey: roleID,
+			inputKey: testRole(roleID, v1.RolePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetRole succeeds.
-				s.On("GetRole", roleIDStr).Return(testRole(roleID, v1.RolePhaseCREATED), nil).Once()
 				// No further storage calls expected by Reconcile before calling syncHandler.
 			},
 			useMockSync: true, // Override with mockSyncHandler.
@@ -314,26 +251,12 @@ func TestRoleController_Reconcile(t *testing.T) {
 			},
 			useMockSync:   false, // Fails before sync handler.
 			wantErr:       true,
-			expectedError: errors.New("failed to assert key to roleID"),
-		},
-		{
-			name:     "GetRole returns error",
-			inputKey: roleID,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				// Mock GetRole to return an error.
-				s.On("GetRole", roleIDStr).Return(nil, assert.AnError).Once()
-			},
-			useMockSync: false, // Fails before sync handler.
-			wantErr:     true,  // Expect error from GetRole to be propagated.
+			expectedError: errors.New("failed to assert obj to *v1.Role"),
 		},
 		{
 			name:     "Sync handler returns error (mock sync)",
-			inputKey: roleID,
+			inputKey: testRole(failedRoleID, v1.RolePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
-				// GetRole succeeds, providing the role that triggers mock failure.
-				role := testRole(roleID, v1.RolePhaseCREATED)
-				role.Metadata.Name = "sync-should-fail" // Condition for mockSyncHandler failure.
-				s.On("GetRole", roleIDStr).Return(role, nil).Once()
 			},
 			useMockSync: true, // Use the mock handler.
 			wantErr:     true, // Expect error from mock sync handler to be propagated.

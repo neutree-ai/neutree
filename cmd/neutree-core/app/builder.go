@@ -110,6 +110,8 @@ func (b *Builder) Build() (*App, error) {
 			beforeHooks: []controllers.HookFunc{},
 			afterHooks:  []controllers.HookFunc{},
 			name:        name,
+			scheme:      b.config.Scheme,
+			storage:     b.config.ObjectStorage,
 		}
 
 		opts.afterHooks = append(opts.afterHooks, b.globalAfterHooks...)

@@ -11,8 +11,10 @@ import (
 
 	"github.com/spf13/pflag"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/options"
+	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
 func main() {
@@ -42,7 +44,10 @@ func main() {
 		klog.Fatalf("Invalid options: %v", err)
 	}
 
-	c, err := opts.Config()
+	scheme := scheme.NewScheme()
+	v1.AddToScheme(scheme) //nolint:errcheck
+
+	c, err := opts.Config(scheme)
 	if err != nil {
 		klog.Fatalf("Failed to create config: %v", err)
 	}

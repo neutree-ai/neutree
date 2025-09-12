@@ -10,7 +10,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/model_registry"
 	modelregistrymocks "github.com/neutree-ai/neutree/pkg/model_registry/mocks"
-	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -352,49 +351,6 @@ func TestModelRegistryController_Sync_Failed(t *testing.T) {
 	}
 }
 
-func TestModelRegistryController_ListKeys(t *testing.T) {
-	tests := []struct {
-		name      string
-		mockSetup func(*storagemocks.MockStorage)
-		wantErr   bool
-	}{
-		{
-			name: "list model registry success",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListModelRegistry", storage.ListOption{}).Return([]v1.ModelRegistry{{ID: 1}}, nil)
-			},
-			wantErr: false,
-		},
-		{
-			name: "list model registry error",
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("ListModelRegistry", storage.ListOption{}).Return(nil, assert.AnError)
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &storagemocks.MockStorage{}
-			tt.mockSetup(mockStorage)
-
-			c := &ModelRegistryController{storage: mockStorage}
-			keys, err := c.ListKeys()
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, keys)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, 1, len(keys))
-				assert.Equal(t, 1, keys[0])
-			}
-			mockStorage.AssertExpectations(t)
-		})
-	}
-}
-
 func TestModelRegistryController_Reconcile(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -403,26 +359,17 @@ func TestModelRegistryController_Reconcile(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name:  "reconcile success",
-			input: 1,
+			name: "reconcile success",
+			input: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{Name: "test"},
+			},
 			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("GetModelRegistry", "1").Return(&v1.ModelRegistry{
-					Metadata: &v1.Metadata{Name: "test"},
-				}, nil)
 			},
 			wantErr: false,
 		},
 		{
 			name:    "invalid key type",
 			input:   "invalid",
-			wantErr: true,
-		},
-		{
-			name:  "get registry error",
-			input: 1,
-			mockSetup: func(s *storagemocks.MockStorage) {
-				s.On("GetModelRegistry", "1").Return(nil, assert.AnError)
-			},
 			wantErr: true,
 		},
 	}

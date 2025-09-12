@@ -8,7 +8,7 @@ BEGIN
         VALUES (
             'v1',
             'Role',
-            ROW('admin', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
+            ROW('admin', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
             ROW('admin'::api.role_preset, ARRAY[]::api.permission_action[])::api.role_spec
         );
     END IF;
@@ -18,7 +18,7 @@ BEGIN
         VALUES (
             'v1',
             'Role',
-            ROW('workspace-user', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
+            ROW('workspace-user', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
             ROW('workspace-user'::api.role_preset, ARRAY[]::api.permission_action[])::api.role_spec
         );
     END IF;
@@ -98,7 +98,7 @@ BEGIN
             CURRENT_TIMESTAMP
         )
         RETURNING id INTO admin_user_id;
-        
+
         -- Assign admin role globally
         INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
         VALUES (
@@ -111,6 +111,7 @@ BEGIN
                 NULL,
                 CURRENT_TIMESTAMP,
                 CURRENT_TIMESTAMP,
+                '{}'::json,
                 '{}'::json
             )::api.metadata,
             ROW(
@@ -120,7 +121,7 @@ BEGIN
                 'admin'      -- Role name
             )::api.role_assignment_spec
         );
-        
+
         -- Print the generated credentials
         RAISE NOTICE 'Created admin user: admin@neutree.local with password: %', random_password;
     ELSE

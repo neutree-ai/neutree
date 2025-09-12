@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/storage"
 	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -23,29 +22,6 @@ func TestNewModelCatalogController(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, controller)
 	assert.Equal(t, mockStorage, controller.storage)
-}
-
-func TestModelCatalogController_ListKeys(t *testing.T) {
-	mockStorage := &storageMocks.MockStorage{}
-	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
-		Storage: mockStorage,
-	})
-
-	expectedModelCatalogs := []v1.ModelCatalog{
-		{ID: 1, Metadata: &v1.Metadata{Name: "catalog1"}},
-		{ID: 2, Metadata: &v1.Metadata{Name: "catalog2"}},
-	}
-
-	mockStorage.On("ListModelCatalog", storage.ListOption{}).Return(expectedModelCatalogs, nil)
-
-	keys, err := controller.ListKeys()
-
-	assert.NoError(t, err)
-	assert.Len(t, keys, 2)
-	assert.Equal(t, 1, keys[0])
-	assert.Equal(t, 2, keys[1])
-
-	mockStorage.AssertExpectations(t)
 }
 
 func TestModelCatalogController_Reconcile(t *testing.T) {
@@ -73,10 +49,9 @@ func TestModelCatalogController_Reconcile(t *testing.T) {
 		},
 	}
 
-	mockStorage.On("GetModelCatalog", "1").Return(modelCatalog, nil)
 	mockStorage.On("UpdateModelCatalog", "1", mock.AnythingOfType("*v1.ModelCatalog")).Return(nil)
 
-	err := controller.Reconcile(1)
+	err := controller.Reconcile(modelCatalog)
 
 	assert.NoError(t, err)
 	mockStorage.AssertExpectations(t)

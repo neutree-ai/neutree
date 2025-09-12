@@ -9,7 +9,6 @@ import (
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
-	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -175,45 +174,6 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 	}
 }
 
-/* ---------- ListKeys ---------- */
-
-func TestEndpointController_ListKeys(t *testing.T) {
-	tests := []struct {
-		name    string
-		setup   func(*storagemocks.MockStorage)
-		wantErr bool
-	}{
-		{
-			name: "ok",
-			setup: func(s *storagemocks.MockStorage) {
-				s.On("ListEndpoint", storage.ListOption{}).Return([]v1.Endpoint{{ID: 1}, {ID: 3}}, nil)
-			},
-			wantErr: false,
-		},
-		{
-			name: "err",
-			setup: func(s *storagemocks.MockStorage) {
-				s.On("ListEndpoint", storage.ListOption{}).Return(nil, assert.AnError)
-			},
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ms := &storagemocks.MockStorage{}
-			tt.setup(ms)
-			c := &EndpointController{storage: ms}
-			_, err := c.ListKeys()
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-			ms.AssertExpectations(t)
-		})
-	}
-}
-
 /* ---------- Reconcile ---------- */
 
 func TestEndpointController_Reconcile(t *testing.T) {
@@ -226,23 +186,14 @@ func TestEndpointController_Reconcile(t *testing.T) {
 	}{
 		{
 			name: "ok",
-			key:  id,
+			key:  ep(id, v1.EndpointPhaseRUNNING),
 			setup: func(s *storagemocks.MockStorage) {
-				s.On("GetEndpoint", strconv.Itoa(id)).Return(ep(id, v1.EndpointPhaseRUNNING), nil)
 			},
 			wantErr: false,
 		},
 		{
 			name:    "invalid key",
 			key:     "a",
-			wantErr: true,
-		},
-		{
-			name: "get fail",
-			key:  id,
-			setup: func(s *storagemocks.MockStorage) {
-				s.On("GetEndpoint", strconv.Itoa(id)).Return(nil, assert.AnError)
-			},
 			wantErr: true,
 		},
 	}
