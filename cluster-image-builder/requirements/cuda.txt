@@ -1,5 +1,4 @@
-llama_cpp_python==0.3.7
-vllm==0.8.5
-ray[serve]==2.43.0
+vllm==0.10.1
+ray[serve]==2.49.1
 numpy==1.26.4
 opencv-python-headless==4.11.0.86

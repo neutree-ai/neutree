@@ -10,7 +10,7 @@ ARCH ?= amd64
 ACCELERATORS ?= gpu amd-gpu
 ALL_ARCH ?= amd64 arm64
 
-RAY_BASE_IMAGE ?= rayproject/ray:2.43.0-py311-cu121
+RAY_BASE_IMAGE ?= rayproject/ray:2.49.1-py311-cu121
 ifeq ($(ARCH), arm64)
 RAY_BASE_IMAGE := $(RAY_BASE_IMAGE)-aarch64
 endif

@@ -32,8 +32,6 @@ from vllm.entrypoints.openai.serving_score import ServingScores
 from vllm.entrypoints.openai.serving_models import BaseModelPath, LoRAModulePath, PromptAdapterPath, OpenAIServingModels
 from vllm.engine.metrics import RayPrometheusStatLogger
 
-from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
-from serve._replica_scheduler.chwbl_scheduler import ConsistentHashReplicaScheduler
 
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
@@ -196,9 +194,9 @@ class Backend:
     async def generate(self, payload: Any):
         await self._ensure_chat()
         result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
-        
+
         is_stream = payload.get("stream") is True
-        
+
         if isinstance(result, ErrorResponse):
             if is_stream:
                 logging.error(f"Error during chat completion: {result.message}")
@@ -279,29 +277,29 @@ class Controller:
             handle._init()
 
         # Only modify the scheduler if necessary
-        if scheduler_type != SchedulerType.POW2:
-            try:
-                router = handle._router._asyncio_router
-                original_scheduler = router._replica_scheduler
+        # if scheduler_type != SchedulerType.POW2:
+        #     try:
+        #         router = handle._router._asyncio_router
+        #         original_scheduler = router._replica_scheduler
 
-                if scheduler_type == SchedulerType.STATIC_HASH:
-                    from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
-                    new_scheduler = StaticHashReplicaScheduler()
-                elif scheduler_type == SchedulerType.CONSISTENT_HASH:
-                    from serve._replica_scheduler.chwbl_scheduler import ConsistentHashReplicaScheduler
-                    new_scheduler = ConsistentHashReplicaScheduler(
-                        virtual_nodes_per_replica=virtual_nodes,
-                        load_factor=load_factor
-                    )
+        #         if scheduler_type == SchedulerType.STATIC_HASH:
+        #             from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
+        #             new_scheduler = StaticHashReplicaScheduler()
+        #         elif scheduler_type == SchedulerType.CONSISTENT_HASH:
+        #             from serve._replica_scheduler.chwbl_scheduler import ConsistentHashReplicaScheduler
+        #             new_scheduler = ConsistentHashReplicaScheduler(
+        #                 virtual_nodes_per_replica=virtual_nodes,
+        #                 load_factor=load_factor
+        #             )
 
-                new_scheduler.update_replicas(list(original_scheduler.curr_replicas.values()))
-                router._replica_scheduler = new_scheduler
-                print(f"[Controller] Replaced scheduler with {scheduler_type}")
-            except Exception as e:
-                print(f"[Controller] Failed to replace scheduler: {e}")
-                print("[Controller] Using default scheduler")
-        else:
-            print("[Controller] Using POW2 scheduler")
+        #         new_scheduler.update_replicas(list(original_scheduler.curr_replicas.values()))
+        #         router._replica_scheduler = new_scheduler
+        #         print(f"[Controller] Replaced scheduler with {scheduler_type}")
+        #     except Exception as e:
+        #         print(f"[Controller] Failed to replace scheduler: {e}")
+        #         print("[Controller] Using default scheduler")
+        # else:
+        #     print("[Controller] Using POW2 scheduler")
 
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
@@ -318,12 +316,12 @@ class Controller:
                     import json
                     error_data = json.loads(first_chunk.replace("data: ", "").strip())
                     return JSONResponse(
-                        content=error_data["error"], 
+                        content=error_data["error"],
                         status_code=400
                     )
             except:
                 pass
-        
+
             return StreamingResponse(
                 content=r,
                 media_type="text/event-stream"
@@ -390,6 +388,11 @@ def app_builder(args: Dict[str, Any]) -> Application:
             "memory": backend_options.get('memory', None),
             "resources": backend_options.get('resources', {})
         }
+        # request_router_config={
+        #     "request_router_class": "serve._request_route.static_hash_request_route:StaticHashRequestRouter",
+        #     "request_routing_stats_period_s": 1,
+        #     "request_routing_stats_timeout_s": 1,
+        # }
     ).bind(
         model_registry_type=model.get('registry_type'),
         model_name=model.get('name'),

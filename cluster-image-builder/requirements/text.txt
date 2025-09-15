@@ -15,5 +15,5 @@ numpy==1.26.4
 opencv-python-headless==4.11.0.86
 mistral_common==1.8.4
 scipy==1.16.1
-ray[cgraph]>=2.48.0
-ray[serve]==2.43.0
+ray[cgraph]==2.49.1
+ray[serve]==2.49.1
