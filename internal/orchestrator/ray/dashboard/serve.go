@@ -89,8 +89,10 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 	app := RayServeApplication{
 		Name:        EndpointToServeApplicationName(endpoint),
 		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
-		ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"), endpoint.Spec.Engine.Version),
-		Args:        args,
+		// ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"), endpoint.Spec.Engine.Version),
+		ImportPath: fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"), "v2"),
+		// ImportPath: fmt.Sprintf("app:app_builder"),
+		Args: args,
 	}
 
 	applicationEnv := map[string]string{}
@@ -110,7 +112,9 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 	}
 
 	app.RuntimeEnv = map[string]interface{}{
-		"env_vars": applicationEnv,
+		"env_vars":      applicationEnv,
+		"py_executable": "uv run --offline --project=/home/ray/serve/vllm/v2", // Use uv to run the app
+		//"working_dir":   "/home/ray/serve/vllm/v2",
 	}
 
 	return app

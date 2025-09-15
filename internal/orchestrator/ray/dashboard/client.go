@@ -69,7 +69,9 @@ func (c *Client) doRequest(method, path string, body, result interface{}) error 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("API request failed: %s", resp.Status)
+		content, _ := io.ReadAll(resp.Body) // nolint: errcheck
+		fmt.Println(string(content))
+		return fmt.Errorf("API request failed: %s, content: %s", resp.Status, string(content))
 	}
 
 	if result != nil {
