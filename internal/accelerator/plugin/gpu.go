@@ -66,11 +66,11 @@ func (p *GPUAcceleratorPlugin) GetNodeRuntimeConfig(ctx context.Context,
 
 	return &v1.GetNodeRuntimeConfigResponse{
 		RuntimeConfig: v1.RuntimeConfig{
-			Runtime: "nvidia",
+			//			Runtime: "nvidia",
 			Env: map[string]string{
 				"ACCELERATOR_TYPE": "gpu",
 			},
-			Options: []string{"--gpus all"},
+			Options: []string{"--device nvidia.com/gpu=all"},
 		},
 	}, nil
 }

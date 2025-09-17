@@ -650,6 +650,10 @@ func (c *sshClusterManager) generateRayClusterConfig() (*v1.RayClusterConfig, er
 
 	c.mutateModelCaches(rayClusterConfig)
 
+	// todo
+	rayClusterConfig.Docker.UsePodman = true
+	rayClusterConfig.Docker.DisableAutomaticRuntimeDetection = true
+
 	return rayClusterConfig, nil
 }
 

@@ -50,12 +50,14 @@ type Auth struct {
 }
 
 type Docker struct {
-	Image            string   `json:"image,omitempty" yaml:"image,omitempty"`
-	ContainerName    string   `json:"container_name,omitempty" yaml:"container_name,omitempty"`
-	RunOptions       []string `json:"run_options,omitempty" yaml:"run_options,omitempty"`
-	HeadRunOptions   []string `json:"head_run_options,omitempty" yaml:"head_run_options,omitempty"`
-	WorkerRunOptions []string `json:"worker_run_options,omitempty" yaml:"worker_run_options,omitempty"`
-	PullBeforeRun    bool     `json:"pull_before_run,omitempty" yaml:"pull_before_run,omitempty"`
+	Image                            string   `json:"image,omitempty" yaml:"image,omitempty"`
+	ContainerName                    string   `json:"container_name,omitempty" yaml:"container_name,omitempty"`
+	RunOptions                       []string `json:"run_options,omitempty" yaml:"run_options,omitempty"`
+	HeadRunOptions                   []string `json:"head_run_options,omitempty" yaml:"head_run_options,omitempty"`
+	WorkerRunOptions                 []string `json:"worker_run_options,omitempty" yaml:"worker_run_options,omitempty"`
+	PullBeforeRun                    bool     `json:"pull_before_run,omitempty" yaml:"pull_before_run,omitempty"`
+	UsePodman                        bool     `json:"use_podman,omitempty" yaml:"use_podman,omitempty"`
+	DisableAutomaticRuntimeDetection bool     `json:"disable_automatic_runtime_detection,omitempty" yaml:"disable_automatic_runtime_detection,omitempty"`
 }
 
 type RayClusterConfig struct {
