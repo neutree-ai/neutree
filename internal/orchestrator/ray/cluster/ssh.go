@@ -75,18 +75,7 @@ func NewRaySSHClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistr
 
 	manager.config = rayClusterConfig
 
-	if cluster.IsInitialized() {
-		err = ensureLocalClusterStateFile(rayClusterConfig)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to ensure local cluster state file")
-		}
-	}
-
 	manager.configMgr = config.NewManager(rayClusterConfig.ClusterName)
-
-	if err := manager.configMgr.Generate(rayClusterConfig); err != nil {
-		return nil, errors.Wrap(err, "failed to generate config")
-	}
 
 	return manager, nil
 }
@@ -106,6 +95,11 @@ func (c *sshClusterManager) DownCluster(ctx context.Context) error {
 	// best effort to stop node, ignore error.
 	eg.Wait() //nolint:errcheck
 
+	err := ensureLocalClusterStateFile(c.config)
+	if err != nil {
+		return errors.Wrap(err, "failed to ensure local cluster state file")
+	}
+
 	downArgs := []string{
 		"down",
 		"-y",
@@ -122,11 +116,9 @@ func (c *sshClusterManager) DownCluster(ctx context.Context) error {
 	klog.V(4).Infof("Ray cluster down output: %s", string(output))
 
 	// remove local cluster state file to avoid ray cluster start failed.
-	localClusterStatePath := filepath.Join(getRayTmpDir(), fmt.Sprintf("cluster-%s.state", c.config.ClusterName))
-	if _, err = os.Stat(localClusterStatePath); err == nil {
-		if err = os.Remove(localClusterStatePath); err != nil {
-			return errors.Wrap(err, "failed to remove local cluster state file")
-		}
+	err = removeLocalClusterStateFile(c.config)
+	if err != nil {
+		return errors.Wrap(err, "failed to remove local cluster state file")
 	}
 
 	err = c.configMgr.Cleanup()
@@ -142,21 +134,20 @@ func (c *sshClusterManager) Sync(ctx context.Context) error {
 }
 
 func (c *sshClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
-	changed, err := c.mutateAcceleratorRuntimeConfig(ctx, c.getHeadIP())
+	_, err := c.mutateAcceleratorRuntimeConfig(ctx, c.getHeadIP())
 	if err != nil {
 		return "", errors.Wrap(err, "failed to mutate accelerator runtime config")
 	}
 
-	if changed {
-		err = os.Remove(c.configMgr.ConfigPath())
-		if err != nil {
-			return "", errors.Wrap(err, "failed to remove config file")
-		}
+	// always regenerate config to pick up the latest config.
+	err = c.configMgr.Cleanup()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to cleanup config")
+	}
 
-		err = c.configMgr.Generate(c.config)
-		if err != nil {
-			return "", errors.Wrap(err, "failed to generate config")
-		}
+	err = c.configMgr.Generate(c.config)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to generate config")
 	}
 
 	validate := []dependencyValidateFunc{
@@ -544,7 +535,7 @@ func (c *sshClusterManager) detectClusterAcceleratorType() (string, error) {
 	return detectAcceleratorType, nil
 }
 
-func (c *sshClusterManager) mutateAcceleratorRuntimeConfig(ctx context.Context, nodeIP string) (bool, error) {
+func (c *sshClusterManager) mutateAcceleratorRuntimeConfig(ctx context.Context, nodeIP string) (bool, error) { //nolint:unparam
 	runtimeConfig, err := c.acceleratorManager.GetNodeRuntimeConfig(ctx, *c.sshClusterConfig.AcceleratorType, nodeIP, c.config.Auth)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get node runtime config")
@@ -591,7 +582,7 @@ func (c *sshClusterManager) generateRayClusterConfig() (*v1.RayClusterConfig, er
 	cluster := c.cluster
 	imageRegistry := c.imageRegistry
 
-	rayClusterConfig.ClusterName = cluster.Metadata.Name
+	rayClusterConfig.ClusterName = cluster.Key()
 	rayClusterConfig.Provider.Type = "local"
 
 	if rayClusterConfig.Docker.ContainerName == "" {
@@ -686,6 +677,18 @@ func (c *sshClusterManager) mutateModelCaches(config *v1.RayClusterConfig) {
 			config.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand}, config.StaticWorkerStartRayCommands...)
 		}
 	}
+}
+
+func removeLocalClusterStateFile(config *v1.RayClusterConfig) error {
+	localClusterStatePath := filepath.Join(getRayTmpDir(), "cluster-"+config.ClusterName+".state")
+	if _, err := os.Stat(localClusterStatePath); err == nil {
+		err = os.Remove(localClusterStatePath)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func ensureLocalClusterStateFile(config *v1.RayClusterConfig) error {

@@ -18,16 +18,19 @@ func TestManager_registerAcceleratorPlugin(t *testing.T) {
 
 	// Test registering a new plugin
 	resourceName := "test"
-	p := plugin.NewAcceleratorRestPlugin(resourceName, "http://127.0.0.1:80")
-	manager.registerAcceleratorPlugin(p)
+	req := v1.RegisterRequest{
+		ResourceName: resourceName,
+		Endpoint:     "http://127.0.0.1:80",
+	}
+	manager.registerAcceleratorPlugin(req)
 	value, ok := manager.acceleratorsMap.Load(resourceName)
 	rp := value.(registerPlugin)
 	assert.True(t, ok)
-	assert.Equal(t, p, rp.plugin)
+	assert.Equal(t, req.ResourceName, rp.plugin.Resource())
 	rt := rp.lastRegisterTime
 
 	// Test registering an existing plugin
-	manager.registerAcceleratorPlugin(p)
+	manager.registerAcceleratorPlugin(req)
 	value, ok = manager.acceleratorsMap.Load(resourceName)
 	assert.True(t, ok)
 	rp, ok = value.(registerPlugin)

@@ -161,6 +161,16 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 
 	err = clusterOrchestrator.HealthCheck()
 	if err != nil {
+		if cluster.IsInitialized() && cluster.Status.Phase == v1.ClusterPhaseFailed && cluster.Spec.Type == "ssh" {
+			// for ssh cluster, try to up cluster when cluster in failed status.
+			klog.Info("Cluster " + cluster.Metadata.Name + " in failed status, trying to up cluster")
+
+			_, err = clusterOrchestrator.CreateCluster()
+			if err != nil {
+				return errors.Wrap(err, "failed to up cluster "+cluster.Metadata.Name)
+			}
+		}
+
 		return errors.Wrap(err, "health check cluster failed")
 	}
 
@@ -170,7 +180,7 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 	}
 
 	// ssh cluster use local metrics collector.
-	if cluster.Spec.Type == "ssh" {
+	if cluster.Spec.Type == v1.SSHClusterType {
 		c.obsCollectConfigManager.GetMetricsCollectConfigManager().RegisterMetricsMonitor(cluster.Key(), monitoring.NewClusterMonitor(cluster, clusterOrchestrator))
 	}
 
@@ -180,7 +190,7 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 // reconcileNodes will reconcile the desired node of the cluster.
 func (c *ClusterController) reconcileNodes(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error {
 	// only ssh should reconcile static node.
-	if cluster.Spec.Type == "ssh" {
+	if cluster.Spec.Type == v1.SSHClusterType {
 		err := c.reconcileStaticNodes(cluster, clusterOrchestrator)
 		if err != nil {
 			return errors.Wrap(err, "failed to reconcile cluster static node "+cluster.Metadata.Name)

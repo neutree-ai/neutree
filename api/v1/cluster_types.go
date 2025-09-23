@@ -14,6 +14,11 @@ const (
 	ProvisionedNodeProvisionStatus  = "provisioned"
 )
 
+const (
+	SSHClusterType        = "ssh"
+	KubernetesClusterType = "kubernetes"
+)
+
 type Cluster struct {
 	ID         int            `json:"id,omitempty"`
 	APIVersion string         `json:"api_version,omitempty"`
