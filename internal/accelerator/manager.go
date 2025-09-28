@@ -43,7 +43,12 @@ func NewManager(e *gin.Engine) Manager {
 	}
 
 	for _, p := range plugin.GetLocalAcceleratorPlugins() {
-		manager.registerAcceleratorPlugin(p)
+		manager.acceleratorsMap.Store(p.Resource(), registerPlugin{
+			resource:         p.Resource(),
+			plugin:           p,
+			lastRegisterTime: time.Now(),
+		})
+		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
 
 	// register plugin register handler
@@ -62,29 +67,46 @@ func (a *manager) registerHandler(c *gin.Context) {
 		return
 	}
 
-	acceleratorPlugin := plugin.NewAcceleratorRestPlugin(req.ResourceName, req.Endpoint)
-	a.registerAcceleratorPlugin(acceleratorPlugin)
+	a.registerAcceleratorPlugin(req)
 
 	c.JSON(http.StatusOK, "ok")
 }
 
-func (a *manager) registerAcceleratorPlugin(plugin plugin.AcceleratorPlugin) {
+func (a *manager) registerAcceleratorPlugin(req v1.RegisterRequest) {
+	var (
+		p registerPlugin
+	)
+
+	value, ok := a.acceleratorsMap.Load(req.ResourceName)
+	if ok {
+		klog.Infof("Accelerator plugin %s already registered, update register time", req.ResourceName)
+		var (
+			ok bool
+		)
+
+		p, ok = value.(registerPlugin)
+		if !ok {
+			klog.Warning("assert register plugin type failed")
+			return
+		}
+
+		p.lastRegisterTime = time.Now()
+		a.acceleratorsMap.Store(req.ResourceName, p)
+
+		return
+	} else {
+		p = registerPlugin{
+			resource:         req.ResourceName,
+			plugin:           plugin.NewAcceleratorRestPlugin(req.ResourceName, req.Endpoint),
+			lastRegisterTime: time.Now(),
+		}
+		a.acceleratorsMap.Store(req.ResourceName, p)
+		klog.Infof("Register accelerator plugin: %s", req.ResourceName)
+	}
+
 	// refresh engine cache when plugin register.
 	// todo: we can determine whether an update is needed by checking the plugin version.
-	a.refreshAcceleratorPluginSupportEngines(plugin)
-
-	p := registerPlugin{
-		resource:         plugin.Resource(),
-		plugin:           plugin,
-		lastRegisterTime: time.Now(),
-	}
-
-	previous, _ := a.acceleratorsMap.Swap(p.resource, p)
-	if previous != nil {
-		klog.Infof("Accelerator plugin %s already registered, update register time", p.resource)
-	} else {
-		klog.Infof("Register accelerator plugin: %s", p.resource)
-	}
+	a.refreshAcceleratorPluginSupportEngines(p.plugin)
 }
 
 // syncPlugins sync all register plugin status and will remove unhealthy plugin.
