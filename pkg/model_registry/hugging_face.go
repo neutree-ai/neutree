@@ -12,8 +12,22 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+)
+
+var (
+	sharedClient = &http.Client{
+		Timeout: 300 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				//nolint:gosec
+				InsecureSkipVerify: true,
+			},
+			IdleConnTimeout: 30 * time.Second,
+		},
+	}
 )
 
 const (
@@ -44,19 +58,16 @@ func newHuggingFace(registry *v1.ModelRegistry) (*huggingFace, error) {
 	return &huggingFace{
 		url:      strings.TrimSuffix(parsedUrl.String(), "/"),
 		apiToken: registry.Spec.Credentials,
-		client: &http.Client{
-			Timeout: 300 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					//nolint:gosec
-					InsecureSkipVerify: true,
-				},
-			},
-		},
+		client:   sharedClient,
 	}, nil
 }
 
 func (hf *huggingFace) Connect() error {
+	_, err := hf.ListModels(ListOption{Limit: 1})
+	if err != nil {
+		return errors.Wrap(err, "failed to connect to Hugging Face API")
+	}
+
 	return nil
 }
 
@@ -108,6 +119,7 @@ func (hf *huggingFace) ListModels(option ListOption) ([]v1.GeneralModel, error) 
 // HealthyCheck checks the health of the Hugging Face Hub API.
 func (hf *huggingFace) HealthyCheck() bool {
 	if _, err := hf.getModelsList(ListOption{Search: "", Limit: 1}); err != nil {
+		klog.Errorf("failed to health check Hugging Face API, err: %v", err)
 		return false
 	}
 
