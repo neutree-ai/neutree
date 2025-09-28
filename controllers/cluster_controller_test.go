@@ -508,6 +508,7 @@ func TestClusterController_Sync_Failed(t *testing.T) {
 					assert.Equal(t, testClusterStatus.RayVersion, obj.Status.RayVersion)
 					assert.Equal(t, testClusterStatus.ReadyNodes, obj.Status.ReadyNodes)
 				}).Return(nil)
+				o.On("CreateCluster").Return("", assert.AnError)
 			},
 			wantErr: true,
 		},

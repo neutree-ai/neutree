@@ -55,7 +55,7 @@ func newOrchestrator(opts Options) (Orchestrator, error) {
 	}
 
 	switch opts.Cluster.Spec.Type {
-	case "ssh":
+	case v1.SSHClusterType:
 		clustrManager, err := cluster.NewRaySSHClusterManager(opts.Cluster, imageRegistry, opts.ImageService,
 			opts.AcceleratorManager, &command.OSExecutor{}, opts.Storage)
 		if err != nil {
@@ -66,7 +66,7 @@ func newOrchestrator(opts Options) (Orchestrator, error) {
 			Options:        opts,
 			clusterManager: clustrManager,
 		})
-	case "kubernetes":
+	case v1.KubernetesClusterType:
 		clusterManager, err := cluster.NewKubeRayClusterManager(opts.Cluster, imageRegistry, opts.ImageService,
 			opts.AcceleratorManager, opts.Storage, opts.MetricsRemoteWriteURL)
 		if err != nil {
