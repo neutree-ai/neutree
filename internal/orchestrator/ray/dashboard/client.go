@@ -21,6 +21,13 @@ type DashboardService interface {
 	UpdateServeApplications(appsReq RayServeApplicationsRequest) error
 }
 
+var sharedClient = &http.Client{
+	Timeout: time.Second * 30,
+	Transport: &http.Transport{
+		IdleConnTimeout: 30 * time.Second,
+	},
+}
+
 type Client struct {
 	dashboardURL string
 	client       *http.Client
@@ -35,9 +42,7 @@ var (
 func new(dashboardURL string) DashboardService {
 	return &Client{
 		dashboardURL: dashboardURL,
-		client: &http.Client{
-			Timeout: time.Second * 30,
-		},
+		client:       sharedClient,
 	}
 }
 

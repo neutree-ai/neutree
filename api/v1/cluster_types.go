@@ -137,10 +137,11 @@ func (c Cluster) IsInitialized() bool {
 type ClusterPhase string
 
 const (
-	ClusterPhasePending ClusterPhase = "Pending"
-	ClusterPhaseRunning ClusterPhase = "Running"
-	ClusterPhaseFailed  ClusterPhase = "Failed"
-	ClusterPhaseDeleted ClusterPhase = "Deleted"
+	ClusterPhasePending      ClusterPhase = "Pending"
+	ClusterPhaseRunning      ClusterPhase = "Running"
+	ClusterPhaseFailed       ClusterPhase = "Failed"
+	ClusterPhaseDeleted      ClusterPhase = "Deleted"
+	ClusterPhaseInitializing ClusterPhase = "Initializing"
 )
 
 func (obj *Cluster) GetName() string {

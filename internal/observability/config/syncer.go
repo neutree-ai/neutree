@@ -1,7 +1,7 @@
 package config
 
-import "github.com/neutree-ai/neutree/internal/observability/monitoring"
+import v1 "github.com/neutree-ai/neutree/api/v1"
 
 type ConfigSyncer interface {
-	SyncMetricsCollectConfig(metricsMonitorMap map[string]monitoring.MetricsMonitor) error
+	SyncMetricsCollectConfig(scrapeTargets map[string][]v1.MetricsScrapeTargetsConfig) error
 }

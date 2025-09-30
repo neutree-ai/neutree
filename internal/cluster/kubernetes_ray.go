@@ -3,11 +3,9 @@ package cluster
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,11 +28,9 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/nfs"
 	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
-	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -46,7 +42,7 @@ const (
 	DefaultMonitorCollectConfigMapName = "vmagent-scrape-config"
 )
 
-var _ ClusterManager = &kubeRayClusterManager{}
+var _ ClusterReconcile = &kubeRayClusterReconciler{}
 
 var (
 	scheme = runtime.NewScheme()
@@ -55,12 +51,13 @@ var (
 	_      = corev1.AddToScheme(scheme)
 )
 
-type kubeRayClusterManager struct {
-	imageService       registry.ImageService
-	acceleratorManager accelerator.Manager
-	storage            storage.Storage
+type kubeRayClusterReconciler struct {
+	imageService          registry.ImageService
+	acceleratorManager    accelerator.Manager
+	storage               storage.Storage
+	cluster               *v1.Cluster
+	metricsRemoteWriteURL string
 
-	cluster                 *v1.Cluster
 	imageRegistry           *v1.ImageRegistry
 	kubernetesClusterConfig *v1.RayKubernetesProvisionClusterConfig
 
@@ -72,28 +69,35 @@ type kubeRayClusterManager struct {
 	ctrClient client.Client
 }
 
-func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegistry, imageService registry.ImageService,
-	acceleratorManager accelerator.Manager, s storage.Storage,
-	metricsRemoteWriteURL string) (*kubeRayClusterManager, error) {
-	c := &kubeRayClusterManager{
+func NewKubeRayClusterReconciler(opts Options) (*kubeRayClusterReconciler, error) {
+	c := &kubeRayClusterReconciler{
 		installObjects:   []client.Object{},
-		clusterNamespace: Namespace(cluster),
+		dependencyImages: []string{},
+		clusterNamespace: Namespace(opts.Cluster),
 
-		cluster:            cluster,
-		imageRegistry:      imageRegistry,
-		imageService:       imageService,
-		dependencyImages:   []string{},
-		acceleratorManager: acceleratorManager,
-		storage:            s,
+		cluster:               opts.Cluster,
+		imageService:          opts.ImageService,
+		acceleratorManager:    opts.AcceleratorManager,
+		storage:               opts.Storage,
+		metricsRemoteWriteURL: opts.MetricsRemoteWriteURL,
 	}
 
 	return c, nil
 }
 
-func (c *kubeRayClusterManager) generateConfig() error {
+func (c *kubeRayClusterReconciler) generateConfig() error {
+	var err error
+
 	cluster := c.cluster
 
-	config, err := parseKubernetesClusterConfig(cluster)
+	if c.imageRegistry == nil {
+		c.imageRegistry, err = getRelatedImageRegistry(c.storage, cluster)
+		if err != nil {
+			return errors.Wrap(err, "failed to get related image registry")
+		}
+	}
+
+	config, err := ParseKubernetesClusterConfig(cluster)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse cluster config")
 	}
@@ -138,7 +142,7 @@ func (c *kubeRayClusterManager) generateConfig() error {
 
 	c.installObjects = append(c.installObjects, imagePullSecret)
 
-	vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment, err := c.generateVMAgent(metricsRemoteWriteURL)
+	vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment, err := c.generateVMAgent(c.metricsRemoteWriteURL)
 	if err != nil {
 		return errors.Wrap(err, "failed to generate vm agent")
 	}
@@ -158,7 +162,7 @@ func (c *kubeRayClusterManager) generateConfig() error {
 	return nil
 }
 
-func (c *kubeRayClusterManager) Reconcile(ctx context.Context) error {
+func (c *kubeRayClusterReconciler) Reconcile(ctx context.Context) error {
 	err := c.generateConfig()
 	if err != nil {
 		return errors.Wrap(err, "failed to generate config")
@@ -171,21 +175,52 @@ func (c *kubeRayClusterManager) Reconcile(ctx context.Context) error {
 		}
 	}
 
-	_, err = c.UpCluster(ctx, false)
+	defer func() {
+		err = c.setClusterStatus()
+		if err != nil {
+			klog.Error(err, "failed to set cluster status")
+		}
+	}()
+
+	headIP, err := c.upCluster(ctx, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to reconcile cluster")
+	}
+
+	dashboardSvc := dashboard.NewDashboardService(fmt.Sprintf("http://%s:8265", headIP))
+	_, err = dashboardSvc.GetClusterMetadata()
+	if err != nil {
+		return errors.Wrap(err, "failed to get cluster metadata")
 	}
 
 	return nil
 }
 
-func (c *kubeRayClusterManager) ReconcileDelete(ctx context.Context) error {
+func (c *kubeRayClusterReconciler) setClusterStatus() error {
+	headIP, err := c.getClusterAccessIP(context.Background())
+	if err != nil {
+		return errors.Wrap(err, "failed to get cluster access ip")
+	}
+
+	dashboardSvc := dashboard.NewDashboardService(fmt.Sprintf("http://%s:8265", headIP))
+
+	clusterStatus, err := getRayClusterStatus(dashboardSvc)
+	if err != nil {
+		return errors.Wrap(err, "failed to get ray cluster status")
+	}
+
+	setClusterStatus(c.cluster, clusterStatus)
+
+	return nil
+}
+
+func (c *kubeRayClusterReconciler) ReconcileDelete(ctx context.Context) error {
 	err := c.generateConfig()
 	if err != nil {
 		return errors.Wrap(err, "failed to generate config")
 	}
 
-	err = c.DownCluster(ctx)
+	err = c.downCluster(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to reconcile delete cluster")
 	}
@@ -193,16 +228,18 @@ func (c *kubeRayClusterManager) ReconcileDelete(ctx context.Context) error {
 	return nil
 }
 
-func (c *kubeRayClusterManager) initialize(ctx context.Context) error {
+func (c *kubeRayClusterReconciler) initialize(ctx context.Context) error {
 	klog.Info("Start to initialize cluster " + c.cluster.Metadata.Name)
 
-	c.cluster.Status.Phase = v1.ClusterPhaseInitializing
-	err := c.storage.UpdateCluster(strconv.Itoa(c.cluster.ID), c.cluster)
-	if err != nil {
-		return errors.Wrap(err, "failed to update cluster status")
+	if c.cluster.Status == nil || c.cluster.Status.Phase != v1.ClusterPhaseInitializing {
+		c.cluster.Status.Phase = v1.ClusterPhaseInitializing
+		err := c.storage.UpdateCluster(strconv.Itoa(c.cluster.ID), c.cluster)
+		if err != nil {
+			return errors.Wrap(err, "failed to update cluster status")
+		}
 	}
 
-	headIP, err := c.UpCluster(ctx, false)
+	headIP, err := c.upCluster(ctx, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to up cluster")
 	}
@@ -214,6 +251,7 @@ func (c *kubeRayClusterManager) initialize(ctx context.Context) error {
 	}
 
 	c.cluster.Status.Initialized = true
+	c.cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", headIP)
 	err = c.storage.UpdateCluster(strconv.Itoa(c.cluster.ID), c.cluster)
 	if err != nil {
 		return errors.Wrap(err, "failed to update cluster status")
@@ -222,7 +260,7 @@ func (c *kubeRayClusterManager) initialize(ctx context.Context) error {
 	return nil
 }
 
-func (c *kubeRayClusterManager) UpCluster(ctx context.Context, restart bool) (string, error) {
+func (c *kubeRayClusterReconciler) upCluster(ctx context.Context, restart bool) (string, error) {
 	dependencyValidateFuncs := []dependencyValidateFunc{
 		validateImageRegistryFunc(c.imageRegistry),
 	}
@@ -248,7 +286,7 @@ func (c *kubeRayClusterManager) UpCluster(ctx context.Context, restart bool) (st
 	return c.getClusterAccessIP(ctx)
 }
 
-func (c *kubeRayClusterManager) DownCluster(ctx context.Context) error {
+func (c *kubeRayClusterReconciler) downCluster(ctx context.Context) error {
 	resourceExist := false
 
 	for _, object := range c.installObjects {
@@ -280,42 +318,7 @@ func (c *kubeRayClusterManager) DownCluster(ctx context.Context) error {
 	return nil
 }
 
-func (c *kubeRayClusterManager) GetDashboardService(ctx context.Context) (dashboard.DashboardService, error) {
-	accessIP, err := c.getClusterAccessIP(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get cluster access ip")
-	}
-
-	dashboardUrl := fmt.Sprintf("http://%s:8265", accessIP)
-
-	return dashboard.NewDashboardService(dashboardUrl), nil
-}
-
-func (c *kubeRayClusterManager) GetServeEndpoint(ctx context.Context) (string, error) {
-	accessIP, err := c.getClusterAccessIP(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get cluster access ip")
-	}
-
-	return fmt.Sprintf("http://%s:8000", accessIP), nil
-}
-
-func (c *kubeRayClusterManager) GetDesireStaticWorkersIP(ctx context.Context) []string {
-	// always return null, kuberay cluster only support auto scale
-	return []string{}
-}
-
-func (c *kubeRayClusterManager) StartNode(ctx context.Context, nodeIP string) error {
-	// not implemented
-	return nil
-}
-
-func (c *kubeRayClusterManager) StopNode(ctx context.Context, nodeIP string) error {
-	// not implemented
-	return nil
-}
-
-func (c *kubeRayClusterManager) getClusterAccessIP(ctx context.Context) (string, error) {
+func (c *kubeRayClusterReconciler) getClusterAccessIP(ctx context.Context) (string, error) {
 	rayCluster := &rayv1.RayCluster{}
 
 	err := c.ctrClient.Get(ctx, client.ObjectKey{
@@ -347,177 +350,7 @@ func (c *kubeRayClusterManager) getClusterAccessIP(ctx context.Context) (string,
 	return "", errors.New("only support load balancer service type")
 }
 
-func (c *kubeRayClusterManager) ConnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint) error {
-	err := c.generateConfig()
-	if err != nil {
-		return errors.Wrap(err, "failed to generate config")
-	}
-
-	podList := &corev1.PodList{}
-
-	err = c.ctrClient.List(ctx, podList, client.InNamespace(c.clusterNamespace), client.MatchingLabels{
-		"ray.io/cluster": c.cluster.Metadata.Name,
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to list pods")
-	}
-
-	for _, pod := range podList.Items {
-		if pod.Status.Phase != corev1.PodRunning {
-			continue
-		}
-
-		err := c.connectEndpointModel(ctx, modelRegistry, endpoint, pod.Name)
-		if err != nil {
-			return errors.Wrap(err, "failed to connect endpoint model")
-		}
-	}
-
-	return nil
-}
-
-func (c *kubeRayClusterManager) connectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint, podName string) error {
-	klog.V(4).Infof("Connect endpoint %s model to pod %s", endpoint.Metadata.Name, podName)
-
-	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
-		return nil
-	}
-
-	commandRunner := command_runner.NewKubernetesCommandRunner(c.kubeconfig, podName, c.clusterNamespace, "ray-container")
-
-	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
-		modelRegistryURL, err := url.Parse(modelRegistry.Spec.Url)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse model registry url: %s", modelRegistry.Spec.Url)
-		}
-
-		if modelRegistryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			err = nfs.NewKubernetesNfsMounter(*commandRunner).
-				MountNFS(ctx, modelRegistryURL.Host+modelRegistryURL.Path, filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name))
-			if err != nil {
-				return errors.Wrap(err, "failed to mount nfs")
-			}
-
-			return nil
-		}
-
-		return fmt.Errorf("unsupported model registry type %s and scheme %s", modelRegistry.Spec.Type, modelRegistryURL.Scheme)
-	}
-
-	return fmt.Errorf("unsupported model registry type %s", modelRegistry.Spec.Type)
-}
-
-func (c *kubeRayClusterManager) DisconnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint) error {
-	err := c.generateConfig()
-	if err != nil {
-		return errors.Wrap(err, "failed to generate config")
-	}
-
-	podList := &corev1.PodList{}
-	err = c.ctrClient.List(ctx, podList, client.InNamespace(c.clusterNamespace), client.MatchingLabels{
-		"ray.io/cluster": c.cluster.Metadata.Name,
-	})
-
-	if err != nil {
-		return errors.Wrap(err, "failed to list pods")
-	}
-
-	for _, pod := range podList.Items {
-		if pod.Status.Phase != corev1.PodRunning {
-			continue
-		}
-
-		err := c.disconnectEndpointModel(ctx, modelRegistry, endpoint, pod.Name)
-		if err != nil {
-			return errors.Wrap(err, "failed to disconnect endpoint model")
-		}
-	}
-
-	return nil
-}
-
-func (c *kubeRayClusterManager) disconnectEndpointModel(ctx context.Context, modelRegistry v1.ModelRegistry, endpoint v1.Endpoint, podName string) error {
-	klog.V(4).Infof("Disconnect endpoint %s model from pod %s", endpoint.Metadata.Name, podName)
-
-	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
-		return nil
-	}
-
-	commandRunner := command_runner.NewKubernetesCommandRunner(c.kubeconfig, podName, c.clusterNamespace, "ray-container")
-
-	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
-		modelRegistryURL, err := url.Parse(modelRegistry.Spec.Url)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse model registry url: %s", modelRegistry.Spec.Url)
-		}
-
-		if modelRegistryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			err = nfs.NewKubernetesNfsMounter(*commandRunner).
-				Unmount(ctx, filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name))
-			if err != nil {
-				return errors.Wrap(err, "failed to mount nfs")
-			}
-
-			return nil
-		}
-
-		return fmt.Errorf("unsupported model registry type %s and scheme %s", modelRegistry.Spec.Type, modelRegistryURL.Scheme)
-	}
-
-	return fmt.Errorf("unsupported model registry type %s", modelRegistry.Spec.Type)
-}
-
-func (c *kubeRayClusterManager) syncMetricsConfig(ctx context.Context) error {
-	dashboardService, err := c.GetDashboardService(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to get dashboard service")
-	}
-
-	clusterMetricsConfig, err := generateRayClusterMetricsScrapeTargetsConfig(c.cluster, dashboardService)
-	if err != nil {
-		return errors.Wrap(err, "failed to generate ray cluster metrics scrape targets config")
-	}
-
-	clusterMetricsConfigContent, err := json.Marshal([]*v1.MetricsScrapeTargetsConfig{clusterMetricsConfig})
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal ray cluster metrics config")
-	}
-
-	vmAgentScrapeConfigMap := &corev1.ConfigMap{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "ConfigMap",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultMonitorCollectConfigMapName,
-			Namespace: c.clusterNamespace,
-		},
-	}
-
-	err = c.ctrClient.Get(ctx, client.ObjectKeyFromObject(vmAgentScrapeConfigMap), vmAgentScrapeConfigMap)
-	if err != nil {
-		return errors.Wrap(err, "failed to get vmagent scrape config map")
-	}
-
-	if vmAgentScrapeConfigMap.Data == nil {
-		vmAgentScrapeConfigMap.Data = make(map[string]string)
-	}
-
-	if vmAgentScrapeConfigMap.Data["cluster.json"] == string(clusterMetricsConfigContent) {
-		return nil
-	}
-
-	vmAgentScrapeConfigMap.Data["cluster.json"] = string(clusterMetricsConfigContent)
-
-	err = c.ctrClient.Update(ctx, vmAgentScrapeConfigMap)
-	if err != nil {
-		return errors.Wrap(err, "failed to update vmagent scrape config map")
-	}
-
-	return nil
-}
-
-func (c *kubeRayClusterManager) getKubeconfig() (string, error) {
+func (c *kubeRayClusterReconciler) getKubeconfig() (string, error) {
 	if c.kubernetesClusterConfig.Kubeconfig == "" {
 		return "", errors.New("kubeconfig is required")
 	}
@@ -530,7 +363,7 @@ func (c *kubeRayClusterManager) getKubeconfig() (string, error) {
 	return string(kubeconfigContent), nil
 }
 
-func (c *kubeRayClusterManager) generateImagePullSecret() (*corev1.Secret, error) {
+func (c *kubeRayClusterReconciler) generateImagePullSecret() (*corev1.Secret, error) {
 	registryURL, err := url.Parse(c.imageRegistry.Spec.URL)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse image registry url: %s", c.imageRegistry.Spec.URL)
@@ -582,7 +415,7 @@ func (c *kubeRayClusterManager) generateImagePullSecret() (*corev1.Secret, error
 	}, nil
 }
 
-func (c *kubeRayClusterManager) generateVMAgent(metricsRemoteWriteURL string) (*corev1.ConfigMap, *corev1.ConfigMap, *appsv1.Deployment, error) {
+func (c *kubeRayClusterReconciler) generateVMAgent(metricsRemoteWriteURL string) (*corev1.ConfigMap, *corev1.ConfigMap, *appsv1.Deployment, error) {
 	registryURL, err := url.Parse(c.imageRegistry.Spec.URL)
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to parse image registry url "+c.imageRegistry.Spec.URL)
@@ -712,7 +545,7 @@ scrape_configs:
 	return vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment, nil
 }
 
-func (c *kubeRayClusterManager) generateKubeRayCluster() (*rayv1.RayCluster, error) {
+func (c *kubeRayClusterReconciler) generateKubeRayCluster() (*rayv1.RayCluster, error) {
 	clusterImage, err := getBaseImage(c.cluster, c.imageRegistry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get cluster image")
@@ -775,7 +608,7 @@ func (c *kubeRayClusterManager) generateKubeRayCluster() (*rayv1.RayCluster, err
 	return rayCluster, nil
 }
 
-func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec) (corev1.PodTemplateSpec, error) {
+func (c *kubeRayClusterReconciler) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSpec) (corev1.PodTemplateSpec, error) {
 	resourceList := corev1.ResourceList{}
 
 	for k, v := range spec.Resources {
@@ -863,7 +696,7 @@ func (c *kubeRayClusterManager) buildWorkerPodTemplateSpec(spec v1.WorkerGroupSp
 	return podTemplate, nil
 }
 
-func (c *kubeRayClusterManager) mutateModelCaches(podTemplate *corev1.PodTemplateSpec) {
+func (c *kubeRayClusterReconciler) mutateModelCaches(podTemplate *corev1.PodTemplateSpec) {
 	modelCaches := c.kubernetesClusterConfig.ModelCaches
 	if modelCaches == nil {
 		return
@@ -957,7 +790,7 @@ func (c *kubeRayClusterManager) mutateModelCaches(podTemplate *corev1.PodTemplat
 	podTemplate.Spec.InitContainers = append(podTemplate.Spec.InitContainers, modifyPermissionContainer)
 }
 
-func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() (corev1.PodTemplateSpec, error) {
+func (c *kubeRayClusterReconciler) buildHeadPodTemplateSpec() (corev1.PodTemplateSpec, error) {
 	resourceList := corev1.ResourceList{}
 	for k, v := range c.kubernetesClusterConfig.HeadNodeSpec.Resources {
 		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
@@ -1052,7 +885,7 @@ func (c *kubeRayClusterManager) buildHeadPodTemplateSpec() (corev1.PodTemplateSp
 	return podTemplate, nil
 }
 
-func (c *kubeRayClusterManager) configClusterAcceleratorType() error {
+func (c *kubeRayClusterReconciler) configClusterAcceleratorType() error {
 	if c.kubernetesClusterConfig.AcceleratorType != nil {
 		return nil
 	}
@@ -1070,7 +903,7 @@ func (c *kubeRayClusterManager) configClusterAcceleratorType() error {
 	})
 }
 
-func (c *kubeRayClusterManager) detectClusterAcceleratorType() (string, error) {
+func (c *kubeRayClusterReconciler) detectClusterAcceleratorType() (string, error) {
 	detectAcceleratorType := ""
 
 	for _, workerGroup := range c.kubernetesClusterConfig.WorkerGroupSpecs {
@@ -1111,7 +944,7 @@ func (c *kubeRayClusterManager) detectClusterAcceleratorType() (string, error) {
 	return detectAcceleratorType, nil
 }
 
-func (c *kubeRayClusterManager) mutateContainerAcceleratorRuntimeConfig(container *corev1.Container) error {
+func (c *kubeRayClusterReconciler) mutateContainerAcceleratorRuntimeConfig(container *corev1.Container) error {
 	acceleratorRuntimeConfig, err := c.acceleratorManager.GetKubernetesContainerRuntimeConfig(context.Background(), *c.kubernetesClusterConfig.AcceleratorType, *container)
 	if err != nil {
 		return errors.Wrap(err, "failed to get container runtime config")

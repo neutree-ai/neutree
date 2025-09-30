@@ -110,6 +110,7 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		LocalCollectConfigPath:                o.Observability.LocalCollectConfigPath,
 		KubernetesMetricsCollectConfigMapName: o.Observability.KubernetesMetricsCollectConfigMap,
 		KubernetesCollectConfigNamespace:      o.Observability.KubernetesCollectConfigNamespace,
+		Storage:                               s,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init obs collect config manager")

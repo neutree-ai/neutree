@@ -3,14 +3,15 @@ package manager
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
+	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/neutree-ai/neutree/internal/observability/config"
-	"github.com/neutree-ai/neutree/internal/observability/monitoring"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type ObsCollectConfigManager interface {
@@ -23,6 +24,7 @@ type ObsCollectConfigOptions struct {
 	LocalCollectConfigPath                string
 	KubernetesMetricsCollectConfigMapName string
 	KubernetesCollectConfigNamespace      string
+	Storage                               storage.Storage
 }
 
 func NewObsCollectConfigManager(options ObsCollectConfigOptions) (ObsCollectConfigManager, error) {
@@ -34,18 +36,20 @@ func NewObsCollectConfigManager(options ObsCollectConfigOptions) (ObsCollectConf
 	case "kubernetes":
 		var err error
 
-		configSyncer, err = config.NewKubernetesConfigSync(options.KubernetesMetricsCollectConfigMapName, options.KubernetesCollectConfigNamespace)
+		c := ctrlconfig.GetConfigOrDie()
+		kubeClient, err := kubernetes.NewForConfig(c)
 		if err != nil {
-			return nil, err
+			return nil, errors.New("failed to create kubernetes client")
 		}
+
+		configSyncer = config.NewKubernetesConfigSync(kubeClient, options.KubernetesMetricsCollectConfigMapName, options.KubernetesCollectConfigNamespace)
 	default:
 		return nil, errors.New("unsupported deploy type")
 	}
 
 	metricsCollectConfigManager := &metricsCollectConfigManager{
-		configSyncer:      configSyncer,
-		metricsMonitorMap: make(map[string]monitoring.MetricsMonitor),
-		lock:              &sync.Mutex{},
+		localConfigSyncer: configSyncer,
+		storage:           options.Storage,
 	}
 
 	return &obsCollectConfigManager{

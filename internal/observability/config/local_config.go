@@ -9,7 +9,6 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/monitoring"
 )
 
 type LocalConfigSync struct {
@@ -22,7 +21,7 @@ func NewLocalConfigSync(configPath string) *LocalConfigSync {
 	}
 }
 
-func (s *LocalConfigSync) SyncMetricsCollectConfig(metricsMonitorMap map[string]monitoring.MetricsMonitor) error {
+func (s *LocalConfigSync) SyncMetricsCollectConfig(metricsScrapeTargetsConfigs map[string][]v1.MetricsScrapeTargetsConfig) error {
 	// remove useless scrape configs from local metrics scrape config path
 	entries, err := os.ReadDir(s.metricsConfigPath)
 	if err != nil {
@@ -36,7 +35,7 @@ func (s *LocalConfigSync) SyncMetricsCollectConfig(metricsMonitorMap map[string]
 
 		key := strings.Split(entry.Name(), ".")[0]
 
-		_, ok := metricsMonitorMap[key]
+		_, ok := metricsScrapeTargetsConfigs[key]
 		if ok {
 			continue
 		}
@@ -48,12 +47,7 @@ func (s *LocalConfigSync) SyncMetricsCollectConfig(metricsMonitorMap map[string]
 	}
 
 	// write current scrape configs to local metrics scrape config path
-	for key, monitor := range metricsMonitorMap {
-		metricsConfigs, err := monitor.GetMetricsScrapeTargetsConfig()
-		if err != nil {
-			return errors.Wrapf(err, "failed to get metrics configs for key: %s", key)
-		}
-
+	for key, metricsConfigs := range metricsScrapeTargetsConfigs {
 		err = s.updateMetricsConfig(key, metricsConfigs)
 		if err != nil {
 			return errors.Wrapf(err, "failed to update metrics configs for key: %s", key)

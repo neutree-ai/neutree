@@ -1,4 +1,4 @@
-package config
+package cluster
 
 import (
 	"encoding/base64"
@@ -13,19 +13,17 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-type Manager struct {
-	clusterName string
-	baseDir     string
+type raySSHLocalConfigGenerator struct {
+	baseDir string
 }
 
-func NewManager(clusterName string) *Manager {
-	return &Manager{
-		clusterName: clusterName,
-		baseDir:     filepath.Join(os.TempDir(), "ray_cluster"+uuid.New().String()[0:6], clusterName),
+func newRaySSHLocalConfigGenerator(clusterName string) *raySSHLocalConfigGenerator {
+	return &raySSHLocalConfigGenerator{
+		baseDir: filepath.Join(os.TempDir(), "ray_cluster"+uuid.New().String()[0:6], clusterName),
 	}
 }
 
-func (m *Manager) Generate(config *v1.RayClusterConfig) error {
+func (m *raySSHLocalConfigGenerator) Generate(config *v1.RayClusterConfig) error {
 	if err := os.MkdirAll(m.baseDir, 0700); err != nil {
 		return errors.Wrap(err, "create config dir failed")
 	}
@@ -78,19 +76,19 @@ func (m *Manager) Generate(config *v1.RayClusterConfig) error {
 	return nil
 }
 
-func (m *Manager) ConfigPath() string {
+func (m *raySSHLocalConfigGenerator) ConfigPath() string {
 	return filepath.Join(m.baseDir, "bootstrap.yaml")
 }
 
-func (m *Manager) SSHKeyPath() string {
+func (m *raySSHLocalConfigGenerator) SSHKeyPath() string {
 	return filepath.Join(m.baseDir, "ssh_private_key")
 }
 
-func (m *Manager) Cleanup() error {
+func (m *raySSHLocalConfigGenerator) Cleanup() error {
 	return os.RemoveAll(m.baseDir)
 }
 
-func (m *Manager) ensureLocalClusterStateFile(config *v1.RayClusterConfig) error {
+func (m *raySSHLocalConfigGenerator) ensureLocalClusterStateFile(config *v1.RayClusterConfig) error {
 	localClusterStatePath := filepath.Join(m.baseDir, "cluster-"+config.ClusterName+".state")
 	if _, err := os.Stat(localClusterStatePath); err == nil {
 		return nil

@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	monitoring "github.com/neutree-ai/neutree/internal/observability/monitoring"
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -20,17 +20,17 @@ func (_m *MockConfigSyncer) EXPECT() *MockConfigSyncer_Expecter {
 	return &MockConfigSyncer_Expecter{mock: &_m.Mock}
 }
 
-// SyncMetricsCollectConfig provides a mock function with given fields: metricsMonitorMap
-func (_m *MockConfigSyncer) SyncMetricsCollectConfig(metricsMonitorMap map[string]monitoring.MetricsMonitor) error {
-	ret := _m.Called(metricsMonitorMap)
+// SyncMetricsCollectConfig provides a mock function with given fields: scrapeTargets
+func (_m *MockConfigSyncer) SyncMetricsCollectConfig(scrapeTargets map[string][]v1.MetricsScrapeTargetsConfig) error {
+	ret := _m.Called(scrapeTargets)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SyncMetricsCollectConfig")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]monitoring.MetricsMonitor) error); ok {
-		r0 = rf(metricsMonitorMap)
+	if rf, ok := ret.Get(0).(func(map[string][]v1.MetricsScrapeTargetsConfig) error); ok {
+		r0 = rf(scrapeTargets)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -44,14 +44,14 @@ type MockConfigSyncer_SyncMetricsCollectConfig_Call struct {
 }
 
 // SyncMetricsCollectConfig is a helper method to define mock.On call
-//   - metricsMonitorMap map[string]monitoring.MetricsMonitor
-func (_e *MockConfigSyncer_Expecter) SyncMetricsCollectConfig(metricsMonitorMap interface{}) *MockConfigSyncer_SyncMetricsCollectConfig_Call {
-	return &MockConfigSyncer_SyncMetricsCollectConfig_Call{Call: _e.mock.On("SyncMetricsCollectConfig", metricsMonitorMap)}
+//   - scrapeTargets map[string][]v1.MetricsScrapeTargetsConfig
+func (_e *MockConfigSyncer_Expecter) SyncMetricsCollectConfig(scrapeTargets interface{}) *MockConfigSyncer_SyncMetricsCollectConfig_Call {
+	return &MockConfigSyncer_SyncMetricsCollectConfig_Call{Call: _e.mock.On("SyncMetricsCollectConfig", scrapeTargets)}
 }
 
-func (_c *MockConfigSyncer_SyncMetricsCollectConfig_Call) Run(run func(metricsMonitorMap map[string]monitoring.MetricsMonitor)) *MockConfigSyncer_SyncMetricsCollectConfig_Call {
+func (_c *MockConfigSyncer_SyncMetricsCollectConfig_Call) Run(run func(scrapeTargets map[string][]v1.MetricsScrapeTargetsConfig)) *MockConfigSyncer_SyncMetricsCollectConfig_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[string]monitoring.MetricsMonitor))
+		run(args[0].(map[string][]v1.MetricsScrapeTargetsConfig))
 	})
 	return _c
 }
@@ -61,7 +61,7 @@ func (_c *MockConfigSyncer_SyncMetricsCollectConfig_Call) Return(_a0 error) *Moc
 	return _c
 }
 
-func (_c *MockConfigSyncer_SyncMetricsCollectConfig_Call) RunAndReturn(run func(map[string]monitoring.MetricsMonitor) error) *MockConfigSyncer_SyncMetricsCollectConfig_Call {
+func (_c *MockConfigSyncer_SyncMetricsCollectConfig_Call) RunAndReturn(run func(map[string][]v1.MetricsScrapeTargetsConfig) error) *MockConfigSyncer_SyncMetricsCollectConfig_Call {
 	_c.Call.Return(run)
 	return _c
 }

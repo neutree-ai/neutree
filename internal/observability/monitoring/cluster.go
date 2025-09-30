@@ -2,22 +2,21 @@ package monitoring
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
 )
 
 type clusterMonitor struct {
-	cluster             *v1.Cluster
-	clusterOrchestrator orchestrator.Orchestrator
+	cluster *v1.Cluster
 }
 
-func NewClusterMonitor(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) ServiceMonitor {
+func NewClusterMonitor(cluster *v1.Cluster) ServiceMonitor {
 	return &clusterMonitor{
-		cluster:             cluster,
-		clusterOrchestrator: clusterOrchestrator,
+		cluster: cluster,
 	}
 }
 
@@ -27,7 +26,7 @@ func (cm *clusterMonitor) GetMetricsScrapeTargetsConfig() ([]v1.MetricsScrapeTar
 	)
 
 	// current only support ray cluster
-	metricsScrapeTargetsConfig, err := generateRayClusterMetricsScrapeTargetsConfig(cm.cluster, cm.clusterOrchestrator)
+	metricsScrapeTargetsConfig, err := generateRayClusterMetricsScrapeTargetsConfig(cm.cluster)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate ray metrics scrape targets config")
 	}
@@ -37,16 +36,22 @@ func (cm *clusterMonitor) GetMetricsScrapeTargetsConfig() ([]v1.MetricsScrapeTar
 	return metricsScrapeTargetsConfigs, nil
 }
 
-func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) (*v1.MetricsScrapeTargetsConfig, error) {
-	nodes, err := clusterOrchestrator.ListNodes()
+func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster) (*v1.MetricsScrapeTargetsConfig, error) {
+	if cluster.Status.DashboardURL == "" {
+		return nil, errors.New("cluster dashboard url is empty")
+	}
+
+	dashboardService := dashboard.NewDashboardService(cluster.Status.DashboardURL)
+	nodes, err := dashboardService.ListNodes()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list ray nodes")
 	}
 
 	metricsScrapeTargetConfig := &v1.MetricsScrapeTargetsConfig{
 		Labels: map[string]string{
-			"ray_io_cluster": cluster.Metadata.Name,
-			"job":            "ray",
+			"ray_io_cluster":     cluster.Metadata.Name,
+			"neutree_cluster_id": strconv.Itoa(cluster.ID),
+			"job":                "ray",
 		},
 	}
 

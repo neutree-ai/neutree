@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/monitoring"
-	"github.com/neutree-ai/neutree/internal/observability/monitoring/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,31 +19,31 @@ func TestLocalConfigSync(t *testing.T) {
 	// Create test cases
 	tests := []struct {
 		name              string
-		metricsMonitorMap map[string]monitoring.MetricsMonitor
+		metricsMonitorMap map[string][]v1.MetricsScrapeTargetsConfig
 		setupFiles        []string // files to create before test
 		expectedFiles     []string // files expected after test
 		expectError       bool
 	}{
 		{
 			name: "successful sync with new configs",
-			metricsMonitorMap: map[string]monitoring.MetricsMonitor{
-				"metrics1": &mocks.MockMetricsMonitor{},
-				"metrics2": &mocks.MockMetricsMonitor{},
+			metricsMonitorMap: map[string][]v1.MetricsScrapeTargetsConfig{
+				"metrics1": {{}, {}},
+				"metrics2": {{}, {}},
 			},
 			expectedFiles: []string{"metrics1.json", "metrics2.json"},
 		},
 		{
 			name: "remove outdated configs",
-			metricsMonitorMap: map[string]monitoring.MetricsMonitor{
-				"metrics1": &mocks.MockMetricsMonitor{},
+			metricsMonitorMap: map[string][]v1.MetricsScrapeTargetsConfig{
+				"metrics1": {{}, {}},
 			},
 			setupFiles:    []string{"metrics1.json", "old_metrics.json"},
 			expectedFiles: []string{"metrics1.json"},
 		},
 		{
 			name: "error when reading directory fails",
-			metricsMonitorMap: map[string]monitoring.MetricsMonitor{
-				"metrics1": &mocks.MockMetricsMonitor{},
+			metricsMonitorMap: map[string][]v1.MetricsScrapeTargetsConfig{
+				"metrics1": {{}, {}},
 			},
 			expectError: true,
 		},
@@ -62,13 +60,6 @@ func TestLocalConfigSync(t *testing.T) {
 				fp := filepath.Join(configPath, "metrics", file)
 				os.WriteFile(fp, []byte("{}"), 0644)
 			}
-
-			// Mock behavior for GetMetricsScrapeTargetsConfig
-			for _, sm := range tt.metricsMonitorMap {
-				mockSM := sm.(*mocks.MockMetricsMonitor)
-				mockSM.On("GetMetricsScrapeTargetsConfig").Return([]v1.MetricsScrapeTargetsConfig{}, nil)
-			}
-
 			// Create config sync instance
 			sync := NewLocalConfigSync(configPath)
 
