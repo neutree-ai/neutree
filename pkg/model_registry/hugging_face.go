@@ -18,16 +18,19 @@ import (
 )
 
 var (
-	sharedClient = &http.Client{
-		Timeout: 300 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				//nolint:gosec
-				InsecureSkipVerify: true,
-			},
-			IdleConnTimeout: 30 * time.Second,
-		},
-	}
+	sharedClient = func() *http.Client {
+		transport := http.DefaultTransport.(*http.Transport).Clone() //nolint:errcheck
+		transport.TLSClientConfig = &tls.Config{
+			//nolint:gosec
+			InsecureSkipVerify: true,
+		}
+		transport.IdleConnTimeout = 30 * time.Second
+
+		return &http.Client{
+			Timeout:   300 * time.Second,
+			Transport: transport,
+		}
+	}()
 )
 
 const (
