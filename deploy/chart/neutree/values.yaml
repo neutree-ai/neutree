@@ -68,7 +68,6 @@ auth:
     type: ClusterIP
 
 migration:
-  enabled: true
   image:
     repository: migrate/migrate
     tag: v4.18.3
@@ -216,6 +215,8 @@ victoria-metrics-cluster:
 
 grafana:
   enabled: true
+  deploymentStrategy:
+    type: Recreate
   image:
     # -- The Docker registry
     registry: docker.io

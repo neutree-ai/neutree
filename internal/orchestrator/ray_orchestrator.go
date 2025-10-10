@@ -275,6 +275,11 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 				Operator: "eq",
 				Value:    strconv.Quote(endpoint.Spec.Cluster),
 			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(endpoint.Metadata.Workspace),
+			},
 		},
 	})
 	if err != nil {
@@ -325,6 +330,11 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 				Column:   "metadata->name",
 				Operator: "eq",
 				Value:    strconv.Quote(endpoint.Spec.Model.Registry),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(endpoint.Metadata.Workspace),
 			},
 		},
 	})
@@ -421,6 +431,11 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 				Column:   "metadata->name",
 				Operator: "eq",
 				Value:    strconv.Quote(endpoint.Spec.Cluster),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(endpoint.Metadata.Workspace),
 			},
 		},
 	})
@@ -533,6 +548,11 @@ func (o *RayOrchestrator) ConnectEndpointModel(endpoint *v1.Endpoint) error {
 				Operator: "eq",
 				Value:    strconv.Quote(endpoint.Spec.Model.Registry),
 			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(endpoint.Metadata.Workspace),
+			},
 		},
 	})
 	if err != nil {
@@ -565,6 +585,11 @@ func (o *RayOrchestrator) DisconnectEndpointModel(endpoint *v1.Endpoint) error {
 				Column:   "metadata->name",
 				Operator: "eq",
 				Value:    strconv.Quote(endpoint.Spec.Model.Registry),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(endpoint.Metadata.Workspace),
 			},
 		},
 	})
