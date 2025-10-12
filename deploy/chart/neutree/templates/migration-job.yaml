@@ -1,4 +1,3 @@
-{{- if .Values.migration.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -58,4 +57,3 @@ spec:
         - name: migrations
           emptyDir: {}
       restartPolicy: OnFailure
-{{- end }}

@@ -13,6 +13,11 @@ services:
     command:
       - "--storageDataPath=/storage"
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # vminsert is ingestion frontend. It receives metrics pushed by vmagent,
   # pre-process them and distributes across configured vmstorage shards.
@@ -28,6 +33,11 @@ services:
     ports:
       - 8480:8480
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
   vmselect:
     container_name: vmselect
     image: victoriametrics/vmselect:{{ .VictoriaMetricsVersion}}
@@ -40,6 +50,11 @@ services:
     ports:
       - 8481:8481
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
   grafana:
     container_name: grafana
     image: grafana/grafana:{{.GrafanaVersion}}
@@ -54,6 +69,11 @@ services:
       - {{ .GrafanaWorkDir}}/grafana.ini:/etc/grafana/grafana.ini
     depends_on:
       - "vmselect"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
   grafanadata: {}
-  storagedata: {}  
+  storagedata: {}

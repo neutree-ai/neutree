@@ -48,6 +48,10 @@ func NewManager(e *gin.Engine) Manager {
 			plugin:           p,
 			lastRegisterTime: time.Now(),
 		})
+
+		// It is critical to refresh supported engines during local plugin registration.
+		// Without this call, local accelerator plugins' supported engines are never initialized.
+		manager.refreshAcceleratorPluginSupportEngines(p)
 		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
 
@@ -73,40 +77,36 @@ func (a *manager) registerHandler(c *gin.Context) {
 }
 
 func (a *manager) registerAcceleratorPlugin(req v1.RegisterRequest) {
-	var (
-		p registerPlugin
-	)
-
 	value, ok := a.acceleratorsMap.Load(req.ResourceName)
 	if ok {
 		klog.Infof("Accelerator plugin %s already registered, update register time", req.ResourceName)
-		var (
-			ok bool
-		)
 
-		p, ok = value.(registerPlugin)
+		p, ok := value.(registerPlugin)
 		if !ok {
 			klog.Warning("assert register plugin type failed")
 			return
 		}
 
-		p.lastRegisterTime = time.Now()
-		a.acceleratorsMap.Store(req.ResourceName, p)
+		updatedPlugin := registerPlugin{
+			resource:         p.resource,
+			plugin:           p.plugin,
+			lastRegisterTime: time.Now(),
+		}
 
-		return
+		a.acceleratorsMap.Store(req.ResourceName, updatedPlugin)
+		// refresh engine cache when plugin register.
+		// todo: we can determine whether an update is needed by checking the plugin version.
+		a.refreshAcceleratorPluginSupportEngines(updatedPlugin.plugin)
 	} else {
-		p = registerPlugin{
+		p := registerPlugin{
 			resource:         req.ResourceName,
 			plugin:           plugin.NewAcceleratorRestPlugin(req.ResourceName, req.Endpoint),
 			lastRegisterTime: time.Now(),
 		}
 		a.acceleratorsMap.Store(req.ResourceName, p)
+		a.refreshAcceleratorPluginSupportEngines(p.plugin)
 		klog.Infof("Register accelerator plugin: %s", req.ResourceName)
 	}
-
-	// refresh engine cache when plugin register.
-	// todo: we can determine whether an update is needed by checking the plugin version.
-	a.refreshAcceleratorPluginSupportEngines(p.plugin)
 }
 
 // syncPlugins sync all register plugin status and will remove unhealthy plugin.
