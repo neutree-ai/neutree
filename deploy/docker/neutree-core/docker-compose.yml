@@ -21,6 +21,11 @@ services:
       interval: 2s
       timeout: 15s
       retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   auth:
     image: supabase/gotrue:v2.170.0
@@ -58,6 +63,11 @@ services:
       interval: 2s
       timeout: 15s
       retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   migration:
     image: migrate/migrate
@@ -111,6 +121,11 @@ services:
     networks:
       - neutree
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   postgres-meta:
     image: supabase/postgres-meta:v0.86.0
@@ -130,6 +145,11 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   neutree-core:
     image: neutree-ai/neutree-core:{{ .NeutreeCoreVersion}}
@@ -162,6 +182,11 @@ services:
     depends_on:
        postgrest:
           condition: service_started
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   neutree-api:
     image: neutree-ai/neutree-api:{{ .NeutreeAPIVersion}}
@@ -190,6 +215,11 @@ services:
     depends_on:
       postgrest:
         condition: service_started
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   vmagent:
     container_name: vmagent
@@ -208,6 +238,11 @@ services:
       - "--promscrape.configCheckInterval=10s"
       - "--remoteWrite.url={{ .MetricsRemoteWriteURL}}"
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   kong-migrations:
     image: kong/kong:{{ .KongVersion}}
@@ -226,6 +261,11 @@ services:
       postgres:
         condition: service_healthy
     restart: on-failure
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   kong-migrations-up:
     image: kong/kong:{{ .KongVersion}}
@@ -244,6 +284,11 @@ services:
     networks:
       - neutree
     restart: on-failure
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   vector:
     container_name: vector
@@ -261,6 +306,11 @@ services:
     depends_on:
       neutree-api:
         condition: service_started
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
   kong:
     image: kong/kong:{{ .KongVersion}}
     container_name: kong
@@ -306,6 +356,11 @@ services:
       timeout: 10s
       retries: 10
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 networks:
   neutree:
     driver: bridge

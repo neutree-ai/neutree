@@ -215,6 +215,8 @@ victoria-metrics-cluster:
 
 grafana:
   enabled: true
+  deploymentStrategy:
+    type: Recreate
   image:
     # -- The Docker registry
     registry: docker.io
