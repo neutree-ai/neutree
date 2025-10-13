@@ -135,12 +135,12 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 
 	c.installObjects = append(c.installObjects, vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment)
 
-	kuberayCluster, err := c.generateKubeRayCluster()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to generate kuberay cluster")
-	}
+	// kuberayCluster, err := c.generateKubeRayCluster()
+	// if err != nil {
+	// 	return nil, errors.Wrap(err, "failed to generate kuberay cluster")
+	// }
 
-	c.installObjects = append(c.installObjects, kuberayCluster)
+	// c.installObjects = append(c.installObjects, kuberayCluster)
 	for i := range c.installObjects {
 		addMetedataForObject(c.installObjects[i], cluster)
 	}
