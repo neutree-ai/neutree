@@ -196,14 +196,12 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 		return errors.Wrapf(err, "failed to compare engine spec for %s/%s",
 			engine.Metadata.Workspace, engine.Metadata.Name)
 	}
-
 	// If the specs are equal, no need to update
 	if result {
 		return nil
 	}
 
 	klog.V(4).Infof("Engine %s spec has changed, diff: %s", engine.Metadata.Name, diff)
-
 	engines[0].Spec = engine.Spec
 
 	if err := c.storage.UpdateEngine(strconv.Itoa(engines[0].ID), &engines[0]); err != nil {

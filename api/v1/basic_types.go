@@ -9,3 +9,7 @@ type Metadata struct {
 	Annotations       map[string]string `json:"annotations,omitempty"`
 	Name              string            `json:"name"`
 }
+
+func (m Metadata) WorkspaceName() string {
+	return m.Workspace + "/" + m.Name
+}

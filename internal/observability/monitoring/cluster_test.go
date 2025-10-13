@@ -4,7 +4,8 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/orchestrator/mocks"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
@@ -22,6 +23,9 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 			name: "success with head and worker nodes",
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Status: &v1.ClusterStatus{
+					DashboardURL: "http://example-dashboard-url",
+				},
 			},
 			mockNodes: []v1.NodeSummary{
 				{
@@ -58,6 +62,9 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 			name: "success with only head node",
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Status: &v1.ClusterStatus{
+					DashboardURL: "http://example-dashboard-url",
+				},
 			},
 			mockNodes: []v1.NodeSummary{
 				{
@@ -86,6 +93,9 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 			name: "error listing nodes",
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Status: &v1.ClusterStatus{
+					DashboardURL: "http://example-dashboard-url",
+				},
 			},
 			mockError:     errors.New("connection error"),
 			expectedError: "failed to list ray nodes",
@@ -94,6 +104,9 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 			name: "skip non-alive worker nodes",
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Status: &v1.ClusterStatus{
+					DashboardURL: "http://example-dashboard-url",
+				},
 			},
 			mockNodes: []v1.NodeSummary{
 				{
@@ -130,11 +143,15 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup mock orchestrator
-			mockOrchestrator := &mocks.MockOrchestrator{}
-			mockOrchestrator.On("ListNodes").Return(tt.mockNodes, tt.mockError)
+			mockDashboardSvc := &mocks.MockDashboardService{}
+			mockDashboardSvc.On("ListNodes").Return(tt.mockNodes, tt.mockError)
+			dashboard.NewDashboardService = func(dashboardURL string) dashboard.DashboardService {
+				assert.Equal(t, tt.cluster.Status.DashboardURL, dashboardURL)
+				return mockDashboardSvc
+			}
 
 			// Create cluster monitor
-			monitor := NewClusterMonitor(tt.cluster, mockOrchestrator)
+			monitor := NewClusterMonitor(tt.cluster)
 
 			// Execute test
 			result, err := monitor.GetMetricsScrapeTargetsConfig()

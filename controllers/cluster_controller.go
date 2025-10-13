@@ -1,29 +1,24 @@
 package controllers
 
 import (
-	"encoding/json"
-	"fmt"
+	"context"
 	"strconv"
 
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
-	"github.com/neutree-ai/neutree/internal/orchestrator"
-	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type ClusterController struct {
 	storage               storage.Storage
-	imageService          registry.ImageService
 	defaultClusterVersion string
 
 	syncHandler func(cluster *v1.Cluster) error
@@ -38,7 +33,6 @@ type ClusterController struct {
 }
 
 type ClusterControllerOption struct {
-	ImageService          registry.ImageService
 	Storage               storage.Storage
 	DefaultClusterVersion string
 	MetricsRemoteWriteURL string
@@ -51,7 +45,6 @@ type ClusterControllerOption struct {
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
 	c := &ClusterController{
 		storage:               opt.Storage,
-		imageService:          opt.ImageService,
 		defaultClusterVersion: opt.DefaultClusterVersion,
 
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
@@ -72,296 +65,113 @@ func (c *ClusterController) Reconcile(obj interface{}) error {
 		return errors.New("failed to assert obj to *v1.Cluster")
 	}
 
-	klog.V(4).Info("Reconciling cluster " + cluster.Metadata.Name)
+	klog.V(4).Info("Reconciling cluster " + cluster.Metadata.WorkspaceName())
 
 	return c.syncHandler(cluster)
 }
 
-func (c *ClusterController) sync(obj *v1.Cluster) error {
+func (controller *ClusterController) sync(obj *v1.Cluster) error {
 	// set default cluster version
 	if obj.Spec.Version == "" {
-		obj.Spec.Version = c.defaultClusterVersion
+		obj.Spec.Version = controller.defaultClusterVersion
 	}
 
 	if obj.Metadata.DeletionTimestamp != "" {
-		return c.reconcileDelete(obj)
+		return controller.reconcileDelete(obj)
 	}
 
-	return c.reconcileNormal(obj)
+	return controller.reconcileNormal(obj)
 }
 
-func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
+func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 	var (
-		err                 error
-		headIP              string
-		phase               v1.ClusterPhase
-		clusterOrchestrator orchestrator.Orchestrator
+		err   error
+		phase v1.ClusterPhase
 	)
 
 	defer func() {
 		phase = v1.ClusterPhaseRunning
 		if err != nil {
 			phase = v1.ClusterPhaseFailed
+			if c.Status != nil && !c.Status.Initialized {
+				phase = v1.ClusterPhaseInitializing
+			}
 		}
 
-		updateStatusErr := c.updateStatus(cluster, clusterOrchestrator, phase, err)
+		updateStatusErr := controller.updateStatus(c, phase, err)
 		if updateStatusErr != nil {
-			klog.Errorf("failed to update cluster %s status, err: %v", cluster.Metadata.Name, updateStatusErr)
+			klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateStatusErr)
 		}
 	}()
 
-	clusterOrchestrator, err = orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:               cluster,
-		ImageService:          c.imageService,
-		AcceleratorManager:    c.acceleratorManager,
-		Storage:               c.storage,
-		MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
-	})
+	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create cluster orchestrator for cluster %s/%s",
-			cluster.Metadata.Workspace, cluster.Metadata.Name)
+		return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 	}
 
-	if !cluster.IsInitialized() {
-		klog.Info("Initializing cluster " + cluster.Metadata.Name)
-
-		headIP, err = clusterOrchestrator.CreateCluster()
-		if err != nil {
-			return errors.Wrapf(err, "failed to create cluster %s/%s",
-				cluster.Metadata.Workspace, cluster.Metadata.Name)
-		}
-
-		cluster.Status = &v1.ClusterStatus{
-			DashboardURL: fmt.Sprintf("http://%s:8265", headIP),
-			Initialized:  true,
-		}
-
-		err = clusterOrchestrator.HealthCheck()
-		if err != nil {
-			klog.Info("waiting for cluster " + cluster.Metadata.Name + " healthy")
-			return errors.Wrap(err, "failed to health check cluster "+cluster.Metadata.Name)
-		}
-
-		klog.Info("Cluster " + cluster.Metadata.Name + " initialized")
-
-		return nil
-	}
-
-	// only reconcile node when cluster is running.
-	if cluster.Status != nil && cluster.Status.Phase == v1.ClusterPhaseRunning {
-		err = c.reconcileNodes(cluster, clusterOrchestrator)
-		if err != nil {
-			return errors.Wrap(err, "failed to reconcile nodes")
-		}
-	}
-
-	err = clusterOrchestrator.SyncCluster()
+	err = r.Reconcile(context.Background(), c)
 	if err != nil {
-		return errors.Wrap(err, "sync cluster failed")
+		return errors.Wrapf(err, "failed to reconcile cluster %s", c.Metadata.WorkspaceName())
 	}
 
-	err = clusterOrchestrator.HealthCheck()
+	klog.V(4).Info("Cluster " + c.Metadata.WorkspaceName() + " reconcile succeeded, syncing to gateway")
+
+	err = controller.gw.SyncCluster(c)
 	if err != nil {
-		return errors.Wrap(err, "health check cluster failed")
+		return errors.Wrapf(err, "failed to sync cluster %s to gateway", c.Metadata.WorkspaceName())
 	}
 
-	err = c.gw.SyncCluster(cluster)
-	if err != nil {
-		return errors.Wrap(err, "sync cluster backend service failed")
-	}
-
-	// ssh cluster use local metrics collector.
-	if cluster.Spec.Type == "ssh" {
-		c.obsCollectConfigManager.GetMetricsCollectConfigManager().RegisterMetricsMonitor(cluster.Key(), monitoring.NewClusterMonitor(cluster, clusterOrchestrator))
+	if c.Spec.Type == v1.SSHClusterType {
+		controller.obsCollectConfigManager.GetMetricsCollectConfigManager().RegisterMetricsMonitor(c.Key(), monitoring.NewClusterMonitor(c))
 	}
 
 	return nil
 }
 
-// reconcileNodes will reconcile the desired node of the cluster.
-func (c *ClusterController) reconcileNodes(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error {
-	// only ssh should reconcile static node.
-	if cluster.Spec.Type == "ssh" {
-		err := c.reconcileStaticNodes(cluster, clusterOrchestrator)
+func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
+	if c.Status != nil && c.Status.Phase == v1.ClusterPhaseDeleted {
+		klog.Info("Cluster " + c.Metadata.WorkspaceName() + " already deleted, delete resource from storage")
+
+		err := controller.storage.DeleteCluster(strconv.Itoa(c.ID))
 		if err != nil {
-			return errors.Wrap(err, "failed to reconcile cluster static node "+cluster.Metadata.Name)
-		}
-	}
-
-	return nil
-}
-
-// 1. get desired static node ip from cluster spec
-// 2. get static node provision status from cluster status
-// 3. compare desired static node ip and static node provision status
-// 4. start static node that not provisioned
-// 5. stop static node that not in desired static node ip
-func (c *ClusterController) reconcileStaticNodes(cluster *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator) error { //nolint:funlen
-	klog.V(4).Info("Reconciling Static Nodes for cluster " + cluster.Metadata.Name)
-
-	var (
-		desiredStaticNodeIpMap       = map[string]string{}
-		staticNodeProvisionStatusMap = map[string]string{}
-		nodeIpToStart                []string
-		nodeIpToStop                 []string
-	)
-
-	// get desired static provision node ip from cluster spec
-	desiredStaticWorkersIP := clusterOrchestrator.GetDesireStaticWorkersIP()
-
-	for _, nodeIp := range desiredStaticWorkersIP {
-		desiredStaticNodeIpMap[nodeIp] = nodeIp
-	}
-
-	// get static node provision status from cluster status
-	if cluster.Status != nil && cluster.Status.NodeProvisionStatus != "" {
-		err := json.Unmarshal([]byte(cluster.Status.NodeProvisionStatus), &staticNodeProvisionStatusMap)
-		if err != nil {
-			return errors.Wrap(err, "failed to unmarshal static node provision status")
-		}
-	}
-
-	for nodeIp := range staticNodeProvisionStatusMap {
-		if _, ok := desiredStaticNodeIpMap[nodeIp]; ok {
-			continue
-		}
-
-		nodeIpToStop = append(nodeIpToStop, nodeIp)
-	}
-
-	for _, nodeIp := range desiredStaticNodeIpMap {
-		// already provisioned, skip
-		if _, ok := staticNodeProvisionStatusMap[nodeIp]; ok && staticNodeProvisionStatusMap[nodeIp] == v1.ProvisionedNodeProvisionStatus {
-			continue
-		}
-
-		nodeIpToStart = append(nodeIpToStart, nodeIp)
-	}
-
-	nodeOpErrors := make([]error, len(nodeIpToStart)+len(nodeIpToStop))
-	eg := &errgroup.Group{}
-
-	for i := range nodeIpToStart {
-		ip := nodeIpToStart[i]
-
-		eg.Go(func() error {
-			klog.Info("Starting ray node " + ip)
-
-			err := clusterOrchestrator.StartNode(ip)
-			if err != nil {
-				nodeOpErrors[i] = errors.Wrap(err, "failed to start ray node "+ip)
-			}
-
-			return nil
-		})
-	}
-
-	for i := range nodeIpToStop {
-		ip := nodeIpToStop[i]
-
-		eg.Go(func() error {
-			klog.Info("Stopping ray node " + ip)
-
-			err := clusterOrchestrator.StopNode(ip)
-			if err != nil {
-				nodeOpErrors[i+len(nodeIpToStart)] = errors.Wrap(err, "failed to stop ray node "+ip)
-			}
-
-			return nil
-		})
-	}
-
-	eg.Wait() //nolint:errcheck
-
-	// update static node provision status
-	for i := range nodeIpToStart {
-		if nodeOpErrors[i] == nil {
-			staticNodeProvisionStatusMap[nodeIpToStart[i]] = v1.ProvisionedNodeProvisionStatus
-		} else {
-			staticNodeProvisionStatusMap[nodeIpToStart[i]] = v1.ProvisioningNodeProvisionStatus
-		}
-	}
-
-	for i := range nodeIpToStop {
-		if nodeOpErrors[len(nodeIpToStart)+i] == nil {
-			delete(staticNodeProvisionStatusMap, nodeIpToStop[i])
-		}
-	}
-
-	// update cluster labels
-	staticNodeProvisionStatusContent, err := json.Marshal(staticNodeProvisionStatusMap)
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal static node provision status")
-	}
-
-	if cluster.Status == nil {
-		cluster.Status = &v1.ClusterStatus{}
-	}
-
-	cluster.Status.NodeProvisionStatus = string(staticNodeProvisionStatusContent)
-
-	aggregateError := apierrors.NewAggregate(nodeOpErrors)
-	if aggregateError != nil {
-		return aggregateError
-	}
-
-	return nil
-}
-
-func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
-	if cluster.Status != nil && cluster.Status.Phase == v1.ClusterPhaseDeleted {
-		klog.Info("Cluster " + cluster.Metadata.Name + " already deleted, delete resource from storage")
-
-		err := c.storage.DeleteCluster(strconv.Itoa(cluster.ID))
-		if err != nil {
-			return errors.Wrapf(err, "failed to delete cluster %s/%s from DB",
-				cluster.Metadata.Workspace, cluster.Metadata.Name)
+			return errors.Wrap(err, "failed to delete cluster "+c.Metadata.WorkspaceName())
 		}
 
 		return nil
 	}
 
-	klog.Info("Deleting cluster " + cluster.Metadata.Name)
+	klog.Info("Deleting cluster " + c.Metadata.WorkspaceName())
 
-	c.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(cluster.Key())
-
-	if cluster.IsInitialized() {
-		clusterOrchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-			Cluster:               cluster,
-			ImageService:          c.imageService,
-			Storage:               c.storage,
-			AcceleratorManager:    c.acceleratorManager,
-			MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
-		})
-		if err != nil {
-			return errors.Wrapf(err, "failed to create orchestrator for cluster %s/%s",
-				cluster.Metadata.Workspace, cluster.Metadata.Name)
-		}
-
-		err = clusterOrchestrator.DeleteCluster()
-		if err != nil {
-			return errors.Wrapf(err, "failed to delete ray cluster %s/%s",
-				cluster.Metadata.Workspace, cluster.Metadata.Name)
-		}
+	err := controller.gw.DeleteCluster(c)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete cluster backend service "+c.Metadata.WorkspaceName())
 	}
 
-	err := c.gw.DeleteCluster(cluster)
-	if err != nil {
-		return errors.Wrapf(err, "failed to delete cluster backend service for %s/%s",
-			cluster.Metadata.Workspace, cluster.Metadata.Name)
+	if c.Spec.Type == v1.SSHClusterType {
+		controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
 	}
 
-	klog.Info("Cluster " + cluster.Metadata.Name + " delete finished, mark as deleted")
-
-	err = c.updateStatus(cluster, nil, v1.ClusterPhaseDeleted, nil)
+	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 	if err != nil {
-		klog.Errorf("failed to update cluster %s status, err: %v", cluster.Metadata.Name, err)
+		return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
+	}
+
+	err = r.ReconcileDelete(context.Background(), c)
+	if err != nil {
+		return errors.Wrapf(err, "failed to reconcile delete cluster %s", c.Metadata.WorkspaceName())
+	}
+
+	klog.Info("Cluster " + c.Metadata.WorkspaceName() + " delete finished, mark as deleted")
+
+	err = controller.updateStatus(c, v1.ClusterPhaseDeleted, nil)
+	if err != nil {
+		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), err)
 	}
 
 	return nil
 }
 
-func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator, phase v1.ClusterPhase, err error) error {
+func (c *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {
 	newStatus := &v1.ClusterStatus{
 		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
@@ -378,15 +188,8 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 		newStatus.RayVersion = obj.Status.RayVersion
 	}
 
-	if newStatus.Phase == v1.ClusterPhaseRunning && clusterOrchestrator != nil && obj.Metadata.DeletionTimestamp == "" {
-		clusterStatus, getClusterStatusErr := clusterOrchestrator.ClusterStatus()
-		if getClusterStatusErr == nil {
-			newStatus.ReadyNodes = clusterStatus.ReadyNodes
-			newStatus.Version = clusterStatus.NeutreeServeVersion
-			newStatus.RayVersion = clusterStatus.RayVersion
-			newStatus.DesiredNodes = clusterStatus.DesireNodes
-			newStatus.ResourceInfo = clusterStatus.ResourceInfo
-		}
+	if err != nil {
+		newStatus.ErrorMessage = err.Error()
 	}
 
 	return c.storage.UpdateCluster(strconv.Itoa(obj.ID), &v1.Cluster{Status: newStatus})
