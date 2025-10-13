@@ -35,7 +35,7 @@ func (p *AMDGPUAcceleratorPlugin) Handle() AcceleratorPluginHandle {
 }
 
 func (p *AMDGPUAcceleratorPlugin) Resource() string {
-	return "amd-gpu"
+	return v1.AcceleratorTypeAMDGPU
 }
 
 func (p *AMDGPUAcceleratorPlugin) Type() string {
@@ -248,4 +248,8 @@ func (p *AMDGPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.Ge
 
 func (p *AMDGPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
+}
+
+func (p *AMDGPUAcceleratorPlugin) GetResourceConverter() v1.ResourceConverter {
+	return NewAMDGPUConverter()
 }

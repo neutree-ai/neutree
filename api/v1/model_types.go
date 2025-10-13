@@ -6,6 +6,7 @@ const (
 
 type ModelVersion struct {
 	Name         string            `json:"name"`
+	Version      string            `json:"version,omitempty"`
 	CreationTime string            `json:"creation_time"`
 	Size         string            `json:"size,omitempty"`
 	Module       string            `json:"module,omitempty"`

@@ -1,12 +1,18 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
+	"maps"
+	"net/url"
+	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -17,20 +23,22 @@ var _ Orchestrator = &RayOrchestrator{}
 type RayOrchestrator struct {
 	cluster *v1.Cluster
 
-	storage storage.Storage
+	storage            storage.Storage
+	acceleratorManager accelerator.Manager
 }
 
 type RayOptions struct {
 	Options
 }
 
-func NewRayOrchestrator(opts RayOptions) (*RayOrchestrator, error) {
+func NewRayOrchestrator(opts RayOptions) *RayOrchestrator {
 	o := &RayOrchestrator{
-		cluster: opts.Cluster,
-		storage: opts.Storage,
+		cluster:            opts.Cluster,
+		storage:            opts.Storage,
+		acceleratorManager: opts.AcceleratorManager,
 	}
 
-	return o, nil
+	return o
 }
 
 func (o *RayOrchestrator) getDashboardService() (dashboard.DashboardService, error) {
@@ -70,7 +78,10 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 		return nil, errors.Wrap(err, "failed to get current serve applications")
 	}
 
-	newApp := dashboard.EndpointToApplication(endpoint, modelRegistry)
+	newApp, err := EndpointToApplication(endpoint, modelRegistry, o.acceleratorManager)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to convert endpoint to application")
+	}
 
 	// Build the list of applications for the PUT request
 	needAppend := true
@@ -151,7 +162,7 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	found := false
 
 	for name, appStatus := range currentAppsResp.Applications {
-		if name == dashboard.EndpointToServeApplicationName(endpoint) {
+		if name == EndpointToServeApplicationName(endpoint) {
 			found = true
 			continue // Skip the endpoint to be deleted
 		}
@@ -195,7 +206,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}, nil
 	}
 
-	status, exists := currentAppsResp.Applications[dashboard.EndpointToServeApplicationName(endpoint)]
+	status, exists := currentAppsResp.Applications[EndpointToServeApplicationName(endpoint)]
 	if !exists {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhasePENDING,
@@ -256,4 +267,93 @@ func (o *RayOrchestrator) DisconnectEndpointModel(endpoint *v1.Endpoint) error {
 	default:
 		return fmt.Errorf("unsupported cluster type: %s", o.cluster.Spec.Type)
 	}
+}
+
+// endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
+func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry, acceleratorManager accelerator.Manager) (dashboard.RayServeApplication, error) {
+	rayResource, err := acceleratorManager.ConvertToRay(context.Background(), endpoint.Spec.Resources)
+	if err != nil {
+		klog.Errorf("Failed to convert resources to Ray format: %v", err)
+		return dashboard.RayServeApplication{}, err
+	}
+
+	backendConfig := map[string]interface{}{
+		"num_replicas": endpoint.Spec.Replicas.Num,
+		"num_cpus":     rayResource.NumCPUs,
+		"memory":       rayResource.Memory,
+		"num_gpus":     rayResource.NumGPUs,
+		"resources":    rayResource.Resources,
+	}
+
+	endpoint.Spec.DeploymentOptions["backend"] = backendConfig
+
+	endpoint.Spec.DeploymentOptions["controller"] = map[string]interface{}{
+		"num_replicas": 1,
+		"num_cpus":     0.1,
+		"num_gpus":     0,
+	}
+
+	args := map[string]interface{}{
+		"model": map[string]interface{}{
+			"registry_type": modelRegistry.Spec.Type,
+			"name":          endpoint.Spec.Model.Name,
+			"file":          endpoint.Spec.Model.File,
+			"version":       endpoint.Spec.Model.Version,
+			"task":          endpoint.Spec.Model.Task,
+		},
+		"deployment_options": endpoint.Spec.DeploymentOptions,
+	}
+
+	maps.Copy(args, endpoint.Spec.Variables)
+
+	app := dashboard.RayServeApplication{
+		Name:        EndpointToServeApplicationName(endpoint),
+		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
+		ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"), endpoint.Spec.Engine.Version),
+		Args:        args,
+	}
+
+	applicationEnv := map[string]string{}
+
+	for k, v := range endpoint.Spec.Env {
+		applicationEnv[k] = v
+	}
+
+	switch modelRegistry.Spec.Type {
+	case v1.BentoMLModelRegistryType:
+		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
+		// todo: support local file type env set
+		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+			applicationEnv[v1.BentoMLHomeEnv] = filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name)
+		}
+	case v1.HuggingFaceModelRegistryType:
+		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
+		if modelRegistry.Spec.Credentials != "" {
+			applicationEnv[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
+		}
+	}
+
+	app.RuntimeEnv = map[string]interface{}{
+		"env_vars": applicationEnv,
+	}
+
+	return app, nil
+}
+
+// formatServiceURL constructs the service URL for an endpoint.
+func FormatServiceURL(cluster *v1.Cluster, endpoint *v1.Endpoint) (string, error) {
+	if cluster.Status == nil || cluster.Status.DashboardURL == "" {
+		return "", errors.New("cluster dashboard URL is not available")
+	}
+
+	dashboardURL, err := url.Parse(cluster.Status.DashboardURL)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to parse cluster dashboard URL")
+	}
+	// Ray serve applications are typically exposed on port 8000 by default
+	return fmt.Sprintf("%s://%s:8000/%s/%s", dashboardURL.Scheme, dashboardURL.Hostname(), endpoint.Metadata.Workspace, endpoint.Metadata.Name), nil
+}
+
+func EndpointToServeApplicationName(endpoint *v1.Endpoint) string {
+	return fmt.Sprintf("%s_%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
 }

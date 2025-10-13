@@ -1,0 +1,1 @@
+ALTER TYPE api.endpoint_spec ADD ATTRIBUTE env json;

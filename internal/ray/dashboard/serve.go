@@ -1,21 +1,9 @@
 package dashboard
 
 import (
-	"fmt"
 	"net/http"
-	"net/url"
-	"path/filepath"
-	"strings"
-
-	"maps"
 
 	"github.com/pkg/errors"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
-)
-
-const (
-	BytesPerGiB = 1024 * 1024 * 1024
 )
 
 // RayServeApplication represents the structure expected by the Ray Serve API.
@@ -44,78 +32,6 @@ type RayServeApplicationsResponse struct {
 	Applications map[string]RayServeApplicationStatus `json:"applications"`
 }
 
-// endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
-func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) RayServeApplication {
-	accelerator := map[string]float64{}
-
-	for key, value := range endpoint.Spec.Resources.Accelerator {
-		if key != "-" && value > 0 {
-			accelerator[key] = value
-		}
-	}
-
-	backendConfig := map[string]interface{}{
-		"num_replicas": endpoint.Spec.Replicas.Num,
-		"num_cpus":     endpoint.Spec.Resources.CPU,
-		"num_gpus":     endpoint.Spec.Resources.GPU,
-		"resources":    accelerator,
-	}
-
-	if endpoint.Spec.Resources.Memory != nil {
-		backendConfig["memory"] = *endpoint.Spec.Resources.Memory * BytesPerGiB
-	}
-
-	endpoint.Spec.DeploymentOptions["backend"] = backendConfig
-
-	endpoint.Spec.DeploymentOptions["controller"] = map[string]interface{}{
-		"num_replicas": 1,
-		"num_cpus":     0.1,
-		"num_gpus":     0,
-	}
-
-	args := map[string]interface{}{
-		"model": map[string]interface{}{
-			"registry_type": modelRegistry.Spec.Type,
-			"name":          endpoint.Spec.Model.Name,
-			"file":          endpoint.Spec.Model.File,
-			"version":       endpoint.Spec.Model.Version,
-			"task":          endpoint.Spec.Model.Task,
-		},
-		"deployment_options": endpoint.Spec.DeploymentOptions,
-	}
-
-	maps.Copy(args, endpoint.Spec.Variables)
-
-	app := RayServeApplication{
-		Name:        EndpointToServeApplicationName(endpoint),
-		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
-		ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"), endpoint.Spec.Engine.Version),
-		Args:        args,
-	}
-
-	applicationEnv := map[string]string{}
-
-	switch modelRegistry.Spec.Type {
-	case v1.BentoMLModelRegistryType:
-		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
-		// todo: support local file type env set
-		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			applicationEnv[v1.BentoMLHomeEnv] = filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name)
-		}
-	case v1.HuggingFaceModelRegistryType:
-		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
-		if modelRegistry.Spec.Credentials != "" {
-			applicationEnv[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
-		}
-	}
-
-	app.RuntimeEnv = map[string]interface{}{
-		"env_vars": applicationEnv,
-	}
-
-	return app
-}
-
 // GetServeApplications retrieves the current Ray Serve applications.
 func (c *Client) GetServeApplications() (*RayServeApplicationsResponse, error) {
 	var appsResp RayServeApplicationsResponse
@@ -138,22 +54,4 @@ func (c *Client) UpdateServeApplications(appsReq RayServeApplicationsRequest) er
 	}
 
 	return nil
-}
-
-// formatServiceURL constructs the service URL for an endpoint.
-func FormatServiceURL(cluster *v1.Cluster, endpoint *v1.Endpoint) (string, error) {
-	if cluster.Status == nil || cluster.Status.DashboardURL == "" {
-		return "", errors.New("cluster dashboard URL is not available")
-	}
-
-	dashboardURL, err := url.Parse(cluster.Status.DashboardURL)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse cluster dashboard URL")
-	}
-	// Ray serve applications are typically exposed on port 8000 by default
-	return fmt.Sprintf("%s://%s:8000/%s/%s", dashboardURL.Scheme, dashboardURL.Hostname(), endpoint.Metadata.Workspace, endpoint.Metadata.Name), nil
-}
-
-func EndpointToServeApplicationName(endpoint *v1.Endpoint) string {
-	return fmt.Sprintf("%s_%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
 }

@@ -1,0 +1,294 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "vLLM V1 Engine Configuration",
+  "description": "Configuration schema for vLLM V1 engine parameters",
+  "properties": {
+    "dtype": {
+      "type": "string",
+      "enum": ["auto", "half", "float16", "bfloat16", "float", "float32"],
+      "default": "auto",
+      "description": "Data type for model weights and activations"
+    },
+    "max_model_len": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Model context length. If unspecified, will be automatically derived from the model config"
+    },
+    "gpu_memory_utilization": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 1.0,
+      "default": 0.9,
+      "description": "The fraction of GPU memory to be used for the model executor"
+    },
+    "tensor_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of GPUs to use for tensor parallelism"
+    },
+    "pipeline_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of stages to use for pipeline parallelism"
+    },
+    "data_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of replicas to use for data parallelism"
+    },
+    "enable_expert_parallel": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable expert parallelism for MoE models"
+    },
+    "block_size": {
+      "type": "integer",
+      "enum": [8, 16, 32],
+      "default": 16,
+      "description": "Block size for the key-value cache"
+    },
+    "swap_space": {
+      "type": "number",
+      "minimum": 0,
+      "default": 4.0,
+      "description": "CPU swap space size (GiB) per GPU"
+    },
+    "kv_cache_dtype": {
+      "type": "string",
+      "enum": ["auto", "fp8", "fp8_e5m2", "fp8_e4m3"],
+      "default": "auto",
+      "description": "Data type for KV cache storage"
+    },
+    "enable_prefix_caching": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable automatic prefix caching"
+    },
+    "cpu_offload_gb": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0,
+      "description": "The space in GiB to offload to CPU"
+    },
+    "max_num_batched_tokens": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum number of batched tokens per iteration"
+    },
+    "max_num_seqs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum number of sequences per iteration"
+    },
+    "enable_chunked_prefill": {
+      "type": "boolean",
+      "description": "Enable chunked prefill requests"
+    },
+    "scheduler_delay_factor": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.0,
+      "description": "Apply a delay (of delay factor multiplied by previous prompt latency) before scheduling next prompt"
+    },
+    "quantization": {
+      "type": "string",
+      "enum": ["awq", "gptq", "squeezellm", "marlin", "fp8", "fbgemm_fp8", "modelopt", "bitsandbytes"],
+      "description": "Method used to quantize the weights"
+    },
+    "enforce_eager": {
+      "type": "boolean",
+      "default": false,
+      "description": "Always use eager-mode PyTorch"
+    },
+    "max_seq_len_to_capture": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 8192,
+      "description": "Maximum sequence length covered by CUDA graphs"
+    },
+    "disable_custom_all_reduce": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable custom all-reduce kernels and use NCCL instead"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Random seed for operations"
+    },
+    "enable_lora": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable handling of LoRA adapters"
+    },
+    "max_loras": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Maximum number of LoRA adapters to serve"
+    },
+    "max_lora_rank": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 16,
+      "description": "Maximum rank of LoRA adapters"
+    },
+    "lora_dtype": {
+      "type": "string",
+      "enum": ["auto", "float16", "bfloat16", "float32"],
+      "description": "Data type for LoRA adapters"
+    },
+    "enable_prompt_adapter": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable handling of PromptAdapters"
+    },
+    "max_prompt_adapters": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Maximum number of PromptAdapters to serve"
+    },
+    "max_prompt_adapter_token": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 0,
+      "description": "Maximum number of PromptAdapter tokens"
+    },
+    "rope_scaling": {
+      "type": "object",
+      "description": "RoPE scaling configuration",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["linear", "dynamic"]
+        },
+        "factor": {
+          "type": "number",
+          "minimum": 1.0
+        }
+      }
+    },
+    "rope_theta": {
+      "type": "number",
+      "minimum": 0,
+      "description": "RoPE theta parameter"
+    },
+    "trust_remote_code": {
+      "type": "boolean",
+      "default": false,
+      "description": "Trust remote code from Hugging Face"
+    },
+    "revision": {
+      "type": "string",
+      "description": "The specific model version to use"
+    },
+    "tokenizer_revision": {
+      "type": "string",
+      "description": "Revision of the tokenizer to use"
+    },
+    "tokenizer_mode": {
+      "type": "string",
+      "enum": ["auto", "slow", "mistral", "custom"],
+      "default": "auto",
+      "description": "The tokenizer mode to use"
+    },
+    "enable_reasoning": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable reasoning mode for the model"
+    },
+    "reasoning_parser": {
+      "type": "string",
+      "enum": ["cot", "step"],
+      "description": "Reasoning parser to use"
+    },
+    "chat_template": {
+      "type": "string",
+      "description": "Chat template to use for the model"
+    },
+    "chat_template_content_format": {
+      "type": "string",
+      "enum": ["auto", "string", "openai"],
+      "default": "auto",
+      "description": "The content format of the chat template"
+    },
+    "tool_call_parser": {
+      "type": "string",
+      "enum": ["openai", "mistral", "hermes"],
+      "description": "Tool call parser to use"
+    },
+    "response_role": {
+      "type": "string",
+      "default": "assistant",
+      "description": "The role name to return if request.add_generation_prompt is true"
+    },
+    "enable_prompt_tokens_details": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable prompt tokens details in the completion response"
+    },
+    "guided_decoding_backend": {
+      "type": "string",
+      "enum": ["outlines", "lm-format-enforcer"],
+      "default": "outlines",
+      "description": "Which library to use for guided decoding"
+    },
+    "distributed_executor_backend": {
+      "type": "string",
+      "enum": ["ray", "mp"],
+      "description": "Backend to use for distributed serving"
+    },
+    "preemption_mode": {
+      "type": "string",
+      "enum": ["swap", "recompute"],
+      "description": "The preemption mode during memory shortage"
+    },
+    "num_scheduler_steps": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of scheduler steps"
+    },
+    "multi_step_stream_outputs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable multi-step stream outputs"
+    },
+    "mm_processor_kwargs": {
+      "type": "object",
+      "description": "Overrides for the multi-modal processor"
+    },
+    "limit_mm_per_prompt": {
+      "type": "object",
+      "description": "Maximum number of multi-modal items per prompt",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "disable_mm_preprocessor_cache": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable caching of processed multi-modal inputs"
+    },
+    "generation_config": {
+      "type": "string",
+      "default": "auto",
+      "description": "Path to the generation config file"
+    },
+    "override_generation_config": {
+      "type": "object",
+      "description": "Override generation config parameters"
+    },
+    "additional_config": {
+      "type": "object",
+      "description": "Additional platform-specific configuration"
+    }
+  },
+  "additionalProperties": false
+}

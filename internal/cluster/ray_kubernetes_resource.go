@@ -1,11 +1,9 @@
 package cluster
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"path"
-	"regexp"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -14,10 +12,8 @@ import (
 	"go.openly.dev/pointy"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -63,7 +59,7 @@ scrape_configs:
 			Name:      DefaultMonitorCollectConfigMapName,
 			Namespace: reconcileCtx.clusterNamespace,
 			Annotations: map[string]string{
-				ResourceSkipPatchAnnotation: "true",
+				util.ResourceSkipPatchAnnotation: "true",
 			},
 		},
 	}
@@ -156,7 +152,7 @@ scrape_configs:
 }
 
 func (c *kubeRayClusterReconciler) generateKubeRayCluster(reconcileCtx *ReconcileContext) (*rayv1.RayCluster, error) {
-	imagePrefix, err := getImagePrefix(reconcileCtx.ImageRegistry)
+	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get image prefix")
 	}
@@ -188,7 +184,7 @@ func (c *kubeRayClusterReconciler) generateKubeRayCluster(reconcileCtx *Reconcil
 		Template:       headPodTemplate,
 	}
 
-	if reconcileCtx.kubernetesClusterConfig.HeadNodeSpec.AccessMode == v1.KubernetesAccessModeLoadBalancer {
+	if reconcileCtx.rayKubernetesClusterConfig.HeadNodeSpec.AccessMode == v1.KubernetesAccessModeLoadBalancer {
 		rayCluster.Spec.HeadGroupSpec.ServiceType = corev1.ServiceTypeLoadBalancer
 	} else {
 		return nil, errors.New("unsupported access mode")
@@ -196,7 +192,7 @@ func (c *kubeRayClusterReconciler) generateKubeRayCluster(reconcileCtx *Reconcil
 
 	var workGroupSpecs []rayv1.WorkerGroupSpec
 
-	for _, workerGroup := range reconcileCtx.kubernetesClusterConfig.WorkerGroupSpecs {
+	for _, workerGroup := range reconcileCtx.rayKubernetesClusterConfig.WorkerGroupSpecs {
 		workerGroupPodTemplate, err := c.buildWorkerPodTemplateSpec(reconcileCtx, workerGroup)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to build worker pod template spec")
@@ -228,7 +224,7 @@ func (c *kubeRayClusterReconciler) buildWorkerPodTemplateSpec(reconcileCtx *Reco
 		resourceList[corev1.ResourceName(k)] = q
 	}
 
-	imagePrefix, err := getImagePrefix(reconcileCtx.ImageRegistry)
+	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
 	if err != nil {
 		return corev1.PodTemplateSpec{}, errors.Wrapf(err, "failed to get image prefix")
 	}
@@ -302,7 +298,7 @@ func (c *kubeRayClusterReconciler) buildWorkerPodTemplateSpec(reconcileCtx *Reco
 }
 
 func (c *kubeRayClusterReconciler) mutateModelCaches(reconcileCtx *ReconcileContext, podTemplate *corev1.PodTemplateSpec) {
-	modelCaches := reconcileCtx.kubernetesClusterConfig.ModelCaches
+	modelCaches := reconcileCtx.rayKubernetesClusterConfig.ModelCaches
 	if modelCaches == nil {
 		return
 	}
@@ -397,11 +393,11 @@ func (c *kubeRayClusterReconciler) mutateModelCaches(reconcileCtx *ReconcileCont
 
 func (c *kubeRayClusterReconciler) buildHeadPodTemplateSpec(reconcileCtx *ReconcileContext) (corev1.PodTemplateSpec, error) {
 	resourceList := corev1.ResourceList{}
-	for k, v := range reconcileCtx.kubernetesClusterConfig.HeadNodeSpec.Resources {
+	for k, v := range reconcileCtx.rayKubernetesClusterConfig.HeadNodeSpec.Resources {
 		resourceList[corev1.ResourceName(k)] = resource.MustParse(v)
 	}
 
-	imagePrefix, err := getImagePrefix(reconcileCtx.ImageRegistry)
+	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
 	if err != nil {
 		return corev1.PodTemplateSpec{}, errors.Wrap(err, "failed to get cluster image")
 	}
@@ -501,45 +497,4 @@ func addMetedataForObject(obj client.Object, cluster *v1.Cluster) {
 	labels[v1.NeutreeClusterLabelKey] = cluster.Metadata.Name
 	labels[v1.NeutreeClusterWorkspaceLabelKey] = cluster.Metadata.Workspace
 	obj.SetLabels(labels)
-}
-
-func removeEscapes(s string) string {
-	re := regexp.MustCompile(`\\`)
-	return re.ReplaceAllString(s, "")
-}
-
-func Namespace(cluster *v1.Cluster) string {
-	return "neutree-cluster-" + util.HashString(cluster.Key())
-}
-
-func CreateOrPatch(ctx context.Context, obj client.Object, ctrClient client.Client) error {
-	curObj := &unstructured.Unstructured{}
-	curObj.SetGroupVersionKind(obj.GetObjectKind().GroupVersionKind())
-
-	err := ctrClient.Get(ctx, client.ObjectKeyFromObject(obj), curObj)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return ctrClient.Create(ctx, obj)
-		}
-
-		return errors.Wrap(err, "failed to get object")
-	}
-
-	if obj.GetAnnotations() != nil && obj.GetAnnotations()[ResourceSkipPatchAnnotation] != "" {
-		return nil
-	}
-	// patch the object
-	patch := client.MergeFrom(curObj.DeepCopy())
-
-	obj.SetAnnotations(curObj.GetAnnotations())
-	obj.SetLabels(curObj.GetLabels())
-	obj.SetUID(curObj.GetUID())
-	obj.SetResourceVersion(curObj.GetResourceVersion())
-
-	err = ctrClient.Patch(ctx, obj, patch)
-	if err != nil {
-		return errors.Wrap(err, "failed to patch object")
-	}
-
-	return nil
 }

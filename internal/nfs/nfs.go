@@ -8,6 +8,8 @@ import (
 
 	kmount "k8s.io/utils/mount"
 
+	"github.com/pkg/errors"
+
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
@@ -33,12 +35,24 @@ func MountNFS(device string, mountPoint string) error {
 		return err
 	}
 
+	mountPoints, err := mountInterface.List()
+	if err != nil {
+		return err
+	}
+
+	for _, mp := range mountPoints {
+		if mountPoint == mp.Path && device == mp.Device {
+			return nil
+		}
+	}
+
 	err = mountInterface.Mount(device, mountPoint, "nfs", defaultNFSMountOptions)
 	if err != nil {
 		_ = os.RemoveAll(mountPoint)
+		return errors.Wrapf(err, "failed to mount nfs %s to %s", device, mountPoint)
 	}
 
-	return err
+	return nil
 }
 
 func Unmount(mountPoint string) error {
@@ -49,11 +63,16 @@ func Unmount(mountPoint string) error {
 
 	for _, mp := range mountPoints {
 		if mountPoint == mp.Path {
-			return mountInterface.Unmount(mountPoint)
+			err = mountInterface.Unmount(mountPoint)
+			if err != nil {
+				return errors.Wrapf(err, "failed to unmount nfs from %s", mountPoint)
+			}
+
+			break
 		}
 	}
 
-	return nil
+	return os.RemoveAll(mountPoint)
 }
 
 type KubernetesNfsMounter struct {

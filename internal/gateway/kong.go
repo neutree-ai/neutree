@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -387,17 +386,17 @@ func (k *Kong) syncEndpointService(ep *v1.Endpoint) (*kong.Service, error) {
 		return nil, errors.New("cluster is never initialized")
 	}
 
-	url, err := url.Parse(clusters[0].Status.DashboardURL)
+	scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse cluster dashboard url %s", clusters[0].Status.DashboardURL)
+		return nil, errors.Wrapf(err, "failed to get cluster serve url")
 	}
 
 	gwServiceName := "neutree-endpoint-" + util.HashString(ep.Key())
 	gwService := &kong.Service{
 		Name:        &gwServiceName,
-		Host:        pointy.String(url.Hostname()),
-		Port:        pointy.Int(8000),
-		Protocol:    &url.Scheme,
+		Host:        &host,
+		Port:        &port,
+		Protocol:    &scheme,
 		Path:        pointy.String(fmt.Sprintf("/%s/%s", ep.Metadata.Workspace, ep.Metadata.Name)),
 		ReadTimeout: pointy.Int(60000 * 60),
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/url"
+	"regexp"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -14,15 +15,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
-
-func getImagePrefix(imageRegistry *v1.ImageRegistry) (string, error) {
-	registryURL, err := url.Parse(imageRegistry.Spec.URL)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
-	}
-
-	return registryURL.Host + "/" + imageRegistry.Spec.Repository, nil
-}
 
 func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster, dashboardService dashboard.DashboardService) (*v1.MetricsScrapeTargetsConfig, error) {
 	nodes, err := dashboardService.ListNodes()
@@ -62,6 +54,10 @@ func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: util.ClusterNamespace(cluster),
+			Labels: map[string]string{
+				v1.NeutreeClusterLabelKey:          cluster.Metadata.Name,
+				v1.NeutreeClusterWorkspaceLabelKey: cluster.Metadata.Workspace,
+			},
 		},
 	}
 }
@@ -145,4 +141,9 @@ func getUsedImageRegistries(cluster *v1.Cluster, s storage.Storage) (*v1.ImageRe
 	}
 
 	return &imageRegistryList[0], nil
+}
+
+func removeEscapes(s string) string {
+	re := regexp.MustCompile(`\\`)
+	return re.ReplaceAllString(s, "")
 }

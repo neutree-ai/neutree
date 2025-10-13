@@ -25,6 +25,124 @@ func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
 }
 
+// ConvertToKubernetes provides a mock function with given fields: ctx, spec
+func (_m *MockManager) ConvertToKubernetes(ctx context.Context, spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+	ret := _m.Called(ctx, spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConvertToKubernetes")
+	}
+
+	var r0 *v1.KubernetesResourceSpec
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)); ok {
+		return rf(ctx, spec)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.ResourceSpec) *v1.KubernetesResourceSpec); ok {
+		r0 = rf(ctx, spec)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.KubernetesResourceSpec)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *v1.ResourceSpec) error); ok {
+		r1 = rf(ctx, spec)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockManager_ConvertToKubernetes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConvertToKubernetes'
+type MockManager_ConvertToKubernetes_Call struct {
+	*mock.Call
+}
+
+// ConvertToKubernetes is a helper method to define mock.On call
+//   - ctx context.Context
+//   - spec *v1.ResourceSpec
+func (_e *MockManager_Expecter) ConvertToKubernetes(ctx interface{}, spec interface{}) *MockManager_ConvertToKubernetes_Call {
+	return &MockManager_ConvertToKubernetes_Call{Call: _e.mock.On("ConvertToKubernetes", ctx, spec)}
+}
+
+func (_c *MockManager_ConvertToKubernetes_Call) Run(run func(ctx context.Context, spec *v1.ResourceSpec)) *MockManager_ConvertToKubernetes_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*v1.ResourceSpec))
+	})
+	return _c
+}
+
+func (_c *MockManager_ConvertToKubernetes_Call) Return(_a0 *v1.KubernetesResourceSpec, _a1 error) *MockManager_ConvertToKubernetes_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManager_ConvertToKubernetes_Call) RunAndReturn(run func(context.Context, *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)) *MockManager_ConvertToKubernetes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ConvertToRay provides a mock function with given fields: ctx, spec
+func (_m *MockManager) ConvertToRay(ctx context.Context, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+	ret := _m.Called(ctx, spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConvertToRay")
+	}
+
+	var r0 *v1.RayResourceSpec
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.ResourceSpec) (*v1.RayResourceSpec, error)); ok {
+		return rf(ctx, spec)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.ResourceSpec) *v1.RayResourceSpec); ok {
+		r0 = rf(ctx, spec)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.RayResourceSpec)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *v1.ResourceSpec) error); ok {
+		r1 = rf(ctx, spec)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockManager_ConvertToRay_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConvertToRay'
+type MockManager_ConvertToRay_Call struct {
+	*mock.Call
+}
+
+// ConvertToRay is a helper method to define mock.On call
+//   - ctx context.Context
+//   - spec *v1.ResourceSpec
+func (_e *MockManager_Expecter) ConvertToRay(ctx interface{}, spec interface{}) *MockManager_ConvertToRay_Call {
+	return &MockManager_ConvertToRay_Call{Call: _e.mock.On("ConvertToRay", ctx, spec)}
+}
+
+func (_c *MockManager_ConvertToRay_Call) Run(run func(ctx context.Context, spec *v1.ResourceSpec)) *MockManager_ConvertToRay_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*v1.ResourceSpec))
+	})
+	return _c
+}
+
+func (_c *MockManager_ConvertToRay_Call) Return(_a0 *v1.RayResourceSpec, _a1 error) *MockManager_ConvertToRay_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManager_ConvertToRay_Call) RunAndReturn(run func(context.Context, *v1.ResourceSpec) (*v1.RayResourceSpec, error)) *MockManager_ConvertToRay_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAllAcceleratorSupportEngines provides a mock function with given fields: ctx
 func (_m *MockManager) GetAllAcceleratorSupportEngines(ctx context.Context) ([]*v1.Engine, error) {
 	ret := _m.Called(ctx)

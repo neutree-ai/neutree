@@ -40,11 +40,14 @@ type ReconcileContext struct {
 	sshConfigGenerator  *raySSHLocalConfigGenerator
 
 	// kubernetes cluster specific fields
-	ctrClient               client.Client
-	kubeconfig              string
-	clusterNamespace        string
-	installObjects          []client.Object
-	kubernetesClusterConfig *v1.RayKubernetesProvisionClusterConfig
+	ctrClient                  client.Client
+	kubeconfig                 string
+	clusterNamespace           string
+	installObjects             []client.Object
+	rayKubernetesClusterConfig *v1.RayKubernetesProvisionClusterConfig
+
+	// native kubernetes cluster specific fields
+	kubernetesClusterConfig *v1.KubernetesClusterConfig
 
 	rayService dashboard.DashboardService
 }
@@ -58,7 +61,7 @@ func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager, s
 	case v1.SSHClusterType:
 		return newRaySSHClusterReconcile(acceleratorManager, s), nil
 	case v1.KubernetesClusterType:
-		return NewKubeRayClusterReconciler(acceleratorManager, s, metricsRemoteWriteURL), nil
+		return NewNativeKubernetesClusterReconciler(s, metricsRemoteWriteURL), nil
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", cluster.Spec.Type)
 	}

@@ -20,10 +20,10 @@ type EndpointEngineSpec struct {
 }
 
 type ResourceSpec struct {
-	CPU         *float64           `json:"cpu,omitempty"`
-	GPU         *float64           `json:"gpu,omitempty"`
-	Accelerator map[string]float64 `json:"accelerator,omitempty"`
-	Memory      *float64           `json:"memory,omitempty"`
+	CPU         *float64          `json:"cpu,omitempty"`
+	GPU         *float64          `json:"gpu,omitempty"`
+	Accelerator map[string]string `json:"accelerator,omitempty"`
+	Memory      *float64          `json:"memory,omitempty"`
 }
 
 type ReplicaSpec struct {
@@ -38,6 +38,7 @@ type EndpointSpec struct {
 	Replicas          ReplicaSpec            `json:"replicas,omitempty"`
 	DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
 	Variables         map[string]interface{} `json:"variables,omitempty"`
+	Env               map[string]string      `json:"env,omitempty"`
 }
 
 type EndpointPhase string
