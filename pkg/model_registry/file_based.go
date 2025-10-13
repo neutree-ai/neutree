@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -222,7 +223,7 @@ func newFileBased(registry *v1.ModelRegistry) (ModelRegistry, error) {
 		}, nil
 	case string(v1.BentoMLModelRegistryConnectTypeNFS):
 		return &nfsFile{
-			targetPath:    "/mnt/" + registry.Key(),
+			targetPath:    filepath.Join("/mnt", registry.Key()),
 			nfsServerPath: modelRegistryURL.Host + modelRegistryURL.Path,
 		}, nil
 	default:

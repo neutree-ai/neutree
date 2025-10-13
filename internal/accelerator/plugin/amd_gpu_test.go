@@ -45,7 +45,7 @@ var (
 func TestAMDGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	p := &AMDGPUAcceleratorPlugin{}
 	// Test basic interface methods
-	assert.Equal(t, "amd-gpu", p.Resource())
+	assert.Equal(t, v1.AcceleratorTypeAMDGPU, p.Resource())
 	assert.Equal(t, p, p.Handle())
 	assert.Equal(t, InternalPluginType, p.Type())
 }

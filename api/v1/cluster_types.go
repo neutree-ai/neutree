@@ -45,6 +45,20 @@ type RaySSHProvisionClusterConfig struct {
 	CommonClusterConfig `json:",inline" yaml:",inline"`
 }
 
+type KubernetesClusterConfig struct {
+	Kubeconfig          string     `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
+	Router              RouterSpec `json:"router,omitempty" yaml:"router,omitempty"`
+	CommonClusterConfig `json:",inline" yaml:",inline"`
+}
+
+type RouterSpec struct {
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	// access mode for router service, currently support LoadBalancer, NodePort.
+	AccessMode KubernetesAccessMode `json:"access_mode,omitempty" yaml:"access_mode,omitempty"`
+	Replicas   int                  `json:"replicas,omitempty" yaml:"replicas,omitempty"`
+	Resources  map[string]string    `json:"resources,omitempty" yaml:"resources,omitempty"`
+}
+
 type RayKubernetesProvisionClusterConfig struct {
 	Kubeconfig       string            `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
 	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
@@ -67,6 +81,7 @@ type KubernetesAccessMode string
 
 const (
 	KubernetesAccessModeLoadBalancer KubernetesAccessMode = "LoadBalancer"
+	KubernetesAccessModeNodePort     KubernetesAccessMode = "NodePort"
 	// todo support ingress access mode.
 	KubernetesAccessModeIngress KubernetesAccessMode = "Ingress"
 )

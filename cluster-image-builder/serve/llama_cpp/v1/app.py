@@ -71,7 +71,7 @@ class Backend:
 
         # Store model info
         self.model_id = f"{model_name}:{model_version}"
-        
+
         # Ensure model can be loaded without errors
         LlamaProxy.load_llama_from_model_settings(self.model_settings)
 

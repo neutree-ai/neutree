@@ -3,6 +3,8 @@ package util
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/url"
+	"strconv"
 
 	"github.com/pkg/errors"
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
@@ -83,8 +85,46 @@ func ParseRayKubernetesClusterConfig(cluster *v1.Cluster) (*v1.RayKubernetesProv
 	return kubernetesClusterConfig, nil
 }
 
-func GetKubeConfigFromCluster(cluster *v1.Cluster) (string, error) {
+func ParseKubernetesClusterConfig(c *v1.Cluster) (*v1.KubernetesClusterConfig, error) {
+	if c.Spec.Config == nil {
+		return nil, errors.New("cluster config is empty")
+	}
+
+	content, err := json.Marshal(c.Spec.Config)
+	if err != nil {
+		return nil, err
+	}
+
+	config := &v1.KubernetesClusterConfig{}
+
+	err = json.Unmarshal(content, &config)
+	if err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+func GetKubeConfigFromRayKubernetesCluster(cluster *v1.Cluster) (string, error) {
 	config, err := ParseRayKubernetesClusterConfig(cluster)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to parse ray kubernetes cluster config")
+	}
+
+	if config.Kubeconfig == "" {
+		return "", errors.New("kubeconfig is empty")
+	}
+
+	kubeconfigContent, err := base64.StdEncoding.DecodeString(config.Kubeconfig)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to decode kubeconfig")
+	}
+
+	return string(kubeconfigContent), nil
+}
+
+func GetKubeConfigFromCluster(cluster *v1.Cluster) (string, error) {
+	config, err := ParseKubernetesClusterConfig(cluster)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse kubernetes cluster config")
 	}
@@ -150,4 +190,47 @@ func GetClientFromCluster(cluster *v1.Cluster) (client.Client, error) {
 
 func ClusterNamespace(cluster *v1.Cluster) string {
 	return "neutree-cluster-" + HashString(cluster.Key())
+}
+
+func GetApiServerUrlFromKubeConfig(kubeconfig string) (string, error) {
+	kubeconfigContent, err := base64.StdEncoding.DecodeString(kubeconfig)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to decode kubeconfig")
+	}
+
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigContent)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create REST config from kubeconfig")
+	}
+
+	return restConfig.Host, nil
+}
+
+func GetClusterServeAddress(cluster *v1.Cluster) (string, string, int, error) {
+	if cluster.Status == nil || cluster.Status.DashboardURL == "" {
+		return "", "", 0, errors.New("cluster status or dashboard URL is empty")
+	}
+
+	urlParse, err := url.Parse(cluster.Status.DashboardURL)
+	if err != nil {
+		return "", "", 0, errors.Wrapf(err, "failed to parse dashboard url")
+	}
+
+	if urlParse.Host == "" || urlParse.Scheme == "" {
+		return "", "", 0, errors.New("failed to get host or scheme from dashboard url")
+	}
+
+	port := 8000
+	if urlParse.Port() != "" {
+		port, err = strconv.Atoi(urlParse.Port())
+		if err != nil {
+			return "", "", 0, errors.Wrapf(err, "failed to parse port from dashboard url")
+		}
+	}
+
+	if cluster.Spec.Type == v1.SSHClusterType {
+		port = 8000
+	}
+
+	return urlParse.Scheme, urlParse.Hostname(), port, nil
 }

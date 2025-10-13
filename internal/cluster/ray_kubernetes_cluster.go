@@ -23,10 +23,6 @@ import (
 )
 
 const (
-	ResourceSkipPatchAnnotation = "neutree.io/skip-patch"
-)
-
-const (
 	DefaultMonitorCollectConfigMapName = "vmagent-scrape-config"
 )
 
@@ -58,7 +54,7 @@ func (c *kubeRayClusterReconciler) generateConfig(reconcileCtx *ReconcileContext
 		return errors.Wrap(err, "failed to parse cluster config")
 	}
 
-	reconcileCtx.kubernetesClusterConfig = config
+	reconcileCtx.rayKubernetesClusterConfig = config
 
 	err = c.configClusterAcceleratorType(reconcileCtx)
 	if err != nil {
@@ -116,7 +112,7 @@ func (c *kubeRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Cl
 		ImageRegistry: imageRegistry,
 		Ctx:           ctx,
 
-		clusterNamespace: Namespace(cluster),
+		clusterNamespace: util.ClusterNamespace(cluster),
 	}
 
 	err = c.generateConfig(reconcileCtx)
@@ -183,7 +179,7 @@ func (c *kubeRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster 
 	reconcileCtx := &ReconcileContext{
 		Cluster:          cluster,
 		Ctx:              ctx,
-		clusterNamespace: Namespace(cluster),
+		clusterNamespace: util.ClusterNamespace(cluster),
 
 		ImageRegistry: imageRegistry,
 	}
@@ -242,7 +238,7 @@ func (c *kubeRayClusterReconciler) initialize(reconcileCtx *ReconcileContext) er
 
 func (c *kubeRayClusterReconciler) upCluster(reconcileCtx *ReconcileContext, _ bool) (string, error) {
 	for _, object := range reconcileCtx.installObjects {
-		err := CreateOrPatch(reconcileCtx.Ctx, object, reconcileCtx.ctrClient)
+		err := util.CreateOrPatch(reconcileCtx.Ctx, object, reconcileCtx.ctrClient)
 		if err != nil {
 			return "", errors.Wrap(err, "failed to create or patch object "+client.ObjectKeyFromObject(object).String())
 		}
@@ -361,7 +357,7 @@ func (c *kubeRayClusterReconciler) getClusterAccessIP(reconcileCtx *ReconcileCon
 }
 
 func (c *kubeRayClusterReconciler) configClusterAcceleratorType(reconcileCtx *ReconcileContext) error {
-	if reconcileCtx.kubernetesClusterConfig.AcceleratorType != nil {
+	if reconcileCtx.rayKubernetesClusterConfig.AcceleratorType != nil {
 		return nil
 	}
 
@@ -370,8 +366,8 @@ func (c *kubeRayClusterReconciler) configClusterAcceleratorType(reconcileCtx *Re
 		return errors.Wrap(err, "failed to detect cluster accelerator type")
 	}
 
-	reconcileCtx.kubernetesClusterConfig.AcceleratorType = &detectAcceleratorType
-	reconcileCtx.Cluster.Spec.Config = reconcileCtx.kubernetesClusterConfig
+	reconcileCtx.rayKubernetesClusterConfig.AcceleratorType = &detectAcceleratorType
+	reconcileCtx.Cluster.Spec.Config = reconcileCtx.rayKubernetesClusterConfig
 
 	return c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
 		Spec: reconcileCtx.Cluster.Spec,
@@ -381,7 +377,7 @@ func (c *kubeRayClusterReconciler) configClusterAcceleratorType(reconcileCtx *Re
 func (c *kubeRayClusterReconciler) detectClusterAcceleratorType(reconcileCtx *ReconcileContext) (string, error) {
 	detectAcceleratorType := ""
 
-	for _, workerGroup := range reconcileCtx.kubernetesClusterConfig.WorkerGroupSpecs {
+	for _, workerGroup := range reconcileCtx.rayKubernetesClusterConfig.WorkerGroupSpecs {
 		resourceList := corev1.ResourceList{}
 
 		for k, v := range workerGroup.Resources {
@@ -421,7 +417,7 @@ func (c *kubeRayClusterReconciler) detectClusterAcceleratorType(reconcileCtx *Re
 
 func (c *kubeRayClusterReconciler) mutateContainerAcceleratorRuntimeConfig(reconcileContext *ReconcileContext, container *corev1.Container) error {
 	acceleratorRuntimeConfig, err := c.acceleratorManager.GetKubernetesContainerRuntimeConfig(context.Background(),
-		*reconcileContext.kubernetesClusterConfig.AcceleratorType, *container)
+		*reconcileContext.rayKubernetesClusterConfig.AcceleratorType, *container)
 	if err != nil {
 		return errors.Wrap(err, "failed to get container runtime config")
 	}

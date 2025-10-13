@@ -14,6 +14,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/resource"
 )
 
 type Manager interface {
@@ -23,6 +24,10 @@ type Manager interface {
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
 	GetKubernetesContainerRuntimeConfig(ctx context.Context, acceleratorType string, container corev1.Container) (v1.RuntimeConfig, error)
 	GetAllAcceleratorSupportEngines(ctx context.Context) ([]*v1.Engine, error)
+
+	// Resource conversion methods
+	ConvertToRay(ctx context.Context, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error)
+	ConvertToKubernetes(ctx context.Context, spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)
 }
 
 type registerPlugin struct {
@@ -34,12 +39,14 @@ type registerPlugin struct {
 type manager struct {
 	acceleratorsMap   sync.Map
 	supportEnginesMap sync.Map
+	converterManager  resource.ConverterManager
 }
 
 func NewManager(e *gin.Engine) Manager {
 	manager := &manager{
 		acceleratorsMap:   sync.Map{},
 		supportEnginesMap: sync.Map{},
+		converterManager:  resource.NewConverterManager(),
 	}
 
 	for _, p := range plugin.GetLocalAcceleratorPlugins() {
@@ -52,6 +59,17 @@ func NewManager(e *gin.Engine) Manager {
 		// It is critical to refresh supported engines during local plugin registration.
 		// Without this call, local accelerator plugins' supported engines are never initialized.
 		manager.refreshAcceleratorPluginSupportEngines(p)
+
+		// Register resource converter for local plugins
+		if p.Resource() != "" {
+			converter := p.Handle().GetResourceConverter()
+			if err := manager.converterManager.RegisterConverter(p.Resource(), converter); err != nil {
+				klog.Warningf("Failed to register converter for %s: %v", p.Resource(), err)
+			} else {
+				klog.V(4).Infof("Registered resource converter for %s", p.Resource())
+			}
+		}
+
 		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
 
@@ -105,6 +123,17 @@ func (a *manager) registerAcceleratorPlugin(req v1.RegisterRequest) {
 		}
 		a.acceleratorsMap.Store(req.ResourceName, p)
 		a.refreshAcceleratorPluginSupportEngines(p.plugin)
+
+		// Register resource converter for external plugins
+		if p.plugin.Resource() != "" {
+			converter := p.plugin.Handle().GetResourceConverter()
+			if err := a.converterManager.RegisterConverter(p.plugin.Resource(), converter); err != nil {
+				klog.Warningf("Failed to register converter for %s: %v", p.plugin.Resource(), err)
+			} else {
+				klog.V(4).Infof("Registered resource converter for %s", p.plugin.Resource())
+			}
+		}
+
 		klog.Infof("Register accelerator plugin: %s", req.ResourceName)
 	}
 }
@@ -372,4 +401,14 @@ func (a *manager) refreshAllAcceleratorPluginSupportEngines() {
 
 		return true
 	})
+}
+
+// ConvertToRay converts to Ray resource configuration
+func (a *manager) ConvertToRay(ctx context.Context, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+	return a.converterManager.ConvertToRay(ctx, spec)
+}
+
+// ConvertToKubernetes converts to Kubernetes resource configuration
+func (a *manager) ConvertToKubernetes(ctx context.Context, spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+	return a.converterManager.ConvertToKubernetes(ctx, spec)
 }

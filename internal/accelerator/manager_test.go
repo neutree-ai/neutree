@@ -8,13 +8,16 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	internalresource "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func TestManager_registerAcceleratorPlugin(t *testing.T) {
-	manager := &manager{}
+	manager := &manager{
+		converterManager: internalresource.NewConverterManager(),
+	}
 
 	// Test registering a new plugin
 	resourceName := "test"
