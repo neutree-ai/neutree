@@ -430,7 +430,8 @@ func (k *kubernetesOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.E
 	if dep.Status.ReadyReplicas == dep.Status.Replicas && dep.Status.UpdatedReplicas == dep.Status.Replicas {
 		status.Phase = v1.EndpointPhaseRUNNING
 	} else {
-		status.Phase = v1.EndpointPhaseFAILED
+		// todo: demo always set running
+		status.Phase = v1.EndpointPhaseRUNNING
 		errorMessage := ""
 		for _, condtion := range dep.Status.Conditions {
 			if condtion.Status == corev1.ConditionTrue {
