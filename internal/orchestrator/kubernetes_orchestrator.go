@@ -252,7 +252,7 @@ func (k *kubernetesOrchestrator) buildManifestData(endpoint *v1.Endpoint, deploy
 }
 
 func buildDeployment(data DeploymentManifestData) (client.Object, error) {
-	return renderManifest(deploymentTemplate, data)
+	return renderManifest(demoDeploymentTemplate, data)
 }
 
 func renderManifest(templateStr string, data DeploymentManifestData) (client.Object, error) {
@@ -267,6 +267,8 @@ func renderManifest(templateStr string, data DeploymentManifestData) (client.Obj
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return nil, errors.Wrap(err, "failed to execute template")
 	}
+
+	fmt.Println(buf.String())
 
 	// Decode YAML to unstructured object
 	obj := &unstructured.Unstructured{}
