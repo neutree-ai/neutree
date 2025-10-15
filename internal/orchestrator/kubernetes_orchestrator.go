@@ -215,6 +215,9 @@ func (k *kubernetesOrchestrator) buildManifestData(endpoint *v1.Endpoint, deploy
 
 	env := map[string]string{}
 
+	// test
+	env["HF_HUB_OFFLINE"] = "1"
+
 	if len(modelCaches) > 0 {
 		volumes, volumeMounts, modelEnv := generateModelCacheConfig(modelCaches)
 		data.Volumes = volumes
