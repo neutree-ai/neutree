@@ -22,7 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,7 +30,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/nfs"
-	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
@@ -43,13 +42,6 @@ const (
 )
 
 var _ ClusterManager = &kubeRayClusterManager{}
-
-var (
-	scheme = runtime.NewScheme()
-	_      = rayv1.AddToScheme(scheme)
-	_      = appsv1.AddToScheme(scheme)
-	_      = corev1.AddToScheme(scheme)
-)
 
 type kubeRayClusterManager struct {
 	imageService       registry.ImageService
@@ -83,7 +75,7 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 		storage:            s,
 	}
 
-	config, err := parseKubernetesClusterConfig(c.cluster)
+	config, err := parseRayKubernetesClusterConfig(c.cluster)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse cluster config")
 	}
@@ -135,12 +127,12 @@ func NewKubeRayClusterManager(cluster *v1.Cluster, imageRegistry *v1.ImageRegist
 
 	c.installObjects = append(c.installObjects, vmAgentConfigMap, vmAgentScrapeConfigMap, vmAgentDeployment)
 
-	// kuberayCluster, err := c.generateKubeRayCluster()
-	// if err != nil {
-	// 	return nil, errors.Wrap(err, "failed to generate kuberay cluster")
-	// }
+	kuberayCluster, err := c.generateKubeRayCluster()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to generate kuberay cluster")
+	}
 
-	// c.installObjects = append(c.installObjects, kuberayCluster)
+	c.installObjects = append(c.installObjects, kuberayCluster)
 	for i := range c.installObjects {
 		addMetedataForObject(c.installObjects[i], cluster)
 	}
@@ -1061,18 +1053,6 @@ func (c *kubeRayClusterManager) mutateContainerAcceleratorRuntimeConfig(containe
 	}
 
 	return nil
-}
-
-func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
-	return &corev1.Namespace{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Namespace",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name: Namespace(cluster),
-		},
-	}
 }
 
 func getHeadSvcName(clusterName string) string {

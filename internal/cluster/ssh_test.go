@@ -16,9 +16,9 @@ import (
 	"go.openly.dev/pointy"
 
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
-	"github.com/neutree-ai/neutree/internal/orchestrator/ray/config"
-	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
-	dashboardmocks "github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard/mocks"
+	"github.com/neutree-ai/neutree/internal/ray/config"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	registrymocks "github.com/neutree-ai/neutree/internal/registry/mocks"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 )

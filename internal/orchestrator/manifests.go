@@ -1,0 +1,179 @@
+package orchestrator
+
+var demoDeploymentTemplate = `
+kind: Deployment
+metadata:
+  name: {{ .EndpointName }}
+  namespace: {{ .Namespace }}
+spec:
+  replicas: {{ .Replicas }}
+  progressDeadlineSeconds: 1200
+  selector:
+	matchLabels:
+	  engine: {{ .EngineName }}
+	  engine_version: {{ .EngineVersion }}
+	  cluster: {{ .ClusterName }}
+	  workspace: {{ .Workspace }}
+	  routing_logic: {{ .RoutingLogic }}
+  template:
+	metadata:
+	  labels:
+	  engine: {{ .EngineName }}
+	  engine_version: {{ .EngineVersion }}
+	  cluster: {{ .ClusterName }}
+	  workspace: {{ .Workspace }}
+	  routing_logic: {{ .RoutingLogic }}
+	spec:
+      {{- if .NodeSelector }}
+      nodeSelector:
+        {{- range $key, $value := .NodeSelector }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
+      {{- if .ImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .ImagePullSecret }}
+      {{- end }}
+
+      {{- if .Volumes }}
+      volumes:
+      {{ .Volumes | toYaml | indent 2 }}
+      {{- end }}
+
+	  containers:
+		- name: {{ .EngineName }}
+		  image: {{ .ImagePrefix }}/{{ .EngineName }}:{{ .EngineVersion }}
+		  command:
+		  - vllm
+		  - serve
+		  - --host
+		  - "0.0.0.0"
+		  - "--port"
+		  - "8080"
+		  - --model
+		  - {{ .ModelArgs.name }}
+		  {{ - if .EngineArgs }}
+		  {{ - range $key, $value := .EngineArgs }}
+		  - --{{ $key }}
+		  - {{ $value }}
+		  {{ - end }}
+		  {{ - end }}
+		  resources:
+			limits:
+			  {{- range $key, $value := .Resources }}
+			  {{ $key }}: {{ $value }}
+			  {{- end }}
+			requests:
+			  {{- range $key, $value := .Resources }}
+			  {{ $key }}: {{ $value }}
+			  {{- end }}
+		   env:
+		   - name: VLLM_USE_V1
+		     value: "1"
+		   {{ range $key, $value := .Env }}
+		   - name: {{ $key }}
+		     value: "{{ $value }}"
+		   {{ end }}
+		  ports:
+			- containerPort: 8080
+		  startupProbe:
+			httpGet:
+			  path: /health
+			  port: 8080
+			initialDelaySeconds: 5
+			timeoutSeconds: 5
+			periodSeconds: 10
+			successThreshold: 1
+			failureThreshold: 3
+		  {{- if .VolumeMounts }}
+		  volumeMounts:
+          {{ .VolumeMounts | toYaml | indent 2 }}
+		  {{- end }}
+`
+
+var deploymentTemplate = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .EndpointName }}
+  namespace: {{ .Namespace }}
+spec:
+  replicas: {{ .Replicas }}
+  progressDeadlineSeconds: 1200
+  selector:
+	matchLabels:
+	  engine: {{ .EngineName }}
+	  engine_version: {{ .EngineVersion }}
+	  cluster: {{ .ClusterName }}
+	  workspace: {{ .Workspace }}
+	  routing_logic: {{ .RoutingLogic }}
+  template:
+	metadata:
+	  labels:
+	  engine: {{ .EngineName }}
+	  engine_version: {{ .EngineVersion }}
+	  cluster: {{ .ClusterName }}
+	  workspace: {{ .Workspace }}
+	  routing_logic: {{ .RoutingLogic }}
+	spec:
+      {{- if .NodeSelector }}
+      nodeSelector:
+        {{- range $key, $value := .NodeSelector }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
+      {{- if .ImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .ImagePullSecret }}
+      {{- end }}
+
+      {{- if .Volumes }}
+      volumes:
+      {{ .Volumes | toYaml | indent 2 }}
+      {{- end }}
+
+	  containers:
+		- name: {{ .EngineName }}
+		  image: {{ .ImagePrefix }}/{{ .EngineName }}:{{ .EngineVersion }}
+		  command:
+		  - neutree
+		  - serve
+		  - --host
+		  - "0.0.0.0"
+		  - "--port"
+		  - "8080"
+		  - --model
+		  - {{ .ModelArgs }}
+		  - --engine-args
+		  - {{ .EngineArgs }}
+		  resources:
+			limits:
+			  {{- range $key, $value := .Resources }}
+			  {{ $key }}: {{ $value }}
+			  {{- end }}
+			requests:
+			  {{- range $key, $value := .Resources }}
+			  {{ $key }}: {{ $value }}
+			  {{- end }}
+		   env:
+		   - name: VLLM_USE_V1
+		     value: "1"
+		   {{ range $key, $value := .Env }}
+		   - name: {{ $key }}
+		     value: "{{ $value }}"
+		   {{ end }}
+		  ports:
+			- containerPort: 8080
+		  startupProbe:
+			httpGet:
+			  path: /health
+			  port: 8080
+			initialDelaySeconds: 5
+			timeoutSeconds: 5
+			periodSeconds: 10
+			successThreshold: 1
+			failureThreshold: 3
+		  {{- if .VolumeMounts }}
+		  volumeMounts:
+          {{ .VolumeMounts | toYaml | indent 2 }}
+		  {{- end }}
+`

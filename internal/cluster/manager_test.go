@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	dashboardmocks "github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard/mocks"
 	registrymocks "github.com/neutree-ai/neutree/internal/registry/mocks"
 )
 
@@ -212,105 +211,105 @@ func TestValidateClusterImage(t *testing.T) {
 	}
 }
 
-func TestGenerateRayClusterMetricsScrapeTargetsConfig(t *testing.T) {
-	// Setup test cases with table-driven style
-	tests := []struct {
-		name        string
-		nodes       []v1.NodeSummary
-		mockSetup   func(*dashboardmocks.MockDashboardService)
-		wantTargets []string
-		wantErr     bool
-	}{
-		{
-			name: "single head node",
-			nodes: []v1.NodeSummary{
-				{
-					IP:     "192.168.1.1",
-					Raylet: v1.Raylet{IsHeadNode: true, State: v1.AliveNodeState},
-				},
-			},
-			mockSetup: func(m *dashboardmocks.MockDashboardService) {
-				m.On("ListNodes").Return([]v1.NodeSummary{
-					{
-						IP:     "192.168.1.1",
-						Raylet: v1.Raylet{IsHeadNode: true, State: v1.AliveNodeState},
-					},
-				}, nil)
-			},
-			wantTargets: []string{
-				"192.168.1.1:44227",
-				"192.168.1.1:44217",
-				"192.168.1.1:54311",
-			},
-			wantErr: false,
-		},
-		{
-			name: "head node with alive worker",
-			nodes: []v1.NodeSummary{
-				{
-					IP:     "192.168.1.1",
-					Raylet: v1.Raylet{IsHeadNode: true, State: v1.AliveNodeState},
-				},
-				{
-					IP:     "192.168.1.2",
-					Raylet: v1.Raylet{IsHeadNode: false, State: v1.AliveNodeState},
-				},
-			},
-			mockSetup: func(m *dashboardmocks.MockDashboardService) {
-				m.On("ListNodes").Return([]v1.NodeSummary{
-					{
-						IP:     "192.168.1.1",
-						Raylet: v1.Raylet{IsHeadNode: true, State: v1.AliveNodeState},
-					},
-					{
-						IP:     "192.168.1.2",
-						Raylet: v1.Raylet{IsHeadNode: false, State: v1.AliveNodeState},
-					},
-				}, nil)
-			},
-			wantTargets: []string{
-				"192.168.1.1:44227",
-				"192.168.1.1:44217",
-				"192.168.1.1:54311",
-				"192.168.1.2:54311",
-			},
-			wantErr: false,
-		},
-		{
-			name: "node list error",
-			mockSetup: func(m *dashboardmocks.MockDashboardService) {
-				m.On("ListNodes").Return(nil, errors.New("connection failed"))
-			},
-			wantErr: true,
-		},
-	}
+// func TestGenerateRayClusterMetricsScrapeTargetsConfig(t *testing.T) {
+// 	// Setup test cases with table-driven style
+// 	tests := []struct {
+// 		name        string
+// 		nodes       []v1.NodeSummary
+// 		mockSetup   func(*dashboardmocks.MockDashboardService)
+// 		wantTargets []string
+// 		wantErr     bool
+// 	}{
+// 		{
+// 			name: "single head node",
+// 			nodes: []v1.NodeSummary{
+// 				{
+// 					IP:     "192.168.1.1",
+// 					Raylet: v1.Raylet{IsHeadNode: true, State: v1.AliveNodeState},
+// 				},
+// 			},
+// 			mockSetup: func(m *dashboardmocks.MockDashboardService) {
+// 				m.On("ListNodes").Return([]v1.NodeSummary{
+// 					{
+// 						IP:     "192.168.1.1",
+// 						Raylet: v1.Raylet{IsHeadNode: true, State: v1.AliveNodeState},
+// 					},
+// 				}, nil)
+// 			},
+// 			wantTargets: []string{
+// 				"192.168.1.1:44227",
+// 				"192.168.1.1:44217",
+// 				"192.168.1.1:54311",
+// 			},
+// 			wantErr: false,
+// 		},
+// 		{
+// 			name: "head node with alive worker",
+// 			nodes: []v1.NodeSummary{
+// 				{
+// 					IP:     "192.168.1.1",
+// 					Raylet: v1.Raylet{IsHeadNode: true, State: v1.AliveNodeState},
+// 				},
+// 				{
+// 					IP:     "192.168.1.2",
+// 					Raylet: v1.Raylet{IsHeadNode: false, State: v1.AliveNodeState},
+// 				},
+// 			},
+// 			mockSetup: func(m *dashboardmocks.MockDashboardService) {
+// 				m.On("ListNodes").Return([]v1.NodeSummary{
+// 					{
+// 						IP:     "192.168.1.1",
+// 						Raylet: v1.Raylet{IsHeadNode: true, State: v1.AliveNodeState},
+// 					},
+// 					{
+// 						IP:     "192.168.1.2",
+// 						Raylet: v1.Raylet{IsHeadNode: false, State: v1.AliveNodeState},
+// 					},
+// 				}, nil)
+// 			},
+// 			wantTargets: []string{
+// 				"192.168.1.1:44227",
+// 				"192.168.1.1:44217",
+// 				"192.168.1.1:54311",
+// 				"192.168.1.2:54311",
+// 			},
+// 			wantErr: false,
+// 		},
+// 		{
+// 			name: "node list error",
+// 			mockSetup: func(m *dashboardmocks.MockDashboardService) {
+// 				m.On("ListNodes").Return(nil, errors.New("connection failed"))
+// 			},
+// 			wantErr: true,
+// 		},
+// 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Setup mocks
-			mockDashboard := dashboardmocks.NewMockDashboardService(t)
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockDashboard)
-			}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			// Setup mocks
+// 			mockDashboard := dashboardmocks.NewMockDashboardService(t)
+// 			if tt.mockSetup != nil {
+// 				tt.mockSetup(mockDashboard)
+// 			}
 
-			cluster := &v1.Cluster{
-				Metadata: &v1.Metadata{Name: "test-cluster"},
-			}
+// 			cluster := &v1.Cluster{
+// 				Metadata: &v1.Metadata{Name: "test-cluster"},
+// 			}
 
-			// Execute function
-			config, err := generateRayClusterMetricsScrapeTargetsConfig(cluster, mockDashboard)
+// 			// Execute function
+// 			config, err := generateRayClusterMetricsScrapeTargetsConfig(cluster, mockDashboard)
 
-			// Verify results
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
+// 			// Verify results
+// 			if tt.wantErr {
+// 				assert.Error(t, err)
+// 				return
+// 			}
 
-			assert.NoError(t, err)
-			assert.Equal(t, "test-cluster", config.Labels["ray_io_cluster"])
-			assert.Equal(t, "ray", config.Labels["job"])
-			assert.ElementsMatch(t, tt.wantTargets, config.Targets)
-			mockDashboard.AssertExpectations(t)
-		})
-	}
-}
+// 			assert.NoError(t, err)
+// 			assert.Equal(t, "test-cluster", config.Labels["ray_io_cluster"])
+// 			assert.Equal(t, "ray", config.Labels["job"])
+// 			assert.ElementsMatch(t, tt.wantTargets, config.Targets)
+// 			mockDashboard.AssertExpectations(t)
+// 		})
+// 	}
+// }

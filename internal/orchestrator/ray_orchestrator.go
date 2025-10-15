@@ -10,8 +10,8 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/orchestrator/ray/cluster"
-	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -259,7 +259,11 @@ func NewRayOrchestrator(opts RayOptions) (*RayOrchestrator, error) {
 }
 
 func (o *RayOrchestrator) getDashboardService(ctx context.Context) (dashboard.DashboardService, error) {
-	return o.clusterHelper.GetDashboardService(ctx)
+	if o.cluster.Status == nil || o.cluster.Status.DashboardURL == "" {
+		return nil, errors.New("dashboard URL is not configured in cluster status")
+	}
+
+	return dashboard.NewDashboardService(o.cluster.Status.DashboardURL), nil
 }
 
 // CreateEndpoint deploys a new endpoint using Ray Serve.

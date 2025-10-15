@@ -9,9 +9,9 @@ import (
 	"go.openly.dev/pointy"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	clustermocks "github.com/neutree-ai/neutree/internal/orchestrator/ray/cluster/mocks"
-	"github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
-	dashboardmocks "github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard/mocks"
+	clustermocks "github.com/neutree-ai/neutree/internal/cluster/mocks"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
