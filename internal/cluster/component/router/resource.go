@@ -2,6 +2,7 @@ package router
 
 import (
 	"bytes"
+	"fmt"
 	"text/template"
 
 	"github.com/pkg/errors"
@@ -22,6 +23,7 @@ func (r *RouterComponent) renderManifest(templateStr string, data RouteManifestD
 		return nil, errors.Wrap(err, "failed to execute template")
 	}
 
+	fmt.Println(buf.String())
 	// Decode YAML to unstructured object
 	obj := &unstructured.Unstructured{}
 	decoder := yaml.NewYAMLOrJSONDecoder(&buf, 4096)
