@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/pkg/errors"
@@ -57,7 +58,7 @@ func ParseSSHClusterConfig(cluster *v1.Cluster) (*v1.RaySSHProvisionClusterConfi
 	return sshClusterConfig, nil
 }
 
-func ParseKubernetesClusterConfig(c v1.Cluster) (*v1.KubernetesClusterConfig, error) {
+func ParseKubernetesClusterConfig(c *v1.Cluster) (*v1.KubernetesClusterConfig, error) {
 	if c.Spec.Config == nil {
 		return nil, errors.New("cluster config is empty")
 	}
@@ -75,7 +76,7 @@ func ParseKubernetesClusterConfig(c v1.Cluster) (*v1.KubernetesClusterConfig, er
 }
 
 func GetKubeConfigFromCluster(cluster *v1.Cluster) (string, error) {
-	config, err := ParseKubernetesClusterConfig(*cluster)
+	config, err := ParseKubernetesClusterConfig(cluster)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse kubernetes cluster config")
 	}
@@ -115,6 +116,8 @@ func GetClientFromCluster(cluster *v1.Cluster) (client.Client, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get kubeconfig from cluster")
 	}
+
+	fmt.Println(kubeconfig)
 
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
 	if err != nil {

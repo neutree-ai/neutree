@@ -8,6 +8,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/cluster/component/metrics"
 	"github.com/neutree-ai/neutree/internal/cluster/component/router"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -61,12 +62,12 @@ func (c *NativeKubernetesCluster) Reconcile(ctx context.Context, cluster *v1.Clu
 }
 
 func (c *NativeKubernetesCluster) reconcile(ctx context.Context, cluster *v1.Cluster) error {
-	config, err := parseKubernetesClusterConfig(cluster) // Ensure config is parsed
+	config, err := util.ParseKubernetesClusterConfig(cluster) // Ensure config is parsed
 	if err != nil {
 		return errors.Wrap(err, "failed to parse cluster config")
 	}
 
-	ctrlClient, err := getCtrlClientFromKubeConfig(config.Kubeconfig) // Ensure we can create client
+	ctrlClient, err := util.GetClientFromCluster(cluster) // Ensure we can create client
 	if err != nil {
 		return errors.Wrap(err, "failed to create Kubernetes client")
 	}
