@@ -81,7 +81,7 @@ spec:
         - --k8s-namespace
         - {{ .Namespace }}
         - --k8s-label-selector
-        - "cluster={{ .ClusterName }},workspace={{ .Workspace }}"
+        - "cluster={{ .ClusterName }},workspace={{ .Workspace }},app=inference"
         - --routing-logic
         - roundrobin
         - --lmcache-controller-port
