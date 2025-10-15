@@ -162,6 +162,17 @@ func (k *kubernetesOrchestrator) buildManifestData(endpoint *v1.Endpoint, deploy
 		ImagePrefix:     imagePrefix,
 		ImagePullSecret: cluster.ImagePullSecretName,
 		EngineArgs:      endpoint.Spec.Variables,
+		Replicas:        int32(*endpoint.Spec.Replicas.Num),
+		RoutingLogic:    "roundrobin",
+	}
+
+	if endpoint.Spec.DeploymentOptions != nil && endpoint.Spec.DeploymentOptions["scheduler"] != nil {
+		scheduleConfig, ok := endpoint.Spec.DeploymentOptions["scheduler"].(map[string]interface{})
+		if ok {
+			if logic, exists := scheduleConfig["type"].(string); exists {
+				data.RoutingLogic = logic
+			}
+		}
 	}
 
 	modelArgs := map[string]interface{}{
@@ -338,6 +349,8 @@ type DeploymentManifestData struct {
 	Env             map[string]string
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
+	RoutingLogic    string
+	Replicas        int32
 }
 
 func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
