@@ -56,12 +56,11 @@ spec:
           command:
           - vllm
           - serve
+          - {{ .ModelArgs.name }}
           - --host
           - "0.0.0.0"
           - "--port"
           - "8080"
-          - --model
-          - {{ .ModelArgs.name }}
           - --task
           - {{ .ModelArgs.task }}
           {{- if .EngineArgs }}
