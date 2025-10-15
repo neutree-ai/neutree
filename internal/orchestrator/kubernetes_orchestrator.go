@@ -353,6 +353,7 @@ type DeploymentManifestData struct {
 	VolumeMounts    []corev1.VolumeMount
 	RoutingLogic    string
 	Replicas        int32
+	NodeSelector    map[string]string
 }
 
 func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
