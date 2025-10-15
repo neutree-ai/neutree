@@ -1,6 +1,7 @@
 package orchestrator
 
 var demoDeploymentTemplate = `
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .EndpointName }}
@@ -102,7 +103,8 @@ spec:
           {{- end }}
 `
 
-var deploymentTemplate = `apiVersion: apps/v1
+var deploymentTemplate = `
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .EndpointName }}
