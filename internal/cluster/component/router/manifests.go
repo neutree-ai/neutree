@@ -90,6 +90,8 @@ spec:
         - "30"
         - --session-key
         - "session_id"
+        - --service-discovery
+        - k8s
         {{- if .Resources }}
         resources:
           limits:
