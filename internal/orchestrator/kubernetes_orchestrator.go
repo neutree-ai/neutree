@@ -438,7 +438,7 @@ func (k *kubernetesOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.E
 	}
 
 	// Implementation for getting the status of an	 endpoint in a Kubernetes cluster
-	return nil, nil
+	return status, nil
 }
 
 func (k *kubernetesOrchestrator) ConnectEndpointModel(endpoint *v1.Endpoint) error {
