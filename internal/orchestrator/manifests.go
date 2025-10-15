@@ -99,7 +99,7 @@ spec:
             timeoutSeconds: 5
             periodSeconds: 10
             successThreshold: 1
-            failureThreshold: 3
+            failureThreshold: 120
           {{- if .VolumeMounts }}
           volumeMounts:
 {{ .VolumeMounts | toYaml | indent 10 }}
