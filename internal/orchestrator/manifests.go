@@ -16,6 +16,8 @@ metadata:
 spec:
   replicas: {{ .Replicas }}
   progressDeadlineSeconds: 1200
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       engine: {{ .EngineName }}
