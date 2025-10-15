@@ -46,7 +46,7 @@ spec:
 
       {{- if .Volumes }}
       volumes:
-      {{ .Volumes | toYaml | indent 2 }}
+{{ .Volumes | toYaml | indent 6 }}
       {{- end }}
 
       containers:
@@ -98,7 +98,7 @@ spec:
             failureThreshold: 3
           {{- if .VolumeMounts }}
           volumeMounts:
-          {{ .VolumeMounts | toYaml | indent 2 }}
+{{ .VolumeMounts | toYaml | indent 10 }}
           {{- end }}
 `
 
@@ -148,7 +148,7 @@ spec:
 
       {{- if .Volumes }}
       volumes:
-      {{ .Volumes | toYaml | indent 2 }}
+{{ .Volumes | toYaml | indent 6 }}
       {{- end }}
 
 	  containers:
@@ -192,8 +192,8 @@ spec:
 			periodSeconds: 10
 			successThreshold: 1
 			failureThreshold: 3
-		  {{- if .VolumeMounts }}
-		  volumeMounts:
-          {{ .VolumeMounts | toYaml | indent 2 }}
-		  {{- end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
 `

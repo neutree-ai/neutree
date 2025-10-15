@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
-	yamlv3 "gopkg.in/yaml.v3"
+	sigyaml "sigs.k8s.io/yaml"
 )
 
 const (
@@ -281,7 +281,7 @@ func renderManifest(templateStr string, data DeploymentManifestData) (client.Obj
 }
 
 func toYAML(v interface{}) string {
-	data, err := yamlv3.Marshal(v)
+	data, err := sigyaml.Marshal(v)
 	if err != nil {
 		// Swallow errors inside of a template.
 		return ""

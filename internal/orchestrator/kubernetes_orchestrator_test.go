@@ -1,6 +1,10 @@
 package orchestrator
 
-import "testing"
+import (
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 func TestBuildDeployment(t *testing.T) {
 	data := DeploymentManifestData{
@@ -26,6 +30,23 @@ func TestBuildDeployment(t *testing.T) {
 		},
 		RoutingLogic: "roundrobin",
 		Replicas:     2,
+		Volumes: []corev1.Volume{
+			{
+				Name: "model-volume",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: "/mnt/model",
+					},
+				},
+			},
+		},
+
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "model-volume",
+				MountPath: "/mnt/model",
+			},
+		},
 	}
 
 	obj, err := buildDeployment(data)
