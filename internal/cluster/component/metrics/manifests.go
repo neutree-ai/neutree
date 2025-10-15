@@ -22,6 +22,9 @@ data:
         namespaces:
           names:
           - {{ .Namespace }}
+        selector:
+        - role: pod
+          label: app=inference
       relabel_configs:
       # Only scrape pods with cluster and workspace labels matching
       - source_labels: [__meta_kubernetes_pod_label_cluster]

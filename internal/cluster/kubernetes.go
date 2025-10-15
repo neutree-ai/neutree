@@ -185,9 +185,9 @@ func (c *NativeKubernetesCluster) UpCluster(ctx context.Context, restart bool) (
 
 	var errs []error
 	for _, comp := range comps {
-		err = comp.Reconcile()
-		if err != nil {
-			errs = append(errs, err)
+		reconcileErr := comp.Reconcile()
+		if reconcileErr != nil {
+			errs = append(errs, reconcileErr)
 		}
 	}
 

@@ -88,6 +88,8 @@ spec:
         - "50051"
         - --engine-stats-interval
         - "30"
+        - --session-key
+        - "session_id"
         resources:
           limits:
             {{- range $key, $value := .Resources }}

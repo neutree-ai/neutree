@@ -15,6 +15,7 @@ spec:
 	  cluster: {{ .ClusterName }}
 	  workspace: {{ .Workspace }}
 	  routing_logic: {{ .RoutingLogic }}
+	  app: inference
   template:
 	metadata:
 	  labels:
@@ -23,6 +24,7 @@ spec:
 	  cluster: {{ .ClusterName }}
 	  workspace: {{ .Workspace }}
 	  routing_logic: {{ .RoutingLogic }}
+	  app: inference
 	spec:
       {{- if .NodeSelector }}
       nodeSelector:
