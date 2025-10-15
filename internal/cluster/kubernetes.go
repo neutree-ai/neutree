@@ -239,11 +239,21 @@ func (c *NativeKubernetesCluster) reconcileDelete(ctx context.Context, cluster *
 	}
 
 	ns := generateInstallNs(cluster)
-	err = ctrlClient.Delete(ctx, ns)
-	if err != nil && !apierrors.IsNotFound(err) {
+	err = ctrlClient.Get(ctx, client.ObjectKey{Name: ns.Name}, ns)
+	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
+		return errors.Wrap(err, "failed to get namespace")
+	}
+
+	if ns.DeletionTimestamp != nil {
+		// Namespace is already being deleted
+		return errors.New("waiting for namespace deletion")
+	}
+
+	err = ctrlClient.Delete(ctx, ns)
+	if err != nil {
 		return errors.Wrap(err, "failed to delete namespace")
 	}
 
