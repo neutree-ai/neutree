@@ -142,7 +142,7 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.Endp
 	}
 
 	// Implementation for creating an endpoint in a Kubernetes cluster
-	return nil, nil
+	return k.GetEndpointStatus(endpoint)
 }
 
 func (k *kubernetesOrchestrator) buildManifestData(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, modelRegistry *v1.ModelRegistry, engine *v1.Engine, imageRegistry *v1.ImageRegistry) (DeploymentManifestData, error) {
@@ -161,7 +161,6 @@ func (k *kubernetesOrchestrator) buildManifestData(endpoint *v1.Endpoint, deploy
 		EngineVersion:   endpoint.Spec.Engine.Version,
 		ImagePrefix:     imagePrefix,
 		ImagePullSecret: cluster.ImagePullSecretName,
-		EngineArgs:      endpoint.Spec.Variables,
 		Replicas:        int32(*endpoint.Spec.Replicas.Num),
 		RoutingLogic:    "roundrobin",
 	}
@@ -186,6 +185,12 @@ func (k *kubernetesOrchestrator) buildManifestData(endpoint *v1.Endpoint, deploy
 	}
 
 	data.ModelArgs = modelArgs
+
+	if endpoint.Spec.Variables != nil {
+		if v, ok := endpoint.Spec.Variables["engine_args"].(map[string]interface{}); ok {
+			data.EngineArgs = v
+		}
+	}
 
 	resource := map[string]string{}
 	if endpoint.Spec.Resources.CPU != nil {
