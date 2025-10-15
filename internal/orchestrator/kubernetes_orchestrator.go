@@ -175,12 +175,14 @@ func (k *kubernetesOrchestrator) buildManifestData(endpoint *v1.Endpoint, deploy
 		}
 	}
 
+	task := "generate"
+
 	modelArgs := map[string]interface{}{
 		"registry_type": modelRegistry.Spec.Type,
 		"name":          endpoint.Spec.Model.Name,
 		"file":          endpoint.Spec.Model.File,
 		"version":       endpoint.Spec.Model.Version,
-		"task":          endpoint.Spec.Model.Task,
+		"task":          task,
 	}
 
 	data.ModelArgs = modelArgs

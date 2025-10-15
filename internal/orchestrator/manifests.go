@@ -54,6 +54,8 @@ spec:
 		  - "8080"
 		  - --model
 		  - {{ .ModelArgs.name }}
+		  - --task
+		  - {{ .ModelArgs.task }}
 		  {{ - if .EngineArgs }}
 		  {{ - range $key, $value := .EngineArgs }}
 		  - --{{ $key }}
