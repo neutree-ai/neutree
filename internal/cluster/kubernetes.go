@@ -148,12 +148,12 @@ func (c *NativeKubernetesCluster) UpCluster(ctx context.Context, restart bool) (
 	// For native Kubernetes cluster, the cluster is already running
 	// Just verify it's accessible and return success
 	// The actual access information is stored in cluster status
-	config, err := parseKubernetesClusterConfig(c.cluster) // Ensure config is parsed
+	config, err := util.ParseKubernetesClusterConfig(c.cluster) // Ensure config is parsed
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse cluster config")
 	}
 
-	ctrlClient, err := getCtrlClientFromKubeConfig(config.Kubeconfig) // Ensure we can create client
+	ctrlClient, err := util.GetClientFromCluster(c.cluster) // Ensure we can create client
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create Kubernetes client")
 	}
@@ -208,12 +208,7 @@ func (c *NativeKubernetesCluster) DownCluster(ctx context.Context) error {
 	// For native Kubernetes cluster, we don't manage the cluster lifecycle
 	// The cluster should be managed externally
 
-	config, err := parseKubernetesClusterConfig(c.cluster) // Ensure config is parsed
-	if err != nil {
-		return errors.Wrap(err, "failed to parse cluster config")
-	}
-
-	ctrlClient, err := getCtrlClientFromKubeConfig(config.Kubeconfig) // Ensure we can create client
+	ctrlClient, err := util.GetClientFromCluster(c.cluster) // Ensure we can create client
 	if err != nil {
 		return errors.Wrap(err, "failed to create Kubernetes client")
 	}
