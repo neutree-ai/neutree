@@ -23,7 +23,8 @@ func TestBuildDeployment(t *testing.T) {
 		EngineArgs: map[string]interface{}{
 			"max-concurrency": "10",
 			"timeout":         "60s",
-			"verbose":         "true",
+			"verbose":         true,
+			"enable-logging":  "true",
 		},
 		Resources: map[string]string{
 			"cpu":    "500m",

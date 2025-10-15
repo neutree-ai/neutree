@@ -68,7 +68,7 @@ spec:
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
           - --{{ $key }}
-		  {{- if ne $value "true"}}
+		  {{- if ne (printf "%v" $value) "true"}}
           - "{{ $value }}"
 		  {{- end }}
           {{- end }}
