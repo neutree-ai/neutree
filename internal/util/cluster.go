@@ -3,7 +3,6 @@ package util
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/pkg/errors"
@@ -116,8 +115,6 @@ func GetClientFromCluster(cluster *v1.Cluster) (client.Client, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get kubeconfig from cluster")
 	}
-
-	fmt.Println(kubeconfig)
 
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
 	if err != nil {
