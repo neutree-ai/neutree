@@ -90,6 +90,7 @@ spec:
         - "30"
         - --session-key
         - "session_id"
+        {{- if .Resources }}
         resources:
           limits:
             {{- range $key, $value := .Resources }}
@@ -99,6 +100,7 @@ spec:
             {{- range $key, $value := .Resources }}
             {{ $key }}: {{ $value }}
             {{- end }}
+        {{- end }}
         ports:
         - name: router-port
           containerPort: 8080
