@@ -67,7 +67,7 @@ spec:
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
           - --{{ $key }}
-          - {{ $value }}
+          - "{{ $value }}"
           {{- end }}
           {{- end }}
           resources:
