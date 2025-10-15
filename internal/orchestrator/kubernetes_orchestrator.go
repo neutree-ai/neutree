@@ -85,7 +85,7 @@ func (k *kubernetesOrchestrator) HealthCheck() error {
 
 func (k *kubernetesOrchestrator) ClusterStatus() (*v1.RayClusterStatus, error) {
 	// Implementation for getting the status of a Kubernetes cluster
-	return nil, nil
+	return &v1.RayClusterStatus{}, nil
 }
 
 func (k *kubernetesOrchestrator) ListNodes() ([]v1.NodeSummary, error) {
