@@ -22,7 +22,7 @@ data:
         namespaces:
           names:
           - {{ .Namespace }}
-        selector:
+        selectors:
         - role: pod
           label: app=inference
       relabel_configs:
