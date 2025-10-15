@@ -232,13 +232,7 @@ func (c *NativeKubernetesCluster) reconcileDelete(ctx context.Context, cluster *
 	// For native Kubernetes cluster, we don't manage the cluster lifecycle
 	// The cluster should be managed externally
 
-	config, err := parseKubernetesClusterConfig(cluster)
-	if err != nil {
-		klog.Infof("Kubernetes cluster config parse error, may cluster never init, so skip delete: %v", err)
-		return nil
-	}
-
-	ctrlClient, err := getCtrlClientFromKubeConfig(config.Kubeconfig)
+	ctrlClient, err := util.GetClientFromCluster(cluster)
 	if err != nil {
 		klog.Infof("Kubernetes client create error, may cluster never init, so skip delete: %v", err)
 		return nil
