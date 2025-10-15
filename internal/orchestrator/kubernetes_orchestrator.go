@@ -201,7 +201,7 @@ func (k *kubernetesOrchestrator) buildManifestData(endpoint *v1.Endpoint, deploy
 	}
 
 	// todo: handle accelerator resources
-	data.Resource = resource
+	data.Resources = resource
 
 	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
 	if err != nil {
@@ -347,7 +347,7 @@ type DeploymentManifestData struct {
 	ImagePullSecret string
 	ModelArgs       map[string]interface{}
 	EngineArgs      map[string]interface{}
-	Resource        map[string]string
+	Resources       map[string]string
 	Env             map[string]string
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
