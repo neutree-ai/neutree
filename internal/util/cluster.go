@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/base64"
 	"encoding/json"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -82,7 +83,12 @@ func GetKubeConfigFromCluster(cluster *v1.Cluster) (string, error) {
 		return "", errors.New("kubeconfig is empty")
 	}
 
-	return config.Kubeconfig, nil
+	kubeconfigContent, err := base64.StdEncoding.DecodeString(config.Kubeconfig)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to decode kubeconfig")
+	}
+
+	return string(kubeconfigContent), nil
 }
 
 func GetClientSetFromCluster(cluster *v1.Cluster) (*kubernetes.Clientset, error) {
