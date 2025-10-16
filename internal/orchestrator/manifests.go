@@ -21,12 +21,9 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      engine: {{ .EngineName }}
-      engine_version: {{ .EngineVersion }}
       cluster: {{ .ClusterName }}
       workspace: {{ .Workspace }}
       endpoint: {{ .EndpointName }}
-      routing_logic: {{ .RoutingLogic }}
       app: inference
   template:
     metadata:
