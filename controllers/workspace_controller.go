@@ -10,7 +10,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -191,21 +190,22 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 		return c.storage.CreateEngine(engine)
 	}
 
-	result, diff, err := util.JsonEqual(engines[0].Spec, engine.Spec)
-	if err != nil {
-		return errors.Wrapf(err, "failed to compare engine spec")
-	}
+	return nil
+	// result, diff, err := util.JsonEqual(engines[0].Spec, engine.Spec)
+	// if err != nil {
+	// 	return errors.Wrapf(err, "failed to compare engine spec")
+	// }
 
-	// If the specs are equal, no need to update
-	if result {
-		return nil
-	}
+	// // If the specs are equal, no need to update
+	// if result {
+	// 	return nil
+	// }
 
-	klog.V(4).Infof("Engine %s spec has changed, diff: %s", engine.Metadata.Name, diff)
+	// klog.V(4).Infof("Engine %s spec has changed, diff: %s", engine.Metadata.Name, diff)
 
-	engines[0].Spec = engine.Spec
+	// engines[0].Spec = engine.Spec
 
-	return c.storage.UpdateEngine(strconv.Itoa(engines[0].ID), &engines[0])
+	// return c.storage.UpdateEngine(strconv.Itoa(engines[0].ID), &engines[0])
 }
 
 func (c *WorkspaceController) DeleteWorkspaceEngine(workspace *v1.Workspace) error {
