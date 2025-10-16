@@ -96,31 +96,15 @@ RETURNS BOOLEAN AS $$
 DECLARE
     has_perm BOOLEAN;
 BEGIN
-    IF workspace IS NULL THEN
-        -- check global assignment
-        SELECT EXISTS (
-            SELECT 1
-            FROM api.role_assignments ra
-            JOIN api.roles r ON (ra.spec).role = (r.metadata).name
-            WHERE (ra.spec).user_id = user_uuid
-            AND (ra.spec).global = TRUE
-            AND required_permission = ANY((r.spec).permissions)
-        ) INTO has_perm;
-    ELSE
-        -- check global and workspace assignment
-        SELECT EXISTS (
-            SELECT 1
-            FROM api.role_assignments ra
-            JOIN api.roles r ON (ra.spec).role = (r.metadata).name
-            WHERE (ra.spec).user_id = user_uuid
-            AND (
-                (ra.spec).global = TRUE 
-                OR (ra.spec).workspace = workspace
-            )
-            AND required_permission = ANY((r.spec).permissions)
-        ) INTO has_perm;
-    END IF;
-    
+    SELECT EXISTS (
+        SELECT 1
+        FROM api.role_assignments ra
+        JOIN api.roles r ON (ra.spec).role = (r.metadata).name
+        WHERE (ra.spec).user_id = user_uuid
+        AND (ra.spec).global = TRUE
+        AND required_permission = ANY((r.spec).permissions)
+    ) INTO has_perm;
+
     RETURN has_perm;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
