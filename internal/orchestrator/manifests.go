@@ -62,7 +62,7 @@ spec:
           - --host
           - "0.0.0.0"
           - "--port"
-          - "8080"
+          - "8000"
           - --task
           - {{ .ModelArgs.task }}
           {{- if .EngineArgs }}
@@ -90,11 +90,11 @@ spec:
              value: "{{ $value }}"
            {{ end }}
           ports:
-            - containerPort: 8080
+            - containerPort: 8000
           startupProbe:
             httpGet:
               path: /health
-              port: 8080
+              port: 8000
             initialDelaySeconds: 5
             timeoutSeconds: 5
             periodSeconds: 10
