@@ -77,7 +77,7 @@ spec:
         - --host
         - "0.0.0.0"
         - --port
-        - "8080"
+        - "8000"
         - --k8s-namespace
         - {{ .Namespace }}
         - --k8s-label-selector
@@ -105,13 +105,13 @@ spec:
         {{- end }}
         ports:
         - name: router-port
-          containerPort: 8080
+          containerPort: 8000
         - name: lmcache-port
           containerPort: 50051
         readinessProbe:
           httpGet:
             path: /health
-            port: 8080
+            port: 8000
             scheme: HTTP
           initialDelaySeconds: 10
           periodSeconds: 10
@@ -136,8 +136,8 @@ spec:
     workspace: {{ .Workspace }}
   ports:
   - name: http
-    port: 80
-    targetPort: 8080
+    port: 8000
+    targetPort: 8000
   - name: lmcache
     port: 50051
     targetPort: 50051

@@ -226,10 +226,10 @@ func (r *RouterComponent) GetRouteEndpoint(ctx context.Context) (string, error) 
 		if len(service.Status.LoadBalancer.Ingress) > 0 {
 			ingress := service.Status.LoadBalancer.Ingress[0]
 			if ingress.IP != "" {
-				return fmt.Sprintf("http://%s", ingress.IP), nil
+				return ingress.IP, nil
 			}
 			if ingress.Hostname != "" {
-				return fmt.Sprintf("http://%s", ingress.Hostname), nil
+				return ingress.Hostname, nil
 			}
 		}
 		return "", errors.New("LoadBalancer service has no ingress IP/Hostname")
