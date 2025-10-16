@@ -18,7 +18,10 @@ spec:
   replicas: {{ .Replicas }}
   progressDeadlineSeconds: 1200
   strategy:
-    type: Recreate
+    type: RollingUpdate
+	rollingUpdate:
+	  maxUnavailable: 1
+	  maxSurge: 0
   selector:
     matchLabels:
       cluster: {{ .ClusterName }}
