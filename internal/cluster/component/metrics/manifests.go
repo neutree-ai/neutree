@@ -43,7 +43,7 @@ data:
         action: replace
         target_label: __address__
         regex: (.+)
-        replacement: $1:8080
+        replacement: $1:8000
       # Use the metrics path from pod annotations or default to /metrics
       - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
         action: replace
