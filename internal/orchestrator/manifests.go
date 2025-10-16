@@ -11,6 +11,7 @@ metadata:
     engine_version: {{ .EngineVersion }}
     cluster: {{ .ClusterName }}
     workspace: {{ .Workspace }}
+    endpoint: {{ .EndpointName }}
     routing_logic: {{ .RoutingLogic }}
     app: inference
 spec:
@@ -24,6 +25,7 @@ spec:
       engine_version: {{ .EngineVersion }}
       cluster: {{ .ClusterName }}
       workspace: {{ .Workspace }}
+      endpoint: {{ .EndpointName }}
       routing_logic: {{ .RoutingLogic }}
       app: inference
   template:
@@ -33,6 +35,7 @@ spec:
         engine_version: {{ .EngineVersion }}
         cluster: {{ .ClusterName }}
         workspace: {{ .Workspace }}
+        endpoint: {{ .EndpointName }}
         routing_logic: {{ .RoutingLogic }}
         app: inference
     spec:
