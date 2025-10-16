@@ -19,9 +19,9 @@ spec:
   progressDeadlineSeconds: 1200
   strategy:
     type: RollingUpdate
-	rollingUpdate:
-	  maxUnavailable: 1
-	  maxSurge: 0
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
   selector:
     matchLabels:
       cluster: {{ .ClusterName }}
