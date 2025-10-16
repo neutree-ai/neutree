@@ -63,6 +63,8 @@ spec:
           - "0.0.0.0"
           - "--port"
           - "8000"
+          - --served-model-name
+          - {{ .ModelArgs.name }}
           - --task
           - {{ .ModelArgs.task }}
           {{- if .EngineArgs }}
