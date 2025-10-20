@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -87,13 +86,9 @@ func (c *RoleController) sync(obj *v1.Role) error {
 
 func (c *RoleController) updateStatus(obj *v1.Role, phase v1.RolePhase, err error) error {
 	newStatus := &v1.RoleStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
-	}
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	return c.storage.UpdateRole(strconv.Itoa(obj.ID), &v1.Role{Status: newStatus})

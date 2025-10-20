@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -133,11 +132,9 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 func (c *ModelRegistryController) updateStatus(obj *v1.ModelRegistry, phase v1.ModelRegistryPhase, err error) error {
 	newStatus := &v1.ModelRegistryStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
-	}
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	return c.storage.UpdateModelRegistry(strconv.Itoa(obj.ID), &v1.ModelRegistry{Status: newStatus})

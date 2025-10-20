@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -276,7 +275,7 @@ func (c *EndpointController) disconnectModelFromCluster(obj *v1.Endpoint) error 
 }
 
 func (c *EndpointController) updateStatus(obj *v1.Endpoint, status *v1.EndpointStatus) error {
-	status.LastTransitionTime = time.Now().Format(time.RFC3339Nano)
+	status.LastTransitionTime = FormatStatusTime()
 
 	// If the new service URL is empty, use the old service URL to avoid it being set to empty.
 	if status.ServiceURL == "" && obj.Status != nil && obj.Status.ServiceURL != "" {
@@ -288,13 +287,9 @@ func (c *EndpointController) updateStatus(obj *v1.Endpoint, status *v1.EndpointS
 
 func (c *EndpointController) formatStatus(phase v1.EndpointPhase, err error) *v1.EndpointStatus {
 	newStatus := &v1.EndpointStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
-	}
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	return newStatus

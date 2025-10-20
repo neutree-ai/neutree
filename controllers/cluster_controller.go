@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -364,8 +363,9 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 
 func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator, phase v1.ClusterPhase, err error) error {
 	newStatus := &v1.ClusterStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	if obj.Status != nil {
@@ -376,7 +376,6 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 		newStatus.Version = obj.Status.Version
 		newStatus.RayVersion = obj.Status.RayVersion
-		newStatus.DesiredNodes = obj.Status.DesiredNodes
 	}
 
 	if newStatus.Phase == v1.ClusterPhaseRunning && clusterOrchestrator != nil && obj.Metadata.DeletionTimestamp == "" {
@@ -388,10 +387,6 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 			newStatus.DesiredNodes = clusterStatus.DesireNodes
 			newStatus.ResourceInfo = clusterStatus.ResourceInfo
 		}
-	}
-
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
 	}
 
 	return c.storage.UpdateCluster(strconv.Itoa(obj.ID), &v1.Cluster{Status: newStatus})

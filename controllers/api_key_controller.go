@@ -1,8 +1,6 @@
 package controllers
 
 import (
-	"time"
-
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 
@@ -105,14 +103,10 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 
 func (c *ApiKeyController) updateStatus(obj *v1.ApiKey, phase v1.ApiKeyPhase, err error) error {
 	newStatus := &v1.ApiKeyStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
 		SkValue:            obj.Status.SkValue,
-	}
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	return c.storage.UpdateApiKey(obj.ID, &v1.ApiKey{Status: newStatus})

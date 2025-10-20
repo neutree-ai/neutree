@@ -174,13 +174,9 @@ func intPtr(i int) *int {
 
 func (c *ModelCatalogController) updateStatus(obj *v1.ModelCatalog, phase v1.ModelCatalogPhase, err error) error {
 	newStatus := &v1.ModelCatalogStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
-	}
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	return c.storage.UpdateModelCatalog(strconv.Itoa(obj.ID), &v1.ModelCatalog{Status: newStatus})

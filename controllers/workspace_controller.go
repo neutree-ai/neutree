@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -119,19 +118,14 @@ func (c *WorkspaceController) sync(obj *v1.Workspace) error {
 
 func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.WorkspacePhase, err error) error {
 	newStatus := &v1.WorkspaceStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	// Preserve existing fields if needed, e.g., ServiceURL
 	if obj.Status != nil {
 		newStatus.ServiceURL = obj.Status.ServiceURL
-	}
-
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
 	}
 
 	// Avoid unnecessary updates if status hasn't changed meaningfully

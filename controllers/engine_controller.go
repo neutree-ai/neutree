@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -87,13 +86,9 @@ func (c *EngineController) sync(obj *v1.Engine) error {
 
 func (c *EngineController) updateStatus(obj *v1.Engine, phase v1.EnginePhase, err error) error {
 	newStatus := &v1.EngineStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
-	}
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	return c.storage.UpdateEngine(strconv.Itoa(obj.ID), &v1.Engine{Status: newStatus})
