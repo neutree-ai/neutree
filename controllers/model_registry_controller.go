@@ -73,6 +73,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 						obj.Metadata.Workspace, obj.Metadata.Name)
 				}
 			}
+
 			return nil
 		}()
 

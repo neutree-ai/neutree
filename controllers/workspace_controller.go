@@ -187,6 +187,7 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 			return errors.Wrapf(err, "failed to create engine %s/%s",
 				engine.Metadata.Workspace, engine.Metadata.Name)
 		}
+
 		return nil
 	}
 
@@ -209,6 +210,7 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 		return errors.Wrapf(err, "failed to update engine %s/%s",
 			engine.Metadata.Workspace, engine.Metadata.Name)
 	}
+
 	return nil
 }
 
