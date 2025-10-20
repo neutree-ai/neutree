@@ -54,7 +54,8 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 
 			err = c.storage.DeleteApiKey(obj.ID)
 			if err != nil {
-				return errors.Wrapf(err, "failed to delete api_key in DB %s", obj.Metadata.Name)
+				return errors.Wrapf(err, "failed to delete api_key %s/%s from DB",
+					obj.Metadata.Workspace, obj.Metadata.Name)
 			}
 
 			return nil
@@ -64,13 +65,15 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 
 		err = c.gw.DeleteAPIKey(obj)
 		if err != nil {
-			return errors.Wrapf(err, "failed to delete api_key in gateway %s", obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to delete api_key %s/%s from gateway",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		// Update status to DELETED
 		err = c.updateStatus(obj, v1.ApiKeyPhaseDELETED, nil)
 		if err != nil {
-			return errors.Wrapf(err, "failed to update api_key %s status to DELETED", obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to update api_key %s/%s status to DELETED",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil
@@ -79,7 +82,8 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 	// sync api key when not deleting
 	err = c.gw.SyncAPIKey(obj)
 	if err != nil {
-		return errors.Wrapf(err, "failed to sync api_key %s in gateway", obj.Metadata.Name)
+		return errors.Wrapf(err, "failed to sync api_key %s/%s to gateway",
+			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
 	// Handle creation/update (when not deleting)
@@ -89,7 +93,8 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 		err = c.updateStatus(obj, v1.ApiKeyPhaseCREATED, nil)
 
 		if err != nil {
-			return errors.Wrapf(err, "failed to update api_key %s status to CREATED", obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to update api_key %s/%s status to CREATED",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil

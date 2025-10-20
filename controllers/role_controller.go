@@ -50,7 +50,8 @@ func (c *RoleController) sync(obj *v1.Role) error {
 
 			err = c.storage.DeleteRole(strconv.Itoa(obj.ID))
 			if err != nil {
-				return errors.Wrapf(err, "failed to delete role in DB %s", obj.Metadata.Name)
+				return errors.Wrapf(err, "failed to delete role %s/%s from DB",
+					obj.Metadata.Workspace, obj.Metadata.Name)
 			}
 
 			return nil
@@ -60,7 +61,8 @@ func (c *RoleController) sync(obj *v1.Role) error {
 		// Update status to DELETED
 		err = c.updateStatus(obj, v1.RolePhaseDELETED, nil)
 		if err != nil {
-			return errors.Wrapf(err, "failed to update role %s status to DELETED", obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to update role %s/%s status to DELETED",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil
@@ -73,7 +75,8 @@ func (c *RoleController) sync(obj *v1.Role) error {
 		err = c.updateStatus(obj, v1.RolePhaseCREATED, nil)
 
 		if err != nil {
-			return errors.Wrapf(err, "failed to update role %s status to CREATED", obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to update role %s/%s status to CREATED",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil

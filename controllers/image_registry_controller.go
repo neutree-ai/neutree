@@ -116,7 +116,8 @@ func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRe
 
 	_, err = c.imageService.ListImageTags(imageRepo, authn.FromConfig(authConfig))
 	if err != nil {
-		return errors.Wrap(err, "check image registry auth failed")
+		return errors.Wrapf(err, "failed to authenticate with image registry %s/%s at URL %s, repository %s",
+			imageRegistry.Metadata.Workspace, imageRegistry.Metadata.Name, imageRegistry.Spec.URL, imageRepo)
 	}
 
 	return nil

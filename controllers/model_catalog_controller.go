@@ -52,7 +52,8 @@ func (c *ModelCatalogController) sync(modelCatalog *v1.ModelCatalog) error {
 
 			err := c.storage.DeleteModelCatalog(strconv.Itoa(modelCatalog.ID))
 			if err != nil {
-				return errors.Wrapf(err, "failed to delete model catalog in DB %s", modelCatalog.Metadata.Name)
+				return errors.Wrapf(err, "failed to delete model catalog %s/%s from DB",
+					modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name)
 			}
 
 			return nil
@@ -62,7 +63,8 @@ func (c *ModelCatalogController) sync(modelCatalog *v1.ModelCatalog) error {
 		// Update status to DELETED
 		err := c.updateStatus(modelCatalog, v1.ModelCatalogPhaseDELETED, nil)
 		if err != nil {
-			return errors.Wrapf(err, "failed to update model catalog %s status to DELETED", modelCatalog.Metadata.Name)
+			return errors.Wrapf(err, "failed to update model catalog %s/%s status to DELETED",
+				modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name)
 		}
 
 		return nil
@@ -129,7 +131,8 @@ func (c *ModelCatalogController) processPendingModelCatalog(modelCatalog *v1.Mod
 	modelCatalog.Status.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
 
 	if err := c.storage.UpdateModelCatalog(strconv.Itoa(modelCatalog.ID), modelCatalog); err != nil {
-		return errors.Wrapf(err, "failed to update model catalog status to ready")
+		return errors.Wrapf(err, "failed to update model catalog %s/%s status to ready",
+			modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name)
 	}
 
 	klog.Infof("Model catalog %s/%s is ready", modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name)
@@ -157,7 +160,8 @@ func (c *ModelCatalogController) processFailedModelCatalog(modelCatalog *v1.Mode
 	modelCatalog.Status.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
 
 	if err := c.storage.UpdateModelCatalog(strconv.Itoa(modelCatalog.ID), modelCatalog); err != nil {
-		return errors.Wrapf(err, "failed to update model catalog status to pending")
+		return errors.Wrapf(err, "failed to update model catalog %s/%s status to pending",
+			modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name)
 	}
 
 	return nil

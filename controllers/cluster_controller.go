@@ -119,7 +119,8 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 		MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
 	})
 	if err != nil {
-		return errors.Wrapf(err, "failed to create cluster orchestrator for cluster %s", cluster.Metadata.Name)
+		return errors.Wrapf(err, "failed to create cluster orchestrator for cluster %s/%s",
+			cluster.Metadata.Workspace, cluster.Metadata.Name)
 	}
 
 	if !cluster.IsInitialized() {
@@ -127,7 +128,8 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 
 		headIP, err = clusterOrchestrator.CreateCluster()
 		if err != nil {
-			return errors.Wrap(err, "failed to create cluster "+cluster.Metadata.Name)
+			return errors.Wrapf(err, "failed to create cluster %s/%s",
+				cluster.Metadata.Workspace, cluster.Metadata.Name)
 		}
 
 		cluster.Status = &v1.ClusterStatus{
@@ -313,7 +315,8 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 
 		err := c.storage.DeleteCluster(strconv.Itoa(cluster.ID))
 		if err != nil {
-			return errors.Wrap(err, "failed to delete cluster "+cluster.Metadata.Name)
+			return errors.Wrapf(err, "failed to delete cluster %s/%s from DB",
+				cluster.Metadata.Workspace, cluster.Metadata.Name)
 		}
 
 		return nil
@@ -332,18 +335,21 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 			MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
 		})
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to create orchestrator for cluster %s/%s",
+				cluster.Metadata.Workspace, cluster.Metadata.Name)
 		}
 
 		err = clusterOrchestrator.DeleteCluster()
 		if err != nil {
-			return errors.Wrap(err, "failed to delete ray cluster "+cluster.Metadata.Name)
+			return errors.Wrapf(err, "failed to delete ray cluster %s/%s",
+				cluster.Metadata.Workspace, cluster.Metadata.Name)
 		}
 	}
 
 	err := c.gw.DeleteCluster(cluster)
 	if err != nil {
-		return errors.Wrap(err, "failed to delete cluster backend service "+cluster.Metadata.Name)
+		return errors.Wrapf(err, "failed to delete cluster backend service for %s/%s",
+			cluster.Metadata.Workspace, cluster.Metadata.Name)
 	}
 
 	klog.Info("Cluster " + cluster.Metadata.Name + " delete finished, mark as deleted")

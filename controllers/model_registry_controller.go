@@ -122,9 +122,9 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 	}
 
 	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseCONNECTED {
-		healthy := modelRegistry.HealthyCheck()
-		if !healthy {
-			return errors.New("health check model registry " + obj.Metadata.Name + " failed")
+		if err = modelRegistry.HealthyCheck(); err != nil {
+			return errors.Wrapf(err, "health check failed for model registry %s/%s",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 	}
 

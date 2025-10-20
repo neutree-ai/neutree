@@ -121,15 +121,17 @@ func (f *localFile) GetModelPath(name, version string) (string, error) {
 	return bentoml.GetModelPath(f.path, name, version)
 }
 
-func (f *localFile) HealthyCheck() bool {
+func (f *localFile) HealthyCheck() error {
 	if _, err := os.Stat(f.path); err != nil {
-		return false
+		return errors.Wrapf(err, "failed to access model registry path %s", f.path)
 	}
 
-	// Try to list models to verify BentoML functionality
-	_, err := bentoml.ListModels(f.path)
+	// Try to list models to verify functionality
+	if _, err := bentoml.ListModels(f.path); err != nil {
+		return errors.Wrapf(err, "failed to list models at path %s", f.path)
+	}
 
-	return err == nil
+	return nil
 }
 
 type nfsFile struct {
@@ -194,15 +196,17 @@ func (n *nfsFile) GetModelPath(name, version string) (string, error) {
 	return bentoml.GetModelPath(n.targetPath, name, version)
 }
 
-func (n *nfsFile) HealthyCheck() bool {
+func (n *nfsFile) HealthyCheck() error {
 	if _, err := os.Stat(n.targetPath); err != nil {
-		return false
+		return errors.Wrapf(err, "failed to access NFS mount path %s", n.targetPath)
 	}
 
-	// Try to list models to verify BentoML functionality
-	_, err := bentoml.ListModels(n.targetPath)
+	// Try to list models to verify functionality
+	if _, err := bentoml.ListModels(n.targetPath); err != nil {
+		return errors.Wrapf(err, "failed to list models at NFS path %s", n.targetPath)
+	}
 
-	return err == nil
+	return nil
 }
 
 func newFileBased(registry *v1.ModelRegistry) (ModelRegistry, error) {

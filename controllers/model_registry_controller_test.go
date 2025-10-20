@@ -199,14 +199,14 @@ func TestModelRegistryController_Sync_Connected(t *testing.T) {
 			name:  "Connected -> Connected (healthy check success)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
-				m.On("HealthyCheck").Return(true)
+				m.On("HealthyCheck").Return(nil)
 			},
 		},
 		{
 			name:  "Connected -> Failed (healthy check failed)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
-				m.On("HealthyCheck").Return(false)
+				m.On("HealthyCheck").Return(assert.AnError)
 				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.ModelRegistry)
 					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
