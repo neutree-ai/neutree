@@ -58,13 +58,16 @@ func (c *EndpointController) Reconcile(obj interface{}) error {
 func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	var err error
 
+	// Handle deletion early - bypass defer block for already-deleted resources
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
 		if obj.Status != nil && obj.Status.Phase == v1.EndpointPhaseDELETED {
 			klog.Infof("Endpoint %s already marked as deleted, removing from DB", obj.Metadata.Name)
 
 			err = c.storage.DeleteEndpoint(strconv.Itoa(obj.ID))
 			if err != nil {
-				return errors.Wrapf(err, "failed to delete endpoint in DB %s", obj.Metadata.Name)
+				// Already deleted, just return error for logging
+				return errors.Wrapf(err, "failed to delete endpoint %s/%s from DB",
+					obj.Metadata.Workspace, obj.Metadata.Name)
 			}
 
 			return nil
@@ -72,29 +75,66 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 
 		klog.Info("Deleting endpoint " + obj.Metadata.Name)
 
-		err = c.gw.DeleteEndpoint(obj)
-		if err != nil {
-			return errors.Wrapf(err, "failed to delete route for endpoint %s", obj.Metadata.Name)
+		// For deletion, we need to track if it succeeds to set correct phase
+		deleteErr := func() error {
+			if err := c.gw.DeleteEndpoint(obj); err != nil {
+				return errors.Wrapf(err, "failed to delete route for endpoint %s/%s",
+					obj.Metadata.Workspace, obj.Metadata.Name)
+			}
+
+			if err := c.cleanupEndpoint(obj); err != nil {
+				return errors.Wrapf(err, "failed to cleanup endpoint %s/%s",
+					obj.Metadata.Workspace, obj.Metadata.Name)
+			}
+
+			if err := c.disconnectModelFromCluster(obj); err != nil {
+				return errors.Wrapf(err, "failed to disconnect model %s from endpoint %s/%s",
+					obj.Spec.Model, obj.Metadata.Workspace, obj.Metadata.Name)
+			}
+
+			return nil
+		}()
+
+		// Update status to DELETED if successful, or FAILED if not
+		phase := v1.EndpointPhaseDELETED
+		if deleteErr != nil {
+			phase = v1.EndpointPhaseFAILED
 		}
 
-		err = c.cleanupEndpoint(obj)
-		if err != nil {
-			return errors.Wrapf(err, "failed to cleanup endpoint %s", obj.Metadata.Name)
+		updateErr := c.updateStatus(obj, c.formatStatus(phase, deleteErr))
+		if updateErr != nil {
+			klog.Errorf("failed to update endpoint %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
 		}
 
-		err = c.disconnectModelFromCluster(obj)
-		if err != nil {
-			return errors.Wrapf(err, "failed to disconnect model %s to endpoint %s", obj.Spec.Model, obj.Metadata.Name)
-		}
-
-		// Update status to DELETED
-		err = c.updateStatus(obj, c.formatStatus(v1.EndpointPhaseDELETED, nil))
-		if err != nil {
-			return errors.Wrapf(err, "failed to update endpoint %s status to DELETED", obj.Metadata.Name)
+		// Return the original delete error if any
+		if deleteErr != nil {
+			return deleteErr
 		}
 
 		return nil
 	}
+
+	// Defer block to handle status updates for non-deletion paths
+	defer func() {
+		// Determine phase based on error
+		phase := v1.EndpointPhaseRUNNING
+		if err != nil {
+			phase = v1.EndpointPhaseFAILED
+		}
+
+		// Skip update if already in correct phase and no error change
+		if obj.Status != nil && obj.Status.Phase == phase &&
+			(err != nil) == (obj.Status.ErrorMessage != "") {
+			return
+		}
+
+		updateErr := c.updateStatus(obj, c.formatStatus(phase, err))
+		if updateErr != nil {
+			klog.Errorf("failed to update endpoint %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
+		}
+	}()
 
 	// always exec connect model to cluster, for cluster may dynamic scale, we need ensure model exists on all cluster nodes.
 	// todo: In order to reduce model connection actions, a new controller may be created in the future to uniformly manage model connections on the cluster.
@@ -108,14 +148,9 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.EndpointPhasePENDING {
 		klog.Infof("Endpoint %s is PENDING or has no status, creating", obj.Metadata.Name)
 
-		status, err := c.createOrUpdateEndpoint(obj)
+		_, err = c.createOrUpdateEndpoint(obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create endpoint %s", obj.Metadata.Name)
-		}
-
-		err = c.updateStatus(obj, status)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update endpoint %s status", obj.Metadata.Name)
 		}
 
 		return nil
@@ -130,14 +165,9 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			return errors.Wrapf(err, "failed to cleanup endpoint %s", obj.Metadata.Name)
 		}
 
-		status, err := c.createOrUpdateEndpoint(obj)
+		_, err = c.createOrUpdateEndpoint(obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create endpoint %s", obj.Metadata.Name)
-		}
-
-		err = c.updateStatus(obj, status)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update endpoint %s status", obj.Metadata.Name)
 		}
 
 		return nil
@@ -163,24 +193,21 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			return errors.Wrapf(err, "failed to check endpoint %s health", obj.Metadata.Name)
 		}
 
-		serviceURL, err := c.gw.GetEndpointServeUrl(obj)
-		if err != nil {
-			klog.Warningf("failed to get endpoint %s service url: %v", obj.Metadata.Name, err)
+		serviceURL, urlErr := c.gw.GetEndpointServeUrl(obj)
+		if urlErr != nil {
+			klog.Warningf("failed to get endpoint %s service url: %v", obj.Metadata.Name, urlErr)
 		} else {
 			status.ServiceURL = serviceURL
 		}
 
-		if status.Phase != v1.EndpointPhaseRUNNING {
-			klog.Infof("Endpoint %s is not RUNNING, updating status", obj.Metadata.Name)
-
-			err = c.updateStatus(obj, status)
-			if err != nil {
-				return errors.Wrapf(err, "failed to update endpoint %s status", obj.Metadata.Name)
+		// If health check shows not RUNNING, or service URL changed, we need explicit update
+		if status.Phase != v1.EndpointPhaseRUNNING || status.ServiceURL != obj.Status.ServiceURL {
+			if status.Phase != v1.EndpointPhaseRUNNING {
+				klog.Infof("Endpoint %s is not RUNNING, updating status", obj.Metadata.Name)
 			}
-		}
-
-		if status.ServiceURL != obj.Status.ServiceURL {
-			klog.Infof("Endpoint %s service url changed, updating", obj.Metadata.Name)
+			if status.ServiceURL != obj.Status.ServiceURL {
+				klog.Infof("Endpoint %s service url changed, updating", obj.Metadata.Name)
+			}
 
 			err = c.updateStatus(obj, status)
 			if err != nil {

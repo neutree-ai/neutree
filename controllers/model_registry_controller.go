@@ -47,13 +47,15 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 		modelRegistry model_registry.ModelRegistry
 	)
 
+	// Handle deletion early - bypass defer block for already-deleted resources
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
 		if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
 			klog.Info("Model registry " + obj.Metadata.Name + " is already deleted, delete resource from storage")
 
 			err = c.storage.DeleteModelRegistry(strconv.Itoa(obj.ID))
 			if err != nil {
-				return errors.Wrap(err, "failed to delete model registry "+obj.Metadata.Name)
+				return errors.Wrapf(err, "failed to delete model registry %s/%s from DB",
+					obj.Metadata.Workspace, obj.Metadata.Name)
 			}
 
 			return nil
@@ -61,48 +63,73 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 		klog.Info("Deleting model registry " + obj.Metadata.Name)
 
-		modelRegistry, err = model_registry.NewModelRegistry(obj)
-		if err == nil {
-			// only disconnect model registry when it config is correct.
-			if err = modelRegistry.Disconnect(); err != nil {
-				return errors.Wrap(err, "failed to disconnect model registry "+obj.Metadata.Name)
+		// For deletion, we need to track if it succeeds to set correct phase
+		deleteErr := func() error {
+			modelRegistry, err = model_registry.NewModelRegistry(obj)
+			if err == nil {
+				// only disconnect model registry when it config is correct.
+				if err = modelRegistry.Disconnect(); err != nil {
+					return errors.Wrapf(err, "failed to disconnect model registry %s/%s",
+						obj.Metadata.Workspace, obj.Metadata.Name)
+				}
 			}
+			return nil
+		}()
+
+		// Update status to DELETED if successful, or FAILED if not
+		phase := v1.ModelRegistryPhaseDELETED
+		if deleteErr != nil {
+			phase = v1.ModelRegistryPhaseFAILED
 		}
 
-		klog.Info("Model registry " + obj.Metadata.Name + " is deleted")
+		updateErr := c.updateStatus(obj, phase, deleteErr)
+		if updateErr != nil {
+			klog.Errorf("failed to update model registry %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
+		}
 
-		if err = c.updateStatus(obj, v1.ModelRegistryPhaseDELETED, nil); err != nil {
-			klog.Errorf("failed to update model registry %s, err: %v", obj.Metadata.Name, err)
+		klog.Info("Model registry " + obj.Metadata.Name + " deletion processed")
+
+		// Return the original delete error if any
+		if deleteErr != nil {
+			return deleteErr
 		}
 
 		return nil
 	}
 
+	// Defer block to handle status updates for non-deletion paths
 	defer func() {
+		// Determine phase based on error
 		phase := v1.ModelRegistryPhaseCONNECTED
 		if err != nil {
 			phase = v1.ModelRegistryPhaseFAILED
 		}
 
-		if obj.Status != nil && obj.Status.Phase == phase {
+		// Skip update if already in correct phase and no error change
+		if obj.Status != nil && obj.Status.Phase == phase &&
+			(err != nil) == (obj.Status.ErrorMessage != "") {
 			return
 		}
 
-		updateStatusErr := c.updateStatus(obj, phase, err)
-		if updateStatusErr != nil {
-			klog.Errorf("failed to update model registry %s status, err: %v ", obj.Metadata.Name, updateStatusErr)
+		updateErr := c.updateStatus(obj, phase, err)
+		if updateErr != nil {
+			klog.Errorf("failed to update model registry %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
 		}
 	}()
 
 	modelRegistry, err = model_registry.NewModelRegistry(obj)
 	if err != nil {
-		return errors.Wrap(err, "failed to create model registry "+obj.Metadata.Name)
+		return errors.Wrapf(err, "failed to create model registry %s/%s",
+			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.ModelRegistryPhasePENDING {
 		err = modelRegistry.Connect()
 		if err != nil {
-			return errors.Wrap(err, "failed to connect model registry "+obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to connect model registry %s/%s",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil
@@ -110,11 +137,13 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseFAILED {
 		if err = modelRegistry.Disconnect(); err != nil {
-			return errors.Wrap(err, "failed to disconnect model registry "+obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to disconnect model registry %s/%s",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		if err = modelRegistry.Connect(); err != nil {
-			return errors.Wrap(err, "failed to connect model registry "+obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to connect model registry %s/%s",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil

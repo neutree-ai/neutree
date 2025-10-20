@@ -51,13 +51,15 @@ func (c *ImageRegistryController) Reconcile(obj interface{}) error {
 func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 	var err error
 
+	// Handle deletion early - bypass defer block for already-deleted resources
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
 		if obj.Status != nil && obj.Status.Phase == v1.ImageRegistryPhaseDELETED {
 			klog.Info("Image registry " + obj.Metadata.Name + " is already deleted, delete resource from storage")
 
 			err = c.storage.DeleteImageRegistry(strconv.Itoa(obj.ID))
 			if err != nil {
-				return errors.Wrap(err, "failed to delete image registry "+obj.Metadata.Name)
+				return errors.Wrapf(err, "failed to delete image registry %s/%s from DB",
+					obj.Metadata.Workspace, obj.Metadata.Name)
 			}
 
 			return nil
@@ -65,33 +67,41 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 
 		klog.Info("Image registry " + obj.Metadata.Name + " is deleted")
 
-		err = c.updateStatus(obj, v1.ImageRegistryPhaseDELETED, nil)
-		if err != nil {
-			klog.Errorf("failed to update image registry %s, err: %v ", obj.Metadata.Name, err)
+		// Update status to DELETED (no operations needed for image registry deletion)
+		updateErr := c.updateStatus(obj, v1.ImageRegistryPhaseDELETED, nil)
+		if updateErr != nil {
+			klog.Errorf("failed to update image registry %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
 		}
 
 		return nil
 	}
 
+	// Defer block to handle status updates for non-deletion paths
 	defer func() {
+		// Determine phase based on error
 		phase := v1.ImageRegistryPhaseCONNECTED
 		if err != nil {
 			phase = v1.ImageRegistryPhaseFAILED
 		}
 
-		if obj.Status != nil && obj.Status.Phase == phase {
+		// Skip update if already in correct phase and no error change
+		if obj.Status != nil && obj.Status.Phase == phase &&
+			(err != nil) == (obj.Status.ErrorMessage != "") {
 			return
 		}
 
-		updateStatusErr := c.updateStatus(obj, phase, err)
-		if updateStatusErr != nil {
-			klog.Errorf("failed to update image registry %s status, err: %v ", obj.Metadata.Name, updateStatusErr)
+		updateErr := c.updateStatus(obj, phase, err)
+		if updateErr != nil {
+			klog.Errorf("failed to update image registry %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
 		}
 	}()
 
 	err = c.connectImageRegistry(obj)
 	if err != nil {
-		return errors.Wrap(err, "failed to connect image registry "+obj.Metadata.Name)
+		return errors.Wrapf(err, "failed to connect image registry %s/%s",
+			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
 	return nil
