@@ -122,10 +122,6 @@ func RegisterUserProfileRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 	RegisterResourceProxyRoute(group, middlewares, deps, "/user_profiles", "user_profiles")
 }
 
-func RegisterAPIKeyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
-	RegisterResourceProxyRoute(group, middlewares, deps, "/api_keys", "api_keys")
-}
-
 func RegisterOEMConfigRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	RegisterResourceProxyRoute(group, middlewares, deps, "/oem_configs", "oem_configs")
 }
