@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -105,13 +104,9 @@ func (c *RoleAssignmentController) sync(obj *v1.RoleAssignment) error {
 
 func (c *RoleAssignmentController) updateStatus(obj *v1.RoleAssignment, phase v1.RoleAssignmentPhase, err error) error {
 	newStatus := &v1.RoleAssignmentStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
-	}
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	// Create a minimal update object to avoid overwriting spec or metadata

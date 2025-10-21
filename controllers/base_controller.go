@@ -112,3 +112,17 @@ func (bc *BaseController) reconcileAll() error {
 
 	return nil
 }
+
+// FormatErrorForStatus formats an error for display in resource status.
+func FormatErrorForStatus(err error) string {
+	if err == nil {
+		return ""
+	}
+	// The pkg/errors library already includes the full chain in Error()
+	return err.Error()
+}
+
+// FormatStatusTime returns the current time in the standard format for status timestamps.
+func FormatStatusTime() string {
+	return time.Now().Format(time.RFC3339Nano)
+}

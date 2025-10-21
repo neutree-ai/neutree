@@ -130,7 +130,7 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "update fail",
+			name: "update status fail - logged but not returned",
 			in:   ep(id, ""),
 			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
@@ -139,9 +139,10 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 				s.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil).Maybe()
 				o.On("ConnectEndpointModel", mock.Anything).Return(nil)
 				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
+				// Defer block catches updateStatus error and logs it without returning
 				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(assert.AnError)
 			},
-			wantErr: true,
+			wantErr: false, // Changed: defer block logs error but doesn't return it
 		},
 		{
 			name: "running health ok",

@@ -139,10 +139,15 @@ func TestModelRegistryController_Sync_PendingOrNoStatus(t *testing.T) {
 			},
 		},
 		{
-			name:  "Pending/NoStatus -> Pending/NoStatus (disconnect failed)",
+			name:  "Pending/NoStatus -> Failed (disconnect failed)",
 			input: testModelRegistryWithDeletionTimestamp(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
 				m.On("Disconnect").Return(assert.AnError)
+				// Now updateStatus is called even on disconnect failure to set FAILED phase
+				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+					obj := args.Get(1).(*v1.ModelRegistry)
+					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
+				}).Return(nil)
 			},
 			wantErr: true,
 		},
@@ -199,14 +204,14 @@ func TestModelRegistryController_Sync_Connected(t *testing.T) {
 			name:  "Connected -> Connected (healthy check success)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
-				m.On("HealthyCheck").Return(true)
+				m.On("HealthyCheck").Return(nil)
 			},
 		},
 		{
 			name:  "Connected -> Failed (healthy check failed)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
-				m.On("HealthyCheck").Return(false)
+				m.On("HealthyCheck").Return(assert.AnError)
 				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.ModelRegistry)
 					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
@@ -226,10 +231,15 @@ func TestModelRegistryController_Sync_Connected(t *testing.T) {
 			},
 		},
 		{
-			name:  "Connected -> Connected (disconnect failed)",
+			name:  "Connected -> Failed (disconnect failed)",
 			input: testModelRegistryWithDeletionTimestamp(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
 				m.On("Disconnect").Return(assert.AnError)
+				// Now updateStatus is called even on disconnect failure to set FAILED phase
+				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+					obj := args.Get(1).(*v1.ModelRegistry)
+					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
+				}).Return(nil)
 			},
 			wantErr: true,
 		},
@@ -300,6 +310,11 @@ func TestModelRegistryController_Sync_Failed(t *testing.T) {
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
 				m.On("Disconnect").Return(nil)
 				m.On("Connect").Return(assert.AnError)
+				// Defer block updates status to FAILED when connect fails
+				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+					obj := args.Get(1).(*v1.ModelRegistry)
+					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
+				}).Return(nil)
 			},
 			wantErr: true,
 		},
@@ -308,6 +323,11 @@ func TestModelRegistryController_Sync_Failed(t *testing.T) {
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
 				m.On("Disconnect").Return(assert.AnError)
+				// Defer block updates status to FAILED when disconnect fails
+				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+					obj := args.Get(1).(*v1.ModelRegistry)
+					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
+				}).Return(nil)
 			},
 			wantErr: true,
 		},
@@ -327,6 +347,11 @@ func TestModelRegistryController_Sync_Failed(t *testing.T) {
 			input: testModelRegistryWithDeletionTimestamp(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
 				m.On("Disconnect").Return(assert.AnError)
+				// Deletion path updates status to FAILED when disconnect fails
+				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+					obj := args.Get(1).(*v1.ModelRegistry)
+					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
+				}).Return(nil)
 			},
 			wantErr: true,
 		},

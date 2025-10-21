@@ -326,18 +326,18 @@ func (_c *MockModelRegistry_GetModelVersion_Call) RunAndReturn(run func(string, 
 }
 
 // HealthyCheck provides a mock function with no fields
-func (_m *MockModelRegistry) HealthyCheck() bool {
+func (_m *MockModelRegistry) HealthyCheck() error {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for HealthyCheck")
 	}
 
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(bool)
+		r0 = ret.Error(0)
 	}
 
 	return r0
@@ -360,12 +360,12 @@ func (_c *MockModelRegistry_HealthyCheck_Call) Run(run func()) *MockModelRegistr
 	return _c
 }
 
-func (_c *MockModelRegistry_HealthyCheck_Call) Return(_a0 bool) *MockModelRegistry_HealthyCheck_Call {
+func (_c *MockModelRegistry_HealthyCheck_Call) Return(_a0 error) *MockModelRegistry_HealthyCheck_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockModelRegistry_HealthyCheck_Call) RunAndReturn(run func() bool) *MockModelRegistry_HealthyCheck_Call {
+func (_c *MockModelRegistry_HealthyCheck_Call) RunAndReturn(run func() error) *MockModelRegistry_HealthyCheck_Call {
 	_c.Call.Return(run)
 	return _c
 }

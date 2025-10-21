@@ -378,6 +378,11 @@ func TestImageRegistryController_Sync_Failed(t *testing.T) {
 					assert.Equal(t, input.Spec.AuthConfig.Username, authConfig.Username)
 					assert.Equal(t, input.Spec.AuthConfig.Password, authConfig.Password)
 				}).Return(nil, assert.AnError)
+				// Defer block updates status to FAILED when connection fails
+				s.On("UpdateImageRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+					arg := args.Get(1).(*v1.ImageRegistry)
+					assert.Equal(t, v1.ImageRegistryPhaseFAILED, arg.Status.Phase)
+				}).Return(nil)
 			},
 			wantErr: true,
 		},

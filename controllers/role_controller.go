@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -50,7 +49,8 @@ func (c *RoleController) sync(obj *v1.Role) error {
 
 			err = c.storage.DeleteRole(strconv.Itoa(obj.ID))
 			if err != nil {
-				return errors.Wrapf(err, "failed to delete role in DB %s", obj.Metadata.Name)
+				return errors.Wrapf(err, "failed to delete role %s/%s from DB",
+					obj.Metadata.Workspace, obj.Metadata.Name)
 			}
 
 			return nil
@@ -60,7 +60,8 @@ func (c *RoleController) sync(obj *v1.Role) error {
 		// Update status to DELETED
 		err = c.updateStatus(obj, v1.RolePhaseDELETED, nil)
 		if err != nil {
-			return errors.Wrapf(err, "failed to update role %s status to DELETED", obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to update role %s/%s status to DELETED",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil
@@ -73,7 +74,8 @@ func (c *RoleController) sync(obj *v1.Role) error {
 		err = c.updateStatus(obj, v1.RolePhaseCREATED, nil)
 
 		if err != nil {
-			return errors.Wrapf(err, "failed to update role %s status to CREATED", obj.Metadata.Name)
+			return errors.Wrapf(err, "failed to update role %s/%s status to CREATED",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil
@@ -84,13 +86,9 @@ func (c *RoleController) sync(obj *v1.Role) error {
 
 func (c *RoleController) updateStatus(obj *v1.Role, phase v1.RolePhase, err error) error {
 	newStatus := &v1.RoleStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
-	}
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	return c.storage.UpdateRole(strconv.Itoa(obj.ID), &v1.Role{Status: newStatus})

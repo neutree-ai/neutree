@@ -19,7 +19,7 @@ type ModelRegistry interface {
 	ListModels(option ListOption) ([]v1.GeneralModel, error)
 	Connect() error
 	Disconnect() error
-	HealthyCheck() bool
+	HealthyCheck() error
 
 	// Model operations
 	GetModelVersion(name, version string) (*v1.ModelVersion, error)

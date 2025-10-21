@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -119,7 +118,8 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 		MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
 	})
 	if err != nil {
-		return errors.Wrapf(err, "failed to create cluster orchestrator for cluster %s", cluster.Metadata.Name)
+		return errors.Wrapf(err, "failed to create cluster orchestrator for cluster %s/%s",
+			cluster.Metadata.Workspace, cluster.Metadata.Name)
 	}
 
 	if !cluster.IsInitialized() {
@@ -127,7 +127,8 @@ func (c *ClusterController) reconcileNormal(cluster *v1.Cluster) error {
 
 		headIP, err = clusterOrchestrator.CreateCluster()
 		if err != nil {
-			return errors.Wrap(err, "failed to create cluster "+cluster.Metadata.Name)
+			return errors.Wrapf(err, "failed to create cluster %s/%s",
+				cluster.Metadata.Workspace, cluster.Metadata.Name)
 		}
 
 		cluster.Status = &v1.ClusterStatus{
@@ -313,7 +314,8 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 
 		err := c.storage.DeleteCluster(strconv.Itoa(cluster.ID))
 		if err != nil {
-			return errors.Wrap(err, "failed to delete cluster "+cluster.Metadata.Name)
+			return errors.Wrapf(err, "failed to delete cluster %s/%s from DB",
+				cluster.Metadata.Workspace, cluster.Metadata.Name)
 		}
 
 		return nil
@@ -332,18 +334,21 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 			MetricsRemoteWriteURL: c.metricsRemoteWriteURL,
 		})
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to create orchestrator for cluster %s/%s",
+				cluster.Metadata.Workspace, cluster.Metadata.Name)
 		}
 
 		err = clusterOrchestrator.DeleteCluster()
 		if err != nil {
-			return errors.Wrap(err, "failed to delete ray cluster "+cluster.Metadata.Name)
+			return errors.Wrapf(err, "failed to delete ray cluster %s/%s",
+				cluster.Metadata.Workspace, cluster.Metadata.Name)
 		}
 	}
 
 	err := c.gw.DeleteCluster(cluster)
 	if err != nil {
-		return errors.Wrap(err, "failed to delete cluster backend service "+cluster.Metadata.Name)
+		return errors.Wrapf(err, "failed to delete cluster backend service for %s/%s",
+			cluster.Metadata.Workspace, cluster.Metadata.Name)
 	}
 
 	klog.Info("Cluster " + cluster.Metadata.Name + " delete finished, mark as deleted")
@@ -358,8 +363,9 @@ func (c *ClusterController) reconcileDelete(cluster *v1.Cluster) error {
 
 func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator orchestrator.Orchestrator, phase v1.ClusterPhase, err error) error {
 	newStatus := &v1.ClusterStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	if obj.Status != nil {
@@ -370,7 +376,6 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 		newStatus.Version = obj.Status.Version
 		newStatus.RayVersion = obj.Status.RayVersion
-		newStatus.DesiredNodes = obj.Status.DesiredNodes
 	}
 
 	if newStatus.Phase == v1.ClusterPhaseRunning && clusterOrchestrator != nil && obj.Metadata.DeletionTimestamp == "" {
@@ -382,10 +387,6 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, clusterOrchestrator or
 			newStatus.DesiredNodes = clusterStatus.DesireNodes
 			newStatus.ResourceInfo = clusterStatus.ResourceInfo
 		}
-	}
-
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
 	}
 
 	return c.storage.UpdateCluster(strconv.Itoa(obj.ID), &v1.Cluster{Status: newStatus})

@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -119,19 +118,14 @@ func (c *WorkspaceController) sync(obj *v1.Workspace) error {
 
 func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.WorkspacePhase, err error) error {
 	newStatus := &v1.WorkspaceStatus{
-		LastTransitionTime: time.Now().Format(time.RFC3339Nano),
+		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
+		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	// Preserve existing fields if needed, e.g., ServiceURL
 	if obj.Status != nil {
 		newStatus.ServiceURL = obj.Status.ServiceURL
-	}
-
-	if err != nil {
-		newStatus.ErrorMessage = err.Error()
-	} else {
-		newStatus.ErrorMessage = ""
 	}
 
 	// Avoid unnecessary updates if status hasn't changed meaningfully
@@ -150,7 +144,7 @@ func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.Workspace
 func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error {
 	engines, err := c.acceleratorManager.GetAllAcceleratorSupportEngines(context.Background())
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to get accelerator supported engines for workspace %s", workspace.Metadata.Name)
 	}
 
 	// set workspace name to engine metadata
@@ -160,7 +154,8 @@ func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error 
 
 	for _, engine := range engines {
 		if err := c.createOrUpdateEngine(engine); err != nil {
-			return err
+			return errors.Wrapf(err, "failed to create or update engine %s for workspace %s",
+				engine.Metadata.Name, workspace.Metadata.Name)
 		}
 	}
 
@@ -184,16 +179,22 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 	})
 
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to list engines for workspace %s", engine.Metadata.Workspace)
 	}
 
 	if len(engines) == 0 {
-		return c.storage.CreateEngine(engine)
+		if err := c.storage.CreateEngine(engine); err != nil {
+			return errors.Wrapf(err, "failed to create engine %s/%s",
+				engine.Metadata.Workspace, engine.Metadata.Name)
+		}
+
+		return nil
 	}
 
 	result, diff, err := util.JsonEqual(engines[0].Spec, engine.Spec)
 	if err != nil {
-		return errors.Wrapf(err, "failed to compare engine spec")
+		return errors.Wrapf(err, "failed to compare engine spec for %s/%s",
+			engine.Metadata.Workspace, engine.Metadata.Name)
 	}
 
 	// If the specs are equal, no need to update
@@ -205,7 +206,12 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 
 	engines[0].Spec = engine.Spec
 
-	return c.storage.UpdateEngine(strconv.Itoa(engines[0].ID), &engines[0])
+	if err := c.storage.UpdateEngine(strconv.Itoa(engines[0].ID), &engines[0]); err != nil {
+		return errors.Wrapf(err, "failed to update engine %s/%s",
+			engine.Metadata.Workspace, engine.Metadata.Name)
+	}
+
+	return nil
 }
 
 func (c *WorkspaceController) DeleteWorkspaceEngine(workspace *v1.Workspace) error {
@@ -219,13 +225,13 @@ func (c *WorkspaceController) DeleteWorkspaceEngine(workspace *v1.Workspace) err
 		},
 	})
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to list engines for workspace %s", workspace.Metadata.Name)
 	}
 
 	for _, engine := range engines {
-		err = c.storage.DeleteEngine(strconv.Itoa(engine.ID))
-		if err != nil {
-			return err
+		if err = c.storage.DeleteEngine(strconv.Itoa(engine.ID)); err != nil {
+			return errors.Wrapf(err, "failed to delete engine %s/%s",
+				workspace.Metadata.Name, engine.Metadata.Name)
 		}
 	}
 

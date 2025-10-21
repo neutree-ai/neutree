@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -120,13 +119,13 @@ func (hf *huggingFace) ListModels(option ListOption) ([]v1.GeneralModel, error) 
 }
 
 // HealthyCheck checks the health of the Hugging Face Hub API.
-func (hf *huggingFace) HealthyCheck() bool {
-	if _, err := hf.getModelsList(ListOption{Search: "", Limit: 1}); err != nil {
-		klog.Errorf("failed to health check Hugging Face API, err: %v", err)
-		return false
+func (hf *huggingFace) HealthyCheck() error {
+	_, err := hf.getModelsList(ListOption{Search: "", Limit: 1})
+	if err != nil {
+		return errors.Wrap(err, "failed to list models from Hugging Face API")
 	}
 
-	return true
+	return nil
 }
 
 // GetModelsList calls the Hugging Face Hub API to get a list of models with pagination.
