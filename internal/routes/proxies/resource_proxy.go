@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,7 +15,6 @@ import (
 // FieldSelector defines which fields to include or exclude in responses
 type FieldSelector struct {
 	// Fields to exclude from response, using dot-separated paths as keys
-	// Example: map[string]struct{}{"status.sk_value": {}}
 	ExcludeFields map[string]struct{}
 }
 
@@ -221,4 +222,119 @@ func (w *responseCapture) WriteHeader(statusCode int) {
 
 func (w *responseCapture) WriteString(s string) (int, error) {
 	return w.body.WriteString(s)
+}
+
+// extractExcludeFieldsFromTag extracts fields marked with api:"-" tag from a struct type
+// Returns a map of JSON paths to exclude
+func extractExcludeFieldsFromTag(t reflect.Type) map[string]struct{} {
+	excludeFields := make(map[string]struct{})
+	extractFieldsRecursive(t, "", excludeFields)
+	return excludeFields
+}
+
+// extractFieldsRecursive recursively extracts fields with api:"-" tag
+func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[string]struct{}) {
+	// Handle pointer types
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	// Only process struct types
+	if t.Kind() != reflect.Struct {
+		return
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		// Skip unexported fields
+		if !field.IsExported() {
+			continue
+		}
+
+		// Get json tag to determine field name in JSON
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "" || jsonTag == "-" {
+			continue
+		}
+
+		// Parse json tag
+		jsonName := strings.Split(jsonTag, ",")[0]
+
+		// Build the full path
+		var fieldPath string
+		if prefix == "" {
+			fieldPath = jsonName
+		} else {
+			fieldPath = prefix + "." + jsonName
+		}
+
+		// Check if this field has api:"-" tag
+		apiTag := field.Tag.Get("api")
+		if apiTag == "-" {
+			excludeFields[fieldPath] = struct{}{}
+		}
+
+		// Recursively process nested structs
+		fieldType := field.Type
+		if fieldType.Kind() == reflect.Ptr {
+			fieldType = fieldType.Elem()
+		}
+		if fieldType.Kind() == reflect.Struct {
+			extractFieldsRecursive(fieldType, fieldPath, excludeFields)
+		}
+	}
+}
+
+// CreateStructProxyHandler creates a proxy handler that filters response based on struct api tags
+// The struct type T is used only for configuration extraction at initialization time
+// At runtime, responses are filtered using map-based JSON filtering for performance
+func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.HandlerFunc {
+	// Extract exclude fields from struct type at initialization time (compile-time type safety)
+	var zero T
+	excludeFields := extractExcludeFieldsFromTag(reflect.TypeOf(zero))
+
+	return func(c *gin.Context) {
+		// Create proxy handler
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, nil)
+
+		// If no field filtering is needed, use proxy directly
+		if len(excludeFields) == 0 {
+			proxyHandler(c)
+			return
+		}
+
+		// Need to intercept response for field filtering
+		responseWriter := &responseCapture{
+			ResponseWriter: c.Writer,
+			body:           &bytes.Buffer{},
+			statusCode:     http.StatusOK,
+		}
+		c.Writer = responseWriter
+
+		// Execute proxy
+		proxyHandler(c)
+
+		// Filter the response body if it's a successful response
+		if responseWriter.statusCode >= 200 && responseWriter.statusCode < 300 {
+			filteredBody, err := filterResponseBody(io.NopCloser(responseWriter.body), excludeFields)
+			if err != nil {
+				c.Writer = responseWriter.ResponseWriter
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("Failed to filter response: %v", err),
+				})
+				return
+			}
+
+			// Write filtered response
+			c.Writer = responseWriter.ResponseWriter
+			// Let c.Data re-calculate Content-Length
+			c.Writer.Header().Del("Content-Length")
+			c.Data(responseWriter.statusCode, "application/json", filteredBody)
+		} else {
+			// For error responses, write as-is
+			c.Writer = responseWriter.ResponseWriter
+			c.Data(responseWriter.statusCode, c.Writer.Header().Get("Content-Type"), responseWriter.body.Bytes())
+		}
+	}
 }

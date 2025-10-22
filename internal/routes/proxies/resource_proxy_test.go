@@ -2,6 +2,7 @@ package proxies
 
 import (
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -276,5 +277,154 @@ func Test_filterResponseBody(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "failed to unmarshal response body")
+	})
+}
+
+func Test_extractExcludeFieldsFromTag(t *testing.T) {
+	t.Run("extract single field with api tag", func(t *testing.T) {
+		type TestStatus struct {
+			Phase   string `json:"phase"`
+			Secret  string `json:"secret" api:"-"`
+			Message string `json:"message"`
+		}
+
+		type TestObject struct {
+			ID     string     `json:"id"`
+			Status TestStatus `json:"status"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"status.secret": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("extract multiple fields with api tag", func(t *testing.T) {
+		type TestMetadata struct {
+			Name   string `json:"name"`
+			Secret string `json:"secret" api:"-"`
+		}
+
+		type TestStatus struct {
+			Phase   string `json:"phase"`
+			SKValue string `json:"sk_value" api:"-"`
+		}
+
+		type TestObject struct {
+			ID       string       `json:"id"`
+			Metadata TestMetadata `json:"metadata"`
+			Status   TestStatus   `json:"status"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"metadata.secret":   {},
+			"status.sk_value": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("handle pointer types", func(t *testing.T) {
+		type TestStatus struct {
+			Phase   string `json:"phase"`
+			Secret  string `json:"secret" api:"-"`
+		}
+
+		type TestObject struct {
+			ID     string      `json:"id"`
+			Status *TestStatus `json:"status"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"status.secret": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("no api tag returns empty map", func(t *testing.T) {
+		type TestObject struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		assert.Empty(t, result)
+	})
+
+	t.Run("ignore fields with json:-", func(t *testing.T) {
+		type TestObject struct {
+			ID       string `json:"id"`
+			Internal string `json:"-"`
+			Secret   string `json:"secret" api:"-"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"secret": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("ignore unexported fields", func(t *testing.T) {
+		type TestObject struct {
+			ID     string `json:"id"`
+			secret string `json:"secret" api:"-"` // unexported
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		assert.Empty(t, result)
+	})
+
+	t.Run("handle json tag with omitempty", func(t *testing.T) {
+		type TestStatus struct {
+			Phase   string `json:"phase,omitempty"`
+			Secret  string `json:"secret,omitempty" api:"-"`
+		}
+
+		type TestObject struct {
+			ID     string     `json:"id"`
+			Status TestStatus `json:"status"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"status.secret": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("deeply nested structs", func(t *testing.T) {
+		type Level3 struct {
+			DeepSecret string `json:"deep_secret" api:"-"`
+		}
+
+		type Level2 struct {
+			L3 Level3 `json:"l3"`
+		}
+
+		type Level1 struct {
+			L2 Level2 `json:"l2"`
+		}
+
+		type TestObject struct {
+			ID string `json:"id"`
+			L1 Level1 `json:"l1"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"l1.l2.l3.deep_secret": {},
+		}
+		assert.Equal(t, expected, result)
 	})
 }

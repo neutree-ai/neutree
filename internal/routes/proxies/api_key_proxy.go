@@ -1,49 +1,16 @@
 package proxies
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func getAPIKeyProxyConfig() *ResourceProxyConfig {
-	return &ResourceProxyConfig{
-		ResourceName: "api_keys",
-		TableName:    "api_keys",
-		Methods: map[string]*MethodConfig{
-			http.MethodGet: {
-				Enabled: true,
-				FieldSelector: &FieldSelector{
-					ExcludeFields: map[string]struct{}{
-						"status.sk_value": {},
-					},
-				},
-			},
-			http.MethodPatch: {
-				Enabled: true,
-				FieldSelector: &FieldSelector{
-					ExcludeFields: map[string]struct{}{
-						"status.sk_value": {},
-					},
-				},
-			},
-			http.MethodPost: {
-				Enabled: false,
-			},
-			http.MethodPut: {
-				Enabled: false,
-			},
-			http.MethodDelete: {
-				Enabled: false,
-			},
-		},
-	}
-}
-
 func RegisterAPIKeyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
-	config := getAPIKeyProxyConfig()
-
-	proxyGroup := group.Group("/" + config.ResourceName)
+	proxyGroup := group.Group("/api_keys")
 	proxyGroup.Use(middlewares...)
-	proxyGroup.Any("", CreateResourceProxyHandler(deps, config))
+
+	handler := CreateStructProxyHandler[v1.ApiKey](deps, "api_keys")
+
+	proxyGroup.GET("", handler)
+	proxyGroup.PATCH("", handler)
 }
