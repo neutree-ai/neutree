@@ -40,7 +40,7 @@ const (
 
 type ModelRegistrySpec struct {
 	Type        ModelRegistryType `json:"type"` // only support 'bentoml' | 'hugging-face'
-	Url         string            `json:"url"`  // only support 'file://path/to/model' | 'https://huggingface.co' | 'nfs://path/to/model';
+	Url         string            `json:"url"`  // only support 'file://localhost/path/to/model' | 'https://huggingface.co' | 'nfs://nfs-server:/path/to/model';
 	Credentials string            `json:"credentials" api:"-"`
 }
 
