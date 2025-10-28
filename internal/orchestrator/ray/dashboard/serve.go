@@ -107,6 +107,20 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 		if modelRegistry.Spec.Credentials != "" {
 			applicationEnv[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
+	case v1.ModelScopeModelRegistryType:
+		if endpoint.Spec.Engine.Engine == "vllm" {
+			url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
+
+			applicationEnv["VLLM_USE_MODELSCOPE"] = "True"
+			applicationEnv["MODELSCOPE_DOMAIN"] = url.Host
+			if modelRegistry.Spec.Credentials != "" {
+				applicationEnv[v1.ModelScopeAPITokenEnv] = modelRegistry.Spec.Credentials
+			}
+
+		} else if endpoint.Spec.Engine.Engine == "llama-cpp" {
+			// for llama-cpp, set MODELSCOPE_ENDPOINT to the model registry url
+			applicationEnv[v1.ModelScopeEndpointEnv] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
+		}
 	}
 
 	app.RuntimeEnv = map[string]interface{}{

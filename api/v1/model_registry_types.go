@@ -20,6 +20,7 @@ type ModelRegistryType string
 const (
 	HuggingFaceModelRegistryType = "hugging-face"
 	BentoMLModelRegistryType     = "bentoml"
+	ModelScopeModelRegistryType  = "model-scope"
 )
 
 type BentoMLModelRegistryConnectType string
@@ -36,11 +37,14 @@ const (
 	HFEndpoint = "HF_ENDPOINT"
 
 	BentoMLHomeEnv = "BENTOML_HOME"
+
+	ModelScopeAPITokenEnv = "MODELSCOPE_API_TOKEN"
+	ModelScopeEndpointEnv = "MODEL_ENDPOINT"
 )
 
 type ModelRegistrySpec struct {
 	Type        ModelRegistryType `json:"type"` // only support 'bentoml' | 'hugging-face'
-	Url         string            `json:"url"`  // only support 'file://path/to/model' | 'https://huggingface.co' | 'nfs://path/to/model';
+	Url         string            `json:"url"`  // only support 'file://path/to/model' | 'https://huggingface.co' | 'nfs://path/to/model' | 'https://modelscope.cn';
 	Credentials string            `json:"credentials"`
 }
 
