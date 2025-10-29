@@ -28,7 +28,6 @@ func NewClusterControllerFactory() ControllerFactory {
 		clusterController, err := controllers.NewClusterController(
 			&controllers.ClusterControllerOption{
 				Storage:                 opts.config.Storage,
-				ImageService:            opts.config.ImageService,
 				Gw:                      opts.config.Gateway,
 				AcceleratorManager:      opts.config.AcceleratorManager,
 				ObsCollectConfigManager: opts.config.ObsCollectConfigManager,
@@ -83,7 +82,6 @@ func NewEndpointControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
 			Storage:            opts.config.Storage,
-			ImageService:       opts.config.ImageService,
 			Gw:                 opts.config.Gateway,
 			AcceleratorManager: opts.config.AcceleratorManager,
 		})

@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	dashboard "github.com/neutree-ai/neutree/internal/orchestrator/ray/dashboard"
+	dashboard "github.com/neutree-ai/neutree/internal/ray/dashboard"
 	mock "github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"

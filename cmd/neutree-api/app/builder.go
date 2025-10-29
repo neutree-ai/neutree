@@ -34,10 +34,15 @@ func NewBuilder() *Builder {
 
 	// Register default route handlers
 	defaultRouteInits := map[string]RouteFactory{
-		"models":                ModelsRouteFactory(models.RegisterModelsRoutes),
-		"auth":                  ProxiesRouteFactory(proxies.RegisterAuthProxyRoutes),
-		"serve-proxy":           ProxiesRouteFactory(proxies.RegisterRayServeProxyRoutes),
-		"dashboard-proxy":       ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
+		"models":          ModelsRouteFactory(models.RegisterModelsRoutes),
+		"serve-proxy":     ProxiesRouteFactory(proxies.RegisterRayServeProxyRoutes),
+		"dashboard-proxy": ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
+		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
+		// Auth route (no auth required for authentication itself)
+		"auth": ProxiesRouteFactory(proxies.RegisterAuthProxyRoutes),
+		// PostgREST proxy routes (auth handled by PostgREST backend)
+		// Note: rest/* routes are proxied to PostgREST which handles authentication,
+		// so no auth middleware is needed at gateway level
 		"rest/api-keys":         ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
 		"rest/workspaces":       ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
 		"rest/roles":            ProxiesRouteFactory(proxies.RegisterRoleRoutes),
@@ -51,7 +56,6 @@ func NewBuilder() *Builder {
 		"rest/model-catalogs":   ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
 		"rest/oem-configs":      ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
 		"rest/rpc":              ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
-		"system":                SystemRouteFactory(system.RegisterSystemRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {

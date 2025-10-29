@@ -14,6 +14,12 @@ const (
 	ProvisionedNodeProvisionStatus  = "provisioned"
 )
 
+// Neutree Cluster type.
+const (
+	SSHClusterType        = "ssh"
+	KubernetesClusterType = "kubernetes"
+)
+
 type Cluster struct {
 	ID         int            `json:"id,omitempty"`
 	APIVersion string         `json:"api_version,omitempty"`
@@ -108,6 +114,12 @@ type ClusterStatus struct {
 	ResourceInfo map[string]float64 `json:"resource_info,omitempty"`
 }
 
+type NodeProvision struct {
+	LastProvisionTime string `json:"last_provision_time,omitempty"`
+	Status            string `json:"status,omitempty"`
+	IsHead            bool   `json:"is_head,omitempty"`
+}
+
 func (c Cluster) Key() string {
 	if c.Metadata == nil {
 		return "default" + "-" + "clsuter" + "-" + strconv.Itoa(c.ID)
@@ -131,10 +143,11 @@ func (c Cluster) IsInitialized() bool {
 type ClusterPhase string
 
 const (
-	ClusterPhasePending ClusterPhase = "Pending"
-	ClusterPhaseRunning ClusterPhase = "Running"
-	ClusterPhaseFailed  ClusterPhase = "Failed"
-	ClusterPhaseDeleted ClusterPhase = "Deleted"
+	ClusterPhasePending      ClusterPhase = "Pending"
+	ClusterPhaseRunning      ClusterPhase = "Running"
+	ClusterPhaseFailed       ClusterPhase = "Failed"
+	ClusterPhaseDeleted      ClusterPhase = "Deleted"
+	ClusterPhaseInitializing ClusterPhase = "Initializing"
 )
 
 func (obj *Cluster) GetName() string {

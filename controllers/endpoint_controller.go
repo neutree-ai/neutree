@@ -10,22 +10,19 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
-	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type EndpointController struct {
-	storage      storage.Storage
-	imageService registry.ImageService
-	syncHandler  func(endpoint *v1.Endpoint) error // Added syncHandler field
+	storage     storage.Storage
+	syncHandler func(endpoint *v1.Endpoint) error // Added syncHandler field
 
 	gw                 gateway.Gateway
 	acceleratorManager accelerator.Manager
 }
 
 type EndpointControllerOption struct {
-	ImageService registry.ImageService
-	Storage      storage.Storage
+	Storage storage.Storage
 
 	Gw                 gateway.Gateway
 	AcceleratorManager accelerator.Manager
@@ -34,7 +31,6 @@ type EndpointControllerOption struct {
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
 	c := &EndpointController{
 		storage:            option.Storage,
-		imageService:       option.ImageService,
 		gw:                 option.Gw,
 		acceleratorManager: option.AcceleratorManager,
 	}
@@ -363,7 +359,6 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	orchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
 		Cluster:            &cluster[0],
 		Storage:            c.storage,
-		ImageService:       c.imageService,
 		AcceleratorManager: c.acceleratorManager,
 	})
 	if err != nil {
