@@ -70,7 +70,7 @@ spec:
         - name: KONG_NGINX_WORKER_PROCESSES
           value: "2"
         - name: KONG_PG_DATABASE
-          value: "aippp"
+          value: "neutree"
         - name: KONG_PG_HOST
           value: "{{ include "neutree.fullname" . }}-postgresql-service"
         - name: KONG_PG_PASSWORD
@@ -199,7 +199,7 @@ spec:
         - name: KONG_NGINX_WORKER_PROCESSES
           value: "2"
         - name: KONG_PG_DATABASE
-          value: "aippp"
+          value: "neutree"
         - name: KONG_PG_HOST
           value: "{{ include "neutree.fullname" . }}-postgresql-service"
         - name: KONG_PG_PASSWORD
@@ -376,7 +376,7 @@ spec:
         - name: KONG_NGINX_WORKER_PROCESSES
           value: "2"
         - name: KONG_PG_DATABASE
-          value: "aippp"
+          value: "neutree"
         - name: KONG_PG_HOST
           value: "{{ include "neutree.fullname" . }}-postgresql-service"
         - name: KONG_PG_PASSWORD
@@ -454,7 +454,7 @@ spec:
         - name: KONG_NGINX_WORKER_PROCESSES
           value: "2"
         - name: KONG_PG_DATABASE
-          value: "aippp"
+          value: "neutree"
         - name: KONG_PG_HOST
           value: "{{ include "neutree.fullname" . }}-postgresql-service"
         - name: KONG_PG_PASSWORD
@@ -544,7 +544,7 @@ spec:
         - name: KONG_NGINX_WORKER_PROCESSES
           value: "2"
         - name: KONG_PG_DATABASE
-          value: "aippp"
+          value: "neutree"
         - name: KONG_PG_HOST
           value: "{{ include "neutree.fullname" . }}-postgresql-service"
         - name: KONG_PG_PASSWORD
@@ -725,7 +725,7 @@ spec:
         - name: KONG_NGINX_WORKER_PROCESSES
           value: "2"
         - name: KONG_PG_DATABASE
-          value: "aippp"
+          value: "neutree"
         - name: KONG_PG_HOST
           value: "{{ include "neutree.fullname" . }}-postgresql-service"
         - name: KONG_PG_PASSWORD
