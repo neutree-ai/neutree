@@ -83,7 +83,7 @@ migration:
 postgrest:
   image:
     repository: postgrest/postgrest
-    tag: v13.0.4
+    tag: v14.0
     pullPolicy: IfNotPresent
   resources:
     requests:
