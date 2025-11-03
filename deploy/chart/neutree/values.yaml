@@ -33,7 +33,7 @@ db:
     pullPolicy: IfNotPresent
   user: postgres
   password: pgpassword
-  name: aippp
+  name: neutree
   resources:
     requests:
       cpu: 100m
