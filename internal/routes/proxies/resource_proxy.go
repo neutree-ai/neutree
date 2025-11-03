@@ -56,6 +56,7 @@ func filterJSONFields(data interface{}, excludeFields map[string]struct{}) inter
 		for i, item := range v {
 			result[i] = filterJSONFields(item, excludeFields)
 		}
+
 		return result
 	default:
 		return data
@@ -83,6 +84,7 @@ func filterObject(obj map[string]interface{}, excludeFields map[string]struct{},
 			result[key] = filterObject(v, excludeFields, fieldPath)
 		case []interface{}:
 			filtered := make([]interface{}, len(v))
+
 			for i, item := range v {
 				if itemObj, ok := item.(map[string]interface{}); ok {
 					filtered[i] = filterObject(itemObj, excludeFields, fieldPath)
@@ -90,6 +92,7 @@ func filterObject(obj map[string]interface{}, excludeFields map[string]struct{},
 					filtered[i] = item
 				}
 			}
+
 			result[key] = filtered
 		default:
 			result[key] = value
@@ -138,6 +141,7 @@ func CreateResourceProxyHandler(deps *Dependencies, config *ResourceProxyConfig)
 			c.JSON(http.StatusMethodNotAllowed, gin.H{
 				"error": fmt.Sprintf("Method %s is not allowed for resource %s", method, config.ResourceName),
 			})
+
 			return
 		}
 
@@ -146,6 +150,7 @@ func CreateResourceProxyHandler(deps *Dependencies, config *ResourceProxyConfig)
 			c.JSON(http.StatusMethodNotAllowed, gin.H{
 				"error": fmt.Sprintf("Method %s is not allowed for resource %s", method, config.ResourceName),
 			})
+
 			return
 		}
 
@@ -190,6 +195,7 @@ func handleResourceProxyWithFilter(c *gin.Context, deps *Dependencies, tableName
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": fmt.Sprintf("Failed to filter response: %v", err),
 			})
+
 			return
 		}
 
@@ -229,6 +235,7 @@ func (w *responseCapture) WriteString(s string) (int, error) {
 func extractExcludeFieldsFromTag(t reflect.Type) map[string]struct{} {
 	excludeFields := make(map[string]struct{})
 	extractFieldsRecursive(t, "", excludeFields)
+
 	return excludeFields
 }
 
@@ -280,6 +287,7 @@ func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[str
 		if fieldType.Kind() == reflect.Ptr {
 			fieldType = fieldType.Elem()
 		}
+
 		if fieldType.Kind() == reflect.Struct {
 			extractFieldsRecursive(fieldType, fieldPath, excludeFields)
 		}
@@ -323,6 +331,7 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"error": fmt.Sprintf("Failed to filter response: %v", err),
 				})
+
 				return
 			}
 

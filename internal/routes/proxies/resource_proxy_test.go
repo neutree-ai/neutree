@@ -62,7 +62,7 @@ func Test_filterObject(t *testing.T) {
 			},
 		}
 		excludeFields := map[string]struct{}{
-			"status.sk_value":  {},
+			"status.sk_value": {},
 			"metadata.secret": {},
 		}
 
@@ -321,7 +321,7 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
-			"metadata.secret":   {},
+			"metadata.secret": {},
 			"status.sk_value": {},
 		}
 		assert.Equal(t, expected, result)
@@ -329,8 +329,8 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 
 	t.Run("handle pointer types", func(t *testing.T) {
 		type TestStatus struct {
-			Phase   string `json:"phase"`
-			Secret  string `json:"secret" api:"-"`
+			Phase  string `json:"phase"`
+			Secret string `json:"secret" api:"-"`
 		}
 
 		type TestObject struct {
@@ -375,7 +375,7 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 	t.Run("ignore unexported fields", func(t *testing.T) {
 		type TestObject struct {
 			ID     string `json:"id"`
-			secret string `json:"secret" api:"-"` // unexported
+			secret string `api:"-"` // unexported, no json tag to avoid go vet error
 		}
 
 		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
@@ -385,8 +385,8 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 
 	t.Run("handle json tag with omitempty", func(t *testing.T) {
 		type TestStatus struct {
-			Phase   string `json:"phase,omitempty"`
-			Secret  string `json:"secret,omitempty" api:"-"`
+			Phase  string `json:"phase,omitempty"`
+			Secret string `json:"secret,omitempty" api:"-"`
 		}
 
 		type TestObject struct {
