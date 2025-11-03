@@ -102,7 +102,7 @@ services:
         condition: none
 
   postgrest:
-    image: postgrest/postgrest:v13.0.4
+    image: postgrest/postgrest:v14.0
     container_name: postgrest
     environment:
       PGRST_DB_URI: postgres://postgres:pgpassword@postgres:5432/aippp
