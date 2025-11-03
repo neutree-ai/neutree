@@ -20,7 +20,7 @@ type ApiKeyStatus struct {
 	ErrorMessage       string      `json:"error_message,omitempty"`
 	LastTransitionTime string      `json:"last_transition_time,omitempty"`
 	Phase              ApiKeyPhase `json:"phase,omitempty"`
-	SkValue            string      `json:"sk_value,omitempty"`
+	SkValue            string      `json:"sk_value,omitempty" api:"-"`
 	Usage              int64       `json:"usage,omitempty"`
 	LastUsedAt         string      `json:"last_used_at,omitempty"`
 	LastSyncAt         string      `json:"last_sync_at,omitempty"`

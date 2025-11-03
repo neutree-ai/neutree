@@ -33,8 +33,8 @@ type ImageRegistryAuthConfig struct {
 }
 
 type ImageRegistrySpec struct {
-	AuthConfig ImageRegistryAuthConfig `json:"authconfig"`
-	Ca         string                  `json:"ca"`
+	AuthConfig ImageRegistryAuthConfig `json:"authconfig" api:"-"`
+	Ca         string                  `json:"ca" api:"-"`
 	Repository string                  `json:"repository"`
 	URL        string                  `json:"url"`
 }
