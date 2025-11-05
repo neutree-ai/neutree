@@ -60,6 +60,8 @@ func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options 
 	return generalModels
 }
 
+// todo: Current model repository for local file types has not yet been fully designed
+// and will be improved after the design is completed.
 type localFile struct {
 	path string
 }
@@ -122,10 +124,6 @@ func (f *localFile) GetModelPath(name, version string) (string, error) {
 }
 
 func (f *localFile) HealthyCheck() error {
-	if _, err := os.Stat(f.path); err != nil {
-		return errors.Wrapf(err, "failed to access model registry path %s", f.path)
-	}
-
 	// Try to list models to verify functionality
 	if _, err := bentoml.ListModels(f.path); err != nil {
 		return errors.Wrapf(err, "failed to list models at path %s", f.path)
@@ -217,10 +215,18 @@ func newFileBased(registry *v1.ModelRegistry) (ModelRegistry, error) {
 
 	switch modelRegistryURL.Scheme {
 	case string(v1.BentoMLModelRegistryConnectTypeFile):
+		if modelRegistryURL.Path == "" {
+			return nil, errors.New("file path is required for file-based model registry")
+		}
+
 		return &localFile{
 			path: modelRegistryURL.Path,
 		}, nil
 	case string(v1.BentoMLModelRegistryConnectTypeNFS):
+		if modelRegistryURL.Host == "" || modelRegistryURL.Path == "" {
+			return nil, errors.New("both NFS server and path are required for NFS-based model registry")
+		}
+
 		return &nfsFile{
 			targetPath:    "/mnt/" + registry.Key(),
 			nfsServerPath: modelRegistryURL.Host + modelRegistryURL.Path,
