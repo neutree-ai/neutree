@@ -51,7 +51,10 @@ class Backend:
        # Configure model based on registry
         if model_registry_type == "bentoml":
             model_ref = bentoml.models.get(f"{model_name}:{model_version}")
-            model_file = model_ref.info.labels.get("model_file", "")
+            # Check if model file is specified in labels
+            custom_model_file = model_ref.info.labels.get("model_file", "")
+            if custom_model_file:
+                model_file = custom_model_file
             model_path = model_ref.path_of(model_file)
             # Override model path in settings
             model_settings["model"] = model_path
@@ -71,7 +74,7 @@ class Backend:
 
         # Store model info
         self.model_id = f"{model_name}:{model_version}"
-        
+
         # Ensure model can be loaded without errors
         LlamaProxy.load_llama_from_model_settings(self.model_settings)
 
