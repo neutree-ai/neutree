@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"fmt"
+	"path"
 	"strings"
 	"testing"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/pointer"
 
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
@@ -1160,6 +1163,178 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				assert.Equal(t, tt.expectedConfig.WorkerStartRayCommands, config.WorkerStartRayCommands)
 				assert.Equal(t, tt.expectedConfig.StaticWorkerStartRayCommands, config.StaticWorkerStartRayCommands)
 				assert.Equal(t, tt.expectedConfig.InitializationCommands, config.InitializationCommands)
+			}
+		})
+	}
+}
+
+func TestMutateModelCache(t *testing.T) {
+	testHostPath := "/mnt/model_cache"
+	initPathCmd := fmt.Sprintf("mkdir -p %s && chmod 755 %s", testHostPath, testHostPath)
+	tests := []struct {
+		name                        string
+		sshRayClusterConfig         *v1.RayClusterConfig
+		modelCaches                 []v1.ModelCache
+		expectRunOptions            []string
+		expectedContainInitCommands []string
+		expectedStartCommands       []string
+	}{
+		{
+			name:                "never changed if model cache is nil",
+			sshRayClusterConfig: &v1.RayClusterConfig{},
+
+			expectRunOptions:            []string{},
+			expectedContainInitCommands: []string{},
+			expectedStartCommands:       []string{},
+		},
+		{
+			name:                "never changed if model cache host path is nil",
+			sshRayClusterConfig: &v1.RayClusterConfig{},
+			modelCaches: []v1.ModelCache{
+				{
+					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					HostPath:          nil,
+				},
+			},
+			expectRunOptions:            []string{},
+			expectedContainInitCommands: []string{},
+			expectedStartCommands:       []string{},
+		},
+		{
+			name:                "never changed if model cache nfs is not nil, ssh cluster only support hostpath",
+			sshRayClusterConfig: &v1.RayClusterConfig{},
+			modelCaches: []v1.ModelCache{
+				{
+					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					HostPath:          nil,
+					NFS:               &corev1.NFSVolumeSource{Path: testHostPath},
+				},
+			},
+			expectRunOptions:            []string{},
+			expectedContainInitCommands: []string{},
+			expectedStartCommands:       []string{},
+		},
+		{
+			name:                "mutate huggingface type model cache success",
+			sshRayClusterConfig: &v1.RayClusterConfig{},
+			modelCaches: []v1.ModelCache{
+				{
+					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: testHostPath,
+					},
+				},
+			},
+			expectRunOptions: []string{fmt.Sprintf("-e %s=%s", v1.HFHomeEnv, path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+				fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType))},
+			expectedContainInitCommands: []string{
+				initPathCmd,
+			},
+			expectedStartCommands: []string{
+				fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+			},
+		},
+		{
+			name:                "mutate bentoml type model cache success",
+			sshRayClusterConfig: &v1.RayClusterConfig{},
+			modelCaches: []v1.ModelCache{
+				{
+					ModelRegistryType: v1.BentoMLModelRegistryType,
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: testHostPath,
+					},
+				},
+			},
+			expectRunOptions: []string{fmt.Sprintf("-e %s=%s", v1.BentoMLHomeEnv, path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
+				fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType))},
+			expectedContainInitCommands: []string{
+				initPathCmd,
+			},
+			expectedStartCommands: []string{
+				fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
+			},
+		},
+		{
+			name:                "mutate both huggingface and bentoml type model cache success",
+			sshRayClusterConfig: &v1.RayClusterConfig{},
+			modelCaches: []v1.ModelCache{
+				{
+					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: testHostPath,
+					},
+				},
+				{
+					ModelRegistryType: v1.BentoMLModelRegistryType,
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: testHostPath,
+					},
+				},
+			},
+			expectRunOptions: []string{
+				fmt.Sprintf("-e %s=%s", v1.HFHomeEnv, path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+				fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+				fmt.Sprintf("-e %s=%s", v1.BentoMLHomeEnv, path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
+				fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
+			},
+			expectedContainInitCommands: []string{
+				initPathCmd,
+			},
+			expectedStartCommands: []string{
+				fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+				fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			mutateModelCaches(tt.sshRayClusterConfig, tt.modelCaches)
+			for _, cmd := range tt.expectedContainInitCommands {
+				found := false
+				for _, initCmd := range tt.sshRayClusterConfig.InitializationCommands {
+					if strings.Contains(initCmd, cmd) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected initialization commands to contain %s, but it was not found", cmd)
+				}
+			}
+
+			for _, cmd := range tt.expectedStartCommands {
+				found := false
+				for _, startCmd := range tt.sshRayClusterConfig.StaticWorkerStartRayCommands {
+					if strings.Contains(startCmd, cmd) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected static worker start commands to contain %s, but it was not found", cmd)
+				}
+				found = false
+				for _, startCmd := range tt.sshRayClusterConfig.WorkerStartRayCommands {
+					if strings.Contains(startCmd, cmd) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected worker start commands to contain %s, but it was not found", cmd)
+				}
+				found = false
+				for _, startCmd := range tt.sshRayClusterConfig.HeadStartRayCommands {
+					if strings.Contains(startCmd, cmd) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected head start commands to contain %s, but it was not found", cmd)
+				}
 			}
 		})
 	}
