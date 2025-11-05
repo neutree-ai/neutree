@@ -19,7 +19,47 @@ data:
 
     scrape_configs:
     # Scrape from Kubernetes pods using service discovery
-    - job_name: 'neutree'
+    - job_name: 'neutree-cluster'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - {{ .Namespace }}
+        selectors:
+        - role: pod
+          label: app=router
+      relabel_configs:
+      # Only scrape pods with cluster and workspace labels matching
+      - source_labels: [__meta_kubernetes_pod_label_cluster]
+        action: keep
+        regex: {{ .ClusterName }}
+      - source_labels: [__meta_kubernetes_pod_label_workspace]
+        action: keep
+        regex: {{ .Workspace }}
+      - source_labels: [__meta_kubernetes_pod_ip]
+        action: replace
+        target_label: __address__
+        regex: (.+)
+        replacement: $1:8000
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_label_workspace]
+        action: replace
+        target_label: workspace
+      - source_labels: [__meta_kubernetes_pod_label_cluster]
+        action: replace
+        target_label: neutree_cluster
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: replace
+        target_label: app
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod
+      # Add fixed labels to all scraped metrics
+      - target_label: deployment
+        replacement: Router
+    - job_name: 'neutree-inference-pods'
       kubernetes_sd_configs:
       - role: pod
         namespaces:
@@ -36,35 +76,36 @@ data:
       - source_labels: [__meta_kubernetes_pod_label_workspace]
         action: keep
         regex: {{ .Workspace }}
-      # Use the metrics port from pod annotations or default to 8080
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
-        action: replace
-        target_label: __address__
-        regex: (.+)
-        replacement: __meta_kubernetes_pod_ip:$1
       - source_labels: [__meta_kubernetes_pod_ip]
         action: replace
         target_label: __address__
         regex: (.+)
         replacement: $1:8000
-      # Use the metrics path from pod annotations or default to /metrics
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-        action: replace
-        target_label: __metrics_path__
-        regex: (.+)
       # Add pod metadata as labels
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        target_label: pod
       - source_labels: [__meta_kubernetes_namespace]
         action: replace
         target_label: namespace
-      - source_labels: [__meta_kubernetes_pod_label_component]
+      - source_labels: [__meta_kubernetes_pod_label_workspace]
         action: replace
-        target_label: component
+        target_label: workspace
+      - source_labels: [__meta_kubernetes_pod_label_cluster]
+        action: replace
+        target_label: neutree_cluster
       - source_labels: [__meta_kubernetes_pod_label_endpoint]
         action: replace
-        target_label: endpoint
+        target_label: application
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: replica
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: replace
+        target_label: app
+      - source_labels: [__meta_kubernetes_pod_label_engine]
+        action: replace
+        target_label: engine
+      # Add fixed labels to all scraped metrics
+      - target_label: deployment
+        replacement: Backend
 ---
 apiVersion: v1
 kind: ServiceAccount

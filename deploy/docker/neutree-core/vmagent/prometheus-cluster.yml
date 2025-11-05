@@ -7,3 +7,10 @@ scrape_configs:
   file_sd_configs:
   - files:
     - '/etc/prometheus/scrape/*.json'
+  metric_relabel_configs:
+  # Convert ray_vllm: prefix to vllm: prefix
+  # ray_vllm:e2e_request_latency_seconds_bucket => vllm:e2e_request_latency_seconds_bucket
+  - source_labels: [__name__]
+    regex: ray_vllm:(.+)
+    target_label: __name__
+    replacement: vllm:$1

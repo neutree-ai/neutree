@@ -120,6 +120,7 @@ class Backend:
             "deployment":  ctx.deployment,
             "replica":     ctx.replica_tag,
             "model_name":  self.engine.engine.model_config.served_model_name,
+            "engine": "vllm",
         }
 
         if hasattr(ctx, "app_name"):
@@ -196,9 +197,9 @@ class Backend:
     async def generate(self, payload: Any):
         await self._ensure_chat()
         result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
-        
+
         is_stream = payload.get("stream") is True
-        
+
         if isinstance(result, ErrorResponse):
             if is_stream:
                 logging.error(f"Error during chat completion: {result.message}")
@@ -318,12 +319,12 @@ class Controller:
                     import json
                     error_data = json.loads(first_chunk.replace("data: ", "").strip())
                     return JSONResponse(
-                        content=error_data["error"], 
+                        content=error_data["error"],
                         status_code=400
                     )
             except:
                 pass
-        
+
             return StreamingResponse(
                 content=r,
                 media_type="text/event-stream"

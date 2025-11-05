@@ -333,12 +333,12 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 
 	rayClusterConfig.InitializationCommands = initializationCommands
 
-	c.mutateModelCaches(reconcileContext)
+	c.mutateModelCaches(reconcileContext, rayClusterConfig)
 
 	return rayClusterConfig, nil
 }
 
-func (c *sshRayClusterReconciler) mutateModelCaches(reconcileContext *ReconcileContext) {
+func (c *sshRayClusterReconciler) mutateModelCaches(reconcileContext *ReconcileContext, sshRayClusterConfig *v1.RayClusterConfig) {
 	modelCaches := reconcileContext.sshClusterConfig.ModelCaches
 	if modelCaches == nil {
 		return
@@ -349,10 +349,10 @@ func (c *sshRayClusterReconciler) mutateModelCaches(reconcileContext *ReconcileC
 
 		switch modelCache.ModelRegistryType {
 		case v1.HuggingFaceModelRegistryType:
-			reconcileContext.sshRayClusterConfig.Docker.RunOptions = append(reconcileContext.sshRayClusterConfig.Docker.RunOptions,
+			sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
 				fmt.Sprintf("-e %s=%s", v1.HFHomeEnv, mountPath))
 		case v1.BentoMLModelRegistryType:
-			reconcileContext.sshRayClusterConfig.Docker.RunOptions = append(reconcileContext.sshRayClusterConfig.Docker.RunOptions,
+			sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
 				fmt.Sprintf("-e %s=%s", v1.BentoMLHomeEnv, mountPath))
 		default:
 			klog.Warningf("Model registry type %s is not supported, skip", modelCache.ModelRegistryType)
@@ -361,15 +361,15 @@ func (c *sshRayClusterReconciler) mutateModelCaches(reconcileContext *ReconcileC
 
 		if modelCache.HostPath != nil {
 			hostPath := modelCache.HostPath.Path
-			reconcileContext.sshRayClusterConfig.Docker.RunOptions = append(reconcileContext.sshRayClusterConfig.Docker.RunOptions,
+			sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
 				"--volume "+hostPath+":"+mountPath)
-			reconcileContext.sshRayClusterConfig.InitializationCommands = append(reconcileContext.sshRayClusterConfig.InitializationCommands,
+			sshRayClusterConfig.InitializationCommands = append(sshRayClusterConfig.InitializationCommands,
 				fmt.Sprintf("mkdir -p %s && chmod 755 %s", hostPath, hostPath))
 			modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", mountPath)
-			reconcileContext.sshRayClusterConfig.HeadStartRayCommands = append([]string{modifyPermissionCommand}, reconcileContext.sshRayClusterConfig.HeadStartRayCommands...)
-			reconcileContext.sshRayClusterConfig.WorkerStartRayCommands = append([]string{modifyPermissionCommand}, reconcileContext.sshRayClusterConfig.WorkerStartRayCommands...)
-			reconcileContext.sshRayClusterConfig.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand},
-				reconcileContext.sshRayClusterConfig.StaticWorkerStartRayCommands...)
+			sshRayClusterConfig.HeadStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.HeadStartRayCommands...)
+			sshRayClusterConfig.WorkerStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.WorkerStartRayCommands...)
+			sshRayClusterConfig.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand},
+				sshRayClusterConfig.StaticWorkerStartRayCommands...)
 		}
 	}
 }
