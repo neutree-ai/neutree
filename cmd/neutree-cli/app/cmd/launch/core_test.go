@@ -148,7 +148,6 @@ func TestPrepareNeutreeCoreDeployConfig(t *testing.T) {
 
 				// Verify files were created/modified
 				assert.FileExists(t, filepath.Join(tempDir, "neutree-core", "docker-compose.yml"))
-				assert.DirExists(t, filepath.Join(tempDir, "neutree-core", "db"))
 			}
 		})
 	}

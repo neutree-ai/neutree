@@ -1,6 +1,16 @@
 version: "3.8"
 
 services:
+  copy-db-scripts:
+    image: neutree/neutree-db-scripts:{{ .NeutreeVersion}}
+    container_name: copy-db-scripts
+    command: bash -c 'cp -rf /db /host/'
+    volumes:
+      - {{ .NeutreeCoreWorkDir}}:/host/
+    restart: none
+    deploy:
+      restart_policy:
+        condition: none
   postgres:
     image: postgres:13
     container_name: postgres
@@ -8,6 +18,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: pgpassword
       POSTGRES_DB: neutree
+    depends_on:
+      copy-db-scripts:
+        condition: service_completed_successfully
     volumes:
       - pg_data:/var/lib/postgresql/data
       - {{ .NeutreeCoreWorkDir}}/db/init-scripts:/docker-entrypoint-initdb.d
@@ -75,6 +88,8 @@ services:
     depends_on:
       auth:
         condition: service_healthy
+      copy-db-scripts:
+        condition: service_completed_successfully
     command: -source=file://migrations -database "postgres://postgres:pgpassword@postgres:5432/neutree?sslmode=disable" up
     volumes:
       - {{ .NeutreeCoreWorkDir}}/db/migrations:/migrations
@@ -153,7 +168,7 @@ services:
         max-file: "3"
 
   neutree-core:
-    image: neutree/neutree-core:{{ .NeutreeCoreVersion}}
+    image: neutree/neutree-core:{{ .NeutreeVersion}}
     container_name: neutree-core
     privileged: true
     cap_add:
@@ -190,7 +205,7 @@ services:
         max-file: "3"
 
   neutree-api:
-    image: neutree/neutree-api:{{ .NeutreeAPIVersion}}
+    image: neutree/neutree-api:{{ .NeutreeVersion}}
     container_name: neutree-api
     privileged: true
     cap_add:
@@ -232,7 +247,7 @@ services:
       - 8429:8429
     volumes:
       - vmagentdata:/vmagentdata
-      - {{ .NeutreeCoreWorkDir}}/vmagent/prometheus-cluster.yml:/etc/prometheus/prometheus.yml
+      - {{ .NeutreeCoreWorkDir}}/vmagent/prometheus.yml:/etc/prometheus/prometheus.yml
       - {{ .NeutreeCoreWorkDir}}/collect/metrics:/etc/prometheus/scrape
     command:
       - "--promscrape.config=/etc/prometheus/prometheus.yml"
@@ -333,7 +348,7 @@ services:
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
     volumes:
-      - {{.NeutreeCoreWorkDir}}/kong/plugin:/neutree-kong-plugin
+      - {{.NeutreeCoreWorkDir}}/gateway/kong/plugins:/neutree-kong-plugin/kong/plugins
     networks:
       - neutree
     ports:

@@ -1,0 +1,27 @@
+apiVersion: vendir.k14s.io/v1alpha1
+directories:
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/docker/neutree-core/gateway/
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/chart/neutree/gateway/
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/docker/obs-stack/grafana/dashboards/
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/chart/neutree/grafana-dashboards/
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/docker/neutree-core/vmagent/
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/chart/neutree/vmagent/
+kind: LockConfig

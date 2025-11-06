@@ -97,12 +97,5 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 data:
-  "prometheus.yml": |-
-    global:
-      scrape_interval: 30s
-    scrape_configs:
-      - job_name: 'neutree'
-        file_sd_configs:
-          - files:
-            - /etc/prometheus/scrape/*.json
+{{ (.Files.Glob "vmagent/*").AsConfig | indent 2 }}
 {{ end }}

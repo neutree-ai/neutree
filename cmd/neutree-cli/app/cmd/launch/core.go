@@ -49,10 +49,10 @@ Configuration Options:
 Examples:
   # Basic installation
   neutree-cli launch neutree-core
-  
+
   # Custom version installation
   neutree-cli launch neutree-core --version v1.2.0
-  
+
   # With remote metrics storage and Grafana
   neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com --grafana-url http://grafana.example.com:3030`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -137,18 +137,6 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 
 	coreWorkDir := filepath.Join(options.workDir, "neutree-core")
 
-	// extract db init scripts
-	neutreeDBInitScriptsTarFile, err := manifests.NeutreeCoreDBInitScriptsTar.Open("db.tar")
-	if err != nil {
-		return errors.Wrap(err, "open neutree core db init scripts failed")
-	}
-	defer neutreeDBInitScriptsTarFile.Close()
-
-	err = util.ExtractTar(neutreeDBInitScriptsTarFile, coreWorkDir)
-	if err != nil {
-		return errors.Wrap(err, "extract neutree core db init scripts failed")
-	}
-
 	// parseTemplate
 	tempplateFiles := []string{
 		filepath.Join(coreWorkDir, "docker-compose.yml"),
@@ -166,8 +154,7 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		"MetricsRemoteWriteURL":  options.metricsRemoteWriteURL,
 		"GrafanaURL":             options.grafanaURL,
 		"VictoriaMetricsVersion": constants.VictoriaMetricsVersion,
-		"NeutreeCoreVersion":     options.version,
-		"NeutreeAPIVersion":      options.version,
+		"NeutreeVersion":         options.version,
 		"JwtToken":               *jwtToken,
 		"VectorVersion":          constants.VectorVersion,
 		"KongVersion":            constants.KongVersion,
