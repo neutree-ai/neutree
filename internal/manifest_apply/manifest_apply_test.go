@@ -1,4 +1,4 @@
-package manifestapply
+package manifest_apply
 
 import (
 	"context"

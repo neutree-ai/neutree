@@ -164,6 +164,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != "latest" {
 				modelPath = filepath.Join(modelPath, endpoint.Spec.Model.Version)
 			} else {
+				// Fetch latest actual model version from model registry
 				registryManager, err := model_registry.NewModelRegistry(modelRegistry)
 				if err != nil {
 					return errors.Wrapf(err, "failed to create model registry manager for model registry %s", modelRegistry.Metadata.Name)
@@ -181,7 +182,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 					return errors.Wrapf(err, "failed to get latest model version for %s", endpoint.Spec.Model.Name)
 				}
 
-				modelPath = filepath.Join(modelPath, latestModelVersionInfo.Version)
+				modelPath = filepath.Join(modelPath, latestModelVersionInfo.Name)
 			}
 
 			if endpoint.Spec.Model.File != "" {

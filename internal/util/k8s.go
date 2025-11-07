@@ -12,10 +12,6 @@ import (
 const ResourceSkipPatchAnnotation = "neutree.io/skip-patch"
 
 func CreateOrPatch(ctx context.Context, obj client.Object, ctrClient client.Client) error {
-	if obj.GetAnnotations() != nil && obj.GetAnnotations()[ResourceSkipPatchAnnotation] != "" {
-		return nil
-	}
-
 	err := ctrClient.Patch(ctx, obj, client.Apply, client.ForceOwnership, client.FieldOwner("neutree-controller"))
 	if err != nil {
 		return errors.Wrap(err, "failed to apply object")
@@ -26,6 +22,10 @@ func CreateOrPatch(ctx context.Context, obj client.Object, ctrClient client.Clie
 
 func IsDeploymentUpdatedAndReady(deployment *appsv1.Deployment) bool {
 	if deployment.Status.ObservedGeneration < deployment.Generation {
+		return false
+	}
+
+	if deployment.Spec.Replicas == nil {
 		return false
 	}
 

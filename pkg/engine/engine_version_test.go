@@ -1,4 +1,4 @@
-package engine_version
+package engine
 
 import (
 	"os"

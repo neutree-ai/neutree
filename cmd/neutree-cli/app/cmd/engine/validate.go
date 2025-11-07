@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 
-	"github.com/neutree-ai/neutree/pkg/engine_version"
+	"github.com/neutree-ai/neutree/pkg/engine"
 )
 
 type ValidateOptions struct {
@@ -51,7 +51,7 @@ func runValidate(opts *ValidateOptions) error {
 	klog.Infof("Validating engine version package: %s", opts.PackagePath)
 
 	// Validate the package
-	if err := engine_version.ValidatePackage(opts.PackagePath); err != nil {
+	if err := engine.ValidatePackage(opts.PackagePath); err != nil {
 		return fmt.Errorf("package validation failed: %w", err)
 	}
 

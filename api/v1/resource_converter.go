@@ -68,9 +68,9 @@ func (r *ResourceSpec) GetCustomResources() map[string]string {
 
 // HasAccelerator checks whether an accelerator is configured
 func (r *ResourceSpec) HasAccelerator() bool {
-	gpu := 0
+	var gpu float64
 	if r.GPU != nil {
-		gpu = int(*r.GPU)
+		gpu = *r.GPU
 	}
 
 	return gpu > 0 && r.GetAcceleratorType() != ""

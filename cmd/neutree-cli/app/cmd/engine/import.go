@@ -8,7 +8,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/pkg/client"
-	"github.com/neutree-ai/neutree/pkg/engine_version"
+	"github.com/neutree-ai/neutree/pkg/engine"
 )
 
 type ImportOptions struct {
@@ -122,10 +122,10 @@ func runImport(opts *ImportOptions) error {
 	apiClient := client.NewClient(serverURL, clientOpts...)
 
 	// Create importer with engines service
-	importer := engine_version.NewImporter(apiClient)
+	importer := engine.NewImporter(apiClient)
 
 	// Prepare import options
-	importOpts := &engine_version.ImportOptions{
+	importOpts := &engine.ImportOptions{
 		PackagePath:   opts.packagePath,
 		ImageRegistry: opts.registry,
 		Workspace:     opts.workspace,

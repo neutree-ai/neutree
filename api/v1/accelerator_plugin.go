@@ -70,8 +70,6 @@ type RuntimeConfig struct {
 	Env         map[string]string `json:"env"`
 	Runtime     string            `json:"runtime"`
 	Options     []string          `json:"options"`
-
-	NodeSelector map[string]string `json:"node_selector,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {

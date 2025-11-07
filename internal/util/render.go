@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/klog/v2"
 	sigyaml "sigs.k8s.io/yaml"
 )
 
@@ -61,6 +62,7 @@ func RenderKubernetesManifest(templateStr string, variables any) (*unstructured.
 func toYAML(v interface{}) string {
 	data, err := sigyaml.Marshal(v)
 	if err != nil {
+		klog.Warningf("Failed to marshal yaml: %v", err)
 		// Swallow errors inside of a template.
 		return ""
 	}

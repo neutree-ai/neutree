@@ -1,4 +1,4 @@
-package engine_version
+package engine
 
 import (
 	v1 "github.com/neutree-ai/neutree/api/v1"

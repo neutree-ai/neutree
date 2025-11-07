@@ -1,4 +1,4 @@
-package manifestapply
+package manifest_apply
 
 import (
 	"context"
@@ -314,6 +314,7 @@ func computeSpecHash(obj *unstructured.Unstructured) string {
 
 	specJSON, err := json.Marshal(spec)
 	if err != nil {
+		klog.Warningf("Failed to marshal spec for hashing: %v", err)
 		return ""
 	}
 

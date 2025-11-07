@@ -11,40 +11,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
-
-func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster, dashboardService dashboard.DashboardService) (*v1.MetricsScrapeTargetsConfig, error) {
-	nodes, err := dashboardService.ListNodes()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list ray nodes")
-	}
-
-	metricsScrapeTargetConfig := &v1.MetricsScrapeTargetsConfig{
-		Labels: map[string]string{
-			"ray_io_cluster": cluster.Metadata.Name,
-			"job":            "ray",
-		},
-	}
-
-	for _, node := range nodes {
-		if node.Raylet.IsHeadNode {
-			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.DashboardMetricsPort))
-			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.AutoScaleMetricsPort))
-			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.RayletMetricsPort))
-
-			continue
-		}
-
-		if node.Raylet.State == v1.AliveNodeState {
-			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.RayletMetricsPort))
-		}
-	}
-
-	return metricsScrapeTargetConfig, nil
-}
 
 func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
 	return &corev1.Namespace{

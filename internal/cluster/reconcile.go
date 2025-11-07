@@ -40,11 +40,8 @@ type ReconcileContext struct {
 	sshConfigGenerator  *raySSHLocalConfigGenerator
 
 	// kubernetes cluster specific fields
-	ctrClient                  client.Client
-	kubeconfig                 string
-	clusterNamespace           string
-	installObjects             []client.Object
-	rayKubernetesClusterConfig *v1.RayKubernetesProvisionClusterConfig
+	ctrClient        client.Client
+	clusterNamespace string
 
 	// native kubernetes cluster specific fields
 	kubernetesClusterConfig *v1.KubernetesClusterConfig

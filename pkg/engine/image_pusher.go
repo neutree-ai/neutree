@@ -1,4 +1,4 @@
-package engine_version
+package engine
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func NewImagePusher() *ImagePusher {
 }
 
 // LoadAndPushImages loads images from tar files and pushes them to the registry
-func (p *ImagePusher) LoadAndPushImages(ctx context.Context, manifest *PackageManifest, extractedPath string, registry string, imagePrefix string) ([]string, error) {
+func (p *ImagePusher) LoadAndPushImages(ctx context.Context, manifest *PackageManifest, extractedPath string, registry string, repo string) ([]string, error) {
 	var pushedImages []string
 	var errs []error
 
@@ -36,7 +36,7 @@ func (p *ImagePusher) LoadAndPushImages(ctx context.Context, manifest *PackageMa
 
 		// Build the original and target image references
 		originalImage := fmt.Sprintf("%s:%s", imgSpec.ImageName, imgSpec.Tag)
-		targetImage := p.buildTargetImage(registry, imagePrefix, imgSpec)
+		targetImage := p.buildTargetImage(registry, repo, imgSpec)
 
 		// Tag the image with the target registry
 		klog.Infof("Tagging image %s as %s", originalImage, targetImage)
@@ -65,8 +65,8 @@ func (p *ImagePusher) LoadAndPushImages(ctx context.Context, manifest *PackageMa
 	return pushedImages, nil
 }
 
-// buildTargetImage builds the target image reference with registry and prefix
-func (p *ImagePusher) buildTargetImage(registry, prefix string, imgSpec *ImageSpec) string {
+// buildTargetImage builds the target image reference with registry and repo
+func (p *ImagePusher) buildTargetImage(registry, repo string, imgSpec *ImageSpec) string {
 	// Remove any existing registry from the image name
 	imageName := imgSpec.ImageName
 	if idx := strings.Index(imageName, "/"); idx != -1 {
@@ -78,8 +78,8 @@ func (p *ImagePusher) buildTargetImage(registry, prefix string, imgSpec *ImageSp
 	}
 
 	// Build the target image reference
-	if prefix != "" {
-		return fmt.Sprintf("%s/%s/%s:%s", registry, prefix, imageName, imgSpec.Tag)
+	if repo != "" {
+		return fmt.Sprintf("%s/%s/%s:%s", registry, repo, imageName, imgSpec.Tag)
 	}
 
 	return fmt.Sprintf("%s/%s:%s", registry, imageName, imgSpec.Tag)

@@ -7,7 +7,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/manifestapply"
+	"github.com/neutree-ai/neutree/internal/manifest_apply"
 	"github.com/neutree-ai/neutree/internal/util"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -33,7 +33,7 @@ func (r *RouterComponent) ApplyResources(ctx context.Context) error {
 	}
 
 	lastAppliedConfigJson := r.cluster.Metadata.Annotations[routerLastAppliedConfigAnnotation]
-	manifestApplier := manifestapply.NewManifestApply(r.ctrlClient, r.namespace).WithNewObjects(objs).
+	manifestApplier := manifest_apply.NewManifestApply(r.ctrlClient, r.namespace).WithNewObjects(objs).
 		WithLastAppliedConfig(lastAppliedConfigJson).
 		WithMutate(func(obj *unstructured.Unstructured) error {
 			labels := obj.GetLabels()
@@ -79,7 +79,7 @@ func (r *RouterComponent) ApplyResources(ctx context.Context) error {
 // DeleteResources deletes all route resources from the cluster
 func (r *RouterComponent) DeleteResources(ctx context.Context) (bool, error) {
 	lastAppliedConfigJson := r.cluster.Metadata.Annotations[routerLastAppliedConfigAnnotation]
-	manifestApplier := manifestapply.NewManifestApply(r.ctrlClient, r.namespace).
+	manifestApplier := manifest_apply.NewManifestApply(r.ctrlClient, r.namespace).
 		WithLastAppliedConfig(lastAppliedConfigJson).
 		WithMutate(func(obj *unstructured.Unstructured) error {
 			labels := obj.GetLabels()

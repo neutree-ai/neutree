@@ -10,7 +10,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/manifestapply"
+	"github.com/neutree-ai/neutree/internal/manifest_apply"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 
@@ -110,7 +110,7 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.Endp
 	)
 
 	// Use ManifestApply for automatic manifest management
-	manifestApply := manifestapply.NewManifestApply(ctrlClient, util.ClusterNamespace(deployedCluster)).
+	manifestApply := manifest_apply.NewManifestApply(ctrlClient, util.ClusterNamespace(deployedCluster)).
 		WithLastAppliedConfig(lastAppliedConfig).
 		WithNewObjects(deploymentObjects).
 		WithMutate(mutate).
@@ -182,7 +182,7 @@ func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	}
 
 	// Use ManifestApply for automatic resource deletion
-	manifestApply := manifestapply.NewManifestApply(ctrlClient, util.ClusterNamespace(deployedCluster)).
+	manifestApply := manifest_apply.NewManifestApply(ctrlClient, util.ClusterNamespace(deployedCluster)).
 		WithLastAppliedConfig(lastAppliedConfig)
 
 	// Delete all resources from last applied config

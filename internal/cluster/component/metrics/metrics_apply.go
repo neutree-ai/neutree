@@ -7,7 +7,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/manifestapply"
+	"github.com/neutree-ai/neutree/internal/manifest_apply"
 	"github.com/neutree-ai/neutree/internal/util"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -33,7 +33,7 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 	}
 
 	lastAppliedConfigJson := m.cluster.Metadata.Annotations[metricsLastAppliedConfigAnnotation]
-	manifestApplier := manifestapply.NewManifestApply(m.ctrlClient, m.namespace).
+	manifestApplier := manifest_apply.NewManifestApply(m.ctrlClient, m.namespace).
 		WithNewObjects(objs).
 		WithLastAppliedConfig(lastAppliedConfigJson).
 		WithMutate(func(obj *unstructured.Unstructured) error {
@@ -80,7 +80,7 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 // DeleteResources deletes all metrics resources from the cluster
 func (m *MetricsComponent) DeleteResources(ctx context.Context) (bool, error) {
 	lastAppliedConfigJson := m.cluster.Metadata.Annotations[metricsLastAppliedConfigAnnotation]
-	manifestApplier := manifestapply.NewManifestApply(m.ctrlClient, m.namespace).
+	manifestApplier := manifest_apply.NewManifestApply(m.ctrlClient, m.namespace).
 		WithLastAppliedConfig(lastAppliedConfigJson).
 		WithMutate(func(obj *unstructured.Unstructured) error {
 			labels := obj.GetLabels()
