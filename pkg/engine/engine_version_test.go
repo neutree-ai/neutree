@@ -144,19 +144,18 @@ func TestParserGetImagePath(t *testing.T) {
 }
 
 func TestImagePusherBuildTargetImage(t *testing.T) {
-	pusher := NewImagePusher()
+	pusher, err := NewImagePusher(nil) // No API client needed for testing buildTargetImage
+	require.NoError(t, err, "Failed to create ImagePusher")
 
 	tests := []struct {
-		name     string
-		registry string
-		prefix   string
-		imgSpec  *ImageSpec
-		expected string
+		name        string
+		imagePrefix string
+		imgSpec     *ImageSpec
+		expected    string
 	}{
 		{
-			name:     "with prefix",
-			registry: "registry.example.com",
-			prefix:   "neutree",
+			name:        "with prefix",
+			imagePrefix: "registry.example.com/neutree",
 			imgSpec: &ImageSpec{
 				ImageName: "vllm-cuda",
 				Tag:       "v0.5.0",
@@ -164,9 +163,8 @@ func TestImagePusherBuildTargetImage(t *testing.T) {
 			expected: "registry.example.com/neutree/vllm-cuda:v0.5.0",
 		},
 		{
-			name:     "without prefix",
-			registry: "registry.example.com",
-			prefix:   "",
+			name:        "without prefix",
+			imagePrefix: "registry.example.com",
 			imgSpec: &ImageSpec{
 				ImageName: "vllm-cuda",
 				Tag:       "v0.5.0",
@@ -174,27 +172,45 @@ func TestImagePusherBuildTargetImage(t *testing.T) {
 			expected: "registry.example.com/vllm-cuda:v0.5.0",
 		},
 		{
-			name:     "remove existing registry",
-			registry: "new-registry.com",
-			prefix:   "neutree",
+			name:        "remove existing registry",
+			imagePrefix: "new-registry.com/neutree",
 			imgSpec: &ImageSpec{
 				ImageName: "old-registry.com/vllm-cuda",
 				Tag:       "v0.5.0",
 			},
 			expected: "new-registry.com/neutree/vllm-cuda:v0.5.0",
 		},
+		{
+			name:        "remove existing registry with port",
+			imagePrefix: "new-registry.com/neutree",
+			imgSpec: &ImageSpec{
+				ImageName: "old-registry.com:5000/vllm-cuda",
+				Tag:       "v0.5.0",
+			},
+			expected: "new-registry.com/neutree/vllm-cuda:v0.5.0",
+		},
+		{
+			name:        "keep organization name without dots",
+			imagePrefix: "registry.example.com/neutree",
+			imgSpec: &ImageSpec{
+				ImageName: "myorg/vllm-cuda",
+				Tag:       "v0.5.0",
+			},
+			expected: "registry.example.com/neutree/myorg/vllm-cuda:v0.5.0",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := pusher.buildTargetImage(tt.registry, tt.prefix, tt.imgSpec)
+			result := pusher.buildTargetImage(tt.imagePrefix, tt.imgSpec)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestImportOptionsValidation(t *testing.T) {
-	importer := NewImporter(nil)
+	importer, err := NewImporter(nil)
+	require.NoError(t, err, "Failed to create Importer")
 
 	tests := []struct {
 		name        string
@@ -275,6 +291,65 @@ func TestImportOptionsValidation(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestImagePusherExtractImageNameWithoutRegistry(t *testing.T) {
+	pusher, err := NewImagePusher(nil) // No API client needed for testing
+	require.NoError(t, err, "Failed to create ImagePusher")
+
+	tests := []struct {
+		name      string
+		imageName string
+		expected  string
+	}{
+		{
+			name:      "simple image name",
+			imageName: "vllm-cuda",
+			expected:  "vllm-cuda",
+		},
+		{
+			name:      "image with organization",
+			imageName: "myorg/vllm-cuda",
+			expected:  "myorg/vllm-cuda",
+		},
+		{
+			name:      "image with registry domain",
+			imageName: "registry.example.com/vllm-cuda",
+			expected:  "vllm-cuda",
+		},
+		{
+			name:      "image with registry and org",
+			imageName: "registry.example.com/myorg/vllm-cuda",
+			expected:  "myorg/vllm-cuda",
+		},
+		{
+			name:      "image with registry port",
+			imageName: "registry.example.com:5000/vllm-cuda",
+			expected:  "vllm-cuda",
+		},
+		{
+			name:      "image with registry port and org",
+			imageName: "registry.example.com:5000/myorg/vllm-cuda",
+			expected:  "myorg/vllm-cuda",
+		},
+		{
+			name:      "dockerhub official image",
+			imageName: "nginx",
+			expected:  "nginx",
+		},
+		{
+			name:      "dockerhub user image",
+			imageName: "username/image",
+			expected:  "username/image",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := pusher.extractImageNameWithoutRegistry(tt.imageName)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

@@ -32,12 +32,20 @@ type Model struct {
 	CreationTime string `json:"creation_time"`
 }
 
+type ModelMeta struct {
+	Name         string `yaml:"name" json:"name"`
+	Version      string `yaml:"version" json:"version"`
+	Module       string `yaml:"module" json:"module"`
+	Size         string `yaml:"size" json:"size"`
+	CreationTime string `yaml:"creation_time" json:"creation_time"`
+}
+
 const (
 	ModelYAMLFileName = "model.yaml"
 )
 
 // GetModelDetail gets detailed information about a specific model
-func GetModelDetail(homePath, modelName, version string) (*Model, error) {
+func GetModelDetail(homePath, modelName, version string) (*ModelMeta, error) {
 	tag := modelName
 	if version != "" {
 		tag = fmt.Sprintf("%s:%s", modelName, version)
@@ -51,14 +59,14 @@ func GetModelDetail(homePath, modelName, version string) (*Model, error) {
 		return nil, errors.Wrapf(err, "failed to get model detail: %s", string(content))
 	}
 
-	var model Model
+	var meta ModelMeta
 
-	err = json.Unmarshal(content, &model)
+	err = json.Unmarshal(content, &meta)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal model detail")
 	}
 
-	return &model, nil
+	return &meta, nil
 }
 
 // DeleteModel deletes a model from BentoML store
@@ -185,21 +193,13 @@ func ExportModel(homePath, modelName, version, outputPath string) error {
 // GetModelPath returns the path where a model is stored in BentoML home
 func GetModelPath(homePath, modelName, version string) (string, error) {
 	// Get model details to ensure it exists
-	model, err := GetModelDetail(homePath, modelName, version)
+	meta, err := GetModelDetail(homePath, modelName, version)
 	if err != nil {
 		return "", err
 	}
 
-	// Parse the tag to get the actual version
-	parts := strings.Split(model.Tag, ":")
-	if len(parts) != 2 {
-		return "", errors.New("invalid model tag format")
-	}
-
-	actualVersion := parts[1]
-
 	// Construct the path to the model directory
-	modelDir := filepath.Join(homePath, "models", modelName, actualVersion)
+	modelDir := filepath.Join(homePath, "models", meta.Name, meta.Version)
 	if _, err := os.Stat(modelDir); os.IsNotExist(err) {
 		return "", errors.New("model directory not found")
 	}
@@ -249,13 +249,7 @@ func ListModels(homePath string) ([]Model, error) {
 		}
 
 		// Minimal superset of fields we care about
-		var meta struct {
-			Name         string `yaml:"name" json:"name"`
-			Version      string `yaml:"version" json:"version"`
-			Module       string `yaml:"module" json:"module"`
-			Size         string `yaml:"size" json:"size"`
-			CreationTime string `yaml:"creation_time" json:"creation_time"`
-		}
+		var meta ModelMeta
 
 		if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
 			if err := yaml.Unmarshal(raw, &meta); err != nil {

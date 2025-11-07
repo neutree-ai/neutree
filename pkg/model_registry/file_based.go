@@ -92,16 +92,8 @@ func (f *localFile) GetModelVersion(name, version string) (*v1.ModelVersion, err
 		return nil, err
 	}
 
-	// Parse tag to get the actual version
-	parts := strings.Split(bentomlModel.Tag, ":")
-	modelVersion := version
-
-	if len(parts) == 2 {
-		modelVersion = parts[1]
-	}
-
 	return &v1.ModelVersion{
-		Name:         modelVersion,
+		Name:         bentomlModel.Version,
 		CreationTime: bentomlModel.CreationTime,
 		Size:         bentomlModel.Size,
 		Module:       bentomlModel.Module,
@@ -163,16 +155,8 @@ func (n *nfsFile) GetModelVersion(name, version string) (*v1.ModelVersion, error
 		return nil, err
 	}
 
-	// Parse tag to get the actual version
-	parts := strings.Split(bentomlModel.Tag, ":")
-	modelVersion := version
-
-	if len(parts) == 2 {
-		modelVersion = parts[1]
-	}
-
 	return &v1.ModelVersion{
-		Name:         modelVersion,
+		Name:         bentomlModel.Version,
 		CreationTime: bentomlModel.CreationTime,
 		Size:         bentomlModel.Size,
 		Module:       bentomlModel.Module,

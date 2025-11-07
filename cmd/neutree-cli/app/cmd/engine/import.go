@@ -122,7 +122,10 @@ func runImport(opts *ImportOptions) error {
 	apiClient := client.NewClient(serverURL, clientOpts...)
 
 	// Create importer with engines service
-	importer := engine.NewImporter(apiClient)
+	importer, err := engine.NewImporter(apiClient)
+	if err != nil {
+		return err
+	}
 
 	// Prepare import options
 	importOpts := &engine.ImportOptions{
