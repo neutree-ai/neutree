@@ -3,14 +3,12 @@ package engine
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
 
@@ -23,13 +21,18 @@ type Importer struct {
 }
 
 // NewImporter creates a new Importer
-func NewImporter(apiClient *client.Client) *Importer {
+func NewImporter(apiClient *client.Client) (*Importer, error) {
+	imagePusher, err := NewImagePusher(apiClient)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create image pusher")
+	}
+
 	return &Importer{
 		apiClient:   apiClient,
 		extractor:   NewExtractor(),
 		parser:      NewParser(),
-		imagePusher: NewImagePusher(),
-	}
+		imagePusher: imagePusher,
+	}, nil
 }
 
 // Import imports an engine version package
@@ -103,35 +106,12 @@ func (i *Importer) Import(ctx context.Context, opts *ImportOptions) (*ImportResu
 	if !opts.SkipImagePush {
 		klog.Info("Loading and pushing images to registry")
 
-		imageRegistry, err := i.apiClient.ImageRegistries.Get(opts.Workspace, opts.ImageRegistry)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get image registry")
-		}
-
-		klog.Infof("Using image registry: %s", imageRegistry.Metadata.Name)
-
-		registryHost, err := util.GetImageRegistryHost(imageRegistry)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to parse image registry URL")
-		}
-
-		// Login to the image registry
-		userName, password := util.GetImageRegistryAuthInfo(imageRegistry)
-		if userName != "" && password != "" {
-			cmd := exec.CommandContext(ctx, "docker", "login", registryHost, "-u", userName, "-p", password)
-
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				return nil, errors.Wrapf(err, "docker login failed: %s", string(output))
-			}
-		}
-
 		pushedImages, err := i.imagePusher.LoadAndPushImages(
 			ctx,
+			opts.Workspace,
+			opts.ImageRegistry,
 			manifest,
 			opts.ExtractPath,
-			registryHost,
-			imageRegistry.Spec.Repository,
 		)
 		if err != nil {
 			result.Errors = append(result.Errors, err)
