@@ -9,7 +9,7 @@ scrape_configs:
     - '/etc/prometheus/scrape/*.json'
 
 # Ray use applicationName as application label value in metrics.
-# it cause the ui can not show the dashboard correctly.
+# it cause the UI can not show the dashboard correctly.
 # So we use relabeling to change it to "endpointName".
   metric_relabel_configs:
     - source_labels: [application]
@@ -20,3 +20,9 @@ scrape_configs:
       regex: '([^_]+)_(.+)'
       target_label: application
       replacement: '$2'
+  # Convert ray_vllm: prefix to vllm: prefix
+  # ray_vllm:e2e_request_latency_seconds_bucket => vllm:e2e_request_latency_seconds_bucket
+    - source_labels: [__name__]
+      regex: ray_vllm:(.+)
+      target_label: __name__
+      replacement: vllm:$1

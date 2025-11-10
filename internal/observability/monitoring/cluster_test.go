@@ -22,7 +22,7 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 		{
 			name: "success with head and worker nodes",
 			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
 				Status: &v1.ClusterStatus{
 					DashboardURL: "http://example-dashboard-url",
 				},
@@ -46,8 +46,10 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 			expected: []v1.MetricsScrapeTargetsConfig{
 				{
 					Labels: map[string]string{
-						"ray_io_cluster": "test-cluster",
-						"job":            "ray",
+						"ray_io_cluster":  "test-cluster",
+						"job":             "neutree",
+						"neutree_cluster": "test-cluster",
+						"workspace":       "default",
 					},
 					Targets: []string{
 						"10.0.0.1:44227", // DashboardMetricsPort
@@ -61,7 +63,7 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 		{
 			name: "success with only head node",
 			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
 				Status: &v1.ClusterStatus{
 					DashboardURL: "http://example-dashboard-url",
 				},
@@ -78,8 +80,10 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 			expected: []v1.MetricsScrapeTargetsConfig{
 				{
 					Labels: map[string]string{
-						"ray_io_cluster": "test-cluster",
-						"job":            "ray",
+						"ray_io_cluster":  "test-cluster",
+						"job":             "neutree",
+						"neutree_cluster": "test-cluster",
+						"workspace":       "default",
 					},
 					Targets: []string{
 						"10.0.0.1:44227",
@@ -103,7 +107,7 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 		{
 			name: "skip non-alive worker nodes",
 			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
 				Status: &v1.ClusterStatus{
 					DashboardURL: "http://example-dashboard-url",
 				},
@@ -127,8 +131,10 @@ func TestClusterMonitor_GetMetricsScrapeTargetsConfig(t *testing.T) {
 			expected: []v1.MetricsScrapeTargetsConfig{
 				{
 					Labels: map[string]string{
-						"ray_io_cluster": "test-cluster",
-						"job":            "ray",
+						"ray_io_cluster":  "test-cluster",
+						"job":             "neutree",
+						"neutree_cluster": "test-cluster",
+						"workspace":       "default",
 					},
 					Targets: []string{
 						"10.0.0.1:44227",

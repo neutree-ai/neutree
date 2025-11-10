@@ -1,0 +1,19 @@
+apiVersion: vendir.k14s.io/v1alpha1
+directories:
+- contents:
+  - git:
+      commitTitle: '[Release] Update KubeRay version references for 1.4.0 (#3816)...'
+      sha: 279b9f002a597125e9267365c46caaf123fe5a45
+      tags:
+      - ray-operator/v1.4.0
+    path: .
+  path: dashboards/ray-upstream
+- contents:
+  - git:
+      commitTitle: '[Model] Add tuned triton fused_moe configs for Qwen3Moe (#17328)...'
+      sha: ba41cc90e8ef7f236347b2f1599eec2cbb9e1f0d
+      tags:
+      - v0.8.5
+    path: .
+  path: dashboards/vllm-upstream
+kind: LockConfig

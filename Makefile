@@ -258,3 +258,8 @@ $(VENDIR):
 .PHONY: sync-deploy-manifests
 sync-deploy-manifests: vendir ## Sync third-party dependencies using vendir
 	$(VENDIR) sync
+
+.PHONY: sync-grafana-dashboards
+sync-grafana-dashboards: vendir ## Sync grafana dashboards using vendir
+	cd scripts/dashboard  && $(VENDIR) sync && bash sync-grafana-dashboards.sh
+

@@ -1,0 +1,17 @@
+apiVersion: vendir.k14s.io/v1alpha1
+kind: Config
+directories:
+- path: ray-upstream
+  contents:
+  - path: .
+    git:
+      url: https://github.com/ray-project/kuberay.git
+      ref: v1.4.0
+    newRootPath: config/grafana
+- path: vllm-upstream
+  contents:
+  - path: .
+    git:
+      url: https://github.com/vllm-project/vllm.git
+      ref: v0.8.5
+    newRootPath: examples/online_serving/prometheus_grafana

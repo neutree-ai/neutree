@@ -45,8 +45,10 @@ func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster) (*v1.Metr
 
 	metricsScrapeTargetConfig := &v1.MetricsScrapeTargetsConfig{
 		Labels: map[string]string{
-			"ray_io_cluster": cluster.Metadata.Name,
-			"job":            "ray",
+			"ray_io_cluster":  cluster.Metadata.Name,
+			"job":             "neutree",
+			"neutree_cluster": cluster.Metadata.Name,
+			"workspace":       cluster.Metadata.Workspace,
 		},
 	}
 
