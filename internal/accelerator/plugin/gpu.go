@@ -32,7 +32,7 @@ type GPUAcceleratorPlugin struct {
 }
 
 func (p *GPUAcceleratorPlugin) Resource() string {
-	return "gpu"
+	return v1.AcceleratorTypeNVIDIAGPU
 }
 
 func (p *GPUAcceleratorPlugin) Handle() AcceleratorPluginHandle {
@@ -237,4 +237,8 @@ func (p *GPUAcceleratorPlugin) Ping(ctx context.Context) error {
 
 func (p *GPUAcceleratorPlugin) Type() string {
 	return InternalPluginType
+}
+
+func (p *GPUAcceleratorPlugin) GetResourceConverter() v1.ResourceConverter {
+	return NewGPUConverter()
 }

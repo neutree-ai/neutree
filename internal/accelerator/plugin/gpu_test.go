@@ -15,7 +15,7 @@ func TestGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	plugin := &GPUAcceleratorPlugin{}
 
 	// Test basic interface methods
-	assert.Equal(t, "gpu", plugin.Resource())
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU, plugin.Resource())
 	assert.Equal(t, plugin, plugin.Handle())
 	assert.Equal(t, InternalPluginType, plugin.Type())
 	assert.NoError(t, plugin.Ping(context.Background()))

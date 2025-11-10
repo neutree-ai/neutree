@@ -1,0 +1,422 @@
+package orchestrator
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"net/url"
+	"path"
+	"path/filepath"
+	"strings"
+
+	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/model_registry"
+)
+
+type DeploymentManifestVariables struct {
+	EndpointName    string
+	Namespace       string
+	ClusterName     string
+	Workspace       string
+	EngineName      string
+	EngineVersion   string
+	ImageRepo       string
+	ImageTag        string
+	ImagePullSecret string
+	ModelArgs       map[string]interface{}
+	EngineArgs      map[string]interface{}
+	Resources       map[string]string
+	Env             map[string]string
+	Volumes         []corev1.Volume
+	VolumeMounts    []corev1.VolumeMount
+	RoutingLogic    string
+	Replicas        int32
+	NodeSelector    map[string]string
+}
+
+func buildDeploymentObjects(deployTemplate string, renderVars DeploymentManifestVariables) (*unstructured.UnstructuredList, error) {
+	return util.RenderKubernetesManifest(deployTemplate, renderVars)
+}
+
+// setBasicVariables initializes the basic deployment variables
+func (k *kubernetesOrchestrator) setBasicVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint, deployedCluster *v1.Cluster, engine *v1.Engine) {
+	data.EndpointName = endpoint.Metadata.Name
+	data.Namespace = util.ClusterNamespace(deployedCluster)
+	data.ClusterName = deployedCluster.Metadata.Name
+	data.Workspace = deployedCluster.Metadata.Workspace
+	data.EngineName = engine.Metadata.Name
+	data.EngineVersion = endpoint.Spec.Engine.Version
+	data.ImagePullSecret = cluster.ImagePullSecretName
+	data.Replicas = int32(*endpoint.Spec.Replicas.Num)
+	data.RoutingLogic = "roundrobin"
+}
+
+// setDeployImageVariables sets the container image repository and tag for deployment
+func (k *kubernetesOrchestrator) setDeployImageVariables(data *DeploymentManifestVariables,
+	endpoint *v1.Endpoint, engine *v1.Engine, imageRegistry *v1.ImageRegistry) error {
+	imagePrefix, err := util.GetImagePrefix(imageRegistry)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get image prefix for image registry %s", imageRegistry.Metadata.WorkspaceName())
+	}
+
+	acceleratorType := endpoint.Spec.Resources.GetAcceleratorType()
+
+	imageName, imageTag, err := k.getImageForAccelerator(engine, endpoint.Spec.Engine.Version, acceleratorType, imagePrefix)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get image for accelerator %s", acceleratorType)
+	}
+
+	data.ImageRepo = imageName
+	data.ImageTag = imageTag
+
+	return nil
+}
+
+// setRoutingLogic sets the routing logic from deployment options
+func (k *kubernetesOrchestrator) setRoutingLogic(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
+	if endpoint.Spec.DeploymentOptions != nil && endpoint.Spec.DeploymentOptions["scheduler"] != nil {
+		scheduleConfig, ok := endpoint.Spec.DeploymentOptions["scheduler"].(map[string]interface{})
+		if ok {
+			if logic, exists := scheduleConfig["type"].(string); exists {
+				data.RoutingLogic = logic
+			}
+		}
+	}
+}
+
+// setEngineArgs sets engine arguments from endpoint variables
+func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
+	if endpoint.Spec.Variables != nil {
+		if v, ok := endpoint.Spec.Variables["engine_args"].(map[string]interface{}); ok {
+			data.EngineArgs = v
+		}
+	}
+}
+
+// setResourceVariables sets resource specifications and node selector
+func (k *kubernetesOrchestrator) setResourceVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) error {
+	resourceSpec, err := k.acceleratorManager.ConvertToKubernetes(context.Background(), endpoint.Spec.Resources)
+	if err != nil {
+		return errors.Wrapf(err, "failed to convert resources for endpoint %s", endpoint.Metadata.Name)
+	}
+
+	data.Resources = resourceSpec.Requests
+	data.NodeSelector = resourceSpec.NodeSelector
+
+	return nil
+}
+
+// setEnvironmentVariables initializes environment variables from endpoint spec
+func (k *kubernetesOrchestrator) setEnvironmentVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
+	data.Env = map[string]string{}
+	if endpoint.Spec.Env != nil {
+		data.Env = endpoint.Spec.Env
+	}
+}
+
+// setModelCacheVariables configures model cache volumes and environment variables
+func (k *kubernetesOrchestrator) setModelCacheVariables(data *DeploymentManifestVariables, deployedCluster *v1.Cluster) error {
+	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get model cache for cluster %s", deployedCluster.Metadata.Name)
+	}
+
+	if len(modelCaches) > 0 {
+		volumes, volumeMounts, modelEnv := generateModelCacheConfig(modelCaches)
+		data.Volumes = volumes
+		data.VolumeMounts = volumeMounts
+
+		maps.Copy(data.Env, modelEnv)
+	}
+
+	return nil
+}
+
+// setModelArgs initializes model arguments from endpoint spec
+func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) {
+	data.ModelArgs = map[string]interface{}{
+		"name":          endpoint.Spec.Model.Name,
+		"version":       endpoint.Spec.Model.Version,
+		"file":          endpoint.Spec.Model.File,
+		"task":          endpoint.Spec.Model.Task,
+		"path":          endpoint.Spec.Model.Name, // default to model name
+		"registry-type": string(modelRegistry.Spec.Type),
+	}
+}
+
+// setModelRegistryVariables adapts model registry specific settings
+func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) error {
+	switch modelRegistry.Spec.Type {
+	case v1.BentoMLModelRegistryType:
+		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
+		// todo: support local file type env set
+		mountPath := filepath.Join("/mnt", "bentoml")
+		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+			data.Env[v1.BentoMLHomeEnv] = mountPath
+
+			modelPath := filepath.Join(mountPath, "models", endpoint.Spec.Model.Name)
+			if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != "latest" {
+				modelPath = filepath.Join(modelPath, endpoint.Spec.Model.Version)
+			} else {
+				// Fetch latest actual model version from model registry
+				registryManager, err := model_registry.NewModelRegistry(modelRegistry)
+				if err != nil {
+					return errors.Wrapf(err, "failed to create model registry manager for model registry %s", modelRegistry.Metadata.Name)
+				}
+
+				err = registryManager.Connect()
+				if err != nil {
+					return errors.Wrapf(err, "failed to connect to model registry %s", modelRegistry.Metadata.Name)
+				}
+
+				defer registryManager.Disconnect() // nolint: errcheck
+
+				latestModelVersionInfo, err := registryManager.GetModelVersion(endpoint.Spec.Model.Name, "latest")
+				if err != nil {
+					return errors.Wrapf(err, "failed to get latest model version for %s", endpoint.Spec.Model.Name)
+				}
+
+				modelPath = filepath.Join(modelPath, latestModelVersionInfo.Name)
+			}
+
+			if endpoint.Spec.Model.File != "" {
+				modelPath = filepath.Join(modelPath, endpoint.Spec.Model.File)
+			}
+
+			data.ModelArgs["path"] = modelPath
+
+			data.Volumes = append(data.Volumes, corev1.Volume{
+				Name: "bentoml-model-registry",
+				VolumeSource: corev1.VolumeSource{
+					NFS: &corev1.NFSVolumeSource{
+						Server: url.Hostname(),
+						Path:   url.Path,
+					},
+				},
+			})
+
+			data.VolumeMounts = append(data.VolumeMounts, corev1.VolumeMount{
+				Name:      "bentoml-model-registry",
+				MountPath: mountPath,
+			})
+		}
+
+		// todo: support local file type env set
+
+	case v1.HuggingFaceModelRegistryType:
+		data.Env[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
+		if modelRegistry.Spec.Credentials != "" {
+			data.Env[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
+		}
+	}
+
+	return nil
+}
+
+// addSharedMemoryVolume adds shared memory volume to the deployment
+func (k *kubernetesOrchestrator) addSharedMemoryVolume(data *DeploymentManifestVariables) {
+	data.Volumes = append(data.Volumes, corev1.Volume{
+		Name: "dshm",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				// none size limit mean the sharing memory size equals node allocated memory.
+				Medium: corev1.StorageMediumMemory,
+			},
+		},
+	})
+
+	data.VolumeMounts = append(data.VolumeMounts, corev1.VolumeMount{
+		Name:      "dshm",
+		MountPath: "/dev/shm",
+	})
+}
+
+func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, modelRegistry *v1.ModelRegistry,
+	engine *v1.Engine, imageRegistry *v1.ImageRegistry) (DeploymentManifestVariables, error) {
+	// Initialize deployment manifest variables
+	data := DeploymentManifestVariables{}
+
+	// Set basic variables
+	k.setBasicVariables(&data, endpoint, deployedCluster, engine)
+
+	// Set deploy image variables
+	if err := k.setDeployImageVariables(&data, endpoint, engine, imageRegistry); err != nil {
+		return DeploymentManifestVariables{}, err
+	}
+
+	// Set routing logic
+	k.setRoutingLogic(&data, endpoint)
+
+	// Set engine args
+	k.setEngineArgs(&data, endpoint)
+
+	// Set resource variables
+	if err := k.setResourceVariables(&data, endpoint); err != nil {
+		return DeploymentManifestVariables{}, err
+	}
+
+	// Set environment variables
+	k.setEnvironmentVariables(&data, endpoint)
+
+	// Set model cache variables
+	if err := k.setModelCacheVariables(&data, deployedCluster); err != nil {
+		return DeploymentManifestVariables{}, err
+	}
+
+	// Set model args
+	k.setModelArgs(&data, endpoint, modelRegistry)
+
+	// Set model registry specific variables
+	if err := k.setModelRegistryVariables(&data, endpoint, modelRegistry); err != nil {
+		return DeploymentManifestVariables{}, err
+	}
+
+	// Add shared memory volume
+	k.addSharedMemoryVolume(&data)
+
+	return data, nil
+}
+
+func (k *kubernetesOrchestrator) getDeployTemplate(endpoint *v1.Endpoint, engine *v1.Engine) (string, error) {
+	mode := "default"
+
+	if endpoint.Spec.DeploymentOptions != nil && endpoint.Spec.DeploymentOptions["deploy_mode"] != nil {
+		deployMode, ok := endpoint.Spec.DeploymentOptions["deploy_mode"].(string)
+		if ok {
+			mode = deployMode
+		}
+	}
+
+	for _, version := range engine.Spec.Versions {
+		if version.Version == endpoint.Spec.Engine.Version {
+			// Use the new GetDeployTemplate method which handles Base64 decoding automatically
+			template, err := version.GetDeployTemplate("kubernetes", mode)
+			if err != nil {
+				return "", errors.Wrapf(err, "failed to get deployment template for endpoint %s", endpoint.Metadata.WorkspaceName())
+			}
+
+			return template, nil
+		}
+	}
+
+	return "", errors.Errorf("engine version %s not found for endpoint %s", endpoint.Spec.Engine.Version, endpoint.Metadata.WorkspaceName())
+}
+
+// getImageForAccelerator retrieves the appropriate container image for a specific accelerator type
+// from the engine version specification. It returns the full image name and tag.
+//
+// Parameters:
+//   - engine: The engine object containing version specifications
+//   - version: The specific engine version to use
+//   - acceleratorType: The accelerator type (e.g., "nvidia-gpu", "amd-gpu", "cpu")
+//   - imagePrefix: The image registry prefix (e.g., "registry.neutree.ai/neutree")
+//
+// Returns:
+//   - imageName: The full image name with registry prefix (e.g., "registry.neutree.ai/neutree/vllm")
+//   - imageTag: The image tag (e.g., "v0.5.0")
+//   - error: Any error encountered during image selection
+func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, version string, acceleratorType string, imagePrefix string) (string, string, error) {
+	// Find the matching engine version
+	var targetVersion *v1.EngineVersion
+
+	for _, ev := range engine.Spec.Versions {
+		if ev.Version == version {
+			targetVersion = ev
+			break
+		}
+	}
+
+	if targetVersion == nil {
+		return "", "", errors.Errorf("engine version %s not found in engine %s", version, engine.Metadata.Name)
+	}
+
+	// Check if the engine version has images configured
+	if len(targetVersion.Images) == 0 {
+		// Fallback to legacy behavior: use cluster image name convention
+		imageName := imagePrefix + "/" + engine.Metadata.Name
+		return imageName, version, nil
+	}
+
+	// Default to "cpu" if no accelerator type is specified
+	if acceleratorType == "" {
+		acceleratorType = "cpu"
+	}
+
+	// Get image for the specific accelerator type
+	engineImage := targetVersion.GetImageForAccelerator(acceleratorType)
+	if engineImage == nil {
+		// If accelerator type not found, try to use a default or return error
+		supportedAccelerators := targetVersion.GetSupportedAccelerators()
+
+		return "", "", errors.Errorf(
+			"no image configured for accelerator type %s in engine %s version %s. Supported accelerators: %v",
+			acceleratorType, engine.Metadata.Name, version, supportedAccelerators,
+		)
+	}
+
+	// Construct full image name
+	imageName := imagePrefix + "/" + engineImage.ImageName
+
+	imageTag := engineImage.Tag
+	if imageTag == "" {
+		imageTag = version // Fallback to engine version if tag is not specified
+	}
+
+	return imageName, imageTag, nil
+}
+
+func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []corev1.VolumeMount, map[string]string) {
+	volumes := []corev1.Volume{}
+	volumeMounts := []corev1.VolumeMount{}
+	env := make(map[string]string)
+
+	for _, cache := range modelCaches {
+		name := fmt.Sprintf("%s-model-cache", cache.ModelRegistryType)
+		if cache.HostPath != nil {
+			volumes = append(volumes, corev1.Volume{
+				Name: name,
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: cache.HostPath.Path,
+					},
+				},
+			})
+
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{
+				Name:      name,
+				MountPath: path.Join(modelCacheMountPathPrefix, name),
+			})
+
+			if cache.ModelRegistryType == v1.BentoMLModelRegistryType {
+				env[v1.BentoMLHomeEnv] = path.Join(modelCacheMountPathPrefix, name)
+			} else if cache.ModelRegistryType == v1.HuggingFaceModelRegistryType {
+				env[v1.HFHomeEnv] = path.Join(modelCacheMountPathPrefix, name)
+			}
+		}
+
+		if cache.NFS != nil {
+			volumes = append(volumes, corev1.Volume{
+				Name: name,
+				VolumeSource: corev1.VolumeSource{
+					NFS: &corev1.NFSVolumeSource{
+						Server: cache.NFS.Server,
+						Path:   cache.NFS.Path,
+					},
+				},
+			})
+
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{
+				Name:      name,
+				MountPath: path.Join(modelCacheMountPathPrefix, name),
+			})
+		}
+	}
+
+	return volumes, volumeMounts, env
+}

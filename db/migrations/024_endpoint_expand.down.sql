@@ -1,0 +1,1 @@
+ALTER TYPE api.endpoint_spec DROP ATTRIBUTE env;

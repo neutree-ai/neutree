@@ -13,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/nfs"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
@@ -43,7 +42,7 @@ func (o *RayOrchestrator) connectKubernetesClusterEndpointModel(modelRegistry v1
 	}
 
 	ctx := context.Background()
-	ns := cluster.Namespace(o.cluster)
+	ns := util.ClusterNamespace(o.cluster)
 
 	podList := &corev1.PodList{}
 	err = ctrlClient.List(ctx, podList, client.InNamespace(ns), client.MatchingLabels{

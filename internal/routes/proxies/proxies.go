@@ -14,6 +14,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -202,9 +203,9 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		url, err := url.Parse(clusters[0].Status.DashboardURL)
+		scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
 		if err != nil {
-			errS := fmt.Sprintf("Failed to parse url: %v", err)
+			errS := fmt.Sprintf("Failed to get cluster serve address: %v", err)
 			klog.Errorf(errS)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": errS,
@@ -213,7 +214,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		serviceURL := fmt.Sprintf("%s://%s:%d/%s/%s", url.Scheme, url.Hostname(), 8000, workspace, endpoints[0].Metadata.Name)
+		serviceURL := fmt.Sprintf("%s://%s:%d/%s/%s", scheme, host, port, workspace, endpoints[0].Metadata.Name)
 
 		path := c.Param("path")
 		if path != "" && path[0] == '/' {

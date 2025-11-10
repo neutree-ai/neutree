@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .EndpointName }}
+  namespace: {{ .Namespace }}
+  labels:
+    engine: {{ .EngineName }}
+    engine_version: {{ .EngineVersion }}
+    cluster: {{ .ClusterName }}
+    workspace: {{ .Workspace }}
+    endpoint: {{ .EndpointName }}
+    routing_logic: {{ .RoutingLogic }}
+    app: inference
+spec:
+  replicas: {{ .Replicas }}
+  progressDeadlineSeconds: 1200
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      cluster: {{ .ClusterName }}
+      workspace: {{ .Workspace }}
+      endpoint: {{ .EndpointName }}
+      app: inference
+  template:
+    metadata:
+      labels:
+        engine: {{ .EngineName }}
+        engine_version: {{ .EngineVersion }}
+        cluster: {{ .ClusterName }}
+        workspace: {{ .Workspace }}
+        endpoint: {{ .EndpointName }}
+        routing_logic: {{ .RoutingLogic }}
+        app: inference
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: endpoint
+                      operator: In
+                      values:
+                        - {{ .EndpointName }}
+                topologyKey: "kubernetes.io/hostname"
+      {{- if .NodeSelector }}
+      nodeSelector:
+        {{- range $key, $value := .NodeSelector }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
+      {{- if .ImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .ImagePullSecret }}
+      {{- end }}
+
+      {{- if .Volumes }}
+      volumes:
+{{ .Volumes | toYaml | indent 6 }}
+      {{- end }}
+
+      containers:
+        - name: {{ .EngineName }}
+          image: {{ .ImageRepo }}:{{ .ImageTag }}
+          command:
+          - bash
+          - -c
+          args:
+          - >-
+            python3 -m llama_cpp.server
+            {{- if eq (index .ModelArgs "registry-type") "hugging-face" }}
+            --hf_model_repo_id {{ .ModelArgs.name }} --model {{ .ModelArgs.file }}
+            {{- else }}
+            --model $(find {{ .ModelArgs.path }} -name "{{ .ModelArgs.file }}" | head -n 1)
+            {{- end }}
+            --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.name }}
+            {{- if eq .ModelArgs.task "text-embedding" }} --embedding{{- end }}
+            {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{- if ne (printf "%v" $value) "true"}} "{{ $value }}"{{- end }}{{- end }}{{- end }}
+          resources:
+            limits:
+              {{- range $key, $value := .Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+            requests:
+              {{- range $key, $value := .Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          ports:
+            - containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /v1/models
+              port: 8000
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8000
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}

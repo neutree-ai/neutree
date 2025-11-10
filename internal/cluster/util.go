@@ -4,55 +4,16 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/url"
+	"regexp"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
-
-func getImagePrefix(imageRegistry *v1.ImageRegistry) (string, error) {
-	registryURL, err := url.Parse(imageRegistry.Spec.URL)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
-	}
-
-	return registryURL.Host + "/" + imageRegistry.Spec.Repository, nil
-}
-
-func generateRayClusterMetricsScrapeTargetsConfig(cluster *v1.Cluster, dashboardService dashboard.DashboardService) (*v1.MetricsScrapeTargetsConfig, error) {
-	nodes, err := dashboardService.ListNodes()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list ray nodes")
-	}
-
-	metricsScrapeTargetConfig := &v1.MetricsScrapeTargetsConfig{
-		Labels: map[string]string{
-			"ray_io_cluster": cluster.Metadata.Name,
-			"job":            "ray",
-		},
-	}
-
-	for _, node := range nodes {
-		if node.Raylet.IsHeadNode {
-			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.DashboardMetricsPort))
-			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.AutoScaleMetricsPort))
-			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.RayletMetricsPort))
-
-			continue
-		}
-
-		if node.Raylet.State == v1.AliveNodeState {
-			metricsScrapeTargetConfig.Targets = append(metricsScrapeTargetConfig.Targets, fmt.Sprintf("%s:%d", node.IP, v1.RayletMetricsPort))
-		}
-	}
-
-	return metricsScrapeTargetConfig, nil
-}
 
 func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
 	return &corev1.Namespace{
@@ -62,6 +23,10 @@ func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: util.ClusterNamespace(cluster),
+			Labels: map[string]string{
+				v1.NeutreeClusterLabelKey:          cluster.Metadata.Name,
+				v1.NeutreeClusterWorkspaceLabelKey: cluster.Metadata.Workspace,
+			},
 		},
 	}
 }
@@ -145,4 +110,9 @@ func getUsedImageRegistries(cluster *v1.Cluster, s storage.Storage) (*v1.ImageRe
 	}
 
 	return &imageRegistryList[0], nil
+}
+
+func removeEscapes(s string) string {
+	re := regexp.MustCompile(`\\`)
+	return re.ReplaceAllString(s, "")
 }

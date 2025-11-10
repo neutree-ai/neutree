@@ -18,6 +18,13 @@ type acceleratorPluginClient struct {
 	baseURL string
 }
 
+// restResourceConverter is the REST resource converter
+// Used by external plugins to perform resource conversion via HTTP API
+type restResourceConverter struct {
+	client  *http.Client
+	baseURL string
+}
+
 func newAcceleratorPluginClient(baseUrl string) AcceleratorPluginHandle {
 	return &acceleratorPluginClient{
 		client: &http.Client{
@@ -100,6 +107,13 @@ func (u *acceleratorPluginClient) GetKubernetesContainerRuntimeConfig(ctx contex
 	return response, nil
 }
 
+func (u *acceleratorPluginClient) GetResourceConverter() v1.ResourceConverter {
+	return &restResourceConverter{
+		client:  u.client,
+		baseURL: u.baseURL,
+	}
+}
+
 func (u *acceleratorPluginClient) doPost(ctx context.Context, path string, request, response interface{}) error {
 	reqContent, err := json.Marshal(request)
 	if err != nil {
@@ -159,4 +173,60 @@ func parsePluginResponse(resp *http.Response, result interface{}) error {
 	}
 
 	return nil
+}
+
+// ConvertToRay converts to Ray resource configuration via REST API
+func (r *restResourceConverter) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+	reqContent, err := json.Marshal(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, r.baseURL+v1.ConvertToRayPath, bytes.NewBuffer(reqContent))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	result := &v1.RayResourceSpec{}
+	if err := parsePluginResponse(resp, result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// ConvertToKubernetes converts to Kubernetes resource configuration via REST API
+func (r *restResourceConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+	reqContent, err := json.Marshal(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, r.baseURL+v1.ConvertToKubernetesPath, bytes.NewBuffer(reqContent))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	result := &v1.KubernetesResourceSpec{}
+	if err := parsePluginResponse(resp, result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

@@ -12,8 +12,18 @@ const (
 	GetSupportEnginesPath         = "/v1/support-engines"
 	PingPath                      = "/v1/ping"
 
+	// Resource conversion API paths
+	ConvertToRayPath        = "/v1/resource/convert-to-ray"
+	ConvertToKubernetesPath = "/v1/resource/convert-to-kubernetes"
+
 	PluginAPIGroupPath = "/v1/plugin"
 	RegisterPath       = PluginAPIGroupPath + "/register"
+)
+
+// Accelerator type constants
+const (
+	AcceleratorTypeNVIDIAGPU = "nvidia_gpu"
+	AcceleratorTypeAMDGPU    = "amd_gpu"
 )
 
 type Accelerator struct {
@@ -67,7 +77,7 @@ type GetSupportEnginesResponse struct {
 }
 
 type RegisterRequest struct {
-	ResourceName string `json:"resource_name"`
+	ResourceName string `json:"resource_name"` // Accelerator resource type (e.g., "nvidia_gpu", "amd_gpu")
 	Endpoint     string `json:"endpoint"`
 	Version      string `json:"version"`
 }
