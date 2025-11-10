@@ -7,3 +7,16 @@ scrape_configs:
   file_sd_configs:
   - files:
     - '/etc/prometheus/scrape/*.json'
+
+# Ray use applicationName as application label value in metrics.
+# it cause the ui can not show the dashboard correctly.
+# So we use relabeling to change it to "endpointName".
+  metric_relabel_configs:
+    - source_labels: [application]
+      target_label: application_original
+      regex: '(.+)'
+      replacement: '$1'
+    - source_labels: [application]
+      regex: '([^_]+)_(.+)'
+      target_label: application
+      replacement: '$2'
