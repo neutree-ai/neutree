@@ -14,3 +14,16 @@ __pycache__/
 
 .air.toml
 *.dev.yml
+
+# Ignore vendir managed files
+# kong plugins
+deploy/docker/neutree-core/gateway
+deploy/chart/neutree/gateway
+
+# grafana dashboards
+deploy/docker/obs-stack/grafana/dashboards
+deploy/chart/neutree/grafana-dashboards
+
+# vmagent config files
+deploy/docker/neutree-core/vmagent
+deploy/chart/neutree/vmagent

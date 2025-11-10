@@ -15,6 +15,8 @@ NEUTREE_DB_SCRIPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
 ARCH ?= amd64
 ALL_ARCH = amd64 arm64
 
+TOOLS_BIN_DIR := $(shell pwd)/bin
+
 GO := go
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -24,6 +26,10 @@ GOBIN=$(shell go env GOBIN)
 endif
 
 GO_VERSION ?= 1.23.0
+
+# Host information.
+HOST_OS ?= $(shell sh -c "PATH=$(PATH) go env GOOS")
+HOST_ARCH ?= $(shell sh -c "PATH=$(PATH) go env GOARCH")
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -65,10 +71,8 @@ build: test build-neutree-core build-neutree-cli build-neutree-api
 build-neutree-core:
 	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
 
-prepare-build-cli:
-	tar -cvf db.tar db
+prepare-build-cli: sync-deploy-manifests
 	cd deploy/docker && tar -cvf obs-stack.tar obs-stack && tar -cvf neutree-core.tar neutree-core
-	mv -f db.tar cmd/neutree-cli/app/cmd/launch/manifests/
 	mv -f deploy/docker/neutree-core.tar cmd/neutree-cli/app/cmd/launch/manifests/
 	mv -f deploy/docker/obs-stack.tar cmd/neutree-cli/app/cmd/launch/manifests/
 
@@ -206,7 +210,7 @@ release-binary:
 		-o $(RELEASE_DIR)/$(notdir $(RELEASE_BINARY)) $(BUILD_PATH)
 
 .PHONY: release-chart
-release-chart: ## Build the chart to publish with a release
+release-chart: sync-deploy-manifests ## Build the chart to publish with a release
 	sed -i "s/version: .*/version: ${VERSION}/" deploy/chart/neutree/Chart.yaml
 	sed -i "s/appVersion: .*/appVersion: ${VERSION}/" deploy/chart/neutree/Chart.yaml
 	helm package ./deploy/chart/neutree -d $(RELEASE_DIR)
@@ -238,3 +242,19 @@ docker-test-core: ## Redeploy local neutree-core for testing
 	$(MAKE) build-neutree-core
 	docker cp bin/neutree-core neutree-core:/neutree-core
 	docker restart neutree-core
+
+VENDIR := $(TOOLS_BIN_DIR)/vendir
+
+vendir: $(VENDIR) # Download vendir if not yet.
+$(VENDIR):
+	@[ -f $(VENDIR) ] || { \
+	set -e ;\
+	mkdir -p $(TOOLS_BIN_DIR) ;\
+	curl -LO https://github.com/vmware-tanzu/carvel-vendir/releases/download/v0.26.0/vendir-$(HOST_OS)-$(HOST_ARCH) ;\
+	mv vendir-$(HOST_OS)-$(HOST_ARCH) $(@) ;\
+	chmod a+x $(@) ;\
+	}
+
+.PHONY: sync-deploy-manifests
+sync-deploy-manifests: vendir ## Sync third-party dependencies using vendir
+	$(VENDIR) sync
