@@ -179,9 +179,9 @@ func (p *GPUAcceleratorPlugin) getKubernetesContainerAcceleratorInfo(container c
 }
 
 func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error) {
-	llamaCppV1EngineSchema, err := GetLlamaCppV1EngineSchema()
+	llamaCppDefaultEngineSchema, err := GetLlamaCppDefaultEngineSchema()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load Llama.cpp V1 engine schema")
+		return nil, errors.Wrap(err, "failed to load Llama.cpp default engine schema")
 	}
 
 	llamaCppV1Engine := &v1.Engine{
@@ -193,15 +193,26 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 		Spec: &v1.EngineSpec{
 			Versions: []*v1.EngineVersion{
 				{
-					Version:      "v1",
-					ValuesSchema: llamaCppV1EngineSchema,
+					Version:      "v0.3.6",
+					ValuesSchema: llamaCppDefaultEngineSchema,
+					Images: map[string]*v1.EngineImage{
+						"cpu": {
+							ImageName: "llama-cpp",
+							Tag:       "v0.3.6",
+						},
+					},
+					DeployTemplate: map[string]map[string]string{
+						"kubernetes": {
+							"default": GetLlamaCppDefaultDeployTemplate(),
+						},
+					},
 				},
 			},
 			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask},
 		},
 	}
 
-	vllmV1EngineSchema, err := GetVLLMV1EngineSchema()
+	vllmDefaultEngineSchema, err := GetVLLMDefaultEngineSchema()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load vLLM V1 engine schema")
 	}
@@ -215,8 +226,19 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 		Spec: &v1.EngineSpec{
 			Versions: []*v1.EngineVersion{
 				{
-					Version:      "v1",
-					ValuesSchema: vllmV1EngineSchema,
+					Version:      "v0.8.5",
+					ValuesSchema: vllmDefaultEngineSchema,
+					Images: map[string]*v1.EngineImage{
+						"nvidia_gpu": {
+							ImageName: "vllm",
+							Tag:       "v0.8.5",
+						},
+					},
+					DeployTemplate: map[string]map[string]string{
+						"kubernetes": {
+							"default": GetVLLMDefaultDeployTemplate(),
+						},
+					},
 				},
 			},
 			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},

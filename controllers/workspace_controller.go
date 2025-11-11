@@ -9,6 +9,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -192,10 +193,11 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 
 	targetEngine := engines[0]
 
-	for _, v := range targetEngine.Spec.Versions {
+	for k, v := range targetEngine.Spec.Versions {
 		if v.Version == engine.Spec.Versions[0].Version {
-			// Version already exists, no need to update
-			return nil
+			// Version already exists, merge it and update
+			targetEngine.Spec.Versions[k] = util.MergeEngineVersion(v, engine.Spec.Versions[0])
+			return c.storage.UpdateEngine(strconv.Itoa(targetEngine.ID), &targetEngine)
 		}
 	}
 

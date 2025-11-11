@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetVLLMV1EngineSchema(t *testing.T) {
-	schema, err := GetVLLMV1EngineSchema()
+func TestGetVLLMDefaultEngineSchema(t *testing.T) {
+	schema, err := GetVLLMDefaultEngineSchema()
 	assert.NoError(t, err)
 	assert.NotNil(t, schema)
 
@@ -22,8 +22,8 @@ func TestGetVLLMV1EngineSchema(t *testing.T) {
 	assert.NotEmpty(t, properties)
 }
 
-func TestGetLlamaCppV1EngineSchema(t *testing.T) {
-	schema, err := GetLlamaCppV1EngineSchema()
+func TestGetLlamaCppDefaultEngineSchema(t *testing.T) {
+	schema, err := GetLlamaCppDefaultEngineSchema()
 	assert.NoError(t, err)
 	assert.NotNil(t, schema)
 
@@ -46,12 +46,12 @@ func TestGetEngineSchema(t *testing.T) {
 	}{
 		{
 			name:        "Valid vLLM engine",
-			engineName:  "vllm-v1",
+			engineName:  "vllm-v0.8.5",
 			expectError: false,
 		},
 		{
 			name:        "Valid Llama.cpp engine",
-			engineName:  "llama-cpp-v1",
+			engineName:  "llama-cpp-v0.3.6",
 			expectError: false,
 		},
 		{
@@ -100,7 +100,7 @@ func TestEngineSchemas(t *testing.T) {
 	}
 
 	// Test that we have the expected engines registered
-	assert.Contains(t, EngineSchemas, "vllm-v1")
-	assert.Contains(t, EngineSchemas, "llama-cpp-v1")
+	assert.Contains(t, EngineSchemas, "vllm-v0.8.5")
+	assert.Contains(t, EngineSchemas, "llama-cpp-v0.3.6")
 	assert.Len(t, EngineSchemas, 2)
 }

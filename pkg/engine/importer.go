@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	internalutil "github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
 
@@ -198,34 +199,7 @@ func (i *Importer) updateEngine(_ context.Context, engine *v1.Engine, manifest *
 		engine.Spec.Versions = append(engine.Spec.Versions, newVersion)
 	} else {
 		// merge oldVersion with newVersion
-		for key := range newVersion.Images {
-			oldVersion.Images[key] = newVersion.Images[key]
-		}
-
-		for clusterType := range newVersion.DeployTemplate {
-			for deployMode := range newVersion.DeployTemplate[clusterType] {
-				oldVersion.DeployTemplate[clusterType][deployMode] = newVersion.DeployTemplate[clusterType][deployMode]
-			}
-		}
-
-		if newVersion.ValuesSchema != nil {
-			oldVersion.ValuesSchema = newVersion.ValuesSchema
-		}
-
-		for idx := range newVersion.SupportedTasks {
-			found := false
-
-			for _, oldTask := range oldVersion.SupportedTasks {
-				if oldTask == newVersion.SupportedTasks[idx] {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				oldVersion.SupportedTasks = append(oldVersion.SupportedTasks, newVersion.SupportedTasks[idx])
-			}
-		}
+		engine.Spec.Versions = append(engine.Spec.Versions, internalutil.MergeEngineVersion(oldVersion, newVersion))
 	}
 
 	return i.apiClient.Engines.Update(opts.Workspace, engine.GetID(), engine)

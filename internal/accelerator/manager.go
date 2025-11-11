@@ -14,6 +14,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/resource"
 )
 
@@ -37,16 +38,16 @@ type registerPlugin struct {
 }
 
 type manager struct {
-	acceleratorsMap   sync.Map
-	supportEnginesMap sync.Map
-	converterManager  resource.ConverterManager
+	acceleratorsMap  sync.Map
+	engineRegistry   engine.Registry
+	converterManager resource.ConverterManager
 }
 
 func NewManager(e *gin.Engine) Manager {
 	manager := &manager{
-		acceleratorsMap:   sync.Map{},
-		supportEnginesMap: sync.Map{},
-		converterManager:  resource.NewConverterManager(),
+		acceleratorsMap:  sync.Map{},
+		engineRegistry:   engine.NewRegistry(),
+		converterManager: resource.NewConverterManager(),
 	}
 
 	for _, p := range plugin.GetLocalAcceleratorPlugins() {
@@ -358,21 +359,7 @@ func (a *manager) GetKubernetesContainerRuntimeConfig(ctx context.Context, accel
 }
 
 func (a *manager) GetAllAcceleratorSupportEngines(ctx context.Context) ([]*v1.Engine, error) {
-	var engines []*v1.Engine
-
-	a.supportEnginesMap.Range(func(key, value any) bool {
-		e, ok := value.(*v1.Engine)
-		if !ok {
-			klog.Warning("assert engine type failed")
-			return true
-		}
-
-		engines = append(engines, e)
-
-		return true
-	})
-
-	return engines, nil
+	return a.engineRegistry.ListAll(context.Background())
 }
 
 func (a *manager) refreshAcceleratorPluginSupportEngines(p plugin.AcceleratorPlugin) {
@@ -383,13 +370,23 @@ func (a *manager) refreshAcceleratorPluginSupportEngines(p plugin.AcceleratorPlu
 	}
 
 	for _, e := range resp.Engines {
-		a.supportEnginesMap.Store(e.Metadata.Name, e)
+		// store or update engine info
+		err = a.engineRegistry.Register(e)
+		if err != nil {
+			klog.Warningf("register engine %s from plugin %s failed, err: %s", e.Metadata.Name, p.Resource(), err.Error())
+		}
 	}
 }
 
 func (a *manager) refreshAllAcceleratorPluginSupportEngines() {
 	// reset support engines map
-	a.supportEnginesMap = sync.Map{}
+	err := a.engineRegistry.Cleanup()
+	if err != nil {
+		klog.Warningf("cleanup engine registry failed, err: %s", err.Error())
+		return
+	}
+
+	// refresh all plugin support engines
 	a.acceleratorsMap.Range(func(key, value any) bool {
 		p, ok := value.(registerPlugin)
 		if !ok {
