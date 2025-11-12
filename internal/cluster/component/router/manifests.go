@@ -98,8 +98,6 @@ spec:
         - roundrobin
         - --lmcache-controller-port
         - "50051"
-        - --engine-stats-interval
-        - "30"
         - --session-key
         - "session_id"
         - --service-discovery

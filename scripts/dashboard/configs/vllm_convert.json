@@ -1,0 +1,60 @@
+{
+  "name": "vLLM to Neutree",
+  "description": "Convert open-source vLLM Dashboard to Neutree-integrated version",
+  "source_file": "vllm-upstream/grafana.json",
+  "output_file": "output/vllm_grafana_dashboard.json",
+  "uid": "vllm",
+  "keep_datasource_variable": true,
+
+
+  "filter_rules": [
+    {
+      "name": "model_name_to_neutree_filters",
+      "description": "Replace model_name filter with Neutree multi-dimensional filters",
+      "pattern": "model_name=\"\\$model_name\"",
+      "replacement": "application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"",
+      "is_regex": true
+    }
+  ],
+
+  "custom_rules": [],
+
+  "variables": [
+    {
+      "name": "Application",
+      "label": "Application",
+      "query": "label_values(application)",
+      "multi": true,
+      "include_all": true,
+      "all_value": ".*",
+      "variable_type": "query"
+    },
+    {
+      "name": "Deployment",
+      "label": "Deployment",
+      "query": "label_values(deployment)",
+      "multi": true,
+      "include_all": true,
+      "all_value": ".*",
+      "variable_type": "query"
+    },
+    {
+      "name": "Replica",
+      "label": "Replica",
+      "query": "label_values(replica)",
+      "multi": true,
+      "include_all": true,
+      "all_value": ".*",
+      "variable_type": "query"
+    },
+    {
+      "name": "Cluster",
+      "label": "Cluster",
+      "query": "label_values(neutree_cluster)",
+      "multi": true,
+      "include_all": true,
+      "all_value": ".*",
+      "variable_type": "query"
+    }
+  ]
+}

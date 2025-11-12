@@ -27,3 +27,7 @@ deploy/chart/neutree/grafana-dashboards
 # vmagent config files
 deploy/docker/neutree-core/vmagent
 deploy/chart/neutree/vmagent
+
+scripts/dashboard/ray-upstream
+scripts/dashboard/vllm-upstream
+scripts/dashboard/output

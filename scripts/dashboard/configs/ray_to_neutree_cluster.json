@@ -1,0 +1,24 @@
+{
+  "name": "Ray to Neutree Cluster Label",
+  "description": "Convert ray_io_cluster label to neutree_cluster in Ray upstream dashboards",
+  "source_file": "source_dashboard.json",
+  "output_file": "output_dashboard.json",
+  "uid": null,
+  "keep_datasource_variable": false,
+
+  "metric_rules": [],
+
+  "filter_rules": [
+    {
+      "name": "ray_io_cluster_to_neutree_cluster",
+      "description": "Replace ray_io_cluster label with neutree_cluster in all contexts",
+      "pattern": "ray_io_cluster",
+      "replacement": "neutree_cluster",
+      "is_regex": false
+    }
+  ],
+
+  "custom_rules": [],
+
+  "variables": []
+}
