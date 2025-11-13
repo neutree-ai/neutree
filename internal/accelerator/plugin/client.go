@@ -10,17 +10,13 @@ import (
 	"net/http"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 type acceleratorPluginClient struct {
-	client  *http.Client
-	baseURL string
-}
-
-// restResourceConverter is the REST resource converter
-// Used by external plugins to perform resource conversion via HTTP API
-type restResourceConverter struct {
 	client  *http.Client
 	baseURL string
 }
@@ -83,35 +79,12 @@ func (u *acceleratorPluginClient) GetNodeRuntimeConfig(ctx context.Context,
 	return response, nil
 }
 
-func (u *acceleratorPluginClient) GetKubernetesContainerAccelerator(ctx context.Context,
-	request *v1.GetContainerAcceleratorRequest) (*v1.GetContainerAcceleratorResponse, error) {
-	response := &v1.GetContainerAcceleratorResponse{}
-
-	err := u.doPost(ctx, v1.GetContainerAcceleratorPath, request, response)
-	if err != nil {
-		return nil, err
-	}
-
-	return response, nil
+func (u *acceleratorPluginClient) GetResourceConverter() ResourceConverter {
+	return u
 }
 
-func (u *acceleratorPluginClient) GetKubernetesContainerRuntimeConfig(ctx context.Context,
-	request *v1.GetContainerRuntimeConfigRequest) (*v1.GetContainerRuntimeConfigResponse, error) {
-	response := &v1.GetContainerRuntimeConfigResponse{}
-
-	err := u.doPost(ctx, v1.GetContainerRuntimeConfigPath, request, response)
-	if err != nil {
-		return nil, err
-	}
-
-	return response, nil
-}
-
-func (u *acceleratorPluginClient) GetResourceConverter() v1.ResourceConverter {
-	return &restResourceConverter{
-		client:  u.client,
-		baseURL: u.baseURL,
-	}
+func (u *acceleratorPluginClient) GetResourceParser() ResourceParser {
+	return u
 }
 
 func (u *acceleratorPluginClient) doPost(ctx context.Context, path string, request, response interface{}) error {
@@ -176,57 +149,48 @@ func parsePluginResponse(resp *http.Response, result interface{}) error {
 }
 
 // ConvertToRay converts to Ray resource configuration via REST API
-func (r *restResourceConverter) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
-	reqContent, err := json.Marshal(spec)
+func (u *acceleratorPluginClient) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+	response := &v1.RayResourceSpec{}
+
+	err := u.doPost(context.Background(), v1.ConvertToRayPath, spec, response)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, r.baseURL+v1.ConvertToRayPath, bytes.NewBuffer(reqContent))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	result := &v1.RayResourceSpec{}
-	if err := parsePluginResponse(resp, result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return response, nil
 }
 
 // ConvertToKubernetes converts to Kubernetes resource configuration via REST API
-func (r *restResourceConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
-	reqContent, err := json.Marshal(spec)
-	if err != nil {
+func (u *acceleratorPluginClient) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+	resp := &v1.KubernetesResourceSpec{}
+	if err := u.doPost(context.Background(), v1.ConvertToKubernetesPath, spec, resp); err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, r.baseURL+v1.ConvertToKubernetesPath, bytes.NewBuffer(reqContent))
-	if err != nil {
+	return resp, nil
+}
+
+// ParseFromKubernetes parses resource info from Kubernetes resource quantities via REST API
+func (u *acceleratorPluginClient) ParseFromKubernetes(resource map[corev1.ResourceName]resource.Quantity, labels map[string]string) (*v1.ResourceInfo, error) {
+	resp := &v1.ResourceInfo{}
+	if err := u.doPost(context.Background(), v1.ParseFromKubernetesPath, &v1.ParseFromKubernetesRequest{
+		Resource: resource,
+		Labels:   labels,
+	}, resp); err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	return resp, nil
+}
 
-	resp, err := r.client.Do(req)
-	if err != nil {
+// ParseFromRay parses resource info from Ray resource configuration via REST API
+func (u *acceleratorPluginClient) ParseFromRay(resource map[string]float64) (*v1.ResourceInfo, error) {
+	resp := &v1.ResourceInfo{}
+	if err := u.doPost(context.Background(), v1.ParseFromRayPath, &v1.ParseFromRayRequest{
+		Resource: resource,
+	}, resp); err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 
-	result := &v1.KubernetesResourceSpec{}
-	if err := parsePluginResponse(resp, result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return resp, nil
 }

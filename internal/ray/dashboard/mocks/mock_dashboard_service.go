@@ -22,61 +22,6 @@ func (_m *MockDashboardService) EXPECT() *MockDashboardService_Expecter {
 	return &MockDashboardService_Expecter{mock: &_m.Mock}
 }
 
-// GetClusterAutoScaleStatus provides a mock function with no fields
-func (_m *MockDashboardService) GetClusterAutoScaleStatus() (v1.AutoscalerReport, error) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetClusterAutoScaleStatus")
-	}
-
-	var r0 v1.AutoscalerReport
-	var r1 error
-	if rf, ok := ret.Get(0).(func() (v1.AutoscalerReport, error)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() v1.AutoscalerReport); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(v1.AutoscalerReport)
-	}
-
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDashboardService_GetClusterAutoScaleStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusterAutoScaleStatus'
-type MockDashboardService_GetClusterAutoScaleStatus_Call struct {
-	*mock.Call
-}
-
-// GetClusterAutoScaleStatus is a helper method to define mock.On call
-func (_e *MockDashboardService_Expecter) GetClusterAutoScaleStatus() *MockDashboardService_GetClusterAutoScaleStatus_Call {
-	return &MockDashboardService_GetClusterAutoScaleStatus_Call{Call: _e.mock.On("GetClusterAutoScaleStatus")}
-}
-
-func (_c *MockDashboardService_GetClusterAutoScaleStatus_Call) Run(run func()) *MockDashboardService_GetClusterAutoScaleStatus_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockDashboardService_GetClusterAutoScaleStatus_Call) Return(_a0 v1.AutoscalerReport, _a1 error) *MockDashboardService_GetClusterAutoScaleStatus_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDashboardService_GetClusterAutoScaleStatus_Call) RunAndReturn(run func() (v1.AutoscalerReport, error)) *MockDashboardService_GetClusterAutoScaleStatus_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetClusterMetadata provides a mock function with no fields
 func (_m *MockDashboardService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {
 	ret := _m.Called()
@@ -130,6 +75,61 @@ func (_c *MockDashboardService_GetClusterMetadata_Call) Return(_a0 *dashboard.Cl
 }
 
 func (_c *MockDashboardService_GetClusterMetadata_Call) RunAndReturn(run func() (*dashboard.ClusterMetadataResponse, error)) *MockDashboardService_GetClusterMetadata_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetClusterStatus provides a mock function with no fields
+func (_m *MockDashboardService) GetClusterStatus() (v1.RayAPIClusterStatus, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterStatus")
+	}
+
+	var r0 v1.RayAPIClusterStatus
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (v1.RayAPIClusterStatus, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() v1.RayAPIClusterStatus); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(v1.RayAPIClusterStatus)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDashboardService_GetClusterStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusterStatus'
+type MockDashboardService_GetClusterStatus_Call struct {
+	*mock.Call
+}
+
+// GetClusterStatus is a helper method to define mock.On call
+func (_e *MockDashboardService_Expecter) GetClusterStatus() *MockDashboardService_GetClusterStatus_Call {
+	return &MockDashboardService_GetClusterStatus_Call{Call: _e.mock.On("GetClusterStatus")}
+}
+
+func (_c *MockDashboardService_GetClusterStatus_Call) Run(run func()) *MockDashboardService_GetClusterStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDashboardService_GetClusterStatus_Call) Return(_a0 v1.RayAPIClusterStatus, _a1 error) *MockDashboardService_GetClusterStatus_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDashboardService_GetClusterStatus_Call) RunAndReturn(run func() (v1.RayAPIClusterStatus, error)) *MockDashboardService_GetClusterStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }

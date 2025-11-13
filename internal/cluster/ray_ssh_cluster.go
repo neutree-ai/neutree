@@ -15,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
@@ -42,7 +43,7 @@ type sshRayClusterReconciler struct {
 	storage            storage.Storage
 }
 
-func newRaySSHClusterReconcile(acceleratorManager accelerator.Manager, storage storage.Storage) *sshRayClusterReconciler {
+func newRaySSHClusterReconcile(storage storage.Storage, acceleratorManager accelerator.Manager) *sshRayClusterReconciler {
 	r := &sshRayClusterReconciler{
 		acceleratorManager: acceleratorManager,
 		storage:            storage,
@@ -117,6 +118,16 @@ func (c *sshRayClusterReconciler) setClusterStatus(reconcileCtx *ReconcileContex
 
 	setClusterStatus(reconcileCtx.Cluster, clusterStatus)
 	reconcileCtx.Cluster.Status.DesiredNodes += len(reconcileCtx.sshClusterConfig.Provider.WorkerIPs)
+
+	// Collect cluster resources (including accelerators) if cluster is running
+	if reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseRunning {
+		resources, err := c.calculateClusterResources(reconcileCtx)
+		if err != nil {
+			return errors.Wrap(err, "failed to calculate cluster resources")
+		}
+
+		reconcileCtx.Cluster.Status.ResourceInfo = resources
+	}
 
 	return nil
 }
@@ -560,4 +571,143 @@ func setNodePrivisionStatus(reconcileCtx *ReconcileContext, nodeIP, status strin
 	reconcileCtx.Cluster.Status.NodeProvisionStatus = string(staticNodeProvisionStatusContent)
 
 	return nil
+}
+
+func (c *sshRayClusterReconciler) calculateClusterResources(
+	reconcileCtx *ReconcileContext,
+) (*v1.ClusterResources, error) {
+	// Create dashboard service client
+	dashboardSvc := reconcileCtx.rayService
+	// Fetch node list from Dashboard
+	nodeList, err := dashboardSvc.ListNodes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node list from Ray Dashboard: %w", err)
+	}
+
+	availableResource := map[string]float64{}
+	allocatableResource := map[string]float64{}
+
+	for _, node := range nodeList {
+		if node.Raylet.State != v1.AliveNodeState {
+			continue
+		}
+
+		nodeAvailableResource := map[string]float64{}
+		nodeAllocatableResource := map[string]float64{}
+
+		for resourceKey, quantity := range node.Raylet.Resources {
+			nodeAllocatableResource[resourceKey] = quantity
+			nodeAvailableResource[resourceKey] = quantity
+		}
+
+		for _, workers := range node.Raylet.CoreWorkersStats {
+			for resourceKey, allocations := range workers.UsedResources {
+				nodeAvailableResource[resourceKey] -= float64(allocations.TotalAllocation())
+			}
+		}
+
+		for resourceKey, quantity := range nodeAvailableResource {
+			availableResource[resourceKey] += quantity
+		}
+
+		for resourceKey, quantity := range nodeAllocatableResource {
+			allocatableResource[resourceKey] += quantity
+		}
+	}
+
+	resourceParserMap := c.acceleratorManager.GetAllParsers()
+
+	result := &v1.ClusterResources{
+		Allocatable: &v1.ResourceInfo{
+			CPU:               0,
+			Memory:            0,
+			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
+		},
+		Available: &v1.ResourceInfo{
+			CPU:               0,
+			Memory:            0,
+			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
+		},
+	}
+
+	if availableResource["CPU"] < 0 {
+		availableResource["CPU"] = 0
+	} else {
+		availableResource["CPU"] = roundFloat64ToTwoDecimals(availableResource["CPU"])
+	}
+
+	if availableResource["memory"] < 0 {
+		availableResource["memory"] = 0
+	} else {
+		availableResource["memory"] = roundFloat64ToTwoDecimals(availableResource["memory"] / plugin.BytesPerGiB)
+	}
+
+	if allocatableResource["CPU"] < 0 {
+		allocatableResource["CPU"] = 0
+	} else {
+		allocatableResource["CPU"] = roundFloat64ToTwoDecimals(allocatableResource["CPU"])
+	}
+
+	if allocatableResource["memory"] < 0 {
+		allocatableResource["memory"] = 0
+	} else {
+		allocatableResource["memory"] = roundFloat64ToTwoDecimals(allocatableResource["memory"] / plugin.BytesPerGiB)
+	}
+
+	result.Allocatable.CPU = allocatableResource["CPU"]
+	result.Allocatable.Memory = allocatableResource["memory"]
+	result.Available.CPU = availableResource["CPU"]
+	result.Available.Memory = availableResource["memory"]
+
+	for resourceKey, parser := range resourceParserMap {
+		allocatableInfo, err := parser.ParseFromRay(allocatableResource)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse allocatable resources from Ray for resource %s: %w", resourceKey, err)
+		}
+
+		if allocatableInfo != nil {
+			for key, group := range allocatableInfo.AcceleratorGroups {
+				if existingGroup, exists := result.Allocatable.AcceleratorGroups[key]; exists {
+					existingGroup.Quantity += group.Quantity
+					for productKey, quantity := range group.ProductGroups {
+						if existingQuantity, exists := existingGroup.ProductGroups[productKey]; exists {
+							existingGroup.ProductGroups[productKey] = existingQuantity + quantity
+						} else {
+							existingGroup.ProductGroups[productKey] = quantity
+						}
+					}
+
+					result.Allocatable.AcceleratorGroups[key] = existingGroup
+				} else {
+					result.Allocatable.AcceleratorGroups[key] = allocatableInfo.AcceleratorGroups[key]
+				}
+			}
+		}
+
+		availableInfo, err := parser.ParseFromRay(availableResource)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse available resources from Ray for resource %s: %w", resourceKey, err)
+		}
+
+		if availableInfo != nil {
+			for key, group := range availableInfo.AcceleratorGroups {
+				if existingGroup, exists := result.Available.AcceleratorGroups[key]; exists {
+					existingGroup.Quantity += group.Quantity
+					for productKey, quantity := range group.ProductGroups {
+						if existingQuantity, exists := existingGroup.ProductGroups[productKey]; exists {
+							existingGroup.ProductGroups[productKey] = existingQuantity + quantity
+						} else {
+							existingGroup.ProductGroups[productKey] = quantity
+						}
+					}
+
+					result.Available.AcceleratorGroups[key] = existingGroup
+				} else {
+					result.Available.AcceleratorGroups[key] = availableInfo.AcceleratorGroups[key]
+				}
+			}
+		}
+	}
+
+	return result, nil
 }

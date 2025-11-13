@@ -186,6 +186,8 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase,
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 		newStatus.Version = obj.Status.Version
 		newStatus.RayVersion = obj.Status.RayVersion
+		// Preserve existing ResourceInfo - it will be updated by cluster reconcilers
+		newStatus.ResourceInfo = obj.Status.ResourceInfo
 	}
 
 	if err != nil {

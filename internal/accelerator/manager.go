@@ -8,27 +8,32 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/engine"
-	"github.com/neutree-ai/neutree/internal/resource"
 )
 
 type Manager interface {
 	Start(ctx context.Context)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
-	GetKubernetesContainerAcceleratorType(ctx context.Context, container corev1.Container) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
-	GetKubernetesContainerRuntimeConfig(ctx context.Context, acceleratorType string, container corev1.Container) (v1.RuntimeConfig, error)
+
 	GetAllAcceleratorSupportEngines(ctx context.Context) ([]*v1.Engine, error)
 
-	// Resource conversion methods
-	ConvertToRay(ctx context.Context, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error)
-	ConvertToKubernetes(ctx context.Context, spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)
+	// GetAllConverters returns all registered resource converters
+	GetAllConverters() map[string]plugin.ResourceConverter
+
+	// GetAllParsers returns all registered resource parsers
+	GetAllParsers() map[string]plugin.ResourceParser
+
+	// GetConverter retrieves a resource converter by accelerator type
+	GetConverter(acceleratorType string) (plugin.ResourceConverter, bool)
+
+	// GetParser retrieves a resource parser by accelerator type
+	GetParser(acceleratorType string) (plugin.ResourceParser, bool)
 }
 
 type registerPlugin struct {
@@ -38,16 +43,14 @@ type registerPlugin struct {
 }
 
 type manager struct {
-	acceleratorsMap  sync.Map
-	engineRegistry   engine.Registry
-	converterManager resource.ConverterManager
+	acceleratorsMap sync.Map
+	engineRegistry  engine.Registry
 }
 
-func NewManager(e *gin.Engine) Manager {
+func NewManager(e *gin.Engine) *manager {
 	manager := &manager{
-		acceleratorsMap:  sync.Map{},
-		engineRegistry:   engine.NewRegistry(),
-		converterManager: resource.NewConverterManager(),
+		acceleratorsMap: sync.Map{},
+		engineRegistry:  engine.NewRegistry(),
 	}
 
 	for _, p := range plugin.GetLocalAcceleratorPlugins() {
@@ -60,16 +63,6 @@ func NewManager(e *gin.Engine) Manager {
 		// It is critical to refresh supported engines during local plugin registration.
 		// Without this call, local accelerator plugins' supported engines are never initialized.
 		manager.refreshAcceleratorPluginSupportEngines(p)
-
-		// Register resource converter for local plugins
-		if p.Resource() != "" {
-			converter := p.Handle().GetResourceConverter()
-			if err := manager.converterManager.RegisterConverter(p.Resource(), converter); err != nil {
-				klog.Warningf("Failed to register converter for %s: %v", p.Resource(), err)
-			} else {
-				klog.V(4).Infof("Registered resource converter for %s", p.Resource())
-			}
-		}
 
 		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
@@ -124,16 +117,6 @@ func (a *manager) registerAcceleratorPlugin(req v1.RegisterRequest) {
 		}
 		a.acceleratorsMap.Store(req.ResourceName, p)
 		a.refreshAcceleratorPluginSupportEngines(p.plugin)
-
-		// Register resource converter for external plugins
-		if p.plugin.Resource() != "" {
-			converter := p.plugin.Handle().GetResourceConverter()
-			if err := a.converterManager.RegisterConverter(p.plugin.Resource(), converter); err != nil {
-				klog.Warningf("Failed to register converter for %s: %v", p.plugin.Resource(), err)
-			} else {
-				klog.V(4).Infof("Registered resource converter for %s", p.plugin.Resource())
-			}
-		}
 
 		klog.Infof("Register accelerator plugin: %s", req.ResourceName)
 	}
@@ -256,47 +239,6 @@ func (a *manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, ssh
 	return resultPluginResource, nil
 }
 
-func (a *manager) GetKubernetesContainerAcceleratorType(ctx context.Context, container corev1.Container) (string, error) {
-	var (
-		err                  error
-		pluginResource       string
-		resultPluginResource string
-		acceleratorResp      *v1.GetContainerAcceleratorResponse
-	)
-
-	a.acceleratorsMap.Range(func(key, value any) bool {
-		p, ok := value.(registerPlugin)
-		if !ok {
-			klog.Warning("assert register plugin type failed")
-			return true
-		}
-
-		pluginResource = p.resource
-
-		acceleratorResp, err = p.plugin.Handle().GetKubernetesContainerAccelerator(ctx, &v1.GetContainerAcceleratorRequest{
-			Container: container,
-		})
-
-		if err != nil {
-			return false
-		}
-
-		// by default, nodes will only mount accelerator cards from the same manufacturer.
-		if len(acceleratorResp.Accelerators) > 0 {
-			resultPluginResource = p.resource
-			return false
-		}
-
-		return true
-	})
-
-	if err != nil {
-		return "", errors.Wrapf(err, "get container accelerator from plugin %s failed", pluginResource)
-	}
-
-	return resultPluginResource, nil
-}
-
 func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error) {
 	resource := acceleratorType
 	if resource == "" {
@@ -320,39 +262,6 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 
 	if err != nil {
 		return v1.RuntimeConfig{}, errors.Wrapf(err, "get node runtime config from plugin %s failed", p.plugin.Resource())
-	}
-
-	return runtimeConfigResp.RuntimeConfig, nil
-}
-
-func (a *manager) GetKubernetesContainerRuntimeConfig(ctx context.Context, acceleratorType string, container corev1.Container) (v1.RuntimeConfig, error) {
-	resource := acceleratorType
-
-	// If acceleratorType is an empty string, it means it is a CPU cluster.
-	// CPU clusters use default CUDA base images, so set NVIDIA_VISIBLE_DEVICES=void to avoid nvidia-container-runtime mounting all GPUs on the node to the container.
-	if resource == "" {
-		return v1.RuntimeConfig{
-			Env: map[string]string{
-				"NVIDIA_VISIBLE_DEVICES": "void",
-			},
-		}, nil
-	}
-
-	value, ok := a.acceleratorsMap.Load(resource)
-	if !ok {
-		return v1.RuntimeConfig{}, errors.Errorf("accelerator plugin %s not found", acceleratorType)
-	}
-
-	p, ok := value.(registerPlugin)
-	if !ok {
-		return v1.RuntimeConfig{}, errors.New("assert register plugin type failed")
-	}
-
-	runtimeConfigResp, err := p.plugin.Handle().GetKubernetesContainerRuntimeConfig(ctx, &v1.GetContainerRuntimeConfigRequest{
-		Container: container,
-	})
-	if err != nil {
-		return v1.RuntimeConfig{}, errors.Wrapf(err, "get container runtime config from plugin %s failed", p.plugin.Resource())
 	}
 
 	return runtimeConfigResp.RuntimeConfig, nil
@@ -400,12 +309,79 @@ func (a *manager) refreshAllAcceleratorPluginSupportEngines() {
 	})
 }
 
-// ConvertToRay converts to Ray resource configuration
-func (a *manager) ConvertToRay(ctx context.Context, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
-	return a.converterManager.ConvertToRay(ctx, spec)
+func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {
+	result := make(map[string]plugin.ResourceConverter)
+
+	a.acceleratorsMap.Range(func(key, value any) bool {
+		p, ok := value.(registerPlugin)
+		if !ok {
+			klog.Warning("assert register plugin type failed")
+			return true
+		}
+
+		if converter := p.plugin.Handle().GetResourceConverter(); converter != nil {
+			result[p.resource] = converter
+		}
+
+		return true
+	})
+
+	return result
 }
 
-// ConvertToKubernetes converts to Kubernetes resource configuration
-func (a *manager) ConvertToKubernetes(ctx context.Context, spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
-	return a.converterManager.ConvertToKubernetes(ctx, spec)
+func (a *manager) GetAllParsers() map[string]plugin.ResourceParser {
+	result := make(map[string]plugin.ResourceParser)
+
+	a.acceleratorsMap.Range(func(key, value any) bool {
+		p, ok := value.(registerPlugin)
+		if !ok {
+			klog.Warning("assert register plugin type failed")
+			return true
+		}
+
+		if parser := p.plugin.Handle().GetResourceParser(); parser != nil {
+			result[p.resource] = parser
+		}
+
+		return true
+	})
+
+	return result
+}
+
+func (a *manager) GetPlugin(acceleratorType string) (plugin.AcceleratorPlugin, bool) {
+	value, ok := a.acceleratorsMap.Load(acceleratorType)
+	if !ok {
+		return nil, false
+	}
+
+	p, ok := value.(registerPlugin)
+	if !ok {
+		klog.Warning("assert registered plugin type failed")
+		return nil, false
+	}
+
+	return p.plugin, true
+}
+
+func (a *manager) GetConverter(acceleratorType string) (plugin.ResourceConverter, bool) {
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		return nil, false
+	}
+
+	converter := p.Handle().GetResourceConverter()
+
+	return converter, converter != nil
+}
+
+func (a *manager) GetParser(acceleratorType string) (plugin.ResourceParser, bool) {
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		return nil, false
+	}
+
+	parser := p.Handle().GetResourceParser()
+
+	return parser, parser != nil
 }

@@ -28,6 +28,9 @@ func NewApp(c *config.CoreConfig, controllers map[string]controllers.Controller)
 func (a *App) Run(ctx context.Context) error {
 	klog.Infof("Starting Neutree Core Application")
 
+	// Start accelerator manager
+	a.config.AcceleratorManager.Start(ctx)
+
 	go a.config.ObsCollectConfigManager.Start(ctx)
 
 	// Start all controllers

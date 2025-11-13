@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -18,7 +17,8 @@ import (
 )
 
 const (
-	nvidiaGPUKubernetesResourceName = "nvidia.com/gpu"
+	NvidiaGPUKubernetesResource        corev1.ResourceName = "nvidia.com/gpu"
+	NvidiaGPUKubernetesNodeSelectorKey string              = "nvidia.com/gpu.product"
 )
 
 func init() { //nolint:gochecknoinits
@@ -32,7 +32,7 @@ type GPUAcceleratorPlugin struct {
 }
 
 func (p *GPUAcceleratorPlugin) Resource() string {
-	return v1.AcceleratorTypeNVIDIAGPU
+	return string(v1.AcceleratorTypeNVIDIAGPU)
 }
 
 func (p *GPUAcceleratorPlugin) Handle() AcceleratorPluginHandle {
@@ -126,58 +126,6 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 	return accelerators, nil
 }
 
-func (p *GPUAcceleratorPlugin) GetKubernetesContainerAccelerator(ctx context.Context,
-	request *v1.GetContainerAcceleratorRequest) (*v1.GetContainerAcceleratorResponse, error) {
-	resp := &v1.GetContainerAcceleratorResponse{}
-
-	resp.Accelerators = p.getKubernetesContainerAcceleratorInfo(request.Container)
-
-	return resp, nil
-}
-
-func (p *GPUAcceleratorPlugin) GetKubernetesContainerRuntimeConfig(ctx context.Context,
-	request *v1.GetContainerRuntimeConfigRequest) (*v1.GetContainerRuntimeConfigResponse, error) {
-	acclerators := p.getKubernetesContainerAcceleratorInfo(request.Container)
-
-	if len(acclerators) == 0 {
-		return &v1.GetContainerRuntimeConfigResponse{
-			RuntimeConfig: v1.RuntimeConfig{
-				// cuda base image has NVIDIA_VISIBLE_DEVICES=all env, it will cause the nvidia-container-runtime
-				// mount all gpu to container even has no gpu request,
-				// so set NVIDIA_VISIBLE_DEVICES=void to avoid this problem.
-				Env: map[string]string{
-					"NVIDIA_VISIBLE_DEVICES": "void",
-				},
-			},
-		}, nil
-	}
-
-	return &v1.GetContainerRuntimeConfigResponse{
-		RuntimeConfig: v1.RuntimeConfig{
-			Env: map[string]string{
-				"ACCELERATOR_TYPE": "gpu",
-			},
-		},
-	}, nil
-}
-
-func (p *GPUAcceleratorPlugin) getKubernetesContainerAcceleratorInfo(container corev1.Container) []v1.Accelerator {
-	var accelerators []v1.Accelerator
-
-	for k, v := range container.Resources.Requests {
-		if k == nvidiaGPUKubernetesResourceName {
-			for i := 0; i < int(v.Value()); i++ {
-				accelerators = append(accelerators, v1.Accelerator{
-					Type: k.String(),
-					ID:   strconv.Itoa(i + 1),
-				})
-			}
-		}
-	}
-
-	return accelerators
-}
-
 func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error) {
 	llamaCppDefaultEngineSchema, err := GetLlamaCppDefaultEngineSchema()
 	if err != nil {
@@ -261,6 +209,10 @@ func (p *GPUAcceleratorPlugin) Type() string {
 	return InternalPluginType
 }
 
-func (p *GPUAcceleratorPlugin) GetResourceConverter() v1.ResourceConverter {
+func (p *GPUAcceleratorPlugin) GetResourceConverter() ResourceConverter {
 	return NewGPUConverter()
+}
+
+func (p *GPUAcceleratorPlugin) GetResourceParser() ResourceParser {
+	return &GPUResourceParser{}
 }

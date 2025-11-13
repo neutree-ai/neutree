@@ -3,6 +3,7 @@ package cluster
 import (
 	"encoding/base64"
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 
@@ -115,4 +116,8 @@ func getUsedImageRegistries(cluster *v1.Cluster, s storage.Storage) (*v1.ImageRe
 func removeEscapes(s string) string {
 	re := regexp.MustCompile(`\\`)
 	return re.ReplaceAllString(s, "")
+}
+
+func roundFloat64ToTwoDecimals(input float64) float64 {
+	return math.Round(input*100) / 100
 }

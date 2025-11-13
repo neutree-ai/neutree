@@ -15,7 +15,6 @@ func setClusterStatus(cluster *v1.Cluster, status *v1.RayClusterStatus) {
 	cluster.Status.ReadyNodes = status.ReadyNodes
 	cluster.Status.RayVersion = status.RayVersion
 	cluster.Status.Version = status.NeutreeServeVersion
-	cluster.Status.ResourceInfo = status.ResourceInfo
 }
 
 func getRayClusterStatus(dashboardService dashboard.DashboardService) (*v1.RayClusterStatus, error) {
@@ -82,7 +81,7 @@ func getRayClusterStatus(dashboardService dashboard.DashboardService) (*v1.RayCl
 	clusterStatus.ReadyNodes = readyNodes
 	clusterStatus.NeutreeServeVersion = neutreeServingVersion
 
-	autoScaleStatus, err := dashboardService.GetClusterAutoScaleStatus()
+	rayClusterStatus, err := dashboardService.GetClusterStatus()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get cluster autoScale status")
 	}
@@ -92,17 +91,17 @@ func getRayClusterStatus(dashboardService dashboard.DashboardService) (*v1.RayCl
 		pendingLauncherNodes        int
 	)
 
-	for _, activeNodeNumber := range autoScaleStatus.ActiveNodes {
+	for _, activeNodeNumber := range rayClusterStatus.AutoscalerReport.ActiveNodes {
 		currentAutoScaleActiveNodes += activeNodeNumber
 	}
 
-	for _, pendingLauncherNumber := range autoScaleStatus.PendingLaunches {
+	for _, pendingLauncherNumber := range rayClusterStatus.AutoscalerReport.PendingLaunches {
 		pendingLauncherNodes += pendingLauncherNumber
 	}
 
-	clusterStatus.AutoScaleStatus.PendingNodes = len(autoScaleStatus.PendingNodes) + pendingLauncherNodes
+	clusterStatus.AutoScaleStatus.PendingNodes = len(rayClusterStatus.AutoscalerReport.PendingNodes) + pendingLauncherNodes
 	clusterStatus.AutoScaleStatus.ActiveNodes = currentAutoScaleActiveNodes
-	clusterStatus.AutoScaleStatus.FailedNodes = len(autoScaleStatus.FailedNodes)
+	clusterStatus.AutoScaleStatus.FailedNodes = len(rayClusterStatus.AutoscalerReport.FailedNodes)
 
 	clusterMetadata, err := dashboardService.GetClusterMetadata()
 	if err != nil {

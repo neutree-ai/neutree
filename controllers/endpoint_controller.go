@@ -17,22 +17,22 @@ type EndpointController struct {
 	storage     storage.Storage
 	syncHandler func(endpoint *v1.Endpoint) error // Added syncHandler field
 
-	gw                 gateway.Gateway
-	acceleratorManager accelerator.Manager
+	gw             gateway.Gateway
+	acceleratorMgr accelerator.Manager
 }
 
 type EndpointControllerOption struct {
 	Storage storage.Storage
 
-	Gw                 gateway.Gateway
-	AcceleratorManager accelerator.Manager
+	Gw             gateway.Gateway
+	AcceleratorMgr accelerator.Manager
 }
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
 	c := &EndpointController{
-		storage:            option.Storage,
-		gw:                 option.Gw,
-		acceleratorManager: option.AcceleratorManager,
+		storage:        option.Storage,
+		gw:             option.Gw,
+		acceleratorMgr: option.AcceleratorMgr,
 	}
 
 	c.syncHandler = c.sync
@@ -357,9 +357,9 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	}
 
 	orchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:            &cluster[0],
-		Storage:            c.storage,
-		AcceleratorManager: c.acceleratorManager,
+		Cluster:        &cluster[0],
+		Storage:        c.storage,
+		AcceleratorMgr: c.acceleratorMgr,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create orchestrator for cluster %s", cluster[0].Metadata.Name)

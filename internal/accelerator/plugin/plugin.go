@@ -4,6 +4,9 @@ import (
 	"context"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
@@ -29,12 +32,31 @@ type AcceleratorPlugin interface {
 type AcceleratorPluginHandle interface {
 	GetNodeAccelerator(ctx context.Context, request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
 	GetNodeRuntimeConfig(ctx context.Context, request *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
-	GetKubernetesContainerAccelerator(ctx context.Context, request *v1.GetContainerAcceleratorRequest) (*v1.GetContainerAcceleratorResponse, error)
-	GetKubernetesContainerRuntimeConfig(ctx context.Context, request *v1.GetContainerRuntimeConfigRequest) (*v1.GetContainerRuntimeConfigResponse, error)
 	GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error)
 	Ping(ctx context.Context) error
 	// GetResourceConverter returns the resource converter
-	GetResourceConverter() v1.ResourceConverter
+	GetResourceConverter() ResourceConverter
+
+	// GetResourceParser returns the resource parser
+	GetResourceParser() ResourceParser
+}
+
+// ResourceConverter is the interface for resource converters
+// Converts Neutree's unified resource specifications to resource configurations for different cluster types (Ray, Kubernetes)
+type ResourceConverter interface {
+	// ConvertToRay converts to Ray resource configuration
+	ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSpec, error)
+
+	// ConvertToKubernetes converts to Kubernetes resource configuration
+	ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)
+}
+
+type ResourceParser interface {
+	// ParseFromRay parses Ray resource configuration to Neutree's unified resource specification
+	ParseFromRay(resource map[string]float64) (*v1.ResourceInfo, error)
+
+	// ParseFromKubernetes parses Kubernetes resource configuration to Neutree's unified resource specification
+	ParseFromKubernetes(resource map[corev1.ResourceName]resource.Quantity, labels map[string]string) (*v1.ResourceInfo, error)
 }
 
 type RegisterHandle func(plugin AcceleratorPlugin)

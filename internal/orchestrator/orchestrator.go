@@ -19,9 +19,9 @@ type Orchestrator interface {
 }
 
 type Options struct {
-	Cluster            *v1.Cluster
-	Storage            storage.Storage
-	AcceleratorManager accelerator.Manager
+	Cluster        *v1.Cluster
+	Storage        storage.Storage
+	AcceleratorMgr accelerator.Manager
 }
 
 type NewOrchestratorFunc func(opts Options) (Orchestrator, error)

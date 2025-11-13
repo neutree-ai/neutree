@@ -5,8 +5,7 @@ package mocks
 import (
 	context "context"
 
-	corev1 "k8s.io/api/core/v1"
-
+	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	mock "github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -23,124 +22,6 @@ type MockManager_Expecter struct {
 
 func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
-}
-
-// ConvertToKubernetes provides a mock function with given fields: ctx, spec
-func (_m *MockManager) ConvertToKubernetes(ctx context.Context, spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
-	ret := _m.Called(ctx, spec)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ConvertToKubernetes")
-	}
-
-	var r0 *v1.KubernetesResourceSpec
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)); ok {
-		return rf(ctx, spec)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *v1.ResourceSpec) *v1.KubernetesResourceSpec); ok {
-		r0 = rf(ctx, spec)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*v1.KubernetesResourceSpec)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *v1.ResourceSpec) error); ok {
-		r1 = rf(ctx, spec)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockManager_ConvertToKubernetes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConvertToKubernetes'
-type MockManager_ConvertToKubernetes_Call struct {
-	*mock.Call
-}
-
-// ConvertToKubernetes is a helper method to define mock.On call
-//   - ctx context.Context
-//   - spec *v1.ResourceSpec
-func (_e *MockManager_Expecter) ConvertToKubernetes(ctx interface{}, spec interface{}) *MockManager_ConvertToKubernetes_Call {
-	return &MockManager_ConvertToKubernetes_Call{Call: _e.mock.On("ConvertToKubernetes", ctx, spec)}
-}
-
-func (_c *MockManager_ConvertToKubernetes_Call) Run(run func(ctx context.Context, spec *v1.ResourceSpec)) *MockManager_ConvertToKubernetes_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*v1.ResourceSpec))
-	})
-	return _c
-}
-
-func (_c *MockManager_ConvertToKubernetes_Call) Return(_a0 *v1.KubernetesResourceSpec, _a1 error) *MockManager_ConvertToKubernetes_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockManager_ConvertToKubernetes_Call) RunAndReturn(run func(context.Context, *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)) *MockManager_ConvertToKubernetes_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ConvertToRay provides a mock function with given fields: ctx, spec
-func (_m *MockManager) ConvertToRay(ctx context.Context, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
-	ret := _m.Called(ctx, spec)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ConvertToRay")
-	}
-
-	var r0 *v1.RayResourceSpec
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v1.ResourceSpec) (*v1.RayResourceSpec, error)); ok {
-		return rf(ctx, spec)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *v1.ResourceSpec) *v1.RayResourceSpec); ok {
-		r0 = rf(ctx, spec)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*v1.RayResourceSpec)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *v1.ResourceSpec) error); ok {
-		r1 = rf(ctx, spec)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockManager_ConvertToRay_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConvertToRay'
-type MockManager_ConvertToRay_Call struct {
-	*mock.Call
-}
-
-// ConvertToRay is a helper method to define mock.On call
-//   - ctx context.Context
-//   - spec *v1.ResourceSpec
-func (_e *MockManager_Expecter) ConvertToRay(ctx interface{}, spec interface{}) *MockManager_ConvertToRay_Call {
-	return &MockManager_ConvertToRay_Call{Call: _e.mock.On("ConvertToRay", ctx, spec)}
-}
-
-func (_c *MockManager_ConvertToRay_Call) Run(run func(ctx context.Context, spec *v1.ResourceSpec)) *MockManager_ConvertToRay_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*v1.ResourceSpec))
-	})
-	return _c
-}
-
-func (_c *MockManager_ConvertToRay_Call) Return(_a0 *v1.RayResourceSpec, _a1 error) *MockManager_ConvertToRay_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockManager_ConvertToRay_Call) RunAndReturn(run func(context.Context, *v1.ResourceSpec) (*v1.RayResourceSpec, error)) *MockManager_ConvertToRay_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // GetAllAcceleratorSupportEngines provides a mock function with given fields: ctx
@@ -201,117 +82,154 @@ func (_c *MockManager_GetAllAcceleratorSupportEngines_Call) RunAndReturn(run fun
 	return _c
 }
 
-// GetKubernetesContainerAcceleratorType provides a mock function with given fields: ctx, container
-func (_m *MockManager) GetKubernetesContainerAcceleratorType(ctx context.Context, container corev1.Container) (string, error) {
-	ret := _m.Called(ctx, container)
+// GetAllConverters provides a mock function with no fields
+func (_m *MockManager) GetAllConverters() map[string]plugin.ResourceConverter {
+	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetKubernetesContainerAcceleratorType")
+		panic("no return value specified for GetAllConverters")
 	}
 
-	var r0 string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, corev1.Container) (string, error)); ok {
-		return rf(ctx, container)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, corev1.Container) string); ok {
-		r0 = rf(ctx, container)
+	var r0 map[string]plugin.ResourceConverter
+	if rf, ok := ret.Get(0).(func() map[string]plugin.ResourceConverter); ok {
+		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(string)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]plugin.ResourceConverter)
+		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, corev1.Container) error); ok {
-		r1 = rf(ctx, container)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
-// MockManager_GetKubernetesContainerAcceleratorType_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetKubernetesContainerAcceleratorType'
-type MockManager_GetKubernetesContainerAcceleratorType_Call struct {
+// MockManager_GetAllConverters_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAllConverters'
+type MockManager_GetAllConverters_Call struct {
 	*mock.Call
 }
 
-// GetKubernetesContainerAcceleratorType is a helper method to define mock.On call
-//   - ctx context.Context
-//   - container corev1.Container
-func (_e *MockManager_Expecter) GetKubernetesContainerAcceleratorType(ctx interface{}, container interface{}) *MockManager_GetKubernetesContainerAcceleratorType_Call {
-	return &MockManager_GetKubernetesContainerAcceleratorType_Call{Call: _e.mock.On("GetKubernetesContainerAcceleratorType", ctx, container)}
+// GetAllConverters is a helper method to define mock.On call
+func (_e *MockManager_Expecter) GetAllConverters() *MockManager_GetAllConverters_Call {
+	return &MockManager_GetAllConverters_Call{Call: _e.mock.On("GetAllConverters")}
 }
 
-func (_c *MockManager_GetKubernetesContainerAcceleratorType_Call) Run(run func(ctx context.Context, container corev1.Container)) *MockManager_GetKubernetesContainerAcceleratorType_Call {
+func (_c *MockManager_GetAllConverters_Call) Run(run func()) *MockManager_GetAllConverters_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(corev1.Container))
+		run()
 	})
 	return _c
 }
 
-func (_c *MockManager_GetKubernetesContainerAcceleratorType_Call) Return(_a0 string, _a1 error) *MockManager_GetKubernetesContainerAcceleratorType_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockManager_GetAllConverters_Call) Return(_a0 map[string]plugin.ResourceConverter) *MockManager_GetAllConverters_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockManager_GetKubernetesContainerAcceleratorType_Call) RunAndReturn(run func(context.Context, corev1.Container) (string, error)) *MockManager_GetKubernetesContainerAcceleratorType_Call {
+func (_c *MockManager_GetAllConverters_Call) RunAndReturn(run func() map[string]plugin.ResourceConverter) *MockManager_GetAllConverters_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetKubernetesContainerRuntimeConfig provides a mock function with given fields: ctx, acceleratorType, container
-func (_m *MockManager) GetKubernetesContainerRuntimeConfig(ctx context.Context, acceleratorType string, container corev1.Container) (v1.RuntimeConfig, error) {
-	ret := _m.Called(ctx, acceleratorType, container)
+// GetAllParsers provides a mock function with no fields
+func (_m *MockManager) GetAllParsers() map[string]plugin.ResourceParser {
+	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetKubernetesContainerRuntimeConfig")
+		panic("no return value specified for GetAllParsers")
 	}
 
-	var r0 v1.RuntimeConfig
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, corev1.Container) (v1.RuntimeConfig, error)); ok {
-		return rf(ctx, acceleratorType, container)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, corev1.Container) v1.RuntimeConfig); ok {
-		r0 = rf(ctx, acceleratorType, container)
+	var r0 map[string]plugin.ResourceParser
+	if rf, ok := ret.Get(0).(func() map[string]plugin.ResourceParser); ok {
+		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(v1.RuntimeConfig)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]plugin.ResourceParser)
+		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, corev1.Container) error); ok {
-		r1 = rf(ctx, acceleratorType, container)
+	return r0
+}
+
+// MockManager_GetAllParsers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAllParsers'
+type MockManager_GetAllParsers_Call struct {
+	*mock.Call
+}
+
+// GetAllParsers is a helper method to define mock.On call
+func (_e *MockManager_Expecter) GetAllParsers() *MockManager_GetAllParsers_Call {
+	return &MockManager_GetAllParsers_Call{Call: _e.mock.On("GetAllParsers")}
+}
+
+func (_c *MockManager_GetAllParsers_Call) Run(run func()) *MockManager_GetAllParsers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockManager_GetAllParsers_Call) Return(_a0 map[string]plugin.ResourceParser) *MockManager_GetAllParsers_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockManager_GetAllParsers_Call) RunAndReturn(run func() map[string]plugin.ResourceParser) *MockManager_GetAllParsers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetConverter provides a mock function with given fields: acceleratorType
+func (_m *MockManager) GetConverter(acceleratorType string) (plugin.ResourceConverter, bool) {
+	ret := _m.Called(acceleratorType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetConverter")
+	}
+
+	var r0 plugin.ResourceConverter
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(string) (plugin.ResourceConverter, bool)); ok {
+		return rf(acceleratorType)
+	}
+	if rf, ok := ret.Get(0).(func(string) plugin.ResourceConverter); ok {
+		r0 = rf(acceleratorType)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(plugin.ResourceConverter)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) bool); ok {
+		r1 = rf(acceleratorType)
+	} else {
+		r1 = ret.Get(1).(bool)
 	}
 
 	return r0, r1
 }
 
-// MockManager_GetKubernetesContainerRuntimeConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetKubernetesContainerRuntimeConfig'
-type MockManager_GetKubernetesContainerRuntimeConfig_Call struct {
+// MockManager_GetConverter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetConverter'
+type MockManager_GetConverter_Call struct {
 	*mock.Call
 }
 
-// GetKubernetesContainerRuntimeConfig is a helper method to define mock.On call
-//   - ctx context.Context
+// GetConverter is a helper method to define mock.On call
 //   - acceleratorType string
-//   - container corev1.Container
-func (_e *MockManager_Expecter) GetKubernetesContainerRuntimeConfig(ctx interface{}, acceleratorType interface{}, container interface{}) *MockManager_GetKubernetesContainerRuntimeConfig_Call {
-	return &MockManager_GetKubernetesContainerRuntimeConfig_Call{Call: _e.mock.On("GetKubernetesContainerRuntimeConfig", ctx, acceleratorType, container)}
+func (_e *MockManager_Expecter) GetConverter(acceleratorType interface{}) *MockManager_GetConverter_Call {
+	return &MockManager_GetConverter_Call{Call: _e.mock.On("GetConverter", acceleratorType)}
 }
 
-func (_c *MockManager_GetKubernetesContainerRuntimeConfig_Call) Run(run func(ctx context.Context, acceleratorType string, container corev1.Container)) *MockManager_GetKubernetesContainerRuntimeConfig_Call {
+func (_c *MockManager_GetConverter_Call) Run(run func(acceleratorType string)) *MockManager_GetConverter_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(corev1.Container))
+		run(args[0].(string))
 	})
 	return _c
 }
 
-func (_c *MockManager_GetKubernetesContainerRuntimeConfig_Call) Return(_a0 v1.RuntimeConfig, _a1 error) *MockManager_GetKubernetesContainerRuntimeConfig_Call {
+func (_c *MockManager_GetConverter_Call) Return(_a0 plugin.ResourceConverter, _a1 bool) *MockManager_GetConverter_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManager_GetKubernetesContainerRuntimeConfig_Call) RunAndReturn(run func(context.Context, string, corev1.Container) (v1.RuntimeConfig, error)) *MockManager_GetKubernetesContainerRuntimeConfig_Call {
+func (_c *MockManager_GetConverter_Call) RunAndReturn(run func(string) (plugin.ResourceConverter, bool)) *MockManager_GetConverter_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -429,6 +347,64 @@ func (_c *MockManager_GetNodeRuntimeConfig_Call) Return(_a0 v1.RuntimeConfig, _a
 }
 
 func (_c *MockManager_GetNodeRuntimeConfig_Call) RunAndReturn(run func(context.Context, string, string, v1.Auth) (v1.RuntimeConfig, error)) *MockManager_GetNodeRuntimeConfig_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetParser provides a mock function with given fields: acceleratorType
+func (_m *MockManager) GetParser(acceleratorType string) (plugin.ResourceParser, bool) {
+	ret := _m.Called(acceleratorType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetParser")
+	}
+
+	var r0 plugin.ResourceParser
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(string) (plugin.ResourceParser, bool)); ok {
+		return rf(acceleratorType)
+	}
+	if rf, ok := ret.Get(0).(func(string) plugin.ResourceParser); ok {
+		r0 = rf(acceleratorType)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(plugin.ResourceParser)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) bool); ok {
+		r1 = rf(acceleratorType)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockManager_GetParser_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetParser'
+type MockManager_GetParser_Call struct {
+	*mock.Call
+}
+
+// GetParser is a helper method to define mock.On call
+//   - acceleratorType string
+func (_e *MockManager_Expecter) GetParser(acceleratorType interface{}) *MockManager_GetParser_Call {
+	return &MockManager_GetParser_Call{Call: _e.mock.On("GetParser", acceleratorType)}
+}
+
+func (_c *MockManager_GetParser_Call) Run(run func(acceleratorType string)) *MockManager_GetParser_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockManager_GetParser_Call) Return(_a0 plugin.ResourceParser, _a1 bool) *MockManager_GetParser_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManager_GetParser_Call) RunAndReturn(run func(string) (plugin.ResourceParser, bool)) *MockManager_GetParser_Call {
 	_c.Call.Return(run)
 	return _c
 }
