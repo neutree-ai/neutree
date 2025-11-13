@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/command"
@@ -35,7 +34,7 @@ func (p *AMDGPUAcceleratorPlugin) Handle() AcceleratorPluginHandle {
 }
 
 func (p *AMDGPUAcceleratorPlugin) Resource() string {
-	return v1.AcceleratorTypeAMDGPU
+	return string(v1.AcceleratorTypeAMDGPU)
 }
 
 func (p *AMDGPUAcceleratorPlugin) Type() string {
@@ -145,54 +144,6 @@ func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, no
 	return accelerators, nil
 }
 
-func (p *AMDGPUAcceleratorPlugin) GetKubernetesContainerAccelerator(ctx context.Context,
-	request *v1.GetContainerAcceleratorRequest) (*v1.GetContainerAcceleratorResponse, error) {
-	resp := &v1.GetContainerAcceleratorResponse{}
-
-	resp.Accelerators = p.getKubernetesContainerAcceleratorInfo(request.Container)
-
-	return resp, nil
-}
-
-func (p *AMDGPUAcceleratorPlugin) GetKubernetesContainerRuntimeConfig(ctx context.Context,
-	request *v1.GetContainerRuntimeConfigRequest) (*v1.GetContainerRuntimeConfigResponse, error) {
-	acclerators := p.getKubernetesContainerAcceleratorInfo(request.Container)
-
-	if len(acclerators) == 0 {
-		return &v1.GetContainerRuntimeConfigResponse{
-			RuntimeConfig: v1.RuntimeConfig{
-				ImageSuffix: "rocm",
-			},
-		}, nil
-	}
-
-	return &v1.GetContainerRuntimeConfigResponse{
-		RuntimeConfig: v1.RuntimeConfig{
-			ImageSuffix: "rocm",
-			Env: map[string]string{
-				"ACCELERATOR_TYPE": "amd_gpu",
-			},
-		},
-	}, nil
-}
-
-func (p *AMDGPUAcceleratorPlugin) getKubernetesContainerAcceleratorInfo(container corev1.Container) []v1.Accelerator {
-	var accelerators []v1.Accelerator
-
-	for k, v := range container.Resources.Requests {
-		if k == AMDGPUKubernetesResource {
-			for i := 0; i < int(v.Value()); i++ {
-				accelerators = append(accelerators, v1.Accelerator{
-					Type: k.String(),
-					ID:   strconv.Itoa(i + 1),
-				})
-			}
-		}
-	}
-
-	return accelerators
-}
-
 func (p *AMDGPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error) {
 	llamaCppDefaultEngineSchema, err := GetLlamaCppDefaultEngineSchema()
 	if err != nil {
@@ -274,4 +225,8 @@ func (p *AMDGPUAcceleratorPlugin) Ping(ctx context.Context) error {
 
 func (p *AMDGPUAcceleratorPlugin) GetResourceConverter() v1.ResourceConverter {
 	return NewAMDGPUConverter()
+}
+
+func (p *AMDGPUAcceleratorPlugin) GetResourceParser() v1.ResourceParser {
+	return &AMDGPUResourceParser{}
 }

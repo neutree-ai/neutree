@@ -29,12 +29,13 @@ type AcceleratorPlugin interface {
 type AcceleratorPluginHandle interface {
 	GetNodeAccelerator(ctx context.Context, request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
 	GetNodeRuntimeConfig(ctx context.Context, request *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
-	GetKubernetesContainerAccelerator(ctx context.Context, request *v1.GetContainerAcceleratorRequest) (*v1.GetContainerAcceleratorResponse, error)
-	GetKubernetesContainerRuntimeConfig(ctx context.Context, request *v1.GetContainerRuntimeConfigRequest) (*v1.GetContainerRuntimeConfigResponse, error)
 	GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error)
 	Ping(ctx context.Context) error
 	// GetResourceConverter returns the resource converter
 	GetResourceConverter() v1.ResourceConverter
+
+	// GetResourceParser returns the resource parser
+	GetResourceParser() v1.ResourceParser
 }
 
 type RegisterHandle func(plugin AcceleratorPlugin)

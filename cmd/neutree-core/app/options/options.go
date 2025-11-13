@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -83,6 +84,11 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 
 	c.ObjectStorage = objStorage
 	c.Storage = s
+
+	resourceManager := resource.NewManager(&resource.Config{
+		PluginRegistry: acceleratorManager,
+	})
+	c.ResourceManager = resourceManager
 
 	imageService := registry.NewImageService()
 	c.ImageService = imageService

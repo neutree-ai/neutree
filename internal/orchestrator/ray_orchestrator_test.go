@@ -8,9 +8,9 @@ import (
 	"go.openly.dev/pointy"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
+	resourcemocks "github.com/neutree-ai/neutree/internal/resource/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -164,8 +164,11 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockDashboard := dashboardmocks.NewMockDashboardService(t)
 			mockStorage := storagemocks.NewMockStorage(t)
-			mockaccelerator := acceleratormocks.NewMockManager(t)
-			mockaccelerator.On("ConvertToRay", mock.Anything, mock.Anything).Return(&v1.RayResourceSpec{}, nil).Maybe()
+			mockResourceManager := resourcemocks.NewMockManager(t)
+			mockConverter := resourcemocks.NewMockResourceConverter(t)
+			mockResourceManager.On("Converter").Return(mockConverter).Maybe()
+			mockConverter.On("ConvertToRay", mock.Anything, mock.Anything).Return(&v1.RayResourceSpec{}, nil).Maybe()
+
 			if tt.setupMock != nil {
 				tt.setupMock(mockDashboard, mockStorage)
 			}
@@ -187,7 +190,7 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 						DashboardURL: "http://127.0.0.1:8265",
 					},
 				},
-				acceleratorManager: mockaccelerator,
+				resourceManager: mockResourceManager,
 			}
 
 			err := tt.testFunc(o)
@@ -337,8 +340,10 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 		t.Run(tt.name, func(t *testing.T) {
 			mockDashboard := dashboardmocks.NewMockDashboardService(t)
 			mockStorage := storagemocks.NewMockStorage(t)
-			mockaccelerator := acceleratormocks.NewMockManager(t)
-			mockaccelerator.On("ConvertToRay", mock.Anything, mock.Anything).Return(&v1.RayResourceSpec{}, nil)
+			mockResourceManager := resourcemocks.NewMockManager(t)
+			mockConverter := resourcemocks.NewMockResourceConverter(t)
+			mockResourceManager.On("Converter").Return(mockConverter)
+			mockConverter.On("ConvertToRay", mock.Anything, mock.Anything).Return(&v1.RayResourceSpec{}, nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(mockDashboard, mockStorage)
@@ -349,8 +354,8 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 			}
 
 			o := &RayOrchestrator{
-				storage:            mockStorage,
-				acceleratorManager: mockaccelerator,
+				storage:         mockStorage,
+				resourceManager: mockResourceManager,
 				cluster: &v1.Cluster{
 					Metadata: &v1.Metadata{Name: "test-cluster"},
 					Spec: &v1.ClusterSpec{
@@ -474,10 +479,12 @@ func TestEndpointToApplication_ApplicationNameConsistency(t *testing.T) {
 		},
 	}
 
-	mockaccelerator := acceleratormocks.NewMockManager(t)
-	mockaccelerator.On("ConvertToRay", mock.Anything, mock.Anything).Return(&v1.RayResourceSpec{}, nil)
+	mockResourceManager := resourcemocks.NewMockManager(t)
+	mockConverter := resourcemocks.NewMockResourceConverter(t)
+	mockResourceManager.On("Converter").Return(mockConverter)
+	mockConverter.On("ConvertToRay", mock.Anything, mock.Anything).Return(&v1.RayResourceSpec{}, nil)
 
-	app, err := EndpointToApplication(endpoint, modelRegistry, mockaccelerator)
+	app, err := EndpointToApplication(endpoint, modelRegistry, mockResourceManager)
 	assert.NoError(t, err)
 	// Verify that the application name matches the naming function
 	expectedName := EndpointToServeApplicationName(endpoint)
@@ -512,10 +519,12 @@ func TestEndpointToApplication_RouteConsistency(t *testing.T) {
 		},
 	}
 
-	mockaccelerator := acceleratormocks.NewMockManager(t)
-	mockaccelerator.On("ConvertToRay", mock.Anything, mock.Anything).Return(&v1.RayResourceSpec{}, nil)
+	mockResourceManager := resourcemocks.NewMockManager(t)
+	mockConverter := resourcemocks.NewMockResourceConverter(t)
+	mockResourceManager.On("Converter").Return(mockConverter)
+	mockConverter.On("ConvertToRay", mock.Anything, mock.Anything).Return(&v1.RayResourceSpec{}, nil)
 
-	app, err := EndpointToApplication(endpoint, modelRegistry, mockaccelerator)
+	app, err := EndpointToApplication(endpoint, modelRegistry, mockResourceManager)
 	assert.NoError(t, err)
 
 	// Verify that the route prefix includes workspace

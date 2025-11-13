@@ -7,6 +7,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -31,6 +32,7 @@ type CoreConfig struct {
 	ImageService            registry.ImageService
 	Gateway                 gateway.Gateway
 	AcceleratorManager      accelerator.Manager
+	ResourceManager         resource.Manager
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	GinEngine               *gin.Engine
 

@@ -30,6 +30,7 @@ func NewClusterControllerFactory() ControllerFactory {
 				Storage:                 opts.config.Storage,
 				Gw:                      opts.config.Gateway,
 				AcceleratorManager:      opts.config.AcceleratorManager,
+				ResourceManager:         opts.config.ResourceManager,
 				ObsCollectConfigManager: opts.config.ObsCollectConfigManager,
 				MetricsRemoteWriteURL:   opts.config.ClusterControllerConfig.MetricsRemoteWriteURL,
 				DefaultClusterVersion:   opts.config.ClusterControllerConfig.DefaultClusterVersion,
@@ -81,9 +82,9 @@ func NewEngineControllerFactory() ControllerFactory {
 func NewEndpointControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
-			Storage:            opts.config.Storage,
-			Gw:                 opts.config.Gateway,
-			AcceleratorManager: opts.config.AcceleratorManager,
+			Storage:         opts.config.Storage,
+			Gw:              opts.config.Gateway,
+			ResourceManager: opts.config.ResourceManager,
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create endpoint controller")

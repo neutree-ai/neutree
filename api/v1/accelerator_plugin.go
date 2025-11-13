@@ -10,21 +10,30 @@ const (
 	GetContainerAcceleratorPath   = "/v1/container/accelerator"
 	GetContainerRuntimeConfigPath = "/v1/container/runtime-config"
 	GetSupportEnginesPath         = "/v1/support-engines"
+	GetClusterResourcesPath       = "/v1/cluster/resources"
 	PingPath                      = "/v1/ping"
 
 	// Resource conversion API paths
 	ConvertToRayPath        = "/v1/resource/convert-to-ray"
 	ConvertToKubernetesPath = "/v1/resource/convert-to-kubernetes"
 
+	// Resource Parse API paths
+	ParseFromRayPath        = "/v1/resource/parse-from-ray"
+	ParseFromKubernetesPath = "/v1/resource/parse-from-kubernetes"
+
 	PluginAPIGroupPath = "/v1/plugin"
 	RegisterPath       = PluginAPIGroupPath + "/register"
 )
 
+type AcceleratorType string
+
 // Accelerator type constants
 const (
-	AcceleratorTypeNVIDIAGPU = "nvidia_gpu"
-	AcceleratorTypeAMDGPU    = "amd_gpu"
+	AcceleratorTypeNVIDIAGPU AcceleratorType = "nvidia_gpu"
+	AcceleratorTypeAMDGPU    AcceleratorType = "amd_gpu"
 )
+
+type AcceleratorProduct string
 
 type Accelerator struct {
 	ID   string `json:"id,omitempty"`

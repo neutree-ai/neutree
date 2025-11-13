@@ -1,0 +1,11 @@
+with-expecter: true
+dir: "mocks"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "mocks"
+filename: "mock_{{.InterfaceNameSnake}}.go"
+packages:
+  github.com/neutree-ai/neutree/internal/resource:
+    interfaces:
+      Manager:
+      ClusterResourceService:
+      ResourceConverter:

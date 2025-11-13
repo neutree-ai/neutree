@@ -3,16 +3,19 @@ package cluster
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/klog"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/cluster/component/metrics"
 	"github.com/neutree-ai/neutree/internal/cluster/component/router"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -20,14 +23,17 @@ import (
 var _ ClusterReconcile = &NativeKubernetesClusterReconciler{}
 
 type NativeKubernetesClusterReconciler struct {
-	storage storage.Storage
-
+	storage               storage.Storage
+	resourceManager       resource.Manager
 	metricsRemoteWriteURL string
 }
 
 func NewNativeKubernetesClusterReconciler(
-	storage storage.Storage, metricsRemoteWriteURL string) *NativeKubernetesClusterReconciler {
+	storage storage.Storage,
+	resourceManager resource.Manager,
+	metricsRemoteWriteURL string) *NativeKubernetesClusterReconciler {
 	c := &NativeKubernetesClusterReconciler{
+		resourceManager:       resourceManager,
 		metricsRemoteWriteURL: metricsRemoteWriteURL,
 		storage:               storage,
 	}
@@ -147,8 +153,34 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 	}
 
 	reconcileCtx.Cluster.Status.DashboardURL = endpoint
+	reconcileCtx.Cluster.Status.Initialized = true
+
+	// Collect cluster resources if cluster is running
+	if reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseRunning {
+		c.collectClusterResources(reconcileCtx)
+	}
 
 	return nil
+}
+
+// collectClusterResources collects cluster resource information using ResourceManager
+func (c *NativeKubernetesClusterReconciler) collectClusterResources(reconcileCtx *ReconcileContext) {
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(reconcileCtx.Ctx, 30*time.Second)
+	defer cancel()
+
+	// Collect cluster resources using ResourceManager
+	resources, err := c.resourceManager.Cluster().CollectClusterResources(ctx, reconcileCtx.Cluster)
+	if err != nil {
+		// Log error but don't fail the reconcile
+		klog.Warningf("Failed to collect cluster resources for cluster %s: %v", reconcileCtx.Cluster.Key(), err)
+		return
+	}
+
+	// Update cluster status with collected resources
+	reconcileCtx.Cluster.Status.ResourceInfo = resources
+	// debug
+	klog.Infof("Successfully collected cluster resources for cluster %s: %s", reconcileCtx.Cluster.Metadata.WorkspaceName(), resources.String())
 }
 
 func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {

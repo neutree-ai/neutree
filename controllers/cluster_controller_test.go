@@ -10,6 +10,7 @@ import (
 	clustermocks "github.com/neutree-ai/neutree/internal/cluster/mocks"
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +24,7 @@ func newTestClusterController(s *storagemocks.MockStorage,
 		LocalCollectConfigPath: "tmp",
 	})
 
-	cluster.NewReconcile = func(cluster *v1.Cluster, acceleratorManager accelerator.Manager, s storage.Storage, metricsRemoteWriteURL string) (cluster.ClusterReconcile, error) {
+	cluster.NewReconcile = func(cluster *v1.Cluster, acceleratorManager accelerator.Manager, resourceManager resource.Manager, s storage.Storage, metricsRemoteWriteURL string) (cluster.ClusterReconcile, error) {
 		return r, nil
 	}
 

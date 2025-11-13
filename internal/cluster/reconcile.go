@@ -10,6 +10,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -49,16 +50,18 @@ type ReconcileContext struct {
 	rayService dashboard.DashboardService
 }
 
-type NewReconciler func(cluster *v1.Cluster, acceleratorManager accelerator.Manager, s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error)
+type NewReconciler func(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
+	resourceManager resource.Manager, s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error)
 
 var NewReconcile NewReconciler = newReconcile
 
-func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager, s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
+func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
+	resourceManager resource.Manager, s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
 	switch cluster.Spec.Type {
 	case v1.SSHClusterType:
-		return newRaySSHClusterReconcile(acceleratorManager, s), nil
+		return newRaySSHClusterReconcile(s, acceleratorManager, resourceManager), nil
 	case v1.KubernetesClusterType:
-		return NewNativeKubernetesClusterReconciler(s, metricsRemoteWriteURL), nil
+		return NewNativeKubernetesClusterReconciler(s, resourceManager, metricsRemoteWriteURL), nil
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", cluster.Spec.Type)
 	}

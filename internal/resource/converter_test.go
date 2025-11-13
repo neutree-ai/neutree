@@ -8,26 +8,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
-func TestConverterManager_RegisterConverter(t *testing.T) {
-	cm := NewConverterManager()
-
-	converter := plugin.NewGPUConverter()
-	err := cm.RegisterConverter(v1.AcceleratorTypeNVIDIAGPU, converter)
-	assert.NoError(t, err)
-
-	types := cm.ListConverterTypes()
-	assert.Contains(t, types, v1.AcceleratorTypeNVIDIAGPU)
-}
-
 func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
-	converter := plugin.NewGPUConverter()
-	err := cm.RegisterConverter(v1.AcceleratorTypeNVIDIAGPU, converter)
-	require.NoError(t, err)
+	pluginRegistry.On("GetConverter", "nvidia_gpu").Return(plugin.NewGPUConverter(), true)
 
 	gpu := float64(2)
 	cpu := float64(16)
@@ -37,7 +26,7 @@ func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {
 		CPU:    &cpu,
 		Memory: &memory,
 	}
-	spec.SetAcceleratorType(v1.AcceleratorTypeNVIDIAGPU)
+	spec.SetAcceleratorType(string(v1.AcceleratorTypeNVIDIAGPU))
 	spec.SetAcceleratorProduct("NVIDIA-L20")
 	spec.AddCustomResource("rdma/hca", "2")
 
@@ -52,11 +41,10 @@ func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {
 }
 
 func TestConverterManager_ConvertToKubernetes_NVIDIA(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
-	converter := plugin.NewGPUConverter()
-	err := cm.RegisterConverter(v1.AcceleratorTypeNVIDIAGPU, converter)
-	require.NoError(t, err)
+	pluginRegistry.On("GetConverter", "nvidia_gpu").Return(plugin.NewGPUConverter(), true)
 
 	gpu := float64(1)
 	cpu := float64(8)
@@ -66,10 +54,9 @@ func TestConverterManager_ConvertToKubernetes_NVIDIA(t *testing.T) {
 		CPU:    &cpu,
 		Memory: &memory,
 	}
-	spec.SetAcceleratorType(v1.AcceleratorTypeNVIDIAGPU)
+	spec.SetAcceleratorType(string(v1.AcceleratorTypeNVIDIAGPU))
 	spec.SetAcceleratorProduct("NVIDIA-L20")
 
-	// 转换为 Kubernetes
 	k8s, err := cm.ConvertToKubernetes(context.Background(), spec)
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
@@ -81,11 +68,10 @@ func TestConverterManager_ConvertToKubernetes_NVIDIA(t *testing.T) {
 }
 
 func TestConverterManager_ConvertToRay_AMD(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
-	converter := plugin.NewAMDGPUConverter()
-	err := cm.RegisterConverter(v1.AcceleratorTypeAMDGPU, converter)
-	require.NoError(t, err)
+	pluginRegistry.On("GetConverter", "amd_gpu").Return(plugin.NewAMDGPUConverter(), true)
 
 	gpu := float64(1)
 	cpu := float64(8)
@@ -95,7 +81,7 @@ func TestConverterManager_ConvertToRay_AMD(t *testing.T) {
 		CPU:    &cpu,
 		Memory: &memory,
 	}
-	spec.SetAcceleratorType(v1.AcceleratorTypeAMDGPU)
+	spec.SetAcceleratorType(string(v1.AcceleratorTypeAMDGPU))
 	spec.SetAcceleratorProduct("AMD_Instinct_MI300X_VF")
 
 	ray, err := cm.ConvertToRay(context.Background(), spec)
@@ -107,11 +93,10 @@ func TestConverterManager_ConvertToRay_AMD(t *testing.T) {
 }
 
 func TestConverterManager_ConvertToKubernetes_AMD(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
-	converter := plugin.NewAMDGPUConverter()
-	err := cm.RegisterConverter(v1.AcceleratorTypeAMDGPU, converter)
-	require.NoError(t, err)
+	pluginRegistry.On("GetConverter", "amd_gpu").Return(plugin.NewAMDGPUConverter(), true)
 
 	gpu := float64(1)
 	cpu := float64(8)
@@ -121,7 +106,7 @@ func TestConverterManager_ConvertToKubernetes_AMD(t *testing.T) {
 		CPU:    &cpu,
 		Memory: &memory,
 	}
-	spec.SetAcceleratorType(v1.AcceleratorTypeAMDGPU)
+	spec.SetAcceleratorType(string(v1.AcceleratorTypeAMDGPU))
 	spec.SetAcceleratorProduct("AMD_Instinct_MI300X_VF")
 	spec.AddCustomResource("hugepages-2Mi", "1024Mi")
 
@@ -135,7 +120,8 @@ func TestConverterManager_ConvertToKubernetes_AMD(t *testing.T) {
 }
 
 func TestConverterManager_CPUOnly(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
 	cpu := float64(4)
 	memory := float64(8)
@@ -159,7 +145,8 @@ func TestConverterManager_CPUOnly(t *testing.T) {
 }
 
 func TestConverterManager_CPUOnly_WithCustomResources(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
 	cpu := float64(8)
 	memory := float64(16)
@@ -190,7 +177,8 @@ func TestConverterManager_CPUOnly_WithCustomResources(t *testing.T) {
 }
 
 func TestConverterManager_CPUOnly_MinimalConfig(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
 	spec := &v1.ResourceSpec{}
 
@@ -209,7 +197,8 @@ func TestConverterManager_CPUOnly_MinimalConfig(t *testing.T) {
 }
 
 func TestConverterManager_CPUOnly_OnlyCPU(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
 	cpu := float64(2)
 	spec := &v1.ResourceSpec{
@@ -230,22 +219,20 @@ func TestConverterManager_CPUOnly_OnlyCPU(t *testing.T) {
 }
 
 func TestConverterManager_CPUOnly_OnlyMemory(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
-	// 只配置内存
 	memory := float64(16)
 	spec := &v1.ResourceSpec{
 		Memory: &memory,
 	}
 
-	// 转换为 Ray
 	ray, err := cm.ConvertToRay(context.Background(), spec)
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(0), ray.NumCPUs)
 	assert.Equal(t, float64(16*plugin.BytesPerGiB), ray.Memory)
 
-	// 转换为 Kubernetes
 	k8s, err := cm.ConvertToKubernetes(context.Background(), spec)
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
@@ -254,7 +241,8 @@ func TestConverterManager_CPUOnly_OnlyMemory(t *testing.T) {
 }
 
 func TestConverterManager_GPUZero_NoAcceleratorType(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
 
 	gpu := float64(0)
 	cpu := float64(4)
@@ -280,7 +268,10 @@ func TestConverterManager_GPUZero_NoAcceleratorType(t *testing.T) {
 }
 
 func TestConverterManager_NoConverterFound(t *testing.T) {
-	cm := NewConverterManager()
+	pluginRegistry := &acceleratormocks.MockPluginRegistry{}
+	cm := newConverter(pluginRegistry)
+
+	pluginRegistry.On("GetConverter", "unknown_gpu").Return(nil, false)
 
 	gpu := float64(1)
 	spec := &v1.ResourceSpec{

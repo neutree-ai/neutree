@@ -16,6 +16,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
@@ -39,12 +40,14 @@ var _ ClusterReconcile = &sshRayClusterReconciler{}
 type sshRayClusterReconciler struct {
 	executor           command.Executor
 	acceleratorManager accelerator.Manager
+	resourceManager    resource.Manager
 	storage            storage.Storage
 }
 
-func newRaySSHClusterReconcile(acceleratorManager accelerator.Manager, storage storage.Storage) *sshRayClusterReconciler {
+func newRaySSHClusterReconcile(storage storage.Storage, acceleratorManager accelerator.Manager, resourceManager resource.Manager) *sshRayClusterReconciler {
 	r := &sshRayClusterReconciler{
 		acceleratorManager: acceleratorManager,
+		resourceManager:    resourceManager,
 		storage:            storage,
 	}
 
@@ -118,7 +121,32 @@ func (c *sshRayClusterReconciler) setClusterStatus(reconcileCtx *ReconcileContex
 	setClusterStatus(reconcileCtx.Cluster, clusterStatus)
 	reconcileCtx.Cluster.Status.DesiredNodes += len(reconcileCtx.sshClusterConfig.Provider.WorkerIPs)
 
+	// Collect cluster resources (including accelerators) if cluster is running
+	if reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseRunning {
+		c.collectClusterResources(reconcileCtx)
+	}
+
 	return nil
+}
+
+// collectClusterResources collects cluster resource information using ResourceManager
+func (c *sshRayClusterReconciler) collectClusterResources(reconcileCtx *ReconcileContext) {
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(reconcileCtx.Ctx, 30*time.Second)
+	defer cancel()
+
+	// Collect cluster resources using ResourceManager
+	resources, err := c.resourceManager.Cluster().CollectClusterResources(ctx, reconcileCtx.Cluster)
+	if err != nil {
+		// Log error but don't fail the reconcile
+		klog.Warningf("Failed to collect cluster resources for cluster %s: %v", reconcileCtx.Cluster.Key(), err)
+		return
+	}
+
+	// Update cluster status with collected resources
+	reconcileCtx.Cluster.Status.ResourceInfo = resources
+	// debug
+	klog.Infof("Successfully collected cluster resources for cluster %s: %s", reconcileCtx.Cluster.Metadata.WorkspaceName(), resources.String())
 }
 
 func (c *sshRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {

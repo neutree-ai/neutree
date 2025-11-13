@@ -12,8 +12,8 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -23,8 +23,8 @@ var _ Orchestrator = &RayOrchestrator{}
 type RayOrchestrator struct {
 	cluster *v1.Cluster
 
-	storage            storage.Storage
-	acceleratorManager accelerator.Manager
+	storage         storage.Storage
+	resourceManager resource.Manager
 }
 
 type RayOptions struct {
@@ -33,9 +33,9 @@ type RayOptions struct {
 
 func NewRayOrchestrator(opts RayOptions) *RayOrchestrator {
 	o := &RayOrchestrator{
-		cluster:            opts.Cluster,
-		storage:            opts.Storage,
-		acceleratorManager: opts.AcceleratorManager,
+		cluster:         opts.Cluster,
+		storage:         opts.Storage,
+		resourceManager: opts.ResourceManager,
 	}
 
 	return o
@@ -78,7 +78,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 		return nil, errors.Wrap(err, "failed to get current serve applications")
 	}
 
-	newApp, err := EndpointToApplication(endpoint, modelRegistry, o.acceleratorManager)
+	newApp, err := EndpointToApplication(endpoint, modelRegistry, o.resourceManager)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to convert endpoint to application")
 	}
@@ -270,8 +270,8 @@ func (o *RayOrchestrator) DisconnectEndpointModel(endpoint *v1.Endpoint) error {
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
-func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry, acceleratorManager accelerator.Manager) (dashboard.RayServeApplication, error) {
-	rayResource, err := acceleratorManager.ConvertToRay(context.Background(), endpoint.Spec.Resources)
+func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry, resourceManager resource.Manager) (dashboard.RayServeApplication, error) {
+	rayResource, err := resourceManager.Converter().ConvertToRay(context.Background(), endpoint.Spec.Resources)
 	if err != nil {
 		klog.Errorf("Failed to convert resources to Ray format: %v", err)
 		return dashboard.RayServeApplication{}, err

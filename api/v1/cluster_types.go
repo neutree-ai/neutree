@@ -125,8 +125,10 @@ type ClusterStatus struct {
 	// the cluster all node provision status.
 	// current only record the static node provision status.
 	NodeProvisionStatus string `json:"node_provision_status,omitempty"`
-	// the resource information of the cluster.
-	ResourceInfo map[string]float64 `json:"resource_info,omitempty"`
+
+	// ClusterResources contains structured resource information organized by dimensions.
+	// This replaces the deprecated ResourceInfo field with a type-safe structure.
+	ResourceInfo *ClusterResources `json:"resource_info,omitempty"`
 }
 
 type NodeProvision struct {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -19,9 +19,9 @@ type Orchestrator interface {
 }
 
 type Options struct {
-	Cluster            *v1.Cluster
-	Storage            storage.Storage
-	AcceleratorManager accelerator.Manager
+	Cluster         *v1.Cluster
+	Storage         storage.Storage
+	ResourceManager resource.Manager
 }
 
 type NewOrchestratorFunc func(opts Options) (Orchestrator, error)

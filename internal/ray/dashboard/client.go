@@ -14,7 +14,7 @@ import (
 type DashboardService interface {
 	GetClusterMetadata() (*ClusterMetadataResponse, error)
 	ListNodes() ([]v1.NodeSummary, error)
-	GetClusterAutoScaleStatus() (v1.AutoscalerReport, error)
+	GetClusterStatus() (v1.RayAPIClusterStatus, error)
 
 	// Serve related methods
 	GetServeApplications() (*RayServeApplicationsResponse, error)
@@ -114,13 +114,13 @@ type ClusterStatusResponse struct {
 }
 
 type ClusterStatusData struct {
-	AutoscalingStatus string                       `json:"autoscalingStatus"`
-	ClusterStatus     v1.RayClusterAutoScaleStatus `json:"clusterStatus"`
+	AutoscalingStatus string                 `json:"autoscalingStatus"`
+	ClusterStatus     v1.RayAPIClusterStatus `json:"clusterStatus"`
 }
 
-func (c *Client) GetClusterAutoScaleStatus() (v1.AutoscalerReport, error) {
+func (c *Client) GetClusterStatus() (v1.RayAPIClusterStatus, error) {
 	var result ClusterStatusResponse
 	err := c.doRequest("GET", "/api/cluster_status?format=0", nil, &result)
 
-	return result.Data.ClusterStatus.AutoscalerReport, err
+	return result.Data.ClusterStatus, err
 }

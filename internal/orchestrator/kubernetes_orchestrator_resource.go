@@ -101,7 +101,7 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 
 // setResourceVariables sets resource specifications and node selector
 func (k *kubernetesOrchestrator) setResourceVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) error {
-	resourceSpec, err := k.acceleratorManager.ConvertToKubernetes(context.Background(), endpoint.Spec.Resources)
+	resourceSpec, err := k.resourceManager.Converter().ConvertToKubernetes(context.Background(), endpoint.Spec.Resources)
 	if err != nil {
 		return errors.Wrapf(err, "failed to convert resources for endpoint %s", endpoint.Metadata.Name)
 	}

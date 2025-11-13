@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -30,6 +31,8 @@ type ClusterController struct {
 	gw gateway.Gateway
 
 	acceleratorManager accelerator.Manager
+
+	resourceManager resource.Manager
 }
 
 type ClusterControllerOption struct {
@@ -40,6 +43,7 @@ type ClusterControllerOption struct {
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	Gw                      gateway.Gateway
 	AcceleratorManager      accelerator.Manager
+	ResourceManager         resource.Manager
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
@@ -52,6 +56,7 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 
 		gw:                 opt.Gw,
 		acceleratorManager: opt.AcceleratorManager,
+		resourceManager:    opt.ResourceManager,
 	}
 
 	c.syncHandler = c.sync
@@ -104,7 +109,7 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 		}
 	}()
 
-	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.resourceManager, controller.storage, controller.metricsRemoteWriteURL)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 	}
@@ -151,7 +156,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 		controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
 	}
 
-	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.resourceManager, controller.storage, controller.metricsRemoteWriteURL)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 	}
@@ -186,6 +191,8 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase,
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 		newStatus.Version = obj.Status.Version
 		newStatus.RayVersion = obj.Status.RayVersion
+		// Preserve existing ResourceInfo - it will be updated by cluster reconcilers
+		newStatus.ResourceInfo = obj.Status.ResourceInfo
 	}
 
 	if err != nil {

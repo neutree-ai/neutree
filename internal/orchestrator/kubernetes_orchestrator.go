@@ -9,8 +9,8 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/manifest_apply"
+	"github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 
@@ -30,13 +30,13 @@ var _ Orchestrator = &kubernetesOrchestrator{}
 type kubernetesOrchestrator struct {
 	storage storage.Storage
 
-	acceleratorManager accelerator.Manager
+	resourceManager resource.Manager
 }
 
 func newKubernetesOrchestrator(opts Options) *kubernetesOrchestrator {
 	return &kubernetesOrchestrator{
-		storage:            opts.Storage,
-		acceleratorManager: opts.AcceleratorManager,
+		storage:         opts.Storage,
+		resourceManager: opts.ResourceManager,
 	}
 }
 

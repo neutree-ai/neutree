@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
@@ -83,35 +86,37 @@ func (u *acceleratorPluginClient) GetNodeRuntimeConfig(ctx context.Context,
 	return response, nil
 }
 
-func (u *acceleratorPluginClient) GetKubernetesContainerAccelerator(ctx context.Context,
-	request *v1.GetContainerAcceleratorRequest) (*v1.GetContainerAcceleratorResponse, error) {
-	response := &v1.GetContainerAcceleratorResponse{}
-
-	err := u.doPost(ctx, v1.GetContainerAcceleratorPath, request, response)
-	if err != nil {
-		return nil, err
-	}
-
-	return response, nil
-}
-
-func (u *acceleratorPluginClient) GetKubernetesContainerRuntimeConfig(ctx context.Context,
-	request *v1.GetContainerRuntimeConfigRequest) (*v1.GetContainerRuntimeConfigResponse, error) {
-	response := &v1.GetContainerRuntimeConfigResponse{}
-
-	err := u.doPost(ctx, v1.GetContainerRuntimeConfigPath, request, response)
-	if err != nil {
-		return nil, err
-	}
-
-	return response, nil
-}
-
 func (u *acceleratorPluginClient) GetResourceConverter() v1.ResourceConverter {
 	return &restResourceConverter{
 		client:  u.client,
 		baseURL: u.baseURL,
 	}
+}
+
+func (u *acceleratorPluginClient) GetResourceParser() v1.ResourceParser {
+	return &restResourceParser{
+		client:  u.client,
+		baseURL: u.baseURL,
+	}
+}
+
+type restResourceParser struct {
+	client  *http.Client
+	baseURL string
+}
+
+// ParseFromKubernetes is not supported for external plugins yet
+// External plugins would need to implement their own HTTP endpoint for this
+func (p *restResourceParser) ParseFromKubernetes(resource map[corev1.ResourceName]resource.Quantity, labels map[string]string) (*v1.ResourceInfo, error) {
+	// TODO: Implement REST API call when external plugins support this
+	return nil, nil
+}
+
+// ParseFromRay is not supported for external plugins yet
+// External plugins would need to implement their own HTTP endpoint for this
+func (p *restResourceParser) ParseFromRay(resource map[string]float64) (*v1.ResourceInfo, error) {
+	// TODO: Implement REST API call when external plugins support this
+	return nil, nil
 }
 
 func (u *acceleratorPluginClient) doPost(ctx context.Context, path string, request, response interface{}) error {
