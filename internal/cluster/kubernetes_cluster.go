@@ -329,7 +329,9 @@ func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 
 			if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
 				match = true
-
+				for key := range accelInfo.AcceleratorGroups {
+					klog.Infof("Node %s allocatable accelerator resources: %+v", nodeName, *accelInfo.AcceleratorGroups[key])
+				}
 				for key, group := range accelInfo.AcceleratorGroups {
 					if existingGroup, exists := result.Allocatable.AcceleratorGroups[key]; exists {
 						existingGroup.Quantity += group.Quantity
@@ -355,7 +357,9 @@ func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 
 			if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
 				match = true
-
+				for key := range accelInfo.AcceleratorGroups {
+					klog.Infof("Node %s available accelerator resources: %+v", nodeName, *accelInfo.AcceleratorGroups[key])
+				}
 				for key, group := range accelInfo.AcceleratorGroups {
 					if existingGroup, exists := result.Available.AcceleratorGroups[key]; exists {
 						existingGroup.Quantity += group.Quantity
@@ -403,6 +407,8 @@ func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 	} else {
 		result.Available.Memory = roundFloat64ToTwoDecimals(result.Available.Memory / plugin.BytesPerGiB)
 	}
+
+	klog.Infof("cluster %s resource %s", reconcileCtx.Cluster.Metadata.WorkspaceName(), result.String())
 
 	return result, nil
 }

@@ -709,5 +709,7 @@ func (c *sshRayClusterReconciler) calculateClusterResources(
 		}
 	}
 
+	klog.Infof("cluster %s resource %s", reconcileCtx.Cluster.Metadata.WorkspaceName(), result.String())
+
 	return result, nil
 }
