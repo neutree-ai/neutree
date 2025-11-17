@@ -39,6 +39,26 @@ func TestNVIDIAGPU_ParseFromKubernetes(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Node with zero NVIDIA GPU",
+			kubernetesResource: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceName(NvidiaGPUKubernetesResource): resource.MustParse("0"),
+			},
+			nodeLabels: map[string]string{
+				NvidiaGPUKubernetesNodeSelectorKey: "NVIDIA_L20",
+			},
+			expected: &v1.ResourceInfo{
+				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorTypeNVIDIAGPU: {
+						Quantity: 0,
+						ProductGroups: map[v1.AcceleratorProduct]float64{
+							"NVIDIA_L20": 0,
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "Node with NVIDIA GPU but no product label",
 			kubernetesResource: map[corev1.ResourceName]resource.Quantity{
 				corev1.ResourceName(NvidiaGPUKubernetesResource): resource.MustParse("2"),
@@ -131,7 +151,26 @@ func TestGPUParser_ParserFromRay(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Ray resource with NVIDIA GPU",
+			name: "Ray resource with zero NVIDIA GPU",
+			rayResource: map[string]float64{
+				"GPU":                     0,
+				"NVIDIA_L20":              0,
+				"custom_resource_example": 5,
+			},
+			expected: &v1.ResourceInfo{
+				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorTypeNVIDIAGPU: {
+						Quantity: 0,
+						ProductGroups: map[v1.AcceleratorProduct]float64{
+							"NVIDIA_L20": 0,
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Ray resource with AMD GPU",
 			rayResource: map[string]float64{
 				"CPU":                     16,
 				"GPU":                     4,

@@ -21,7 +21,7 @@ func (p *AMDGPUResourceParser) ParseFromKubernetes(resource map[corev1.ResourceN
 
 	// Check if this node has AMD GPU resources
 	gpuQuantity, hasGPU := resource[AMDGPUKubernetesResource]
-	if !hasGPU || gpuQuantity.IsZero() {
+	if !hasGPU {
 		return nil, nil
 	}
 
@@ -52,7 +52,7 @@ func (p *AMDGPUResourceParser) ParseFromRay(resource map[string]float64) (*v1.Re
 
 	// For AMD GPUs, Ray use "GPU" and Neutree Use Real Product Names
 	totalGPUs, hasGPU := resource["GPU"]
-	if !hasGPU || totalGPUs <= 0 {
+	if !hasGPU {
 		return nil, nil
 	}
 

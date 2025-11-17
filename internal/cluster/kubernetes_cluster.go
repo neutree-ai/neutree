@@ -327,7 +327,9 @@ func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 				return nil, fmt.Errorf("failed to parse allocatable resources from Kubernetes: %w", err)
 			}
 
-			if accelInfo != nil {
+			if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
+				match = true
+
 				for key, group := range accelInfo.AcceleratorGroups {
 					if existingGroup, exists := result.Allocatable.AcceleratorGroups[key]; exists {
 						existingGroup.Quantity += group.Quantity
@@ -351,7 +353,7 @@ func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 				return nil, fmt.Errorf("failed to parse available resources from Kubernetes: %w", err)
 			}
 
-			if accelInfo != nil {
+			if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
 				match = true
 
 				for key, group := range accelInfo.AcceleratorGroups {

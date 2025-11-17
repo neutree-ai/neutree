@@ -665,7 +665,7 @@ func (c *sshRayClusterReconciler) calculateClusterResources(
 			return nil, fmt.Errorf("failed to parse allocatable resources from Ray for resource %s: %w", resourceKey, err)
 		}
 
-		if allocatableInfo != nil {
+		if allocatableInfo != nil && len(allocatableInfo.AcceleratorGroups) > 0 {
 			for key, group := range allocatableInfo.AcceleratorGroups {
 				if existingGroup, exists := result.Allocatable.AcceleratorGroups[key]; exists {
 					existingGroup.Quantity += group.Quantity
@@ -689,7 +689,7 @@ func (c *sshRayClusterReconciler) calculateClusterResources(
 			return nil, fmt.Errorf("failed to parse available resources from Ray for resource %s: %w", resourceKey, err)
 		}
 
-		if availableInfo != nil {
+		if availableInfo != nil && len(allocatableInfo.AcceleratorGroups) > 0 {
 			for key, group := range availableInfo.AcceleratorGroups {
 				if existingGroup, exists := result.Available.AcceleratorGroups[key]; exists {
 					existingGroup.Quantity += group.Quantity

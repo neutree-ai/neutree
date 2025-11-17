@@ -21,7 +21,7 @@ func (p *GPUResourceParser) ParseFromKubernetes(resource map[corev1.ResourceName
 
 	// Check if this node has NVIDIA GPU resources
 	gpuQuantity, hasGPU := resource[NvidiaGPUKubernetesResource]
-	if !hasGPU || gpuQuantity.IsZero() {
+	if !hasGPU {
 		return nil, nil
 	}
 
@@ -52,7 +52,7 @@ func (p *GPUResourceParser) ParseFromRay(resource map[string]float64) (*v1.Resou
 
 	// For NVIDIA GPUs, Ray use "GPU" and Neutree Use Real Product Names
 	totalGPUs, hasGPU := resource["GPU"]
-	if !hasGPU || totalGPUs <= 0 {
+	if !hasGPU {
 		return nil, nil
 	}
 

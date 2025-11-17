@@ -54,6 +54,26 @@ func TestAMDGPU_ParseFromKubernetes(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Node with zero AMD GPU",
+			kubernetesResource: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceName(AMDGPUKubernetesResource): resource.MustParse("0"),
+			},
+			nodeLabels: map[string]string{
+				AMDGPUKubernetesNodeSelectorKey: "AMD_Instinct_MI300X_OAM",
+			},
+			expected: &v1.ResourceInfo{
+				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorTypeAMDGPU: {
+						Quantity: 0,
+						ProductGroups: map[v1.AcceleratorProduct]float64{
+							"AMD_Instinct_MI300X_OAM": 0,
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "Node without AMD GPU",
 			kubernetesResource: map[corev1.ResourceName]resource.Quantity{
 				corev1.ResourceCPU: resource.MustParse("16"),
@@ -122,6 +142,25 @@ func TestAMDGPU_ParseFromRay(t *testing.T) {
 						Quantity: 2,
 						ProductGroups: map[v1.AcceleratorProduct]float64{
 							"AMD_Instinct_MI300X_OAM": 2,
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Ray resource with zero AMD GPU",
+			rayResource: map[string]float64{
+				"GPU":                     0,
+				"AMD_Instinct_MI300X_OAM": 0,
+				"custom_resource_example": 5,
+			},
+			expected: &v1.ResourceInfo{
+				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorTypeAMDGPU: {
+						Quantity: 0,
+						ProductGroups: map[v1.AcceleratorProduct]float64{
+							"AMD_Instinct_MI300X_OAM": 0,
 						},
 					},
 				},
