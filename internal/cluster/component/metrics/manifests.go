@@ -19,7 +19,49 @@ data:
 
     scrape_configs:
     # Scrape from Kubernetes pods using service discovery
-    - job_name: 'neutree'
+    - job_name: 'neutree-router'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - {{ .Namespace }}
+        selectors:
+        - role: pod
+          label: app=router
+      relabel_configs:
+      # Only scrape pods with cluster and workspace labels matching
+      - source_labels: [__meta_kubernetes_pod_label_cluster]
+        action: keep
+        regex: {{ .ClusterName }}
+      - source_labels: [__meta_kubernetes_pod_label_workspace]
+        action: keep
+        regex: {{ .Workspace }}
+      # Set the __address__ to pod IP and port 8000
+      - source_labels: [__meta_kubernetes_pod_ip]
+        action: replace
+        target_label: __address__
+        regex: (.+)
+        replacement: $1:8000
+      # Add pod metadata as labels
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_label_cluster]
+        action: replace
+        target_label: neutree_cluster
+      - source_labels: [__meta_kubernetes_pod_label_workspace]
+        action: replace
+        target_label: workspace
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: replace
+        target_label: app
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod
+      # Add fixed labels to all scraped metrics
+      - target_label: deployment
+        replacement: Router
+    - job_name: 'neutree-inference'
       kubernetes_sd_configs:
       - role: pod
         namespaces:
