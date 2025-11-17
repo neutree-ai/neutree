@@ -50,6 +50,24 @@ func (o *RayOrchestrator) getDashboardService() (dashboard.DashboardService, err
 
 // CreateEndpoint deploys a new endpoint using Ray Serve.
 func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
+	if endpoint.Spec.Replicas.Num != nil && *endpoint.Spec.Replicas.Num == 0 {
+		// If replicas is set to 0, we treat it as a deletion request.
+		klog.Infof("Endpoint %s replicas set to 0, treating as deletion request.", endpoint.Metadata.WorkspaceName())
+		err := o.deleteEndpoint(endpoint)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to set endpoint with 0 replicas")
+		}
+
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseRUNNING,
+			ErrorMessage: "",
+		}, nil
+	}
+
+	return o.createOrUpdate(endpoint)
+}
+
+func (o *RayOrchestrator) createOrUpdate(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
 	// pre-check related resources
 	_, err := getEndpointDeployCluster(o.storage, endpoint)
 	if err != nil {
@@ -140,6 +158,10 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 
 // DeleteEndpoint removes an endpoint from Ray Serve.
 func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
+	return o.deleteEndpoint(endpoint)
+}
+
+func (o *RayOrchestrator) deleteEndpoint(endpoint *v1.Endpoint) error {
 	// pre-check cluster
 	_, err := getEndpointDeployCluster(o.storage, endpoint)
 	if err != nil {
