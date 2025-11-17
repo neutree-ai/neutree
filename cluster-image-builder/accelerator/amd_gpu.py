@@ -35,7 +35,11 @@ def get_accelerator_counts():
             if device.get("type") is not None and  device.get("type") == "CPU":
                 continue
             market_name = device.get("market_name")
+            if market_name is None:
+                continue
             accelerator_type = market_name.replace(" ","_")
+            if not accelerator_type.startswith("AMD_"):
+                accelerator_type = "AMD_" + accelerator_type
             if accelerator_counts.get(accelerator_type) is None:
                 accelerator_counts[accelerator_type] = 1
             else:
