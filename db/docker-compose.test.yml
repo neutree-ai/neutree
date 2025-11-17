@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: neutree-db-test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pgpassword
+      POSTGRES_DB: neutree_test
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  auth:
+    image: supabase/gotrue:v2.170.0
+    container_name: neutree-auth-test
+    environment:
+      GOTRUE_JWT_SECRET: test-jwt-secret-32-characters-min
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: api_user
+      GOTRUE_DB_DRIVER: postgres
+      DB_NAMESPACE: auth
+      GOTRUE_API_HOST: 0.0.0.0
+      PORT: 9999
+      GOTRUE_DISABLE_SIGNUP: "false"
+      API_EXTERNAL_URL: http://localhost:9999
+      GOTRUE_SITE_URL: http://localhost:9999
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_LOG_LEVEL: ERROR
+      DATABASE_URL: "postgres://auth_admin:auth_admin_password@postgres:5432/neutree_test"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9999/health || exit 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  migration:
+    image: migrate/migrate:v4.18.3
+    container_name: neutree-migration-test
+    depends_on:
+      auth:
+        condition: service_healthy
+    command: -source=file://migrations -database "postgres://postgres:pgpassword@postgres:5432/neutree_test?sslmode=disable" up
+    volumes:
+      - ./migrations:/migrations
+    restart: "no"

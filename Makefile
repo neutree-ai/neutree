@@ -156,6 +156,26 @@ ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 test: prepare-build-cli mockgen fmt vet lint ## Run unit test
 	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e\|mocks')
 
+##@ Database Testing
+
+.PHONY: db-test
+db-test: ## Run database tests with isolated PostgreSQL
+	@echo "Starting test database and auth service..."
+	@cd db && docker-compose -f docker-compose.test.yml up -d postgres auth
+	@echo "Waiting for services to be ready..."
+	@cd db && docker-compose -f docker-compose.test.yml up --wait postgres auth
+	@echo "Running migrations..."
+	@cd db && docker-compose -f docker-compose.test.yml run --rm migration || \
+		(docker-compose -f docker-compose.test.yml down -v && exit 1)
+	@echo "Running database tests..."
+	@cd db/dbtest && go test -v ./... || (cd .. && docker-compose -f docker-compose.test.yml down -v && exit 1)
+	@echo "Cleaning up test database..."
+	@cd db && docker-compose -f docker-compose.test.yml down -v
+
+.PHONY: db-test-clean
+db-test-clean: ## Clean up test database
+	@cd db && docker-compose -f docker-compose.test.yml down -v
+
 .PHONY: clean
 clean: ## Clean up
 	rm -rf bin
