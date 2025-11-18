@@ -34,6 +34,12 @@ jobs:
       - name: Test
         run: make test
 
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@v1
+
+      - name: Database Test
+        run: make db-test
+
       - name: Build
         run: make build
 
