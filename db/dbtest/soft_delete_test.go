@@ -26,7 +26,6 @@ func createImageRegistry(t *testing.T, tx *sql.Tx, name, workspace string) int {
 		RETURNING id
 	`, name, workspace).Scan(&registryID)
 	if err != nil {
-		tx.Rollback()
 		t.Fatalf("failed to create image registry: %v", err)
 	}
 	return registryID
@@ -83,7 +82,9 @@ func executeAsUser(t *testing.T, db *sql.DB, userID string, fn func(*sql.Tx) err
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	// Set role to api_user to enable RLS
 	_, err = tx.ExecContext(ctx, "SET LOCAL ROLE api_user")

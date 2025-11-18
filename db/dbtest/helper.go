@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	_ "github.com/lib/pq"
-	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/supabase-community/gotrue-go"
 	"github.com/supabase-community/gotrue-go/types"
+
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // GetTestDB returns a connection to the test database
@@ -52,6 +53,7 @@ func getEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
+
 	return defaultValue
 }
 
@@ -95,7 +97,10 @@ func WithUserContext(t *testing.T, db *sql.DB, userID string, fn func(*sql.Tx)) 
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	_, err = tx.Exec(fmt.Sprintf("SET LOCAL request.jwt.claim.sub = '%s'", userID))
 	if err != nil {
