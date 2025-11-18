@@ -1,15 +1,5 @@
 package v1
 
-// ResourceConverter is the interface for resource converters
-// Converts Neutree's unified resource specifications to resource configurations for different cluster types (Ray, Kubernetes)
-type ResourceConverter interface {
-	// ConvertToRay converts to Ray resource configuration
-	ConvertToRay(spec *ResourceSpec) (*RayResourceSpec, error)
-
-	// ConvertToKubernetes converts to Kubernetes resource configuration
-	ConvertToKubernetes(spec *ResourceSpec) (*KubernetesResourceSpec, error)
-}
-
 // RayResourceSpec represents Ray resource specification
 type RayResourceSpec struct {
 	NumGPUs   float64            `json:"num_gpus,omitempty" yaml:"num_gpus,omitempty"`

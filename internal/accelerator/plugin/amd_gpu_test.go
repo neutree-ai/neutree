@@ -9,8 +9,6 @@ import (
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 var (
@@ -45,7 +43,7 @@ var (
 func TestAMDGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	p := &AMDGPUAcceleratorPlugin{}
 	// Test basic interface methods
-	assert.Equal(t, v1.AcceleratorTypeAMDGPU, p.Resource())
+	assert.Equal(t, string(v1.AcceleratorTypeAMDGPU), p.Resource())
 	assert.Equal(t, p, p.Handle())
 	assert.Equal(t, InternalPluginType, p.Type())
 }
@@ -179,97 +177,6 @@ func TestAMDGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 					SSHUser:       "root",
 					SSHPrivateKey: "MTIzCg==",
 				},
-			})
-			assert.NoError(t, err)
-			assert.NotNil(t, runtimeConfig)
-			assert.Equal(t, tt.expectRuntimeConfig, runtimeConfig.RuntimeConfig)
-		})
-	}
-}
-
-func TestAMDGPUAcceleratorPlugin_GetKubernetesContainerAcceleratorInfo(t *testing.T) {
-	tests := []struct {
-		name                    string
-		container               corev1.Container
-		expecteAcceleratorCount int
-	}{
-		{
-			name: "Container without GPU resources",
-			container: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						"cpu": resource.MustParse("1"),
-					},
-				},
-			},
-			expecteAcceleratorCount: 0,
-		},
-		{
-			name: "Container with GPU resources",
-			container: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						"amd.com/gpu": resource.MustParse("1"),
-					},
-				},
-			},
-			expecteAcceleratorCount: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := &AMDGPUAcceleratorPlugin{}
-			// Test GetKubernetesContainerAcceleratorInfo method
-			accelerators := p.getKubernetesContainerAcceleratorInfo(tt.container)
-			assert.Len(t, accelerators, tt.expecteAcceleratorCount)
-		})
-	}
-}
-
-func TestAMDGPUAcceleratorPlugin_GetKubernetesContainerRuntimeConfig(t *testing.T) {
-	tests := []struct {
-		name                string
-		container           corev1.Container
-		expectRuntimeConfig v1.RuntimeConfig
-	}{
-		{
-			name: "Container without GPU resources",
-			container: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						"cpu": resource.MustParse("1"),
-					},
-				},
-			},
-			expectRuntimeConfig: v1.RuntimeConfig{
-				ImageSuffix: "rocm",
-			},
-		},
-		{
-			name: "Container with GPU resources",
-			container: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						"amd.com/gpu": resource.MustParse("1"),
-					},
-				},
-			},
-			expectRuntimeConfig: v1.RuntimeConfig{
-				ImageSuffix: "rocm",
-				Env: map[string]string{
-					"ACCELERATOR_TYPE": "amd_gpu",
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := &AMDGPUAcceleratorPlugin{}
-			// Test GetKubernetesContainerRuntimeConfig method
-			runtimeConfig, err := p.GetKubernetesContainerRuntimeConfig(context.Background(), &v1.GetContainerRuntimeConfigRequest{
-				Container: tt.container,
 			})
 			assert.NoError(t, err)
 			assert.NotNil(t, runtimeConfig)

@@ -98,21 +98,49 @@ type NodeSummary struct {
 }
 
 type Raylet struct {
-	NodeID     string             `json:"nodeId"`
-	Resources  map[string]float64 `json:"resourcesTotal"`
-	State      string             `json:"state"`
-	Labels     map[string]string  `json:"labels"`
-	IsHeadNode bool               `json:"isHeadNode"`
+	NodeID           string             `json:"nodeId"`
+	Resources        map[string]float64 `json:"resourcesTotal"`
+	State            string             `json:"state"`
+	Labels           map[string]string  `json:"labels"`
+	IsHeadNode       bool               `json:"isHeadNode"`
+	CoreWorkersStats []CoreWorkerStats  `json:"coreWorkersStats"`
 }
 
-type RayClusterAutoScaleStatus struct {
-	AutoscalerReport AutoscalerReport `json:"autoscalerReport,omitempty"`
+type CoreWorkerStats struct {
+	UsedResources map[string]RayResourceAllocations `json:"usedResources"`
+}
+
+type RayResourceAllocations struct {
+	ResourceSlots []RayResourceSlot `json:"resourceSlots"`
+}
+
+func (r RayResourceAllocations) TotalAllocation() float64 {
+	total := 0.0
+	for _, slot := range r.ResourceSlots {
+		total += slot.Allocation
+	}
+
+	return total
+}
+
+type RayResourceSlot struct {
+	Allocation float64 `json:"allocation"`
+	Slot       string  `json:"slot"`
+}
+
+type RayAPIClusterStatus struct {
+	AutoscalerReport  AutoscalerReport  `json:"autoscalerReport,omitempty"`
+	LoadMetricsReport LoadMetricsReport `json:"loadMetricsReport,omitempty"`
 }
 
 type NodeInfo struct {
 	NodeIP        string `json:"node_ip"`
 	NodeType      string `json:"node_type"`
 	StatusMessage string `json:"status_message,omitempty"`
+}
+
+type LoadMetricsReport struct {
+	Usage map[string][]float64 `json:"usage,omitempty"`
 }
 
 type AutoscalerReport struct {

@@ -49,16 +49,18 @@ type ReconcileContext struct {
 	rayService dashboard.DashboardService
 }
 
-type NewReconciler func(cluster *v1.Cluster, acceleratorManager accelerator.Manager, s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error)
+type NewReconciler func(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
+	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error)
 
 var NewReconcile NewReconciler = newReconcile
 
-func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager, s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
+func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
+	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
 	switch cluster.Spec.Type {
 	case v1.SSHClusterType:
-		return newRaySSHClusterReconcile(acceleratorManager, s), nil
+		return newRaySSHClusterReconcile(s, acceleratorManager), nil
 	case v1.KubernetesClusterType:
-		return NewNativeKubernetesClusterReconciler(s, metricsRemoteWriteURL), nil
+		return NewNativeKubernetesClusterReconciler(s, acceleratorManager, metricsRemoteWriteURL), nil
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", cluster.Spec.Type)
 	}

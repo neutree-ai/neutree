@@ -8,8 +8,10 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
+	"github.com/neutree-ai/neutree/internal/util"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
@@ -613,6 +615,254 @@ func TestReconcileWorkerNode(t *testing.T) {
 			acceleratorManager.AssertExpectations(t)
 			e.AssertExpectations(t)
 			dashboardSvc.AssertExpectations(t)
+		})
+	}
+}
+
+func TestSSHRayCluster_CalculateResource(t *testing.T) {
+	tests := []struct {
+		name              string
+		setMock           func(*dashboardmocks.MockDashboardService)
+		expectedResources v1.ClusterResources
+		wantErr           bool
+	}{
+		{
+			name: "calculate resources success",
+			setMock: func(dashboardSvc *dashboardmocks.MockDashboardService) {
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						IP: "192.168.1.1",
+						Raylet: v1.Raylet{
+							State: v1.AliveNodeState,
+							Resources: map[string]float64{
+								"CPU":        8,
+								"GPU":        2,
+								"memory":     16 * plugin.BytesPerGiB,
+								"NVIDIA_L20": 2,
+							},
+							CoreWorkersStats: []v1.CoreWorkerStats{
+								{
+									UsedResources: map[string]v1.RayResourceAllocations{
+										"CPU": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 4,
+												},
+											},
+										},
+										"GPU": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 1,
+												},
+											},
+										},
+										"NVIDIA_L20": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 1,
+												},
+											},
+										},
+										"memory": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 8 * plugin.BytesPerGiB,
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				}, nil).Once()
+			},
+			expectedResources: v1.ClusterResources{
+				Allocatable: &v1.ResourceInfo{
+					CPU:    8,
+					Memory: 16,
+					AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+						v1.AcceleratorTypeNVIDIAGPU: {
+							Quantity: 2,
+							ProductGroups: map[v1.AcceleratorProduct]float64{
+								"NVIDIA_L20": 2,
+							},
+						},
+					},
+				},
+				Available: &v1.ResourceInfo{
+					CPU:    4,
+					Memory: 8,
+					AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+						v1.AcceleratorTypeNVIDIAGPU: {
+							Quantity: 1,
+							ProductGroups: map[v1.AcceleratorProduct]float64{
+								"NVIDIA_L20": 1,
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "calculate resources should ignore dead nodes",
+			setMock: func(dashboardSvc *dashboardmocks.MockDashboardService) {
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						IP: "192.168.1.1",
+						Raylet: v1.Raylet{
+							State: v1.AliveNodeState,
+							Resources: map[string]float64{
+								"CPU":        8,
+								"GPU":        2,
+								"memory":     16 * plugin.BytesPerGiB,
+								"NVIDIA_L20": 2,
+							},
+							CoreWorkersStats: []v1.CoreWorkerStats{
+								{
+									UsedResources: map[string]v1.RayResourceAllocations{
+										"CPU": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 4,
+												},
+											},
+										},
+										"GPU": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 1,
+												},
+											},
+										},
+										"NVIDIA_L20": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 1,
+												},
+											},
+										},
+										"memory": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 8 * plugin.BytesPerGiB,
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						IP: "192.168.1.2",
+						Raylet: v1.Raylet{
+							State: v1.DeadNodeState,
+							Resources: map[string]float64{
+								"CPU":        8,
+								"GPU":        2,
+								"memory":     16 * plugin.BytesPerGiB,
+								"NVIDIA_L20": 2,
+							},
+							CoreWorkersStats: []v1.CoreWorkerStats{
+								{
+									UsedResources: map[string]v1.RayResourceAllocations{
+										"CPU": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 4,
+												},
+											},
+										},
+										"GPU": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 1,
+												},
+											},
+										},
+										"NVIDIA_L20": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 1,
+												},
+											},
+										},
+										"memory": {
+											ResourceSlots: []v1.RayResourceSlot{
+												{
+													Allocation: 8 * plugin.BytesPerGiB,
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				}, nil).Once()
+			},
+			expectedResources: v1.ClusterResources{
+				Allocatable: &v1.ResourceInfo{
+					CPU:    8,
+					Memory: 16,
+					AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+						v1.AcceleratorTypeNVIDIAGPU: {
+							Quantity: 2,
+							ProductGroups: map[v1.AcceleratorProduct]float64{
+								"NVIDIA_L20": 2,
+							},
+						},
+					},
+				},
+				Available: &v1.ResourceInfo{
+					CPU:    4,
+					Memory: 8,
+					AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+						v1.AcceleratorTypeNVIDIAGPU: {
+							Quantity: 1,
+							ProductGroups: map[v1.AcceleratorProduct]float64{
+								"NVIDIA_L20": 1,
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dashboardSvc := &dashboardmocks.MockDashboardService{}
+			tt.setMock(dashboardSvc)
+			acceleratorMgr := acceleratormocks.NewMockManager(t)
+			acceleratorMgr.On("GetAllParsers").Return(map[string]plugin.ResourceParser{
+				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+			})
+
+			r := &sshRayClusterReconciler{
+				acceleratorManager: acceleratorMgr,
+			}
+
+			resources, err := r.calculateClusterResources(&ReconcileContext{
+				Cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{
+						Name: "test",
+					},
+				},
+				rayService: dashboardSvc,
+			})
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				equal, _, err := util.JsonEqual(resources, tt.expectedResources)
+				assert.NoError(t, err)
+				assert.Equal(t, true, equal)
+			}
 		})
 	}
 }

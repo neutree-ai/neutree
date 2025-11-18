@@ -30,13 +30,13 @@ var _ Orchestrator = &kubernetesOrchestrator{}
 type kubernetesOrchestrator struct {
 	storage storage.Storage
 
-	acceleratorManager accelerator.Manager
+	acceleratorMgr accelerator.Manager
 }
 
 func newKubernetesOrchestrator(opts Options) *kubernetesOrchestrator {
 	return &kubernetesOrchestrator{
-		storage:            opts.Storage,
-		acceleratorManager: opts.AcceleratorManager,
+		storage:        opts.Storage,
+		acceleratorMgr: opts.AcceleratorMgr,
 	}
 }
 
