@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	_ "github.com/lib/pq"
+	"github.com/neutree-ai/neutree/pkg/storage"
+	"github.com/supabase-community/gotrue-go"
+	"github.com/supabase-community/gotrue-go/types"
 )
 
 // GetTestDB returns a connection to the test database
@@ -50,4 +53,58 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+type TestUser struct {
+	ID    string
+	Email string
+}
+
+func CreateTestUser(t *testing.T, username, email, password string) *TestUser {
+	t.Helper()
+
+	token, err := storage.CreateServiceToken("test-jwt-secret-32-characters-min")
+	if err != nil {
+		t.Fatalf("failed to create service token: %v", err)
+	}
+
+	client := gotrue.New("", "").WithCustomGoTrueURL("http://localhost:9999").WithToken(*token)
+
+	resp, err := client.AdminCreateUser(types.AdminCreateUserRequest{
+		Email:        email,
+		Password:     &password,
+		EmailConfirm: true,
+		UserMetadata: map[string]any{
+			"username": username,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	return &TestUser{
+		ID:    resp.User.ID.String(),
+		Email: resp.User.Email,
+	}
+}
+
+func WithUserContext(t *testing.T, db *sql.DB, userID string, fn func(*sql.Tx)) {
+	t.Helper()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(fmt.Sprintf("SET LOCAL request.jwt.claim.sub = '%s'", userID))
+	if err != nil {
+		t.Fatalf("failed to set user context: %v", err)
+	}
+
+	fn(tx)
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("failed to commit transaction: %v", err)
+	}
 }

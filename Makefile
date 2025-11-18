@@ -167,6 +167,9 @@ db-test: ## Run database tests with isolated PostgreSQL
 	@echo "Running migrations..."
 	@cd db && docker-compose -f docker-compose.test.yml run --rm migration || \
 		(docker-compose -f docker-compose.test.yml down -v && exit 1)
+	@echo "Running seed..."
+	@cd db && docker-compose -f docker-compose.test.yml run --rm seed || \
+		(docker-compose -f docker-compose.test.yml down -v && exit 1)
 	@echo "Running database tests..."
 	@cd db/dbtest && go test -v ./... || (cd .. && docker-compose -f docker-compose.test.yml down -v && exit 1)
 	@echo "Cleaning up test database..."

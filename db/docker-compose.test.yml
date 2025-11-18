@@ -19,6 +19,8 @@ services:
   auth:
     image: supabase/gotrue:v2.170.0
     container_name: neutree-auth-test
+    ports:
+      - "9999:9999"
     environment:
       GOTRUE_JWT_SECRET: test-jwt-secret-32-characters-min
       GOTRUE_JWT_EXP: 3600
@@ -51,4 +53,20 @@ services:
     command: -source=file://migrations -database "postgres://postgres:pgpassword@postgres:5432/neutree_test?sslmode=disable" up
     volumes:
       - ./migrations:/migrations
+    restart: "no"
+
+  seed:
+    image: postgres:15
+    container_name: neutree-seed-test
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    command: >
+      bash -c "
+        for file in /seed/*.sql; do
+          psql postgres://postgres:pgpassword@postgres:5432/neutree_test -f $$file;
+        done
+      "
+    volumes:
+      - ./seed:/seed
     restart: "no"
