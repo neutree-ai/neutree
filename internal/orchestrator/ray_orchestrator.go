@@ -50,6 +50,25 @@ func (o *RayOrchestrator) getDashboardService() (dashboard.DashboardService, err
 
 // CreateEndpoint deploys a new endpoint using Ray Serve.
 func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
+	if endpoint.Spec.Replicas.Num != nil && *endpoint.Spec.Replicas.Num == 0 {
+		// If replicas is set to 0, we treat it as a deletion request.
+		klog.Infof("Endpoint %s replicas set to 0, treating as deletion request.", endpoint.Metadata.WorkspaceName())
+
+		err := o.deleteEndpoint(endpoint)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to set endpoint with 0 replicas")
+		}
+
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseRUNNING,
+			ErrorMessage: "",
+		}, nil
+	}
+
+	return o.createOrUpdate(endpoint)
+}
+
+func (o *RayOrchestrator) createOrUpdate(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
 	// pre-check related resources
 	_, err := getEndpointDeployCluster(o.storage, endpoint)
 	if err != nil {
@@ -140,6 +159,10 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 
 // DeleteEndpoint removes an endpoint from Ray Serve.
 func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
+	return o.deleteEndpoint(endpoint)
+}
+
+func (o *RayOrchestrator) deleteEndpoint(endpoint *v1.Endpoint) error {
 	// pre-check cluster
 	_, err := getEndpointDeployCluster(o.storage, endpoint)
 	if err != nil {
@@ -205,31 +228,47 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}, nil
 	}
 
+	// For zero replicas, the Running phase indicates successful deletion of the application.
+	// Therefore, here we check if the application still exists.
+	// This differs from the behavior when the number of replicas is greater than 0.
+	expectZeroReplicas := endpoint.Spec.Replicas.Num != nil && *endpoint.Spec.Replicas.Num == 0
 	status, exists := currentAppsResp.Applications[EndpointToServeApplicationName(endpoint)]
-	if !exists {
+
+	switch {
+	case !exists && expectZeroReplicas:
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseRUNNING,
+			ErrorMessage: "",
+		}, nil
+	case exists && expectZeroReplicas:
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhasePENDING,
+			ErrorMessage: "Endpoint deletion in progress: still exists in Ray Serve applications",
+		}, nil
+	case !exists && !expectZeroReplicas:
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhasePENDING,
 			ErrorMessage: "Endpoint not found in Ray Serve applications",
 		}, nil
-	}
-
-	// Basic status mapping
-	// https://docs.ray.io/en/latest/serve/api/doc/ray.serve.schema.ApplicationStatus.html#ray.serve.schema.ApplicationStatus
-	var phase v1.EndpointPhase
-
-	switch status.Status {
-	case "RUNNING", "DELETING", "DEPLOYING", "UNHEALTHY", "NOT_STARTED":
-		phase = v1.EndpointPhaseRUNNING
-	case "DEPLOY_FAILED":
-		phase = v1.EndpointPhaseFAILED
 	default:
-		phase = v1.EndpointPhaseRUNNING
-	}
+		// Basic status mapping
+		// https://docs.ray.io/en/latest/serve/api/doc/ray.serve.schema.ApplicationStatus.html#ray.serve.schema.ApplicationStatus
+		var phase v1.EndpointPhase
 
-	return &v1.EndpointStatus{
-		Phase:        phase,
-		ErrorMessage: status.Message, // Use message from Ray if available
-	}, nil
+		switch status.Status {
+		case "RUNNING", "DELETING", "DEPLOYING", "UNHEALTHY", "NOT_STARTED":
+			phase = v1.EndpointPhaseRUNNING
+		case "DEPLOY_FAILED":
+			phase = v1.EndpointPhaseFAILED
+		default:
+			phase = v1.EndpointPhaseRUNNING
+		}
+
+		return &v1.EndpointStatus{
+			Phase:        phase,
+			ErrorMessage: status.Message, // Use message from Ray if available
+		}, nil
+	}
 }
 
 func (o *RayOrchestrator) ConnectEndpointModel(endpoint *v1.Endpoint) error {
