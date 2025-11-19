@@ -41,7 +41,7 @@ spec:
             {{- end }}
             - --version={{ .Values.api.image.tag | default .Chart.AppVersion }}
             - --deploy-type=kubernetes
-          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          image: "{{ include "neutree.image" (list .Values.api.image.repository (.Values.api.image.tag | default .Chart.AppVersion) .Values.api.image.registry) }}"
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:
             privileged: true

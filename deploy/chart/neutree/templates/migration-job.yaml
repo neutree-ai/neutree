@@ -20,19 +20,19 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: "{{ include "neutree.image" (list .Values.k8sWaitFor.image.repository (.Values.k8sWaitFor.image.tag) .Values.k8sWaitFor.image.registry) }}"
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-postgresql
         - name: wait-auth-service
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: "{{ include "neutree.image" (list .Values.k8sWaitFor.image.repository (.Values.k8sWaitFor.image.tag) .Values.k8sWaitFor.image.registry) }}"
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-auth
         - name: copy-migration-sql
-          image: "{{.Values.dbScripts.image.repository }}:{{.Values.dbScripts.image.tag | default .Chart.AppVersion  }}"
+          image: "{{ include "neutree.image" (list .Values.dbScripts.image.repository (.Values.dbScripts.image.tag | default .Chart.AppVersion) .Values.dbScripts.image.registry) }}"
           imagePullPolicy: {{.Values.dbScripts.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
@@ -42,7 +42,7 @@ spec:
               mountPath: /migrations
       containers:
       - name: migration
-        image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag }}"
+  image: "{{ include "neutree.image" (list .Values.migration.image.repository (.Values.migration.image.tag) .Values.migration.image.registry) }}"
         imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
         args:
           - -source=file://migrations

@@ -21,7 +21,7 @@ spec:
       serviceAccountName:  {{ include "neutree.fullname" . }}-sa
       containers:
         - name: postgrest
-          image: "{{ .Values.postgrest.image.repository }}:{{ .Values.postgrest.image.tag }}"
+          image: "{{ include "neutree.image" (list .Values.postgrest.image.repository (.Values.postgrest.image.tag) .Values.postgrest.image.registry) }}"
           imagePullPolicy: {{ .Values.postgrest.image.pullPolicy }}
           env:
             - name: PGRST_DB_URI

@@ -123,7 +123,7 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: init-jwt-secret
-          image: {{ .Values.jwtCli.image.repository }}:{{.Values.jwtCli.image.tag}}
+          image: "{{ include "neutree.image" (list .Values.jwtCli.image.repository (.Values.jwtCli.image.tag) .Values.jwtCli.image.registry) }}"
           imagePullPolicy: {{ .Values.jwtCli.image.pullPolicy}}
           args:
             - encode
@@ -140,7 +140,7 @@ spec:
               mountPath: "/etc/vector/cridentials/"
       containers:
         - name: vector
-          image: {{ .Values.vector.image.repository }}:{{ .Values.vector.image.tag}}
+          image: "{{ include "neutree.image" (list .Values.vector.image.repository (.Values.vector.image.tag) .Values.vector.image.registry) }}"
           imagePullPolicy: {{ .Values.vector.image.pullPolicy}}
           args:
             - --config-dir

@@ -31,7 +31,7 @@ spec:
             {{- else if .Values.metrics.remoteWriteUrl }}
             - "--remoteWrite.url={{ .Values.metrics.remoteWriteUrl }}"
             {{- end }}
-          image: "{{ .Values.vmagent.image.repository }}:{{ .Values.vmagent.image.tag}}"
+          image: "{{ include "neutree.image" (list .Values.vmagent.image.repository (.Values.vmagent.image.tag) .Values.vmagent.image.registry) }}"
           imagePullPolicy: {{ .Values.vmagent.image.pullPolicy }}
           ports:
             - name: http

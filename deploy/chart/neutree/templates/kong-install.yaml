@@ -28,7 +28,7 @@ spec:
             - pod
             - -lapp.kubernetes.io/component=neutree-postgresql
         - name: wait-migration-job
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: "{{ include "neutree.image" (list .Values.k8sWaitFor.image.repository (.Values.k8sWaitFor.image.tag) .Values.k8sWaitFor.image.registry) }}"
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - job
@@ -37,7 +37,7 @@ spec:
             - {{ .Release.Namespace }}
       containers:
       - name: kong-post-upgrade-migrations
-        image: {{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag }}
+  image: "{{ include "neutree.image" (list .Values.kong.image.repository (.Values.kong.image.tag) .Values.kong.image.registry) }}"
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -337,7 +337,7 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
       - name: clear-stale-pid
-        image: {{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag }}
+  image: "{{ include "neutree.image" (list .Values.kong.image.repository (.Values.kong.image.tag) .Values.kong.image.registry) }}"
         imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
         securityContext:
           allowPrivilegeEscalation: false
@@ -509,7 +509,7 @@ spec:
           {}
       containers:
       - name: "proxy"
-        image: {{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag }}
+  image: "{{ include "neutree.image" (list .Values.kong.image.repository (.Values.kong.image.tag) .Values.kong.image.registry) }}"
         imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
         securityContext:
           allowPrivilegeEscalation: false
@@ -691,7 +691,7 @@ spec:
             - {{ .Release.Namespace }}
       containers:
       - name: kong-migrations
-        image: {{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag}}
+  image: "{{ include "neutree.image" (list .Values.kong.image.repository (.Values.kong.image.tag) .Values.kong.image.registry) }}"
         imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
         securityContext:
 

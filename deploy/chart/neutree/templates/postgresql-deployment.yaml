@@ -39,7 +39,7 @@ spec:
               value: {{.Values.db.user }}
             - name: POSTGRES_PASSWORD
               value: {{.Values.db.password }}
-          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag}}"
+          image: "{{ include "neutree.image" (list .Values.db.image.repository (.Values.db.image.tag) .Values.db.image.registry) }}"
           imagePullPolicy: {{ .Values.db.image.pullPolicy }}
           ports:
             - name: http

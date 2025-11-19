@@ -20,7 +20,7 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: "{{ include "neutree.image" (list .Values.k8sWaitFor.image.repository (.Values.k8sWaitFor.image.tag) .Values.k8sWaitFor.image.registry) }}"
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
@@ -44,7 +44,7 @@ spec:
               mountPath: /seed
       containers:
       - name: post-migration-hook
-        image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag }}"
+  image: "{{ include "neutree.image" (list .Values.db.image.repository (.Values.db.image.tag) .Values.db.image.registry) }}"
         imagePullPolicy: IfNotPresent
         command: ["bash", "-c"]
         args:
