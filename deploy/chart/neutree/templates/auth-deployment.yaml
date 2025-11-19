@@ -22,14 +22,14 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-postgresql
       containers:
         - name: auth
-          image: "{{ .Values.auth.image.repository }}:{{ .Values.auth.image.tag}}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.auth.image.registry "repository" .Values.auth.image.repository "tag" .Values.auth.image.tag "defaultTag" .Values.auth.image.tag) }}
           imagePullPolicy: {{ .Values.auth.image.pullPolicy }}
           env:
             - name: GOTRUE_MAILER_URLPATHS_CONFIRMATION

@@ -60,3 +60,30 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Construct the image registry to use.
+If global.image.registry is set, use it; otherwise use the component-specific registry.
+*/}}
+{{- define "neutree.imageRegistry" -}}
+{{- if .global.image.registry -}}
+{{- .global.image.registry -}}
+{{- else -}}
+{{- .componentRegistry -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Construct the full image name.
+Usage: include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.component.image.registry "repository" .Values.component.image.repository "tag" .Values.component.image.tag "defaultTag" .Chart.AppVersion)
+*/}}
+{{- define "neutree.image" -}}
+{{- $registry := include "neutree.imageRegistry" . -}}
+{{- $repository := .repository -}}
+{{- $tag := .tag | default .defaultTag -}}
+{{- if $registry -}}
+{{- printf "%s/%s:%s" $registry $repository $tag -}}
+{{- else -}}
+{{- printf "%s:%s" $repository $tag -}}
+{{- end -}}
+{{- end -}}
