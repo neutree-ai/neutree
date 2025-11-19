@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"context"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
@@ -175,9 +176,7 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 				version:   "v1.0.0",
 			},
 			setupMock: func(m *mocks.MockExecutor) {
-				m.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
-					return args[0] == "compose" && args[1] == "-p"
-				})).Return([]byte("success"), nil)
+				m.On("Execute", mock.Anything, "docker", mock.Anything).Return([]byte("success"), nil).Maybe()
 			},
 			wantErr: false,
 		},
@@ -192,10 +191,10 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 				},
 			},
 			setupMock: func(m *mocks.MockExecutor) {
-				m.On("Execute", mock.Anything, "docker", mock.Anything).Return([]byte("error"), errors.New("docker error"))
+				m.On("Execute", mock.Anything, "docker", mock.Anything).Return([]byte("error"), errors.New("docker error")).Maybe()
 			},
 			wantErr:     true,
-			expectedErr: "error when executing docker compose up",
+			expectedErr: "compose up failed",
 		},
 	}
 
@@ -215,6 +214,22 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 				tt.setupMock(mockExecutor)
 			}
 
+			// stub pullImagesFromCompose to avoid network/docker dependencies in unit tests
+			oldPull := pullImagesFromCompose
+			pullImagesFromCompose = func(ctx context.Context, composeFile string) ([]string, error) {
+				return []string{}, nil
+			}
+			defer func() { pullImagesFromCompose = oldPull }()
+
+			// stub compose runner
+			oldRunner := composeSDKRunner
+			if tt.name == "successful deployment" {
+				composeSDKRunner = &fakeComposeRunner{err: nil}
+			} else {
+				composeSDKRunner = &fakeComposeRunner{err: errors.New("compose failed")}
+			}
+			defer func() { composeSDKRunner = oldRunner }()
+
 			// Execute test
 			err = installNeutreeCoreSingleNodeByDocker(mockExecutor, tt.options)
 
@@ -230,4 +245,13 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fake compose runner for tests
+type fakeComposeRunner struct{
+	err error
+}
+
+func (f *fakeComposeRunner) Up(ctx context.Context, composeFile string, projectName string) error {
+	return f.err
 }

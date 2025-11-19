@@ -4,13 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"context"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+    
 	"github.com/stretchr/testify/require"
 )
 
@@ -165,9 +166,7 @@ func TestInstallObsStackSingleNodeByDocker(t *testing.T) {
 			},
 			hostIP: "192.168.1.1",
 			setupMock: func(m *mocks.MockExecutor) {
-				m.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
-					return args[0] == "compose" && args[1] == "-p"
-				})).Return([]byte("success"), nil)
+				// no docker CLI expectations, Compose SDK runner is used
 			},
 			wantErr: false,
 		},
@@ -183,10 +182,10 @@ func TestInstallObsStackSingleNodeByDocker(t *testing.T) {
 			},
 			hostIP: "192.168.1.1",
 			setupMock: func(m *mocks.MockExecutor) {
-				m.On("Execute", mock.Anything, "docker", mock.Anything).Return([]byte("error"), errors.New("docker error"))
+				// no docker CLI expectations; we will inject compose runner error in test body
 			},
 			wantErr:     true,
-			expectedErr: "error when executing docker compose up",
+			expectedErr: "compose up failed",
 		},
 	}
 
@@ -205,6 +204,22 @@ func TestInstallObsStackSingleNodeByDocker(t *testing.T) {
 			if tt.setupMock != nil {
 				tt.setupMock(mockExecutor)
 			}
+
+			// stub pullImagesFromCompose to avoid network/docker dependencies in unit tests
+			oldPull := pullImagesFromCompose
+			pullImagesFromCompose = func(ctx context.Context, composeFile string) ([]string, error) {
+				return []string{}, nil
+			}
+			defer func() { pullImagesFromCompose = oldPull }()
+
+			// stub compose runner
+			oldRunner := composeSDKRunner
+			if tt.name == "successful deployment" {
+				composeSDKRunner = &fakeComposeRunner{err: nil}
+			} else {
+				composeSDKRunner = &fakeComposeRunner{err: errors.New("compose failed")}
+			}
+			defer func() { composeSDKRunner = oldRunner }()
 
 			// Execute test
 			err = installObsStackSingleNodeByDocker(mockExecutor, tt.options)
