@@ -5,6 +5,10 @@
 jwtSecret: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
 imagePullSecrets: []
 
+global:
+  # Global image registry to prepend to every image repository, e.g "registry.example.com/neutree"
+  imageRegistry: ""
+
 system:
   grafana:
     url: ""

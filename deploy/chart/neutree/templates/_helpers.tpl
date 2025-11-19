@@ -5,6 +5,21 @@ Expand the name of the chart.
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/* Build full image name using optional local or global registry */}}
+{{- define "neutree.image" -}}
+{{- $repo := index . 0 -}}
+{{- $tag := index . 1 -}}
+{{- $localRegistry := index . 2 | default "" -}}
+{{- $globalRegistry := .Values.global.imageRegistry | default "" -}}
+{{- if and (ne $localRegistry "") -}}
+	{{- printf "%s/%s:%s" $localRegistry $repo $tag -}}
+{{- else if and (ne $globalRegistry "") -}}
+	{{- printf "%s/%s:%s" $globalRegistry $repo $tag -}}
+{{- else -}}
+	{{- printf "%s:%s" $repo $tag -}}
+{{- end -}}
+{{- end }}
+
 {{/*
 Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).

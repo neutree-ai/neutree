@@ -1,19 +1,22 @@
 package launch
 
 import (
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
+	"strings"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch/manifests"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/helmclient"
 	"github.com/neutree-ai/neutree/pkg/storage"
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
 )
 
 type neutreeCoreInstallOptions struct {
@@ -77,6 +80,11 @@ Examples:
 }
 
 func installNeutreeCore(exector command.Executor, options neutreeCoreInstallOptions) error {
+	// support compose and helm
+	if options.deployMethod == "helm" || options.deployMethod == "kubernetes" {
+		return installNeutreeCoreByHelm(exector, options)
+	}
+
 	switch options.deployType {
 	case constants.DeployTypeLocal:
 		return installNeutreeCoreByDocker(exector, options)
@@ -113,26 +121,71 @@ func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neut
 		return nil
 	}
 
-	output, err := exector.Execute(context.Background(), "docker",
-		[]string{"compose", "-p", "neutree-core", "-f", filepath.Join(options.workDir, "neutree-core", "docker-compose.yml"), "up", "-d"})
+	// pull images referenced in compose using Docker client SDK before starting
+	composeFile := filepath.Join(options.workDir, "neutree-core", "docker-compose.yml")
+	_, errPull := pullImagesFromCompose(context.Background(), composeFile)
+	if errPull != nil {
+		return errors.Wrap(errPull, "pull compose images failed")
+	}
 	if err != nil {
-		return errors.Wrapf(err, "error when executing docker compose up, failed msg %s", string(output))
+		return errors.Wrap(err, "pull compose images failed")
+	}
+
+	// Bring up compose using SDK runner
+	if composeSDKRunner == nil {
+		// fallback to docker CLI if compose SDK runner is not set
+		output, err := exector.Execute(context.Background(), "docker",
+			[]string{"compose", "-p", "neutree-core", "-f", composeFile, "up", "-d"})
+		if err != nil {
+			return errors.Wrapf(err, "error when executing docker compose up, failed msg %s", string(output))
+		}
+	} else {
+		if err := composeSDKRunner.Up(context.Background(), composeFile, "neutree-core"); err != nil {
+			return errors.Wrap(err, "compose up failed")
+		}
 	}
 
 	return nil
 }
 
 func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
-	// extract neutree core deploy manifests
-	neutreeCoreDeployManifestsTarFile, err := manifests.NeutreeDeployManifestsTar.Open("neutree-core.tar")
-	if err != nil {
-		return errors.Wrap(err, "open neutree core db init scripts failed")
-	}
-	defer neutreeCoreDeployManifestsTarFile.Close()
+	// If an offline package is provided, extract it to the workDir.
+	if options.offlinePackage != "" {
+		f, err := os.Open(options.offlinePackage)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
 
-	err = util.ExtractTar(neutreeCoreDeployManifestsTarFile, options.workDir)
-	if err != nil {
-		return errors.Wrap(err, "extract neutree core db init scripts failed")
+		var reader io.Reader = f
+		if strings.HasSuffix(options.offlinePackage, ".gz") || strings.HasSuffix(options.offlinePackage, ".tgz") {
+			gz, err := gzip.NewReader(f)
+			if err != nil {
+				return err
+			}
+			defer gz.Close()
+			reader = gz
+		}
+
+		if err := util.ExtractTar(reader, options.workDir); err != nil {
+			return errors.Wrap(err, "extract offline package failed")
+		}
+
+		// continue to replace image registries and template parsing below
+	} else {
+		// extract neutree core deploy manifests
+		neutreeCoreDeployManifestsTarFile, err := manifests.NeutreeDeployManifestsTar.Open("neutree-core.tar")
+		if err != nil {
+			return errors.Wrap(err, "open neutree core db init scripts failed")
+		}
+
+		defer neutreeCoreDeployManifestsTarFile.Close()
+
+		err = util.ExtractTar(neutreeCoreDeployManifestsTarFile, options.workDir)
+		if err != nil {
+			return errors.Wrap(err, "extract neutree core db init scripts failed")
+		}
+
 	}
 
 	coreWorkDir := filepath.Join(options.workDir, "neutree-core")
@@ -171,6 +224,86 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 
 	if err != nil {
 		return errors.Wrapf(err, "replace compose image registry failed, file path: %s", composeFilePath)
+	}
+
+	return nil
+}
+
+// install using Helm chart
+func installNeutreeCoreByHelm(exector command.Executor, options neutreeCoreInstallOptions) error {
+	// Extract helm chart if offlinePackage is present
+	chartPath := filepath.Join("deploy", "chart", "neutree")
+	if options.offlinePackage != "" {
+		f, err := os.Open(options.offlinePackage)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		var reader io.Reader = f
+		if strings.HasSuffix(options.offlinePackage, ".gz") || strings.HasSuffix(options.offlinePackage, ".tgz") {
+			gz, err := gzip.NewReader(f)
+			if err != nil {
+				return err
+			}
+			defer gz.Close()
+			reader = gz
+		}
+
+		if err := util.ExtractTar(reader, options.workDir); err != nil {
+			return errors.Wrap(err, "extract helm chart failed")
+		}
+
+		// chart is expected to be extracted under workdir/neutree
+		chartPath = filepath.Join(options.workDir, "neutree")
+	}
+
+	jwtToken, err := storage.CreateServiceToken(options.jwtSecret)
+	if err != nil {
+		return errors.Wrap(err, "create jwt token failed")
+	}
+
+	// Always use Helm SDK for install/upgrade
+	var hc helmclient.HelmClient = helmclient.NewSDKClient()
+
+	if err := installNeutreeCoreByHelmWithClient(hc, chartPath, options, jwtToken); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func installNeutreeCoreByHelmWithClient(hc helmclient.HelmClient, chartPath string, options neutreeCoreInstallOptions, jwtToken *string) error {
+	setArgs := []string{fmt.Sprintf("jwtSecret=%s", *jwtToken)}
+	if options.metricsRemoteWriteURL != "" {
+		setArgs = append(setArgs, fmt.Sprintf("metrics.remoteWriteUrl=%s", options.metricsRemoteWriteURL))
+	}
+	if options.grafanaURL != "" {
+		setArgs = append(setArgs, fmt.Sprintf("system.grafana.url=%s", options.grafanaURL))
+	}
+	if options.mirrorRegistry != "" {
+		setArgs = append(setArgs, fmt.Sprintf("grafana.image.registry=%s", options.mirrorRegistry))
+		setArgs = append(setArgs, fmt.Sprintf("victoria-metrics-cluster.global.image.registry=%s", options.mirrorRegistry))
+		setArgs = append(setArgs, fmt.Sprintf("global.imageRegistry=%s", options.mirrorRegistry))
+	}
+
+	values := map[string]interface{}{}
+	values["jwtSecret"] = *jwtToken
+	if options.metricsRemoteWriteURL != "" {
+		values["metrics"] = map[string]interface{}{"remoteWriteUrl": options.metricsRemoteWriteURL}
+	}
+	if options.grafanaURL != "" {
+		values["system"] = map[string]interface{}{"grafana": map[string]interface{}{"url": options.grafanaURL}}
+	}
+	if options.mirrorRegistry != "" {
+		values["global"] = map[string]interface{}{"imageRegistry": options.mirrorRegistry}
+		values["grafana"] = map[string]interface{}{"image": map[string]interface{}{"registry": options.mirrorRegistry}}
+		values["victoria-metrics-cluster"] = map[string]interface{}{"global": map[string]interface{}{"image": map[string]interface{}{"registry": options.mirrorRegistry}}}
+	}
+
+	_, err := hc.UpgradeInstall(context.Background(), "neutree", chartPath, "neutree", values, setArgs)
+	if err != nil {
+		return errors.Wrap(err, "helm install failed")
 	}
 
 	return nil

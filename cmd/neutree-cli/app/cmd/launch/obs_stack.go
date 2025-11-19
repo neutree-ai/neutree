@@ -1,18 +1,21 @@
 package launch
 
 import (
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
+	"strings"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch/manifests"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/helmclient"
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
 )
 
 type obsStackInstallOptions struct {
@@ -62,6 +65,9 @@ Examples:
 func installObsStack(exector command.Executor, options obsStackInstallOptions) error {
 	switch options.deployType {
 	case constants.DeployTypeLocal:
+		if options.deployMethod == "helm" || options.deployMethod == "kubernetes" {
+			return installObsStackByHelm(exector, options)
+		}
 		return installObsStackByDocker(exector, options)
 	default:
 		return fmt.Errorf("unsupported deploy type: %s", options.deployType)
@@ -94,27 +100,67 @@ func installObsStackSingleNodeByDocker(exector command.Executor, options obsStac
 		fmt.Println(string(composeContent))
 	}
 
-	output, err := exector.Execute(context.Background(), "docker",
-		[]string{"compose", "-p", "obs-stack", "-f", filepath.Join(options.workDir, "obs-stack", "docker-compose.yml"), "up", "-d"})
-	if err != nil {
-		return errors.Wrapf(err, "error when executing docker compose up, failed msg %s", string(output))
+	// pull images referenced in compose using Docker client SDK before starting
+	composeFile := filepath.Join(options.workDir, "obs-stack", "docker-compose.yml")
+	_, errPull := pullImagesFromCompose(context.Background(), composeFile)
+	if errPull != nil {
+		return errors.Wrap(errPull, "pull compose images failed")
+	}
+
+	// Bring up compose via SDK runner, fallback to docker CLI when nil
+	if composeSDKRunner == nil {
+		output, err := exector.Execute(context.Background(), "docker",
+			[]string{"compose", "-p", "obs-stack", "-f", composeFile, "up", "-d"})
+		if err != nil {
+			return errors.Wrapf(err, "error when executing docker compose up, failed msg %s", string(output))
+		}
+	} else {
+		if err := composeSDKRunner.Up(context.Background(), composeFile, "obs-stack"); err != nil {
+			return errors.Wrap(err, "compose up failed")
+		}
 	}
 
 	return nil
 }
 
 func prepareObsStackDeployConfig(options *obsStackInstallOptions) error {
-	// extract neutree core deploy manifests
-	obsStackDeployManifestsTarFile, err := manifests.ObsStackDeployManifestsTar.Open("obs-stack.tar")
-	if err != nil {
-		return errors.Wrap(err, "open obs stack deploy manifests tar file failed")
-	}
-	defer obsStackDeployManifestsTarFile.Close()
+	if options.offlinePackage != "" {
+		f, err := os.Open(options.offlinePackage)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
 
-	err = util.ExtractTar(obsStackDeployManifestsTarFile, options.workDir)
-	if err != nil {
-		return errors.Wrap(err, "extract obs stack deploy manifests tar file failed")
+		var reader io.Reader = f
+		if strings.HasSuffix(options.offlinePackage, ".gz") || strings.HasSuffix(options.offlinePackage, ".tgz") {
+			gz, err := gzip.NewReader(f)
+			if err != nil {
+				return err
+			}
+			defer gz.Close()
+			reader = gz
+		}
+
+		if err := util.ExtractTar(reader, options.workDir); err != nil {
+			return errors.Wrap(err, "extract offline package failed")
+		}
+		// continue to template parsing and registry replacement below
+	} else {
+		// extract neutree core deploy manifests
+		obsStackDeployManifestsTarFile, err := manifests.ObsStackDeployManifestsTar.Open("obs-stack.tar")
+		if err != nil {
+			return errors.Wrap(err, "open obs stack deploy manifests tar file failed")
+		}
+		defer obsStackDeployManifestsTarFile.Close()
+
+		err = util.ExtractTar(obsStackDeployManifestsTarFile, options.workDir)
+		if err != nil {
+			return errors.Wrap(err, "extract obs stack deploy manifests tar file failed")
+		}
+
 	}
+
+	var err error
 
 	templateFiles := []string{
 		filepath.Join(options.workDir, "obs-stack", "docker-compose.yml"),
@@ -152,5 +198,69 @@ func prepareObsStackDeployConfig(options *obsStackInstallOptions) error {
 		return errors.Wrapf(err, "replace compose image registry failed, file path: %s", composeFilePath)
 	}
 
+	return nil
+}
+
+// Install observability stack using Helm chart
+func installObsStackByHelm(exector command.Executor, options obsStackInstallOptions) error {
+	chartPath := filepath.Join("deploy", "chart", "neutree")
+	if options.offlinePackage != "" {
+		f, err := os.Open(options.offlinePackage)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		var reader io.Reader = f
+		if strings.HasSuffix(options.offlinePackage, ".gz") || strings.HasSuffix(options.offlinePackage, ".tgz") {
+			gz, err := gzip.NewReader(f)
+			if err != nil {
+				return err
+			}
+			defer gz.Close()
+			reader = gz
+		}
+
+		if err := util.ExtractTar(reader, options.workDir); err != nil {
+			return errors.Wrap(err, "extract helm chart failed")
+		}
+
+		chartPath = filepath.Join(options.workDir, "neutree")
+	}
+
+	// create helm client
+	// Always use Helm SDK for installs/upgrades. CLI fallbacks were removed.
+	var hc helmclient.HelmClient = helmclient.NewSDKClient()
+
+	setArgs := []string{}
+	setArgs = append(setArgs, "grafana.enabled=true")
+	setArgs = append(setArgs, "victoria-metrics-cluster.enabled=true")
+
+	if options.mirrorRegistry != "" {
+		setArgs = append(setArgs, fmt.Sprintf("grafana.image.registry=%s", options.mirrorRegistry))
+		setArgs = append(setArgs, fmt.Sprintf("victoria-metrics-cluster.global.image.registry=%s", options.mirrorRegistry))
+		setArgs = append(setArgs, fmt.Sprintf("global.imageRegistry=%s", options.mirrorRegistry))
+	}
+
+	values := map[string]interface{}{}
+	values["grafana"] = map[string]interface{}{"enabled": true}
+	values["victoria-metrics-cluster"] = map[string]interface{}{"enabled": true}
+	if options.mirrorRegistry != "" {
+		values["global"] = map[string]interface{}{"imageRegistry": options.mirrorRegistry}
+		values["grafana"] = map[string]interface{}{"image": map[string]interface{}{"registry": options.mirrorRegistry}}
+		values["victoria-metrics-cluster"] = map[string]interface{}{"global": map[string]interface{}{"image": map[string]interface{}{"registry": options.mirrorRegistry}}}
+	}
+
+	if err := installObsStackByHelmWithClient(hc, chartPath, options, values, setArgs); err != nil {
+		return errors.Wrap(err, "helm install obs-stack failed")
+	}
+	return nil
+}
+
+func installObsStackByHelmWithClient(hc helmclient.HelmClient, chartPath string, options obsStackInstallOptions, values map[string]interface{}, setArgs []string) error {
+	_, err := hc.UpgradeInstall(context.Background(), "neutree", chartPath, "neutree", values, setArgs)
+	if err != nil {
+		return err
+	}
 	return nil
 }
