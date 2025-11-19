@@ -144,7 +144,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 		})
 		if err != nil {
 			errS := fmt.Sprintf("Failed to list endpoints: %v", err)
-			klog.Errorf(errS)
+			klog.Errorf("%s", errS)
 
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": errS,
@@ -179,7 +179,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 
 		if err != nil {
 			errS := fmt.Sprintf("Failed to list clusters: %v", err)
-			klog.Errorf(errS)
+			klog.Errorf("%s", errS)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": errS,
 			})
@@ -206,7 +206,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 		scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
 		if err != nil {
 			errS := fmt.Sprintf("Failed to get cluster serve address: %v", err)
-			klog.Errorf(errS)
+			klog.Errorf("%s", errS)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": errS,
 			})
@@ -289,7 +289,7 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 
 		if err != nil {
 			errS := fmt.Sprintf("Failed to list clusters: %v", err)
-			klog.Errorf(errS)
+			klog.Errorf("%s", errS)
 
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": errS,
