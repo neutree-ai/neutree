@@ -6,11 +6,12 @@ import (
 
 	"github.com/compose-spec/compose-go/cli"
 	"github.com/compose-spec/compose-go/loader"
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
-
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/dockerutil"
+	"github.com/neutree-ai/neutree/pkg/compose"
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
 )
 
 type commonOptions struct {
@@ -23,7 +24,14 @@ type commonOptions struct {
 
 	mirrorRegistry string
 
-	dryRun bool
+	// offlinePackage is an optional path to an offline package tarball
+	// containing control plane manifests (helm chart or docker compose files).
+	offlinePackage string
+
+	// deployMethod: compose | helm
+	deployMethod string
+
+	dryRun     bool
 }
 
 func NewLaunchCmd() *cobra.Command {
@@ -67,6 +75,9 @@ Examples:
 
 	launchCmd.PersistentFlags().StringVar(&commonOptions.mirrorRegistry, "mirror-registry", "", "mirror registry")
 	launchCmd.PersistentFlags().BoolVar(&commonOptions.dryRun, "dry-run", false, "dry run")
+	launchCmd.PersistentFlags().StringVar(&commonOptions.offlinePackage, "offline-package", "", "path to offline package tar.gz that contains control plane manifests")
+	launchCmd.PersistentFlags().StringVar(&commonOptions.deployMethod, "deploy-method", "compose", "deployment method (compose|helm|kubernetes)")
+	// Using Helm SDK as the only supported deployment path; the helm binary fallback has been removed.
 
 	exector := &command.OSExecutor{}
 	launchCmd.AddCommand(NewObsStackInstallCmd(exector, commonOptions))
@@ -124,3 +135,9 @@ func replaceComposeImageRegistry(composeFile string, mirrorRegistry string) erro
 
 	return nil
 }
+
+// pullImagesFromCompose used as an overridable hook in tests
+var pullImagesFromCompose = dockerutil.PullImagesFromCompose
+
+// compose SDK runner used for bring-up; tests can replace this with a fake
+var composeSDKRunner = compose.NewSDKRunner()
