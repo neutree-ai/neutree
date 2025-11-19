@@ -64,7 +64,6 @@ func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
 	r.Any("/api/v1/serve-proxy/:workspace/:name/*path", authMiddleware, handleServeProxy(deps))
 	r.Any("/api/v1/ray-dashboard-proxy/:workspace/:name/*path", handleRayDashboardProxy(deps))
 
-	r.Any("/api/v1/auth/:path", handleAuthProxy(deps))
 	r.Any("/api/v1/:path", handlePostgrestProxy(deps))
 	r.Any("/api/v1/rpc/:path", handlePostgrestRPCProxy(deps))
 }
@@ -92,13 +91,6 @@ func RegisterResourceProxyRoute(group *gin.RouterGroup, middlewares []gin.Handle
 	proxyGroup := group.Group(routePath)
 	proxyGroup.Use(middlewares...)
 	proxyGroup.Any("", handlePostgrestResourceProxy(deps, resourceName))
-}
-
-func RegisterAuthProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
-	proxyGroup := group.Group("/auth")
-
-	proxyGroup.Use(middlewares...)
-	proxyGroup.Any("/:path", handleAuthProxy(deps))
 }
 
 func RegisterPostgrestRPCProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
@@ -321,18 +313,6 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		proxyHandler := CreateProxyHandler(dashboardURL, path, nil)
-		proxyHandler(c)
-	}
-}
-
-func handleAuthProxy(deps *Dependencies) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		path := c.Param("path")
-		if path != "" && path[0] == '/' {
-			path = path[1:]
-		}
-
-		proxyHandler := CreateProxyHandler(deps.AuthEndpoint, path, nil)
 		proxyHandler(c)
 	}
 }

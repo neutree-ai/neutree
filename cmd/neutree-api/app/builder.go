@@ -9,6 +9,7 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/internal/routes/auth"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
@@ -39,7 +40,7 @@ func NewBuilder() *Builder {
 		"dashboard-proxy": ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		// Auth route (no auth required for authentication itself)
-		"auth": ProxiesRouteFactory(proxies.RegisterAuthProxyRoutes),
+		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
 		// PostgREST proxy routes (auth handled by PostgREST backend)
 		// Note: rest/* routes are proxied to PostgREST which handles authentication,
 		// so no auth middleware is needed at gateway level
@@ -187,7 +188,11 @@ func (b *Builder) Build() (*App, error) {
 		}
 
 		klog.Info("Initializing route:", name)
-		factory(opts)
+
+		err := factory(opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize route %s: %v", name, err)
+		}
 	}
 
 	return NewApp(b.config), nil

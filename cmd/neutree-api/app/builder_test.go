@@ -36,7 +36,9 @@ func TestBuilderWithConfig(t *testing.T) {
 
 func TestBuilderWithRoute(t *testing.T) {
 	builder := NewBuilder()
-	routeFactory := func(opts *RouteOptions) {}
+	routeFactory := func(opts *RouteOptions) error {
+		return nil
+	}
 	builder.WithRoute("test-route", routeFactory)
 
 	if _, exists := builder.routeInits["test-route"]; !exists {
