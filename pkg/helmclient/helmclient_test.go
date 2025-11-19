@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"helm.sh/helm/v3/pkg/action"
-	genericclioptions "k8s.io/cli-runtime/pkg/genericclioptions"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/release"
-	"github.com/stretchr/testify/assert"
+	genericclioptions "k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
 func TestUpgradeInstall_LoadChartError(t *testing.T) {
@@ -24,7 +24,9 @@ func TestUpgradeInstall_LoadChartError(t *testing.T) {
 	}
 
 	// override init to a no-op so we don't need Kube config
-	actionConfigInit = func(cfg *action.Configuration, getter genericclioptions.RESTClientGetter, namespace, driver string, log func(format string, v ...interface{})) error { return nil }
+	actionConfigInit = func(cfg *action.Configuration, getter genericclioptions.RESTClientGetter, namespace, driver string, log func(format string, v ...interface{})) error {
+		return nil
+	}
 
 	c := NewSDKClient()
 	_, err := c.UpgradeInstall(context.Background(), "rel", "/path/to/chart", "default", map[string]interface{}{}, nil)
@@ -38,7 +40,7 @@ type fakeUpgrade struct {
 }
 
 func (f *fakeUpgrade) SetNamespace(ns string) { f.namespace = ns }
-func (f *fakeUpgrade) SetInstall(b bool)    {}
+func (f *fakeUpgrade) SetInstall(b bool)      {}
 func (f *fakeUpgrade) Run(name string, ch *chart.Chart, values map[string]interface{}) (*release.Release, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -58,7 +60,9 @@ func TestUpgradeInstall_RunErrorAndSuccess(t *testing.T) {
 	}
 
 	// stub init
-	actionConfigInit = func(cfg *action.Configuration, getter genericclioptions.RESTClientGetter, namespace, driver string, log func(format string, v ...interface{})) error { return nil }
+	actionConfigInit = func(cfg *action.Configuration, getter genericclioptions.RESTClientGetter, namespace, driver string, log func(format string, v ...interface{})) error {
+		return nil
+	}
 
 	// first test failing Run
 	newUpgradeClient = func(cfg *action.Configuration) upgradeClient {

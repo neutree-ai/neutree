@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-    
+
 	"testing"
 
 	"github.com/compose-spec/compose-go/cli"
@@ -14,7 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-    
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -194,7 +194,6 @@ func TestNewLaunchCmd(t *testing.T) {
 	}
 }
 
-
 // Fake HelmClient for testing SDK path
 type fakeHelmClient struct {
 	called      bool
@@ -259,7 +258,6 @@ func TestInstallNeutreeCoreByHelmUsesSDK(t *testing.T) {
 	assert.Equal(t, "neutree", fake.namespace)
 	assert.Contains(t, fake.setArgs, "global.imageRegistry=my.registry.com")
 }
-
 
 func TestInstallObsStackByHelmUsesSDK(t *testing.T) {
 	fake := &fakeHelmClient{}

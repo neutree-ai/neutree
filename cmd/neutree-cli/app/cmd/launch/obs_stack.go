@@ -38,11 +38,11 @@ Components:
 
 Deployment Options:
   • Local single-node deployment (default)
-  
+
 Examples:
   # Deploy with default settings
   neutree-cli launch obs-stack
-  
+
   # Deploy with custom registry
   neutree-cli launch obs-stack --mirror-registry my.registry.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -8,8 +8,8 @@ import (
 	"github.com/compose-spec/compose-go/loader"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
 	"github.com/neutree-ai/neutree/pkg/command"
-	"github.com/neutree-ai/neutree/pkg/dockerutil"
 	"github.com/neutree-ai/neutree/pkg/compose"
+	"github.com/neutree-ai/neutree/pkg/dockerutil"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +31,7 @@ type commonOptions struct {
 	// deployMethod: compose | helm
 	deployMethod string
 
-	dryRun     bool
+	dryRun bool
 }
 
 func NewLaunchCmd() *cobra.Command {
@@ -43,7 +43,7 @@ func NewLaunchCmd() *cobra.Command {
 		Use:   "launch",
 		Short: "Deploy Neutree components",
 		Long: `The launch command provides an easy way to install and deploy Neutree related components.
-		
+
 Available deployment types and modes:
   - deploy-type: local (default), cloud, hybrid
   - deploy-mode: single (default), cluster
@@ -61,7 +61,7 @@ Subcommands:
 Examples:
   # Local single node deployment
   neutree-cli launch --deploy-type local
-  
+
   # Cluster deployment with custom registry
   neutree-cli launch --deploy-type cloud --deploy-mode cluster \
     --deploy-ips 192.168.1.10,192.168.1.11 \

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	registryClient "github.com/neutree-ai/neutree/pkg/registry"
+	"github.com/stretchr/testify/assert"
 )
 
 // fake client to record pushes
@@ -49,13 +49,13 @@ func TestClusterImportCmd_UsesRegistryClient(t *testing.T) {
 
 	// write package manifest.json referencing the image
 	pm := struct {
-		Images []struct{
-			File string `json:"file"`
+		Images []struct {
+			File     string   `json:"file"`
 			RepoTags []string `json:"repoTags"`
 		} `json:"images"`
 	}{
-		Images: []struct{
-			File string `json:"file"`
+		Images: []struct {
+			File     string   `json:"file"`
 			RepoTags []string `json:"repoTags"`
 		}{
 			{File: "myimage.tar", RepoTags: []string{"repo/myimage:latest"}},
@@ -76,7 +76,7 @@ func TestClusterImportCmd_UsesRegistryClient(t *testing.T) {
 	fake := &fakeRegistryClient{pushed: []string{}}
 	old := newRegistryClient
 	newRegistryClient = func() registryClient.RegistryClient { return fake }
-	defer func(){ newRegistryClient = old }()
+	defer func() { newRegistryClient = old }()
 
 	cmd := NewClusterImportCmd()
 	// set flags

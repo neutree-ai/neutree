@@ -22,9 +22,9 @@ data:
         inputs:
           - kong_logs
         source: >
-          . = parse_json!(.message)    
+          . = parse_json!(.message)
 
-          # Access fields with hyphens using proper VRL syntax    
+          # Access fields with hyphens using proper VRL syntax
 
           if exists(.ai) && exists(.ai."statistics") && exists(.ai."statistics".usage) {
               # Extract fields one by one
@@ -36,7 +36,7 @@ data:
               .extracted_data.status = .response.status
               .extracted_data.url_spilt = split!(.request.uri, "/")
               .extracted_data.endpoint_name = .extracted_data.url_spilt[4]  # endpoint name from /workspace/{workspace}/endpoint/{endpoint_name}
-              .extracted_data.api_key_id = .consumer.custom_id    
+              .extracted_data.api_key_id = .consumer.custom_id
 
               if to_int!(.extracted_data.total_tokens) > 0 {
                   ._has_usage = true
@@ -74,7 +74,7 @@ data:
         compression: none
         uri: http://{{ include "neutree.fullname" . }}-api-service:3000/api/v1/rpc/record_api_usage
         method: post
-        auth: 
+        auth:
           strategy: bearer
           token: "SECRET[jwt_secret.secret]"
         headers:
@@ -168,7 +168,7 @@ spec:
       terminationGracePeriodSeconds: 60
       volumes:
         - name: jwt-secret
-          emptyDir: {}      
+          emptyDir: {}
         - name: data
           emptyDir: {}
         - name: config

@@ -1,17 +1,17 @@
 package launch
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
-	"context"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-    
+
 	"github.com/stretchr/testify/require"
 )
 

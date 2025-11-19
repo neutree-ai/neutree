@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/cluster"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/engine"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/model"
@@ -21,6 +22,7 @@ Available Commands:
   • launch: Deploy Neutree components and services
   • model: Manage Neutree models
   • engine: Manage Neutree engines
+	• cluster: Manage Neutree cluster images (import SSH offline images)
 
 Examples:
   # Show help information
@@ -34,10 +36,14 @@ Examples:
 
   # Import an engine version package
   neutree-cli engine import --package vllm-v0.5.0.tar.gz --registry registry.example.com
+
+	# Import a cluster offline image package
+	neutree-cli cluster import --offline-image cluster-images.tar.gz --registry registry.example.com
 	`,
 	}
 
 	neutreeCliCmd.AddCommand(launch.NewLaunchCmd())
+	neutreeCliCmd.AddCommand(cluster.NewClusterCmd())
 	neutreeCliCmd.AddCommand(model.NewModelCmd())
 	neutreeCliCmd.AddCommand(engine.NewEngineCmd())
 

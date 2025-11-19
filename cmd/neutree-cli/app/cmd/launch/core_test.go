@@ -1,10 +1,10 @@
 package launch
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
-	"context"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
@@ -248,7 +248,7 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 }
 
 // fake compose runner for tests
-type fakeComposeRunner struct{
+type fakeComposeRunner struct {
 	err error
 }
 
