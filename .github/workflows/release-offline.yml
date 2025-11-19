@@ -1,0 +1,52 @@
+name: release-offline
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the release tag (e.g : v0.1.0-nightly-20250405)"
+        required: true
+        type: string
+      version:
+        description: "the release version (e.g : 0.1.0)"
+        required: true
+        type: string
+
+jobs:
+  package-and-upload:
+    runs-on: ["serve-builder","X64"]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check out specific tag when manually triggered
+        if: github.event_name == 'workflow_dispatch'
+        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+
+      - name: Set up Docker (if needed)
+        uses: docker/setup-buildx-action@v2
+
+      - name: Package offline artifacts
+        env:
+          PULL_FROM_REGISTRY: ${{ secrets.PULL_FROM_REGISTRY }}
+          UPLOAD_URL: ${{ secrets.UPLOAD_URL }}
+          UPLOAD_TOKEN: ${{ secrets.UPLOAD_TOKEN }}
+        run: |
+          set -ex
+          bash scripts/ci-release.sh
+
+      - name: Upload artifacts to GitHub
+        uses: actions/upload-artifact@v3
+        with:
+          name: control-offline
+          path: out/control-offline/*.tar.gz
+
+      - name: Upload cluster artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: cluster-offline
+          path: out/cluster-offline/*.tar.gz
+
+      - name: Upload engine artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: engine-offline
+          path: out/engine-offline/*.tar.gz

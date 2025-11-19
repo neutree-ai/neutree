@@ -153,6 +153,7 @@ Options:
     -c, --schema FILE         Path to engine_schema.json file (optional)
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
+    -P, --pull                Pull images from registry before exporting
     -h, --help                Show this help message
 
 Examples:
@@ -250,6 +251,11 @@ while [[ $# -gt 0 ]]; do
             show_usage
             exit 0
             ;;
+        -P|--pull)
+            PULL_FROM_REGISTRY=true
+            shift 1
+            ;;
+            ;;
         *)
             print_error "Unknown option: $1"
             show_usage
@@ -257,6 +263,18 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+# Optionally pull images from registry before exporting
+if [ "$PULL_FROM_REGISTRY" = "true" ]; then
+    print_info "Pulling images from registry before export..."
+    for spec in "${IMAGE_SPECS[@]}"; do
+        IFS=':' read -ra PARTS <<< "$spec"
+        IMAGE_NAME="${PARTS[1]}"
+        IMAGE_TAG="${PARTS[2]}"
+        FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
+        print_info "Pulling $FULL_IMAGE..."
+        docker pull "$FULL_IMAGE" || true
+    done
+fi
 
 # Validate required arguments
 if [ -z "$ENGINE_NAME" ]; then
