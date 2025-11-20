@@ -2,6 +2,17 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+global:
+  # Global image registry for all components
+  # When set, this registry will be used for:
+  # - All main chart components (api, core, db, auth, etc.) via global.image.registry
+  # - Victoria Metrics Cluster (via global.image.registry)
+  # - Grafana (via global.imageRegistry)
+  # Note: To use a unified registry, global.image.registry should equal global.imageRegistry.
+  image:
+    registry: ""
+  imageRegistry: ""
+
 jwtSecret: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
 imagePullSecrets: []
 
@@ -16,18 +27,21 @@ metrics:
 
 k8sWaitFor:
   image:
-    repository: ghcr.io/groundnuty/k8s-wait-for
+    registry: ghcr.io
+    repository: groundnuty/k8s-wait-for
     tag: "v2.0"
     pullPolicy: IfNotPresent
 
 dbScripts:
   image:
+    registry: ""
     repository: neutree/neutree-db-scripts
     tag: ""
     pullPolicy: IfNotPresent
 
 db:
   image:
+    registry: ""
     repository: postgres
     tag: "13"
     pullPolicy: IfNotPresent
@@ -54,6 +68,7 @@ db:
 
 auth:
   image:
+    registry: ""
     repository: supabase/gotrue
     tag: "v2.170.0"
     pullPolicy: IfNotPresent
@@ -69,6 +84,7 @@ auth:
 
 migration:
   image:
+    registry: ""
     repository: migrate/migrate
     tag: v4.18.3
     pullPolicy: IfNotPresent
@@ -82,6 +98,7 @@ migration:
 
 postgrest:
   image:
+    registry: ""
     repository: postgrest/postgrest
     tag: v14.0
     pullPolicy: IfNotPresent
@@ -97,6 +114,7 @@ postgrest:
 
 postgresmeta:
   image:
+    registry: ""
     repository: supabase/postgres-meta
     tag: "v0.86.0"
     pullPolicy: IfNotPresent
@@ -112,6 +130,7 @@ postgresmeta:
 
 core:
   image:
+    registry: ""
     repository: neutree/neutree-core
     tag: ""
     pullPolicy: IfNotPresent
@@ -128,6 +147,7 @@ core:
 
 api:
   image:
+    registry: ""
     repository: neutree/neutree-api
     tag: ""
     pullPolicy: IfNotPresent
@@ -144,6 +164,7 @@ api:
 
 vmagent:
   image:
+    registry: ""
     repository: victoriametrics/vmagent
     tag: "v1.115.0"
     pullPolicy: IfNotPresent
@@ -162,6 +183,7 @@ vmagent:
 
 kong:
   image:
+    registry: ""
     repository: kong/kong
     tag: "3.9"
     pullPolicy: IfNotPresent
@@ -180,6 +202,7 @@ kong:
 
 vector:
   image:
+    registry: ""
     repository: timberio/vector
     tag: 0.47.0-debian
   resources:
@@ -192,16 +215,14 @@ vector:
 
 jwtCli:
   image:
+    registry: ""
     repository: bitnami/jwt-cli
     tag: 6.2.0
     pullPolicy: IfNotPresent
 
 victoria-metrics-cluster:
   enabled: true
-  global:
-    image:
-      # -- Image registry, that can be shared across multiple helm charts
-      registry: ""
+  # global.image.registry is inherited from parent chart's global.image.registry
   vmselect:
     replicaCount: 1
   vminsert:
@@ -215,11 +236,12 @@ victoria-metrics-cluster:
 
 grafana:
   enabled: true
+  # Grafana will automatically use global.imageRegistry from parent chart
   deploymentStrategy:
     type: Recreate
   image:
     # -- The Docker registry
-    registry: docker.io
+    registry: ""
     # -- Docker image repository
     repository: grafana/grafana
     # Overrides the Grafana image tag whose default is the chart appVersion

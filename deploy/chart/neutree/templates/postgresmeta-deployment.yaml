@@ -20,7 +20,7 @@ spec:
       {{- end }}
       containers:
         - name: neutree-postgresmeta
-          image: "{{ .Values.postgresmeta.image.repository }}:{{ .Values.postgresmeta.image.tag}}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.postgresmeta.image.registry "repository" .Values.postgresmeta.image.repository "tag" .Values.postgresmeta.image.tag "defaultTag" .Values.postgresmeta.image.tag) }}
           imagePullPolicy: {{ .Values.postgresmeta.image.pullPolicy }}
           env:
             - name: PG_META_HOST

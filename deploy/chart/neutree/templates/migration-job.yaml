@@ -20,19 +20,19 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-postgresql
         - name: wait-auth-service
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-auth
         - name: copy-migration-sql
-          image: "{{.Values.dbScripts.image.repository }}:{{.Values.dbScripts.image.tag | default .Chart.AppVersion  }}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.dbScripts.image.registry "repository" .Values.dbScripts.image.repository "tag" .Values.dbScripts.image.tag "defaultTag" .Chart.AppVersion) }}
           imagePullPolicy: {{.Values.dbScripts.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
@@ -42,7 +42,7 @@ spec:
               mountPath: /migrations
       containers:
       - name: migration
-        image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag }}"
+        image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.migration.image.registry "repository" .Values.migration.image.repository "tag" .Values.migration.image.tag "defaultTag" .Values.migration.image.tag) }}
         imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
         args:
           - -source=file://migrations

@@ -22,13 +22,13 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
-          image: {{.Values.k8sWaitFor.image.repository }}:{{.Values.k8sWaitFor.image.tag }}
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{.Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-postgresql
         - name: wait-migration-job
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - job
@@ -37,7 +37,7 @@ spec:
             - {{ .Release.Namespace }}
       containers:
       - name: kong-post-upgrade-migrations
-        image: {{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag }}
+        image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -150,13 +150,13 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
-          image: {{.Values.k8sWaitFor.image.repository }}:{{.Values.k8sWaitFor.image.tag }}
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{.Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-postgresql
         - name: wait-migration-job
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - job
@@ -165,7 +165,7 @@ spec:
             - {{ .Release.Namespace }}
       containers:
       - name: kong-upgrade-migrations
-        image: {{ .Values.kong.image.repository }}:{{.Values.kong.image.tag}}
+        image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -337,7 +337,7 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
       - name: clear-stale-pid
-        image: {{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag }}
+        image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
         imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
         securityContext:
           allowPrivilegeEscalation: false
@@ -421,7 +421,7 @@ spec:
         - name: kong-kong-tmp
           mountPath: /tmp
       - name: wait-for-db
-        image: {{ .Values.kong.image.repository }}:{{.Values.kong.image.tag}}
+        image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -509,7 +509,7 @@ spec:
           {}
       containers:
       - name: "proxy"
-        image: {{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag }}
+        image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
         imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
         securityContext:
           allowPrivilegeEscalation: false
@@ -676,13 +676,13 @@ spec:
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
-          image: {{.Values.k8sWaitFor.image.repository }}:{{.Values.k8sWaitFor.image.tag }}
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{.Values.k8sWaitFor.image.pullPolicy }}
           args:
             - pod
             - -lapp.kubernetes.io/component=neutree-postgresql
         - name: wait-migration-job
-          image: "{{ .Values.k8sWaitFor.image.repository }}:{{ .Values.k8sWaitFor.image.tag}}"
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - job
@@ -691,7 +691,7 @@ spec:
             - {{ .Release.Namespace }}
       containers:
       - name: kong-migrations
-        image: {{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag}}
+        image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
         imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
         securityContext:
 
