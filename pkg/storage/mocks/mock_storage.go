@@ -484,6 +484,52 @@ func (_c *MockStorage_CreateRoleAssignment_Call) RunAndReturn(run func(*v1.RoleA
 	return _c
 }
 
+// CreateUserProfile provides a mock function with given fields: data
+func (_m *MockStorage) CreateUserProfile(data *v1.UserProfile) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateUserProfile")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.UserProfile) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateUserProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateUserProfile'
+type MockStorage_CreateUserProfile_Call struct {
+	*mock.Call
+}
+
+// CreateUserProfile is a helper method to define mock.On call
+//   - data *v1.UserProfile
+func (_e *MockStorage_Expecter) CreateUserProfile(data interface{}) *MockStorage_CreateUserProfile_Call {
+	return &MockStorage_CreateUserProfile_Call{Call: _e.mock.On("CreateUserProfile", data)}
+}
+
+func (_c *MockStorage_CreateUserProfile_Call) Run(run func(data *v1.UserProfile)) *MockStorage_CreateUserProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.UserProfile))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateUserProfile_Call) Return(_a0 error) *MockStorage_CreateUserProfile_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateUserProfile_Call) RunAndReturn(run func(*v1.UserProfile) error) *MockStorage_CreateUserProfile_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateWorkspace provides a mock function with given fields: data
 func (_m *MockStorage) CreateWorkspace(data *v1.Workspace) error {
 	ret := _m.Called(data)
@@ -940,6 +986,52 @@ func (_c *MockStorage_DeleteRoleAssignment_Call) Return(_a0 error) *MockStorage_
 }
 
 func (_c *MockStorage_DeleteRoleAssignment_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteUserProfile provides a mock function with given fields: id
+func (_m *MockStorage) DeleteUserProfile(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteUserProfile")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteUserProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteUserProfile'
+type MockStorage_DeleteUserProfile_Call struct {
+	*mock.Call
+}
+
+// DeleteUserProfile is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteUserProfile(id interface{}) *MockStorage_DeleteUserProfile_Call {
+	return &MockStorage_DeleteUserProfile_Call{Call: _e.mock.On("DeleteUserProfile", id)}
+}
+
+func (_c *MockStorage_DeleteUserProfile_Call) Run(run func(id string)) *MockStorage_DeleteUserProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteUserProfile_Call) Return(_a0 error) *MockStorage_DeleteUserProfile_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteUserProfile_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteUserProfile_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1508,6 +1600,64 @@ func (_c *MockStorage_GetRoleAssignment_Call) Return(_a0 *v1.RoleAssignment, _a1
 }
 
 func (_c *MockStorage_GetRoleAssignment_Call) RunAndReturn(run func(string) (*v1.RoleAssignment, error)) *MockStorage_GetRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetUserProfile provides a mock function with given fields: id
+func (_m *MockStorage) GetUserProfile(id string) (*v1.UserProfile, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUserProfile")
+	}
+
+	var r0 *v1.UserProfile
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.UserProfile, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.UserProfile); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.UserProfile)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetUserProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUserProfile'
+type MockStorage_GetUserProfile_Call struct {
+	*mock.Call
+}
+
+// GetUserProfile is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetUserProfile(id interface{}) *MockStorage_GetUserProfile_Call {
+	return &MockStorage_GetUserProfile_Call{Call: _e.mock.On("GetUserProfile", id)}
+}
+
+func (_c *MockStorage_GetUserProfile_Call) Run(run func(id string)) *MockStorage_GetUserProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetUserProfile_Call) Return(_a0 *v1.UserProfile, _a1 error) *MockStorage_GetUserProfile_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetUserProfile_Call) RunAndReturn(run func(string) (*v1.UserProfile, error)) *MockStorage_GetUserProfile_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2092,6 +2242,64 @@ func (_c *MockStorage_ListRoleAssignment_Call) RunAndReturn(run func(storage.Lis
 	return _c
 }
 
+// ListUserProfile provides a mock function with given fields: option
+func (_m *MockStorage) ListUserProfile(option storage.ListOption) ([]v1.UserProfile, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListUserProfile")
+	}
+
+	var r0 []v1.UserProfile
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.UserProfile, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.UserProfile); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.UserProfile)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListUserProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListUserProfile'
+type MockStorage_ListUserProfile_Call struct {
+	*mock.Call
+}
+
+// ListUserProfile is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListUserProfile(option interface{}) *MockStorage_ListUserProfile_Call {
+	return &MockStorage_ListUserProfile_Call{Call: _e.mock.On("ListUserProfile", option)}
+}
+
+func (_c *MockStorage_ListUserProfile_Call) Run(run func(option storage.ListOption)) *MockStorage_ListUserProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListUserProfile_Call) Return(_a0 []v1.UserProfile, _a1 error) *MockStorage_ListUserProfile_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListUserProfile_Call) RunAndReturn(run func(storage.ListOption) ([]v1.UserProfile, error)) *MockStorage_ListUserProfile_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListWorkspace provides a mock function with given fields: option
 func (_m *MockStorage) ListWorkspace(option storage.ListOption) ([]v1.Workspace, error) {
 	ret := _m.Called(option)
@@ -2569,6 +2777,53 @@ func (_c *MockStorage_UpdateRoleAssignment_Call) Return(_a0 error) *MockStorage_
 }
 
 func (_c *MockStorage_UpdateRoleAssignment_Call) RunAndReturn(run func(string, *v1.RoleAssignment) error) *MockStorage_UpdateRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateUserProfile provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateUserProfile(id string, data *v1.UserProfile) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateUserProfile")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.UserProfile) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateUserProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateUserProfile'
+type MockStorage_UpdateUserProfile_Call struct {
+	*mock.Call
+}
+
+// UpdateUserProfile is a helper method to define mock.On call
+//   - id string
+//   - data *v1.UserProfile
+func (_e *MockStorage_Expecter) UpdateUserProfile(id interface{}, data interface{}) *MockStorage_UpdateUserProfile_Call {
+	return &MockStorage_UpdateUserProfile_Call{Call: _e.mock.On("UpdateUserProfile", id, data)}
+}
+
+func (_c *MockStorage_UpdateUserProfile_Call) Run(run func(id string, data *v1.UserProfile)) *MockStorage_UpdateUserProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.UserProfile))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateUserProfile_Call) Return(_a0 error) *MockStorage_UpdateUserProfile_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateUserProfile_Call) RunAndReturn(run func(string, *v1.UserProfile) error) *MockStorage_UpdateUserProfile_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
@@ -33,6 +34,7 @@ type CoreConfig struct {
 	AcceleratorManager      accelerator.Manager
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	GinEngine               *gin.Engine
+	AuthClient              auth.Client
 
 	// global controller configs
 	ControllerConfig *ControllerConfig

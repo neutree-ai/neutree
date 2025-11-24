@@ -41,6 +41,7 @@ func NewBuilder() *Builder {
 		"image-registry":  NewImageRegistryControllerFactory(),
 		"model-catalog":   NewModelCatalogControllerFactory(),
 		"model-registry":  NewModelRegistryControllerFactory(),
+		"user-profile":    NewUserProfileControllerFactory(),
 	}
 
 	for name, factory := range defaultControllers {

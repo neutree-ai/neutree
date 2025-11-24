@@ -266,3 +266,27 @@ func NewModelRegistryControllerFactory() ControllerFactory {
 		return ctrl, nil
 	}
 }
+
+func NewUserProfileControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		userProfileController, err := controllers.NewUserProfileController(&controllers.UserProfileControllerOption{
+			Storage:    opts.config.Storage,
+			AuthClient: opts.config.AuthClient,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create user profile controller")
+		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(userProfileController),
+			controllers.WithObject(&v1.UserProfile{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		)
+
+		return ctrl, nil
+	}
+}

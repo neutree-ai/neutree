@@ -9,23 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/supabase-community/gotrue-go/types"
+
+	authmocks "github.com/neutree-ai/neutree/internal/auth/mocks"
 )
 
-// MockAuthClient is a mock implementation of AuthClient for testing
-type MockAuthClient struct {
-	mock.Mock
-}
-
-func (m *MockAuthClient) AdminCreateUser(params types.AdminCreateUserRequest) (*types.AdminCreateUserResponse, error) {
-	args := m.Called(params)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*types.AdminCreateUserResponse), args.Error(1)
-}
-
 func TestCreateUserSuccess(t *testing.T) {
-	mockClient := new(MockAuthClient)
+	mockClient := authmocks.NewMockClient(t)
 	userID := uuid.New()
 
 	req := CreateUserRequest{
@@ -63,7 +52,7 @@ func TestCreateUserSuccess(t *testing.T) {
 }
 
 func TestCreateUserMissingUsername(t *testing.T) {
-	mockClient := new(MockAuthClient)
+	mockClient := authmocks.NewMockClient(t)
 
 	req := CreateUserRequest{
 		Email:    "test@example.com",
@@ -81,7 +70,7 @@ func TestCreateUserMissingUsername(t *testing.T) {
 }
 
 func TestCreateUserGoTrueAPIError(t *testing.T) {
-	mockClient := new(MockAuthClient)
+	mockClient := authmocks.NewMockClient(t)
 
 	req := CreateUserRequest{
 		Email:    "test@example.com",
@@ -104,7 +93,7 @@ func TestCreateUserGoTrueAPIError(t *testing.T) {
 }
 
 func TestCreateUserUsernameInMetadata(t *testing.T) {
-	mockClient := new(MockAuthClient)
+	mockClient := authmocks.NewMockClient(t)
 	userID := uuid.New()
 
 	req := CreateUserRequest{
@@ -134,7 +123,7 @@ func TestCreateUserUsernameInMetadata(t *testing.T) {
 }
 
 func TestCreateUserNoUsernameInMetadata(t *testing.T) {
-	mockClient := new(MockAuthClient)
+	mockClient := authmocks.NewMockClient(t)
 	userID := uuid.New()
 
 	req := CreateUserRequest{
@@ -164,7 +153,7 @@ func TestCreateUserNoUsernameInMetadata(t *testing.T) {
 }
 
 func TestCreateUserInvalidUsernameType(t *testing.T) {
-	mockClient := new(MockAuthClient)
+	mockClient := authmocks.NewMockClient(t)
 	userID := uuid.New()
 
 	req := CreateUserRequest{
