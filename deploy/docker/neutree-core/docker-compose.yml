@@ -188,6 +188,7 @@ services:
       - --gateway-log-remote-write-url=http://vector:30122
       - --core-server-port=3001
       - --core-server-host=0.0.0.0
+      - --auth-endpoint=http://auth:9999
     volumes:
       - {{.NeutreeCoreWorkDir}}/collect:/etc/neutree/collect
     ports:

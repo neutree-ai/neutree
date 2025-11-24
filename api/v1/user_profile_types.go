@@ -6,10 +6,20 @@ type UserProfileSpec struct {
 	Email string `json:"email"`
 }
 
+type UserProfilePhase string
+
+const (
+	UserProfilePhasePENDING UserProfilePhase = "Pending"
+	UserProfilePhaseCREATED UserProfilePhase = "Created"
+	UserProfilePhaseDELETED UserProfilePhase = "Deleted"
+	UserProfilePhaseFAILED  UserProfilePhase = "Failed"
+)
+
 type UserProfileStatus struct {
-	Phase        string `json:"phase,omitempty"`
-	ServiceURL   string `json:"service_url,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
+	Phase              UserProfilePhase `json:"phase,omitempty"`
+	ServiceURL         string           `json:"service_url,omitempty"`
+	ErrorMessage       string           `json:"error_message,omitempty"`
+	LastTransitionTime string           `json:"last_transition_time,omitempty"`
 }
 
 type UserProfile struct {

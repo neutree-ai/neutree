@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
+	"github.com/supabase-community/gotrue-go"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/internal/accelerator"
@@ -22,6 +23,7 @@ type NeutreeCoreOptions struct {
 	Server        *ServerOptions
 	Observability *ObservabilityOptions
 	Cluster       *ClusterOptions
+	Auth          *AuthOptions
 }
 
 func NewOptions() *NeutreeCoreOptions {
@@ -33,6 +35,7 @@ func NewOptions() *NeutreeCoreOptions {
 		Server:        NewServerOptions(),
 		Observability: NewObservabilityOptions(),
 		Cluster:       NewClusterOptions(),
+		Auth:          NewAuthOptions(),
 	}
 }
 
@@ -44,9 +47,14 @@ func (o *NeutreeCoreOptions) AddFlags(fs *pflag.FlagSet) {
 	o.Server.AddFlags(fs)
 	o.Observability.AddFlags(fs)
 	o.Cluster.AddFlags(fs)
+	o.Auth.AddFlags(fs)
 }
 
 func (o *NeutreeCoreOptions) Validate() error {
+	if err := o.Auth.Validate(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -128,6 +136,17 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		Port: o.Server.Port,
 		Host: o.Server.Host,
 	}
+
+	jwtToken, err := storage.CreateServiceToken(o.Storage.JwtSecret)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create service token for auth client")
+	}
+
+	authClient := gotrue.New("", "").
+		WithCustomGoTrueURL(o.Auth.AuthEndpoint).
+		WithToken(*jwtToken)
+
+	c.AuthClient = authClient
 
 	return c, nil
 }

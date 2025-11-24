@@ -7,21 +7,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/supabase-community/gotrue-go/types"
 
+	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
-
-type AuthClient interface {
-	AdminCreateUser(params types.AdminCreateUserRequest) (*types.AdminCreateUserResponse, error)
-}
 
 // Dependencies defines the dependencies for auth handlers
 type Dependencies struct {
 	AuthEndpoint string
 	AuthConfig   middleware.AuthConfig
 	Storage      storage.Storage
-	AuthClient   AuthClient
+	AuthClient   auth.Client
 }
 
 // RegisterAuthRoutes registers authentication-related routes
@@ -82,7 +79,7 @@ type CreateUserResponse struct {
 	Username string `json:"username"`
 }
 
-func createUser(client AuthClient, req CreateUserRequest) (*CreateUserResponse, error) {
+func createUser(client auth.Client, req CreateUserRequest) (*CreateUserResponse, error) {
 	// Validate input
 	if req.Username == "" {
 		return nil, fmt.Errorf("username is required")

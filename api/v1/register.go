@@ -32,6 +32,8 @@ func init() { //nolint:gochecknoinits
 		&RoleList{},
 		&Workspace{},
 		&WorkspaceList{},
+		&UserProfile{},
+		&UserProfileList{},
 	)
 
 	SchemeBuilder.RegisterTable(
@@ -46,6 +48,7 @@ func init() { //nolint:gochecknoinits
 			"role_assignments": "RoleAssignment",
 			"roles":            "Role",
 			"workspaces":       "Workspace",
+			"user_profiles":    "UserProfile",
 		},
 	)
 }

@@ -822,3 +822,69 @@ func (s *postgrestObjectStorage) UpdateStatus(id string, data scheme.Object) err
 
 	return err
 }
+
+// UserProfile storage implementations
+func (s *postgrestStorage) CreateUserProfile(data *v1.UserProfile) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(USER_PROFILE_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteUserProfile(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(USER_PROFILE_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateUserProfile(id string, data *v1.UserProfile) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(USER_PROFILE_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetUserProfile(id string) (*v1.UserProfile, error) {
+	var (
+		response []v1.UserProfile
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(USER_PROFILE_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListUserProfile(option ListOption) ([]v1.UserProfile, error) {
+	var response []v1.UserProfile
+	err := s.genericList(USER_PROFILE_TABLE, &response, option)
+
+	return response, err
+}

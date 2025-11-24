@@ -43,6 +43,7 @@ spec:
             - --gateway-proxy-url=http://{{ include "neutree.fullname" . }}-kong-proxy:80
             - --gateway-admin-url=http://{{ include "neutree.fullname" . }}-kong-admin:8001
             - --gateway-log-remote-write-url=http://{{ include "neutree.fullname" . }}-vector:30122
+            - --auth-endpoint=http://{{ include "neutree.fullname" . }}-auth-service:9999
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.core.image.registry "repository" .Values.core.image.repository "tag" .Values.core.image.tag "defaultTag" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.core.image.pullPolicy }}
           securityContext:

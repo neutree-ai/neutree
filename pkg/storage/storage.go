@@ -25,6 +25,7 @@ const (
 	ROLE_ASSIGNMENT_TABLE = "role_assignments"
 	WORKSPACE_TABLE       = "workspaces"
 	API_KEY_TABLE         = "api_keys"
+	USER_PROFILE_TABLE    = "user_profiles"
 )
 
 type ImageRegistryStorage interface {
@@ -157,6 +158,19 @@ type ModelCatalogStorage interface {
 	ListModelCatalog(option ListOption) ([]v1.ModelCatalog, error)
 }
 
+type UserProfileStorage interface {
+	// CreateUserProfile creates a new user profile in the database.
+	CreateUserProfile(data *v1.UserProfile) error
+	// DeleteUserProfile deletes a user profile by its ID.
+	DeleteUserProfile(id string) error
+	// UpdateUserProfile updates an existing user profile in the database.
+	UpdateUserProfile(id string, data *v1.UserProfile) error
+	// GetUserProfile retrieves a user profile by its ID.
+	GetUserProfile(id string) (*v1.UserProfile, error)
+	// ListUserProfile retrieves a list of user profiles with optional filters.
+	ListUserProfile(option ListOption) ([]v1.UserProfile, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -168,6 +182,7 @@ type Storage interface {
 	EngineStorage
 	EndpointStorage
 	ModelCatalogStorage
+	UserProfileStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error
