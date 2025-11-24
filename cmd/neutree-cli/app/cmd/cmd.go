@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/engine"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/model"
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/packageimport"
 )
 
 func NewNeutreeCliCommand() *cobra.Command {
@@ -39,7 +39,7 @@ Examples:
 
 	neutreeCliCmd.AddCommand(launch.NewLaunchCmd())
 	neutreeCliCmd.AddCommand(model.NewModelCmd())
-	neutreeCliCmd.AddCommand(engine.NewEngineCmd())
+	neutreeCliCmd.AddCommand(packageimport.NewImportCmd())
 
 	return neutreeCliCmd
 }
