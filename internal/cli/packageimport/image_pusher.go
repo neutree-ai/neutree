@@ -1,33 +1,25 @@
-package engine
+package packageimport
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/util"
-	apiclient "github.com/neutree-ai/neutree/pkg/client"
 )
 
 // ImagePusher handles pushing container images to registries
 type ImagePusher struct {
-	apiClient    *apiclient.Client
 	dockerClient *client.Client
 }
 
 // NewImagePusher creates a new ImagePusher
-func NewImagePusher(apiClient *apiclient.Client) (*ImagePusher, error) {
+func NewImagePusher() (*ImagePusher, error) {
 	// Create Docker client
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -35,55 +27,61 @@ func NewImagePusher(apiClient *apiclient.Client) (*ImagePusher, error) {
 	}
 
 	return &ImagePusher{
-		apiClient:    apiClient,
 		dockerClient: dockerClient,
 	}, nil
 }
 
-// LoadAndPushImages loads images from tar files and pushes them to the registry
-// It handles getting the image registry and pushing images
-func (p *ImagePusher) LoadAndPushImages(ctx context.Context, workspace, registryName string, manifest *PackageManifest, extractedPath string) ([]string, error) {
-	// Get image registry
-	imageRegistry, err := p.apiClient.ImageRegistries.Get(workspace, registryName)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get image registry")
-	}
+func (p *ImagePusher) LoadImages(ctx context.Context, manifest *PackageManifest, extractedPath string) error {
+	klog.Infof("Loading images from extracted path: %s", extractedPath)
 
-	klog.Infof("Using image registry: %s", imageRegistry.Metadata.Name)
-
-	// Load and push images
-	return p.loadAndPushImages(ctx, imageRegistry, manifest, extractedPath)
+	// Load images
+	return p.loadImages(ctx, manifest, extractedPath)
 }
 
-// loadAndPushImages is the internal implementation that loads and pushes images
-func (p *ImagePusher) loadAndPushImages(ctx context.Context, imageRegistry *v1.ImageRegistry, manifest *PackageManifest, extractedPath string) ([]string, error) {
-	var pushedImages []string
-	var errs []error
+// loadImages is the internal implementation that loads images
+func (p *ImagePusher) loadImages(ctx context.Context, manifest *PackageManifest, extractedPath string) error {
+	alreadyLoadedImageFile := make(map[string]bool)
 
-	targetImagePrefix, err := util.GetImagePrefix(imageRegistry)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get image prefix")
-	}
-
-	// Initialize the Images map if it doesn't exist
-	if manifest.Package.EngineVersion.Images == nil {
-		manifest.Package.EngineVersion.Images = make(map[string]*v1.EngineImage)
-	}
-
-	for _, imgSpec := range manifest.Package.Images {
+	for _, imgSpec := range manifest.Images {
 		imagePath := fmt.Sprintf("%s/%s", extractedPath, imgSpec.ImageFile)
+
+		// Skip loading if already loaded
+		if alreadyLoadedImageFile[imgSpec.ImageFile] {
+			klog.Infof("Image file %s already loaded, skipping load", imgSpec.ImageFile)
+			continue
+		}
 
 		// Load the image
 		klog.Infof("Loading image from %s", imagePath)
 
 		if err := p.loadImage(ctx, imagePath); err != nil {
-			errs = append(errs, errors.Wrapf(err, "failed to load image: %s", imagePath))
-			continue
+			return errors.Wrapf(err, "failed to load image: %s", imagePath)
 		}
 
+		alreadyLoadedImageFile[imgSpec.ImageFile] = true
+	}
+
+	return nil
+}
+
+func (p *ImagePusher) PushImagesToMirrorRegistry(ctx context.Context,
+	mirrorRegistry string, registryAuth string, manifest *PackageManifest) ([]string, error) {
+	klog.Infof("Pushing images to mirror registry: %s", mirrorRegistry)
+
+	// Load and push images
+	return p.pushImages(ctx, mirrorRegistry, registryAuth, manifest)
+}
+
+// loadAndPushImages is the internal implementation that loads and pushes images
+func (p *ImagePusher) pushImages(ctx context.Context, mirrorRegistry string, registryAuth string,
+	manifest *PackageManifest) ([]string, error) {
+	var pushedImages []string
+	var errs []error
+
+	for _, imgSpec := range manifest.Images {
 		// Build the original and target image references
 		originalImage := fmt.Sprintf("%s:%s", imgSpec.ImageName, imgSpec.Tag)
-		targetImage := p.buildTargetImage(targetImagePrefix, imgSpec)
+		targetImage := p.buildTargetImage(mirrorRegistry, imgSpec)
 
 		// Tag the image with the target registry
 		klog.Infof("Tagging image %s as %s", originalImage, targetImage)
@@ -96,22 +94,13 @@ func (p *ImagePusher) loadAndPushImages(ctx context.Context, imageRegistry *v1.I
 		// Push the image to the registry
 		klog.Infof("Pushing image %s to registry", targetImage)
 
-		if err := p.pushImage(ctx, imageRegistry, targetImage); err != nil {
+		if err := p.pushImage(ctx, targetImage, registryAuth); err != nil {
 			errs = append(errs, errors.Wrapf(err, "failed to push image"))
 			continue
 		}
 
 		pushedImages = append(pushedImages, targetImage)
 		klog.Infof("Successfully pushed image: %s", targetImage)
-
-		// Update the manifest's EngineVersion.Images with the processed image name (without old registry)
-		processedImageName := p.extractImageNameWithoutRegistry(imgSpec.ImageName)
-		manifest.Package.EngineVersion.Images[imgSpec.Accelerator] = &v1.EngineImage{
-			ImageName: processedImageName,
-			Tag:       imgSpec.Tag,
-		}
-
-		klog.V(2).Infof("Updated manifest image for accelerator %s: %s:%s", imgSpec.Accelerator, processedImageName, imgSpec.Tag)
 	}
 
 	if len(errs) > 0 {
@@ -124,23 +113,8 @@ func (p *ImagePusher) loadAndPushImages(ctx context.Context, imageRegistry *v1.I
 // buildTargetImage builds the target image reference with registry and repo
 func (p *ImagePusher) buildTargetImage(imagePrefix string, imgSpec *ImageSpec) string {
 	// Remove any existing registry from the image name
-	imageName := p.extractImageNameWithoutRegistry(imgSpec.ImageName)
+	imageName := extractImageNameWithoutRegistry(imgSpec.ImageName)
 	return fmt.Sprintf("%s/%s:%s", imagePrefix, imageName, imgSpec.Tag)
-}
-
-// extractImageNameWithoutRegistry removes any existing registry prefix from the image name
-func (p *ImagePusher) extractImageNameWithoutRegistry(imageName string) string {
-	// Check if there's a registry prefix (contains / before any other structure)
-	if idx := strings.Index(imageName, "/"); idx != -1 {
-		// Check if this is a registry prefix (contains . or :)
-		firstPart := imageName[:idx]
-		if strings.Contains(firstPart, ".") || strings.Contains(firstPart, ":") {
-			// This is a registry, remove it
-			return imageName[idx+1:]
-		}
-	}
-	// No registry prefix found, return as-is
-	return imageName
 }
 
 // loadImage loads a Docker image from a tar file
@@ -180,30 +154,10 @@ func (p *ImagePusher) tagImage(ctx context.Context, sourceImage, targetImage str
 }
 
 // pushImage pushes a Docker image to a registry
-func (p *ImagePusher) pushImage(ctx context.Context, imageRegistry *v1.ImageRegistry, imageName string) error {
+func (p *ImagePusher) pushImage(ctx context.Context, imageName string, registryAuth string) error {
 	// Create push options with auth
-	pushOptions := image.PushOptions{}
-
-	// Add auth if credentials are available
-	userName, password := util.GetImageRegistryAuthInfo(imageRegistry)
-	if userName != "" && password != "" {
-		registryHost, err := util.GetImageRegistryHost(imageRegistry)
-		if err != nil {
-			return errors.Wrap(err, "failed to get registry host")
-		}
-
-		authConfig := registry.AuthConfig{
-			Username:      userName,
-			Password:      password,
-			ServerAddress: registryHost,
-		}
-
-		authConfigBytes, err := json.Marshal(authConfig)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal auth config")
-		}
-
-		pushOptions.RegistryAuth = base64.URLEncoding.EncodeToString(authConfigBytes)
+	pushOptions := image.PushOptions{
+		RegistryAuth: registryAuth,
 	}
 
 	// Push the image
@@ -236,4 +190,19 @@ func (w *klogWriter) Write(p []byte) (int, error) {
 	}
 
 	return len(p), nil
+}
+
+// extractImageNameWithoutRegistry removes any existing registry prefix from the image name
+func extractImageNameWithoutRegistry(imageName string) string {
+	// Check if there's a registry prefix (contains / before any other structure)
+	if idx := strings.Index(imageName, "/"); idx != -1 {
+		// Check if this is a registry prefix (contains . or :)
+		firstPart := imageName[:idx]
+		if strings.Contains(firstPart, ".") || strings.Contains(firstPart, ":") {
+			// This is a registry, remove it
+			return imageName[idx+1:]
+		}
+	}
+	// No registry prefix found, return as-is
+	return imageName
 }

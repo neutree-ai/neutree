@@ -3,14 +3,17 @@ package client
 import (
 	"net/http"
 	"time"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // Client represents a neutree API client
 type Client struct {
 	// Common client properties
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
+	baseURL       string
+	apiKey        string
+	httpClient    *http.Client
+	showAllFields bool
 
 	// Service endpoints
 	Models          *ModelsService
@@ -49,6 +52,13 @@ func WithTimeout(timeout time.Duration) ClientOption {
 	}
 }
 
+// WithShowAllFields sets the showAllFields flag for the client
+func WithShowAllFields() ClientOption {
+	return func(c *Client) {
+		c.showAllFields = true
+	}
+}
+
 // NewClient creates a new neutree API client
 func NewClient(baseURL string, options ...ClientOption) *Client {
 	client := &Client{
@@ -74,6 +84,11 @@ func NewClient(baseURL string, options ...ClientOption) *Client {
 
 // do performs an HTTP request using the client's HTTP client
 func (c *Client) do(req *http.Request) (*http.Response, error) {
+	// add showAllFields header if set
+	if c.showAllFields {
+		req.Header.Set(v1.ShowAllFieldsHeaderKey, "true")
+	}
+
 	// Add authorization header if API key is set
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", c.apiKey)

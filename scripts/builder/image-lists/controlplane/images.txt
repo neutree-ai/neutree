@@ -1,0 +1,17 @@
+bitnami/jwt-cli:6.2.0
+docker.io/grafana/grafana:11.5.3
+ghcr.io/groundnuty/k8s-wait-for:v2.0
+kong/kong:3.9
+migrate/migrate:v4.18.3
+neutree/neutree-api:latest
+neutree/neutree-core:latest
+neutree/neutree-db-scripts:latest
+postgres:13
+postgrest/postgrest:v14.0
+supabase/gotrue:v2.170.0
+supabase/postgres-meta:v0.86.0
+timberio/vector:0.47.0-debian
+victoriametrics/vmagent:v1.115.0
+victoriametrics/vminsert:v1.115.0-cluster
+victoriametrics/vmselect:v1.115.0-cluster
+victoriametrics/vmstorage:v1.115.0-cluster

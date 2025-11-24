@@ -8,3 +8,8 @@ const (
 	// Resource management annotations
 	AnnotationLastAppliedConfig = "neutree.ai/last-applied-config" // Stores full last applied manifest config (JSON)
 )
+
+const (
+	// HTTP header to request all fields in the response
+	ShowAllFieldsHeaderKey = "Neutree-Show-All-Fields"
+)

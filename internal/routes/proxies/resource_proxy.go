@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // FieldSelector defines which fields to include or exclude in responses
@@ -306,8 +308,10 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 		// Create proxy handler
 		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, nil)
 
+		showAll := c.Request.Header.Get(v1.ShowAllFieldsHeaderKey)
+
 		// If no field filtering is needed, use proxy directly
-		if len(excludeFields) == 0 {
+		if len(excludeFields) == 0 || showAll == "true" {
 			proxyHandler(c)
 			return
 		}
