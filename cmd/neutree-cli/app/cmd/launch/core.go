@@ -23,6 +23,7 @@ type neutreeCoreInstallOptions struct {
 	metricsRemoteWriteURL string
 	grafanaURL            string
 	version               string
+	adminPassword         string
 }
 
 func NewNeutreeCoreInstallCmd(exector command.Executor, commonOptions *commonOptions) *cobra.Command {
@@ -72,6 +73,9 @@ Examples:
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", "v0.0.1", "neutree core version")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
+		"it is valid when starting neutree core for the first time. "+
+		"It is recommended to change it quickly after installation.")
 
 	return neutreeCoreInstallCmd
 }
@@ -159,6 +163,7 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		"VectorVersion":          constants.VectorVersion,
 		"KongVersion":            constants.KongVersion,
 		"NodeIP":                 options.nodeIP,
+		"AdminPassword":          options.adminPassword,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)

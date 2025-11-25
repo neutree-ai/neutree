@@ -108,6 +108,8 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
+    environment:
+      - PGOPTIONS=-c neutree.admin_password={{ .AdminPassword}}
     volumes:
       - {{ .NeutreeCoreWorkDir}}/db/seed:/seed
     command: 'bash -c ''for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://postgres:pgpassword@postgres:5432/neutree?sslmode=disable -f $$file; done'''
