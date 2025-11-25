@@ -46,6 +46,28 @@ func TestGetImagePrefix(t *testing.T) {
 			want:    "registry.example.com:5000/prod",
 			wantErr: false,
 		},
+		{
+			name: "URL with port number and no repository",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "https://registry.example.com:5000",
+					Repository: "",
+				},
+			},
+			want:    "registry.example.com:5000",
+			wantErr: false,
+		},
+		{
+			name: "invalid URL with empty host",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "https://",
+					Repository: "repo",
+				},
+			},
+			want:    "",
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

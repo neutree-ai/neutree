@@ -81,7 +81,7 @@ spec:
       serviceAccountName: router-service-account
       containers:
       - name: router
-        image: {{ .ImagePrefix }}/router:{{ .Version }}
+        image: {{ .ImagePrefix }}/neutree/router:{{ .Version }}
         env:
         - name: LMCACHE_LOG_LEVEL
           value: DEBUG

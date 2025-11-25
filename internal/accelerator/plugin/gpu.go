@@ -145,7 +145,7 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 					ValuesSchema: llamaCppDefaultEngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"cpu": {
-							ImageName: "llama-cpp",
+							ImageName: "neutree/llama-cpp-python", // no official llama-cpp-python image, so use neutree image
 							Tag:       "v0.3.6",
 						},
 					},
@@ -178,7 +178,7 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 					ValuesSchema: vllmDefaultEngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"nvidia_gpu": {
-							ImageName: "vllm",
+							ImageName: "vllm/vllm-openai", // use official vllm image with nvidia gpu support
 							Tag:       "v0.8.5",
 						},
 					},

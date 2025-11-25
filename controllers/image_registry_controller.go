@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"fmt"
-	"net/url"
 	"strconv"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -11,6 +10,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -113,20 +113,37 @@ func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRe
 		Password:      imageRegistry.Spec.AuthConfig.Password,
 		Auth:          imageRegistry.Spec.AuthConfig.Auth,
 		IdentityToken: imageRegistry.Spec.AuthConfig.IdentityToken,
-		RegistryToken: imageRegistry.Spec.AuthConfig.IdentityToken,
+		RegistryToken: imageRegistry.Spec.AuthConfig.RegistryToken,
 	}
 
-	registryURL, err := url.Parse(imageRegistry.Spec.URL)
+	imagePrefix, err := util.GetImagePrefix(imageRegistry)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
+		return errors.Wrapf(err, "failed to get image prefix for image registry %s",
+			imageRegistry.Metadata.WorkspaceName())
 	}
 
-	imageRepo := fmt.Sprintf("%s/%s/neutree-serve", registryURL.Host, imageRegistry.Spec.Repository)
+	// For docker.io, we cannot check pull permissions by fetching a non-existent image because Docker Hub supports image-level permission control.
+	// Instead, we use a known public image under the neutree namespace to check pull permissions.
+	testImage := fmt.Sprintf("%s/neutree/neutree-serve", imagePrefix)
 
-	_, err = c.imageService.ListImageTags(imageRepo, authn.FromConfig(authConfig))
+	// If no credentials or tokens are provided, use anonymous auth which avoids providing empty
+	// Authorization headers that could lead some registries to reject a request as "unauthorized".
+	var authenticator authn.Authenticator
+	if authConfig.Username == "" && authConfig.Password == "" && authConfig.IdentityToken == "" && authConfig.RegistryToken == "" {
+		authenticator = authn.Anonymous
+	} else {
+		authenticator = authn.FromConfig(authConfig)
+	}
+
+	hasPermission, err := c.imageService.CheckPullPermission(testImage, authenticator)
 	if err != nil {
-		return errors.Wrapf(err, "failed to authenticate with image registry %s/%s at URL %s, repository %s",
-			imageRegistry.Metadata.Workspace, imageRegistry.Metadata.Name, imageRegistry.Spec.URL, imageRepo)
+		return errors.Wrapf(err, "failed to connect %s at URL %s",
+			imageRegistry.Metadata.WorkspaceName(), imageRegistry.Spec.URL)
+	}
+
+	if !hasPermission {
+		return errors.Errorf("no pull permission for image registry %s at URL %s",
+			imageRegistry.Metadata.WorkspaceName(), imageRegistry.Spec.URL)
 	}
 
 	return nil

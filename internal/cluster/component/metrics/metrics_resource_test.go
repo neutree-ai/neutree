@@ -40,7 +40,7 @@ func TestBuildVMAgentDeployment(t *testing.T) {
 			assert.Equal(t, "vmagent", deployment.GetName(), "Deployment name mismatch")
 			assert.Equal(t, "vmagent", deployment.GetLabels()["app"], "Deployment app label mismatch")
 			assert.Equal(t, int32(1), *deployment.Spec.Replicas, "Deployment replicas mismatch")
-			assert.Equal(t, "test-image-prefix/vmagent:v1.115.0", deployment.Spec.Template.Spec.Containers[0].Image, "Deployment image mismatch")
+			assert.Equal(t, "test-image-prefix/victoriametrics/vmagent:v1.115.0", deployment.Spec.Template.Spec.Containers[0].Image, "Deployment image mismatch")
 			assert.Equal(t, "test-image-pull-secret", deployment.Spec.Template.Spec.ImagePullSecrets[0].Name, "Deployment image pull secret mismatch")
 			return
 		}

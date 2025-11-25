@@ -165,7 +165,7 @@ func (p *AMDGPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.Ge
 					ValuesSchema: llamaCppDefaultEngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"cpu": {
-							ImageName: "llama-cpp",
+							ImageName: "neutree/llama-cpp-python", // no official llama-cpp-python image, so use neutree image
 							Tag:       "v0.3.6",
 						},
 					},
@@ -198,8 +198,8 @@ func (p *AMDGPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.Ge
 					ValuesSchema: vllmDefaultEngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"amd_gpu": {
-							ImageName: "vllm",
-							Tag:       "v0.8.5-rocm",
+							ImageName: "rocm/vllm", // use official vllm image with amd gpu support
+							Tag:       "rocm6.3.1_vllm_0.8.5_20250521",
 						},
 					},
 					DeployTemplate: map[string]map[string]string{

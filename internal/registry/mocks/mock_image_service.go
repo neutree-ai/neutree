@@ -77,6 +77,63 @@ func (_c *MockImageService_CheckImageExists_Call) RunAndReturn(run func(string, 
 	return _c
 }
 
+// CheckPullPermission provides a mock function with given fields: image, auth
+func (_m *MockImageService) CheckPullPermission(image string, auth authn.Authenticator) (bool, error) {
+	ret := _m.Called(image, auth)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckPullPermission")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) (bool, error)); ok {
+		return rf(image, auth)
+	}
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) bool); ok {
+		r0 = rf(image, auth)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, authn.Authenticator) error); ok {
+		r1 = rf(image, auth)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockImageService_CheckPullPermission_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckPullPermission'
+type MockImageService_CheckPullPermission_Call struct {
+	*mock.Call
+}
+
+// CheckPullPermission is a helper method to define mock.On call
+//   - image string
+//   - auth authn.Authenticator
+func (_e *MockImageService_Expecter) CheckPullPermission(image interface{}, auth interface{}) *MockImageService_CheckPullPermission_Call {
+	return &MockImageService_CheckPullPermission_Call{Call: _e.mock.On("CheckPullPermission", image, auth)}
+}
+
+func (_c *MockImageService_CheckPullPermission_Call) Run(run func(image string, auth authn.Authenticator)) *MockImageService_CheckPullPermission_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(authn.Authenticator))
+	})
+	return _c
+}
+
+func (_c *MockImageService_CheckPullPermission_Call) Return(_a0 bool, _a1 error) *MockImageService_CheckPullPermission_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockImageService_CheckPullPermission_Call) RunAndReturn(run func(string, authn.Authenticator) (bool, error)) *MockImageService_CheckPullPermission_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImageTags provides a mock function with given fields: imageRepo, auth
 func (_m *MockImageService) ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error) {
 	ret := _m.Called(imageRepo, auth)
