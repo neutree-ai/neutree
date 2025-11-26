@@ -1,3 +1,3 @@
 bentoml==v1.4.6
 ray[default]==v2.43.0
-click>=7.0, !=8.3.0
+click>=7.0, <8.3.0
