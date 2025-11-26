@@ -6,6 +6,268 @@ import (
 	"testing"
 )
 
+func TestKubernetesClusterConfigValidation(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	t.Run("cluster kubeconfig is empty - error code 10021", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with empty kubeconfig
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: kubeconfig is required for Kubernetes clusters")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10021"`) {
+			t.Fatalf("expected error code 10021, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10021: %v", err)
+	})
+
+	t.Run("cluster router.replicas less than 1 - error code 10027", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with router.replicas < 1
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes','{"kubeconfig":"xxxx", "router": {"replicas": 0, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: router.replicas must be at least 1")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10027"`) {
+			t.Fatalf("expected error code 10027, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10027: %v", err)
+	})
+
+	t.Run("cluster router.replicas is not int - error code 10028", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with router.replicas as string
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": "two", "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: router.replicas must be an integer")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10028"`) {
+			t.Fatalf("expected error code 10027, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10028: %v", err)
+	})
+
+	t.Run("cluster router.resources missing - error code 10029", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster without router.resources
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "access_mode":"LoadBalancer"}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-resources', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: router.resources is required for Kubernetes clusters")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10029"`) {
+			t.Fatalf("expected error code 10029, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10029: %v", err)
+	})
+
+	t.Run("cluster router.resources.cpu is missing - error code 10025", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster without router.resources
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"memory":"1Gi"}, "access_mode":"LoadBalancer"}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-resources', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: router.resources is required for Kubernetes clusters")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10025"`) {
+			t.Fatalf("expected error code 10025, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10025: %v", err)
+	})
+
+	t.Run("cluster router.resources.memory is missing - error code 10026", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster without router.resources
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1"}, "access_mode":"LoadBalancer"}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-resources', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: router.resources is required for Kubernetes clusters")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10026"`) {
+			t.Fatalf("expected error code 10026, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10026: %v", err)
+	})
+
+	t.Run("cluster router.resources.memory invalid - error code 10114", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster without router.resources
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1", "memory":"1XXXX"}, "access_mode":"LoadBalancer"}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-resources', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: router.resources is required for Kubernetes clusters")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10114"`) {
+			t.Fatalf("expected error code 10114, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10114: %v", err)
+	})
+
+	t.Run("cluster router.access_mode is missing - error code 10023", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster without router.access_mode
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"}}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-access-mode', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: router.access_mode is required for Kubernetes clusters")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10023"`) {
+			t.Fatalf("expected error code 10023, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10023: %v", err)
+	})
+
+}
+
 func TestModelRegistryValidation(t *testing.T) {
 	db := GetTestDB(t)
 	ctx := context.Background()
