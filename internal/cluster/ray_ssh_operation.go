@@ -231,8 +231,12 @@ func (c *sshRayClusterReconciler) downCluster(reconcileCtx *ReconcileContext) er
 }
 
 func (c *sshRayClusterReconciler) mutateAcceleratorRuntimeConfig(reconcileCtx *ReconcileContext, nodeIP string) (bool, error) {
+	if reconcileCtx.Cluster.Status == nil || reconcileCtx.Cluster.Status.AcceleratorType == nil {
+		return false, errors.New("cluster status or accelerator type is not set")
+	}
+
 	runtimeConfig, err := c.acceleratorManager.GetNodeRuntimeConfig(reconcileCtx.Ctx,
-		*reconcileCtx.sshClusterConfig.AcceleratorType, nodeIP, reconcileCtx.sshClusterConfig.Auth)
+		*reconcileCtx.Cluster.Status.AcceleratorType, nodeIP, reconcileCtx.sshClusterConfig.Auth)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get node runtime config")
 	}
