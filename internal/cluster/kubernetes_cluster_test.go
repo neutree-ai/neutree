@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -17,6 +16,7 @@ import (
 
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 func newNode(name string, schedulable bool, resources map[corev1.ResourceName]resource.Quantity, labels map[string]string) *corev1.Node {

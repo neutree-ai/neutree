@@ -885,12 +885,50 @@ func TestDownCluster(t *testing.T) {
 }
 
 func TestGenerateRayClusterConfig(t *testing.T) {
+	defaultExpectedConfig := func() *v1.RayClusterConfig {
+		return &v1.RayClusterConfig{
+			ClusterName: "test-cluster",
+			Provider: v1.Provider{
+				Type: "local",
+			},
+			Auth: v1.Auth{
+				SSHUser: "root",
+			},
+			Docker: v1.Docker{
+				ContainerName: "ray_container",
+				PullBeforeRun: true,
+				Image:         "registry.example.com/neutree/neutree-serve:v1.0.0",
+				RunOptions: []string{
+					"--privileged",
+					"--cap-add=SYS_ADMIN",
+					"--security-opt=seccomp=unconfined",
+					"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
+					"--ulimit nofile=65536:65536",
+				},
+			},
+			HeadStartRayCommands: []string{
+				"ray stop",
+				`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+			},
+			WorkerStartRayCommands: []string{
+				"ray stop",
+				`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+			},
+			StaticWorkerStartRayCommands: []string{
+				"ray stop",
+				`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+			},
+			InitializationCommands: []string{
+				"docker login registry.example.com -u 'user' -p 'pass'",
+			},
+		}
+	}
 	tests := []struct {
 		name           string
 		cluster        *v1.Cluster
 		imageRegistry  *v1.ImageRegistry
 		inputConfig    *v1.RayClusterConfig
-		expectedConfig *v1.RayClusterConfig
+		expectedConfig func() *v1.RayClusterConfig
 		expectError    bool
 	}{
 		{
@@ -920,31 +958,8 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			inputConfig: &v1.RayClusterConfig{
 				ClusterName: "test-cluster",
 			},
-			expectedConfig: &v1.RayClusterConfig{
-				ClusterName: "test-cluster",
-				Provider: v1.Provider{
-					Type: "local",
-				},
-				Docker: v1.Docker{
-					ContainerName: "ray_container",
-					PullBeforeRun: true,
-					Image:         "registry.example.com/neutree/neutree-serve:v1.0.0",
-				},
-				HeadStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				WorkerStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				StaticWorkerStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				InitializationCommands: []string{
-					"docker login registry.example.com -u 'user' -p 'pass'",
-				},
+			expectedConfig: func() *v1.RayClusterConfig {
+				return defaultExpectedConfig()
 			},
 			expectError: false,
 		},
@@ -975,36 +990,13 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			inputConfig: &v1.RayClusterConfig{
 				ClusterName: "test-cluster-1",
 			},
-			expectedConfig: &v1.RayClusterConfig{
-				ClusterName: "test-cluster",
-				Provider: v1.Provider{
-					Type: "local",
-				},
-				Docker: v1.Docker{
-					ContainerName: "ray_container",
-					PullBeforeRun: true,
-					Image:         "registry.example.com/neutree/neutree-serve:v1.0.0",
-				},
-				HeadStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				WorkerStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				StaticWorkerStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				InitializationCommands: []string{
-					"docker login registry.example.com -u 'user' -p 'pass'",
-				},
+			expectedConfig: func() *v1.RayClusterConfig {
+				return defaultExpectedConfig()
 			},
 			expectError: false,
 		},
 		{
-			name: "success - always use neutree cluster name",
+			name: "success - without registry auth",
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
@@ -1020,95 +1012,13 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Spec: &v1.ImageRegistrySpec{
 					URL:        "http://registry.example.com",
 					Repository: "neutree",
-					AuthConfig: v1.ImageRegistryAuthConfig{
-						Username: "user",
-						Password: "pass",
-					},
-					Ca: "Y2EK",
 				},
 			},
-			inputConfig: &v1.RayClusterConfig{
-				ClusterName: "test-cluster-1",
-			},
-			expectedConfig: &v1.RayClusterConfig{
-				ClusterName: "test-cluster",
-				Provider: v1.Provider{
-					Type: "local",
-				},
-				Docker: v1.Docker{
-					ContainerName: "ray_container",
-					PullBeforeRun: true,
-					Image:         "registry.example.com/neutree/neutree-serve:v1.0.0",
-				},
-				HeadStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				WorkerStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				StaticWorkerStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				InitializationCommands: []string{
-					"docker login registry.example.com -u 'user' -p 'pass'",
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "success - registry without CA",
-			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{Name: "test-cluster"},
-				Spec: &v1.ClusterSpec{
-					Version: "v1.0.0",
-					Config: map[string]interface{}{
-						"auth": map[string]interface{}{
-							"ssh_user": "root",
-						},
-					},
-				},
-			},
-			imageRegistry: &v1.ImageRegistry{
-				Spec: &v1.ImageRegistrySpec{
-					URL:        "http://registry.example.com",
-					Repository: "neutree",
-					AuthConfig: v1.ImageRegistryAuthConfig{
-						Username: "user",
-						Password: "pass",
-					},
-				},
-			},
-			inputConfig: &v1.RayClusterConfig{
-				ClusterName: "test-cluster-1",
-			},
-			expectedConfig: &v1.RayClusterConfig{
-				ClusterName: "test-cluster",
-				Provider: v1.Provider{
-					Type: "local",
-				},
-				Docker: v1.Docker{
-					ContainerName: "ray_container",
-					PullBeforeRun: true,
-					Image:         "registry.example.com/neutree/neutree-serve:v1.0.0",
-				},
-				HeadStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				WorkerStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				StaticWorkerStartRayCommands: []string{
-					"ray stop",
-					`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
-				},
-				InitializationCommands: []string{
-					"docker login registry.example.com -u 'user' -p 'pass'",
-				},
+			inputConfig: &v1.RayClusterConfig{},
+			expectedConfig: func() *v1.RayClusterConfig {
+				config := defaultExpectedConfig()
+				config.InitializationCommands = []string{}
+				return config
 			},
 			expectError: false,
 		},
@@ -1154,15 +1064,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedConfig.ClusterName, config.ClusterName)
-				assert.Equal(t, tt.expectedConfig.Provider.Type, config.Provider.Type)
-				assert.Equal(t, tt.expectedConfig.Docker.ContainerName, config.Docker.ContainerName)
-				assert.Equal(t, tt.expectedConfig.Docker.PullBeforeRun, config.Docker.PullBeforeRun)
-				assert.Equal(t, tt.expectedConfig.Docker.Image, config.Docker.Image)
-				assert.Equal(t, tt.expectedConfig.HeadStartRayCommands, config.HeadStartRayCommands)
-				assert.Equal(t, tt.expectedConfig.WorkerStartRayCommands, config.WorkerStartRayCommands)
-				assert.Equal(t, tt.expectedConfig.StaticWorkerStartRayCommands, config.StaticWorkerStartRayCommands)
-				assert.Equal(t, tt.expectedConfig.InitializationCommands, config.InitializationCommands)
+				expectedConfig := tt.expectedConfig()
+				eq := assert.ObjectsAreEqual(config, expectedConfig)
+				if !eq {
+					t.Errorf("Generated config does not match expected config.\nGot: %+v\nExpected: %+v", config, expectedConfig)
+				}
 			}
 		})
 	}

@@ -295,21 +295,23 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		"--cap-add=SYS_ADMIN",
 		"--security-opt=seccomp=unconfined",
 		"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
+		// Increase nofile ulimit to avoid "Too many open files" error in Ray workers
+		"--ulimit nofile=65536:65536",
 	}
 
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py --head --port=6379 --metrics-export-port=%d --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
+		fmt.Sprintf(`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --metrics-export-port=%d --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
 			v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.WorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+		fmt.Sprintf(`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 	rayClusterConfig.StaticWorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
+		fmt.Sprintf(`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
 			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
 	}
 
