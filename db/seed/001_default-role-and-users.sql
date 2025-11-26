@@ -35,8 +35,24 @@ DECLARE
     admin_user_id UUID;
     uuid UUID;
     random_password TEXT;
+    custom_password TEXT;
 BEGIN
-    SELECT encode(gen_random_bytes(8), 'hex') INTO random_password;
+    -- Try to get custom password from environment variable
+    -- Use current_setting with missing_ok = true to avoid error if not set
+    BEGIN
+        custom_password := current_setting('neutree.admin_password', true);
+    EXCEPTION
+        WHEN OTHERS THEN
+            custom_password := NULL;
+    END;
+
+    -- If custom password is provided and not empty, use it; otherwise generate random
+    IF custom_password IS NOT NULL AND custom_password != '' THEN
+        random_password := custom_password;
+    ELSE
+        SELECT encode(gen_random_bytes(8), 'hex') INTO random_password;
+    END IF;
+
     SELECT gen_random_uuid() INTO uuid;
 
     -- Create admin user if not exists

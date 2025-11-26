@@ -14,6 +14,10 @@ global:
   imageRegistry: ""
 
 jwtSecret: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
+# the password for the neutree admin user.
+# it is valid when starting neutree core for the first time.
+# It is recommended to change it quickly after installation.
+adminPassword: ""
 imagePullSecrets: []
 
 system:

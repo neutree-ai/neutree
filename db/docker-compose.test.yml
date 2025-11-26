@@ -61,6 +61,8 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
+    environment:
+      - PGOPTIONS=-c neutree.admin_password=neutree-test
     command: >
       bash -c "
         for file in /seed/*.sql; do

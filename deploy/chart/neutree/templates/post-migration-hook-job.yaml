@@ -46,6 +46,9 @@ spec:
       - name: post-migration-hook
         image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.db.image.registry "repository" .Values.db.image.repository "tag" .Values.db.image.tag "defaultTag" .Values.db.image.tag) }}
         imagePullPolicy: IfNotPresent
+        env:
+          - name: PGOPTIONS
+            value: "-c neutree.admin_password={{ .Values.adminPassword }}"
         command: ["bash", "-c"]
         args:
           - 'for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://{{.Values.db.user }}:{{.Values.db.password }}@{{ include "neutree.fullname" .}}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable -f $$file || exit 1; done'
