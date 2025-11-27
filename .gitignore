@@ -31,3 +31,4 @@ deploy/chart/neutree/vmagent
 scripts/dashboard/ray-upstream
 scripts/dashboard/vllm-upstream
 scripts/dashboard/output
+scripts/builder/dist

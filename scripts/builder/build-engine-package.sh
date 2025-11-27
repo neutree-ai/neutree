@@ -5,6 +5,9 @@
 
 set -e
 
+VERSION=$(git describe --tags --always --dirty)
+OUTPUT_DIR="./dist"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -464,22 +467,22 @@ ${DEPLOY_TEMPLATE_CONTENT}"
     cat > "$PACKAGE_DIR/manifest.yaml" << EOF
 manifest_version: "1.0"
 
-package:
-  metadata:
-    engine_name: "$ENGINE_NAME"
-    version: "$ENGINE_VERSION"
-    description: "${DESCRIPTION:-Engine version $ENGINE_VERSION}"
-    author: "$(whoami)"
-    created_at: "$CREATED_AT"
-    package_version: "1.0"
-    tags:
-      - "llm"
-      - "inference"
+metadata:
+  description: "${DESCRIPTION:-Engine version $ENGINE_VERSION}"
+  author: "Neutree Team"
+  created_at: "$CREATED_AT"
+  version: $VERSION
+  tags:
+    - "engine"
+    - "$ENGINE_NAME"
+    - "$ENGINE_VERSION"
 
-  images:$IMAGE_ENTRIES
+images:$IMAGE_ENTRIES
 
-  engine_version:
-    version: "$ENGINE_VERSION"
+engines:
+- name: $ENGINE_NAME
+  engine_versions:
+  - version: "$ENGINE_VERSION"
 ${VALUES_SCHEMA_SECTION}
 
 $DEPLOY_TEMPLATE_SECTION
@@ -496,15 +499,17 @@ tar -I "pigz -p 16" -cf "$OUTPUT_FILE" *
 cd - > /dev/null
 
 # Move to final location
-if [ -f "$OUTPUT_FILE" ]; then
-    :  # File is already in the right place
+mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
+# Calculate checksum
+log_info "Calculating checksum..."
+if command -v md5sum &> /dev/null; then
+    md5sum "$OUTPUT_DIR/$OUTPUT_FILE" > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
 else
-    mv "$PACKAGE_DIR/$OUTPUT_FILE" "./$OUTPUT_FILE"
+    md5 "$OUTPUT_DIR/$OUTPUT_FILE" | awk '{print $4}' > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
 fi
 
 # Get package size
-PACKAGE_SIZE=$(stat -f%z "$OUTPUT_FILE" 2>/dev/null || stat -c%s "$OUTPUT_FILE" 2>/dev/null)
-
+PACKAGE_SIZE=$(stat -f%z "$OUTPUT_DIR/$OUTPUT_FILE" 2>/dev/null || stat -c%s "$OUTPUT_DIR/$OUTPUT_FILE" 2>/dev/null)
 print_info "Package created successfully!"
 echo ""
 echo "================================================"
@@ -517,7 +522,7 @@ echo "Size:        $(numfmt --to=iec-i --suffix=B $PACKAGE_SIZE 2>/dev/null || e
 echo "================================================"
 echo ""
 print_info "You can now validate the package with:"
-echo "    neutree-cli engine validate --package $OUTPUT_FILE"
+echo "    neutree-cli import validate --package $OUTPUT_FILE"
 echo ""
 print_info "Or import it with:"
-echo "    neutree-cli engine import --package $OUTPUT_FILE --registry <registry> --workspace <workspace>"
+echo "    neutree-cli import engine --package $OUTPUT_FILE --registry <registry> --workspace <workspace>"
