@@ -947,7 +947,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			imageRegistry: &v1.ImageRegistry{
 				Spec: &v1.ImageRegistrySpec{
 					URL:        "http://registry.example.com",
-					Repository: "neutree",
+					Repository: "",
 					AuthConfig: v1.ImageRegistryAuthConfig{
 						Username: "user",
 						Password: "pass",
@@ -979,7 +979,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			imageRegistry: &v1.ImageRegistry{
 				Spec: &v1.ImageRegistrySpec{
 					URL:        "http://registry.example.com",
-					Repository: "neutree",
+					Repository: "",
 					AuthConfig: v1.ImageRegistryAuthConfig{
 						Username: "user",
 						Password: "pass",
@@ -1011,13 +1011,50 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			imageRegistry: &v1.ImageRegistry{
 				Spec: &v1.ImageRegistrySpec{
 					URL:        "http://registry.example.com",
-					Repository: "neutree",
+					Repository: "",
+					AuthConfig: v1.ImageRegistryAuthConfig{},
+					Ca:         "Y2EK",
 				},
 			},
-			inputConfig: &v1.RayClusterConfig{},
+			inputConfig: &v1.RayClusterConfig{
+				ClusterName: "test-cluster-1",
+			},
 			expectedConfig: func() *v1.RayClusterConfig {
 				config := defaultExpectedConfig()
 				config.InitializationCommands = []string{}
+				return config
+			},
+			expectError: false,
+		},
+		{
+			name: "success - registry without CA",
+			cluster: &v1.Cluster{
+				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Spec: &v1.ClusterSpec{
+					Version: "v1.0.0",
+					Config: map[string]interface{}{
+						"auth": map[string]interface{}{
+							"ssh_user": "root",
+						},
+					},
+				},
+			},
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "http://registry.example.com",
+					Repository: "custom-repo",
+					AuthConfig: v1.ImageRegistryAuthConfig{
+						Username: "user",
+						Password: "pass",
+					},
+				},
+			},
+			inputConfig: &v1.RayClusterConfig{
+				ClusterName: "test-cluster-1",
+			},
+			expectedConfig: func() *v1.RayClusterConfig {
+				config := defaultExpectedConfig()
+				config.Docker.Image = "registry.example.com/custom-repo/neutree/neutree-serve:v1.0.0"
 				return config
 			},
 			expectError: false,

@@ -40,5 +40,13 @@ func GetImagePrefix(imageRegistry *v1.ImageRegistry) (string, error) {
 		return "", errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
 	}
 
+	if registryURL.Host == "" {
+		return "", errors.New("invalid image registry url: " + imageRegistry.Spec.URL)
+	}
+
+	if imageRegistry.Spec.Repository == "" {
+		return registryURL.Host, nil
+	}
+
 	return registryURL.Host + "/" + imageRegistry.Spec.Repository, nil
 }

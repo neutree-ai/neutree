@@ -266,6 +266,13 @@ docker-test-core: ## Redeploy local neutree-core for testing
 	docker cp bin/neutree-core neutree-core:/neutree-core
 	docker restart neutree-core
 
+.PHONY: docker-test-db-scripts
+docker-test-db-scripts: ## Overwrite db scripts for testing, and restart related services
+	docker cp db copy-db-scripts:/
+	docker restart copy-db-scripts
+	docker restart migration
+	docker restart post-migration-hook
+
 VENDIR := $(TOOLS_BIN_DIR)/vendir
 
 vendir: $(VENDIR) # Download vendir if not yet.

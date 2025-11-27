@@ -192,7 +192,7 @@ spec:
       serviceAccountName: vmagent-service-account
       containers:
       - name: vmagent
-        image: {{ .ImagePrefix }}/vmagent:{{ .Version }}
+        image: {{ .ImagePrefix }}/victoriametrics/vmagent:{{ .Version }}
         args:
         - --promscrape.config=/etc/prometheus/prometheus.yml
         - --promscrape.configCheckInterval=10s

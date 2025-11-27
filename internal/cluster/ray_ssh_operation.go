@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"fmt"
-	"net/url"
 	"path"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
@@ -283,12 +283,12 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		rayClusterConfig.Docker.ContainerName = "ray_container"
 	}
 
-	registryURL, err := url.Parse(imageRegistry.Spec.URL)
+	imagePrefix, err := util.GetImagePrefix(imageRegistry)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
+		return nil, errors.Wrap(err, "failed to get image prefix")
 	}
 
-	rayClusterConfig.Docker.Image = registryURL.Host + "/" + imageRegistry.Spec.Repository + "/neutree-serve:" + cluster.Spec.Version
+	rayClusterConfig.Docker.Image = imagePrefix + "/neutree/neutree-serve:" + cluster.Spec.Version
 	rayClusterConfig.Docker.PullBeforeRun = true
 	rayClusterConfig.Docker.RunOptions = []string{
 		"--privileged",
@@ -317,19 +317,11 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 
 	initializationCommands := []string{}
 	// login registry.
-	var password string
+	username, password := util.GetImageRegistryAuthInfo(imageRegistry)
+	registry := strings.Split(imagePrefix, "/")[0]
 
-	switch {
-	case imageRegistry.Spec.AuthConfig.Password != "":
-		password = imageRegistry.Spec.AuthConfig.Password
-	case imageRegistry.Spec.AuthConfig.IdentityToken != "":
-		password = imageRegistry.Spec.AuthConfig.IdentityToken
-	case imageRegistry.Spec.AuthConfig.RegistryToken != "":
-		password = imageRegistry.Spec.AuthConfig.RegistryToken
-	}
-
-	if imageRegistry.Spec.AuthConfig.Username != "" && password != "" {
-		dockerLoginCommand := fmt.Sprintf("docker login %s -u '%s' -p '%s'", registryURL.Host, imageRegistry.Spec.AuthConfig.Username, password)
+	if username != "" && password != "" {
+		dockerLoginCommand := fmt.Sprintf("docker login %s -u '%s' -p '%s'", registry, username, password)
 		initializationCommands = append(initializationCommands, dockerLoginCommand)
 	}
 

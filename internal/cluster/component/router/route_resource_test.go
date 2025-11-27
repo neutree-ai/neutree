@@ -53,7 +53,7 @@ func Test_BuildRouterDeployment(t *testing.T) {
 			assert.Equal(t, "router", deployment.GetName(), "Deployment name mismatch")
 			assert.Equal(t, "router", deployment.GetLabels()["app"], "Deployment app label mismatch")
 			assert.Equal(t, int32(2), *deployment.Spec.Replicas, "Deployment replicas mismatch")
-			assert.Equal(t, "test-image-prefix/router:1.0.0", deployment.Spec.Template.Spec.Containers[0].Image, "Deployment image mismatch")
+			assert.Equal(t, "test-image-prefix/neutree/router:1.0.0", deployment.Spec.Template.Spec.Containers[0].Image, "Deployment image mismatch")
 			assert.Equal(t, "test-image-pull-secret", deployment.Spec.Template.Spec.ImagePullSecrets[0].Name, "Deployment image pull secret mismatch")
 			actualCPU := deployment.Spec.Template.Spec.Containers[0].Resources.Limits["cpu"]
 			actualMemory := deployment.Spec.Template.Spec.Containers[0].Resources.Limits["memory"]
