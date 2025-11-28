@@ -10,6 +10,7 @@ var (
 	apiKey    string
 	workspace string
 	registry  string
+	insecure  bool
 )
 
 func NewModelCmd() *cobra.Command {
@@ -24,6 +25,7 @@ func NewModelCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key")
 	cmd.PersistentFlags().StringVarP(&workspace, "workspace", "w", "default", "Workspace to use")
 	cmd.PersistentFlags().StringVarP(&registry, "registry", "r", "default", "Registry to use")
+	cmd.PersistentFlags().BoolVar(&insecure, "insecure", false, "Skip TLS verification")
 
 	// Add subcommands
 	cmd.AddCommand(NewListCmd())

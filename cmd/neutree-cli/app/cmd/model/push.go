@@ -90,8 +90,17 @@ func NewPushCmd() *cobra.Command {
 				defer os.Remove(archivePath)
 			}
 
+			clientOptions := []client.ClientOption{
+				client.WithAPIKey(apiKey),
+				client.WithTimeout(0),
+			}
+
+			if insecure {
+				clientOptions = append(clientOptions, client.WithInsecureSkipVerify())
+			}
+
 			// Create client
-			c := client.NewClient(serverURL, client.WithAPIKey(apiKey), client.WithTimeout(0))
+			c := client.NewClient(serverURL, clientOptions...)
 
 			// Get file size for progress bar
 			fileInfo, err := os.Stat(modelPath)

@@ -28,8 +28,16 @@ func NewPullCmd() *cobra.Command {
 				return err
 			}
 
+			clientOptions := []client.ClientOption{
+				client.WithAPIKey(apiKey),
+				client.WithTimeout(0),
+			}
+
+			if insecure {
+				clientOptions = append(clientOptions, client.WithInsecureSkipVerify())
+			}
 			// Create client
-			c := client.NewClient(serverURL, client.WithAPIKey(apiKey), client.WithTimeout(0))
+			c := client.NewClient(serverURL, clientOptions...)
 
 			// If output directory is not specified, use current directory
 			if outputDir == "" {
