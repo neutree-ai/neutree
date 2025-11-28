@@ -110,12 +110,13 @@ func TestMutateAcceleratorRuntimeConfig(t *testing.T) {
 			}
 
 			changed, err := sshRayClusterReconciler.mutateAcceleratorRuntimeConfig(&ReconcileContext{
-				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-					CommonClusterConfig: v1.CommonClusterConfig{
-						AcceleratorType: pointer.String("gpu"),
+				sshClusterConfig:    &v1.RaySSHProvisionClusterConfig{},
+				sshRayClusterConfig: tt.input,
+				Cluster: &v1.Cluster{
+					Status: &v1.ClusterStatus{
+						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 					},
 				},
-				sshRayClusterConfig: tt.input,
 			}, "127.0.0.1")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("MutateAcceleratorRuntimeConfig() error = %v, wantErr %v", err, tt.wantErr)
@@ -235,15 +236,16 @@ func TestUpCluster(t *testing.T) {
 			_, err := sshRayClusterReconciler.upCluster(&ReconcileContext{
 				sshRayClusterConfig: &v1.RayClusterConfig{},
 				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-					CommonClusterConfig: v1.CommonClusterConfig{
-						AcceleratorType: pointer.String("gpu"),
-					},
+					CommonClusterConfig: v1.CommonClusterConfig{},
 				},
 				sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
 				Cluster: &v1.Cluster{
 					Metadata: &v1.Metadata{
 						Name:      "test",
 						Workspace: "test",
+					},
+					Status: &v1.ClusterStatus{
+						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 					},
 				},
 			}, tt.restart)
@@ -500,6 +502,11 @@ func TestStartNode(t *testing.T) {
 					},
 				},
 				sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
+				Cluster: &v1.Cluster{
+					Status: &v1.ClusterStatus{
+						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+					},
+				},
 			}, "test-node")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("startNode() error = %v, wantErr %v", err, tt.wantErr)

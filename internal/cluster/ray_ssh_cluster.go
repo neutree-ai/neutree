@@ -469,26 +469,35 @@ func (c *sshRayClusterReconciler) buildSSHCommandArgs(reconcileCtx *ReconcileCon
 }
 
 func (c *sshRayClusterReconciler) configClusterAcceleratorType(reconcileCtx *ReconcileContext) error {
-	if reconcileCtx.sshClusterConfig.AcceleratorType != nil {
-		return nil
-	}
-
 	acceleratorType, err := c.detectClusterAcceleratorType(reconcileCtx)
 	if err != nil {
 		return errors.Wrapf(err, "failed to detect cluster accelerator type")
 	}
 
-	reconcileCtx.sshClusterConfig.AcceleratorType = &acceleratorType
-	reconcileCtx.Cluster.Spec.Config = reconcileCtx.sshClusterConfig
+	// record detected accelerator type to cluster status.
+	if reconcileCtx.Cluster.Status == nil {
+		reconcileCtx.Cluster.Status = &v1.ClusterStatus{}
+	}
 
-	return c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
-		Spec: reconcileCtx.Cluster.Spec,
-	})
+	reconcileCtx.Cluster.Status.AcceleratorType = &acceleratorType
+
+	return nil
 }
 
 func (c *sshRayClusterReconciler) detectClusterAcceleratorType(reconcileCtx *ReconcileContext) (string, error) {
+	// first we check the cluster spec for accelerator type
+	if reconcileCtx.sshClusterConfig.AcceleratorType != nil {
+		return *reconcileCtx.sshClusterConfig.AcceleratorType, nil
+	}
+
+	// then we check the last detected accelerator type in cluster status
+	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.AcceleratorType != nil {
+		return *reconcileCtx.Cluster.Status.AcceleratorType, nil
+	}
+
 	detectAcceleratorType := ""
 
+	// finally we detect the accelerator type from nodes
 	acceleratorType, err := c.acceleratorManager.GetNodeAcceleratorType(context.Background(),
 		reconcileCtx.sshClusterConfig.Provider.HeadIP, reconcileCtx.sshClusterConfig.Auth)
 	if err != nil {

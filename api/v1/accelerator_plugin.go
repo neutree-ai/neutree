@@ -28,6 +28,15 @@ const (
 
 type AcceleratorType string
 
+func (at AcceleratorType) String() string {
+	return string(at)
+}
+
+func (at AcceleratorType) StringPtr() *string {
+	s := at.String()
+	return &s
+}
+
 // Accelerator type constants
 const (
 	AcceleratorTypeNVIDIAGPU AcceleratorType = "nvidia_gpu"

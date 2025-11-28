@@ -129,6 +129,10 @@ type ClusterStatus struct {
 	// ClusterResources contains structured resource information organized by dimensions.
 	// This replaces the deprecated ResourceInfo field with a type-safe structure.
 	ResourceInfo *ClusterResources `json:"resource_info,omitempty"`
+
+	// AcceleratorType is the accelerator type of the cluster, e.g. nvidia_gpu, amd_gpu, etc.
+	// It is currently only used for SSH clusters to avoid frequent parsing of node accelerators.
+	AcceleratorType *string `json:"accelerator_type,omitempty"`
 }
 
 type NodeProvision struct {
