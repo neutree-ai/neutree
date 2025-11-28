@@ -16,8 +16,16 @@ func NewListCmd() *cobra.Command {
 		Short: "List all models in the registry",
 		Long:  `List all models in the registry with their basic information`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			clientOptions := []client.ClientOption{
+				client.WithAPIKey(apiKey),
+			}
+
+			if insecure {
+				clientOptions = append(clientOptions, client.WithInsecureSkipVerify())
+			}
+
 			// Create client
-			c := client.NewClient(serverURL, client.WithAPIKey(apiKey))
+			c := client.NewClient(serverURL, clientOptions...)
 
 			// List models
 			models, err := c.Models.List(workspace, registry, "")
