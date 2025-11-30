@@ -50,7 +50,7 @@ func (r *RouterComponent) Reconcile() error {
 		return errors.Wrap(err, "failed to apply route resources")
 	}
 
-	status, err := r.CheckResourcesStatus(context.Background()) // Log status, but ignore error for now
+	status, err := r.CheckResourcesStatus(context.Background())
 	if err != nil {
 		return errors.Wrap(err, "failed to check route resources status")
 	}

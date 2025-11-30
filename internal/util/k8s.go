@@ -6,6 +6,8 @@ import (
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -59,4 +61,20 @@ func IsDeploymentUpdatedAndReady(deployment *appsv1.Deployment) bool {
 	}
 
 	return true
+}
+
+func ToUnstructured(obj runtime.Object) (*unstructured.Unstructured, error) {
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		return u, nil
+	}
+
+	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		return nil, err
+	}
+
+	u := &unstructured.Unstructured{Object: m}
+	u.SetGroupVersionKind(obj.GetObjectKind().GroupVersionKind())
+
+	return u, nil
 }

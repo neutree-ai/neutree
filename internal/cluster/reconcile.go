@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -44,6 +45,8 @@ type ReconcileContext struct {
 	kubernetesClusterConfig *v1.KubernetesClusterConfig
 
 	rayService dashboard.DashboardService
+
+	logger klog.Logger
 }
 
 type NewReconciler func(cluster *v1.Cluster, acceleratorManager accelerator.Manager,

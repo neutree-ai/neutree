@@ -1518,6 +1518,31 @@ func TestKubernetesOrchestrator_setModelCacheVariables(t *testing.T) {
 			expectError:      false,
 		},
 		{
+			name: "cluster with pvc model caches",
+			cluster: &v1.Cluster{
+				Metadata: &v1.Metadata{
+					Name:      "test-cluster",
+					Workspace: "test-workspace",
+				},
+				Spec: &v1.ClusterSpec{
+					Type: "kubernetes",
+					Config: v1.KubernetesClusterConfig{
+						CommonClusterConfig: v1.CommonClusterConfig{
+							ModelCaches: []v1.ModelCache{
+								{
+									ModelRegistryType: v1.HuggingFaceModelRegistryType,
+									PVC:               &corev1.PersistentVolumeClaimSpec{},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedVolCount: 2,
+			expectedEnvKeys:  []string{v1.ModelCacheDirENV},
+			expectError:      false,
+		},
+		{
 			name: "cluster without model cache",
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{
@@ -1597,6 +1622,46 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 					VolumeSource: corev1.VolumeSource{
 						HostPath: &corev1.HostPathVolumeSource{
 							Path: "/data/huggingface",
+						},
+					},
+				},
+			},
+			expectedMounts: []corev1.VolumeMount{
+				{
+					Name:      "models-cache-tmp",
+					MountPath: "/models-cache",
+				},
+				{
+					Name:      "models-cache-hugging-face",
+					MountPath: "/models-cache/hugging-face",
+				},
+			},
+		},
+		{
+			name: "with pvc model cache",
+			modelCaches: []v1.ModelCache{
+				{
+					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					PVC:               &corev1.PersistentVolumeClaimSpec{},
+				},
+			},
+			expectedEnvs: map[string]string{
+				v1.ModelCacheDirENV: "/models-cache",
+			},
+			expectedVolumes: []corev1.Volume{
+				{
+					Name: "models-cache-tmp",
+					VolumeSource: corev1.VolumeSource{
+						EmptyDir: &corev1.EmptyDirVolumeSource{
+							Medium: corev1.StorageMediumDefault,
+						},
+					},
+				},
+				{
+					Name: "models-cache-hugging-face",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "models-cache-hugging-face",
 						},
 					},
 				},
