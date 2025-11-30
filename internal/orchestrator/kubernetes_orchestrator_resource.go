@@ -415,6 +415,28 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 				MountPath: path.Join(modelCacheMountPathPrefix, name),
 			})
 		}
+
+		if cache.PVC != nil {
+			volumes = append(volumes, corev1.Volume{
+				Name: name,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: util.PvcName(cache),
+					},
+				},
+			})
+
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{
+				Name:      name,
+				MountPath: path.Join(modelCacheMountPathPrefix, name),
+			})
+
+			if cache.ModelRegistryType == v1.BentoMLModelRegistryType {
+				env[v1.BentoMLHomeEnv] = path.Join(modelCacheMountPathPrefix, name)
+			} else if cache.ModelRegistryType == v1.HuggingFaceModelRegistryType {
+				env[v1.HFHomeEnv] = path.Join(modelCacheMountPathPrefix, name)
+			}
+		}
 	}
 
 	return volumes, volumeMounts, env

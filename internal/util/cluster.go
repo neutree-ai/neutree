@@ -234,3 +234,13 @@ func GetClusterServeAddress(cluster *v1.Cluster) (string, string, int, error) {
 
 	return urlParse.Scheme, urlParse.Hostname(), port, nil
 }
+
+func PvcName(cache v1.ModelCache) string {
+	baseName := "model-cache"
+
+	if cache.ModelRegistryType != "" {
+		baseName = string(cache.ModelRegistryType) + "-" + baseName
+	}
+
+	return baseName
+}

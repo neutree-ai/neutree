@@ -1403,6 +1403,31 @@ func TestKubernetesOrchestrator_setModelCacheVariables(t *testing.T) {
 			expectError:      false,
 		},
 		{
+			name: "cluster with pvc model caches",
+			cluster: &v1.Cluster{
+				Metadata: &v1.Metadata{
+					Name:      "test-cluster",
+					Workspace: "test-workspace",
+				},
+				Spec: &v1.ClusterSpec{
+					Type: "kubernetes",
+					Config: v1.KubernetesClusterConfig{
+						CommonClusterConfig: v1.CommonClusterConfig{
+							ModelCaches: []v1.ModelCache{
+								{
+									ModelRegistryType: v1.HuggingFaceModelRegistryType,
+									PVC:               &corev1.PersistentVolumeClaimSpec{},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedVolCount: 1,
+			expectedEnvKeys:  []string{v1.HFHomeEnv},
+			expectError:      false,
+		},
+		{
 			name: "cluster without model cache",
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{

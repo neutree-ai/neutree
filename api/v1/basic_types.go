@@ -13,3 +13,11 @@ type Metadata struct {
 func (m Metadata) WorkspaceName() string {
 	return m.Workspace + "/" + m.Name
 }
+
+func (m Metadata) GetAnnotation(key string) string {
+	if m.Annotations == nil {
+		return ""
+	}
+
+	return m.Annotations[key]
+}
