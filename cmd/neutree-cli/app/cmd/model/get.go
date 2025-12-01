@@ -25,8 +25,16 @@ func NewGetCmd() *cobra.Command {
 				return err
 			}
 
+			clientOptions := []client.ClientOption{
+				client.WithAPIKey(apiKey),
+			}
+
+			if insecure {
+				clientOptions = append(clientOptions, client.WithInsecureSkipVerify())
+			}
+
 			// Create client
-			c := client.NewClient(serverURL, client.WithAPIKey(apiKey))
+			c := client.NewClient(serverURL, clientOptions...)
 
 			// Get model details
 			modelVersion, err := c.Models.Get(workspace, registry, modelName, version)
