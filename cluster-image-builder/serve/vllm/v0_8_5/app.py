@@ -3,6 +3,7 @@ import enum
 import logging
 import time
 import json
+from turtle import down
 from typing import Dict, Optional, Any, AsyncGenerator, List
 
 from fastapi import FastAPI, Request
@@ -35,6 +36,8 @@ from vllm.engine.metrics import RayPrometheusStatLogger
 from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
 from serve._replica_scheduler.chwbl_scheduler import ConsistentHashReplicaScheduler
 
+from downloader import get_downloader, build_request_from_model_args
+
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
@@ -49,6 +52,9 @@ class Backend:
                  model_version: str,
                  model_file: str = "",
                  model_task: str = "",
+                 model_registry_path: str = "",
+                 model_path: str = "",
+                 model_serve_name: str = "",
                  **engine_kwargs):
         """
         Backend deployment for vLLM inference.
@@ -61,15 +67,24 @@ class Backend:
             model_task: Task type (e.g., "text-generation", "text-embedding", "text-rerank")
             **engine_kwargs: Additional keyword arguments passed directly to AsyncEngineArgs
         """
-        # Configure model based on registry
-        if model_registry_type == "bentoml":
-            model_ref = bentoml.models.get(f"{model_name}:{model_version}")
-            model_file = model_ref.info.labels.get("model_file", "")
-            model_path = model_ref.path_of(model_file)
-        else:
-            model_path = model_name
+        backend, dl_req = build_request_from_model_args({
+            "registry_type": model_registry_type,
+            "name": model_name,
+            "version": model_version,
+            "file": model_file,
+            "task": model_task,
+            "registry_path": model_registry_path,
+            "path": model_path,
+        })
 
-        self.model_id = f"{model_name}:{model_version}"
+        downloader = get_downloader(backend)
+        print(f"[Backend] Downloading model using backend={backend} from source={dl_req.source} to dest={dl_req.dest}")
+        downloader.download(dl_req.source, dl_req.dest, credentials=dl_req.credentials,
+                            recursive=dl_req.recursive, overwrite=dl_req.overwrite,
+                            retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
+        print(f"[Backend] Model download completed.")
+
+        self.model_id = model_serve_name
         self.model_task = model_task
 
         # Extract our custom parameters BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors
@@ -103,6 +118,7 @@ class Backend:
         engine_args = AsyncEngineArgs(
             task=task,
             model=model_path,
+            served_model_name=self.model_id,
             disable_log_stats=False,
             enable_prefix_caching=True,
             **engine_kwargs
@@ -196,9 +212,9 @@ class Backend:
     async def generate(self, payload: Any):
         await self._ensure_chat()
         result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
-        
+
         is_stream = payload.get("stream") is True
-        
+
         if isinstance(result, ErrorResponse):
             if is_stream:
                 logging.error(f"Error during chat completion: {result.message}")
@@ -318,12 +334,12 @@ class Controller:
                     import json
                     error_data = json.loads(first_chunk.replace("data: ", "").strip())
                     return JSONResponse(
-                        content=error_data["error"], 
+                        content=error_data["error"],
                         status_code=400
                     )
             except:
                 pass
-        
+
             return StreamingResponse(
                 content=r,
                 media_type="text/event-stream"
@@ -396,6 +412,9 @@ def app_builder(args: Dict[str, Any]) -> Application:
         model_version=model.get('version'),
         model_file=model.get('file', ''),
         model_task=model.get('task'),
+        model_registry_path=model.get('registry_path', ''),
+        model_path=model.get('path', ''),
+        model_serve_name=model.get('serve_name', ''),
         # Pass all other engine args directly through
         **engine_args
     )

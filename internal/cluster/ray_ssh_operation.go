@@ -337,9 +337,16 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 }
 
 func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v1.ModelCache) {
-	if modelCaches == nil {
-		return
-	}
+	sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
+		fmt.Sprintf("-e %s=%s", v1.ModelCacheDirENV, v1.DefaultSSHClusterModelCacheMountPath))
+
+	// Change ownership of the model cache directory to the current user in each node, so that the inference instance can read/write files.
+	// After that, the inference instance can easy read/write model files even though the directory is mounted from host.
+	modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", v1.DefaultSSHClusterModelCacheMountPath)
+	sshRayClusterConfig.HeadStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.HeadStartRayCommands...)
+	sshRayClusterConfig.WorkerStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.WorkerStartRayCommands...)
+	sshRayClusterConfig.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand},
+		sshRayClusterConfig.StaticWorkerStartRayCommands...)
 
 	for _, modelCache := range modelCaches {
 		if modelCache.HostPath == nil {
@@ -347,29 +354,12 @@ func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v
 			continue
 		}
 
-		mountPath := path.Join(defaultModelCacheMountPath, string(modelCache.ModelRegistryType))
-
-		switch modelCache.ModelRegistryType {
-		case v1.HuggingFaceModelRegistryType:
-			sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
-				fmt.Sprintf("-e %s=%s", v1.HFHomeEnv, mountPath))
-		case v1.BentoMLModelRegistryType:
-			sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
-				fmt.Sprintf("-e %s=%s", v1.BentoMLHomeEnv, mountPath))
-		default:
-			klog.Warningf("Model registry type %s is not supported, skip", modelCache.ModelRegistryType)
-			continue
-		}
+		mountPath := path.Join(v1.DefaultSSHClusterModelCacheMountPath, string(modelCache.ModelRegistryType))
 
 		hostPath := modelCache.HostPath.Path
 		sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
 			"--volume "+hostPath+":"+mountPath)
 		sshRayClusterConfig.InitializationCommands = append(sshRayClusterConfig.InitializationCommands,
 			fmt.Sprintf("mkdir -p %s && chmod 755 %s", hostPath, hostPath))
-		modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", mountPath)
-		sshRayClusterConfig.HeadStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.HeadStartRayCommands...)
-		sshRayClusterConfig.WorkerStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.WorkerStartRayCommands...)
-		sshRayClusterConfig.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand},
-			sshRayClusterConfig.StaticWorkerStartRayCommands...)
 	}
 }

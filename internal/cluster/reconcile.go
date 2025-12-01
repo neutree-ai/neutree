@@ -14,9 +14,6 @@ import (
 )
 
 const (
-	defaultWorkdir             = "/home/ray"
-	defaultModelCacheMountPath = defaultWorkdir + "/.neutree/model-cache"
-
 	ImagePullSecretName = "image-pull-secret" //nolint:gosec
 )
 

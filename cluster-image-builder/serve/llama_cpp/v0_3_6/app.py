@@ -3,6 +3,7 @@ import os
 import enum
 import json
 import time
+import fnmatch
 from typing import Dict, Any, AsyncGenerator, Optional
 
 import ray
@@ -22,6 +23,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette_context.plugins import RequestIdPlugin
 from starlette_context.middleware import RawContextMiddleware
 
+from downloader import get_downloader, build_request_from_model_args
+
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
@@ -36,6 +39,9 @@ class Backend:
                  model_version: str,
                  model_file: str = "",
                  model_task: str = "",
+                 model_registry_path: str = "",
+                 model_path: str = "",
+                 model_serve_name: str = "",
                  **model_settings):
         """
         Backend deployment for LlamaCpp model inference.
@@ -48,32 +54,46 @@ class Backend:
             model_task: Task type (e.g., "text-generation", "text-embedding")
             **model_settings: Additional model settings for llama-cpp
         """
-       # Configure model based on registry
-        if model_registry_type == "bentoml":
-            model_ref = bentoml.models.get(f"{model_name}:{model_version}")
-            # Check if model file is specified in labels
-            custom_model_file = model_ref.info.labels.get("model_file", "")
-            if custom_model_file:
-                model_file = custom_model_file
-            model_path = model_ref.path_of(model_file)
-            # Override model path in settings
-            model_settings["model"] = model_path
-        elif model_registry_type == "hugging-face":
-            # Use the hf_model_repo_id from settings or default to model_name
-            model_settings["hf_model_repo_id"] = model_name
-            model_settings["model"] = model_file
-        else:
-            raise ValueError(f"Unsupported MODEL_REGISTRY_TYPE: {model_registry_type}")
+
+        backend, dl_req = build_request_from_model_args({
+            "registry_type": model_registry_type,
+            "name": model_name,
+            "version": model_version,
+            "file": model_file,
+            "task": model_task,
+            "registry_path": model_registry_path,
+            "path": model_path,
+        })
+
+        downloader = get_downloader(backend)
+        print(f"[Backend] Downloading model using backend={backend} from source={dl_req.source} to dest={dl_req.dest}")
+        downloader.download(dl_req.source, dl_req.dest, credentials=dl_req.credentials,
+                            recursive=dl_req.recursive, overwrite=dl_req.overwrite,
+                            retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
+        print(f"[Backend] Model download completed.")
+
+        matched_file = False
+        file_pattern = model_file
+        for file in os.listdir(model_path):
+            if fnmatch.fnmatch(file, file_pattern):
+                model_path = os.path.join(model_path, file)
+                matched_file = True
+                break
+
+        if model_file and not matched_file:
+            raise FileNotFoundError(f"Model file matching pattern '{model_file}' not found in path '{model_path}'")
+
+        model_settings["model"] = model_path
 
         if model_task == "text-embedding":
             # Set embedding flag for embedding tasks
             model_settings["embedding"] = True
+        # Store model info
+        self.model_id = model_serve_name
+        model_settings["model_alias"] = self.model_id
 
         # Create model settings and model instance
         self.model_settings = ModelSettings(**model_settings)
-
-        # Store model info
-        self.model_id = f"{model_name}:{model_version}"
 
         # Ensure model can be loaded without errors
         LlamaProxy.load_llama_from_model_settings(self.model_settings)
@@ -247,6 +267,9 @@ def app_builder(args: Dict[str, Any]) -> Application:
         model_version=model.get('version'),
         model_file=model.get('file', ""),
         model_task=model.get('task', ""),
+        model_registry_path=model.get('registry_path', ""),
+        model_path=model.get('path', ""),
+        model_serve_name=model.get('serve_name', ""),
         **model_settings
     )
 

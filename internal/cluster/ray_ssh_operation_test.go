@@ -892,6 +892,7 @@ func TestDownCluster(t *testing.T) {
 }
 
 func TestGenerateRayClusterConfig(t *testing.T) {
+	modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", v1.DefaultSSHClusterModelCacheMountPath)
 	defaultExpectedConfig := func() *v1.RayClusterConfig {
 		return &v1.RayClusterConfig{
 			ClusterName: "test-cluster",
@@ -911,17 +912,21 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"--security-opt=seccomp=unconfined",
 					"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 					"--ulimit nofile=65536:65536",
+					fmt.Sprintf("-e %s=%s", v1.ModelCacheDirENV, v1.DefaultSSHClusterModelCacheMountPath),
 				},
 			},
 			HeadStartRayCommands: []string{
+				modifyPermissionCommand,
 				"ray stop",
 				`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 			},
 			WorkerStartRayCommands: []string{
+				modifyPermissionCommand,
 				"ray stop",
 				`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 			},
 			StaticWorkerStartRayCommands: []string{
+				modifyPermissionCommand,
 				"ray stop",
 				`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 			},
@@ -1121,24 +1126,28 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 func TestMutateModelCache(t *testing.T) {
 	testHostPath := "/mnt/model_cache"
 	initPathCmd := fmt.Sprintf("mkdir -p %s && chmod 755 %s", testHostPath, testHostPath)
+	modelCacheRunOption := fmt.Sprintf("-e %s=%s", v1.ModelCacheDirENV, v1.DefaultSSHClusterModelCacheMountPath)
+	modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", v1.DefaultSSHClusterModelCacheMountPath)
 	tests := []struct {
-		name                        string
-		sshRayClusterConfig         *v1.RayClusterConfig
-		modelCaches                 []v1.ModelCache
-		expectRunOptions            []string
-		expectedContainInitCommands []string
-		expectedStartCommands       []string
+		name                string
+		sshRayClusterConfig *v1.RayClusterConfig
+		modelCaches         []v1.ModelCache
+		expected            *v1.RayClusterConfig
 	}{
 		{
-			name:                "never changed if model cache is nil",
+			name:                "set default command when model cache is nil",
 			sshRayClusterConfig: &v1.RayClusterConfig{},
-
-			expectRunOptions:            []string{},
-			expectedContainInitCommands: []string{},
-			expectedStartCommands:       []string{},
+			expected: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					RunOptions: []string{modelCacheRunOption},
+				},
+				HeadStartRayCommands:         []string{modifyPermissionCommand},
+				WorkerStartRayCommands:       []string{modifyPermissionCommand},
+				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+			},
 		},
 		{
-			name:                "never changed if model cache host path is nil",
+			name:                "only set default command if model cache host path is nil",
 			sshRayClusterConfig: &v1.RayClusterConfig{},
 			modelCaches: []v1.ModelCache{
 				{
@@ -1146,12 +1155,17 @@ func TestMutateModelCache(t *testing.T) {
 					HostPath:          nil,
 				},
 			},
-			expectRunOptions:            []string{},
-			expectedContainInitCommands: []string{},
-			expectedStartCommands:       []string{},
+			expected: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					RunOptions: []string{modelCacheRunOption},
+				},
+				HeadStartRayCommands:         []string{modifyPermissionCommand},
+				WorkerStartRayCommands:       []string{modifyPermissionCommand},
+				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+			},
 		},
 		{
-			name:                "never changed if model cache nfs is not nil, ssh cluster only support hostpath",
+			name:                "only set default command if model cache nfs is not nil, ssh cluster only support hostpath",
 			sshRayClusterConfig: &v1.RayClusterConfig{},
 			modelCaches: []v1.ModelCache{
 				{
@@ -1160,9 +1174,14 @@ func TestMutateModelCache(t *testing.T) {
 					NFS:               &corev1.NFSVolumeSource{Path: testHostPath},
 				},
 			},
-			expectRunOptions:            []string{},
-			expectedContainInitCommands: []string{},
-			expectedStartCommands:       []string{},
+			expected: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					RunOptions: []string{modelCacheRunOption},
+				},
+				HeadStartRayCommands:         []string{modifyPermissionCommand},
+				WorkerStartRayCommands:       []string{modifyPermissionCommand},
+				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+			},
 		},
 		{
 			name:                "mutate huggingface type model cache success",
@@ -1175,13 +1194,17 @@ func TestMutateModelCache(t *testing.T) {
 					},
 				},
 			},
-			expectRunOptions: []string{fmt.Sprintf("-e %s=%s", v1.HFHomeEnv, path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
-				fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType))},
-			expectedContainInitCommands: []string{
-				initPathCmd,
-			},
-			expectedStartCommands: []string{
-				fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+			expected: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					RunOptions: []string{
+						modelCacheRunOption,
+						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+					},
+				},
+				HeadStartRayCommands:         []string{modifyPermissionCommand},
+				WorkerStartRayCommands:       []string{modifyPermissionCommand},
+				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+				InitializationCommands:       []string{initPathCmd},
 			},
 		},
 		{
@@ -1195,13 +1218,17 @@ func TestMutateModelCache(t *testing.T) {
 					},
 				},
 			},
-			expectRunOptions: []string{fmt.Sprintf("-e %s=%s", v1.BentoMLHomeEnv, path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
-				fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType))},
-			expectedContainInitCommands: []string{
-				initPathCmd,
-			},
-			expectedStartCommands: []string{
-				fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
+			expected: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					RunOptions: []string{
+						modelCacheRunOption,
+						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.BentoMLModelRegistryType)),
+					},
+				},
+				HeadStartRayCommands:         []string{modifyPermissionCommand},
+				WorkerStartRayCommands:       []string{modifyPermissionCommand},
+				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+				InitializationCommands:       []string{initPathCmd},
 			},
 		},
 		{
@@ -1221,18 +1248,18 @@ func TestMutateModelCache(t *testing.T) {
 					},
 				},
 			},
-			expectRunOptions: []string{
-				fmt.Sprintf("-e %s=%s", v1.HFHomeEnv, path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
-				fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
-				fmt.Sprintf("-e %s=%s", v1.BentoMLHomeEnv, path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
-				fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
-			},
-			expectedContainInitCommands: []string{
-				initPathCmd,
-			},
-			expectedStartCommands: []string{
-				fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", path.Join(defaultModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
-				fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", path.Join(defaultModelCacheMountPath, v1.BentoMLModelRegistryType)),
+			expected: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					RunOptions: []string{
+						modelCacheRunOption,
+						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.BentoMLModelRegistryType)),
+					},
+				},
+				HeadStartRayCommands:         []string{modifyPermissionCommand},
+				WorkerStartRayCommands:       []string{modifyPermissionCommand},
+				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+				InitializationCommands:       []string{initPathCmd, initPathCmd},
 			},
 		},
 	}
@@ -1241,50 +1268,18 @@ func TestMutateModelCache(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			mutateModelCaches(tt.sshRayClusterConfig, tt.modelCaches)
-			for _, cmd := range tt.expectedContainInitCommands {
-				found := false
-				for _, initCmd := range tt.sshRayClusterConfig.InitializationCommands {
-					if strings.Contains(initCmd, cmd) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("Expected initialization commands to contain %s, but it was not found", cmd)
-				}
+			eq, _, err := util.JsonEqual(tt.expected, tt.sshRayClusterConfig)
+			if err != nil {
+				t.Errorf("JsonEqual() error = %v", err)
+				return
+			}
+			if !eq {
+				t.Errorf("mutateModelCaches() got = %+v, want %+v", tt.sshRayClusterConfig, tt.expected)
 			}
 
-			for _, cmd := range tt.expectedStartCommands {
-				found := false
-				for _, startCmd := range tt.sshRayClusterConfig.StaticWorkerStartRayCommands {
-					if strings.Contains(startCmd, cmd) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("Expected static worker start commands to contain %s, but it was not found", cmd)
-				}
-				found = false
-				for _, startCmd := range tt.sshRayClusterConfig.WorkerStartRayCommands {
-					if strings.Contains(startCmd, cmd) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("Expected worker start commands to contain %s, but it was not found", cmd)
-				}
-				found = false
-				for _, startCmd := range tt.sshRayClusterConfig.HeadStartRayCommands {
-					if strings.Contains(startCmd, cmd) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("Expected head start commands to contain %s, but it was not found", cmd)
-				}
+			eq = assert.ObjectsAreEqual(tt.expected.StaticWorkerStartRayCommands, tt.sshRayClusterConfig.StaticWorkerStartRayCommands)
+			if !eq {
+				t.Errorf("StaticWorkerStartRayCommands not match, got = %+v, want %+v", tt.sshRayClusterConfig.StaticWorkerStartRayCommands, tt.expected.StaticWorkerStartRayCommands)
 			}
 		})
 	}

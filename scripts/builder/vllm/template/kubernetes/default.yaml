@@ -63,10 +63,34 @@ spec:
       volumes:
 {{ .Volumes | toYaml | indent 6 }}
       {{- end }}
+      initContainers:
+        - name: model-downloader
+          image: {{ .ImagePrefix }}/neutree/runtime:{{ .NeutreeVersion }}
+          command:
+            - bash
+            - -c
+          args:
+            - >-
+              python3 -m neutree.downloader
+              --name="{{ .ModelArgs.name }}"
+              --registry_type="{{ .ModelArgs.registry_type }}"
+              --registry_path="{{ .ModelArgs.registry_path }}"
+              --version="{{ .ModelArgs.version }}"
+              --file="{{ .ModelArgs.file }}"
+              --task="{{ .ModelArgs.task }}"
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
 
       containers:
         - name: {{ .EngineName }}
-          image: {{ .ImageRepo }}:{{ .ImageTag }}
+          image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
           command:
           - vllm
           - serve
@@ -76,7 +100,7 @@ spec:
           - "--port"
           - "8000"
           - --served-model-name
-          - {{ .ModelArgs.name }}
+          - {{ .ModelArgs.serve_name }}
           - --task
           {{- if eq .ModelArgs.task "text-embedding" }}
           - embedding

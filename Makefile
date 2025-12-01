@@ -11,6 +11,7 @@ IMAGE_TAG ?= ${shell echo $(VERSION) | awk -F '/' '{print $$NF}'}
 NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
 NEUTREE_API_IMAGE := $(IMAGE_PREFIX)neutree-api
 NEUTREE_DB_SCRIPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
+NEUTREE_RUNTIME_IMAGE := $(IMAGE_PREFIX)neutree-runtime
 
 ARCH ?= amd64
 ALL_ARCH = amd64 arm64
@@ -107,6 +108,10 @@ docker-build-api: # build api docker image
 docker-build-db-scripts:
 	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_DB_SCRIPTS_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.db-scripts
 
+.PHONY: docker-build-runtime
+docker-build-runtime:
+	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.runtime
+
 .PHONY: docker-push-all ## Push all the architecture docker images
 docker-push-all:
 	$(MAKE) ALL_ARCH="$(ALL_ARCH)" $(addprefix docker-push-,$(ALL_DOCKER_BUILD))
@@ -129,6 +134,10 @@ docker-push-api: # push api docker image
 docker-push-db-scripts: # push db scripts docker image
 	docker push $(NEUTREE_DB_SCRIPTS_IMAGE)-$(ARCH):$(IMAGE_TAG)
 
+.PHONY: docker-push-runtime
+docker-push-runtime: # push runtime docker image
+	docker push $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ALL_DOCKER_BUILD))
 
@@ -149,6 +158,12 @@ docker-push-manifest-db-scripts: ## Push the db scripts manifest docker image.
 	docker manifest create --amend $(NEUTREE_DB_SCRIPTS_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_DB_SCRIPTS_IMAGE)\-&:$(IMAGE_TAG)~g")
 	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_DB_SCRIPTS_IMAGE}:${IMAGE_TAG} ${NEUTREE_DB_SCRIPTS_IMAGE}-$${arch}:${IMAGE_TAG}; done
 	docker manifest push --purge ${NEUTREE_DB_SCRIPTS_IMAGE}:${IMAGE_TAG}
+
+.PHONY: docker-push-manifest-runtime
+docker-push-manifest-runtime: ## Push the runtime manifest docker image.
+	docker manifest create --amend $(NEUTREE_RUNTIME_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_RUNTIME_IMAGE)\-&:$(IMAGE_TAG)~g")
+	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_RUNTIME_IMAGE}:${IMAGE_TAG} ${NEUTREE_RUNTIME_IMAGE}-$${arch}:${IMAGE_TAG}; done
+	docker manifest push --purge ${NEUTREE_RUNTIME_IMAGE}:${IMAGE_TAG}
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 

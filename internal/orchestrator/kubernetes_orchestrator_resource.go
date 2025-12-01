@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"fmt"
 	"maps"
 	"net/url"
 	"path"
@@ -15,7 +14,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/util"
-	"github.com/neutree-ai/neutree/pkg/model_registry"
 )
 
 type DeploymentManifestVariables struct {
@@ -25,6 +23,7 @@ type DeploymentManifestVariables struct {
 	Workspace       string
 	EngineName      string
 	EngineVersion   string
+	ImagePrefix     string
 	ImageRepo       string
 	ImageTag        string
 	ImagePullSecret string
@@ -37,6 +36,7 @@ type DeploymentManifestVariables struct {
 	RoutingLogic    string
 	Replicas        int32
 	NodeSelector    map[string]string
+	NeutreeVersion  string
 }
 
 func buildDeploymentObjects(deployTemplate string, renderVars DeploymentManifestVariables) (*unstructured.UnstructuredList, error) {
@@ -54,6 +54,7 @@ func (k *kubernetesOrchestrator) setBasicVariables(data *DeploymentManifestVaria
 	data.ImagePullSecret = cluster.ImagePullSecretName
 	data.Replicas = int32(*endpoint.Spec.Replicas.Num)
 	data.RoutingLogic = "roundrobin"
+	data.NeutreeVersion = deployedCluster.Spec.Version
 }
 
 // setDeployImageVariables sets the container image repository and tag for deployment
@@ -64,9 +65,11 @@ func (k *kubernetesOrchestrator) setDeployImageVariables(data *DeploymentManifes
 		return errors.Wrapf(err, "failed to get image prefix for image registry %s", imageRegistry.Metadata.WorkspaceName())
 	}
 
+	data.ImagePrefix = imagePrefix
+
 	acceleratorType := endpoint.Spec.Resources.GetAcceleratorType()
 
-	imageName, imageTag, err := k.getImageForAccelerator(engine, endpoint.Spec.Engine.Version, acceleratorType, imagePrefix)
+	imageName, imageTag, err := k.getImageForAccelerator(engine, endpoint.Spec.Engine.Version, acceleratorType)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get image for accelerator %s", acceleratorType)
 	}
@@ -126,13 +129,11 @@ func (k *kubernetesOrchestrator) setModelCacheVariables(data *DeploymentManifest
 		return errors.Wrapf(err, "failed to get model cache for cluster %s", deployedCluster.Metadata.Name)
 	}
 
-	if len(modelCaches) > 0 {
-		volumes, volumeMounts, modelEnv := generateModelCacheConfig(modelCaches)
-		data.Volumes = volumes
-		data.VolumeMounts = volumeMounts
+	volumes, volumeMounts, modelEnv := generateModelCacheConfig(modelCaches)
+	data.Volumes = volumes
+	data.VolumeMounts = volumeMounts
 
-		maps.Copy(data.Env, modelEnv)
-	}
+	maps.Copy(data.Env, modelEnv)
 
 	return nil
 }
@@ -145,7 +146,14 @@ func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables,
 		"file":          endpoint.Spec.Model.File,
 		"task":          endpoint.Spec.Model.Task,
 		"path":          endpoint.Spec.Model.Name, // default to model name
-		"registry-type": string(modelRegistry.Spec.Type),
+		"registry_type": string(modelRegistry.Spec.Type),
+	}
+
+	data.ModelArgs["serve_name"] = endpoint.Spec.Model.Name
+
+	// only set serve_name with version when version is specified and not latest for non-huggingface model registry
+	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion && modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType {
+		data.ModelArgs["serve_name"] = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
 	}
 }
 
@@ -155,40 +163,17 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 	case v1.BentoMLModelRegistryType:
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		// todo: support local file type env set
-		mountPath := filepath.Join("/mnt", "bentoml")
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			data.Env[v1.BentoMLHomeEnv] = mountPath
-
-			modelPath := filepath.Join(mountPath, "models", endpoint.Spec.Model.Name)
-			if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != "latest" {
-				modelPath = filepath.Join(modelPath, endpoint.Spec.Model.Version)
-			} else {
-				// Fetch latest actual model version from model registry
-				registryManager, err := model_registry.NewModelRegistry(modelRegistry)
-				if err != nil {
-					return errors.Wrapf(err, "failed to create model registry manager for model registry %s", modelRegistry.Metadata.Name)
-				}
-
-				err = registryManager.Connect()
-				if err != nil {
-					return errors.Wrapf(err, "failed to connect to model registry %s", modelRegistry.Metadata.Name)
-				}
-
-				defer registryManager.Disconnect() // nolint: errcheck
-
-				latestModelVersionInfo, err := registryManager.GetModelVersion(endpoint.Spec.Model.Name, "latest")
-				if err != nil {
-					return errors.Wrapf(err, "failed to get latest model version for %s", endpoint.Spec.Model.Name)
-				}
-
-				modelPath = filepath.Join(modelPath, latestModelVersionInfo.Name)
+			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+			if err != nil {
+				return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
 			}
 
-			if endpoint.Spec.Model.File != "" {
-				modelPath = filepath.Join(modelPath, endpoint.Spec.Model.File)
-			}
-
-			data.ModelArgs["path"] = modelPath
+			mountPath := filepath.Join("/mnt", "bentoml")
+			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
+			// so we need to append "models" to the path
+			data.ModelArgs["registry_path"] = filepath.Join(mountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
+			data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, string(v1.BentoMLModelRegistryType), endpoint.Spec.Model.Name, modelRealVersion)
 
 			data.Volumes = append(data.Volumes, corev1.Volume{
 				Name: "bentoml-model-registry",
@@ -207,12 +192,14 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 		}
 
 		// todo: support local file type env set
-
 	case v1.HuggingFaceModelRegistryType:
 		data.Env[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
 		if modelRegistry.Spec.Credentials != "" {
 			data.Env[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
+
+		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
+		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, string(v1.HuggingFaceModelRegistryType), endpoint.Spec.Model.Name)
 	}
 
 	return nil
@@ -320,7 +307,7 @@ func (k *kubernetesOrchestrator) getDeployTemplate(endpoint *v1.Endpoint, engine
 //   - imageName: The full image name with registry prefix (e.g., "registry.neutree.ai/neutree/vllm")
 //   - imageTag: The image tag (e.g., "v0.5.0")
 //   - error: Any error encountered during image selection
-func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, version string, acceleratorType string, imagePrefix string) (string, string, error) {
+func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, version string, acceleratorType string) (string, string, error) {
 	// Find the matching engine version
 	var targetVersion *v1.EngineVersion
 
@@ -338,7 +325,7 @@ func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, versi
 	// Check if the engine version has images configured
 	if len(targetVersion.Images) == 0 {
 		// Fallback to legacy behavior: use cluster image name convention
-		imageName := imagePrefix + "/" + engine.Metadata.Name
+		imageName := engine.Metadata.Name
 		return imageName, version, nil
 	}
 
@@ -360,7 +347,7 @@ func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, versi
 	}
 
 	// Construct full image name
-	imageName := imagePrefix + "/" + engineImage.ImageName
+	imageName := engineImage.ImageName
 
 	imageTag := engineImage.Tag
 	if imageTag == "" {
@@ -375,8 +362,25 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 	volumeMounts := []corev1.VolumeMount{}
 	env := make(map[string]string)
 
+	// Set model cache directory environment variable
+	env[v1.ModelCacheDirENV] = v1.DefaultK8sClusterModelCacheMountPath
+
+	volumes = append(volumes, corev1.Volume{
+		Name: "models-cache-tmp",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				Medium: corev1.StorageMediumDefault,
+			},
+		},
+	})
+
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      "models-cache-tmp",
+		MountPath: v1.DefaultK8sClusterModelCacheMountPath,
+	})
+
 	for _, cache := range modelCaches {
-		name := fmt.Sprintf("%s-model-cache", cache.ModelRegistryType)
+		name := "models-cache-" + string(cache.ModelRegistryType)
 		if cache.HostPath != nil {
 			volumes = append(volumes, corev1.Volume{
 				Name: name,
@@ -389,14 +393,8 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 
 			volumeMounts = append(volumeMounts, corev1.VolumeMount{
 				Name:      name,
-				MountPath: path.Join(modelCacheMountPathPrefix, name),
+				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, string(cache.ModelRegistryType)),
 			})
-
-			if cache.ModelRegistryType == v1.BentoMLModelRegistryType {
-				env[v1.BentoMLHomeEnv] = path.Join(modelCacheMountPathPrefix, name)
-			} else if cache.ModelRegistryType == v1.HuggingFaceModelRegistryType {
-				env[v1.HFHomeEnv] = path.Join(modelCacheMountPathPrefix, name)
-			}
 		}
 
 		if cache.NFS != nil {
@@ -412,7 +410,7 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 
 			volumeMounts = append(volumeMounts, corev1.VolumeMount{
 				Name:      name,
-				MountPath: path.Join(modelCacheMountPathPrefix, name),
+				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, string(cache.ModelRegistryType)),
 			})
 		}
 	}

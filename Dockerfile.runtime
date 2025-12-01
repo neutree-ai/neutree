@@ -1,0 +1,14 @@
+ARG ARCH
+
+FROM --platform=linux/${ARCH} python:3.11-slim
+WORKDIR /app
+
+COPY python/neutree/downloader/requirements.txt .
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r /app/requirements.txt
+
+COPY python/neutree/downloader /app/neutree/downloader
+
+ENV PYTHONPATH=/app
+
+ENTRYPOINT ["bash"]

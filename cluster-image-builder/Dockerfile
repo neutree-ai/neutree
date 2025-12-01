@@ -21,6 +21,7 @@ RUN --mount=type=bind,src=requirements,target=requirements \
 COPY *.py ./
 COPY serve ./serve
 COPY accelerator ./accelerator
+COPY downloader ./downloader
 
 EXPOSE 8265 6379 8000
 
