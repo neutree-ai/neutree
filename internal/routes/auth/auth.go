@@ -33,7 +33,11 @@ func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	adminGroup := authGroup.Group("/admin")
 	adminGroup.Use(authMiddleware)
 	{
-		adminGroup.POST("/users", handleCreateUser(deps))
+		adminGroup.POST("/users",
+			middleware.RequirePermission("user_profile:create", middleware.PermissionDependencies{
+				Storage: deps.Storage,
+			}),
+			handleCreateUser(deps))
 	}
 
 	// Public GoTrue proxy routes - no authentication required
