@@ -1127,11 +1127,12 @@ func TestKubernetesOrchestrator_addSharedMemoryVolume(t *testing.T) {
 
 func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing.T) {
 	k := &kubernetesOrchestrator{}
-	modelPathPrefix := filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, v1.HuggingFaceModelRegistryType)
+	modelPathPrefix := filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath)
 	tests := []struct {
 		name          string
 		modelRegistry *v1.ModelRegistry
 		endpoint      *v1.Endpoint
+		cluster       *v1.Cluster
 		expected      *DeploymentManifestVariables
 		wantErr       bool
 	}{
@@ -1147,6 +1148,7 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 					Credentials: "hf_test_token",
 				},
 			},
+			cluster: &v1.Cluster{},
 			endpoint: &v1.Endpoint{
 				Spec: &v1.EndpointSpec{
 					Model: &v1.ModelSpec{
@@ -1183,10 +1185,53 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 					},
 				},
 			},
+			cluster: &v1.Cluster{},
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
 					"registry_path": "test-model",
 					"path":          filepath.Join(modelPathPrefix, "test-model"),
+				},
+				Env: map[string]string{
+					v1.HFEndpoint: "https://huggingface.co",
+				},
+			},
+		},
+		{
+			name: "HuggingFace without credentials - Cluster with model cache",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "hf-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.HuggingFaceModelRegistryType,
+					Url:  "https://huggingface.co/",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name: "test-model",
+					},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{
+					Config: &v1.KubernetesClusterConfig{
+						CommonClusterConfig: v1.CommonClusterConfig{
+							ModelCaches: []v1.ModelCache{
+								{
+									Name:     "test-cache",
+									HostPath: &corev1.HostPathVolumeSource{},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"registry_path": "test-model",
+					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache", "test-model"),
 				},
 				Env: map[string]string{
 					v1.HFEndpoint: "https://huggingface.co",
@@ -1201,7 +1246,8 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 				Env:       map[string]string{},
 				ModelArgs: map[string]interface{}{},
 			}
-			err := k.setModelRegistryVariables(data, tt.endpoint, tt.modelRegistry)
+
+			err := k.setModelRegistryVariables(data, tt.endpoint, tt.cluster, tt.modelRegistry)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -1218,12 +1264,14 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 }
 
 func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) {
+	modelPathPrefix := filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath)
 	k := &kubernetesOrchestrator{}
 
 	tests := []struct {
 		name          string
 		modelRegistry *v1.ModelRegistry
 		endpoint      *v1.Endpoint
+		cluster       *v1.Cluster
 		expected      *DeploymentManifestVariables
 		expectError   bool
 	}{
@@ -1247,9 +1295,10 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 					},
 				},
 			},
+			cluster: &v1.Cluster{},
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
-					"path":          "/models-cache/bentoml/llama-2-7b/v1.0",
+					"path":          filepath.Join(modelPathPrefix, "llama-2-7b", "v1.0"),
 					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
 				},
 				Volumes: []corev1.Volume{
@@ -1269,6 +1318,54 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 						MountPath: "/mnt/bentoml",
 					},
 				},
+				Env: map[string]string{},
+			},
+			expectError: false,
+		},
+		{
+			name: "BentoML with NFS - specific version",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "llama-2-7b",
+						Version: "v1.0",
+						File:    "model.safetensors",
+					},
+				},
+			},
+			cluster: &v1.Cluster{},
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"path":          filepath.Join(modelPathPrefix, "llama-2-7b", "v1.0"),
+					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: "bentoml-model-registry",
+						VolumeSource: corev1.VolumeSource{
+							NFS: &corev1.NFSVolumeSource{
+								Server: "192.168.1.100",
+								Path:   "/bentoml",
+							},
+						},
+					},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "bentoml-model-registry",
+						MountPath: "/mnt/bentoml",
+					},
+				},
+				Env: map[string]string{},
 			},
 			expectError: false,
 		},
@@ -1291,9 +1388,10 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 					},
 				},
 			},
+			cluster: &v1.Cluster{},
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
-					"path":          "/models-cache/bentoml/gpt-model/v2.0",
+					"path":          filepath.Join(modelPathPrefix, "gpt-model/v2.0"),
 					"registry_path": "/mnt/bentoml/models/gpt-model/v2.0",
 				},
 				Volumes: []corev1.Volume{
@@ -1313,6 +1411,7 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 						MountPath: "/mnt/bentoml",
 					},
 				},
+				Env: map[string]string{},
 			},
 			expectError: false,
 		},
@@ -1335,8 +1434,134 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 					},
 				},
 			},
+			cluster: &v1.Cluster{},
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{},
+				Env:       map[string]string{},
+			},
+			expectError: false,
+		},
+		{
+			name: "BentoML with NFS - specific version - deployed cluster with model cache",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "llama-2-7b",
+						Version: "v1.0",
+						File:    "model.safetensors",
+					},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{
+					Config: &v1.KubernetesClusterConfig{
+						CommonClusterConfig: v1.CommonClusterConfig{
+							ModelCaches: []v1.ModelCache{
+								{
+									Name:     "test-cache",
+									HostPath: &corev1.HostPathVolumeSource{},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache", "llama-2-7b", "v1.0"),
+					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: "bentoml-model-registry",
+						VolumeSource: corev1.VolumeSource{
+							NFS: &corev1.NFSVolumeSource{
+								Server: "192.168.1.100",
+								Path:   "/bentoml",
+							},
+						},
+					},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "bentoml-model-registry",
+						MountPath: "/mnt/bentoml",
+					},
+				},
+				Env: map[string]string{},
+			},
+			expectError: false,
+		},
+		{
+			name: "BentoML with NFS - specific version - deployed cluster with multi model cache - only use the first cache name as relative path",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "llama-2-7b",
+						Version: "v1.0",
+						File:    "model.safetensors",
+					},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{
+					Config: &v1.KubernetesClusterConfig{
+						CommonClusterConfig: v1.CommonClusterConfig{
+							ModelCaches: []v1.ModelCache{
+								{
+									Name:     "test-cache-1",
+									HostPath: &corev1.HostPathVolumeSource{},
+								},
+								{
+									Name:     "test-cache-2",
+									HostPath: &corev1.HostPathVolumeSource{},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache-1", "llama-2-7b", "v1.0"),
+					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: "bentoml-model-registry",
+						VolumeSource: corev1.VolumeSource{
+							NFS: &corev1.NFSVolumeSource{
+								Server: "192.168.1.100",
+								Path:   "/bentoml",
+							},
+						},
+					},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "bentoml-model-registry",
+						MountPath: "/mnt/bentoml",
+					},
+				},
+				Env: map[string]string{},
 			},
 			expectError: false,
 		},
@@ -1346,9 +1571,10 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			data := &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{},
+				Env:       map[string]string{},
 			}
 
-			err := k.setModelRegistryVariables(data, tt.endpoint, tt.modelRegistry)
+			err := k.setModelRegistryVariables(data, tt.endpoint, tt.cluster, tt.modelRegistry)
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {
@@ -1480,113 +1706,6 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 	}
 }
 
-func TestKubernetesOrchestrator_setModelCacheVariables(t *testing.T) {
-	k := &kubernetesOrchestrator{}
-
-	tests := []struct {
-		name             string
-		cluster          *v1.Cluster
-		expectedVolCount int
-		expectedEnvKeys  []string
-		expectError      bool
-	}{
-		{
-			name: "cluster with model cache",
-			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{
-					Name:      "test-cluster",
-					Workspace: "test-workspace",
-				},
-				Spec: &v1.ClusterSpec{
-					Type: "kubernetes",
-					Config: v1.KubernetesClusterConfig{
-						CommonClusterConfig: v1.CommonClusterConfig{
-							ModelCaches: []v1.ModelCache{
-								{
-									ModelRegistryType: v1.HuggingFaceModelRegistryType,
-									HostPath: &corev1.HostPathVolumeSource{
-										Path: "/data/huggingface",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expectedVolCount: 2,
-			expectedEnvKeys:  []string{v1.ModelCacheDirENV},
-			expectError:      false,
-		},
-		{
-			name: "cluster with pvc model caches",
-			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{
-					Name:      "test-cluster",
-					Workspace: "test-workspace",
-				},
-				Spec: &v1.ClusterSpec{
-					Type: "kubernetes",
-					Config: v1.KubernetesClusterConfig{
-						CommonClusterConfig: v1.CommonClusterConfig{
-							ModelCaches: []v1.ModelCache{
-								{
-									ModelRegistryType: v1.HuggingFaceModelRegistryType,
-									PVC:               &corev1.PersistentVolumeClaimSpec{},
-								},
-							},
-						},
-					},
-				},
-			},
-			expectedVolCount: 2,
-			expectedEnvKeys:  []string{v1.ModelCacheDirENV},
-			expectError:      false,
-		},
-		{
-			name: "cluster without model cache",
-			cluster: &v1.Cluster{
-				Metadata: &v1.Metadata{
-					Name:      "test-cluster",
-					Workspace: "test-workspace",
-				},
-				Spec: &v1.ClusterSpec{
-					Type: "kubernetes",
-					Config: v1.KubernetesClusterConfig{
-						CommonClusterConfig: v1.CommonClusterConfig{
-							ModelCaches: []v1.ModelCache{},
-						},
-					},
-				},
-			},
-			expectedVolCount: 1,
-			expectedEnvKeys:  []string{v1.ModelCacheDirENV},
-			expectError:      false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data := &DeploymentManifestVariables{
-				Env: map[string]string{},
-			}
-
-			err := k.setModelCacheVariables(data, tt.cluster)
-
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Len(t, data.Volumes, tt.expectedVolCount)
-				assert.Len(t, data.VolumeMounts, tt.expectedVolCount)
-
-				for _, key := range tt.expectedEnvKeys {
-					assert.Contains(t, data.Env, key)
-				}
-			}
-		})
-	}
-}
-
 func TestGenerateModelCacheConfig(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -1599,15 +1718,13 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 			name: "single model cache",
 			modelCaches: []v1.ModelCache{
 				{
-					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					Name: "test-cache",
 					HostPath: &corev1.HostPathVolumeSource{
 						Path: "/data/huggingface",
 					},
 				},
 			},
-			expectedEnvs: map[string]string{
-				v1.ModelCacheDirENV: "/models-cache",
-			},
+			expectedEnvs: map[string]string{},
 			expectedVolumes: []corev1.Volume{
 				{
 					Name: "models-cache-tmp",
@@ -1618,7 +1735,7 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 					},
 				},
 				{
-					Name: "models-cache-hugging-face",
+					Name: "models-cache-test-cache",
 					VolumeSource: corev1.VolumeSource{
 						HostPath: &corev1.HostPathVolumeSource{
 							Path: "/data/huggingface",
@@ -1632,8 +1749,8 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 					MountPath: "/models-cache",
 				},
 				{
-					Name:      "models-cache-hugging-face",
-					MountPath: "/models-cache/hugging-face",
+					Name:      "models-cache-test-cache",
+					MountPath: "/models-cache/test-cache",
 				},
 			},
 		},
@@ -1641,13 +1758,11 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 			name: "with pvc model cache",
 			modelCaches: []v1.ModelCache{
 				{
-					ModelRegistryType: v1.HuggingFaceModelRegistryType,
-					PVC:               &corev1.PersistentVolumeClaimSpec{},
+					Name: "test-pvc",
+					PVC:  &corev1.PersistentVolumeClaimSpec{},
 				},
 			},
-			expectedEnvs: map[string]string{
-				v1.ModelCacheDirENV: "/models-cache",
-			},
+			expectedEnvs: map[string]string{},
 			expectedVolumes: []corev1.Volume{
 				{
 					Name: "models-cache-tmp",
@@ -1658,10 +1773,10 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 					},
 				},
 				{
-					Name: "models-cache-hugging-face",
+					Name: "models-cache-test-pvc",
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: "models-cache-hugging-face",
+							ClaimName: "models-cache-test-pvc",
 						},
 					},
 				},
@@ -1672,8 +1787,8 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 					MountPath: "/models-cache",
 				},
 				{
-					Name:      "models-cache-hugging-face",
-					MountPath: "/models-cache/hugging-face",
+					Name:      "models-cache-test-pvc",
+					MountPath: "/models-cache/test-pvc",
 				},
 			},
 		},
@@ -1681,22 +1796,20 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 			name: "multiple model caches",
 			modelCaches: []v1.ModelCache{
 				{
-					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					Name: "test-cache-1",
 					HostPath: &corev1.HostPathVolumeSource{
 						Path: "/data/huggingface",
 					},
 				},
 				{
-					ModelRegistryType: v1.BentoMLModelRegistryType,
+					Name: "test-cache-2",
 					NFS: &corev1.NFSVolumeSource{
 						Server: "192.168.1.1",
 						Path:   "/models",
 					},
 				},
 			},
-			expectedEnvs: map[string]string{
-				v1.ModelCacheDirENV: "/models-cache",
-			},
+			expectedEnvs: map[string]string{},
 			expectedVolumes: []corev1.Volume{
 				{
 					Name: "models-cache-tmp",
@@ -1707,7 +1820,7 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 					},
 				},
 				{
-					Name: "models-cache-hugging-face",
+					Name: "models-cache-test-cache-1",
 					VolumeSource: corev1.VolumeSource{
 						HostPath: &corev1.HostPathVolumeSource{
 							Path: "/data/huggingface",
@@ -1715,7 +1828,7 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 					},
 				},
 				{
-					Name: "models-cache-bentoml",
+					Name: "models-cache-test-cache-2",
 					VolumeSource: corev1.VolumeSource{
 						NFS: &corev1.NFSVolumeSource{
 							Server: "192.168.1.1",
@@ -1730,12 +1843,12 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 					MountPath: "/models-cache",
 				},
 				{
-					Name:      "models-cache-hugging-face",
-					MountPath: "/models-cache/hugging-face",
+					Name:      "models-cache-test-cache-1",
+					MountPath: "/models-cache/test-cache-1",
 				},
 				{
-					Name:      "models-cache-bentoml",
-					MountPath: "/models-cache/bentoml",
+					Name:      "models-cache-test-cache-2",
+					MountPath: "/models-cache/test-cache-2",
 				},
 			},
 		},

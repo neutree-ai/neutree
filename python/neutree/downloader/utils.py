@@ -62,12 +62,7 @@ def build_request_from_model_args(model_args: Dict[str, Any]) -> Tuple[str, Down
         backend = "local"
 
     source = model_args.get("registry_path") or model_args.get("name") or ""
-
-    cache_dir = os.environ.get("NEUTREE_MODEL_CACHE_DIR") or "/models-cache"
-    dest = cache_dir + "/" + model_args.get("registry_type", "hugging-face")+ "/" + model_args.get("name", "default")
-    if backend != "hugging-face":
-        if model_args.get("version") is not None:
-            dest = dest + "/" + str(model_args.get("version"))
+    dest = model_args.get("path") or "/models-cache"
 
     credentials = None
     token = os.environ.get("NEUTREE_DL_TOKEN") or os.environ.get("HF_TOKEN")

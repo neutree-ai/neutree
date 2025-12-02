@@ -10,7 +10,7 @@ const (
 )
 
 const (
-	ModelCacheDirENV = "NEUTREE_MODEL_CACHE_DIR"
+	DefaultModelCacheRelativePath = "default"
 
 	DefaultSSHClusterModelCacheMountPath = "/home/ray/.neutree/models-cache"
 	DefaultK8sClusterModelCacheMountPath = "/models-cache"

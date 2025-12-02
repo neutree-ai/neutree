@@ -70,7 +70,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointSta
 
 func (o *RayOrchestrator) createOrUpdate(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
 	// pre-check related resources
-	_, err := getEndpointDeployCluster(o.storage, endpoint)
+	deployedCluster, err := getEndpointDeployCluster(o.storage, endpoint)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list cluster")
 	}
@@ -96,7 +96,7 @@ func (o *RayOrchestrator) createOrUpdate(endpoint *v1.Endpoint) (*v1.EndpointSta
 		return nil, errors.Wrap(err, "failed to get current serve applications")
 	}
 
-	newApp, err := EndpointToApplication(endpoint, modelRegistry, o.acceleratorMgr)
+	newApp, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, o.acceleratorMgr)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to convert endpoint to application")
 	}
@@ -308,7 +308,8 @@ func (o *RayOrchestrator) DisconnectEndpointModel(endpoint *v1.Endpoint) error {
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
-func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry, acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
+func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
+	modelRegistry *v1.ModelRegistry, acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
 	app := dashboard.RayServeApplication{
 		Name:        EndpointToServeApplicationName(endpoint),
 		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
@@ -360,6 +361,18 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 		modelArgs["serve_name"] = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
 	}
 
+	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
+
+	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
+	if err != nil {
+		return dashboard.RayServeApplication{}, errors.Wrap(err, "failed to get cluster model cache")
+	}
+
+	// TODO: Now we only use the first model cache for simplicity, In the future, we may support specific model cache.
+	if len(modelCaches) > 0 {
+		modelCacheRelativePath = modelCaches[0].Name
+	}
+
 	switch modelRegistry.Spec.Type {
 	case v1.BentoMLModelRegistryType:
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
@@ -373,7 +386,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
 			modelArgs["registry_path"] = filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name, "models", endpoint.Spec.Model.Name, modelRealVersion)
-			modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, string(v1.BentoMLModelRegistryType), endpoint.Spec.Model.Name, modelRealVersion)
+			modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 		}
 	case v1.HuggingFaceModelRegistryType:
 		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
@@ -382,7 +395,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 		}
 
 		modelArgs["registry_path"] = endpoint.Spec.Model.Name
-		modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, string(v1.HuggingFaceModelRegistryType), endpoint.Spec.Model.Name)
+		modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name)
 	}
 
 	app.Args["model"] = modelArgs

@@ -58,4 +58,4 @@ docker-push-manifest-gpu: ## Push the core manifest docker image.
 
 .PHONY: prepare
 prepare: ## Prepare the build context
-	cp -rf ../python/neutree/downloader ./downloader
+	cp -rf ../python/neutree/downloader .

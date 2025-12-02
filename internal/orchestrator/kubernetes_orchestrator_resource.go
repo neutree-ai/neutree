@@ -158,7 +158,20 @@ func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables,
 }
 
 // setModelRegistryVariables adapts model registry specific settings
-func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) error {
+func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint,
+	deployedCluster *v1.Cluster, modelRegistry *v1.ModelRegistry) error {
+	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
+
+	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get model caches")
+	}
+
+	// TODO: Now we only use the first model cache for simplicity, In the future, we may support specific model cache.
+	if len(modelCaches) > 0 {
+		modelCacheRelativePath = modelCaches[0].Name
+	}
+
 	switch modelRegistry.Spec.Type {
 	case v1.BentoMLModelRegistryType:
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
@@ -173,7 +186,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
 			data.ModelArgs["registry_path"] = filepath.Join(mountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
-			data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, string(v1.BentoMLModelRegistryType), endpoint.Spec.Model.Name, modelRealVersion)
+			data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 
 			data.Volumes = append(data.Volumes, corev1.Volume{
 				Name: "bentoml-model-registry",
@@ -199,7 +212,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 		}
 
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
-		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, string(v1.HuggingFaceModelRegistryType), endpoint.Spec.Model.Name)
+		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name)
 	}
 
 	return nil
@@ -259,7 +272,7 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	k.setModelArgs(&data, endpoint, modelRegistry)
 
 	// Set model registry specific variables
-	if err := k.setModelRegistryVariables(&data, endpoint, modelRegistry); err != nil {
+	if err := k.setModelRegistryVariables(&data, endpoint, deployedCluster, modelRegistry); err != nil {
 		return DeploymentManifestVariables{}, err
 	}
 
@@ -362,9 +375,6 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 	volumeMounts := []corev1.VolumeMount{}
 	env := make(map[string]string)
 
-	// Set model cache directory environment variable
-	env[v1.ModelCacheDirENV] = v1.DefaultK8sClusterModelCacheMountPath
-
 	volumes = append(volumes, corev1.Volume{
 		Name: "models-cache-tmp",
 		VolumeSource: corev1.VolumeSource{
@@ -393,7 +403,7 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 
 			volumeMounts = append(volumeMounts, corev1.VolumeMount{
 				Name:      name,
-				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, string(cache.ModelRegistryType)),
+				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, cache.Name),
 			})
 		}
 
@@ -410,7 +420,7 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 
 			volumeMounts = append(volumeMounts, corev1.VolumeMount{
 				Name:      name,
-				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, string(cache.ModelRegistryType)),
+				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, cache.Name),
 			})
 		}
 
@@ -426,7 +436,7 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 
 			volumeMounts = append(volumeMounts, corev1.VolumeMount{
 				Name:      name,
-				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, string(cache.ModelRegistryType)),
+				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, cache.Name),
 			})
 		}
 	}

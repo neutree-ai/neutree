@@ -266,6 +266,166 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 		t.Logf("validation correctly blocked insert with error code 10023: %v", err)
 	})
 
+	t.Run("cluster modelcaches is not json array - error code 10201", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with invalid modelcaches type
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": "invalid_type"}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: model_caches must be a JSON array")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10201"`) {
+			t.Fatalf("expected error code 10201, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10201: %v", err)
+	})
+
+	t.Run("cluster modelcaches now only can config one - error code 10202", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with multiple modelcaches
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": [{"name": "cache1"}, {"name": "cache2"}]}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: only one model_caches configuration is allowed")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10202"`) {
+			t.Fatalf("expected error code 10202, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10202: %v", err)
+	})
+
+	t.Run("cluster modelcaches.name is required - error code 10203", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with modelcaches.name missing
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": [{}]}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: model_caches.name is required")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10203"`) {
+			t.Fatalf("expected error code 10203, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10203: %v", err)
+	})
+
+	t.Run("cluster modelcaches.name is 'default' - error code 10204", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with modelcaches.name as 'default'
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": [{"name": "default"}]}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: model_caches.name must not be 'default'")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10204"`) {
+			t.Fatalf("expected error code 10204, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10204: %v", err)
+	})
+
+	t.Run("cluster modelcaches.name with invalid characters - error code 10205", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with modelcaches.name having invalid characters
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": [{"name": "Invalid_Name!"}]}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: model_caches.name contains invalid characters")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10205"`) {
+			t.Fatalf("expected error code 10205, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10205: %v", err)
+	})
+
 }
 
 func TestModelRegistryValidation(t *testing.T) {

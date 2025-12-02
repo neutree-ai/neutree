@@ -203,7 +203,7 @@ BEGIN
     JOIN pg_type t ON e.enumtypid = t.oid
     WHERE t.typname = 'permission_action';
 
-    UPDATE api.roles 
+    UPDATE api.roles
     SET spec = ROW((spec).preset_key, all_permissions)::api.role_spec
     WHERE (metadata).name = 'admin';
 END;
@@ -282,7 +282,7 @@ CREATE TRIGGER set_role_assignments_default_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION set_default_metadata_timestamp_column();
 
-CREATE UNIQUE INDEX role_assignment_unique_user_workspace_role 
+CREATE UNIQUE INDEX role_assignment_unique_user_workspace_role
 ON api.role_assignments (((spec).user_id), ((spec).workspace), ((spec).role));
 
 CREATE UNIQUE INDEX role_assignments_name_unique_idx ON api.role_assignments (((metadata).name));
