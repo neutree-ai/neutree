@@ -130,6 +130,7 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 		imgRegistrys, err := i.apiClient.ImageRegistries.List(client.ImageRegistryListOptions{
 			Workspace: opts.Workspace,
 			Name:      opts.ImageRegistry,
+			WithCreds: true,
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get image registry")

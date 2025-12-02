@@ -7,6 +7,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
+	"github.com/neutree-ai/neutree/internal/routes/credentials"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
@@ -81,6 +82,19 @@ func AuthRouteFactory(register AuthRegisterFunc) RouteFactory {
 			AuthConfig:   deps.Config.AuthConfig,
 			Storage:      deps.Config.Storage,
 			AuthClient:   authClient,
+		})
+
+		return nil
+	}
+}
+
+type CredentialsRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *credentials.Dependencies)
+
+func CredentialsRouteFactory(register CredentialsRegisterFunc) RouteFactory {
+	return func(deps *RouteOptions) error {
+		register(deps.Group, deps.Middlewares, &credentials.Dependencies{
+			Storage:          deps.Config.Storage,
+			StorageAccessURL: deps.Config.StorageAccessURL,
 		})
 
 		return nil
