@@ -22,11 +22,11 @@ docker-build: ## Run docker-build-* targets for all the images
 	$(MAKE) ARCH=$(ARCH) $(addprefix docker-build-,$(ACCELERATORS))
 
 .PHONY: docker-build-gpu
-docker-build-gpu: ## Build the GPU image
+docker-build-gpu: prepare ## Build the GPU image
 	docker build --build-arg RAY_BASE_IMAGE=$(RAY_BASE_IMAGE) -f Dockerfile -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG) .
 
 .PHONY: docker-build-amd-gpu
-docker-build-amd-gpu: ## Build the AMD GPU image
+docker-build-amd-gpu: prepare ## Build the AMD GPU image
 	docker build --build-arg BASE_IMAGE=$(ROCM_BASE_IMAGE) -f Dockerfile.rocm -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG)-rocm .
 
 .PHONY: docker-push
@@ -55,3 +55,7 @@ docker-push-manifest-gpu: ## Push the core manifest docker image.
 	docker manifest create --amend $(NEUTREE_SERVE_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_SERVE_IMAGE)\-&:$(IMAGE_TAG)~g")
 	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_SERVE_IMAGE}:${IMAGE_TAG} ${NEUTREE_SERVE_IMAGE}-$${arch}:${IMAGE_TAG}; done
 	docker manifest push --purge ${NEUTREE_SERVE_IMAGE}:${IMAGE_TAG}
+
+.PHONY: prepare
+prepare: ## Prepare the build context
+	cp -rf ../python/neutree/downloader ./downloader

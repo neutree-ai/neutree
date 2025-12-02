@@ -10,6 +10,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/pkg/model_registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -310,4 +311,30 @@ func convertCPUToKubernetes(spec *v1.ResourceSpec) *v1.KubernetesResourceSpec {
 	}
 
 	return res
+}
+
+func getDeployedModelRealVersion(modelRegistry *v1.ModelRegistry, modelName, modelVersion string) (string, error) {
+	if modelVersion != "" && modelVersion != v1.LatestVersion {
+		return modelVersion, nil
+	}
+
+	// Fetch latest actual model version from model registry
+	registryManager, err := model_registry.NewModelRegistry(modelRegistry)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to create model registry manager for model registry %s", modelRegistry.Metadata.Name)
+	}
+
+	err = registryManager.Connect()
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to connect to model registry %s", modelRegistry.Metadata.Name)
+	}
+
+	defer registryManager.Disconnect() // nolint: errcheck
+
+	latestModelVersionInfo, err := registryManager.GetModelVersion(modelName, modelVersion)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to get latest model version for %s", modelName)
+	}
+
+	return latestModelVersionInfo.Name, nil
 }

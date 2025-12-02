@@ -172,9 +172,9 @@ func (o *RayOrchestrator) connectSSHNodeEndpointModel(config *v1.RaySSHProvision
 			switch op {
 			case connect:
 				err = mounter.MountNFS(context.Background(), modelRegistryURL.Host+modelRegistryURL.Path,
-					filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name))
+					filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name))
 			case disconnect:
-				err = mounter.Unmount(context.Background(), filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name))
+				err = mounter.Unmount(context.Background(), filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name))
 			default:
 				return fmt.Errorf("unsupported operation %s", op)
 			}

@@ -163,6 +163,7 @@ WORKDIR ${HOME}
 COPY *.py ./
 COPY serve ./serve
 COPY accelerator ./accelerator
+COPY downloader ./downloader
 
 RUN chmod +x start.py
 

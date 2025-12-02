@@ -21,10 +21,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	modelCacheMountPathPrefix = "/root/.neutree/model-cache/"
-)
-
 var _ Orchestrator = &kubernetesOrchestrator{}
 
 type kubernetesOrchestrator struct {

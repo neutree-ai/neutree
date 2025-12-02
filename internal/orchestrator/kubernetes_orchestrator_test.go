@@ -1,9 +1,11 @@
 package orchestrator
 
 import (
+	"path/filepath"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -74,10 +76,34 @@ spec:
       volumes:
 {{ .Volumes | toYaml | indent 6 }}
       {{- end }}
+      initContainers:
+        - name: model-downloader
+          image: {{ .ImagePrefix }}/neutree/runtime:{{ .NeutreeVersion }}
+          command:
+            - bash
+            - -c
+          args:
+            - >-
+              python3 -m neutree.downloader
+              --name="{{ .ModelArgs.name }}"
+              --registry_type="{{ .ModelArgs.registry_type }}"
+              --registry_path="{{ .ModelArgs.registry_path }}"
+              --version="{{ .ModelArgs.version }}"
+              --file="{{ .ModelArgs.file }}"
+              --task="{{ .ModelArgs.task }}"
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
 
       containers:
         - name: {{ .EngineName }}
-          image: {{ .ImageRepo }}:{{ .ImageTag }}
+          image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
           command:
           - vllm
           - serve
@@ -87,7 +113,7 @@ spec:
           - "--port"
           - "8000"
           - --served-model-name
-          - {{ .ModelArgs.name }}
+          - {{ .ModelArgs.serve_name }}
           - --task
           {{- if eq .ModelArgs.task "text-embedding" }}
           - embedding
@@ -145,11 +171,14 @@ spec:
 {{ .VolumeMounts | toYaml | indent 10 }}
           {{- end }}`
 
+// TestBuildVllmDeployment only tests the building of a VLLM default deployment manifest.
 func TestBuildVllmDeployment(t *testing.T) {
 	data := DeploymentManifestVariables{
+		NeutreeVersion:  "v0.1.0",
 		ClusterName:     "test-cluster",
 		Workspace:       "test-workspace",
 		Namespace:       "default",
+		ImagePrefix:     "registry.example.com",
 		ImageRepo:       "myrepo",
 		ImageTag:        "v1.0.0",
 		ImagePullSecret: "my-secret",
@@ -157,8 +186,12 @@ func TestBuildVllmDeployment(t *testing.T) {
 		EngineVersion:   "v1.0.0",
 		EndpointName:    "test-endpoint",
 		ModelArgs: map[string]interface{}{
-			"name": "gpt-4",
-			"task": "text-generation",
+			"name":          "gpt-4",
+			"task":          "text-generation",
+			"path":          "/mnt/models/gpt-4",
+			"registry_type": "bentoml",
+			"registry_path": "/mnt/registry/gpt-4-model",
+			"serve_name":    "gpt-4-serve",
 		},
 		EngineArgs: map[string]interface{}{
 			"max-concurrency": "10",
@@ -263,29 +296,47 @@ spec:
       imagePullSecrets:
         - name: {{ .ImagePullSecret }}
       {{- end }}
-
       {{- if .Volumes }}
       volumes:
 {{ .Volumes | toYaml | indent 6 }}
       {{- end }}
-
+      initContainers:
+        - name: model-downloader
+          image: {{ .ImagePrefix }}/neutree/runtime:{{ .NeutreeVersion }}
+          command:
+            - bash
+            - -c
+          args:
+            - >-
+              python3 -m neutree.downloader
+              --name="{{ .ModelArgs.name }}"
+              --registry_type="{{ .ModelArgs.registry_type }}"
+              --registry_path="{{ .ModelArgs.registry_path }}"
+              --version="{{ .ModelArgs.version }}"
+              --file="{{ .ModelArgs.file }}"
+              --task="{{ .ModelArgs.task }}"
+          env:
+            {{ range $key, $value := .Env }}
+            - name: {{ $key }}
+              value: "{{ $value }}"
+            {{ end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
       containers:
         - name: {{ .EngineName }}
-          image: {{ .ImageRepo }}:{{ .ImageTag }}
+          image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
           command:
-          - bash
-          - -c
+            - bash
+            - -c
           args:
-          - >-
-            python3 -m llama_cpp.server
-            {{- if eq (index .ModelArgs "registry-type") "hugging-face" }}
-            --hf_model_repo_id {{ .ModelArgs.name }} --model {{ .ModelArgs.file }}
-            {{- else }}
-            --model $(find {{ .ModelArgs.path }} -name "{{ .ModelArgs.file }}" | head -n 1)
-            {{- end }}
-            --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.name }}
-            {{- if eq .ModelArgs.task "text-embedding" }} --embedding{{- end }}
-            {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{- if ne (printf "%v" $value) "true"}} "{{ $value }}"{{- end }}{{- end }}{{- end }}
+            - >-
+              python3 -m llama_cpp.server
+              --model $(find {{ .ModelArgs.path }} -name "{{ .ModelArgs.file }}" | head -n 1)
+              --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.serve_name }}
+              {{- if eq .ModelArgs.task "text-embedding" }} --embedding{{- end }}
+              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{- if ne (printf "%v" $value) "true"}} "{{ $value }}"{{- end }}{{- end }}{{- end }}
           resources:
             limits:
               {{- range $key, $value := .Resources }}
@@ -296,10 +347,10 @@ spec:
               {{ $key }}: {{ $value }}
               {{- end }}
           env:
-           {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
-           {{ end }}
+            {{ range $key, $value := .Env }}
+            - name: {{ $key }}
+              value: "{{ $value }}"
+            {{ end }}
           ports:
             - containerPort: 8000
           startupProbe:
@@ -325,11 +376,14 @@ spec:
 {{ .VolumeMounts | toYaml | indent 10 }}
           {{- end }}`
 
+// TestBuildLlamacppDeployment only tests the building of a Llamacpp default deployment manifest.
 func TestBuildLlamacppDeployment(t *testing.T) {
 	data := DeploymentManifestVariables{
+		NeutreeVersion:  "v0.1.0",
 		ClusterName:     "test-cluster",
 		Workspace:       "test-workspace",
 		Namespace:       "default",
+		ImagePrefix:     "registry.example.com",
 		ImageRepo:       "myrepo",
 		ImageTag:        "v1.0.0",
 		ImagePullSecret: "my-secret",
@@ -337,12 +391,14 @@ func TestBuildLlamacppDeployment(t *testing.T) {
 		EngineVersion:   "v0.3.6",
 		EndpointName:    "test-endpoint",
 		ModelArgs: map[string]interface{}{
-			"name":     "qwen2-0.5b-instruct",
-			"version":  "v1.0.0",
-			"task":     "text-generation",
-			"registry": "bentoml",
-			"path":     "/mnt/bentoml/models/qwen2-0.5b-instruct-gguf/so42drbrikfceusu",
-			"file":     "*q8_0.gguf",
+			"name":          "qwen2-0.5b-instruct",
+			"version":       "v1.0.0",
+			"task":          "text-generation",
+			"path":          "/mnt/bentoml/models/qwen2-0.5b-instruct-gguf/so42drbrikfceusu",
+			"file":          "*q8_0.gguf",
+			"serve_name":    "qwen2-0.5b-instruct",
+			"registry_type": "bentoml",
+			"registry_path": "/mnt/registry/qwen2-0.5b-instruct-model",
 		},
 		EngineArgs: map[string]interface{}{
 			"n_ctx":     "512",
@@ -382,8 +438,6 @@ func TestBuildLlamacppDeployment(t *testing.T) {
 	if objs.Items[0].GetName() != "test-endpoint" {
 		t.Errorf("Expected deployment name 'test-endpoint', got '%s'", objs.Items[0].GetName())
 	}
-
-	// Additional checks can be added here to validate the structure of the generated object
 }
 
 func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
@@ -394,7 +448,6 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 		engine            *v1.Engine
 		version           string
 		acceleratorType   string
-		imagePrefix       string
 		expectedImageName string
 		expectedImageTag  string
 		expectError       bool
@@ -424,8 +477,7 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 			},
 			version:           "v0.5.0",
 			acceleratorType:   "nvidia-gpu",
-			imagePrefix:       "registry.neutree.ai",
-			expectedImageName: "registry.neutree.ai/vllm-cuda",
+			expectedImageName: "vllm-cuda",
 			expectedImageTag:  "v0.5.0",
 			expectError:       false,
 		},
@@ -449,8 +501,7 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 			},
 			version:           "v0.5.0",
 			acceleratorType:   "amd-gpu",
-			imagePrefix:       "registry.neutree.ai",
-			expectedImageName: "registry.neutree.ai/vllm-rocm",
+			expectedImageName: "vllm-rocm",
 			expectedImageTag:  "v0.5.0",
 			expectError:       false,
 		},
@@ -474,8 +525,7 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 			},
 			version:           "v0.5.0",
 			acceleratorType:   "cpu",
-			imagePrefix:       "registry.neutree.ai",
-			expectedImageName: "registry.neutree.ai/vllm-cpu",
+			expectedImageName: "vllm-cpu",
 			expectedImageTag:  "v0.5.0",
 			expectError:       false,
 		},
@@ -499,7 +549,6 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 			},
 			version:         "v0.5.0",
 			acceleratorType: "intel-gpu",
-			imagePrefix:     "registry.neutree.ai",
 			expectError:     true,
 			errorContains:   "no image configured for accelerator type intel-gpu",
 		},
@@ -523,7 +572,6 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 			},
 			version:         "v0.6.0",
 			acceleratorType: "nvidia-gpu",
-			imagePrefix:     "registry.neutree.ai",
 			expectError:     true,
 			errorContains:   "engine version v0.6.0 not found",
 		},
@@ -542,8 +590,7 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 			},
 			version:           "v0.5.0",
 			acceleratorType:   "nvidia-gpu",
-			imagePrefix:       "registry.neutree.ai",
-			expectedImageName: "registry.neutree.ai/vllm",
+			expectedImageName: "vllm",
 			expectedImageTag:  "v0.5.0",
 			expectError:       false,
 		},
@@ -567,8 +614,7 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 			},
 			version:           "v0.5.0",
 			acceleratorType:   "nvidia-gpu",
-			imagePrefix:       "registry.neutree.ai",
-			expectedImageName: "registry.neutree.ai/vllm-cuda",
+			expectedImageName: "vllm-cuda",
 			expectedImageTag:  "v0.5.0",
 			expectError:       false,
 		},
@@ -580,7 +626,6 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 				tt.engine,
 				tt.version,
 				tt.acceleratorType,
-				tt.imagePrefix,
 			)
 
 			if tt.expectError {
@@ -629,9 +674,9 @@ func TestKubernetesOrchestrator_getImageForAccelerator_MultipleAccelerators(t *t
 		acceleratorType   string
 		expectedImageName string
 	}{
-		{"nvidia-gpu", "registry.neutree.ai/vllm-cuda"},
-		{"amd-gpu", "registry.neutree.ai/vllm-rocm"},
-		{"cpu", "registry.neutree.ai/vllm-cpu"},
+		{"nvidia-gpu", "vllm-cuda"},
+		{"amd-gpu", "vllm-rocm"},
+		{"cpu", "vllm-cpu"},
 	}
 
 	for _, tc := range testCases {
@@ -640,7 +685,6 @@ func TestKubernetesOrchestrator_getImageForAccelerator_MultipleAccelerators(t *t
 				engine,
 				"v0.5.0",
 				tc.acceleratorType,
-				"registry.neutree.ai",
 			)
 
 			require.NoError(t, err)
@@ -650,7 +694,7 @@ func TestKubernetesOrchestrator_getImageForAccelerator_MultipleAccelerators(t *t
 	}
 }
 
-var testBase64DeploymentTemplate = `YXBpVmVyc2lvbjogYXBwcy92MQpraW5kOiBEZXBsb3ltZW50Cm1ldGFkYXRhOgogIG5hbWU6IHt7IC5FbmRwb2ludE5hbWUgfX0KICBuYW1lc3BhY2U6IHt7IC5OYW1lc3BhY2UgfX0KICBsYWJlbHM6CiAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICBlbmdpbmVfdmVyc2lvbjoge3sgLkVuZ2luZVZlcnNpb24gfX0KICAgIGNsdXN0ZXI6IHt7IC5DbHVzdGVyTmFtZSB9fQogICAgd29ya3NwYWNlOiB7eyAuV29ya3NwYWNlIH19CiAgICBlbmRwb2ludDoge3sgLkVuZHBvaW50TmFtZSB9fQogICAgcm91dGluZ19sb2dpYzoge3sgLlJvdXRpbmdMb2dpYyB9fQogICAgYXBwOiBpbmZlcmVuY2UKc3BlYzoKICByZXBsaWNhczoge3sgLlJlcGxpY2FzIH19CiAgcHJvZ3Jlc3NEZWFkbGluZVNlY29uZHM6IDEyMDAKICBzdHJhdGVneToKICAgIHR5cGU6IFJvbGxpbmdVcGRhdGUKICAgIHJvbGxpbmdVcGRhdGU6CiAgICAgIG1heFVuYXZhaWxhYmxlOiAxCiAgICAgIG1heFN1cmdlOiAwCiAgc2VsZWN0b3I6CiAgICBtYXRjaExhYmVsczoKICAgICAgY2x1c3Rlcjoge3sgLkNsdXN0ZXJOYW1lIH19CiAgICAgIHdvcmtzcGFjZToge3sgLldvcmtzcGFjZSB9fQogICAgICBlbmRwb2ludDoge3sgLkVuZHBvaW50TmFtZSB9fQogICAgICBhcHA6IGluZmVyZW5jZQogIHRlbXBsYXRlOgogICAgbWV0YWRhdGE6CiAgICAgIGxhYmVsczoKICAgICAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICAgICAgZW5naW5lX3ZlcnNpb246IHt7IC5FbmdpbmVWZXJzaW9uIH19CiAgICAgICAgY2x1c3Rlcjoge3sgLkNsdXN0ZXJOYW1lIH19CiAgICAgICAgd29ya3NwYWNlOiB7eyAuV29ya3NwYWNlIH19CiAgICAgICAgZW5kcG9pbnQ6IHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgICByb3V0aW5nX2xvZ2ljOiB7eyAuUm91dGluZ0xvZ2ljIH19CiAgICAgICAgYXBwOiBpbmZlcmVuY2UKICAgIHNwZWM6CiAgICAgIGFmZmluaXR5OgogICAgICAgIHBvZEFudGlBZmZpbml0eToKICAgICAgICAgIHByZWZlcnJlZER1cmluZ1NjaGVkdWxpbmdJZ25vcmVkRHVyaW5nRXhlY3V0aW9uOgogICAgICAgICAgICAtIHdlaWdodDogMTAwCiAgICAgICAgICAgICAgcG9kQWZmaW5pdHlUZXJtOgogICAgICAgICAgICAgICAgbGFiZWxTZWxlY3RvcjoKICAgICAgICAgICAgICAgICAgbWF0Y2hFeHByZXNzaW9uczoKICAgICAgICAgICAgICAgICAgICAtIGtleTogZW5kcG9pbnQKICAgICAgICAgICAgICAgICAgICAgIG9wZXJhdG9yOiBJbgogICAgICAgICAgICAgICAgICAgICAgdmFsdWVzOgogICAgICAgICAgICAgICAgICAgICAgICAtIHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgICAgICAgICAgIHRvcG9sb2d5S2V5OiAia3ViZXJuZXRlcy5pby9ob3N0bmFtZSIKICAgICAge3stIGlmIC5Ob2RlU2VsZWN0b3IgfX0KICAgICAgbm9kZVNlbGVjdG9yOgogICAgICAgIHt7LSByYW5nZSAka2V5LCAkdmFsdWUgOj0gLk5vZGVTZWxlY3RvciB9fQogICAgICAgIHt7ICRrZXkgfX06IHt7ICR2YWx1ZSB9fQogICAgICAgIHt7LSBlbmQgfX0KICAgICAge3stIGVuZCB9fQogICAgICB7ey0gaWYgLkltYWdlUHVsbFNlY3JldCB9fQogICAgICBpbWFnZVB1bGxTZWNyZXRzOgogICAgICAgIC0gbmFtZToge3sgLkltYWdlUHVsbFNlY3JldCB9fQogICAgICB7ey0gZW5kIH19CgogICAgICB7ey0gaWYgLlZvbHVtZXMgfX0KICAgICAgdm9sdW1lczoKe3sgLlZvbHVtZXMgfCB0b1lhbWwgfCBpbmRlbnQgNiB9fQogICAgICB7ey0gZW5kIH19CgogICAgICBjb250YWluZXJzOgogICAgICAgIC0gbmFtZToge3sgLkVuZ2luZU5hbWUgfX0KICAgICAgICAgIGltYWdlOiB7eyAuSW1hZ2VSZXBvIH19Ont7IC5JbWFnZVRhZyB9fQogICAgICAgICAgY29tbWFuZDoKICAgICAgICAgIC0gdmxsbQogICAgICAgICAgLSBzZXJ2ZQogICAgICAgICAgLSB7eyAuTW9kZWxBcmdzLnBhdGggfX0KICAgICAgICAgIC0gLS1ob3N0CiAgICAgICAgICAtICIwLjAuMC4wIgogICAgICAgICAgLSAiLS1wb3J0IgogICAgICAgICAgLSAiODAwMCIKICAgICAgICAgIC0gLS1zZXJ2ZWQtbW9kZWwtbmFtZQogICAgICAgICAgLSB7eyAuTW9kZWxBcmdzLm5hbWUgfX0KICAgICAgICAgIC0gLS10YXNrCiAgICAgICAgICB7ey0gaWYgZXEgLk1vZGVsQXJncy50YXNrICJ0ZXh0LWVtYmVkZGluZyIgfX0KICAgICAgICAgIC0gZW1iZWRkaW5nCiAgICAgICAgICB7ey0gZWxzZSBpZiBlcSAuTW9kZWxBcmdzLnRhc2sgInRleHQtZ2VuZXJhdGlvbiIgfX0KICAgICAgICAgIC0gZ2VuZXJhdGUKICAgICAgICAgIHt7LSBlbHNlIGlmIGVxIC5Nb2RlbEFyZ3MudGFzayAidGV4dC1yZXJhbmsiIH19CiAgICAgICAgICAtIHJlcmFuawogICAgICAgICAge3stIGVsc2UgfX0KICAgICAgICAgIC0ge3sgLk1vZGVsQXJncy50YXNrIH19CiAgICAgICAgICB7ey0gZW5kIH19CiAgICAgICAgICB7ey0gaWYgLkVuZ2luZUFyZ3MgfX0KICAgICAgICAgIHt7LSByYW5nZSAka2V5LCAkdmFsdWUgOj0gLkVuZ2luZUFyZ3MgfX0KICAgICAgICAgIC0gLS17eyAka2V5IH19CiAgICAgIHt7LSBpZiBuZSAocHJpbnRmICIldiIgJHZhbHVlKSAidHJ1ZSJ9fQogICAgICAgICAgLSAie3sgJHZhbHVlIH19IgogICAgICB7ey0gZW5kIH19CiAgICAgICAgICB7ey0gZW5kIH19CiAgICAgICAgICB7ey0gZW5kIH19CiAgICAgICAgICByZXNvdXJjZXM6CiAgICAgICAgICAgIGxpbWl0czoKICAgICAgICAgICAgICB7ey0gcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5SZXNvdXJjZXMgfX0KICAgICAgICAgICAgICB7eyAka2V5IH19OiB7eyAkdmFsdWUgfX0KICAgICAgICAgICAgICB7ey0gZW5kIH19CiAgICAgICAgICAgIHJlcXVlc3RzOgogICAgICAgICAgICAgIHt7LSByYW5nZSAka2V5LCAkdmFsdWUgOj0gLlJlc291cmNlcyB9fQogICAgICAgICAgICAgIHt7ICRrZXkgfX06IHt7ICR2YWx1ZSB9fQogICAgICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIGVudjoKICAgICAgICAgICB7eyByYW5nZSAka2V5LCAkdmFsdWUgOj0gLkVudiB9fQogICAgICAgICAgIC0gbmFtZToge3sgJGtleSB9fQogICAgICAgICAgICAgdmFsdWU6ICJ7eyAkdmFsdWUgfX0iCiAgICAgICAgICAge3sgZW5kIH19CiAgICAgICAgICBwb3J0czoKICAgICAgICAgICAgLSBjb250YWluZXJQb3J0OiA4MDAwCiAgICAgICAgICBzdGFydHVwUHJvYmU6CiAgICAgICAgICAgIGh0dHBHZXQ6CiAgICAgICAgICAgICAgcGF0aDogL2hlYWx0aAogICAgICAgICAgICAgIHBvcnQ6IDgwMDAKICAgICAgICAgICAgaW5pdGlhbERlbGF5U2Vjb25kczogNQogICAgICAgICAgICB0aW1lb3V0U2Vjb25kczogNQogICAgICAgICAgICBwZXJpb2RTZWNvbmRzOiAxMAogICAgICAgICAgICBzdWNjZXNzVGhyZXNob2xkOiAxCiAgICAgICAgICAgIGZhaWx1cmVUaHJlc2hvbGQ6IDEyMAogICAgICAgICAgcmVhZGluZXNzUHJvYmU6CiAgICAgICAgICAgIGh0dHBHZXQ6CiAgICAgICAgICAgICAgcGF0aDogL2hlYWx0aAogICAgICAgICAgICAgIHBvcnQ6IDgwMDAKICAgICAgICAgICAgaW5pdGlhbERlbGF5U2Vjb25kczogNQogICAgICAgICAgICB0aW1lb3V0U2Vjb25kczogNQogICAgICAgICAgICBwZXJpb2RTZWNvbmRzOiAxMAogICAgICAgICAgICBzdWNjZXNzVGhyZXNob2xkOiAxCiAgICAgICAgICAgIGZhaWx1cmVUaHJlc2hvbGQ6IDMKICAgICAgICAgIHt7LSBpZiAuVm9sdW1lTW91bnRzIH19CiAgICAgICAgICB2b2x1bWVNb3VudHM6Cnt7IC5Wb2x1bWVNb3VudHMgfCB0b1lhbWwgfCBpbmRlbnQgMTAgfX0KICAgICAgICAgIHt7LSBlbmQgfX0=`
+var testBase64DeploymentTemplate = `YXBpVmVyc2lvbjogYXBwcy92MQpraW5kOiBEZXBsb3ltZW50Cm1ldGFkYXRhOgogIG5hbWU6IHt7IC5FbmRwb2ludE5hbWUgfX0KICBuYW1lc3BhY2U6IHt7IC5OYW1lc3BhY2UgfX0KICBsYWJlbHM6CiAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICBlbmdpbmVfdmVyc2lvbjoge3sgLkVuZ2luZVZlcnNpb24gfX0KICAgIGNsdXN0ZXI6IHt7IC5DbHVzdGVyTmFtZSB9fQogICAgd29ya3NwYWNlOiB7eyAuV29ya3NwYWNlIH19CiAgICBlbmRwb2ludDoge3sgLkVuZHBvaW50TmFtZSB9fQogICAgcm91dGluZ19sb2dpYzoge3sgLlJvdXRpbmdMb2dpYyB9fQogICAgYXBwOiBpbmZlcmVuY2UKc3BlYzoKICByZXBsaWNhczoge3sgLlJlcGxpY2FzIH19CiAgcHJvZ3Jlc3NEZWFkbGluZVNlY29uZHM6IDEyMDAKICBzdHJhdGVneToKICAgIHR5cGU6IFJvbGxpbmdVcGRhdGUKICAgIHJvbGxpbmdVcGRhdGU6CiAgICAgIG1heFVuYXZhaWxhYmxlOiAxCiAgICAgIG1heFN1cmdlOiAwCiAgc2VsZWN0b3I6CiAgICBtYXRjaExhYmVsczoKICAgICAgY2x1c3Rlcjoge3sgLkNsdXN0ZXJOYW1lIH19CiAgICAgIHdvcmtzcGFjZToge3sgLldvcmtzcGFjZSB9fQogICAgICBlbmRwb2ludDoge3sgLkVuZHBvaW50TmFtZSB9fQogICAgICBhcHA6IGluZmVyZW5jZQogIHRlbXBsYXRlOgogICAgbWV0YWRhdGE6CiAgICAgIGxhYmVsczoKICAgICAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICAgICAgZW5naW5lX3ZlcnNpb246IHt7IC5FbmdpbmVWZXJzaW9uIH19CiAgICAgICAgY2x1c3Rlcjoge3sgLkNsdXN0ZXJOYW1lIH19CiAgICAgICAgd29ya3NwYWNlOiB7eyAuV29ya3NwYWNlIH19CiAgICAgICAgZW5kcG9pbnQ6IHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgICByb3V0aW5nX2xvZ2ljOiB7eyAuUm91dGluZ0xvZ2ljIH19CiAgICAgICAgYXBwOiBpbmZlcmVuY2UKICAgIHNwZWM6CiAgICAgIGFmZmluaXR5OgogICAgICAgIHBvZEFudGlBZmZpbml0eToKICAgICAgICAgIHByZWZlcnJlZER1cmluZ1NjaGVkdWxpbmdJZ25vcmVkRHVyaW5nRXhlY3V0aW9uOgogICAgICAgICAgICAtIHdlaWdodDogMTAwCiAgICAgICAgICAgICAgcG9kQWZmaW5pdHlUZXJtOgogICAgICAgICAgICAgICAgbGFiZWxTZWxlY3RvcjoKICAgICAgICAgICAgICAgICAgbWF0Y2hFeHByZXNzaW9uczoKICAgICAgICAgICAgICAgICAgICAtIGtleTogZW5kcG9pbnQKICAgICAgICAgICAgICAgICAgICAgIG9wZXJhdG9yOiBJbgogICAgICAgICAgICAgICAgICAgICAgdmFsdWVzOgogICAgICAgICAgICAgICAgICAgICAgICAtIHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgICAgICAgICAgIHRvcG9sb2d5S2V5OiAia3ViZXJuZXRlcy5pby9ob3N0bmFtZSIKICAgICAge3stIGlmIC5Ob2RlU2VsZWN0b3IgfX0KICAgICAgbm9kZVNlbGVjdG9yOgogICAgICAgIHt7LSByYW5nZSAka2V5LCAkdmFsdWUgOj0gLk5vZGVTZWxlY3RvciB9fQogICAgICAgIHt7ICRrZXkgfX06IHt7ICR2YWx1ZSB9fQogICAgICAgIHt7LSBlbmQgfX0KICAgICAge3stIGVuZCB9fQogICAgICB7ey0gaWYgLkltYWdlUHVsbFNlY3JldCB9fQogICAgICBpbWFnZVB1bGxTZWNyZXRzOgogICAgICAgIC0gbmFtZToge3sgLkltYWdlUHVsbFNlY3JldCB9fQogICAgICB7ey0gZW5kIH19CgogICAgICB7ey0gaWYgLlZvbHVtZXMgfX0KICAgICAgdm9sdW1lczoKe3sgLlZvbHVtZXMgfCB0b1lhbWwgfCBpbmRlbnQgNiB9fQogICAgICB7ey0gZW5kIH19CiAgICAgIGluaXRDb250YWluZXJzOgogICAgICAgIC0gbmFtZTogbW9kZWwtZG93bmxvYWRlcgogICAgICAgICAgaW1hZ2U6IHt7IC5JbWFnZVByZWZpeCB9fS9uZXV0cmVlL3J1bnRpbWU6e3sgLk5ldXRyZWVWZXJzaW9uIH19CiAgICAgICAgICBjb21tYW5kOgogICAgICAgICAgICAtIGJhc2gKICAgICAgICAgICAgLSAtYwogICAgICAgICAgYXJnczoKICAgICAgICAgICAgLSA+LQogICAgICAgICAgICAgIHB5dGhvbjMgLW0gbmV1dHJlZS5kb3dubG9hZGVyCiAgICAgICAgICAgICAgLS1uYW1lPSJ7eyAuTW9kZWxBcmdzLm5hbWUgfX0iCiAgICAgICAgICAgICAgLS1yZWdpc3RyeV90eXBlPSJ7eyAuTW9kZWxBcmdzLnJlZ2lzdHJ5X3R5cGUgfX0iCiAgICAgICAgICAgICAgLS1yZWdpc3RyeV9wYXRoPSJ7eyAuTW9kZWxBcmdzLnJlZ2lzdHJ5X3BhdGggfX0iCiAgICAgICAgICAgICAgLS12ZXJzaW9uPSJ7eyAuTW9kZWxBcmdzLnZlcnNpb24gfX0iCiAgICAgICAgICAgICAgLS1maWxlPSJ7eyAuTW9kZWxBcmdzLmZpbGUgfX0iCiAgICAgICAgICAgICAgLS10YXNrPSJ7eyAuTW9kZWxBcmdzLnRhc2sgfX0iCiAgICAgICAgICBlbnY6CiAgICAgICAgICAge3sgcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5FbnYgfX0KICAgICAgICAgICAtIG5hbWU6IHt7ICRrZXkgfX0KICAgICAgICAgICAgIHZhbHVlOiAie3sgJHZhbHVlIH19IgogICAgICAgICAgIHt7IGVuZCB9fQogICAgICAgICAge3stIGlmIC5Wb2x1bWVNb3VudHMgfX0KICAgICAgICAgIHZvbHVtZU1vdW50czoKe3sgLlZvbHVtZU1vdW50cyB8IHRvWWFtbCB8IGluZGVudCAxMCB9fQogICAgICAgICAge3stIGVuZCB9fQoKICAgICAgY29udGFpbmVyczoKICAgICAgICAtIG5hbWU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICAgICAgICBpbWFnZToge3sgLkltYWdlUHJlZml4IH19L3t7IC5JbWFnZVJlcG8gfX06e3sgLkltYWdlVGFnIH19CiAgICAgICAgICBjb21tYW5kOgogICAgICAgICAgLSB2bGxtCiAgICAgICAgICAtIHNlcnZlCiAgICAgICAgICAtIHt7IC5Nb2RlbEFyZ3MucGF0aCB9fQogICAgICAgICAgLSAtLWhvc3QKICAgICAgICAgIC0gIjAuMC4wLjAiCiAgICAgICAgICAtICItLXBvcnQiCiAgICAgICAgICAtICI4MDAwIgogICAgICAgICAgLSAtLXNlcnZlZC1tb2RlbC1uYW1lCiAgICAgICAgICAtIHt7IC5Nb2RlbEFyZ3Muc2VydmVfbmFtZSB9fQogICAgICAgICAgLSAtLXRhc2sKICAgICAgICAgIHt7LSBpZiBlcSAuTW9kZWxBcmdzLnRhc2sgInRleHQtZW1iZWRkaW5nIiB9fQogICAgICAgICAgLSBlbWJlZGRpbmcKICAgICAgICAgIHt7LSBlbHNlIGlmIGVxIC5Nb2RlbEFyZ3MudGFzayAidGV4dC1nZW5lcmF0aW9uIiB9fQogICAgICAgICAgLSBnZW5lcmF0ZQogICAgICAgICAge3stIGVsc2UgaWYgZXEgLk1vZGVsQXJncy50YXNrICJ0ZXh0LXJlcmFuayIgfX0KICAgICAgICAgIC0gcmVyYW5rCiAgICAgICAgICB7ey0gZWxzZSB9fQogICAgICAgICAgLSB7eyAuTW9kZWxBcmdzLnRhc2sgfX0KICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIHt7LSBpZiAuRW5naW5lQXJncyB9fQogICAgICAgICAge3stIHJhbmdlICRrZXksICR2YWx1ZSA6PSAuRW5naW5lQXJncyB9fQogICAgICAgICAgLSAtLXt7ICRrZXkgfX0KICAgICAge3stIGlmIG5lIChwcmludGYgIiV2IiAkdmFsdWUpICJ0cnVlIn19CiAgICAgICAgICAtICJ7eyAkdmFsdWUgfX0iCiAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIHJlc291cmNlczoKICAgICAgICAgICAgbGltaXRzOgogICAgICAgICAgICAgIHt7LSByYW5nZSAka2V5LCAkdmFsdWUgOj0gLlJlc291cmNlcyB9fQogICAgICAgICAgICAgIHt7ICRrZXkgfX06IHt7ICR2YWx1ZSB9fQogICAgICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgICAgcmVxdWVzdHM6CiAgICAgICAgICAgICAge3stIHJhbmdlICRrZXksICR2YWx1ZSA6PSAuUmVzb3VyY2VzIH19CiAgICAgICAgICAgICAge3sgJGtleSB9fToge3sgJHZhbHVlIH19CiAgICAgICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAgZW52OgogICAgICAgICAgIHt7IHJhbmdlICRrZXksICR2YWx1ZSA6PSAuRW52IH19CiAgICAgICAgICAgLSBuYW1lOiB7eyAka2V5IH19CiAgICAgICAgICAgICB2YWx1ZTogInt7ICR2YWx1ZSB9fSIKICAgICAgICAgICB7eyBlbmQgfX0KICAgICAgICAgIHBvcnRzOgogICAgICAgICAgICAtIGNvbnRhaW5lclBvcnQ6IDgwMDAKICAgICAgICAgIHN0YXJ0dXBQcm9iZToKICAgICAgICAgICAgaHR0cEdldDoKICAgICAgICAgICAgICBwYXRoOiAvaGVhbHRoCiAgICAgICAgICAgICAgcG9ydDogODAwMAogICAgICAgICAgICBpbml0aWFsRGVsYXlTZWNvbmRzOiA1CiAgICAgICAgICAgIHRpbWVvdXRTZWNvbmRzOiA1CiAgICAgICAgICAgIHBlcmlvZFNlY29uZHM6IDEwCiAgICAgICAgICAgIHN1Y2Nlc3NUaHJlc2hvbGQ6IDEKICAgICAgICAgICAgZmFpbHVyZVRocmVzaG9sZDogMTIwCiAgICAgICAgICByZWFkaW5lc3NQcm9iZToKICAgICAgICAgICAgaHR0cEdldDoKICAgICAgICAgICAgICBwYXRoOiAvaGVhbHRoCiAgICAgICAgICAgICAgcG9ydDogODAwMAogICAgICAgICAgICBpbml0aWFsRGVsYXlTZWNvbmRzOiA1CiAgICAgICAgICAgIHRpbWVvdXRTZWNvbmRzOiA1CiAgICAgICAgICAgIHBlcmlvZFNlY29uZHM6IDEwCiAgICAgICAgICAgIHN1Y2Nlc3NUaHJlc2hvbGQ6IDEKICAgICAgICAgICAgZmFpbHVyZVRocmVzaG9sZDogMwogICAgICAgICAge3stIGlmIC5Wb2x1bWVNb3VudHMgfX0KICAgICAgICAgIHZvbHVtZU1vdW50czoKe3sgLlZvbHVtZU1vdW50cyB8IHRvWWFtbCB8IGluZGVudCAxMCB9fQogICAgICAgICAge3stIGVuZCB9fQ==`
 
 func Test_getDeployTemplate(t *testing.T) {
 	k := &kubernetesOrchestrator{}
@@ -778,6 +822,9 @@ func TestKubernetesOrchestrator_setBasicVariables(t *testing.T) {
 			Name:      "test-cluster",
 			Workspace: "test-workspace",
 		},
+		Spec: &v1.ClusterSpec{
+			Version: "v0.1.0",
+		},
 	}
 
 	engine := &v1.Engine{
@@ -798,6 +845,7 @@ func TestKubernetesOrchestrator_setBasicVariables(t *testing.T) {
 	assert.Equal(t, "roundrobin", data.RoutingLogic)
 	assert.NotEmpty(t, data.Namespace)
 	assert.NotEmpty(t, data.ImagePullSecret)
+	assert.Equal(t, data.NeutreeVersion, "v0.1.0")
 }
 
 func TestKubernetesOrchestrator_setRoutingLogic(t *testing.T) {
@@ -986,7 +1034,8 @@ func TestKubernetesOrchestrator_setModelArgs(t *testing.T) {
 				"file":          "model.safetensors",
 				"task":          "text-generation",
 				"path":          "llama-2-7b",
-				"registry-type": string(v1.HuggingFaceModelRegistryType),
+				"registry_type": string(v1.HuggingFaceModelRegistryType),
+				"serve_name":    "llama-2-7b",
 			},
 		},
 		{
@@ -1014,7 +1063,39 @@ func TestKubernetesOrchestrator_setModelArgs(t *testing.T) {
 				"file":          "",
 				"task":          "text-generation",
 				"path":          "gpt-model",
-				"registry-type": string(v1.BentoMLModelRegistryType),
+				"registry_type": string(v1.BentoMLModelRegistryType),
+				"serve_name":    "gpt-model",
+			},
+		},
+		{
+			name: "serve_name with version when registry is BentoML",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:     "gpt-model",
+						Version:  "v2.0",
+						Task:     "text-generation",
+						Registry: "bentoml",
+					},
+				},
+			},
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			expectedModelArgs: map[string]interface{}{
+				"name":          "gpt-model",
+				"version":       "v2.0",
+				"file":          "",
+				"task":          "text-generation",
+				"path":          "gpt-model",
+				"registry_type": string(v1.BentoMLModelRegistryType),
+				"serve_name":    "gpt-model:v2.0",
 			},
 		},
 	}
@@ -1046,12 +1127,13 @@ func TestKubernetesOrchestrator_addSharedMemoryVolume(t *testing.T) {
 
 func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing.T) {
 	k := &kubernetesOrchestrator{}
-
+	modelPathPrefix := filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, v1.HuggingFaceModelRegistryType)
 	tests := []struct {
-		name            string
-		modelRegistry   *v1.ModelRegistry
-		endpoint        *v1.Endpoint
-		expectedEnvKeys []string
+		name          string
+		modelRegistry *v1.ModelRegistry
+		endpoint      *v1.Endpoint
+		expected      *DeploymentManifestVariables
+		wantErr       bool
 	}{
 		{
 			name: "HuggingFace with credentials",
@@ -1072,7 +1154,16 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 					},
 				},
 			},
-			expectedEnvKeys: []string{v1.HFEndpoint, v1.HFTokenEnv},
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"registry_path": "test-model",
+					"path":          filepath.Join(modelPathPrefix, "test-model"),
+				},
+				Env: map[string]string{
+					v1.HFEndpoint: "https://huggingface.co",
+					v1.HFTokenEnv: "hf_test_token",
+				},
+			},
 		},
 		{
 			name: "HuggingFace without credentials",
@@ -1092,28 +1183,35 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 					},
 				},
 			},
-			expectedEnvKeys: []string{v1.HFEndpoint},
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"registry_path": "test-model",
+					"path":          filepath.Join(modelPathPrefix, "test-model"),
+				},
+				Env: map[string]string{
+					v1.HFEndpoint: "https://huggingface.co",
+				},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := &DeploymentManifestVariables{
-				Env: map[string]string{},
-				ModelArgs: map[string]interface{}{
-					"path": "test-model",
-				},
+				Env:       map[string]string{},
+				ModelArgs: map[string]interface{}{},
 			}
 			err := k.setModelRegistryVariables(data, tt.endpoint, tt.modelRegistry)
-			require.NoError(t, err)
-
-			for _, key := range tt.expectedEnvKeys {
-				assert.Contains(t, data.Env, key)
-			}
-
-			// Verify URL has trailing slash removed
-			if url, ok := data.Env[v1.HFEndpoint]; ok {
-				assert.Equal(t, "https://huggingface.co", url)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			} else {
+				assert.NoError(t, err)
+				eq, _, err := util.JsonEqual(data, tt.expected)
+				require.NoError(t, err)
+				if !eq {
+					t.Errorf("expected and actual DeploymentManifestVariables do not match, want: %+v, got: %+v", tt.expected, data)
+				}
 			}
 		})
 	}
@@ -1123,13 +1221,11 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 	k := &kubernetesOrchestrator{}
 
 	tests := []struct {
-		name                string
-		modelRegistry       *v1.ModelRegistry
-		endpoint            *v1.Endpoint
-		expectedEnvKeys     []string
-		expectedVolumeCount int
-		expectedModelPath   string
-		expectError         bool
+		name          string
+		modelRegistry *v1.ModelRegistry
+		endpoint      *v1.Endpoint
+		expected      *DeploymentManifestVariables
+		expectError   bool
 	}{
 		{
 			name: "BentoML with NFS - specific version",
@@ -1151,10 +1247,30 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 					},
 				},
 			},
-			expectedEnvKeys:     []string{v1.BentoMLHomeEnv},
-			expectedVolumeCount: 1,
-			expectedModelPath:   "/mnt/bentoml/models/llama-2-7b/v1.0/model.safetensors",
-			expectError:         false,
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"path":          "/models-cache/bentoml/llama-2-7b/v1.0",
+					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: "bentoml-model-registry",
+						VolumeSource: corev1.VolumeSource{
+							NFS: &corev1.NFSVolumeSource{
+								Server: "192.168.1.100",
+								Path:   "/bentoml",
+							},
+						},
+					},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "bentoml-model-registry",
+						MountPath: "/mnt/bentoml",
+					},
+				},
+			},
+			expectError: false,
 		},
 		{
 			name: "BentoML with NFS - without file",
@@ -1175,10 +1291,30 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 					},
 				},
 			},
-			expectedEnvKeys:     []string{v1.BentoMLHomeEnv},
-			expectedVolumeCount: 1,
-			expectedModelPath:   "/mnt/bentoml/models/gpt-model/v2.0",
-			expectError:         false,
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"path":          "/models-cache/bentoml/gpt-model/v2.0",
+					"registry_path": "/mnt/bentoml/models/gpt-model/v2.0",
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: "bentoml-model-registry",
+						VolumeSource: corev1.VolumeSource{
+							NFS: &corev1.NFSVolumeSource{
+								Server: "192.168.1.100",
+								Path:   "/bentoml",
+							},
+						},
+					},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "bentoml-model-registry",
+						MountPath: "/mnt/bentoml",
+					},
+				},
+			},
+			expectError: false,
 		},
 		{
 			name: "BentoML without NFS scheme",
@@ -1199,52 +1335,28 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 					},
 				},
 			},
-			expectedEnvKeys:     []string{},
-			expectedVolumeCount: 0,
-			expectedModelPath:   "test-model", // Should keep original path
-			expectError:         false,
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{},
+			},
+			expectError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := &DeploymentManifestVariables{
-				Env: map[string]string{},
-				ModelArgs: map[string]interface{}{
-					"path": tt.endpoint.Spec.Model.Name, // Initialize with model name
-				},
+				ModelArgs: map[string]interface{}{},
 			}
 
 			err := k.setModelRegistryVariables(data, tt.endpoint, tt.modelRegistry)
-
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-
-				// Verify environment variables
-				for _, key := range tt.expectedEnvKeys {
-					assert.Contains(t, data.Env, key)
-				}
-
-				// Verify volumes
-				assert.Len(t, data.Volumes, tt.expectedVolumeCount)
-				assert.Len(t, data.VolumeMounts, tt.expectedVolumeCount)
-
-				// Verify model path
-				if modelPath, ok := data.ModelArgs["path"].(string); ok {
-					assert.Equal(t, tt.expectedModelPath, modelPath)
-				}
-
-				// Verify NFS volume configuration if expected
-				if tt.expectedVolumeCount > 0 {
-					assert.Equal(t, "bentoml-model-registry", data.Volumes[0].Name)
-					assert.NotNil(t, data.Volumes[0].VolumeSource.NFS)
-					assert.Equal(t, "192.168.1.100", data.Volumes[0].VolumeSource.NFS.Server)
-					assert.Equal(t, "/bentoml", data.Volumes[0].VolumeSource.NFS.Path)
-
-					assert.Equal(t, "bentoml-model-registry", data.VolumeMounts[0].Name)
-					assert.Equal(t, "/mnt/bentoml", data.VolumeMounts[0].MountPath)
+				eq, _, err := util.JsonEqual(data, tt.expected)
+				require.NoError(t, err)
+				if !eq {
+					t.Errorf("expected and actual DeploymentManifestVariables do not match, want: %+v, got: %+v", tt.expected, data)
 				}
 			}
 		})
@@ -1253,13 +1365,14 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 
 func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 	tests := []struct {
-		name          string
-		endpoint      *v1.Endpoint
-		engine        *v1.Engine
-		imageRegistry *v1.ImageRegistry
-		expectedImage string
-		expectedTag   string
-		expectError   bool
+		name                string
+		endpoint            *v1.Endpoint
+		engine              *v1.Engine
+		imageRegistry       *v1.ImageRegistry
+		expectedImagePrefix string
+		expectedImage       string
+		expectedTag         string
+		expectError         bool
 	}{
 		{
 			name: "with new image system - nvidia gpu",
@@ -1300,9 +1413,10 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 					Repository: "neutree",
 				},
 			},
-			expectedImage: "registry.neutree.ai/neutree/vllm-cuda",
-			expectedTag:   "v0.5.0-cuda12.1",
-			expectError:   false,
+			expectedImagePrefix: "registry.neutree.ai/neutree",
+			expectedImage:       "vllm-cuda",
+			expectedTag:         "v0.5.0-cuda12.1",
+			expectError:         false,
 		},
 		{
 			name: "with new image system - cpu",
@@ -1341,9 +1455,10 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 					Repository: "neutree",
 				},
 			},
-			expectedImage: "registry.neutree.ai/neutree/vllm-cpu",
-			expectedTag:   "v0.5.0",
-			expectError:   false,
+			expectedImagePrefix: "registry.neutree.ai/neutree",
+			expectedImage:       "vllm-cpu",
+			expectedTag:         "v0.5.0",
+			expectError:         false,
 		},
 	}
 
@@ -1398,8 +1513,8 @@ func TestKubernetesOrchestrator_setModelCacheVariables(t *testing.T) {
 					},
 				},
 			},
-			expectedVolCount: 1,
-			expectedEnvKeys:  []string{v1.HFHomeEnv},
+			expectedVolCount: 2,
+			expectedEnvKeys:  []string{v1.ModelCacheDirENV},
 			expectError:      false,
 		},
 		{
@@ -1418,8 +1533,8 @@ func TestKubernetesOrchestrator_setModelCacheVariables(t *testing.T) {
 					},
 				},
 			},
-			expectedVolCount: 0,
-			expectedEnvKeys:  []string{},
+			expectedVolCount: 1,
+			expectedEnvKeys:  []string{v1.ModelCacheDirENV},
 			expectError:      false,
 		},
 	}
@@ -1442,6 +1557,145 @@ func TestKubernetesOrchestrator_setModelCacheVariables(t *testing.T) {
 				for _, key := range tt.expectedEnvKeys {
 					assert.Contains(t, data.Env, key)
 				}
+			}
+		})
+	}
+}
+
+func TestGenerateModelCacheConfig(t *testing.T) {
+	tests := []struct {
+		name            string
+		modelCaches     []v1.ModelCache
+		expectedEnvs    map[string]string
+		expectedVolumes []corev1.Volume
+		expectedMounts  []corev1.VolumeMount
+	}{
+		{
+			name: "single model cache",
+			modelCaches: []v1.ModelCache{
+				{
+					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: "/data/huggingface",
+					},
+				},
+			},
+			expectedEnvs: map[string]string{
+				v1.ModelCacheDirENV: "/models-cache",
+			},
+			expectedVolumes: []corev1.Volume{
+				{
+					Name: "models-cache-tmp",
+					VolumeSource: corev1.VolumeSource{
+						EmptyDir: &corev1.EmptyDirVolumeSource{
+							Medium: corev1.StorageMediumDefault,
+						},
+					},
+				},
+				{
+					Name: "models-cache-hugging-face",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/data/huggingface",
+						},
+					},
+				},
+			},
+			expectedMounts: []corev1.VolumeMount{
+				{
+					Name:      "models-cache-tmp",
+					MountPath: "/models-cache",
+				},
+				{
+					Name:      "models-cache-hugging-face",
+					MountPath: "/models-cache/hugging-face",
+				},
+			},
+		},
+		{
+			name: "multiple model caches",
+			modelCaches: []v1.ModelCache{
+				{
+					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: "/data/huggingface",
+					},
+				},
+				{
+					ModelRegistryType: v1.BentoMLModelRegistryType,
+					NFS: &corev1.NFSVolumeSource{
+						Server: "192.168.1.1",
+						Path:   "/models",
+					},
+				},
+			},
+			expectedEnvs: map[string]string{
+				v1.ModelCacheDirENV: "/models-cache",
+			},
+			expectedVolumes: []corev1.Volume{
+				{
+					Name: "models-cache-tmp",
+					VolumeSource: corev1.VolumeSource{
+						EmptyDir: &corev1.EmptyDirVolumeSource{
+							Medium: corev1.StorageMediumDefault,
+						},
+					},
+				},
+				{
+					Name: "models-cache-hugging-face",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/data/huggingface",
+						},
+					},
+				},
+				{
+					Name: "models-cache-bentoml",
+					VolumeSource: corev1.VolumeSource{
+						NFS: &corev1.NFSVolumeSource{
+							Server: "192.168.1.1",
+							Path:   "/models",
+						},
+					},
+				},
+			},
+			expectedMounts: []corev1.VolumeMount{
+				{
+					Name:      "models-cache-tmp",
+					MountPath: "/models-cache",
+				},
+				{
+					Name:      "models-cache-hugging-face",
+					MountPath: "/models-cache/hugging-face",
+				},
+				{
+					Name:      "models-cache-bentoml",
+					MountPath: "/models-cache/bentoml",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			volumes, mounts, envs := generateModelCacheConfig(tt.modelCaches)
+
+			eq, _, err := util.JsonEqual(tt.expectedVolumes, volumes)
+			require.NoError(t, err)
+			if !eq {
+				t.Errorf("expected and actual volumes do not match, want: %+v, got: %+v", tt.expectedVolumes, volumes)
+			}
+
+			eq, _, err = util.JsonEqual(tt.expectedMounts, mounts)
+			require.NoError(t, err)
+			if !eq {
+				t.Errorf("expected and actual mounts do not match, want: %+v, got: %+v", tt.expectedMounts, mounts)
+			}
+
+			eq, _, err = util.JsonEqual(tt.expectedEnvs, envs)
+			require.NoError(t, err)
+			if !eq {
+				t.Errorf("expected and actual envs do not match, want: %+v, got: %+v", tt.expectedEnvs, envs)
 			}
 		})
 	}

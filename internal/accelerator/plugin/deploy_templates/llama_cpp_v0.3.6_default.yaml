@@ -58,29 +58,47 @@ spec:
       imagePullSecrets:
         - name: {{ .ImagePullSecret }}
       {{- end }}
-
       {{- if .Volumes }}
       volumes:
 {{ .Volumes | toYaml | indent 6 }}
       {{- end }}
-
+      initContainers:
+        - name: model-downloader
+          image: {{ .ImagePrefix }}/neutree/runtime:{{ .NeutreeVersion }}
+          command:
+            - bash
+            - -c
+          args:
+            - >-
+              python3 -m neutree.downloader
+              --name="{{ .ModelArgs.name }}"
+              --registry_type="{{ .ModelArgs.registry_type }}"
+              --registry_path="{{ .ModelArgs.registry_path }}"
+              --version="{{ .ModelArgs.version }}"
+              --file="{{ .ModelArgs.file }}"
+              --task="{{ .ModelArgs.task }}"
+          env:
+            {{ range $key, $value := .Env }}
+            - name: {{ $key }}
+              value: "{{ $value }}"
+            {{ end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
       containers:
         - name: {{ .EngineName }}
-          image: {{ .ImageRepo }}:{{ .ImageTag }}
+          image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
           command:
-          - bash
-          - -c
+            - bash
+            - -c
           args:
-          - >-
-            python3 -m llama_cpp.server
-            {{- if eq (index .ModelArgs "registry-type") "hugging-face" }}
-            --hf_model_repo_id {{ .ModelArgs.name }} --model {{ .ModelArgs.file }}
-            {{- else }}
-            --model $(find {{ .ModelArgs.path }} -name "{{ .ModelArgs.file }}" | head -n 1)
-            {{- end }}
-            --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.name }}
-            {{- if eq .ModelArgs.task "text-embedding" }} --embedding{{- end }}
-            {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{- if ne (printf "%v" $value) "true"}} "{{ $value }}"{{- end }}{{- end }}{{- end }}
+            - >-
+              python3 -m llama_cpp.server
+              --model $(find {{ .ModelArgs.path }} -name "{{ .ModelArgs.file }}" | head -n 1)
+              --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.serve_name }}
+              {{- if eq .ModelArgs.task "text-embedding" }} --embedding{{- end }}
+              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{- if ne (printf "%v" $value) "true"}} "{{ $value }}"{{- end }}{{- end }}{{- end }}
           resources:
             limits:
               {{- range $key, $value := .Resources }}
@@ -91,10 +109,10 @@ spec:
               {{ $key }}: {{ $value }}
               {{- end }}
           env:
-           {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
-           {{ end }}
+            {{ range $key, $value := .Env }}
+            - name: {{ $key }}
+              value: "{{ $value }}"
+            {{ end }}
           ports:
             - containerPort: 8000
           startupProbe:

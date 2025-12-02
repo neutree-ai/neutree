@@ -309,6 +309,14 @@ func (o *RayOrchestrator) DisconnectEndpointModel(endpoint *v1.Endpoint) error {
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
 func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry, acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
+	app := dashboard.RayServeApplication{
+		Name:        EndpointToServeApplicationName(endpoint),
+		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
+		ImportPath: fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"),
+			strings.ReplaceAll(endpoint.Spec.Engine.Version, ".", "_")),
+		Args: map[string]interface{}{},
+	}
+
 	rayResource, err := convertToRay(acceleratorMgr, endpoint.Spec.Resources)
 	if err != nil {
 		klog.Errorf("Failed to convert resources to Ray format: %v", err)
@@ -331,25 +339,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 		"num_gpus":     0,
 	}
 
-	args := map[string]interface{}{
-		"model": map[string]interface{}{
-			"registry_type": modelRegistry.Spec.Type,
-			"name":          endpoint.Spec.Model.Name,
-			"file":          endpoint.Spec.Model.File,
-			"version":       endpoint.Spec.Model.Version,
-			"task":          endpoint.Spec.Model.Task,
-		},
-		"deployment_options": endpoint.Spec.DeploymentOptions,
-	}
-
-	maps.Copy(args, endpoint.Spec.Variables)
-
-	app := dashboard.RayServeApplication{
-		Name:        EndpointToServeApplicationName(endpoint),
-		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
-		ImportPath:  fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"), endpoint.Spec.Engine.Version),
-		Args:        args,
-	}
+	app.Args["deployment_options"] = endpoint.Spec.DeploymentOptions
 
 	applicationEnv := map[string]string{}
 
@@ -357,19 +347,47 @@ func EndpointToApplication(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistr
 		applicationEnv[k] = v
 	}
 
+	modelArgs := map[string]interface{}{
+		"registry_type": modelRegistry.Spec.Type,
+		"name":          endpoint.Spec.Model.Name,
+		"file":          endpoint.Spec.Model.File,
+		"version":       endpoint.Spec.Model.Version,
+		"task":          endpoint.Spec.Model.Task,
+	}
+
+	modelArgs["serve_name"] = endpoint.Spec.Model.Name
+	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion && modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType {
+		modelArgs["serve_name"] = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
+	}
+
 	switch modelRegistry.Spec.Type {
 	case v1.BentoMLModelRegistryType:
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		// todo: support local file type env set
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			applicationEnv[v1.BentoMLHomeEnv] = filepath.Join("/mnt", endpoint.Key(), modelRegistry.Key(), endpoint.Spec.Model.Name)
+			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+			if err != nil {
+				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get real model version for model %s", endpoint.Spec.Model.Name)
+			}
+
+			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
+			// so we need to append "models" to the path
+			modelArgs["registry_path"] = filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name, "models", endpoint.Spec.Model.Name, modelRealVersion)
+			modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, string(v1.BentoMLModelRegistryType), endpoint.Spec.Model.Name, modelRealVersion)
 		}
 	case v1.HuggingFaceModelRegistryType:
 		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
 		if modelRegistry.Spec.Credentials != "" {
 			applicationEnv[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
+
+		modelArgs["registry_path"] = endpoint.Spec.Model.Name
+		modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, string(v1.HuggingFaceModelRegistryType), endpoint.Spec.Model.Name)
 	}
+
+	app.Args["model"] = modelArgs
+
+	maps.Copy(app.Args, endpoint.Spec.Variables)
 
 	app.RuntimeEnv = map[string]interface{}{
 		"env_vars": applicationEnv,

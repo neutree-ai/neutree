@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/pkg/model_registry"
+	modelregistrymocks "github.com/neutree-ai/neutree/pkg/model_registry/mocks"
 )
 
 func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {
@@ -243,4 +245,77 @@ func TestNoConverterFound(t *testing.T) {
 	_, err = convertToKubernetes(mgr, spec)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no converter found")
+}
+
+func TestGetDeployedModelRealVersion(t *testing.T) {
+	tests := []struct {
+		name         string
+		setupMocks   func(modelregistry *modelregistrymocks.MockModelRegistry)
+		inputVersion string
+		expected     string
+		wantErr      bool
+	}{
+		{
+			name: "Model found with real version",
+			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
+				modelregistry.On("Connect").Return(nil)
+				modelregistry.On("GetModelVersion", "test", "latest").Return(&v1.ModelVersion{
+					Name: "v1.0.0",
+				}, nil)
+				modelregistry.On("Disconnect").Return(nil)
+			},
+			inputVersion: "latest",
+			expected:     "v1.0.0",
+		},
+		{
+			name: "Model found with real version with empty version",
+			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
+				modelregistry.On("Connect").Return(nil)
+				modelregistry.On("GetModelVersion", "test", "").Return(&v1.ModelVersion{
+					Name: "v1.0.0",
+				}, nil)
+				modelregistry.On("Disconnect").Return(nil)
+			},
+			inputVersion: "",
+			expected:     "v1.0.0",
+		},
+		{
+			name: "Model not found error",
+			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
+				modelregistry.On("Connect").Return(nil)
+				modelregistry.On("GetModelVersion", "test", "latest").Return(nil, assert.AnError)
+				modelregistry.On("Disconnect").Return(nil)
+			},
+			inputVersion: "latest",
+			wantErr:      true,
+		},
+		{
+			name: "Model found with specific version",
+			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
+				// No calls expected since specific version is provided
+			},
+			inputVersion: "v2.0.0",
+			expected:     "v2.0.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockModelRegistry := &modelregistrymocks.MockModelRegistry{}
+			tt.setupMocks(mockModelRegistry)
+			model_registry.NewModelRegistry = func(registry *v1.ModelRegistry) (model_registry.ModelRegistry, error) {
+				return mockModelRegistry, nil
+			}
+
+			result, err := getDeployedModelRealVersion(&v1.ModelRegistry{}, "test", tt.inputVersion)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+
+			mockModelRegistry.AssertExpectations(t)
+		})
+	}
 }
