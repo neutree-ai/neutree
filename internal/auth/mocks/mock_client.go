@@ -124,6 +124,64 @@ func (_c *MockClient_AdminDeleteUser_Call) RunAndReturn(run func(types.AdminDele
 	return _c
 }
 
+// AdminUpdateUser provides a mock function with given fields: req
+func (_m *MockClient) AdminUpdateUser(req types.AdminUpdateUserRequest) (*types.AdminUpdateUserResponse, error) {
+	ret := _m.Called(req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AdminUpdateUser")
+	}
+
+	var r0 *types.AdminUpdateUserResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(types.AdminUpdateUserRequest) (*types.AdminUpdateUserResponse, error)); ok {
+		return rf(req)
+	}
+	if rf, ok := ret.Get(0).(func(types.AdminUpdateUserRequest) *types.AdminUpdateUserResponse); ok {
+		r0 = rf(req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.AdminUpdateUserResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(types.AdminUpdateUserRequest) error); ok {
+		r1 = rf(req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClient_AdminUpdateUser_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AdminUpdateUser'
+type MockClient_AdminUpdateUser_Call struct {
+	*mock.Call
+}
+
+// AdminUpdateUser is a helper method to define mock.On call
+//   - req types.AdminUpdateUserRequest
+func (_e *MockClient_Expecter) AdminUpdateUser(req interface{}) *MockClient_AdminUpdateUser_Call {
+	return &MockClient_AdminUpdateUser_Call{Call: _e.mock.On("AdminUpdateUser", req)}
+}
+
+func (_c *MockClient_AdminUpdateUser_Call) Run(run func(req types.AdminUpdateUserRequest)) *MockClient_AdminUpdateUser_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(types.AdminUpdateUserRequest))
+	})
+	return _c
+}
+
+func (_c *MockClient_AdminUpdateUser_Call) Return(_a0 *types.AdminUpdateUserResponse, _a1 error) *MockClient_AdminUpdateUser_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClient_AdminUpdateUser_Call) RunAndReturn(run func(types.AdminUpdateUserRequest) (*types.AdminUpdateUserResponse, error)) *MockClient_AdminUpdateUser_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockClient creates a new instance of MockClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockClient(t interface {
