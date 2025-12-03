@@ -103,7 +103,10 @@ type ModelCache struct {
 	HostPath          *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
 	// Only Kubernetes type cluster support NFS.
 	NFS *corev1.NFSVolumeSource `json:"nfs,omitempty" yaml:"nfs,omitempty"`
-	// todo: support other model cache type, e.g. pvc etc.
+
+	// PVC specifies the PersistentVolumeClaimSpec for the model cache storage.
+	// Only Kubernetes type cluster support PVC.
+	PVC *corev1.PersistentVolumeClaimSpec `json:"pvc,omitempty" yaml:"pvc,omitempty"`
 }
 
 type ClusterStatus struct {

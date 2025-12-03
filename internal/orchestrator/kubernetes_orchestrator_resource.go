@@ -380,7 +380,7 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 	})
 
 	for _, cache := range modelCaches {
-		name := "models-cache-" + string(cache.ModelRegistryType)
+		name := util.CacheName(cache)
 		if cache.HostPath != nil {
 			volumes = append(volumes, corev1.Volume{
 				Name: name,
@@ -404,6 +404,22 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 					NFS: &corev1.NFSVolumeSource{
 						Server: cache.NFS.Server,
 						Path:   cache.NFS.Path,
+					},
+				},
+			})
+
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{
+				Name:      name,
+				MountPath: path.Join(v1.DefaultK8sClusterModelCacheMountPath, string(cache.ModelRegistryType)),
+			})
+		}
+
+		if cache.PVC != nil {
+			volumes = append(volumes, corev1.Volume{
+				Name: name,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: name,
 					},
 				},
 			})

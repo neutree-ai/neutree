@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	resourceutil "k8s.io/kubectl/pkg/util/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -52,6 +52,7 @@ func (c *NativeKubernetesClusterReconciler) Reconcile(ctx context.Context, clust
 		Ctx:     ctx,
 
 		clusterNamespace: util.ClusterNamespace(cluster),
+		logger:           klog.LoggerWithValues(klog.Background(), "cluster", cluster.Metadata.WorkspaceName()),
 	}
 
 	err = c.generateConfig(reconcileCtx)
@@ -116,24 +117,15 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 		}
 	}
 
-	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
-	if err != nil {
-		return errors.Wrap(err, "failed to get image prefix")
+	reconcileFuncs := []func(*ReconcileContext) error{
+		c.reconcileComponents,
+		c.reconcileModelCache,
 	}
-
-	// Create components
-	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
-		ns.Name, imagePrefix, imagePullSecret.Name,
-		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
-	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
-		ns.Name, imagePrefix, imagePullSecret.Name, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
-
-	comps := []component.Component{metricsComp, routerComp}
 
 	var errs []error
 
-	for _, comp := range comps {
-		err = comp.Reconcile()
+	for _, fn := range reconcileFuncs {
+		err = fn(reconcileCtx)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -151,13 +143,6 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 		return errors.Wrap(err, "failed to update cluster annotations")
 	}
 
-	// Get the router service endpoint
-	endpoint, err := routerComp.GetRouteEndpoint(reconcileCtx.Ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to get router service endpoint")
-	}
-
-	reconcileCtx.Cluster.Status.DashboardURL = endpoint
 	reconcileCtx.Cluster.Status.Initialized = true
 
 	// Collect cluster resources if cluster is running
@@ -169,6 +154,45 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 
 		reconcileCtx.Cluster.Status.ResourceInfo = resources
 	}
+
+	return nil
+}
+
+func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *ReconcileContext) error {
+	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
+	if err != nil {
+		return errors.Wrap(err, "failed to get image prefix")
+	}
+
+	// Create components
+	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
+		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+
+	comps := []component.Component{metricsComp, routerComp}
+
+	var errs []error
+
+	for _, comp := range comps {
+		err = comp.Reconcile()
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if len(errs) > 0 {
+		return utilerrors.NewAggregate(errs)
+	}
+
+	// Get the router service endpoint
+	endpoint, err := routerComp.GetRouteEndpoint(reconcileCtx.Ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get router service endpoint")
+	}
+
+	reconcileCtx.Cluster.Status.DashboardURL = endpoint
 
 	return nil
 }
