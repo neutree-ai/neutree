@@ -32,45 +32,26 @@ func RegisterCredentialsRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 		middleware.RequirePermission("cluster:read-credentials", middleware.PermissionDependencies{
 			Storage: deps.Storage,
 		}),
-		handleClusterCredentials(proxyDeps))
+		handleResourceCredentials(proxyDeps, "clusters"))
 
 	// Image registry credentials (username, password, token)
-	credGroup.GET("/image-registries",
+	credGroup.GET("/image_registries",
 		middleware.RequirePermission("image_registry:read-credentials", middleware.PermissionDependencies{
 			Storage: deps.Storage,
 		}),
-		handleImageRegistryCredentials(proxyDeps))
+		handleResourceCredentials(proxyDeps, "image_registries"))
 
 	// Model registry credentials
-	credGroup.GET("/model-registries",
+	credGroup.GET("/model_registries",
 		middleware.RequirePermission("model_registry:read-credentials", middleware.PermissionDependencies{
 			Storage: deps.Storage,
 		}),
-		handleModelRegistryCredentials(proxyDeps))
+		handleResourceCredentials(proxyDeps, "model_registries"))
 }
 
-// handleClusterCredentials returns cluster credentials without filtering sensitive fields
-func handleClusterCredentials(deps *proxies.Dependencies) gin.HandlerFunc {
+func handleResourceCredentials(deps *proxies.Dependencies, tabelName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Create proxy handler that doesn't filter any fields
-		// User has already been authorized by middleware to read credentials
-		proxyHandler := proxies.CreateProxyHandler(deps.StorageAccessURL, "clusters", nil)
-		proxyHandler(c)
-	}
-}
-
-// handleImageRegistryCredentials returns image registry credentials
-func handleImageRegistryCredentials(deps *proxies.Dependencies) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		proxyHandler := proxies.CreateProxyHandler(deps.StorageAccessURL, "image_registries", nil)
-		proxyHandler(c)
-	}
-}
-
-// handleModelRegistryCredentials returns model registry credentials
-func handleModelRegistryCredentials(deps *proxies.Dependencies) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		proxyHandler := proxies.CreateProxyHandler(deps.StorageAccessURL, "model_registries", nil)
+		proxyHandler := proxies.CreateProxyHandler(deps.StorageAccessURL, tabelName, proxies.CreatePostgrestAuthModifier(c))
 		proxyHandler(c)
 	}
 }
