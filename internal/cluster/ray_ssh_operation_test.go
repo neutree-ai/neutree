@@ -892,7 +892,6 @@ func TestDownCluster(t *testing.T) {
 }
 
 func TestGenerateRayClusterConfig(t *testing.T) {
-	modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", v1.DefaultSSHClusterModelCacheMountPath)
 	defaultExpectedConfig := func() *v1.RayClusterConfig {
 		return &v1.RayClusterConfig{
 			ClusterName: "test-cluster",
@@ -916,17 +915,14 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 			},
 			HeadStartRayCommands: []string{
-				modifyPermissionCommand,
 				"ray stop",
 				`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 			},
 			WorkerStartRayCommands: []string{
-				modifyPermissionCommand,
 				"ray stop",
 				`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 			},
 			StaticWorkerStartRayCommands: []string{
-				modifyPermissionCommand,
 				"ray stop",
 				`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
 			},
@@ -1039,7 +1035,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "success - registry without CA",
+			name: "success - registry with custom repository",
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
@@ -1135,20 +1131,28 @@ func TestMutateModelCache(t *testing.T) {
 		expected            *v1.RayClusterConfig
 	}{
 		{
-			name:                "set default command when model cache is nil",
-			sshRayClusterConfig: &v1.RayClusterConfig{},
+			name: "set default command when model cache is nil",
+			sshRayClusterConfig: &v1.RayClusterConfig{
+				HeadStartRayCommands:         []string{},
+				WorkerStartRayCommands:       []string{},
+				StaticWorkerStartRayCommands: []string{},
+			},
 			expected: &v1.RayClusterConfig{
 				Docker: v1.Docker{
 					RunOptions: []string{modelCacheRunOption},
 				},
-				HeadStartRayCommands:         []string{modifyPermissionCommand},
-				WorkerStartRayCommands:       []string{modifyPermissionCommand},
-				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+				HeadStartRayCommands:         []string{},
+				WorkerStartRayCommands:       []string{},
+				StaticWorkerStartRayCommands: []string{},
 			},
 		},
 		{
-			name:                "only set default command if model cache host path is nil",
-			sshRayClusterConfig: &v1.RayClusterConfig{},
+			name: "only set default command if model cache host path is nil",
+			sshRayClusterConfig: &v1.RayClusterConfig{
+				HeadStartRayCommands:         []string{},
+				WorkerStartRayCommands:       []string{},
+				StaticWorkerStartRayCommands: []string{},
+			},
 			modelCaches: []v1.ModelCache{
 				{
 					ModelRegistryType: v1.HuggingFaceModelRegistryType,
@@ -1159,14 +1163,18 @@ func TestMutateModelCache(t *testing.T) {
 				Docker: v1.Docker{
 					RunOptions: []string{modelCacheRunOption},
 				},
-				HeadStartRayCommands:         []string{modifyPermissionCommand},
-				WorkerStartRayCommands:       []string{modifyPermissionCommand},
-				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+				HeadStartRayCommands:         []string{},
+				WorkerStartRayCommands:       []string{},
+				StaticWorkerStartRayCommands: []string{},
 			},
 		},
 		{
-			name:                "only set default command if model cache nfs is not nil, ssh cluster only support hostpath",
-			sshRayClusterConfig: &v1.RayClusterConfig{},
+			name: "only set default command if model cache nfs is not nil, ssh cluster only support hostpath",
+			sshRayClusterConfig: &v1.RayClusterConfig{
+				HeadStartRayCommands:         []string{},
+				WorkerStartRayCommands:       []string{},
+				StaticWorkerStartRayCommands: []string{},
+			},
 			modelCaches: []v1.ModelCache{
 				{
 					ModelRegistryType: v1.HuggingFaceModelRegistryType,
@@ -1178,9 +1186,9 @@ func TestMutateModelCache(t *testing.T) {
 				Docker: v1.Docker{
 					RunOptions: []string{modelCacheRunOption},
 				},
-				HeadStartRayCommands:         []string{modifyPermissionCommand},
-				WorkerStartRayCommands:       []string{modifyPermissionCommand},
-				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
+				HeadStartRayCommands:         []string{},
+				WorkerStartRayCommands:       []string{},
+				StaticWorkerStartRayCommands: []string{},
 			},
 		},
 		{

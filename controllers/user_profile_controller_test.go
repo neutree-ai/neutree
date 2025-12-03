@@ -100,7 +100,7 @@ func TestUserProfileController_Sync_Creation(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:  "CREATED -> no change (no sync needed)",
+			name: "CREATED -> no change (no sync needed)",
 			input: func() *v1.UserProfile {
 				up := testUserProfile(userID, v1.UserProfilePhaseCREATED)
 				up.Status.SyncedSpec = &v1.UserProfileSpec{
