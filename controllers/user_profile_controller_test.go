@@ -58,11 +58,17 @@ func TestUserProfileController_Sync_Creation(t *testing.T) {
 		{
 			name:  "PENDING -> CREATED (success)",
 			input: testUserProfile(userID, v1.UserProfilePhasePENDING),
-			mockSetup: func(s *storagemocks.MockStorage, _ *authmocks.MockClient) {
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminUpdateUser", mock.MatchedBy(func(req types.AdminUpdateUserRequest) bool {
+					return req.Email == "test@example.com" && req.EmailConfirm == true
+				})).Return(&types.AdminUpdateUserResponse{}, nil).Once()
+
 				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
 					return up.Status != nil &&
 						up.Status.Phase == v1.UserProfilePhaseCREATED &&
-						up.Status.ErrorMessage == ""
+						up.Status.ErrorMessage == "" &&
+						up.Status.SyncedSpec != nil &&
+						up.Status.SyncedSpec.Email == "test@example.com"
 				})).Return(nil).Once()
 			},
 			wantErr: false,
@@ -70,26 +76,39 @@ func TestUserProfileController_Sync_Creation(t *testing.T) {
 		{
 			name:  "No status -> CREATED (success)",
 			input: testUserProfile(userID, ""),
-			mockSetup: func(s *storagemocks.MockStorage, _ *authmocks.MockClient) {
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminUpdateUser", mock.Anything).Return(&types.AdminUpdateUserResponse{}, nil).Once()
+
 				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
-					return up.Status != nil && up.Status.Phase == v1.UserProfilePhaseCREATED
+					return up.Status != nil &&
+						up.Status.Phase == v1.UserProfilePhaseCREATED &&
+						up.Status.SyncedSpec != nil
 				})).Return(nil).Once()
 			},
 			wantErr: false,
 		},
 		{
-			name:  "PENDING -> CREATED (update failed)",
+			name:  "PENDING -> CREATED (GoTrue sync failed)",
 			input: testUserProfile(userID, v1.UserProfilePhasePENDING),
-			mockSetup: func(s *storagemocks.MockStorage, _ *authmocks.MockClient) {
-				s.On("UpdateUserProfile", userID, mock.Anything).Return(assert.AnError).Once()
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminUpdateUser", mock.Anything).Return(nil, assert.AnError).Once()
+
+				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
+					return up.Status != nil && up.Status.Phase == v1.UserProfilePhaseFAILED
+				})).Return(nil).Once()
 			},
 			wantErr: true,
 		},
 		{
-			name:  "CREATED -> no change",
-			input: testUserProfile(userID, v1.UserProfilePhaseCREATED),
+			name:  "CREATED -> no change (no sync needed)",
+			input: func() *v1.UserProfile {
+				up := testUserProfile(userID, v1.UserProfilePhaseCREATED)
+				up.Status.SyncedSpec = &v1.UserProfileSpec{
+					Email: "test@example.com",
+				}
+				return up
+			}(),
 			mockSetup: func(_ *storagemocks.MockStorage, _ *authmocks.MockClient) {
-				// No mock expectations - should not call storage
 			},
 			wantErr: false,
 		},
@@ -319,6 +338,99 @@ func TestUserProfileController_DeleteGoTrueUser(t *testing.T) {
 
 			profile := testUserProfile(tt.userID, "")
 			err := controller.deleteGoTrueUser(profile)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestUserProfileController_Sync_EmailUpdate(t *testing.T) {
+	userID := uuid.New().String()
+
+	tests := []struct {
+		name      string
+		input     *v1.UserProfile
+		mockSetup func(*storagemocks.MockStorage, *authmocks.MockClient)
+		wantErr   bool
+	}{
+		{
+			name: "Email changed -> Sync to GoTrue (success)",
+			input: func() *v1.UserProfile {
+				up := testUserProfile(userID, v1.UserProfilePhaseCREATED)
+				up.Spec.Email = "newemail@example.com"
+				up.Status.SyncedSpec = &v1.UserProfileSpec{
+					Email: "oldemail@example.com",
+				}
+				return up
+			}(),
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminUpdateUser", mock.MatchedBy(func(req types.AdminUpdateUserRequest) bool {
+					return req.Email == "newemail@example.com" && req.EmailConfirm == true
+				})).Return(&types.AdminUpdateUserResponse{}, nil).Once()
+
+				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
+					return up.Status != nil &&
+						up.Status.Phase == v1.UserProfilePhaseCREATED &&
+						up.Status.SyncedSpec != nil &&
+						up.Status.SyncedSpec.Email == "newemail@example.com"
+				})).Return(nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name: "Email changed -> Sync failed",
+			input: func() *v1.UserProfile {
+				up := testUserProfile(userID, v1.UserProfilePhaseCREATED)
+				up.Spec.Email = "newemail@example.com"
+				up.Status.SyncedSpec = &v1.UserProfileSpec{
+					Email: "oldemail@example.com",
+				}
+				return up
+			}(),
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminUpdateUser", mock.Anything).Return(nil, assert.AnError).Once()
+
+				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
+					return up.Status != nil &&
+						up.Status.Phase == v1.UserProfilePhaseFAILED &&
+						up.Status.SyncedSpec != nil &&
+						up.Status.SyncedSpec.Email == "oldemail@example.com"
+				})).Return(nil).Once()
+			},
+			wantErr: true,
+		},
+		{
+			name: "No synced spec -> Sync to GoTrue",
+			input: func() *v1.UserProfile {
+				up := testUserProfile(userID, v1.UserProfilePhaseCREATED)
+				up.Status.SyncedSpec = nil
+				return up
+			}(),
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminUpdateUser", mock.Anything).Return(&types.AdminUpdateUserResponse{}, nil).Once()
+
+				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
+					return up.Status != nil &&
+						up.Status.Phase == v1.UserProfilePhaseCREATED &&
+						up.Status.SyncedSpec != nil
+				})).Return(nil).Once()
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := storagemocks.NewMockStorage(t)
+			mockAuthClient := authmocks.NewMockClient(t)
+			tt.mockSetup(mockStorage, mockAuthClient)
+
+			controller := newTestUserProfileController(mockStorage, mockAuthClient)
+			err := controller.sync(tt.input)
 
 			if tt.wantErr {
 				assert.Error(t, err)

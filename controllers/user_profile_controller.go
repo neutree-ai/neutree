@@ -89,18 +89,61 @@ func (c *UserProfileController) sync(obj *v1.UserProfile) error {
 		return deleteErr
 	}
 
-	// Handle creation/update (when not deleting)
-	// If status is missing or PENDING, update it to CREATED.
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.UserProfilePhasePENDING {
-		klog.Infof("UserProfile %s is PENDING or has no status, updating to CREATED", obj.Metadata.Name)
-		err = c.updateStatus(obj, v1.UserProfilePhaseCREATED, nil)
+		klog.Infof("UserProfile %s is PENDING or has no status, syncing to auth backend and updating to CREATED", obj.Metadata.Name)
 
+		err = c.syncSpecToGoTrue(obj)
+		if err != nil {
+			updateErr := c.updateStatusWithSyncedSpec(obj, v1.UserProfilePhaseFAILED, err, nil)
+			if updateErr != nil {
+				klog.Errorf("Failed to update status after sync failure: %v", updateErr)
+			}
+
+			return err
+		}
+
+		err = c.updateStatusWithSyncedSpec(obj, v1.UserProfilePhaseCREATED, nil, obj.Spec)
 		if err != nil {
 			return errors.Wrapf(err, "failed to update user profile %s/%s status to CREATED",
 				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil
+	}
+
+	needsSync := false
+
+	if obj.Spec != nil && obj.Status != nil {
+		if obj.Status.SyncedSpec == nil {
+			needsSync = true
+
+			klog.Infof("UserProfile %s has no synced spec, syncing to auth backend", obj.Metadata.Name)
+		} else if obj.Spec.Email != obj.Status.SyncedSpec.Email {
+			needsSync = true
+
+			klog.Infof("UserProfile %s email changed: %s -> %s, syncing to auth backend",
+				obj.Metadata.Name, obj.Status.SyncedSpec.Email, obj.Spec.Email)
+		}
+	}
+
+	if needsSync {
+		err = c.syncSpecToGoTrue(obj)
+		if err != nil {
+			updateErr := c.updateStatusWithSyncedSpec(obj, v1.UserProfilePhaseFAILED, err, obj.Status.SyncedSpec)
+			if updateErr != nil {
+				klog.Errorf("Failed to update status after sync failure: %v", updateErr)
+			}
+
+			return err
+		}
+
+		err = c.updateStatusWithSyncedSpec(obj, v1.UserProfilePhaseCREATED, nil, obj.Spec)
+		if err != nil {
+			return errors.Wrapf(err, "failed to update synced spec status for user profile %s/%s",
+				obj.Metadata.Workspace, obj.Metadata.Name)
+		}
+
+		klog.Infof("Successfully synced spec to auth backend for user %s", obj.Metadata.Name)
 	}
 
 	return nil
@@ -123,14 +166,14 @@ func (c *UserProfileController) deleteGoTrueUser(obj *v1.UserProfile) error {
 		// Check if error is "user not found" - treat as success since user is already gone
 		errMsg := strings.ToLower(err.Error())
 		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "404") {
-			klog.Infof("User %s not found in GoTrue (may already be deleted), skipping deletion", obj.ID)
+			klog.Infof("User %s not found in auth backend (may already be deleted), skipping deletion", obj.ID)
 			return nil
 		}
 		// Real deletion error, return it for retry
-		return errors.Wrapf(err, "failed to delete user %s from GoTrue", obj.ID)
+		return errors.Wrapf(err, "failed to delete user %s from auth backend", obj.ID)
 	}
 
-	klog.Infof("Successfully deleted user %s from GoTrue", obj.ID)
+	klog.Infof("Successfully deleted user %s from auth backend", obj.ID)
 
 	return nil
 }
@@ -140,6 +183,47 @@ func (c *UserProfileController) updateStatus(obj *v1.UserProfile, phase v1.UserP
 		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
 		ErrorMessage:       FormatErrorForStatus(err),
+	}
+
+	return c.storage.UpdateUserProfile(obj.ID, &v1.UserProfile{Status: newStatus})
+}
+
+func (c *UserProfileController) syncSpecToGoTrue(obj *v1.UserProfile) error {
+	if obj.Spec == nil {
+		return errors.New("spec is nil, cannot sync to auth backend")
+	}
+
+	userUUID, err := uuid.Parse(obj.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse user ID %s as UUID", obj.ID)
+	}
+
+	_, err = c.authClient.AdminUpdateUser(types.AdminUpdateUserRequest{
+		UserID:       userUUID,
+		Email:        obj.Spec.Email,
+		EmailConfirm: true,
+	})
+
+	if err != nil {
+		return errors.Wrapf(err, "failed to update user in auth backend for user %s", obj.ID)
+	}
+
+	klog.Infof("Successfully synced user spec to auth backend for user %s (email: %s)", obj.ID, obj.Spec.Email)
+
+	return nil
+}
+
+func (c *UserProfileController) updateStatusWithSyncedSpec(
+	obj *v1.UserProfile,
+	phase v1.UserProfilePhase,
+	err error,
+	syncedSpec *v1.UserProfileSpec,
+) error {
+	newStatus := &v1.UserProfileStatus{
+		LastTransitionTime: FormatStatusTime(),
+		Phase:              phase,
+		ErrorMessage:       FormatErrorForStatus(err),
+		SyncedSpec:         syncedSpec,
 	}
 
 	return c.storage.UpdateUserProfile(obj.ID, &v1.UserProfile{Status: newStatus})
