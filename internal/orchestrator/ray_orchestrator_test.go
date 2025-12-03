@@ -184,7 +184,7 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 					Metadata: &v1.Metadata{Name: "test-cluster"},
 					Spec: &v1.ClusterSpec{
 						Version: "v1.0.0",
-						Config:  map[string]interface{}{},
+						Config:  &v1.ClusterConfig{},
 					},
 					Status: &v1.ClusterStatus{
 						Initialized:  true,
@@ -355,7 +355,7 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 					Metadata: &v1.Metadata{Name: "test-cluster"},
 					Spec: &v1.ClusterSpec{
 						Version: "v1.0.0",
-						Config:  map[string]interface{}{},
+						Config:  &v1.ClusterConfig{},
 					},
 					Status: &v1.ClusterStatus{
 						Initialized:  true,
@@ -484,7 +484,7 @@ func TestRayOrchestrator_CreateEndpoint_WithZeroReplicas(t *testing.T) {
 					Metadata: &v1.Metadata{Name: "test-cluster"},
 					Spec: &v1.ClusterSpec{
 						Version: "v1.0.0",
-						Config:  map[string]interface{}{},
+						Config:  &v1.ClusterConfig{},
 					},
 					Status: &v1.ClusterStatus{
 						Initialized:  true,
@@ -773,12 +773,14 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 			},
 			cluster: &v1.Cluster{
 				Spec: &v1.ClusterSpec{
-					Config: &v1.KubernetesClusterConfig{
-						CommonClusterConfig: v1.CommonClusterConfig{
-							ModelCaches: []v1.ModelCache{
-								{
-									Name:     "test-cache",
-									HostPath: &corev1.HostPathVolumeSource{},
+					Config: &v1.ClusterConfig{
+						KubernetesConfig: &v1.KubernetesClusterConfig{
+							CommonClusterConfig: v1.CommonClusterConfig{
+								ModelCaches: []v1.ModelCache{
+									{
+										Name:     "test-cache",
+										HostPath: &corev1.HostPathVolumeSource{},
+									},
 								},
 							},
 						},
@@ -828,16 +830,18 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 			},
 			cluster: &v1.Cluster{
 				Spec: &v1.ClusterSpec{
-					Config: &v1.KubernetesClusterConfig{
-						CommonClusterConfig: v1.CommonClusterConfig{
-							ModelCaches: []v1.ModelCache{
-								{
-									Name:     "test-cache-1",
-									HostPath: &corev1.HostPathVolumeSource{},
-								},
-								{
-									Name:     "test-cache-2",
-									HostPath: &corev1.HostPathVolumeSource{},
+					Config: &v1.ClusterConfig{
+						KubernetesConfig: &v1.KubernetesClusterConfig{
+							CommonClusterConfig: v1.CommonClusterConfig{
+								ModelCaches: []v1.ModelCache{
+									{
+										Name:     "test-cache-1",
+										HostPath: &corev1.HostPathVolumeSource{},
+									},
+									{
+										Name:     "test-cache-2",
+										HostPath: &corev1.HostPathVolumeSource{},
+									},
 								},
 							},
 						},
@@ -1052,7 +1056,7 @@ func TestRayOrchestrator_GetEndpointStatus_WithZeroReplicas(t *testing.T) {
 					Metadata: &v1.Metadata{Name: "test-cluster"},
 					Spec: &v1.ClusterSpec{
 						Version: "v1.0.0",
-						Config:  map[string]interface{}{},
+						Config:  &v1.ClusterConfig{},
 					},
 					Status: &v1.ClusterStatus{
 						Initialized:  true,

@@ -31,11 +31,16 @@ type Cluster struct {
 
 type ClusterSpec struct {
 	// current only support "ssh"
-	Type          string `json:"type"`
-	Config        any    `json:"config"`
-	ImageRegistry string `json:"image_registry"`
+	Type          string         `json:"type"`
+	Config        *ClusterConfig `json:"config"`
+	ImageRegistry string         `json:"image_registry"`
 	// the neutree serving version, if not specified, the default version will be used
 	Version string `json:"version"`
+}
+
+type ClusterConfig struct {
+	SSHConfig        *RaySSHProvisionClusterConfig `json:"ssh_config,omitempty" yaml:"ssh_config,omitempty"`
+	KubernetesConfig *KubernetesClusterConfig      `json:"kubernetes_config,omitempty" yaml:"kubernetes_config,omitempty"`
 }
 
 type RaySSHProvisionClusterConfig struct {

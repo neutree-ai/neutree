@@ -972,9 +972,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: clusterVersion,
-					Config: map[string]interface{}{
-						"auth": map[string]interface{}{
-							"ssh_user": "root",
+					Config: &v1.ClusterConfig{
+						SSHConfig: &v1.RaySSHProvisionClusterConfig{
+							Auth: v1.Auth{
+								SSHUser: "root",
+							},
 						},
 					},
 				},
@@ -1003,9 +1005,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: clusterVersion,
-					Config: map[string]interface{}{
-						"auth": map[string]interface{}{
-							"ssh_user": "root",
+					Config: &v1.ClusterConfig{
+						SSHConfig: &v1.RaySSHProvisionClusterConfig{
+							Auth: v1.Auth{
+								SSHUser: "root",
+							},
 						},
 					},
 				},
@@ -1034,9 +1038,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: clusterVersion,
-					Config: map[string]interface{}{
-						"auth": map[string]interface{}{
-							"ssh_user": "root",
+					Config: &v1.ClusterConfig{
+						SSHConfig: &v1.RaySSHProvisionClusterConfig{
+							Auth: v1.Auth{
+								SSHUser: "root",
+							},
 						},
 					},
 				},
@@ -1064,9 +1070,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: clusterVersion,
-					Config: map[string]interface{}{
-						"auth": map[string]interface{}{
-							"ssh_user": "root",
+					Config: &v1.ClusterConfig{
+						SSHConfig: &v1.RaySSHProvisionClusterConfig{
+							Auth: v1.Auth{
+								SSHUser: "root",
+							},
 						},
 					},
 				},
@@ -1097,9 +1105,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
 					Version: clusterVersion,
-					Config: map[string]interface{}{
-						"auth": map[string]interface{}{
-							"ssh_user": "root",
+					Config: &v1.ClusterConfig{
+						SSHConfig: &v1.RaySSHProvisionClusterConfig{
+							Auth: v1.Auth{
+								SSHUser: "root",
+							},
 						},
 					},
 				},
