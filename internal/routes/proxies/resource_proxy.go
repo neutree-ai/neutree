@@ -223,7 +223,7 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 
 	return func(c *gin.Context) {
 		// Create proxy handler
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, nil)
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, createPostgrestAuthModifier(c))
 
 		// If no field filtering is needed, use proxy directly
 		if len(excludeFields) == 0 {

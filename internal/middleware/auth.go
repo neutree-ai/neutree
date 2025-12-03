@@ -58,12 +58,15 @@ func Auth(deps Dependencies) gin.HandlerFunc {
 
 		var parsedInfo *ParsedInfo
 		var err error
+		var is_api_key bool
 
 		switch {
 		case strings.HasPrefix(authHeader, "Bearer "):
 			parsedInfo, err = parseBearerToken(deps.Config, authHeader)
+			is_api_key = false
 		case strings.HasPrefix(authHeader, "sk_"):
 			parsedInfo, err = parseApiKey(authHeader, deps.Config)
+			is_api_key = true
 		default:
 			err = errors.New("invalid Authorization header format")
 		}
@@ -79,6 +82,21 @@ func Auth(deps Dependencies) gin.HandlerFunc {
 
 		// Set user information in context
 		c.Set("user_id", parsedInfo.UserID)
+
+		// For API key authentication, generate a postgrest token
+		if is_api_key {
+			postgrestToken, err := GeneratePostgrestToken(parsedInfo.UserID, deps.Config.JwtSecret)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "Failed to generate authentication token",
+				})
+				c.Abort()
+
+				return
+			}
+
+			c.Set("postgrest_token", postgrestToken)
+		}
 
 		c.Next()
 	}
@@ -291,6 +309,23 @@ func createHMAC(data []byte, secret string) []byte {
 	return h.Sum(nil)
 }
 
+// GeneratePostgrestToken generates a minimal JWT token for postgrest authentication
+func GeneratePostgrestToken(userID string, jwtSecret string) (string, error) {
+	claims := jwt.MapClaims{
+		"sub":  userID,
+		"role": "api_user",
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	tokenString, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate postgrest token: %w", err)
+	}
+
+	return tokenString, nil
+}
+
 // GetUserID extracts user ID from Gin context
 func GetUserID(c *gin.Context) (string, bool) {
 	userID, exists := c.Get("user_id")
@@ -301,4 +336,16 @@ func GetUserID(c *gin.Context) (string, bool) {
 	userIDStr, ok := userID.(string)
 
 	return userIDStr, ok
+}
+
+// GetPostgrestToken extracts postgrest token from Gin context
+func GetPostgrestToken(c *gin.Context) (string, bool) {
+	token, exists := c.Get("postgrest_token")
+	if !exists {
+		return "", false
+	}
+
+	tokenStr, ok := token.(string)
+
+	return tokenStr, ok
 }

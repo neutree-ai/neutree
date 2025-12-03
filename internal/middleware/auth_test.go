@@ -112,10 +112,11 @@ func TestAuth(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		setupAuth      func() string
-		expectedStatus int
-		expectUserID   string
+		name                  string
+		setupAuth             func() string
+		expectedStatus        int
+		expectUserID          string
+		expectPostgrestToken  bool
 	}{
 		{
 			name: "Valid JWT token",
@@ -132,8 +133,9 @@ func TestAuth(t *testing.T) {
 				tokenString, _ := token.SignedString([]byte(jwtSecret))
 				return "Bearer " + tokenString
 			},
-			expectedStatus: http.StatusOK,
-			expectUserID:   "user-123",
+			expectedStatus:       http.StatusOK,
+			expectUserID:         "user-123",
+			expectPostgrestToken: false, // JWT tokens don't get postgrest_token
 		},
 		{
 			name: "Valid self-contained API key",
@@ -146,8 +148,9 @@ func TestAuth(t *testing.T) {
 				)
 				return apiKey
 			},
-			expectedStatus: http.StatusOK,
-			expectUserID:   "12345678-1234-1234-1234-123456789abc",
+			expectedStatus:       http.StatusOK,
+			expectUserID:         "12345678-1234-1234-1234-123456789abc",
+			expectPostgrestToken: true, // API keys should generate postgrest_token
 		},
 		{
 			name: "Invalid API Key format",
@@ -180,8 +183,11 @@ func TestAuth(t *testing.T) {
 			}))
 			r.GET("/test", func(c *gin.Context) {
 				userID, _ := GetUserID(c)
+				postgrestToken, hasPostgrestToken := GetPostgrestToken(c)
 				c.JSON(http.StatusOK, gin.H{
-					"user_id": userID,
+					"user_id":               userID,
+					"has_postgrest_token":   hasPostgrestToken,
+					"postgrest_token_empty": postgrestToken == "",
 				})
 			})
 
@@ -202,6 +208,14 @@ func TestAuth(t *testing.T) {
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectUserID, response["user_id"])
+
+				// Verify postgrest_token behavior
+				if tt.expectPostgrestToken {
+					assert.True(t, response["has_postgrest_token"].(bool), "API key auth should have postgrest_token")
+					assert.False(t, response["postgrest_token_empty"].(bool), "postgrest_token should not be empty")
+				} else {
+					assert.False(t, response["has_postgrest_token"].(bool), "JWT auth should not have postgrest_token")
+				}
 			}
 		})
 	}
@@ -498,6 +512,103 @@ func TestGetUserID(t *testing.T) {
 
 			userID, ok := GetUserID(c)
 			assert.Equal(t, tt.expectedID, userID)
+			assert.Equal(t, tt.expectedOK, ok)
+		})
+	}
+}
+
+func TestGeneratePostgrestToken(t *testing.T) {
+	jwtSecret := "test-secret-32bytes-for-aes256!!"
+
+	tests := []struct {
+		name        string
+		userID      string
+		secret      string
+		expectError bool
+	}{
+		{
+			name:        "Valid token generation",
+			userID:      "12345678-1234-1234-1234-123456789abc",
+			secret:      jwtSecret,
+			expectError: false,
+		},
+		{
+			name:        "Valid token with different user ID",
+			userID:      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			secret:      jwtSecret,
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token, err := GeneratePostgrestToken(tt.userID, tt.secret)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Empty(t, token)
+			} else {
+				assert.NoError(t, err)
+				assert.NotEmpty(t, token)
+
+				// Verify the token can be parsed and contains correct claims
+				parsedToken, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+					return []byte(tt.secret), nil
+				})
+				assert.NoError(t, err)
+				assert.True(t, parsedToken.Valid)
+
+				claims, ok := parsedToken.Claims.(jwt.MapClaims)
+				assert.True(t, ok)
+				assert.Equal(t, tt.userID, claims["sub"])
+				assert.Equal(t, "api_user", claims["role"])
+			}
+		})
+	}
+}
+
+func TestGetPostgrestToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name          string
+		setupContext  func(*gin.Context)
+		expectedToken string
+		expectedOK    bool
+	}{
+		{
+			name: "Valid postgrest token in context",
+			setupContext: func(c *gin.Context) {
+				c.Set("postgrest_token", "test-token-123")
+			},
+			expectedToken: "test-token-123",
+			expectedOK:    true,
+		},
+		{
+			name: "No postgrest token in context",
+			setupContext: func(c *gin.Context) {
+				// Don't set anything
+			},
+			expectedToken: "",
+			expectedOK:    false,
+		},
+		{
+			name: "Invalid type in context",
+			setupContext: func(c *gin.Context) {
+				c.Set("postgrest_token", 123) // Wrong type
+			},
+			expectedToken: "",
+			expectedOK:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			tt.setupContext(c)
+
+			token, ok := GetPostgrestToken(c)
+			assert.Equal(t, tt.expectedToken, token)
 			assert.Equal(t, tt.expectedOK, ok)
 		})
 	}
