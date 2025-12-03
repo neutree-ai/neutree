@@ -293,6 +293,14 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 	}
 }
 
+func createPostgrestAuthModifier(c *gin.Context) func(*http.Request) {
+	return func(req *http.Request) {
+		if postgrestToken, exists := middleware.GetPostgrestToken(c); exists && postgrestToken != "" {
+			req.Header.Set("Authorization", "Bearer "+postgrestToken)
+		}
+	}
+}
+
 func handlePostgrestRPCProxy(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Param("path")
@@ -302,7 +310,7 @@ func handlePostgrestRPCProxy(deps *Dependencies) gin.HandlerFunc {
 
 		path = "rpc/" + path
 
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, nil)
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, createPostgrestAuthModifier(c))
 		proxyHandler(c)
 	}
 }

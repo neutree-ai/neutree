@@ -41,9 +41,10 @@ func NewBuilder() *Builder {
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		// Auth route (no auth required for authentication itself)
 		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
-		// PostgREST proxy routes (auth handled by PostgREST backend)
-		// Note: rest/* routes are proxied to PostgREST which handles authentication,
-		// so no auth middleware is needed at gateway level
+		// PostgREST proxy routes
+		// Auth middleware is applied to:
+		// - Validate and pass-through JWT tokens to PostgREST
+		// - Convert API keys (sk_*) to PostgREST-compatible JWT tokens
 		"rest/api-keys":         ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
 		"rest/workspaces":       ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
 		"rest/roles":            ProxiesRouteFactory(proxies.RegisterRoleRoutes),
@@ -77,6 +78,22 @@ func NewBuilder() *Builder {
 		"models":      {"auth"},
 		"serve-proxy": {"auth"},
 		"system":      {"auth"},
+		// PostgREST proxy routes now require auth middleware to:
+		// 1. Validate JWT tokens (pass-through to PostgREST)
+		// 2. Convert API keys to PostgREST-compatible JWT tokens
+		"rest/api-keys":         {"auth"},
+		"rest/workspaces":       {"auth"},
+		"rest/roles":            {"auth"},
+		"rest/role-assignments": {"auth"},
+		"rest/user-profiles":    {"auth"},
+		"rest/clusters":         {"auth"},
+		"rest/image-registries": {"auth"},
+		"rest/model-registries": {"auth"},
+		"rest/endpoints":        {"auth"},
+		"rest/engines":          {"auth"},
+		"rest/model-catalogs":   {"auth"},
+		"rest/oem-configs":      {"auth"},
+		"rest/rpc":              {"auth"},
 	}
 
 	for route, middlewares := range defaultRoutesToMiddlewares {

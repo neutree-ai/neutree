@@ -356,3 +356,61 @@ func TestHandleRayDashboardProxy_MissingDashboardURL(t *testing.T) {
 
 	mockStorage.AssertExpectations(t)
 }
+
+// TestCreatePostgrestAuthModifier tests the createPostgrestAuthModifier function
+func TestCreatePostgrestAuthModifier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("With postgrest_token in context", func(t *testing.T) {
+		// Create a test context with postgrest_token
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Set("postgrest_token", "test-postgrest-token-123")
+
+		// Create a test request
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set("Authorization", "sk_original_api_key")
+
+		// Apply the modifier
+		modifier := createPostgrestAuthModifier(c)
+		modifier(req)
+
+		// Verify the Authorization header was replaced
+		assert.Equal(t, "Bearer test-postgrest-token-123", req.Header.Get("Authorization"))
+	})
+
+	t.Run("Without postgrest_token in context", func(t *testing.T) {
+		// Create a test context without postgrest_token
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+		// Create a test request with original Bearer token
+		req := httptest.NewRequest("GET", "/test", nil)
+		originalAuth := "Bearer original-jwt-token"
+		req.Header.Set("Authorization", originalAuth)
+
+		// Apply the modifier
+		modifier := createPostgrestAuthModifier(c)
+		modifier(req)
+
+		// Verify the Authorization header was not modified
+		assert.Equal(t, originalAuth, req.Header.Get("Authorization"))
+	})
+
+	t.Run("With empty postgrest_token", func(t *testing.T) {
+		// Create a test context with empty postgrest_token
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Set("postgrest_token", "")
+
+		// Create a test request
+		req := httptest.NewRequest("GET", "/test", nil)
+		originalAuth := "Bearer original-token"
+		req.Header.Set("Authorization", originalAuth)
+
+		// Apply the modifier
+		modifier := createPostgrestAuthModifier(c)
+		modifier(req)
+
+		// Empty postgrest_token means GetPostgrestToken returns false,
+		// so Authorization should not be modified
+		assert.Equal(t, originalAuth, req.Header.Get("Authorization"))
+	})
+}
