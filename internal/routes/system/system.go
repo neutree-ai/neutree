@@ -37,19 +37,6 @@ func RegisterSystemRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	systemGroup.GET("/info", handleSystemInfo(deps))
 }
 
-// RegisterRoutes registers system-related routes
-func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
-	apiV1 := r.Group("/api/v1")
-
-	authMiddleware := middleware.Auth(middleware.Dependencies{
-		Config: deps.AuthConfig,
-	})
-	apiV1.Use(authMiddleware)
-
-	// System information endpoint
-	apiV1.GET("/system/info", handleSystemInfo(deps))
-}
-
 // handleSystemInfo returns system information including URLs to monitoring services
 func handleSystemInfo(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {

@@ -55,19 +55,6 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 	}
 }
 
-func RegisterRoutes(r *gin.Engine, deps *Dependencies) {
-	// Create JWT middleware
-	authMiddleware := middleware.Auth(middleware.Dependencies{
-		Config: deps.AuthConfig,
-	})
-
-	r.Any("/api/v1/serve-proxy/:workspace/:name/*path", authMiddleware, handleServeProxy(deps))
-	r.Any("/api/v1/ray-dashboard-proxy/:workspace/:name/*path", handleRayDashboardProxy(deps))
-
-	r.Any("/api/v1/:path", handlePostgrestProxy(deps))
-	r.Any("/api/v1/rpc/:path", handlePostgrestRPCProxy(deps))
-}
-
 func RegisterRayServeProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	proxyGroup := group.Group("/serve-proxy")
 
@@ -80,17 +67,6 @@ func RegisterRayDashboardProxyRoutes(group *gin.RouterGroup, middlewares []gin.H
 
 	proxyGroup.Use(middlewares...)
 	proxyGroup.Any("/:workspace/:name/*path", handleRayDashboardProxy(deps))
-}
-
-func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
-	RegisterResourceProxyRoute(group, middlewares, deps, "/clusters", "clusters")
-}
-
-// Generic function to register a resource proxy route
-func RegisterResourceProxyRoute(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies, routePath string, resourceName string) {
-	proxyGroup := group.Group(routePath)
-	proxyGroup.Use(middlewares...)
-	proxyGroup.Any("", handlePostgrestResourceProxy(deps, resourceName))
 }
 
 func RegisterPostgrestRPCProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
@@ -313,25 +289,6 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		proxyHandler := CreateProxyHandler(dashboardURL, path, nil)
-		proxyHandler(c)
-	}
-}
-
-func handlePostgrestResourceProxy(deps *Dependencies, resource string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, resource, nil)
-		proxyHandler(c)
-	}
-}
-
-func handlePostgrestProxy(deps *Dependencies) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		path := c.Param("path")
-		if path != "" && path[0] == '/' {
-			path = path[1:]
-		}
-
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, nil)
 		proxyHandler(c)
 	}
 }
