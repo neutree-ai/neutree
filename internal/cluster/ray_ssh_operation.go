@@ -337,26 +337,22 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 }
 
 func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v1.ModelCache) {
-	sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
-		fmt.Sprintf("-e %s=%s", v1.ModelCacheDirENV, v1.DefaultSSHClusterModelCacheMountPath))
-
 	useModelCache := false
 
 	for _, modelCache := range modelCaches {
-		if modelCache.HostPath == nil {
-			klog.Warning("Model cache host path is nil, skip")
+		if modelCache.HostPath != nil {
+			mountPath := path.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCache.Name)
+			hostPath := modelCache.HostPath.Path
+			sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
+				"--volume "+hostPath+":"+mountPath)
+			sshRayClusterConfig.InitializationCommands = append(sshRayClusterConfig.InitializationCommands,
+				fmt.Sprintf("mkdir -p %s && chmod 755 %s", hostPath, hostPath))
+			useModelCache = true
+
 			continue
 		}
 
-		mountPath := path.Join(v1.DefaultSSHClusterModelCacheMountPath, string(modelCache.ModelRegistryType))
-
-		hostPath := modelCache.HostPath.Path
-		sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
-			"--volume "+hostPath+":"+mountPath)
-		sshRayClusterConfig.InitializationCommands = append(sshRayClusterConfig.InitializationCommands,
-			fmt.Sprintf("mkdir -p %s && chmod 755 %s", hostPath, hostPath))
-
-		useModelCache = true
+		klog.Warning("Now only support HostPath source")
 	}
 
 	// Change ownership of the model cache directory to the current user in each node, so that the inference instance can read/write files.

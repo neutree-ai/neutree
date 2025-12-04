@@ -1,16 +1,19 @@
 package orchestrator
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.openly.dev/pointy"
+	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
+	"github.com/neutree-ai/neutree/internal/util"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -597,9 +600,11 @@ func TestEndpointToApplication_ApplicationNameConsistency(t *testing.T) {
 		},
 	}
 
+	deployedCluster := &v1.Cluster{}
+
 	mgr := &acceleratormocks.MockManager{}
 
-	app, err := EndpointToApplication(endpoint, modelRegistry, mgr)
+	app, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, mgr)
 	assert.NoError(t, err)
 	// Verify that the application name matches the naming function
 	expectedName := EndpointToServeApplicationName(endpoint)
@@ -634,11 +639,251 @@ func TestEndpointToApplication_RouteConsistency(t *testing.T) {
 		},
 	}
 
-	app, err := EndpointToApplication(endpoint, modelRegistry, nil)
+	app, err := EndpointToApplication(endpoint, &v1.Cluster{}, modelRegistry, nil)
 	assert.NoError(t, err)
 
 	// Verify that the route prefix includes workspace
 	assert.Equal(t, "/production/chat-model", app.RoutePrefix)
+}
+
+func TestEndpointToApplication_setModelArgs(t *testing.T) {
+	tests := []struct {
+		name              string
+		endpoint          *v1.Endpoint
+		modelRegistry     *v1.ModelRegistry
+		cluster           *v1.Cluster
+		expectedModelArgs map[string]string
+		expectedEnvs      map[string]string
+		wantErr           bool
+	}{
+		{
+			name: "BentoML modelRegistry - specific version",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "llama-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "llama-2-7b",
+						Version: "v1.0",
+						File:    "model.safetensors",
+						Task:    v1.TextGenerationModelTask,
+					},
+					Resources:         &v1.ResourceSpec{},
+					Engine:            &v1.EndpointEngineSpec{},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{},
+			expectedModelArgs: map[string]string{
+				"registry_type": "bentoml",
+				"name":          "llama-2-7b",
+				"version":       "v1.0",
+				"file":          "model.safetensors",
+				"task":          v1.TextGenerationModelTask,
+				"serve_name":    "llama-2-7b:v1.0",
+				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "llama-2-7b", "v1.0"),
+				"registry_path": filepath.Join("/mnt", "default", "llama-endpoint", "models", "llama-2-7b", "v1.0"),
+			},
+			expectedEnvs: map[string]string{},
+			wantErr:      false,
+		},
+		{
+			name: "BentoML modelRegistry - specific version - with cluster model cache",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "llama-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "llama-2-7b",
+						Version: "v1.0",
+						File:    "model.safetensors",
+						Task:    v1.TextGenerationModelTask,
+					},
+					Resources:         &v1.ResourceSpec{},
+					Engine:            &v1.EndpointEngineSpec{},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{
+					Config: &v1.KubernetesClusterConfig{
+						CommonClusterConfig: v1.CommonClusterConfig{
+							ModelCaches: []v1.ModelCache{
+								{
+									Name:     "test-cache",
+									HostPath: &corev1.HostPathVolumeSource{},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedModelArgs: map[string]string{
+				"registry_type": "bentoml",
+				"name":          "llama-2-7b",
+				"version":       "v1.0",
+				"file":          "model.safetensors",
+				"task":          v1.TextGenerationModelTask,
+				"serve_name":    "llama-2-7b:v1.0",
+				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "test-cache", "llama-2-7b", "v1.0"),
+				"registry_path": filepath.Join("/mnt", "default", "llama-endpoint", "models", "llama-2-7b", "v1.0"),
+			},
+			expectedEnvs: map[string]string{},
+			wantErr:      false,
+		},
+		{
+			name: "BentoML modelRegistry - specific version - with cluster multi model cache - only use the first one",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "llama-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "llama-2-7b",
+						Version: "v1.0",
+						File:    "model.safetensors",
+						Task:    v1.TextGenerationModelTask,
+					},
+					Resources:         &v1.ResourceSpec{},
+					Engine:            &v1.EndpointEngineSpec{},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{
+					Config: &v1.KubernetesClusterConfig{
+						CommonClusterConfig: v1.CommonClusterConfig{
+							ModelCaches: []v1.ModelCache{
+								{
+									Name:     "test-cache-1",
+									HostPath: &corev1.HostPathVolumeSource{},
+								},
+								{
+									Name:     "test-cache-2",
+									HostPath: &corev1.HostPathVolumeSource{},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedModelArgs: map[string]string{
+				"registry_type": "bentoml",
+				"name":          "llama-2-7b",
+				"version":       "v1.0",
+				"file":          "model.safetensors",
+				"task":          v1.TextGenerationModelTask,
+				"serve_name":    "llama-2-7b:v1.0",
+				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "test-cache-1", "llama-2-7b", "v1.0"),
+				"registry_path": filepath.Join("/mnt", "default", "llama-endpoint", "models", "llama-2-7b", "v1.0"),
+			},
+			expectedEnvs: map[string]string{},
+			wantErr:      false,
+		},
+		{
+			name: "HuggingFace modelRegistry - specific version",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "huggingface-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type:        v1.HuggingFaceModelRegistryType,
+					Url:         "https://huggingface.co",
+					Credentials: "test-token",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "llama-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "llama-2-7b",
+						Version: "v1.0",
+						File:    "model.safetensors",
+						Task:    v1.TextGenerationModelTask,
+					},
+					Resources:         &v1.ResourceSpec{},
+					Engine:            &v1.EndpointEngineSpec{},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{},
+			expectedModelArgs: map[string]string{
+				"registry_type": "hugging-face",
+				"name":          "llama-2-7b",
+				"version":       "v1.0",
+				"file":          "model.safetensors",
+				"task":          v1.TextGenerationModelTask,
+				"serve_name":    "llama-2-7b",
+				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "llama-2-7b"),
+				"registry_path": "llama-2-7b",
+			},
+			expectedEnvs: map[string]string{
+				v1.HFEndpoint: "https://huggingface.co",
+				v1.HFTokenEnv: "test-token",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, err := EndpointToApplication(tt.endpoint, tt.cluster, tt.modelRegistry, nil)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			} else {
+				assert.NoError(t, err)
+				modelArgs := app.Args["model"].(map[string]interface{})
+				eq, _, err := util.JsonEqual(tt.expectedModelArgs, modelArgs)
+				assert.NoError(t, err)
+				if !eq {
+					t.Errorf("Model args do not match expected.\nGot: %+v\nExpected: %+v", modelArgs, tt.expectedModelArgs)
+				}
+
+				envs := app.RuntimeEnv["env_vars"].(map[string]string)
+				eq, _, err = util.JsonEqual(tt.expectedEnvs, envs)
+				assert.NoError(t, err)
+				if !eq {
+					t.Errorf("Envs do not match expected.\nGot: %+v\nExpected: %+v", envs, tt.expectedEnvs)
+				}
+			}
+		})
+	}
 }
 
 func TestFormatServiceURL_WorkspaceInURL(t *testing.T) {

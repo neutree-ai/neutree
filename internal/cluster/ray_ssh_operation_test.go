@@ -911,7 +911,6 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"--security-opt=seccomp=unconfined",
 					"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 					"--ulimit nofile=65536:65536",
-					fmt.Sprintf("-e %s=%s", v1.ModelCacheDirENV, v1.DefaultSSHClusterModelCacheMountPath),
 				},
 			},
 			HeadStartRayCommands: []string{
@@ -1122,7 +1121,6 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 func TestMutateModelCache(t *testing.T) {
 	testHostPath := "/mnt/model_cache"
 	initPathCmd := fmt.Sprintf("mkdir -p %s && chmod 755 %s", testHostPath, testHostPath)
-	modelCacheRunOption := fmt.Sprintf("-e %s=%s", v1.ModelCacheDirENV, v1.DefaultSSHClusterModelCacheMountPath)
 	modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", v1.DefaultSSHClusterModelCacheMountPath)
 	tests := []struct {
 		name                string
@@ -1138,9 +1136,6 @@ func TestMutateModelCache(t *testing.T) {
 				StaticWorkerStartRayCommands: []string{},
 			},
 			expected: &v1.RayClusterConfig{
-				Docker: v1.Docker{
-					RunOptions: []string{modelCacheRunOption},
-				},
 				HeadStartRayCommands:         []string{},
 				WorkerStartRayCommands:       []string{},
 				StaticWorkerStartRayCommands: []string{},
@@ -1155,14 +1150,11 @@ func TestMutateModelCache(t *testing.T) {
 			},
 			modelCaches: []v1.ModelCache{
 				{
-					ModelRegistryType: v1.HuggingFaceModelRegistryType,
-					HostPath:          nil,
+					Name:     "test-cache",
+					HostPath: nil,
 				},
 			},
 			expected: &v1.RayClusterConfig{
-				Docker: v1.Docker{
-					RunOptions: []string{modelCacheRunOption},
-				},
 				HeadStartRayCommands:         []string{},
 				WorkerStartRayCommands:       []string{},
 				StaticWorkerStartRayCommands: []string{},
@@ -1177,26 +1169,27 @@ func TestMutateModelCache(t *testing.T) {
 			},
 			modelCaches: []v1.ModelCache{
 				{
-					ModelRegistryType: v1.HuggingFaceModelRegistryType,
-					HostPath:          nil,
-					NFS:               &corev1.NFSVolumeSource{Path: testHostPath},
+					Name:     "test-cache",
+					HostPath: nil,
+					NFS:      &corev1.NFSVolumeSource{Path: testHostPath},
 				},
 			},
 			expected: &v1.RayClusterConfig{
-				Docker: v1.Docker{
-					RunOptions: []string{modelCacheRunOption},
-				},
 				HeadStartRayCommands:         []string{},
 				WorkerStartRayCommands:       []string{},
 				StaticWorkerStartRayCommands: []string{},
 			},
 		},
 		{
-			name:                "mutate huggingface type model cache success",
-			sshRayClusterConfig: &v1.RayClusterConfig{},
+			name: "mutate hostPath model cache success",
+			sshRayClusterConfig: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					RunOptions: []string{},
+				},
+			},
 			modelCaches: []v1.ModelCache{
 				{
-					ModelRegistryType: v1.HuggingFaceModelRegistryType,
+					Name: "test-cache",
 					HostPath: &corev1.HostPathVolumeSource{
 						Path: testHostPath,
 					},
@@ -1205,8 +1198,7 @@ func TestMutateModelCache(t *testing.T) {
 			expected: &v1.RayClusterConfig{
 				Docker: v1.Docker{
 					RunOptions: []string{
-						modelCacheRunOption,
-						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
+						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, "test-cache")),
 					},
 				},
 				HeadStartRayCommands:         []string{modifyPermissionCommand},
@@ -1216,11 +1208,21 @@ func TestMutateModelCache(t *testing.T) {
 			},
 		},
 		{
-			name:                "mutate bentoml type model cache success",
-			sshRayClusterConfig: &v1.RayClusterConfig{},
+			name: "mutate multi model cache success",
+			sshRayClusterConfig: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					RunOptions: []string{},
+				},
+			},
 			modelCaches: []v1.ModelCache{
 				{
-					ModelRegistryType: v1.BentoMLModelRegistryType,
+					Name: "test-cache-1",
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: testHostPath,
+					},
+				},
+				{
+					Name: "test-cache-2",
 					HostPath: &corev1.HostPathVolumeSource{
 						Path: testHostPath,
 					},
@@ -1229,39 +1231,8 @@ func TestMutateModelCache(t *testing.T) {
 			expected: &v1.RayClusterConfig{
 				Docker: v1.Docker{
 					RunOptions: []string{
-						modelCacheRunOption,
-						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.BentoMLModelRegistryType)),
-					},
-				},
-				HeadStartRayCommands:         []string{modifyPermissionCommand},
-				WorkerStartRayCommands:       []string{modifyPermissionCommand},
-				StaticWorkerStartRayCommands: []string{modifyPermissionCommand},
-				InitializationCommands:       []string{initPathCmd},
-			},
-		},
-		{
-			name:                "mutate both huggingface and bentoml type model cache success",
-			sshRayClusterConfig: &v1.RayClusterConfig{},
-			modelCaches: []v1.ModelCache{
-				{
-					ModelRegistryType: v1.HuggingFaceModelRegistryType,
-					HostPath: &corev1.HostPathVolumeSource{
-						Path: testHostPath,
-					},
-				},
-				{
-					ModelRegistryType: v1.BentoMLModelRegistryType,
-					HostPath: &corev1.HostPathVolumeSource{
-						Path: testHostPath,
-					},
-				},
-			},
-			expected: &v1.RayClusterConfig{
-				Docker: v1.Docker{
-					RunOptions: []string{
-						modelCacheRunOption,
-						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.HuggingFaceModelRegistryType)),
-						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.BentoMLModelRegistryType)),
+						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, "test-cache-1")),
+						fmt.Sprintf("--volume %s:%s", testHostPath, path.Join(v1.DefaultSSHClusterModelCacheMountPath, "test-cache-2")),
 					},
 				},
 				HeadStartRayCommands:         []string{modifyPermissionCommand},

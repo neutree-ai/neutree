@@ -26,6 +26,14 @@ var (
 )
 
 func GetClusterModelCache(c v1.Cluster) ([]v1.ModelCache, error) {
+	if c.Spec == nil {
+		return nil, nil
+	}
+
+	if c.Spec.Config == nil {
+		return nil, nil
+	}
+
 	content, err := json.Marshal(c.Spec.Config)
 	if err != nil {
 		return nil, err
@@ -238,8 +246,8 @@ func GetClusterServeAddress(cluster *v1.Cluster) (string, string, int, error) {
 func CacheName(cache v1.ModelCache) string {
 	baseName := "models-cache"
 
-	if cache.ModelRegistryType != "" {
-		baseName = baseName + "-" + string(cache.ModelRegistryType)
+	if cache.Name != "" {
+		baseName = baseName + "-" + cache.Name
 	}
 
 	return baseName

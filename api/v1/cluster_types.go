@@ -99,8 +99,8 @@ type WorkerGroupSpec struct {
 }
 
 type ModelCache struct {
-	ModelRegistryType ModelRegistryType            `json:"model_registry_type,omitempty" yaml:"model_registry_type,omitempty"`
-	HostPath          *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
+	Name     string                       `json:"name,omitempty" yaml:"name,omitempty"`
+	HostPath *corev1.HostPathVolumeSource `json:"host_path,omitempty" yaml:"host_path,omitempty"`
 	// Only Kubernetes type cluster support NFS.
 	NFS *corev1.NFSVolumeSource `json:"nfs,omitempty" yaml:"nfs,omitempty"`
 

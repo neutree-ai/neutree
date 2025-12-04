@@ -75,6 +75,7 @@ spec:
               --name="{{ .ModelArgs.name }}"
               --registry_type="{{ .ModelArgs.registry_type }}"
               --registry_path="{{ .ModelArgs.registry_path }}"
+              --path="{{ .ModelArgs.path }}"
               --version="{{ .ModelArgs.version }}"
               --file="{{ .ModelArgs.file }}"
               --task="{{ .ModelArgs.task }}"

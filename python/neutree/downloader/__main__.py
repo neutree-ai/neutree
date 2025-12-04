@@ -17,6 +17,7 @@ def _build_parser():
     p.add_argument("--file", required=False, help="specific file to download inside model path")
     p.add_argument("--task", required=False, help="model task (informational)")
     p.add_argument("--registry_path", required=False, help="explicit registry path for the model")
+    p.add_argument("--path", required=False, help="target path for the model")
     p.add_argument("--registry_type", required=True, help="registry type (e.g., hugging-face, bentoml)")
 
     return p
@@ -34,6 +35,7 @@ def main(argv=None):
         "task": args.task,
         "registry_path": args.registry_path,
         "registry_type": args.registry_type,
+        "path": args.path,
     }
     # Build low-level DownloadRequest from model_args + environment using utils helper
     backend, dl_req = build_request_from_model_args(model_args)
