@@ -249,8 +249,13 @@ release-binary:
 
 .PHONY: release-chart
 release-chart: sync-deploy-manifests ## Build the chart to publish with a release
-	sed -i "s/version: .*/version: ${VERSION}/" deploy/chart/neutree/Chart.yaml
-	sed -i "s/appVersion: .*/appVersion: ${VERSION}/" deploy/chart/neutree/Chart.yaml
+	@if echo "${VERSION}" | grep -qE '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$$'; then \
+		echo "Updating chart version to ${VERSION}"; \
+		sed -i "s/version: .*/version: ${VERSION}/" deploy/chart/neutree/Chart.yaml; \
+		sed -i "s/appVersion: .*/appVersion: ${VERSION}/" deploy/chart/neutree/Chart.yaml; \
+	else \
+		echo "Skipping chart version update because VERSION (${VERSION}) is not a valid semver."; \
+	fi
 	helm package ./deploy/chart/neutree -d $(RELEASE_DIR)
 
 MOCKERY := $(shell pwd)/bin/mockery
