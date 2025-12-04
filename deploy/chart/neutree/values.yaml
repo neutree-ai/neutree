@@ -245,7 +245,7 @@ grafana:
     type: Recreate
   image:
     # -- The Docker registry
-    registry: ""
+    registry: "docker.io"
     # -- Docker image repository
     repository: grafana/grafana
     # Overrides the Grafana image tag whose default is the chart appVersion

@@ -27,12 +27,16 @@ func NewImageRegistriesService(client *Client) *ImageRegistriesService {
 type ImageRegistryListOptions struct {
 	Workspace string
 	Name      string
+	WithCreds bool
 }
 
 // List lists all image registries in the specified workspace
 func (s *ImageRegistriesService) List(opts ImageRegistryListOptions) ([]v1.ImageRegistry, error) {
 	// Build URL with query parameters
 	baseURL := fmt.Sprintf("%s/api/v1/image_registries", s.client.baseURL)
+	if opts.WithCreds {
+		baseURL = fmt.Sprintf("%s/api/v1/credentials/image_registries", s.client.baseURL)
+	}
 
 	params := url.Values{}
 	if opts.Name != "" {

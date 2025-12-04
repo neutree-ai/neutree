@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
+	"github.com/neutree-ai/neutree/internal/routes/credentials"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
@@ -41,6 +42,8 @@ func NewBuilder() *Builder {
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		// Auth route (no auth required for authentication itself)
 		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
+		// Credentials route is used for get resource with sensitive data
+		"credentials": CredentialsRouteFactory(credentials.RegisterCredentialsRoutes),
 		// PostgREST proxy routes
 		// Auth middleware is applied to:
 		// - Validate and pass-through JWT tokens to PostgREST
@@ -72,7 +75,6 @@ func NewBuilder() *Builder {
 	for name, middlewareInit := range defaultMiddlewareInits {
 		b.middlewareInits[name] = middlewareInit
 	}
-
 	// Register default middlewares to routes
 	defaultRoutesToMiddlewares := map[string][]string{
 		"models":      {"auth"},
@@ -94,6 +96,7 @@ func NewBuilder() *Builder {
 		"rest/model-catalogs":   {"auth"},
 		"rest/oem-configs":      {"auth"},
 		"rest/rpc":              {"auth"},
+		"credentials":           {"auth"},
 	}
 
 	for route, middlewares := range defaultRoutesToMiddlewares {

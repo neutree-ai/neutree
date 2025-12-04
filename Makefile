@@ -308,3 +308,11 @@ sync-deploy-manifests: vendir ## Sync third-party dependencies using vendir
 sync-grafana-dashboards: vendir ## Sync grafana dashboards using vendir
 	cd scripts/dashboard  && $(VENDIR) sync && bash sync-grafana-dashboards.sh
 
+.PHONY: sync-images-list
+sync-images-list: ## Sync images list for building package
+	helm template neutree ./deploy/chart/neutree \
+	  --set api.image.tag=latest \
+	  --set core.image.tag=latest \
+	  --set dbScripts.image.tag=latest | \
+	  grep -Eoh 'image:\s*["]?[a-zA-Z0-9./_-]+:[a-zA-Z0-9._-]+["]?' | \
+	  awk '{print $$2}' | tr -d '"' | sort -u > scripts/builder/image-lists/controlplane/images.txt

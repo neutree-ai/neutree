@@ -357,7 +357,7 @@ func TestHandleRayDashboardProxy_MissingDashboardURL(t *testing.T) {
 	mockStorage.AssertExpectations(t)
 }
 
-// TestCreatePostgrestAuthModifier tests the createPostgrestAuthModifier function
+// TestCreatePostgrestAuthModifier tests the CreatePostgrestAuthModifier function
 func TestCreatePostgrestAuthModifier(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -371,7 +371,7 @@ func TestCreatePostgrestAuthModifier(t *testing.T) {
 		req.Header.Set("Authorization", "sk_original_api_key")
 
 		// Apply the modifier
-		modifier := createPostgrestAuthModifier(c)
+		modifier := CreatePostgrestAuthModifier(c)
 		modifier(req)
 
 		// Verify the Authorization header was replaced
@@ -388,7 +388,7 @@ func TestCreatePostgrestAuthModifier(t *testing.T) {
 		req.Header.Set("Authorization", originalAuth)
 
 		// Apply the modifier
-		modifier := createPostgrestAuthModifier(c)
+		modifier := CreatePostgrestAuthModifier(c)
 		modifier(req)
 
 		// Verify the Authorization header was not modified
@@ -406,7 +406,7 @@ func TestCreatePostgrestAuthModifier(t *testing.T) {
 		req.Header.Set("Authorization", originalAuth)
 
 		// Apply the modifier
-		modifier := createPostgrestAuthModifier(c)
+		modifier := CreatePostgrestAuthModifier(c)
 		modifier(req)
 
 		// Empty postgrest_token means GetPostgrestToken returns false,
