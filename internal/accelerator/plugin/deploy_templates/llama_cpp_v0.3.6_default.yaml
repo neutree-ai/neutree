@@ -64,7 +64,7 @@ spec:
       {{- end }}
       initContainers:
         - name: model-downloader
-          image: {{ .ImagePrefix }}/neutree/runtime:{{ .NeutreeVersion }}
+          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
           command:
             - bash
             - -c

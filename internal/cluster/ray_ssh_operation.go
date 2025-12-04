@@ -340,13 +340,7 @@ func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v
 	sshRayClusterConfig.Docker.RunOptions = append(sshRayClusterConfig.Docker.RunOptions,
 		fmt.Sprintf("-e %s=%s", v1.ModelCacheDirENV, v1.DefaultSSHClusterModelCacheMountPath))
 
-	// Change ownership of the model cache directory to the current user in each node, so that the inference instance can read/write files.
-	// After that, the inference instance can easy read/write model files even though the directory is mounted from host.
-	modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", v1.DefaultSSHClusterModelCacheMountPath)
-	sshRayClusterConfig.HeadStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.HeadStartRayCommands...)
-	sshRayClusterConfig.WorkerStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.WorkerStartRayCommands...)
-	sshRayClusterConfig.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand},
-		sshRayClusterConfig.StaticWorkerStartRayCommands...)
+	useModelCache := false
 
 	for _, modelCache := range modelCaches {
 		if modelCache.HostPath == nil {
@@ -361,5 +355,18 @@ func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v
 			"--volume "+hostPath+":"+mountPath)
 		sshRayClusterConfig.InitializationCommands = append(sshRayClusterConfig.InitializationCommands,
 			fmt.Sprintf("mkdir -p %s && chmod 755 %s", hostPath, hostPath))
+
+		useModelCache = true
+	}
+
+	// Change ownership of the model cache directory to the current user in each node, so that the inference instance can read/write files.
+	// After that, the inference instance can easy read/write model files even though the directory is mounted from host.
+	// Only do this when model cache is used.
+	if useModelCache {
+		modifyPermissionCommand := fmt.Sprintf("sudo chown -R $(id -u):$(id -g) %s", v1.DefaultSSHClusterModelCacheMountPath)
+		sshRayClusterConfig.HeadStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.HeadStartRayCommands...)
+		sshRayClusterConfig.WorkerStartRayCommands = append([]string{modifyPermissionCommand}, sshRayClusterConfig.WorkerStartRayCommands...)
+		sshRayClusterConfig.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand},
+			sshRayClusterConfig.StaticWorkerStartRayCommands...)
 	}
 }

@@ -112,11 +112,11 @@ func TestAuth(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                  string
-		setupAuth             func() string
-		expectedStatus        int
-		expectUserID          string
-		expectPostgrestToken  bool
+		name                 string
+		setupAuth            func() string
+		expectedStatus       int
+		expectUserID         string
+		expectPostgrestToken bool
 	}{
 		{
 			name: "Valid JWT token",
