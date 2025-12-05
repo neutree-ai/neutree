@@ -1159,7 +1159,41 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
 					"registry_path": "test-model",
-					"path":          filepath.Join(modelPathPrefix, "test-model"),
+					"path":          filepath.Join(modelPathPrefix, "test-model", "main"),
+					"version":       "main",
+				},
+				Env: map[string]string{
+					v1.HFEndpoint: "https://huggingface.co",
+					v1.HFTokenEnv: "hf_test_token",
+				},
+			},
+		},
+		{
+			name: "HuggingFace with special version",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "hf-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type:        v1.HuggingFaceModelRegistryType,
+					Url:         "https://huggingface.co/",
+					Credentials: "hf_test_token",
+				},
+			},
+			cluster: &v1.Cluster{},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "test-model",
+						Version: "v1",
+					},
+				},
+			},
+			expected: &DeploymentManifestVariables{
+				ModelArgs: map[string]interface{}{
+					"registry_path": "test-model",
+					"path":          filepath.Join(modelPathPrefix, "test-model", "v1"),
+					"version":       "v1",
 				},
 				Env: map[string]string{
 					v1.HFEndpoint: "https://huggingface.co",
@@ -1189,7 +1223,8 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
 					"registry_path": "test-model",
-					"path":          filepath.Join(modelPathPrefix, "test-model"),
+					"path":          filepath.Join(modelPathPrefix, "test-model", "main"),
+					"version":       "main",
 				},
 				Env: map[string]string{
 					v1.HFEndpoint: "https://huggingface.co",
@@ -1231,7 +1266,8 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
 					"registry_path": "test-model",
-					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache", "test-model"),
+					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache", "test-model", "main"),
+					"version":       "main",
 				},
 				Env: map[string]string{
 					v1.HFEndpoint: "https://huggingface.co",
@@ -1300,6 +1336,7 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 				ModelArgs: map[string]interface{}{
 					"path":          filepath.Join(modelPathPrefix, "llama-2-7b", "v1.0"),
 					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
+					"version":       "v1.0",
 				},
 				Volumes: []corev1.Volume{
 					{
@@ -1347,6 +1384,7 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 				ModelArgs: map[string]interface{}{
 					"path":          filepath.Join(modelPathPrefix, "llama-2-7b", "v1.0"),
 					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
+					"version":       "v1.0",
 				},
 				Volumes: []corev1.Volume{
 					{
@@ -1393,6 +1431,7 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 				ModelArgs: map[string]interface{}{
 					"path":          filepath.Join(modelPathPrefix, "gpt-model/v2.0"),
 					"registry_path": "/mnt/bentoml/models/gpt-model/v2.0",
+					"version":       "v2.0",
 				},
 				Volumes: []corev1.Volume{
 					{
@@ -1479,6 +1518,7 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 				ModelArgs: map[string]interface{}{
 					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache", "llama-2-7b", "v1.0"),
 					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
+					"version":       "v1.0",
 				},
 				Volumes: []corev1.Volume{
 					{
@@ -1543,6 +1583,7 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 				ModelArgs: map[string]interface{}{
 					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache-1", "llama-2-7b", "v1.0"),
 					"registry_path": "/mnt/bentoml/models/llama-2-7b/v1.0",
+					"version":       "v1.0",
 				},
 				Volumes: []corev1.Volume{
 					{

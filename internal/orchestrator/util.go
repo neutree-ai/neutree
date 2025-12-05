@@ -314,27 +314,47 @@ func convertCPUToKubernetes(spec *v1.ResourceSpec) *v1.KubernetesResourceSpec {
 }
 
 func getDeployedModelRealVersion(modelRegistry *v1.ModelRegistry, modelName, modelVersion string) (string, error) {
-	if modelVersion != "" && modelVersion != v1.LatestVersion {
+	if modelRegistry == nil {
+		return "", fmt.Errorf("model registry cannot be nil")
+	}
+
+	if modelRegistry.Spec == nil {
+		return "", fmt.Errorf("model registry spec cannot be nil")
+	}
+
+	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
+		if modelVersion == "" {
+			return "main", nil
+		}
+
 		return modelVersion, nil
 	}
 
-	// Fetch latest actual model version from model registry
-	registryManager, err := model_registry.NewModelRegistry(modelRegistry)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to create model registry manager for model registry %s", modelRegistry.Metadata.Name)
+	if modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
+		if modelVersion != "" && modelVersion != v1.LatestVersion {
+			return modelVersion, nil
+		}
+
+		// Fetch latest actual model version from model registry
+		registryManager, err := model_registry.NewModelRegistry(modelRegistry)
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to create model registry manager for model registry %s", modelRegistry.Metadata.Name)
+		}
+
+		err = registryManager.Connect()
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to connect to model registry %s", modelRegistry.Metadata.Name)
+		}
+
+		defer registryManager.Disconnect() // nolint: errcheck
+
+		latestModelVersionInfo, err := registryManager.GetModelVersion(modelName, modelVersion)
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to get latest model version for %s", modelName)
+		}
+
+		return latestModelVersionInfo.Name, nil
 	}
 
-	err = registryManager.Connect()
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to connect to model registry %s", modelRegistry.Metadata.Name)
-	}
-
-	defer registryManager.Disconnect() // nolint: errcheck
-
-	latestModelVersionInfo, err := registryManager.GetModelVersion(modelName, modelVersion)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to get latest model version for %s", modelName)
-	}
-
-	return latestModelVersionInfo.Name, nil
+	return "", fmt.Errorf("unsupported model registry type: %s", modelRegistry.Spec.Type)
 }

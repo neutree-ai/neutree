@@ -182,6 +182,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 				return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
 			}
 
+			data.ModelArgs["version"] = modelRealVersion
 			mountPath := filepath.Join("/mnt", "bentoml")
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
@@ -211,8 +212,14 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			data.Env[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
+		modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+		if err != nil {
+			return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
+		}
+
+		data.ModelArgs["version"] = modelRealVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
-		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name)
+		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 	}
 
 	return nil
