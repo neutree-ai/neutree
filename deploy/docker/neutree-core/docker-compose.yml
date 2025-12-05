@@ -7,6 +7,8 @@ services:
     command: bash -c 'cp -rf /db /host/'
     volumes:
       - {{ .NeutreeCoreWorkDir}}:/host/
+    networks:
+      - neutree
     restart: none
     deploy:
       restart_policy:
@@ -257,6 +259,8 @@ services:
       - "--promscrape.configCheckInterval=10s"
       - "--remoteWrite.url={{ .MetricsRemoteWriteURL}}"
     restart: always
+    networks:
+      - neutree
     logging:
       driver: "json-file"
       options:
