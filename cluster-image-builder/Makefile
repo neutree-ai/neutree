@@ -45,13 +45,13 @@ docker-push-amd-gpu: ## Push the AMD GPU image
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ACCELERATORS))
 
 .PHONY: docker-push-manifest-amd-gpu
-docker-push-manifest-amd-gpu: ## Push the core manifest docker image.
+docker-push-manifest-amd-gpu: ## Push the amd-gpu manifest docker image.
 	docker manifest create --amend $(NEUTREE_SERVE_IMAGE):$(IMAGE_TAG)-rocm $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_SERVE_IMAGE)\-&:$(IMAGE_TAG)-rocm~g")
 	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_SERVE_IMAGE}:${IMAGE_TAG}-rocm ${NEUTREE_SERVE_IMAGE}-$${arch}:${IMAGE_TAG}-rocm; done
 	docker manifest push --purge ${NEUTREE_SERVE_IMAGE}:${IMAGE_TAG}-rocm
 
 .PHONY: docker-push-manifest-gpu
-docker-push-manifest-gpu: ## Push the core manifest docker image.
+docker-push-manifest-gpu: ## Push the gpu manifest docker image.
 	docker manifest create --amend $(NEUTREE_SERVE_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_SERVE_IMAGE)\-&:$(IMAGE_TAG)~g")
 	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_SERVE_IMAGE}:${IMAGE_TAG} ${NEUTREE_SERVE_IMAGE}-$${arch}:${IMAGE_TAG}; done
 	docker manifest push --purge ${NEUTREE_SERVE_IMAGE}:${IMAGE_TAG}

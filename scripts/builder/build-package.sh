@@ -122,7 +122,7 @@ PACKAGE_NAME=""
 case "$PACKAGE_TYPE" in
     controlplane)
         IMAGE_LIST_FILES+=("image-lists/controlplane/images.txt")
-        PACKAGE_NAME="neutree-control-plane-${VERSION}-${ARCH}"
+        PACKAGE_NAME="neutree-controlplane-${VERSION}-${ARCH}"
         ;;
     cluster)
         if [[ -z "$CLUSTER_TYPE" ]]; then
@@ -184,7 +184,7 @@ for list_file in "${IMAGE_LIST_FILES[@]}"; do
 
     log_info "Processing: $list_file"
     # Process image list
-    while IFS= read -r line; do
+    while IFS= read -r line || [[ -n $line ]]; do
         # Skip comments and empty lines
         [[ "$line" =~ ^#.*$ ]] && continue
         [[ -z "$line" ]] && continue
@@ -220,7 +220,7 @@ log_info "Total images to package: $(wc -l < "$MERGED_IMAGE_LIST")"
 
 # Pull and save images
 IMAGES_TO_PULL=()
-while IFS= read -r image; do
+while IFS= read -r image || [[ -n $image ]]; do
     [[ -z "$image" ]] && continue
 
     # Determine the actual image address to pull
