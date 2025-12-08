@@ -40,6 +40,7 @@ Examples:
 	neutreeCliCmd.AddCommand(launch.NewLaunchCmd())
 	neutreeCliCmd.AddCommand(model.NewModelCmd())
 	neutreeCliCmd.AddCommand(packageimport.NewImportCmd())
+	neutreeCliCmd.AddCommand(newVersionCmd())
 
 	return neutreeCliCmd
 }
