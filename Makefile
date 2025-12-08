@@ -168,7 +168,7 @@ docker-push-manifest-runtime: ## Push the runtime manifest docker image.
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
 .PHONY: test
-test: prepare-build-cli mockgen fmt vet lint ## Run unit test
+test: prepare-build-cli mockgen fmt vet lint test-helm-snapshots ## Run unit test
 	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e\|mocks\|db/dbtest')
 
 ##@ Database Testing
@@ -321,3 +321,13 @@ sync-images-list: ## Sync images list for building package
 	  --set dbScripts.image.tag=latest | \
 	  grep -Eoh 'image:\s*["]?[a-zA-Z0-9./_-]+:[a-zA-Z0-9._-]+["]?' | \
 	  awk '{print $$2}' | tr -d '"' | sort -u > scripts/builder/image-lists/controlplane/images.txt
+
+##@ Helm Chart Tests
+
+.PHONY: test-helm-snapshots
+test-helm-snapshots: ## Run helm template snapshot tests
+	@bash deploy/chart/neutree/tests/snapshots/test.sh
+
+.PHONY: update-helm-snapshots
+update-helm-snapshots: ## Update all helm template snapshots
+	@bash deploy/chart/neutree/tests/snapshots/update.sh
