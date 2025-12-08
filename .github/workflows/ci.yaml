@@ -39,7 +39,6 @@ jobs:
 
       - name: Database Test
         run: make db-test
-
       - name: Build
         run: make build
 

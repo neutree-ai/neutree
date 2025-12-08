@@ -15,7 +15,7 @@ spec:
       labels:
         app.kubernetes.io/component: neutree-auth
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}

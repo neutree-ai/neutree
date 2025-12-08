@@ -13,7 +13,7 @@ spec:
       labels:
         app.kubernetes.io/component: neutree-post-migration-hook-job
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}

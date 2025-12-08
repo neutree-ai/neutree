@@ -16,7 +16,7 @@ spec:
       labels:
         app.kubernetes.io/component: neutree-postgresql
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
