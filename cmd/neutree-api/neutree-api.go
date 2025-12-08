@@ -3,15 +3,25 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"os"
 
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app"
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/options"
+	"github.com/neutree-ai/neutree/internal/version"
 )
 
 func main() {
+	// Check for version flag first
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-v") {
+		info := version.Get()
+		fmt.Println(info.String())
+		os.Exit(0)
+	}
+
 	klog.InitFlags(nil)
 	defer klog.Flush()
 
