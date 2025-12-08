@@ -247,7 +247,7 @@ func TestNoConverterFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "no converter found")
 }
 
-func TestGetDeployedModelRealVersion(t *testing.T) {
+func TestGetDeployedModelRealVersion_BentoML(t *testing.T) {
 	tests := []struct {
 		name         string
 		setupMocks   func(modelregistry *modelregistrymocks.MockModelRegistry)
@@ -256,7 +256,7 @@ func TestGetDeployedModelRealVersion(t *testing.T) {
 		wantErr      bool
 	}{
 		{
-			name: "Model found with real version",
+			name: "bentoml registry model found with real version",
 			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
 				modelregistry.On("Connect").Return(nil)
 				modelregistry.On("GetModelVersion", "test", "latest").Return(&v1.ModelVersion{
@@ -268,7 +268,7 @@ func TestGetDeployedModelRealVersion(t *testing.T) {
 			expected:     "v1.0.0",
 		},
 		{
-			name: "Model found with real version with empty version",
+			name: "bentoml registry model found with real version with empty version",
 			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
 				modelregistry.On("Connect").Return(nil)
 				modelregistry.On("GetModelVersion", "test", "").Return(&v1.ModelVersion{
@@ -280,7 +280,7 @@ func TestGetDeployedModelRealVersion(t *testing.T) {
 			expected:     "v1.0.0",
 		},
 		{
-			name: "Model not found error",
+			name: "bentoml registry model not found error",
 			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
 				modelregistry.On("Connect").Return(nil)
 				modelregistry.On("GetModelVersion", "test", "latest").Return(nil, assert.AnError)
@@ -290,7 +290,7 @@ func TestGetDeployedModelRealVersion(t *testing.T) {
 			wantErr:      true,
 		},
 		{
-			name: "Model found with specific version",
+			name: "bentoml registry model found with specific version",
 			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
 				// No calls expected since specific version is provided
 			},
@@ -307,7 +307,11 @@ func TestGetDeployedModelRealVersion(t *testing.T) {
 				return mockModelRegistry, nil
 			}
 
-			result, err := getDeployedModelRealVersion(&v1.ModelRegistry{}, "test", tt.inputVersion)
+			result, err := getDeployedModelRealVersion(&v1.ModelRegistry{
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+				},
+			}, "test", tt.inputVersion)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -316,6 +320,82 @@ func TestGetDeployedModelRealVersion(t *testing.T) {
 			}
 
 			mockModelRegistry.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetDeployedModelRealVersion_Huggingface(t *testing.T) {
+	tests := []struct {
+		name         string
+		inputVersion string
+		expected     string
+		wantErr      bool
+	}{
+		{
+			name:         "huggingface registry model with real version",
+			inputVersion: "latest",
+			expected:     "latest",
+		},
+		{
+			name:         "huggingface registry model with empty version",
+			inputVersion: "",
+			expected:     "main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := getDeployedModelRealVersion(&v1.ModelRegistry{
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.HuggingFaceModelRegistryType,
+				},
+			}, "test", tt.inputVersion)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestGetDeployedModelRealVersion_ModelRegistry(t *testing.T) {
+	test := []struct {
+		name          string
+		modelRegistry *v1.ModelRegistry
+		expectedErr   string
+	}{
+		{
+			name: "unsupported model registry type",
+			modelRegistry: &v1.ModelRegistry{
+				Spec: &v1.ModelRegistrySpec{
+					Type: "unsupported_type",
+				},
+			},
+			expectedErr: "unsupported model registry type: unsupported_type",
+		},
+		{
+			name:          "nil model registry",
+			modelRegistry: nil,
+			expectedErr:   "model registry cannot be nil",
+		},
+		{
+			name: "nil model registry spec",
+			modelRegistry: &v1.ModelRegistry{
+				Spec: nil,
+			},
+			expectedErr: "model registry spec cannot be nil",
+		},
+	}
+
+	for _, tt := range test {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := getDeployedModelRealVersion(tt.modelRegistry, "test", "latest")
+			if err == nil {
+				t.Fatalf("expected error but got nil")
+			}
+			assert.Contains(t, err.Error(), tt.expectedErr)
 		})
 	}
 }

@@ -849,7 +849,52 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 				"file":          "model.safetensors",
 				"task":          v1.TextGenerationModelTask,
 				"serve_name":    "llama-2-7b",
-				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "llama-2-7b"),
+				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "llama-2-7b", "v1.0"),
+				"registry_path": "llama-2-7b",
+			},
+			expectedEnvs: map[string]string{
+				v1.HFEndpoint: "https://huggingface.co",
+				v1.HFTokenEnv: "test-token",
+			},
+			wantErr: false,
+		},
+		{
+			name: "HuggingFace modelRegistry - without specific version",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "huggingface-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type:        v1.HuggingFaceModelRegistryType,
+					Url:         "https://huggingface.co",
+					Credentials: "test-token",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "llama-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name: "llama-2-7b",
+						File: "model.safetensors",
+						Task: v1.TextGenerationModelTask,
+					},
+					Resources:         &v1.ResourceSpec{},
+					Engine:            &v1.EndpointEngineSpec{},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{},
+			expectedModelArgs: map[string]string{
+				"registry_type": "hugging-face",
+				"name":          "llama-2-7b",
+				"version":       "main",
+				"file":          "model.safetensors",
+				"task":          v1.TextGenerationModelTask,
+				"serve_name":    "llama-2-7b",
+				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "llama-2-7b", "main"),
 				"registry_path": "llama-2-7b",
 			},
 			expectedEnvs: map[string]string{
