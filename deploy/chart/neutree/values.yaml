@@ -220,8 +220,8 @@ vector:
 jwtCli:
   image:
     registry: ""
-    repository: bitnami/jwt-cli
-    tag: 6.2.0
+    repository: bitnamilegacy/jwt-cli
+    tag: 6.2.0-debian-12-r16
     pullPolicy: IfNotPresent
 
 victoria-metrics-cluster:

@@ -1,4 +1,4 @@
-bitnami/jwt-cli:6.2.0
+bitnamilegacy/jwt-cli:6.2.0-debian-12-r16
 docker.io/grafana/grafana:11.5.3
 ghcr.io/groundnuty/k8s-wait-for:v2.0
 kong/kong:3.9
