@@ -82,3 +82,76 @@ func TestGetImagePrefix(t *testing.T) {
 		})
 	}
 }
+
+func Test_GetImageRegistryAuthInfo(t *testing.T) {
+	tests := []struct {
+		name          string
+		imageRegistry *v1.ImageRegistry
+		wantUser      string
+		wantPassword  string
+		wantErr       bool
+	}{
+		{
+			name: "Username and Password provided",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					AuthConfig: v1.ImageRegistryAuthConfig{
+						Username: "testuser",
+						Password: "testpassword",
+					},
+				},
+			},
+			wantUser:     "testuser",
+			wantPassword: "testpassword",
+			wantErr:      false,
+		},
+		{
+			name: "Auth provided in base64",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					AuthConfig: v1.ImageRegistryAuthConfig{
+						Auth: "dGVzdHVzZXI6dGVzdHBhc3N3b3Jk", // base64 for "testuser:testpassword"
+					},
+				},
+			},
+			wantUser:     "testuser",
+			wantPassword: "testpassword",
+			wantErr:      false,
+		},
+		{
+			name: "Invalid base64 Auth",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					AuthConfig: v1.ImageRegistryAuthConfig{
+						Auth: "invalid-base64",
+					},
+				},
+			},
+			wantUser:     "",
+			wantPassword: "",
+			wantErr:      true,
+		},
+		{
+			name:          "Nil ImageRegistry",
+			imageRegistry: nil,
+			wantUser:      "",
+			wantPassword:  "",
+			wantErr:       true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotUser, gotPassword, err := GetImageRegistryAuthInfo(tt.imageRegistry)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetImageRegistryAuthInfo() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotUser != tt.wantUser {
+				t.Errorf("GetImageRegistryAuthInfo() gotUser = %v, want %v", gotUser, tt.wantUser)
+			}
+			if gotPassword != tt.wantPassword {
+				t.Errorf("GetImageRegistryAuthInfo() gotPassword = %v, want %v", gotPassword, tt.wantPassword)
+			}
+		})
+	}
+}
