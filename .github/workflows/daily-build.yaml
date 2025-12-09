@@ -21,14 +21,14 @@ jobs:
         id: create_nightly_tag
         run: |
           DATE=$(date +'%Y%m%d')
-          git tag v0.1.0-nightly-$DATE -m v0.1.0-nightly-$DATE
-          git push origin v0.1.0-nightly-$DATE
-          echo "tag=v0.1.0-nightly-$DATE" >> $GITHUB_OUTPUT
+          git tag v1.0.0-nightly-$DATE -m v1.0.0-nightly-$DATE
+          git push origin v1.0.0-nightly-$DATE
+          echo "tag=v1.0.0-nightly-$DATE" >> $GITHUB_OUTPUT
       - name: Trigger Workflow
         uses: actions/github-script@v6
         env:
-          NGIGHTLY_UI_VERSION: ${{ secrets.NGIGHTLY_UI_VERSION }}
-          NGIGHTLY_CLUSTER_VERSION: ${{ secrets.NGIGHTLY_CLUSTER_VERSION }}
+          NIGHTLY_UI_VERSION: ${{ secrets.NIGHTLY_UI_VERSION }}
+          NIGHTLY_CLUSTER_VERSION: ${{ secrets.NIGHTLY_CLUSTER_VERSION }}
         with:
           script: |
             github.rest.actions.createWorkflowDispatch({
@@ -38,7 +38,7 @@ jobs:
               ref: 'main',
               inputs: {
                 tag: '${{ steps.create_nightly_tag.outputs.tag }}',
-                ui_version: '${{ env.NGIGHTLY_UI_VERSION }}',
-                cluster_version:'${{ env.NGIGHTLY_CLUSTER_VERSION }}'
+                ui_version: '${{ env.NIGHTLY_UI_VERSION }}',
+                cluster_version:'${{ env.NIGHTLY_CLUSTER_VERSION }}'
               },
             })
