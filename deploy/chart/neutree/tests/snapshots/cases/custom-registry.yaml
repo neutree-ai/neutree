@@ -1,0 +1,7 @@
+# Custom image registry configuration
+global:
+  image:
+    registry: "myregistry.io"
+  imagePullSecrets:
+  - name: my-registry-secret
+
