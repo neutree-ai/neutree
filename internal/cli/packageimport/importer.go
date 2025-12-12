@@ -149,7 +149,10 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 			return nil, errors.Wrap(err, "failed to get image prefix")
 		}
 
-		user, token = util.GetImageRegistryAuthInfo(targetRegistry)
+		user, token, err = util.GetImageRegistryAuthInfo(targetRegistry)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get image registry auth info")
+		}
 	}
 
 	authConfig := registry.AuthConfig{

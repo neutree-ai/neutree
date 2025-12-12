@@ -321,11 +321,17 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 
 	initializationCommands := []string{}
 	// login registry.
-	username, password := util.GetImageRegistryAuthInfo(imageRegistry)
-	registry := strings.Split(imagePrefix, "/")[0]
+	username, token, err := util.GetImageRegistryAuthInfo(imageRegistry)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get image registry auth info")
+	}
+	host, err := util.GetImageRegistryHost(imageRegistry)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get image registry host")
+	}
 
-	if username != "" && password != "" {
-		dockerLoginCommand := fmt.Sprintf("docker login %s -u '%s' -p '%s'", registry, username, password)
+	if username != "" && token != "" {
+		dockerLoginCommand := fmt.Sprintf("docker login %s -u '%s' -p '%s'", host, username, token)
 		initializationCommands = append(initializationCommands, dockerLoginCommand)
 	}
 

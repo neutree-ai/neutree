@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
-	"net/url"
 	"regexp"
 
 	"github.com/pkg/errors"
@@ -33,27 +32,19 @@ func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
 }
 
 func generateImagePullSecret(ns string, imageRegistry *v1.ImageRegistry) (*corev1.Secret, error) {
-	registryURL, err := url.Parse(imageRegistry.Spec.URL)
+	host, err := util.GetImageRegistryHost(imageRegistry)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse image registry url: %s", imageRegistry.Spec.URL)
+		return nil, errors.Wrap(err, "failed to get image registry host")
 	}
 
-	var password string
-
-	switch {
-	case imageRegistry.Spec.AuthConfig.Password != "":
-		password = imageRegistry.Spec.AuthConfig.Password
-	case imageRegistry.Spec.AuthConfig.IdentityToken != "":
-		password = imageRegistry.Spec.AuthConfig.IdentityToken
-	case imageRegistry.Spec.AuthConfig.RegistryToken != "":
-		password = imageRegistry.Spec.AuthConfig.RegistryToken
+	user, token, err := util.GetImageRegistryAuthInfo(imageRegistry)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get image registry auth info")
 	}
 
-	userName := removeEscapes(imageRegistry.Spec.AuthConfig.Username)
-	password = removeEscapes(password)
 	auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s",
-		userName,
-		password)))
+		user,
+		token)))
 
 	dockerAuthData := fmt.Sprintf(`{
 			"auths": {
@@ -63,9 +54,9 @@ func generateImagePullSecret(ns string, imageRegistry *v1.ImageRegistry) (*corev
 					"auth": "%s"
 				}
 			}
-		}`, registryURL.Host,
-		userName,
-		password,
+		}`, host,
+		user,
+		token,
 		auth)
 
 	return &corev1.Secret{

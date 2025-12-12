@@ -12,13 +12,13 @@ global:
   image:
     registry: ""
   imageRegistry: ""
+  imagePullSecrets: []
 
 jwtSecret: "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp"
 # the password for the neutree admin user.
 # it is valid when starting neutree core for the first time.
 # It is recommended to change it quickly after installation.
 adminPassword: ""
-imagePullSecrets: []
 
 system:
   grafana:
@@ -220,8 +220,8 @@ vector:
 jwtCli:
   image:
     registry: ""
-    repository: bitnami/jwt-cli
-    tag: 6.2.0
+    repository: bitnamilegacy/jwt-cli
+    tag: 6.2.0-debian-12-r16
     pullPolicy: IfNotPresent
 
 victoria-metrics-cluster:
