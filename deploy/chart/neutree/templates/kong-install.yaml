@@ -15,7 +15,7 @@ spec:
       labels:
         app.kubernetes.io/component: kong-post-upgrade-migrations
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -143,7 +143,7 @@ spec:
       labels:
         app.kubernetes.io/component: kong-pre-upgrade-migrations
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -330,7 +330,7 @@ spec:
       labels:
         app.kubernetes.io/component: {{ include "neutree.fullname" . }}-kong
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
