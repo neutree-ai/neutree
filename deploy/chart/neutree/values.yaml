@@ -220,7 +220,7 @@ vector:
 jwtCli:
   image:
     registry: ""
-    repository: bitnami/jwt-cli
+    repository: neutree/jwt-cli
     tag: 6.2.0
     pullPolicy: IfNotPresent
 
