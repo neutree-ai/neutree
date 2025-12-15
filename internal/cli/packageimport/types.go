@@ -69,10 +69,8 @@ type ImportOptions struct {
 	// PackagePath is the path to the engine version package file (.tar.gz or .zip)
 	PackagePath string
 
-	// ImageRegistry is the target image registry to push images to
-	ImageRegistry string
-
-	// MirrorRegistry is an optional mirror registry to push images to
+	// MirrorRegistry is the mirror registry to push images to.
+	// This field is required when SkipImagePush is false (i.e., when pushing images).
 	MirrorRegistry string
 
 	// RegistryUser is the username for the mirror image registry

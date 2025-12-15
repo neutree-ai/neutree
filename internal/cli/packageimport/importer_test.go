@@ -71,10 +71,12 @@ func TestImportOptionsValidation(t *testing.T) {
 				os.Remove(path)
 			},
 			opts: &ImportOptions{
-				PackagePath:   "", // Will be set by setupFunc
-				SkipImagePush: false,
-				ImageRegistry: "registry.example.com",
-				Workspace:     "default",
+				PackagePath:      "", // Will be set by setupFunc
+				SkipImagePush:    false,
+				MirrorRegistry:   "registry.example.com",
+				RegistryUser:     "user",
+				RegistryPassword: "pass",
+				Workspace:        "default",
 			},
 			expectError: false,
 		},
