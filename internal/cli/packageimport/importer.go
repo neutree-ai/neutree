@@ -126,32 +126,6 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 	mirrorRegistry := opts.MirrorRegistry
 	user, token := opts.RegistryUser, opts.RegistryPassword
 
-	if opts.ImageRegistry != "" {
-		imgRegistrys, err := i.apiClient.ImageRegistries.List(client.ImageRegistryListOptions{
-			Workspace: opts.Workspace,
-			Name:      opts.ImageRegistry,
-			WithCreds: true,
-		})
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get image registry")
-		}
-
-		if len(imgRegistrys) == 0 {
-			return nil, errors.Errorf("image registry %s not found", opts.ImageRegistry)
-		}
-
-		targetRegistry := &imgRegistrys[0]
-
-		klog.Info("Pushing image to registry")
-
-		mirrorRegistry, err = util.GetImagePrefix(targetRegistry)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get image prefix")
-		}
-
-		user, token = util.GetImageRegistryAuthInfo(targetRegistry)
-	}
-
 	authConfig := registry.AuthConfig{
 		Username:      user,
 		Password:      token,
@@ -188,7 +162,7 @@ func (i *Importer) validateOptions(opts *ImportOptions) error {
 	}
 
 	if !opts.SkipImagePush {
-		if (opts.Workspace == "" || opts.ImageRegistry == "") && (opts.MirrorRegistry == "" || opts.RegistryUser == "" || opts.RegistryPassword == "") {
+		if opts.MirrorRegistry == "" || opts.RegistryUser == "" || opts.RegistryPassword == "" {
 			return errors.New("image registry config is required when not skipping image push")
 		}
 	}

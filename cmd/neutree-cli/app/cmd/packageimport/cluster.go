@@ -8,12 +8,12 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/cli/packageimport"
-	"github.com/neutree-ai/neutree/pkg/client"
 )
 
 type ClusterImportOptions struct {
 	packagePath string
 	extractPath string
+	importLocal bool
 }
 
 func NewClusterImportCmd() *cobra.Command {
@@ -55,6 +55,7 @@ images:
 
 	cmd.Flags().StringVarP(&opts.packagePath, "package", "p", "", "Path to the cluster image package file (required)")
 	cmd.Flags().StringVar(&opts.extractPath, "extract-path", "/tmp", "Path to extract package to (default: temporary directory)")
+	cmd.Flags().BoolVar(&opts.importLocal, "local", false, "Skip pushing images to the registry, only load images locally")
 
 	_ = cmd.MarkFlagRequired("package")
 
@@ -64,29 +65,22 @@ images:
 func runClusterImport(opts *ClusterImportOptions) error {
 	ctx := context.Background()
 
-	// Validate API connection
-	if serverURL == "" {
-		return fmt.Errorf("API URL is required (use --api-url or set NEUTREE_API_URL env var)")
-	}
-
-	// Initialize API client
-	klog.Info("Initializing API client...")
-
-	clientOpts := []client.ClientOption{}
-	if apiKey != "" {
-		clientOpts = append(clientOpts, client.WithAPIKey(apiKey))
-	}
-
-	apiClient := client.NewClient(serverURL, clientOpts...)
-
-	importer := packageimport.NewImporter(apiClient)
+	// Cluster no need to create apiclient
+	importer := packageimport.NewImporter(nil)
 
 	// Prepare import options
 	importOpts := &packageimport.ImportOptions{
-		PackagePath:   opts.packagePath,
-		ImageRegistry: registry,
-		Workspace:     workspace,
-		ExtractPath:   opts.extractPath,
+		PackagePath: opts.packagePath,
+		ExtractPath: opts.extractPath,
+	}
+
+	// if not importLocal, set registry info
+	if !opts.importLocal {
+		importOpts.MirrorRegistry = mirrorRegistry
+		importOpts.RegistryUser = registryUsername
+		importOpts.RegistryPassword = registryPassword
+	} else {
+		importOpts.SkipImagePush = true
 	}
 
 	// Import the package

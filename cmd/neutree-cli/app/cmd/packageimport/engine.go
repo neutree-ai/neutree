@@ -108,13 +108,15 @@ func runEngineImport(opts *EngineImportOptions) error {
 
 	// Prepare import options
 	importOpts := &engine.ImportOptions{
-		PackagePath:   opts.packagePath,
-		ImageRegistry: registry,
-		Workspace:     workspace,
-		SkipImagePush: opts.skipImagePush,
-		SkipImageLoad: opts.skipImagePush,
-		Force:         opts.force,
-		ExtractPath:   opts.extractPath,
+		PackagePath:      opts.packagePath,
+		MirrorRegistry:   mirrorRegistry,
+		RegistryUser:     registryUsername,
+		RegistryPassword: registryPassword,
+		Workspace:        workspace,
+		SkipImagePush:    opts.skipImagePush,
+		SkipImageLoad:    opts.skipImagePush,
+		Force:            opts.force,
+		ExtractPath:      opts.extractPath,
 	}
 
 	// Import the package

@@ -13,11 +13,7 @@ import (
 type ControlPlaneImportOptions struct {
 	packagePath string
 	extractPath string
-
-	mirrorRegistry   string
-	registryUsername string
-	registryPassword string
-	importLocal      bool
+	importLocal bool
 }
 
 func NewControlPlaneImportCmd() *cobra.Command {
@@ -62,9 +58,6 @@ Use --local flag to skip registry push and only load images to local Docker.
 
 	cmd.Flags().StringVarP(&opts.packagePath, "package", "p", "", "Path to the control plane version package file (required)")
 	cmd.Flags().StringVar(&opts.extractPath, "extract-path", "/tmp", "Path to extract package to (default: temporary directory)")
-	cmd.Flags().StringVar(&opts.mirrorRegistry, "mirror-registry", "", "Container image registry to push images to (required)")
-	cmd.Flags().StringVar(&opts.registryUsername, "registry-username", "", "Username for the container image registry (if required)")
-	cmd.Flags().StringVar(&opts.registryPassword, "registry-password", "", "Password for the container image registry (if required)")
 	cmd.Flags().BoolVar(&opts.importLocal, "local", false, "Skip pushing images to the registry, only load images locally")
 
 	_ = cmd.MarkFlagRequired("package")
@@ -85,11 +78,11 @@ func runControlPlaneImport(opts *ControlPlaneImportOptions) error {
 		ExtractPath: opts.extractPath,
 	}
 
-	// if skipImagePush is not set, configure registry info
+	// if not importLocal, set registry info
 	if !opts.importLocal {
-		importOpts.MirrorRegistry = opts.mirrorRegistry
-		importOpts.RegistryUser = opts.registryUsername
-		importOpts.RegistryPassword = opts.registryPassword
+		importOpts.MirrorRegistry = mirrorRegistry
+		importOpts.RegistryUser = registryUsername
+		importOpts.RegistryPassword = registryPassword
 	} else {
 		importOpts.SkipImagePush = true
 	}
