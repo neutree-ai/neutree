@@ -28,7 +28,7 @@ const (
 	AutoScaleNodeProvisionType = "autoscaler"
 )
 
-// KubeRay resource labels.
+// kubernetes namespace resource labels.
 const (
 	NeutreeClusterLabelKey          = "neutree.ai/neutree-cluster"
 	NeutreeClusterWorkspaceLabelKey = "neutree.ai/neutree-workspace"

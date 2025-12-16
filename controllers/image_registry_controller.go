@@ -109,11 +109,9 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 
 func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRegistry) error {
 	authConfig := authn.AuthConfig{
-		Username:      imageRegistry.Spec.AuthConfig.Username,
-		Password:      imageRegistry.Spec.AuthConfig.Password,
-		Auth:          imageRegistry.Spec.AuthConfig.Auth,
-		IdentityToken: imageRegistry.Spec.AuthConfig.IdentityToken,
-		RegistryToken: imageRegistry.Spec.AuthConfig.RegistryToken,
+		Username: imageRegistry.Spec.AuthConfig.Username,
+		Password: imageRegistry.Spec.AuthConfig.Password,
+		Auth:     imageRegistry.Spec.AuthConfig.Auth,
 	}
 
 	imagePrefix, err := util.GetImagePrefix(imageRegistry)
@@ -129,7 +127,7 @@ func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRe
 	// If no credentials or tokens are provided, use anonymous auth which avoids providing empty
 	// Authorization headers that could lead some registries to reject a request as "unauthorized".
 	var authenticator authn.Authenticator
-	if authConfig.Username == "" && authConfig.Password == "" && authConfig.IdentityToken == "" && authConfig.RegistryToken == "" {
+	if authConfig.Username == "" && authConfig.Password == "" && authConfig.Auth == "" {
 		authenticator = authn.Anonymous
 	} else {
 		authenticator = authn.FromConfig(authConfig)
