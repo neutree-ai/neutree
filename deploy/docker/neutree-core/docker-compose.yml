@@ -26,8 +26,6 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
       - {{ .NeutreeCoreWorkDir}}/db/init-scripts:/docker-entrypoint-initdb.d
-    ports:
-      - "5432:5432"
     networks:
       - neutree
     restart: always
@@ -45,8 +43,6 @@ services:
   auth:
     image: supabase/gotrue:v2.170.0
     container_name: auth
-    ports:
-      - "9999:9999"
     environment:
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: "/verify"
       GOTRUE_JWT_SECRET: {{ .JwtSecret}}
@@ -133,8 +129,6 @@ services:
       PGRST_DB_EXTRA_SEARCH_PATH: auth
       PGRST_DB_AGGREGATES_ENABLED: 1
       PGRST_DB_ANON_ROLE: anonymous
-    ports:
-      - "6432:6432"
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -158,8 +152,6 @@ services:
       PG_META_DB_USER: "postgres"
       PG_META_DB_PORT: 5432
       PG_META_DB_PASSWORD: "pgpassword"
-    ports:
-      - "8080:8080"
     networks:
       - neutree
     depends_on:
@@ -248,8 +240,6 @@ services:
     depends_on:
       neutree-core:
           condition: service_started
-    ports:
-      - 8429:8429
     volumes:
       - vmagentdata:/vmagentdata
       - {{ .NeutreeCoreWorkDir}}/vmagent/prometheus.yml:/etc/prometheus/prometheus.yml
@@ -361,9 +351,6 @@ services:
     ports:
       - 80:8000
       - 443:8443
-      - 8001:8001
-      - 8444:8444
-      - 8002:8002
     depends_on:
       kong-migrations-up:
         condition: service_completed_successfully

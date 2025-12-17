@@ -892,6 +892,17 @@ func TestDownCluster(t *testing.T) {
 }
 
 func TestGenerateRayClusterConfig(t *testing.T) {
+	cluserVersion := "v1.0.0"
+	headLabel := fmt.Sprintf(`--lable={"%s":"%s"}`,
+		v1.NeutreeServingVersionLabel, cluserVersion)
+	autoScaleWorkerLabel := fmt.Sprintf(`--lable={"%s":"%s","%s":"%s"}`,
+		v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType,
+		v1.NeutreeServingVersionLabel, cluserVersion)
+	staticWorkerLabel := fmt.Sprintf(`--lable={"%s":"%s","%s":"%s"}`,
+		v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType,
+		v1.NeutreeServingVersionLabel, cluserVersion)
+
+	commonArgs := fmt.Sprintf(`--disable-usage-stats --node-manager-port=8077 --runtime-env-agent-port=8078 --dashboard-agent-grpc-port=8266 --metrics-export-port=%d --disable-usage-stats`, v1.RayletMetricsPort)
 	defaultExpectedConfig := func() *v1.RayClusterConfig {
 		return &v1.RayClusterConfig{
 			ClusterName: "test-cluster",
@@ -915,15 +926,27 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			},
 			HeadStartRayCommands: []string{
 				"ray stop",
-				`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --metrics-export-port=54311 --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+				strings.Join([]string{
+					`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
+					commonArgs,
+					headLabel,
+				}, " "),
 			},
 			WorkerStartRayCommands: []string{
 				"ray stop",
-				`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"autoscaler","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+				strings.Join([]string{
+					`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
+					commonArgs,
+					autoScaleWorkerLabel,
+				}, " "),
 			},
 			StaticWorkerStartRayCommands: []string{
 				"ray stop",
-				`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=54311 --disable-usage-stats --labels='{"neutree.ai/node-provision-type":"static","neutree.ai/neutree-serving-version":"v1.0.0"}'`,
+				strings.Join([]string{
+					`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
+					commonArgs,
+					staticWorkerLabel,
+				}, " "),
 			},
 			InitializationCommands: []string{
 				"docker login registry.example.com -u 'user' -p 'pass'",
@@ -943,7 +966,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
-					Version: "v1.0.0",
+					Version: cluserVersion,
 					Config: map[string]interface{}{
 						"auth": map[string]interface{}{
 							"ssh_user": "root",
@@ -975,7 +998,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
-					Version: "v1.0.0",
+					Version: cluserVersion,
 					Config: map[string]interface{}{
 						"auth": map[string]interface{}{
 							"ssh_user": "root",
@@ -1007,7 +1030,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
-					Version: "v1.0.0",
+					Version: cluserVersion,
 					Config: map[string]interface{}{
 						"auth": map[string]interface{}{
 							"ssh_user": "root",
@@ -1038,7 +1061,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
-					Version: "v1.0.0",
+					Version: cluserVersion,
 					Config: map[string]interface{}{
 						"auth": map[string]interface{}{
 							"ssh_user": "root",
@@ -1071,7 +1094,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "test-cluster"},
 				Spec: &v1.ClusterSpec{
-					Version: "v1.0.0",
+					Version: cluserVersion,
 					Config: map[string]interface{}{
 						"auth": map[string]interface{}{
 							"ssh_user": "root",

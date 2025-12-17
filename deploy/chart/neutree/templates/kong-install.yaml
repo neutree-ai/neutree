@@ -35,6 +35,14 @@ spec:
             - {{ include "neutree.fullname" . }}-migration-job-{{.Release.Revision }}
             - -n
             - {{ .Release.Namespace }}
+        - name: wait-kong-pre-migrate-job
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
+          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+          args:
+            - job
+            - {{ include "neutree.fullname" . }}-kong-pre-upgrade-migrations-{{ .Release.Revision}}
+            - -n
+            - {{ .Release.Namespace }}
       containers:
       - name: kong-post-upgrade-migrations
         image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
@@ -163,6 +171,14 @@ spec:
             - {{ include "neutree.fullname" . }}-migration-job-{{.Release.Revision }}
             - -n
             - {{ .Release.Namespace }}
+        - name: wait-kong-bootstrap-job
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
+          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+          args:
+            - job
+            - {{ include "neutree.fullname" . }}-kong-init-migrations
+            - -n
+            - {{ .Release.Namespace }}
       containers:
       - name: kong-upgrade-migrations
         image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
@@ -178,7 +194,6 @@ spec:
           runAsUser: 1000
           seccompProfile:
             type: RuntimeDefault
-        env:
         env:
         - name: KONG_ADMIN_ACCESS_LOG
           value: "/dev/stdout"
@@ -598,6 +613,9 @@ spec:
         - name: admin
           containerPort: 8001
           protocol: TCP
+        - name: manager
+          containerPort: 8002
+          protocol: TCP
         - name: proxy
           containerPort: 8000
           protocol: TCP
@@ -656,7 +674,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "neutree.fullname" . }}-kong-init-migrations-{{ .Release.Revision }}
+  name: {{ include "neutree.fullname" . }}-kong-init-migrations
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
