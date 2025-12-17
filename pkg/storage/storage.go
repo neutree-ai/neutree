@@ -213,7 +213,11 @@ func New(o Options) (Storage, error) {
 		return nil, errors.Wrap(err, "failed to init storage")
 	}
 
-	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil).SetAuthToken(*jwtAutoToken)
+	header := make(map[string]string)
+	// Remove nulls from responses
+	header["Accept"] = "application/vnd.pgrst.array+json;nulls=stripped"
+
+	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, header).SetAuthToken(*jwtAutoToken)
 	if postgrestClient.ClientError != nil {
 		return nil, errors.Wrap(postgrestClient.ClientError, "failed to init storage")
 	}
@@ -262,7 +266,11 @@ func NewObjectStorage(o Options, s *scheme.Scheme) (ObjectStorage, error) {
 		return nil, errors.Wrap(err, "failed to init storage")
 	}
 
-	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, nil).SetAuthToken(*jwtAutoToken)
+	header := make(map[string]string)
+	// Remove nulls from responses
+	header["Accept"] = "application/vnd.pgrst.array+json;nulls=stripped"
+
+	postgrestClient := postgrest.NewClient(o.AccessURL, o.Scheme, header).SetAuthToken(*jwtAutoToken)
 	if postgrestClient.ClientError != nil {
 		return nil, errors.Wrap(postgrestClient.ClientError, "failed to init storage")
 	}
