@@ -101,6 +101,10 @@ func NewPushCmd() *cobra.Command {
 
 			// Create client
 			c := client.NewClient(serverURL, clientOptions...)
+			_, err = c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
+			if err != nil {
+				return fmt.Errorf("failed to get model registry %s: %w", registry, err)
+			}
 
 			// Get file size for progress bar
 			fileInfo, err := os.Stat(modelPath)
