@@ -533,7 +533,6 @@ type ApiImageRegistrySpec struct {
 	Url        string      `json:"url"`
 	Repository string      `json:"repository"`
 	Authconfig interface{} `json:"authconfig"`
-	Ca         string      `json:"ca"`
 }
 
 type ApiImageRegistryStatus struct {

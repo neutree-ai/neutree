@@ -27,7 +27,7 @@ func TestClusterDeletionProtection(t *testing.T) {
 			VALUES (
 				'v1',
 				'ImageRegistry',
-				ROW('https://registry.example.com', 'my-repo', '{}'::json, NULL)::api.image_registry_spec,
+				ROW('https://registry.example.com', 'my-repo', '{}'::json)::api.image_registry_spec,
 				ROW('test-image-registry', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`, workspace)
@@ -128,7 +128,7 @@ func TestClusterDeletionProtection(t *testing.T) {
 			VALUES (
 				'v1',
 				'ImageRegistry',
-				ROW('https://registry.example.com', 'my-repo', '{}'::json, NULL)::api.image_registry_spec,
+				ROW('https://registry.example.com', 'my-repo', '{}'::json)::api.image_registry_spec,
 				ROW('test-image-registry-2', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`, workspace)
@@ -186,7 +186,7 @@ func TestImageRegistryDeletionProtection(t *testing.T) {
 			VALUES (
 				'v1',
 				'ImageRegistry',
-				ROW('https://registry.example.com', 'my-repo', '{}'::json, NULL)::api.image_registry_spec,
+				ROW('https://registry.example.com', 'my-repo', '{}'::json)::api.image_registry_spec,
 				ROW('test-image-registry-3', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`, workspace)
@@ -256,7 +256,7 @@ func TestModelRegistryDeletionProtection(t *testing.T) {
 			VALUES (
 				'v1',
 				'ImageRegistry',
-				ROW('https://registry.example.com', 'my-repo', '{}'::json, NULL)::api.image_registry_spec,
+				ROW('https://registry.example.com', 'my-repo', '{}'::json)::api.image_registry_spec,
 				ROW('test-image-registry-4', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`, workspace)

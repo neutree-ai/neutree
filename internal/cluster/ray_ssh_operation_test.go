@@ -959,7 +959,6 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						Username: "user",
 						Password: "pass",
 					},
-					Ca: "Y2EK",
 				},
 			},
 			inputConfig: &v1.RayClusterConfig{
@@ -991,7 +990,6 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						Username: "user",
 						Password: "pass",
 					},
-					Ca: "Y2EK",
 				},
 			},
 			inputConfig: &v1.RayClusterConfig{
@@ -1020,7 +1018,6 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					URL:        "http://registry.example.com",
 					Repository: "",
 					AuthConfig: v1.ImageRegistryAuthConfig{},
-					Ca:         "Y2EK",
 				},
 			},
 			inputConfig: &v1.RayClusterConfig{

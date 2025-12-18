@@ -20,7 +20,7 @@ func createImageRegistry(t *testing.T, tx *sql.Tx, name, workspace string) int {
 		VALUES (
 			'v1',
 			'ImageRegistry',
-			ROW('https://registry.example.com', 'my-repo', '{}'::json, NULL)::api.image_registry_spec,
+			ROW('https://registry.example.com', 'my-repo', '{}'::json)::api.image_registry_spec,
 			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 		)
 		RETURNING id
