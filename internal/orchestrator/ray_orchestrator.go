@@ -318,6 +318,17 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		Args: map[string]interface{}{},
 	}
 
+	// Make a shallow copy of deployment options so we can safely adjust scheduler type for Ray
+	deploymentOptions := maps.Clone(endpoint.Spec.DeploymentOptions)
+
+	// Normalize scheduler type: API layer accepts "roundrobin" as alias; Ray expects "pow2"
+	if schedulerRaw, ok := deploymentOptions["scheduler"].(map[string]interface{}); ok {
+		if schedulerType, ok := schedulerRaw["type"].(string); ok && strings.EqualFold(schedulerType, "roundrobin") {
+			schedulerRaw["type"] = "pow2"
+			deploymentOptions["scheduler"] = schedulerRaw
+		}
+	}
+
 	rayResource, err := convertToRay(acceleratorMgr, endpoint.Spec.Resources)
 	if err != nil {
 		klog.Errorf("Failed to convert resources to Ray format: %v", err)
@@ -332,15 +343,15 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		"resources":    rayResource.Resources,
 	}
 
-	endpoint.Spec.DeploymentOptions["backend"] = backendConfig
+	deploymentOptions["backend"] = backendConfig
 
-	endpoint.Spec.DeploymentOptions["controller"] = map[string]interface{}{
+	deploymentOptions["controller"] = map[string]interface{}{
 		"num_replicas": 1,
 		"num_cpus":     0.1,
 		"num_gpus":     0,
 	}
 
-	app.Args["deployment_options"] = endpoint.Spec.DeploymentOptions
+	app.Args["deployment_options"] = deploymentOptions
 
 	applicationEnv := map[string]string{}
 
