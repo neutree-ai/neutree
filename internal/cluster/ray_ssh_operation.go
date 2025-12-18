@@ -303,20 +303,44 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		"--ulimit nofile=65536:65536",
 	}
 
+	headLabel := fmt.Sprintf(`--labels='{"%s":"%s"}'`,
+		v1.NeutreeServingVersionLabel, cluster.Spec.Version)
+	autoScaleWorkerLabel := fmt.Sprintf(`--labels='{"%s":"%s","%s":"%s"}'`,
+		v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType,
+		v1.NeutreeServingVersionLabel, cluster.Spec.Version)
+	staticWorkerLabel := fmt.Sprintf(`--labels='{"%s":"%s","%s":"%s"}'`,
+		v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType,
+		v1.NeutreeServingVersionLabel, cluster.Spec.Version)
+
+	commonArgs := fmt.Sprintf(`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
+		"--min-worker-port=10002 --max-worker-port=20000 "+
+		`--runtime-env-agent-port=56999 --dashboard-agent-grpc-port=8078 --metrics-export-port=%d`, v1.RayletMetricsPort)
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --metrics-export-port=%d --disable-usage-stats --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0 --labels='{"%s":"%s"}'`, //nolint:lll
-			v1.RayletMetricsPort, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
+		strings.Join([]string{
+			`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
+			commonArgs,
+			"--dashboard-grpc-port=8079",
+			"--dashboard-port=8265",
+			"--ray-client-server-port=10001",
+			headLabel,
+		}, " "),
 	}
 	rayClusterConfig.WorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
-			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
+		strings.Join([]string{
+			`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
+			commonArgs,
+			autoScaleWorkerLabel,
+		}, " "),
 	}
 	rayClusterConfig.StaticWorkerStartRayCommands = []string{
 		"ray stop",
-		fmt.Sprintf(`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379 --metrics-export-port=%d --disable-usage-stats --labels='{"%s":"%s","%s":"%s"}'`,
-			v1.RayletMetricsPort, v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType, v1.NeutreeServingVersionLabel, cluster.Spec.Version),
+		strings.Join([]string{
+			`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
+			commonArgs,
+			staticWorkerLabel,
+		}, " "),
 	}
 
 	initializationCommands := []string{}
