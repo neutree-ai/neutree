@@ -17,6 +17,8 @@ import (
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
+func intPtr(i int) *int { return &i }
+
 func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 	endpoint := &v1.Endpoint{
 		Metadata: &v1.Metadata{
@@ -644,6 +646,49 @@ func TestEndpointToApplication_RouteConsistency(t *testing.T) {
 
 	// Verify that the route prefix includes workspace
 	assert.Equal(t, "/production/chat-model", app.RoutePrefix)
+}
+
+func TestEndpointToApplication_SchedulerAliasRoundrobinToPow2(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Name:      "ep",
+			Workspace: "ws",
+		},
+		Spec: &v1.EndpointSpec{
+			Engine: &v1.EndpointEngineSpec{
+				Engine:  "vllm",
+				Version: "v0.8.5",
+			},
+			Model: &v1.ModelSpec{
+				Name:    "m",
+				Version: "v1",
+				Task:    "text-generation",
+			},
+			Resources: &v1.ResourceSpec{},
+			Replicas:  v1.ReplicaSpec{Num: intPtr(1)},
+			DeploymentOptions: map[string]interface{}{
+				"scheduler": map[string]interface{}{
+					"type": "roundrobin",
+				},
+			},
+			Env: map[string]string{},
+		},
+	}
+
+	cluster := &v1.Cluster{}
+	modelRegistry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.BentoMLModelRegistryType,
+			Url:  "",
+		},
+	}
+
+	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, nil)
+	assert.NoError(t, err)
+
+	deploymentOptions := app.Args["deployment_options"].(map[string]interface{})
+	scheduler := deploymentOptions["scheduler"].(map[string]interface{})
+	assert.Equal(t, "pow2", scheduler["type"])
 }
 
 func TestEndpointToApplication_setModelArgs(t *testing.T) {
