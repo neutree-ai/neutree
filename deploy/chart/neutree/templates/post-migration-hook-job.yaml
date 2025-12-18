@@ -30,7 +30,7 @@ spec:
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
             - job
-            - {{ include "neutree.fullname" . }}-migration-job-{{.Release.Revision }}
+            - {{ include "neutree.fullname" . }}-migration-job-{{ .Release.Revision }}
             - -n
             - {{ .Release.Namespace }}
         - name: copy-seed-sql
