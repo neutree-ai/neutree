@@ -11,7 +11,6 @@ import (
 //
 // Masked fields:
 //   - spec.authconfig: All authentication credentials
-//   - spec.ca: CA certificate
 //
 // Allowed methods: GET, POST, PATCH
 // Disallowed methods:
