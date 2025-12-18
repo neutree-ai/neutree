@@ -414,3 +414,18 @@ func TestCreatePostgrestAuthModifier(t *testing.T) {
 		assert.Equal(t, originalAuth, req.Header.Get("Authorization"))
 	})
 }
+
+func TestAddPostgrestHeaderModifier(t *testing.T) {
+	// Create a test context
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	// Create a test request
+	req := httptest.NewRequest("GET", "/test", nil)
+
+	// Apply the modifier
+	modifier := AddPostgrestHeaderModifier(c)
+	modifier(req)
+
+	// Verify the Accept header was set correctly
+	assert.Equal(t, "application/vnd.pgrst.array+json;nulls=stripped", req.Header.Get("Accept"))
+}

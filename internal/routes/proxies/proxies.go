@@ -301,6 +301,12 @@ func CreatePostgrestAuthModifier(c *gin.Context) func(*http.Request) {
 	}
 }
 
+func AddPostgrestHeaderModifier(c *gin.Context) func(*http.Request) {
+	return func(req *http.Request) {
+		req.Header.Set("Accept", "application/vnd.pgrst.array+json;nulls=stripped")
+	}
+}
+
 func handlePostgrestRPCProxy(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Param("path")
