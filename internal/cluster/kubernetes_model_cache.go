@@ -91,13 +91,14 @@ func (c *NativeKubernetesClusterReconciler) getModelCacheResources(reconcileCtx 
 		objList = &unstructured.UnstructuredList{}
 	)
 
-	if reconcileCtx.kubernetesClusterConfig.ModelCaches == nil {
+	// ModelCaches is now in ClusterConfig level
+	if reconcileCtx.Cluster.Spec.Config == nil || reconcileCtx.Cluster.Spec.Config.ModelCaches == nil {
 		return objList, nil
 	}
 
 	var errs []error
 
-	for _, cache := range reconcileCtx.kubernetesClusterConfig.ModelCaches {
+	for _, cache := range reconcileCtx.Cluster.Spec.Config.ModelCaches {
 		if cache.PVC != nil {
 			pvcSpec := applyDefault(*cache.PVC)
 
@@ -140,13 +141,14 @@ func (c *NativeKubernetesClusterReconciler) getModelCacheResources(reconcileCtx 
 func (c *NativeKubernetesClusterReconciler) reconcileModelCacheStatus(
 	reconcileCtx *ReconcileContext,
 ) error {
-	if reconcileCtx.kubernetesClusterConfig.ModelCaches == nil {
+	// ModelCaches is now in ClusterConfig level
+	if reconcileCtx.Cluster.Spec.Config == nil || reconcileCtx.Cluster.Spec.Config.ModelCaches == nil {
 		return nil
 	}
 
 	var errs []error
 
-	for _, cache := range reconcileCtx.kubernetesClusterConfig.ModelCaches {
+	for _, cache := range reconcileCtx.Cluster.Spec.Config.ModelCaches {
 		// only pvc need check status.
 		if cache.PVC != nil {
 			pvc := &corev1.PersistentVolumeClaim{

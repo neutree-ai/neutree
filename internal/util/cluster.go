@@ -35,16 +35,8 @@ func GetClusterModelCache(c v1.Cluster) ([]v1.ModelCache, error) {
 		return nil, nil
 	}
 
-	// Access the appropriate config based on cluster type
-	if c.Spec.Config.SSHConfig != nil {
-		return c.Spec.Config.SSHConfig.ModelCaches, nil
-	}
-
-	if c.Spec.Config.KubernetesConfig != nil {
-		return c.Spec.Config.KubernetesConfig.ModelCaches, nil
-	}
-
-	return nil, nil
+	// ModelCaches is now directly in ClusterConfig
+	return c.Spec.Config.ModelCaches, nil
 }
 
 func ParseSSHClusterConfig(cluster *v1.Cluster) (*v1.RaySSHProvisionClusterConfig, error) {

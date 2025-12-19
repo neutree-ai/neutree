@@ -281,7 +281,7 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": "invalid_type"}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": "invalid_type"}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
 				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`)
@@ -313,7 +313,7 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": [{"name": "cache1"}, {"name": "cache2"}]}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": [{"name": "cache1"}, {"name": "cache2"}]}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
 				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`)
@@ -345,7 +345,7 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": [{}]}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": [{}]}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
 				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`)
@@ -377,7 +377,7 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": [{"name": "default"}]}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": [{"name": "default"}]}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
 				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`)
@@ -409,7 +409,7 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}, "model_caches": [{"name": "Invalid_Name!"}]}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": [{"name": "Invalid_Name!"}]}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
 				ROW('test-cluster-modelcache', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`)

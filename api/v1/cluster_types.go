@@ -30,7 +30,7 @@ type Cluster struct {
 }
 
 type ClusterSpec struct {
-	// current only support "ssh"
+	// currently supports "ssh" and "kubernetes" cluster types
 	Type          string         `json:"type"`
 	Config        *ClusterConfig `json:"config"`
 	ImageRegistry string         `json:"image_registry"`
@@ -41,19 +41,24 @@ type ClusterSpec struct {
 type ClusterConfig struct {
 	SSHConfig        *RaySSHProvisionClusterConfig `json:"ssh_config,omitempty" yaml:"ssh_config,omitempty"`
 	KubernetesConfig *KubernetesClusterConfig      `json:"kubernetes_config,omitempty" yaml:"kubernetes_config,omitempty"`
+
+	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
+	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+	// ModelCache is used to cache models downloaded from remote model registries, such as huggingface hub, bentoml cloud, etc.
+	// It does not apply to local model registries, such as bentoml nfs/local dir type.
+	// In addition, other data may be cached, which depends on the corresponding model registry download implementation,
+	// so it is not recommended to share a storage with the local model registry.
+	ModelCaches []ModelCache `json:"model_caches,omitempty" yaml:"model_caches,omitempty"`
 }
 
 type RaySSHProvisionClusterConfig struct {
 	Provider Provider `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Auth     Auth     `json:"auth,omitempty" yaml:"auth,omitempty"`
-
-	CommonClusterConfig `json:",inline" yaml:",inline"`
 }
 
 type KubernetesClusterConfig struct {
-	Kubeconfig          string     `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
-	Router              RouterSpec `json:"router,omitempty" yaml:"router,omitempty"`
-	CommonClusterConfig `json:",inline" yaml:",inline"`
+	Kubeconfig string     `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
+	Router     RouterSpec `json:"router,omitempty" yaml:"router,omitempty"`
 }
 
 type RouterSpec struct {
@@ -68,18 +73,6 @@ type RayKubernetesProvisionClusterConfig struct {
 	Kubeconfig       string            `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
 	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
 	WorkerGroupSpecs []WorkerGroupSpec `json:"worker_group_specs,omitempty" yaml:"worker_group_specs,omitempty"`
-
-	CommonClusterConfig `json:",inline" yaml:",inline"`
-}
-
-type CommonClusterConfig struct {
-	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
-	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
-	// ModelCache is used to cache models downloaded from remote model registries, such as huggingface hub, bentoml cloud, etc.
-	// It does not apply to local model registries, such as bentoml nfs/local dir type.
-	// In addition, other data may be cached, which depends on the corresponding model registry download implementation,
-	// so it is not recommended to share a storage with the local model registry.
-	ModelCaches []ModelCache `json:"model_caches,omitempty" yaml:"model_caches,omitempty"`
 }
 
 type KubernetesAccessMode string

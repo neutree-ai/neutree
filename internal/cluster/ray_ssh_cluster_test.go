@@ -341,12 +341,10 @@ func TestReconcileWorkerNode(t *testing.T) {
 				Provider: v1.Provider{
 					WorkerIPs: []string{"192.168.1.1"},
 				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
 			},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{}, nil)
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil).Once()
-
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte("docker"), nil).Once()
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
@@ -372,7 +370,6 @@ func TestReconcileWorkerNode(t *testing.T) {
 				Provider: v1.Provider{
 					WorkerIPs: []string{"192.168.1.1"},
 				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
 			},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{}, nil)
@@ -394,13 +391,10 @@ func TestReconcileWorkerNode(t *testing.T) {
 			sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
 				Provider: v1.Provider{
 					WorkerIPs: []string{"192.168.1.1", "192.168.1.2"},
-				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
-			},
+				}},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{{IP: "192.168.1.1", Raylet: v1.Raylet{State: v1.AliveNodeState}}}, nil)
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil).Once()
-
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte("docker"), nil).Once()
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
@@ -426,7 +420,6 @@ func TestReconcileWorkerNode(t *testing.T) {
 				Provider: v1.Provider{
 					WorkerIPs: []string{"192.168.1.1", "192.168.1.2"},
 				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
 			},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{{IP: "192.168.1.1", Raylet: v1.Raylet{State: v1.AliveNodeState}}}, nil)
@@ -450,7 +443,6 @@ func TestReconcileWorkerNode(t *testing.T) {
 				Provider: v1.Provider{
 					WorkerIPs: []string{"192.168.1.1"},
 				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
 			},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{{IP: "192.168.1.1", Raylet: v1.Raylet{State: v1.AliveNodeState}}, {IP: "192.168.1.2", Raylet: v1.Raylet{State: v1.AliveNodeState}}}, nil)
@@ -475,7 +467,6 @@ func TestReconcileWorkerNode(t *testing.T) {
 				Provider: v1.Provider{
 					WorkerIPs: []string{"192.168.1.1"},
 				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
 			},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{{IP: "192.168.1.1", Raylet: v1.Raylet{State: v1.AliveNodeState}}, {IP: "192.168.1.2", Raylet: v1.Raylet{State: v1.AliveNodeState}}}, nil)
@@ -500,13 +491,10 @@ func TestReconcileWorkerNode(t *testing.T) {
 			sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
 				Provider: v1.Provider{
 					WorkerIPs: []string{"192.168.1.1"},
-				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
-			},
+				}},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{{IP: "192.168.1.1", Raylet: v1.Raylet{State: v1.DeadNodeState}}}, nil)
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil).Once()
-
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte("docker"), nil).Once()
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
@@ -532,7 +520,6 @@ func TestReconcileWorkerNode(t *testing.T) {
 				Provider: v1.Provider{
 					WorkerIPs: []string{"192.168.1.1"},
 				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
 			},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{{IP: "192.168.1.1", Raylet: v1.Raylet{State: v1.DeadNodeState}}}, nil)
@@ -555,7 +542,6 @@ func TestReconcileWorkerNode(t *testing.T) {
 				Provider: v1.Provider{
 					WorkerIPs: []string{},
 				},
-				CommonClusterConfig: v1.CommonClusterConfig{},
 			},
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{{IP: "192.168.1.1", Raylet: v1.Raylet{State: v1.DeadNodeState}}}, nil)
@@ -892,14 +878,14 @@ func TestDetectClusterAcceleratorType(t *testing.T) {
 		{
 			name: "test first use cluster spec accelerator type",
 			reconcileCtx: &ReconcileContext{
-				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-					CommonClusterConfig: v1.CommonClusterConfig{
-						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
-					},
-				},
 				Cluster: &v1.Cluster{
+					Spec: &v1.ClusterSpec{
+						Config: &v1.ClusterConfig{
+							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+						},
+					},
 					Status: &v1.ClusterStatus{
-						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+						AcceleratorType: v1.AcceleratorTypeAMDGPU.StringPtr(),
 					},
 				},
 			},
@@ -909,9 +895,6 @@ func TestDetectClusterAcceleratorType(t *testing.T) {
 		{
 			name: "test second return cluster status accelerator type",
 			reconcileCtx: &ReconcileContext{
-				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-					CommonClusterConfig: v1.CommonClusterConfig{},
-				},
 				Cluster: &v1.Cluster{
 					Status: &v1.ClusterStatus{
 						AcceleratorType: pointer.String(v1.AcceleratorTypeAMDGPU.String()),
@@ -928,7 +911,6 @@ func TestDetectClusterAcceleratorType(t *testing.T) {
 					Provider: v1.Provider{
 						HeadIP: "127.0.0.1",
 					},
-					CommonClusterConfig: v1.CommonClusterConfig{},
 				},
 				Cluster: &v1.Cluster{
 					Status: &v1.ClusterStatus{},

@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/pointer"
 
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
@@ -235,10 +234,8 @@ func TestUpCluster(t *testing.T) {
 
 			_, err := sshRayClusterReconciler.upCluster(&ReconcileContext{
 				sshRayClusterConfig: &v1.RayClusterConfig{},
-				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-					CommonClusterConfig: v1.CommonClusterConfig{},
-				},
-				sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
+				sshClusterConfig:    &v1.RaySSHProvisionClusterConfig{},
+				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
 				Cluster: &v1.Cluster{
 					Metadata: &v1.Metadata{
 						Name:      "test",
@@ -496,12 +493,8 @@ func TestStartNode(t *testing.T) {
 
 			err := sshRayClusterReconciler.startNode(&ReconcileContext{
 				sshRayClusterConfig: tt.sshRayClusterConfig,
-				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-					CommonClusterConfig: v1.CommonClusterConfig{
-						AcceleratorType: pointer.String("gpu"),
-					},
-				},
-				sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
+				sshClusterConfig:    &v1.RaySSHProvisionClusterConfig{},
+				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
 				Cluster: &v1.Cluster{
 					Status: &v1.ClusterStatus{
 						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),

@@ -31,7 +31,7 @@ BEGIN
         -- Check if ssh_config exists
         IF (NEW.spec).config->>'ssh_config' IS NULL THEN
             RAISE sqlstate 'PGRST'
-                USING message = '{"code": "10016","message": "ssh_config is required for SSH clusters","hint": "Provide ssh_config configuration"}',
+                USING message = '{"code": "10206","message": "ssh_config is required for SSH clusters","hint": "Provide ssh_config configuration"}',
                 detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
         END IF;
 
