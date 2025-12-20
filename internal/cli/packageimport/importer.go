@@ -221,7 +221,7 @@ func (i *Importer) updateEngine(_ context.Context, engineMetadata *EngineMetadat
 		}
 	}
 
-	return i.apiClient.Engines.Update(opts.Workspace, existedEngine.GetID(), existedEngine)
+	return i.apiClient.Engines.Update(existedEngine.GetID(), existedEngine)
 }
 
 // Validator handles validation of packages

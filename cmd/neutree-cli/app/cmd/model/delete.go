@@ -35,6 +35,10 @@ func NewDeleteCmd() *cobra.Command {
 
 			// Create client
 			c := client.NewClient(serverURL, clientOptions...)
+			_, err = c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
+			if err != nil {
+				return fmt.Errorf("failed to get model registry %s: %w", registry, err)
+			}
 
 			if !force {
 				fmt.Printf("Are you sure you want to delete model %s? [y/N]: ", modelTag)

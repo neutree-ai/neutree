@@ -17,6 +17,7 @@ type Client struct {
 	Models          *ModelsService
 	Engines         *EnginesService
 	ImageRegistries *ImageRegistriesService
+	ModelRegistries *ModelRegistriesService
 	// Other services will be added here
 }
 
@@ -99,6 +100,7 @@ func NewClient(baseURL string, options ...ClientOption) *Client {
 	client.Models = NewModelsService(client)
 	client.Engines = NewEnginesService(client)
 	client.ImageRegistries = NewImageRegistriesService(client)
+	client.ModelRegistries = NewModelRegistriesService(client)
 	// Other services will be initialized here
 
 	return client

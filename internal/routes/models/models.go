@@ -64,6 +64,9 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 		}
 	}
 
+	permissionDeps := middleware.PermissionDependencies{
+		Storage: deps.Storage,
+	}
 	// Workspace-scoped model registry routes with authentication
 	workspaces := group.Group("/workspaces/:workspace")
 	workspaces.Use(middlewares...) // Apply JWT authentication
@@ -73,19 +76,29 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 			models := modelRegistries.Group("/models")
 			{
 				// List all models in a registry
-				models.GET("", listModels(deps))
+				models.GET("",
+					middleware.RequireWorkspacePermission("model:read", permissionDeps),
+					listModels(deps))
 
 				// Get a specific model
-				models.GET("/:model", getModel(deps))
+				models.GET("/:model",
+					middleware.RequireWorkspacePermission("model:read", permissionDeps),
+					getModel(deps))
 
 				// Upload a new model
-				models.POST("", uploadModel(deps))
+				models.POST("",
+					middleware.RequirePermission("model:push", permissionDeps),
+					uploadModel(deps))
 
 				// Download a model
-				models.GET("/:model/download", downloadModel(deps))
+				models.GET("/:model/download",
+					middleware.RequirePermission("model:pull", permissionDeps),
+					downloadModel(deps))
 
 				// Delete a model
-				models.DELETE("/:model", deleteModel(deps))
+				models.DELETE("/:model",
+					middleware.RequireWorkspacePermission("model:delete", permissionDeps),
+					deleteModel(deps))
 			}
 		}
 	}
