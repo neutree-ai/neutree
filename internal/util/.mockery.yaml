@@ -1,0 +1,10 @@
+---
+dir: mocks
+filename: "mock_{{.InterfaceName | snakecase}}.go"
+outpkg: mocks
+with-expecter: true
+packages:
+  github.com/neutree-ai/neutree/internal/util:
+    interfaces:
+      HTTPClient:
+      K8sClient:

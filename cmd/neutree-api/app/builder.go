@@ -11,6 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
 	"github.com/neutree-ai/neutree/internal/routes/credentials"
+	"github.com/neutree-ai/neutree/internal/routes/logs"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
@@ -40,7 +41,7 @@ func NewBuilder() *Builder {
 		"serve-proxy":     ProxiesRouteFactory(proxies.RegisterRayServeProxyRoutes),
 		"dashboard-proxy": ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
 		"k8s-proxy":       ProxiesRouteFactory(proxies.RegisterKubernetesProxyRoutes),
-		"endpoint-logs":   ProxiesRouteFactory(proxies.RegisterEndpointLogsRoutes),
+		"endpoint-logs":   LogsRouteFactory(logs.RegisterEndpointLogsRoutes),
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		// Auth route (no auth required for authentication itself)
 		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
@@ -79,12 +80,11 @@ func NewBuilder() *Builder {
 	}
 	// Register default middlewares to routes
 	defaultRoutesToMiddlewares := map[string][]string{
-		"models":          {"auth"},
-		"serve-proxy":     {"auth"},
-		"dashboard-proxy": {"auth"},
-		"k8s-proxy":       {"auth"},
-		"system":          {"auth"},
-		"endpoint-logs":   {"auth"},
+		"models":        {"auth"},
+		"serve-proxy":   {"auth"},
+		"k8s-proxy":     {"auth"},
+		"system":        {"auth"},
+		"endpoint-logs": {"auth"},
 		// PostgREST proxy routes now require auth middleware to:
 		// 1. Validate JWT tokens (pass-through to PostgREST)
 		// 2. Convert API keys to PostgREST-compatible JWT tokens

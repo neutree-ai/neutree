@@ -8,9 +8,11 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
 	"github.com/neutree-ai/neutree/internal/routes/credentials"
+	"github.com/neutree-ai/neutree/internal/routes/logs"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -95,6 +97,20 @@ func CredentialsRouteFactory(register CredentialsRegisterFunc) RouteFactory {
 		register(deps.Group, deps.Middlewares, &credentials.Dependencies{
 			Storage:          deps.Config.Storage,
 			StorageAccessURL: deps.Config.StorageAccessURL,
+		})
+
+		return nil
+	}
+}
+
+type LogsRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *logs.Dependencies)
+
+func LogsRouteFactory(register LogsRegisterFunc) RouteFactory {
+	return func(deps *RouteOptions) error {
+		register(deps.Group, deps.Middlewares, &logs.Dependencies{
+			Storage:    deps.Config.Storage,
+			HTTPClient: &util.DefaultHTTPClient{},
+			K8sClient:  &util.DefaultK8sClient{},
 		})
 
 		return nil
