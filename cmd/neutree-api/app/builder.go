@@ -39,6 +39,7 @@ func NewBuilder() *Builder {
 		"models":          ModelsRouteFactory(models.RegisterModelsRoutes),
 		"serve-proxy":     ProxiesRouteFactory(proxies.RegisterRayServeProxyRoutes),
 		"dashboard-proxy": ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
+		"k8s-proxy":       ProxiesRouteFactory(proxies.RegisterKubernetesProxyRoutes),
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		// Auth route (no auth required for authentication itself)
 		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
@@ -77,9 +78,11 @@ func NewBuilder() *Builder {
 	}
 	// Register default middlewares to routes
 	defaultRoutesToMiddlewares := map[string][]string{
-		"models":      {"auth"},
-		"serve-proxy": {"auth"},
-		"system":      {"auth"},
+		"models":          {"auth"},
+		"serve-proxy":     {"auth"},
+		"dashboard-proxy": {"auth"},
+		"k8s-proxy":       {"auth"},
+		"system":          {"auth"},
 		// PostgREST proxy routes now require auth middleware to:
 		// 1. Validate JWT tokens (pass-through to PostgREST)
 		// 2. Convert API keys to PostgREST-compatible JWT tokens

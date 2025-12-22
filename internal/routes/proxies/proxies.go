@@ -26,6 +26,11 @@ type Dependencies struct {
 }
 
 func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.Request)) gin.HandlerFunc {
+	return CreateProxyHandlerWithTransport(targetURL, path, modifyRequest, nil)
+}
+
+// CreateProxyHandlerWithTransport creates a reverse proxy handler with custom transport
+func CreateProxyHandlerWithTransport(targetURL string, path string, modifyRequest func(*http.Request), transport http.RoundTripper) gin.HandlerFunc {
 	target, err := url.Parse(fmt.Sprintf("%s/%s", targetURL, path))
 	if err != nil {
 		klog.Errorf("Failed to parse target URL: %v", err)
@@ -38,6 +43,11 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	// Set custom transport if provided
+	if transport != nil {
+		proxy.Transport = transport
+	}
 
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
@@ -311,6 +321,120 @@ func handlePostgrestRPCProxy(deps *Dependencies) gin.HandlerFunc {
 		path = "rpc/" + path
 
 		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, CreatePostgrestAuthModifier(c))
+		proxyHandler(c)
+	}
+}
+
+func RegisterKubernetesProxyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("/k8s-proxy")
+
+	proxyGroup.Use(middlewares...)
+
+	proxyGroup.GET("/:workspace/:name/*path", handleKubernetesProxy(deps))
+	proxyGroup.HEAD("/:workspace/:name/*path", handleKubernetesProxy(deps))
+	proxyGroup.OPTIONS("/:workspace/:name/*path", handleKubernetesProxy(deps))
+}
+
+func handleKubernetesProxy(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := c.Param("name")
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "name is required",
+			})
+
+			return
+		}
+
+		workspace := c.Param("workspace")
+		if workspace == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "workspace is required",
+			})
+
+			return
+		}
+
+		// Query Kubernetes cluster
+		clusters, err := deps.Storage.ListCluster(storage.ListOption{
+			Filters: []storage.Filter{
+				{
+					Column:   "metadata->name",
+					Operator: "eq",
+					Value:    strconv.Quote(name),
+				},
+				{
+					Column:   "metadata->workspace",
+					Operator: "eq",
+					Value:    strconv.Quote(workspace),
+				},
+			},
+		})
+
+		if err != nil {
+			errS := fmt.Sprintf("Failed to list clusters: %v", err)
+			klog.Errorf(errS)
+
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": errS,
+			})
+
+			return
+		}
+
+		if len(clusters) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "cluster not found",
+			})
+
+			return
+		}
+
+		cluster := clusters[0]
+
+		kubeconfig, err := util.GetKubeConfigFromCluster(&cluster)
+		if err != nil {
+			errS := fmt.Sprintf("Failed to get kubeconfig: %v", err)
+			klog.Errorf(errS)
+
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": errS,
+			})
+
+			return
+		}
+
+		apiServerURL, err := util.GetApiServerUrlFromDecodedKubeConfig(kubeconfig)
+		if err != nil {
+			errS := fmt.Sprintf("Failed to get API server URL: %v", err)
+			klog.Errorf(errS)
+
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": errS,
+			})
+
+			return
+		}
+
+		// Create transport with authentication from kubeconfig
+		transport, err := util.GetTransportFromDecodedKubeConfig(kubeconfig)
+		if err != nil {
+			errS := fmt.Sprintf("Failed to create authenticated transport: %v", err)
+			klog.Errorf(errS)
+
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": errS,
+			})
+
+			return
+		}
+
+		path := c.Param("path")
+		if path != "" && path[0] == '/' {
+			path = path[1:]
+		}
+
+		proxyHandler := CreateProxyHandlerWithTransport(apiServerURL, path, nil, transport)
 		proxyHandler(c)
 	}
 }

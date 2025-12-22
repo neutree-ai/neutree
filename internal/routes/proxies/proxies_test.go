@@ -414,3 +414,146 @@ func TestCreatePostgrestAuthModifier(t *testing.T) {
 		assert.Equal(t, originalAuth, req.Header.Get("Authorization"))
 	})
 }
+
+func TestCreateProxyHandlerWithTransport(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Invalid URL", func(t *testing.T) {
+		handler := CreateProxyHandlerWithTransport("://invalid-url", "", nil, nil)
+		c, w := createMockContext("GET", "/test", "")
+
+		handler(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+		var response map[string]string
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, "Failed to create proxy", response["error"])
+	})
+
+	// Note: Testing successful proxy behavior requires http.CloseNotifier interface
+	// which httptest.ResponseRecorder doesn't implement. The proxy functionality is
+	// tested through integration tests and indirectly through handleKubernetesProxy.
+}
+
+func TestHandleKubernetesProxy_MissingName(t *testing.T) {
+	mockStorage := setupMocks(t)
+	deps := &Dependencies{
+		Storage: mockStorage,
+	}
+
+	c, w := createMockContext("GET", "/api/v1/k8s-proxy/default/", "")
+	handlerFunc := handleKubernetesProxy(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "name is required", response["error"])
+}
+
+func TestHandleKubernetesProxy_MissingWorkspace(t *testing.T) {
+	mockStorage := setupMocks(t)
+	deps := &Dependencies{
+		Storage: mockStorage,
+	}
+
+	c, w := createMockContext("GET", "/api/v1/k8s-proxy//test-cluster", "")
+	// Manually set params to simulate missing workspace
+	c.Params = []gin.Param{
+		{Key: "workspace", Value: ""},
+		{Key: "name", Value: "test-cluster"},
+	}
+
+	handlerFunc := handleKubernetesProxy(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "workspace is required", response["error"])
+}
+
+func TestHandleKubernetesProxy_ClusterNotFound(t *testing.T) {
+	mockStorage := setupMocks(t)
+	deps := &Dependencies{
+		Storage: mockStorage,
+	}
+
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
+
+	c, w := createMockContext("GET", "/api/v1/k8s-proxy/default/non-existent-cluster", "")
+	handlerFunc := handleKubernetesProxy(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "cluster not found", response["error"])
+
+	mockStorage.AssertExpectations(t)
+}
+
+func TestHandleKubernetesProxy_StorageError(t *testing.T) {
+	mockStorage := setupMocks(t)
+	deps := &Dependencies{
+		Storage: mockStorage,
+	}
+
+	mockError := errors.New("storage error")
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, mockError)
+
+	c, w := createMockContext("GET", "/api/v1/k8s-proxy/default/test-cluster", "")
+	handlerFunc := handleKubernetesProxy(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["error"], "Failed to list clusters")
+
+	mockStorage.AssertExpectations(t)
+}
+
+func TestHandleKubernetesProxy_InvalidKubeconfig(t *testing.T) {
+	mockStorage := setupMocks(t)
+
+	cluster := v1.Cluster{
+		Metadata: &v1.Metadata{
+			Name:      "test-cluster",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			Type:   v1.KubernetesClusterType,
+			Config: nil, // Invalid: nil config
+		},
+	}
+
+	deps := &Dependencies{
+		Storage: mockStorage,
+	}
+
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+
+	c, w := createMockContext("GET", "/api/v1/k8s-proxy/default/test-cluster/api/v1/namespaces", "")
+	handlerFunc := handleKubernetesProxy(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["error"], "Failed to get kubeconfig")
+
+	mockStorage.AssertExpectations(t)
+}

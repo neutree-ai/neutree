@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"strconv"
 
@@ -12,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -214,6 +216,15 @@ func GetApiServerUrlFromKubeConfig(kubeconfig string) (string, error) {
 	return restConfig.Host, nil
 }
 
+func GetApiServerUrlFromDecodedKubeConfig(kubeconfigContent string) (string, error) {
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfigContent))
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create REST config from kubeconfig")
+	}
+
+	return restConfig.Host, nil
+}
+
 func GetClusterServeAddress(cluster *v1.Cluster) (string, string, int, error) {
 	if cluster.Status == nil || cluster.Status.DashboardURL == "" {
 		return "", "", 0, errors.New("cluster status or dashboard URL is empty")
@@ -251,4 +262,18 @@ func CacheName(cache v1.ModelCache) string {
 	}
 
 	return baseName
+}
+
+func GetTransportFromDecodedKubeConfig(kubeconfigContent string) (http.RoundTripper, error) {
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfigContent))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create REST config from kubeconfig")
+	}
+
+	transport, err := rest.TransportFor(restConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create transport from REST config")
+	}
+
+	return transport, nil
 }
