@@ -69,12 +69,6 @@ type RouterSpec struct {
 	Resources  map[string]string    `json:"resources,omitempty" yaml:"resources,omitempty"`
 }
 
-type RayKubernetesProvisionClusterConfig struct {
-	Kubeconfig       string            `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
-	HeadNodeSpec     HeadNodeSpec      `json:"head_node_spec,omitempty" yaml:"head_node_spec,omitempty"`
-	WorkerGroupSpecs []WorkerGroupSpec `json:"worker_group_specs,omitempty" yaml:"worker_group_specs,omitempty"`
-}
-
 type KubernetesAccessMode string
 
 const (

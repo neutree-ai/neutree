@@ -47,13 +47,6 @@ func ParseSSHClusterConfig(cluster *v1.Cluster) (*v1.RaySSHProvisionClusterConfi
 	return cluster.Spec.Config.SSHConfig, nil
 }
 
-// Deprecated: ParseRayKubernetesClusterConfig is deprecated.
-// RayKubernetesProvisionClusterConfig is not part of the ClusterConfig structure.
-// This function is kept for backward compatibility but should not be used.
-func ParseRayKubernetesClusterConfig(cluster *v1.Cluster) (*v1.RayKubernetesProvisionClusterConfig, error) {
-	return nil, errors.New("ParseRayKubernetesClusterConfig is deprecated: RayKubernetesProvisionClusterConfig is not available in ClusterConfig structure")
-}
-
 func ParseKubernetesClusterConfig(c *v1.Cluster) (*v1.KubernetesClusterConfig, error) {
 	if c.Spec.Config == nil || c.Spec.Config.KubernetesConfig == nil {
 		return nil, errors.New("kubernetes cluster config is empty")
