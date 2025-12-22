@@ -57,7 +57,7 @@ type RaySSHProvisionClusterConfig struct {
 }
 
 type KubernetesClusterConfig struct {
-	Kubeconfig string     `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
+	Kubeconfig string     `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty" api:"-"`
 	Router     RouterSpec `json:"router,omitempty" yaml:"router,omitempty"`
 }
 

@@ -46,7 +46,7 @@ type Provider struct {
 
 type Auth struct {
 	SSHUser       string `json:"ssh_user,omitempty" yaml:"ssh_user,omitempty"`
-	SSHPrivateKey string `json:"ssh_private_key,omitempty" yaml:"ssh_private_key,omitempty"`
+	SSHPrivateKey string `json:"ssh_private_key,omitempty" yaml:"ssh_private_key,omitempty" api:"-"`
 }
 
 type Docker struct {
