@@ -35,7 +35,7 @@ func NewLaunchCmd() *cobra.Command {
 		Use:   "launch",
 		Short: "Deploy Neutree components",
 		Long: `The launch command provides an easy way to install and deploy Neutree related components.
-		
+
 Available deployment types and modes:
   - deploy-type: local (default), cloud, hybrid
   - deploy-mode: single (default), cluster
@@ -53,7 +53,7 @@ Subcommands:
 Examples:
   # Local single node deployment
   neutree-cli launch --deploy-type local
-  
+
   # Cluster deployment with custom registry
   neutree-cli launch --deploy-type cloud --deploy-mode cluster \
     --deploy-ips 192.168.1.10,192.168.1.11 \

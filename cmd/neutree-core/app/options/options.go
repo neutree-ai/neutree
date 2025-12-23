@@ -5,12 +5,14 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"github.com/supabase-community/gotrue-go"
+	"k8s.io/klog"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -18,7 +20,6 @@ import (
 type NeutreeCoreOptions struct {
 	Storage       *StorageOptions
 	Gateway       *GatewayOptions
-	Deploy        *DeployOptions
 	Controller    *ControllerOptions
 	Server        *ServerOptions
 	Observability *ObservabilityOptions
@@ -30,7 +31,6 @@ func NewOptions() *NeutreeCoreOptions {
 	return &NeutreeCoreOptions{
 		Storage:       NewStorageOptions(),
 		Gateway:       NewGatewayOptions(),
-		Deploy:        NewDeployOptions(),
 		Controller:    NewControllerOptions(),
 		Server:        NewServerOptions(),
 		Observability: NewObservabilityOptions(),
@@ -42,7 +42,6 @@ func NewOptions() *NeutreeCoreOptions {
 func (o *NeutreeCoreOptions) AddFlags(fs *pflag.FlagSet) {
 	o.Storage.AddFlags(fs)
 	o.Gateway.AddFlags(fs)
-	o.Deploy.AddFlags(fs)
 	o.Controller.AddFlags(fs)
 	o.Server.AddFlags(fs)
 	o.Observability.AddFlags(fs)
@@ -66,6 +65,27 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	gin.SetMode(o.Server.GinMode)
 	e := gin.Default()
 	c.GinEngine = e
+
+	var err error
+
+	// Convert external access URLs for component dependencies
+	// Currently, the following configurations need to be converted to external access URLs:
+	// 1. Gateway proxy URL, used for user access to inference endpoints
+	// 2. Metrics remote write URL, used for remote metric writing; the Neutree cluster may not be on the same Kubernetes cluster as the control plane.
+	// Other URLs only require internal access.
+	o.Gateway.ProxyUrl, err = util.GetExternalAccessUrl(o.Gateway.ProxyUrl)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to transform gateway proxy url")
+	}
+
+	klog.Infof("Transformed gateway proxy url: %s", o.Gateway.ProxyUrl)
+
+	o.Observability.MetricsRemoteWriteURL, err = util.GetExternalAccessUrl(o.Observability.MetricsRemoteWriteURL)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to transform metrics remote write url")
+	}
+
+	klog.Infof("Transformed metrics remote write url: %s", o.Observability.MetricsRemoteWriteURL)
 
 	acceleratorManager := accelerator.NewManager(e)
 	c.AcceleratorManager = acceleratorManager
@@ -96,7 +116,6 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	c.ImageService = imageService
 
 	gw, err := gateway.GetGateway(o.Gateway.Type, gateway.GatewayOptions{
-		DeployType:        o.Deploy.Type,
 		ProxyUrl:          o.Gateway.ProxyUrl,
 		AdminUrl:          o.Gateway.AdminUrl,
 		LogRemoteWriteUrl: o.Gateway.LogRemoteWriteUrl,
@@ -114,7 +133,6 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	c.Gateway = gw
 
 	obsCollectConfigManager, err := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
-		DeployType:                            o.Deploy.Type,
 		LocalCollectConfigPath:                o.Observability.LocalCollectConfigPath,
 		KubernetesMetricsCollectConfigMapName: o.Observability.KubernetesMetricsCollectConfigMap,
 		KubernetesCollectConfigNamespace:      o.Observability.KubernetesCollectConfigNamespace,

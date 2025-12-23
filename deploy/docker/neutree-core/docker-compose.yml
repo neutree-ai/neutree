@@ -2,11 +2,11 @@ version: "3.8"
 
 services:
   copy-db-scripts:
-    image: neutree/neutree-db-scripts:{{ .NeutreeVersion}}
+    image: neutree/neutree-db-scripts:{{ .NeutreeVersion }}
     container_name: copy-db-scripts
     command: bash -c 'cp -rf /db /host/'
     volumes:
-      - {{ .NeutreeCoreWorkDir}}:/host/
+      - {{ .NeutreeCoreWorkDir }}:/host/
     networks:
       - neutree
     restart: none
@@ -25,7 +25,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - {{ .NeutreeCoreWorkDir}}/db/init-scripts:/docker-entrypoint-initdb.d
+      - {{ .NeutreeCoreWorkDir }}/db/init-scripts:/docker-entrypoint-initdb.d
     networks:
       - neutree
     restart: always
@@ -45,7 +45,7 @@ services:
     container_name: auth
     environment:
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: "/verify"
-      GOTRUE_JWT_SECRET: {{ .JwtSecret}}
+      GOTRUE_JWT_SECRET: {{ .JwtSecret }}
       GOTRUE_JWT_EXP: 3600
       GOTRUE_JWT_DEFAULT_GROUP_NAME: api_user
       GOTRUE_DB_DRIVER: postgres
@@ -90,7 +90,7 @@ services:
         condition: service_completed_successfully
     command: -source=file://migrations -database "postgres://postgres:pgpassword@postgres:5432/neutree?sslmode=disable" up
     volumes:
-      - {{ .NeutreeCoreWorkDir}}/db/migrations:/migrations
+      - {{ .NeutreeCoreWorkDir }}/db/migrations:/migrations
     networks:
       - neutree
     restart: none
@@ -107,9 +107,9 @@ services:
       migration:
         condition: service_completed_successfully
     environment:
-      - PGOPTIONS=-c neutree.admin_password={{ .AdminPassword}}
+      - PGOPTIONS=-c neutree.admin_password={{ .AdminPassword }}
     volumes:
-      - {{ .NeutreeCoreWorkDir}}/db/seed:/seed
+      - {{ .NeutreeCoreWorkDir }}/db/seed:/seed
     command: 'bash -c ''for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://postgres:pgpassword@postgres:5432/neutree?sslmode=disable -f $$file; done'''
     restart: none
     deploy:
@@ -124,8 +124,8 @@ services:
       PGRST_DB_SCHEMA: api
       PGRST_SERVER_HOST: 0.0.0.0
       PGRST_SERVER_PORT: 6432
-      PGRST_JWT_SECRET: {{ .JwtSecret}}
-      PGRST_APP_SETTINGS_JWT_SECRET: {{ .JwtSecret}}
+      PGRST_JWT_SECRET: {{ .JwtSecret }}
+      PGRST_APP_SETTINGS_JWT_SECRET: {{ .JwtSecret }}
       PGRST_DB_EXTRA_SEARCH_PATH: auth
       PGRST_DB_AGGREGATES_ENABLED: 1
       PGRST_DB_ANON_ROLE: anonymous
@@ -164,7 +164,7 @@ services:
         max-file: "3"
 
   neutree-core:
-    image: neutree/neutree-core:{{ .NeutreeVersion}}
+    image: neutree/neutree-core:{{ .NeutreeVersion }}
     container_name: neutree-core
     privileged: true
     cap_add:
@@ -174,19 +174,19 @@ services:
     command:
       - ./neutree-core
       - --storage-access-url=http://postgrest:6432
-      - --storage-jwt-secret={{ .JwtSecret}}
+      - --storage-jwt-secret={{ .JwtSecret }}
       - --controller-workers=5
       - --default-cluster-version=v1
-      - --metrics-remote-write-url={{.MetricsRemoteWriteURL}}
+      - --metrics-remote-write-url={{ .MetricsRemoteWriteURL }}
       - --gateway-type=kong
-      - --gateway-proxy-url=http://{{ .NodeIP}}:80
+      - --gateway-proxy-url=http://{{ .NodeIP }}:80
       - --gateway-admin-url=http://kong:8001
       - --gateway-log-remote-write-url=http://vector:30122
       - --core-server-port=3001
       - --core-server-host=0.0.0.0
       - --auth-endpoint=http://auth:9999
     volumes:
-      - {{.NeutreeCoreWorkDir}}/collect:/etc/neutree/collect
+      - {{ .NeutreeCoreWorkDir }}/collect:/etc/neutree/collect
     ports:
       - 3001:3001
     networks:
@@ -202,7 +202,7 @@ services:
         max-file: "3"
 
   neutree-api:
-    image: neutree/neutree-api:{{ .NeutreeVersion}}
+    image: neutree/neutree-api:{{ .NeutreeVersion }}
     container_name: neutree-api
     privileged: true
     cap_add:
@@ -212,14 +212,14 @@ services:
     command:
       - ./neutree-api
       - --storage-access-url=http://postgrest:6432
-      - --storage-jwt-secret={{ .JwtSecret}}
+      - --storage-jwt-secret={{ .JwtSecret }}
       - --host=0.0.0.0
       - --port=3000
       - --static-dir=./public
       - --gin-mode=release
       - --auth-endpoint=http://auth:9999
-      - --grafana-url={{.GrafanaURL}}
-      - --version={{.NeutreeAPIVersion}}
+      - --grafana-url={{ .GrafanaURL }}
+      - --version={{ .NeutreeVersion }}
     ports:
       - 3000:3000
     networks:
@@ -236,18 +236,18 @@ services:
 
   vmagent:
     container_name: vmagent
-    image: victoriametrics/vmagent:{{ .VictoriaMetricsVersion}}
+    image: victoriametrics/vmagent:{{ .VictoriaMetricsVersion }}
     depends_on:
       neutree-core:
           condition: service_started
     volumes:
       - vmagentdata:/vmagentdata
-      - {{ .NeutreeCoreWorkDir}}/vmagent/prometheus.yml:/etc/prometheus/prometheus.yml
-      - {{ .NeutreeCoreWorkDir}}/collect/metrics:/etc/prometheus/scrape
+      - {{ .NeutreeCoreWorkDir }}/vmagent/prometheus.yml:/etc/prometheus/prometheus.yml
+      - {{ .NeutreeCoreWorkDir }}/collect/metrics:/etc/prometheus/scrape
     command:
       - "--promscrape.config=/etc/prometheus/prometheus.yml"
       - "--promscrape.configCheckInterval=10s"
-      - "--remoteWrite.url={{ .MetricsRemoteWriteURL}}"
+      - "--remoteWrite.url={{ .MetricsRemoteWriteURL }}"
     restart: always
     networks:
       - neutree
@@ -258,7 +258,7 @@ services:
         max-file: "3"
 
   kong-migrations:
-    image: kong/kong:{{ .KongVersion}}
+    image: kong/kong:{{ .KongVersion }}
     container_name: kong-migrations
     command: kong migrations bootstrap
     environment:
@@ -281,7 +281,7 @@ services:
         max-file: "3"
 
   kong-migrations-up:
-    image: kong/kong:{{ .KongVersion}}
+    image: kong/kong:{{ .KongVersion }}
     container_name: kong-migrations-up
     command: kong migrations up && kong migrations finish
     environment:
@@ -305,12 +305,12 @@ services:
 
   vector:
     container_name: vector
-    image: timberio/vector:{{ .VectorVersion}}
+    image: timberio/vector:{{ .VectorVersion }}
     command:
       - --config-dir
       - /etc/vector/
     volumes:
-      - {{ .NeutreeCoreWorkDir}}/vector:/etc/vector
+      - {{ .NeutreeCoreWorkDir }}/vector:/etc/vector
     restart: always
     networks:
       - neutree
@@ -323,7 +323,7 @@ services:
         max-size: "10m"
         max-file: "3"
   kong:
-    image: kong/kong:{{ .KongVersion}}
+    image: kong/kong:{{ .KongVersion }}
     container_name: kong
     environment:
       KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE: 20m
@@ -343,7 +343,7 @@ services:
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
     volumes:
-      - {{.NeutreeCoreWorkDir}}/gateway/kong/plugins:/neutree-kong-plugin/kong/plugins
+      - {{ .NeutreeCoreWorkDir }}/gateway/kong/plugins:/neutree-kong-plugin/kong/plugins
     networks:
       - neutree
     ports:

@@ -34,5 +34,4 @@ type APIConfig struct {
 	AuthEndpoint     string
 	GrafanaURL       string
 	Version          string
-	DeployType       string
 }

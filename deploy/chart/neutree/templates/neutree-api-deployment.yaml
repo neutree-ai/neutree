@@ -40,7 +40,6 @@ spec:
             - --grafana-url={{ .Values.system.grafana.url }}
             {{- end }}
             - --version={{ .Values.api.image.tag | default .Chart.AppVersion }}
-            - --deploy-type=kubernetes
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.api.image.registry "repository" .Values.api.image.repository "tag" .Values.api.image.tag "defaultTag" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:

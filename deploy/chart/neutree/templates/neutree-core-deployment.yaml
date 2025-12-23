@@ -38,7 +38,6 @@ spec:
             {{- end }}
             - --kubernetes-metrics-collect-configmap=vmagent-scrape-config
             - --kubernetes-collect-config-namespace={{ .Release.Namespace}}
-            - --deploy-type=kubernetes
             - --gateway-type=kong
             - --gateway-proxy-url=http://{{ include "neutree.fullname" . }}-kong-proxy:80
             - --gateway-admin-url=http://{{ include "neutree.fullname" . }}-kong-admin:8001

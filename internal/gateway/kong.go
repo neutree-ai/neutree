@@ -27,8 +27,7 @@ type Kong struct {
 	storage           storage.Storage
 	logRemoteWriteUrl string
 
-	proxyUrl   string
-	deployType string
+	proxyUrl string
 }
 
 func newKong(opts GatewayOptions) (Gateway, error) {
@@ -41,7 +40,6 @@ func newKong(opts GatewayOptions) (Gateway, error) {
 		kongClient:        kongClient,
 		storage:           opts.Storage,
 		logRemoteWriteUrl: opts.LogRemoteWriteUrl,
-		deployType:        opts.DeployType,
 		proxyUrl:          opts.ProxyUrl,
 	}, nil
 }
@@ -178,12 +176,7 @@ func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
 }
 
 func (k *Kong) GetEndpointServeUrl(ep *v1.Endpoint) (string, error) {
-	realProxyURL, err := util.GetExternalAccessUrl(k.deployType, k.proxyUrl)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get real proxy url")
-	}
-
-	return realProxyURL + getEndpointRoutePath(ep), nil
+	return k.proxyUrl + getEndpointRoutePath(ep), nil
 }
 
 func (k *Kong) DeleteEndpoint(ep *v1.Endpoint) error {

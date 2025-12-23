@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/pflag"
+	"k8s.io/klog"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
@@ -82,11 +83,13 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		JwtSecret: o.Storage.JwtSecret,
 	}
 
-	// Get external URLs
-	grafanaExternalURL, err := util.GetExternalAccessUrl(o.API.DeployType, o.External.GrafanaURL)
+	// The Grafana panel will be embedded in the UI, so we need to try converting it to an externally accessible address.
+	grafanaExternalURL, err := util.GetExternalAccessUrl(o.External.GrafanaURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get grafana external url: %w", err)
 	}
+
+	klog.Infof("Transformed grafana external url: %s", grafanaExternalURL)
 
 	return &config.APIConfig{
 		Storage:    s,
@@ -106,6 +109,5 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		AuthEndpoint:     o.External.AuthEndpoint,
 		GrafanaURL:       grafanaExternalURL,
 		Version:          o.API.Version,
-		DeployType:       o.API.DeployType,
 	}, nil
 }
