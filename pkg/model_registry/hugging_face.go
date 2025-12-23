@@ -34,6 +34,7 @@ var (
 
 const (
 	listModelPath              = "/api/models"
+	whoamiPath                 = "/api/whoami-v2"
 	errHuggingFaceNotSupported = "operation not supported for Hugging Face registry"
 )
 
@@ -65,12 +66,8 @@ func newHuggingFace(registry *v1.ModelRegistry) (*huggingFace, error) {
 }
 
 func (hf *huggingFace) Connect() error {
-	_, err := hf.ListModels(ListOption{Limit: 1})
-	if err != nil {
-		return errors.Wrap(err, "failed to connect to Hugging Face API")
-	}
-
-	return nil
+	// Perform a health check to validate the connection
+	return hf.healthyCheck()
 }
 
 func (hf *huggingFace) Disconnect() error {
@@ -120,6 +117,18 @@ func (hf *huggingFace) ListModels(option ListOption) ([]v1.GeneralModel, error) 
 
 // HealthyCheck checks the health of the Hugging Face Hub API.
 func (hf *huggingFace) HealthyCheck() error {
+	return hf.healthyCheck()
+}
+
+func (hf *huggingFace) healthyCheck() error {
+	if hf.apiToken != "" {
+		// Validate the token by making a simple request
+		_, err := hf.whoami()
+		if err != nil {
+			return errors.Wrap(err, "invalid Hugging Face API token")
+		}
+	}
+
 	_, err := hf.getModelsList(ListOption{Search: "", Limit: 1})
 	if err != nil {
 		return errors.Wrap(err, "failed to list models from Hugging Face API")
@@ -172,6 +181,40 @@ func (hf *huggingFace) getModelsList(options ListOption) ([]HuggingFaceModel, er
 	}
 
 	return models, nil
+}
+
+func (hf *huggingFace) whoami() (string, error) {
+	req, err := http.NewRequest("GET", hf.url+whoamiPath, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+hf.apiToken)
+
+	resp, err := hf.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to validate Hugging Face API token: %s", string(body))
+	}
+
+	var result struct {
+		Name string `json:"name"`
+	}
+
+	if err = json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+
+	return result.Name, nil
 }
 
 // Implement the remaining ModelRegistry interface methods with "not supported" errors
