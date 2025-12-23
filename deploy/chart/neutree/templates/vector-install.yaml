@@ -116,7 +116,7 @@ spec:
       labels:
         app.kubernetes.io/component: neutree-vector
     spec:
-      {{- with.Values.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
