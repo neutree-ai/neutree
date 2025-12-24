@@ -3,10 +3,12 @@ package models
 import (
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
@@ -31,6 +33,31 @@ type progressWriter struct {
 	ctx       *gin.Context
 	sent      int64
 	totalSize int64
+}
+
+type progressLogWriter struct {
+	lastPercent int64
+}
+
+func (pl *progressLogWriter) Write(p []byte) (int, error) {
+	trimmed := strings.TrimSpace(string(p))
+	if trimmed == "" {
+		return len(p), nil
+	}
+
+	if percent, err := strconv.ParseFloat(trimmed, 64); err == nil {
+		current := int64(percent)
+		if current != pl.lastPercent {
+			pl.lastPercent = current
+			klog.V(4).Infof("Importing model... %d%%", current)
+		}
+
+		return len(p), nil
+	}
+
+	klog.V(4).Infof("Import progress: %s", trimmed)
+
+	return len(p), nil
 }
 
 func (pw *progressWriter) Write(p []byte) (n int, err error) {
@@ -235,8 +262,58 @@ func getModel(deps *Dependencies) gin.HandlerFunc {
 // uploadModel handles uploading a new model
 func uploadModel(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Parse form data
-		name := c.PostForm("name")
+		mr, err := c.Request.MultipartReader()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": "Invalid multipart form data",
+			})
+
+			return
+		}
+
+		var (
+			name      string
+			version   string
+			modelSize int64 = -1
+			modelPart *multipart.Part
+		)
+
+	readParts:
+		for {
+			part, err := mr.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"message": "Failed to read multipart data",
+				})
+
+				return
+			}
+
+			switch part.FormName() {
+			case "name":
+				value, _ := io.ReadAll(part)
+				name = strings.TrimSpace(string(value))
+			case "version":
+				value, _ := io.ReadAll(part)
+				version = strings.TrimSpace(string(value))
+			case "model_size":
+				value, _ := io.ReadAll(part)
+				if size, err := strconv.ParseInt(strings.TrimSpace(string(value)), 10, 64); err == nil {
+					modelSize = size
+				}
+			case "model":
+				modelPart = part
+				break readParts
+			default:
+				_, _ = io.Copy(io.Discard, part)
+			}
+
+			part.Close()
+		}
+
 		if name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "Model name is required",
@@ -245,7 +322,6 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		version := c.PostForm("version")
 		if version == v1.LatestVersion {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "Cannot use 'latest' as version, please specify a concrete version or leave it empty for auto-generation",
@@ -266,18 +342,14 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		// Get uploaded file
-		file, header, err := c.Request.FormFile("model")
-		if err != nil {
+		if modelPart == nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "No model file provided",
 			})
 
 			return
 		}
-		defer file.Close()
-
-		// Get file size for progress calculation
-		fileSize := header.Size
+		defer modelPart.Close()
 
 		// Get and connect to the model registry
 		modelRegistry, err := getModelRegistry(c, deps)
@@ -298,13 +370,15 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 
 		// Create a progress writer that writes to the response
 		progressWriter := &progressWriter{
-			writer:    c.Writer,
+			writer:    &progressLogWriter{},
 			ctx:       c,
-			totalSize: fileSize,
+			totalSize: modelSize,
 		}
 
 		// Import directly from uploaded file reader with progress
-		if err := (*modelRegistry).ImportModel(file, name, version, progressWriter); err != nil {
+		klog.V(4).Infof("Importing model %s:%s", name, version)
+
+		if err := (*modelRegistry).ImportModel(modelPart, name, version, progressWriter); err != nil {
 			klog.Errorf("Failed to import model: %v", err)
 			fmt.Fprintf(c.Writer, "Error: Failed to import model: %v\n", err)
 
@@ -312,6 +386,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		// Finalize progress
+		klog.V(4).Infof("Imported model %s:%s", name, version)
 		fmt.Fprintf(c.Writer, "Success: Model imported successfully\n")
 		c.Writer.Flush()
 	}

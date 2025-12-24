@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -142,6 +143,10 @@ func (s *ModelsService) PushWithProgress(
 		if len(labels) > 0 {
 			labelsJSON, _ := json.Marshal(labels)
 			_ = mw.WriteField("labels", string(labelsJSON))
+		}
+
+		if info, err := file.Stat(); err == nil {
+			_ = mw.WriteField("model_size", strconv.FormatInt(info.Size(), 10))
 		}
 
 		part, _ := mw.CreateFormFile("model", filepath.Base(modelPath))
