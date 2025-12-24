@@ -46,7 +46,7 @@ dbScripts:
 db:
   image:
     registry: ""
-    repository: postgres
+    repository: library/postgres
     tag: "13"
     pullPolicy: IfNotPresent
   user: postgres

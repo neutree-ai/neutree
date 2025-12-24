@@ -114,6 +114,13 @@ func (p *ImagePusher) pushImages(ctx context.Context, mirrorRegistry string, reg
 func (p *ImagePusher) buildTargetImage(imagePrefix string, imgSpec *ImageSpec) string {
 	// Remove any existing registry from the image name
 	imageName := extractImageNameWithoutRegistry(imgSpec.ImageName)
+
+	// If the image name doesn't contain a slash, it's a Docker Hub library image
+	// We need to add the "library" prefix to maintain the correct path structure
+	if !strings.Contains(imageName, "/") {
+		imageName = "library/" + imageName
+	}
+
 	return fmt.Sprintf("%s/%s:%s", imagePrefix, imageName, imgSpec.Tag)
 }
 
