@@ -7,7 +7,6 @@ import (
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
 )
@@ -19,17 +18,12 @@ type KubernetesConfigSync struct {
 	kubeClient *kubernetes.Clientset
 }
 
-func NewKubernetesConfigSync(metricsConfigMapName, configMapNamespace string) (*KubernetesConfigSync, error) {
-	kubeClient, err := kubernetes.NewForConfig(config.GetConfigOrDie())
-	if err != nil {
-		return nil, err
-	}
-
+func NewKubernetesConfigSync(kubeClient *kubernetes.Clientset, metricsConfigMapName, configMapNamespace string) *KubernetesConfigSync {
 	return &KubernetesConfigSync{
 		metricsConfigMapName: metricsConfigMapName,
 		configMapNamespace:   configMapNamespace,
 		kubeClient:           kubeClient,
-	}, nil
+	}
 }
 
 func (s *KubernetesConfigSync) SyncMetricsCollectConfig(metricsMonitorMap map[string]monitoring.MetricsMonitor) error {

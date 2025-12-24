@@ -2,12 +2,15 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+
+	"github.com/pkg/errors"
 
 	"github.com/neutree-ai/neutree/internal/observability/config"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
@@ -19,7 +22,6 @@ type ObsCollectConfigManager interface {
 }
 
 type ObsCollectConfigOptions struct {
-	DeployType                            string
 	LocalCollectConfigPath                string
 	KubernetesMetricsCollectConfigMapName string
 	KubernetesCollectConfigNamespace      string
@@ -28,18 +30,20 @@ type ObsCollectConfigOptions struct {
 func NewObsCollectConfigManager(options ObsCollectConfigOptions) (ObsCollectConfigManager, error) {
 	var configSyncer config.ConfigSyncer
 
-	switch options.DeployType {
-	case "local":
-		configSyncer = config.NewLocalConfigSync(options.LocalCollectConfigPath)
-	case "kubernetes":
-		var err error
+	restConfig, err := rest.InClusterConfig()
+	if err != nil && err != rest.ErrNotInCluster {
+		return nil, err
+	}
 
-		configSyncer, err = config.NewKubernetesConfigSync(options.KubernetesMetricsCollectConfigMapName, options.KubernetesCollectConfigNamespace)
+	if err == rest.ErrNotInCluster {
+		configSyncer = config.NewLocalConfigSync(options.LocalCollectConfigPath)
+	} else {
+		kubeClient, err := kubernetes.NewForConfig(restConfig)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "failed to create kubeclient")
 		}
-	default:
-		return nil, errors.New("unsupported deploy type")
+
+		configSyncer = config.NewKubernetesConfigSync(kubeClient, options.KubernetesMetricsCollectConfigMapName, options.KubernetesCollectConfigNamespace)
 	}
 
 	metricsCollectConfigManager := &metricsCollectConfigManager{

@@ -20,24 +20,15 @@ func TestNewObsCollectConfigManager(t *testing.T) {
 	}{
 		{
 			name:        "success with local deploy type",
-			deployType:  "local",
 			configPath:  "/tmp/config",
 			expectError: false,
 			expectNil:   false,
-		},
-		{
-			name:        "unsupported deploy type",
-			deployType:  "invalid",
-			configPath:  "/tmp/config",
-			expectError: true,
-			expectNil:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager, err := NewObsCollectConfigManager(ObsCollectConfigOptions{
-				DeployType:             tt.deployType,
 				LocalCollectConfigPath: tt.configPath,
 			})
 

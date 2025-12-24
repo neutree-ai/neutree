@@ -13,7 +13,6 @@ var (
 )
 
 type GatewayOptions struct {
-	DeployType        string
 	ProxyUrl          string
 	AdminUrl          string
 	LogRemoteWriteUrl string

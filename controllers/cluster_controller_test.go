@@ -19,7 +19,6 @@ import (
 func newTestClusterController(s *storagemocks.MockStorage,
 	r *clustermocks.MockClusterReconcile) *ClusterController {
 	obsCollectConfigManager, _ := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
-		DeployType:             "local",
 		LocalCollectConfigPath: "tmp",
 	})
 
