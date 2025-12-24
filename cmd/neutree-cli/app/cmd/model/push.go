@@ -1,12 +1,10 @@
 package model
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/schollz/progressbar/v3"
@@ -124,23 +122,15 @@ func NewPushCmd() *cobra.Command {
 				defer closer.Close()
 			}
 
-			// Create progress bar for import (0-100%)
-			importBar := progressbar.Default(100, "Importing model")
+			fmt.Println("Importing model...")
 
-			scanner := bufio.NewScanner(importProgressReader)
-			for scanner.Scan() {
-				line := scanner.Text()
-				line = strings.TrimSpace(line)
-
-				// Try to parse percentage from server
-				if percentage, err := strconv.ParseFloat(line, 64); err == nil {
-					// Update progress bar with percentage
-					_ = importBar.Set(int(percentage))
-				}
+			body, err := io.ReadAll(importProgressReader)
+			if err != nil {
+				return fmt.Errorf("error reading import response: %w", err)
 			}
 
-			if err := scanner.Err(); err != nil {
-				return fmt.Errorf("error reading import progress: %w", err)
+			if strings.Contains(string(body), "Error:") {
+				return fmt.Errorf("import failed: %s", strings.TrimSpace(string(body)))
 			}
 
 			fmt.Println("Model pushed successfully!")
