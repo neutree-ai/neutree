@@ -41,7 +41,7 @@ func TestClusterDeletionProtection(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('ssh', '{"provider":{"head_ip":"192.168.1.1"},"auth":{"ssh_user":"test"}}'::jsonb, 'test-image-registry', '')::api.cluster_spec,
+				ROW('ssh', '{"ssh_config": {"provider":{"head_ip":"192.168.1.1"},"auth":{"ssh_user":"test"}}}'::jsonb, 'test-image-registry', '')::api.cluster_spec,
 				ROW('test-cluster', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`, workspace)
@@ -142,7 +142,7 @@ func TestClusterDeletionProtection(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('ssh', '{"provider":{"head_ip":"192.168.1.1"},"auth":{"ssh_user":"test"}}'::jsonb, 'test-image-registry-2', '')::api.cluster_spec,
+				ROW('ssh', '{"ssh_config": {"provider":{"head_ip":"192.168.1.1"},"auth":{"ssh_user":"test"}}}'::jsonb, 'test-image-registry-2', '')::api.cluster_spec,
 				ROW('test-cluster-2', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`, workspace)
@@ -200,7 +200,7 @@ func TestImageRegistryDeletionProtection(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('ssh', '{"provider":{"head_ip":"192.168.1.1"},"auth":{"ssh_user":"test"}}'::jsonb, 'test-image-registry-3', '')::api.cluster_spec,
+				ROW('ssh', '{"ssh_config": {"provider":{"head_ip":"192.168.1.1"},"auth":{"ssh_user":"test"}}}'::jsonb, 'test-image-registry-3', '')::api.cluster_spec,
 				ROW('test-cluster-3', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`, workspace)
@@ -270,7 +270,7 @@ func TestModelRegistryDeletionProtection(t *testing.T) {
 			VALUES (
 				'v1',
 				'Cluster',
-				ROW('ssh', '{"provider":{"head_ip":"192.168.1.1"},"auth":{"ssh_user":"test"}}'::jsonb, 'test-image-registry-4', '')::api.cluster_spec,
+				ROW('ssh', '{"ssh_config": {"provider":{"head_ip":"192.168.1.1"},"auth":{"ssh_user":"test"}}}'::jsonb, 'test-image-registry-4', '')::api.cluster_spec,
 				ROW('test-cluster-4', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
 			)
 		`, workspace)

@@ -1251,13 +1251,12 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 			},
 			cluster: &v1.Cluster{
 				Spec: &v1.ClusterSpec{
-					Config: &v1.KubernetesClusterConfig{
-						CommonClusterConfig: v1.CommonClusterConfig{
-							ModelCaches: []v1.ModelCache{
-								{
-									Name:     "test-cache",
-									HostPath: &corev1.HostPathVolumeSource{},
-								},
+					Config: &v1.ClusterConfig{
+						KubernetesConfig: &v1.KubernetesClusterConfig{},
+						ModelCaches: []v1.ModelCache{
+							{
+								Name:     "test-cache",
+								HostPath: &corev1.HostPathVolumeSource{},
 							},
 						},
 					},
@@ -1502,13 +1501,12 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 			},
 			cluster: &v1.Cluster{
 				Spec: &v1.ClusterSpec{
-					Config: &v1.KubernetesClusterConfig{
-						CommonClusterConfig: v1.CommonClusterConfig{
-							ModelCaches: []v1.ModelCache{
-								{
-									Name:     "test-cache",
-									HostPath: &corev1.HostPathVolumeSource{},
-								},
+					Config: &v1.ClusterConfig{
+						KubernetesConfig: &v1.KubernetesClusterConfig{},
+						ModelCaches: []v1.ModelCache{
+							{
+								Name:     "test-cache",
+								HostPath: &corev1.HostPathVolumeSource{},
 							},
 						},
 					},
@@ -1563,17 +1561,16 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 			},
 			cluster: &v1.Cluster{
 				Spec: &v1.ClusterSpec{
-					Config: &v1.KubernetesClusterConfig{
-						CommonClusterConfig: v1.CommonClusterConfig{
-							ModelCaches: []v1.ModelCache{
-								{
-									Name:     "test-cache-1",
-									HostPath: &corev1.HostPathVolumeSource{},
-								},
-								{
-									Name:     "test-cache-2",
-									HostPath: &corev1.HostPathVolumeSource{},
-								},
+					Config: &v1.ClusterConfig{
+						KubernetesConfig: &v1.KubernetesClusterConfig{},
+						ModelCaches: []v1.ModelCache{
+							{
+								Name:     "test-cache-1",
+								HostPath: &corev1.HostPathVolumeSource{},
+							},
+							{
+								Name:     "test-cache-2",
+								HostPath: &corev1.HostPathVolumeSource{},
 							},
 						},
 					},

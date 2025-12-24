@@ -485,9 +485,10 @@ func (c *sshRayClusterReconciler) configClusterAcceleratorType(reconcileCtx *Rec
 }
 
 func (c *sshRayClusterReconciler) detectClusterAcceleratorType(reconcileCtx *ReconcileContext) (string, error) {
-	// first we check the cluster spec for accelerator type
-	if reconcileCtx.sshClusterConfig.AcceleratorType != nil {
-		return *reconcileCtx.sshClusterConfig.AcceleratorType, nil
+	// first we check the cluster spec for accelerator type (now in ClusterConfig level)
+	if reconcileCtx.Cluster.Spec != nil && reconcileCtx.Cluster.Spec.Config != nil &&
+		reconcileCtx.Cluster.Spec.Config.AcceleratorType != nil {
+		return *reconcileCtx.Cluster.Spec.Config.AcceleratorType, nil
 	}
 
 	// then we check the last detected accelerator type in cluster status

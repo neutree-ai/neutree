@@ -362,7 +362,8 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 
 	rayClusterConfig.InitializationCommands = initializationCommands
 
-	mutateModelCaches(rayClusterConfig, reconcileContext.sshClusterConfig.ModelCaches)
+	// ModelCaches is now in ClusterConfig level
+	mutateModelCaches(rayClusterConfig, reconcileContext.Cluster.Spec.Config.ModelCaches)
 
 	return rayClusterConfig, nil
 }

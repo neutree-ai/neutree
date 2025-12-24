@@ -2,7 +2,6 @@ package util
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -36,101 +35,24 @@ func GetClusterModelCache(c v1.Cluster) ([]v1.ModelCache, error) {
 		return nil, nil
 	}
 
-	content, err := json.Marshal(c.Spec.Config)
-	if err != nil {
-		return nil, err
-	}
-
-	config := v1.CommonClusterConfig{}
-
-	err = json.Unmarshal(content, &config)
-	if err != nil {
-		return nil, err
-	}
-
-	return config.ModelCaches, nil
+	// ModelCaches is now directly in ClusterConfig
+	return c.Spec.Config.ModelCaches, nil
 }
 
 func ParseSSHClusterConfig(cluster *v1.Cluster) (*v1.RaySSHProvisionClusterConfig, error) {
-	if cluster.Spec.Config == nil {
-		return nil, errors.New("cluster config is empty")
+	if cluster.Spec.Config == nil || cluster.Spec.Config.SSHConfig == nil {
+		return nil, errors.New("ssh cluster config is empty")
 	}
 
-	config := cluster.Spec.Config
-
-	configString, err := json.Marshal(config)
-	if err != nil {
-		return nil, err
-	}
-
-	sshClusterConfig := &v1.RaySSHProvisionClusterConfig{}
-
-	err = json.Unmarshal(configString, sshClusterConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	return sshClusterConfig, nil
-}
-
-func ParseRayKubernetesClusterConfig(cluster *v1.Cluster) (*v1.RayKubernetesProvisionClusterConfig, error) {
-	if cluster.Spec.Config == nil {
-		return nil, errors.New("cluster config is empty")
-	}
-
-	config := cluster.Spec.Config
-
-	configString, err := json.Marshal(config)
-	if err != nil {
-		return nil, err
-	}
-
-	kubernetesClusterConfig := &v1.RayKubernetesProvisionClusterConfig{}
-
-	err = json.Unmarshal(configString, kubernetesClusterConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	return kubernetesClusterConfig, nil
+	return cluster.Spec.Config.SSHConfig, nil
 }
 
 func ParseKubernetesClusterConfig(c *v1.Cluster) (*v1.KubernetesClusterConfig, error) {
-	if c.Spec.Config == nil {
-		return nil, errors.New("cluster config is empty")
+	if c.Spec.Config == nil || c.Spec.Config.KubernetesConfig == nil {
+		return nil, errors.New("kubernetes cluster config is empty")
 	}
 
-	content, err := json.Marshal(c.Spec.Config)
-	if err != nil {
-		return nil, err
-	}
-
-	config := &v1.KubernetesClusterConfig{}
-
-	err = json.Unmarshal(content, &config)
-	if err != nil {
-		return nil, err
-	}
-
-	return config, nil
-}
-
-func GetKubeConfigFromRayKubernetesCluster(cluster *v1.Cluster) (string, error) {
-	config, err := ParseRayKubernetesClusterConfig(cluster)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse ray kubernetes cluster config")
-	}
-
-	if config.Kubeconfig == "" {
-		return "", errors.New("kubeconfig is empty")
-	}
-
-	kubeconfigContent, err := base64.StdEncoding.DecodeString(config.Kubeconfig)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to decode kubeconfig")
-	}
-
-	return string(kubeconfigContent), nil
+	return c.Spec.Config.KubernetesConfig, nil
 }
 
 func GetKubeConfigFromCluster(cluster *v1.Cluster) (string, error) {
