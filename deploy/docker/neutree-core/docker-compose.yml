@@ -283,7 +283,10 @@ services:
   kong-migrations-up:
     image: kong/kong:{{ .KongVersion}}
     container_name: kong-migrations-up
-    command: kong migrations up && kong migrations finish
+    command:
+      - /bin/sh
+      - -c
+      - "kong migrations up && kong migrations finish"
     environment:
       KONG_DATABASE: "postgres"
       KONG_PG_HOST: "postgres"

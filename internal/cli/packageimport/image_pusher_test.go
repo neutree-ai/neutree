@@ -21,37 +21,37 @@ func TestImagePusherBuildTargetImage(t *testing.T) {
 			name:        "with prefix",
 			imagePrefix: "registry.example.com/neutree",
 			imgSpec: &ImageSpec{
-				ImageName: "vllm-cuda",
+				ImageName: "vllm/vllm-cuda",
 				Tag:       "v0.5.0",
 			},
-			expected: "registry.example.com/neutree/vllm-cuda:v0.5.0",
+			expected: "registry.example.com/neutree/vllm/vllm-cuda:v0.5.0",
 		},
 		{
 			name:        "without prefix",
 			imagePrefix: "registry.example.com",
 			imgSpec: &ImageSpec{
-				ImageName: "vllm-cuda",
+				ImageName: "vllm/vllm-cuda",
 				Tag:       "v0.5.0",
 			},
-			expected: "registry.example.com/vllm-cuda:v0.5.0",
+			expected: "registry.example.com/vllm/vllm-cuda:v0.5.0",
 		},
 		{
 			name:        "remove existing registry",
 			imagePrefix: "new-registry.com/neutree",
 			imgSpec: &ImageSpec{
-				ImageName: "old-registry.com/vllm-cuda",
+				ImageName: "old-registry.com/vllm/vllm-cuda",
 				Tag:       "v0.5.0",
 			},
-			expected: "new-registry.com/neutree/vllm-cuda:v0.5.0",
+			expected: "new-registry.com/neutree/vllm/vllm-cuda:v0.5.0",
 		},
 		{
 			name:        "remove existing registry with port",
 			imagePrefix: "new-registry.com/neutree",
 			imgSpec: &ImageSpec{
-				ImageName: "old-registry.com:5000/vllm-cuda",
+				ImageName: "old-registry.com:5000/vllm/vllm-cuda",
 				Tag:       "v0.5.0",
 			},
-			expected: "new-registry.com/neutree/vllm-cuda:v0.5.0",
+			expected: "new-registry.com/neutree/vllm/vllm-cuda:v0.5.0",
 		},
 		{
 			name:        "keep organization name without dots",
@@ -61,6 +61,24 @@ func TestImagePusherBuildTargetImage(t *testing.T) {
 				Tag:       "v0.5.0",
 			},
 			expected: "registry.example.com/neutree/myorg/vllm-cuda:v0.5.0",
+		},
+		{
+			name:        "push dockerhub official image to custom registry",
+			imagePrefix: "registry.example.com",
+			imgSpec: &ImageSpec{
+				ImageName: "postgres",
+				Tag:       "v13.0.0",
+			},
+			expected: "registry.example.com/library/postgres:v13.0.0",
+		},
+		{
+			name:        "push dockerhub official image to custom registry with namespace",
+			imagePrefix: "registry.example.com/neutree",
+			imgSpec: &ImageSpec{
+				ImageName: "postgres",
+				Tag:       "v13.0.0",
+			},
+			expected: "registry.example.com/neutree/library/postgres:v13.0.0",
 		},
 	}
 
