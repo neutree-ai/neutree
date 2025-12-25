@@ -207,10 +207,12 @@ func (i *Importer) updateEngine(_ context.Context, engineMetadata *EngineMetadat
 		found := false
 
 		for idx, oldVersion := range existedEngine.Spec.Versions {
-			if oldVersion.Version == newVersion.Version && opts.Force {
-				// merge
-				existedEngine.Spec.Versions[idx] = util.MergeEngineVersion(oldVersion, newVersion)
+			if oldVersion.Version == newVersion.Version {
 				found = true
+				// merge versions
+				if opts.Force {
+					existedEngine.Spec.Versions[idx] = util.MergeEngineVersion(oldVersion, newVersion)
+				}
 
 				break
 			}
