@@ -316,9 +316,14 @@ for spec in "${IMAGE_SPECS[@]}"; do
 
     print_info "Exporting $FULL_IMAGE for $ACCELERATOR..."
 
+    # Check if image exists, if not, pull it
     if ! docker image inspect "$FULL_IMAGE" > /dev/null 2>&1; then
-        print_error "Image $FULL_IMAGE not found locally. Please pull or build it first."
-        exit 1
+        print_warn "Image $FULL_IMAGE not found locally. Pulling image..."
+        if ! docker pull "$FULL_IMAGE"; then
+            print_error "Failed to pull image $FULL_IMAGE"
+            exit 1
+        fi
+        print_info "Successfully pulled $FULL_IMAGE"
     fi
 
     docker save "$FULL_IMAGE" -o "$OUTPUT_TAR"
@@ -501,7 +506,7 @@ cd - > /dev/null
 # Move to final location
 mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
 # Calculate checksum
-log_info "Calculating checksum..."
+print_info "Calculating checksum..."
 if command -v md5sum &> /dev/null; then
     md5sum "$OUTPUT_DIR/$OUTPUT_FILE" > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
 else
@@ -525,4 +530,4 @@ print_info "You can now validate the package with:"
 echo "    neutree-cli import validate --package $OUTPUT_FILE"
 echo ""
 print_info "Or import it with:"
-echo "    neutree-cli import engine --package $OUTPUT_FILE --registry <registry> --workspace <workspace>"
+echo "    neutree-cli import engine --package $OUTPUT_FILE --workspace <workspace> --api-key <api-key> --server-url <server-url>"
