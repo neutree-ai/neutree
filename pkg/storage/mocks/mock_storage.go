@@ -1082,6 +1082,55 @@ func (_c *MockStorage_DeleteWorkspace_Call) RunAndReturn(run func(string) error)
 	return _c
 }
 
+// GenericQuery provides a mock function with given fields: table, selectFields, filters, result
+func (_m *MockStorage) GenericQuery(table string, selectFields string, filters []storage.Filter, result interface{}) error {
+	ret := _m.Called(table, selectFields, filters, result)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GenericQuery")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, []storage.Filter, interface{}) error); ok {
+		r0 = rf(table, selectFields, filters, result)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_GenericQuery_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GenericQuery'
+type MockStorage_GenericQuery_Call struct {
+	*mock.Call
+}
+
+// GenericQuery is a helper method to define mock.On call
+//   - table string
+//   - selectFields string
+//   - filters []storage.Filter
+//   - result interface{}
+func (_e *MockStorage_Expecter) GenericQuery(table interface{}, selectFields interface{}, filters interface{}, result interface{}) *MockStorage_GenericQuery_Call {
+	return &MockStorage_GenericQuery_Call{Call: _e.mock.On("GenericQuery", table, selectFields, filters, result)}
+}
+
+func (_c *MockStorage_GenericQuery_Call) Run(run func(table string, selectFields string, filters []storage.Filter, result interface{})) *MockStorage_GenericQuery_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].([]storage.Filter), args[3].(interface{}))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GenericQuery_Call) Return(_a0 error) *MockStorage_GenericQuery_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_GenericQuery_Call) RunAndReturn(run func(string, string, []storage.Filter, interface{}) error) *MockStorage_GenericQuery_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetApiKey provides a mock function with given fields: id
 func (_m *MockStorage) GetApiKey(id string) (*v1.ApiKey, error) {
 	ret := _m.Called(id)

@@ -186,6 +186,10 @@ type Storage interface {
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error
+
+	// GenericQuery performs a generic query on any table with custom select fields
+	// Use this for internal operations that need service_role permissions
+	GenericQuery(table string, selectFields string, filters []Filter, result interface{}) error
 }
 
 type Options struct {

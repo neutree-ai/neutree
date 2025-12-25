@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"k8s.io/klog/v2"
+
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // FieldSelector defines which fields to include or exclude in responses
@@ -213,6 +217,165 @@ func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[str
 	}
 }
 
+// mergeExcludedFields merges excluded fields from source into target
+// Only merges fields that are in excludeFields and missing in target
+func mergeExcludedFields(target, source map[string]interface{}, excludeFields map[string]struct{}) {
+	mergeExcludedFieldsRecursive(target, source, excludeFields, "")
+}
+
+// mergeExcludedFieldsRecursive recursively merges excluded fields
+func mergeExcludedFieldsRecursive(target, source map[string]interface{}, excludeFields map[string]struct{}, currentPath string) {
+	for key, sourceValue := range source {
+		fieldPath := key
+		if currentPath != "" {
+			fieldPath = currentPath + "." + key
+		}
+
+		// Check if this field is an excluded field
+		if _, isExcluded := excludeFields[fieldPath]; isExcluded {
+			// If target doesn't have this field or it's empty, merge from source
+			if targetValue, exists := target[key]; !exists || isEmptyValue(targetValue) {
+				target[key] = sourceValue
+			}
+
+			continue
+		}
+
+		// Recursively merge nested objects
+		if sourceMap, ok := sourceValue.(map[string]interface{}); ok {
+			if targetMap, ok := target[key].(map[string]interface{}); ok {
+				mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, fieldPath)
+			} else if !ok && target[key] == nil {
+				// Target has this key but it's nil, create a new map and merge
+				target[key] = make(map[string]interface{})
+				if targetMap, ok := target[key].(map[string]interface{}); ok {
+					mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, fieldPath)
+				}
+			}
+		}
+	}
+}
+
+// isEmptyValue checks if a value is considered empty
+func isEmptyValue(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+
+	switch val := v.(type) {
+	case string:
+		return val == ""
+	case map[string]interface{}:
+		return len(val) == 0
+	case []interface{}:
+		return len(val) == 0
+	default:
+		return false
+	}
+}
+
+// buildSelectParam builds PostgREST select parameter for excluded fields
+// For example, if excludeFields contains "spec.credentials", it returns "spec"
+func buildSelectParam(excludeFields map[string]struct{}) string {
+	if len(excludeFields) == 0 {
+		return ""
+	}
+
+	// Collect top-level fields that contain excluded nested fields
+	fieldsMap := make(map[string]struct{})
+
+	for fieldPath := range excludeFields {
+		parts := strings.Split(fieldPath, ".")
+		if len(parts) > 0 {
+			fieldsMap[parts[0]] = struct{}{}
+		}
+	}
+
+	// Convert to slice
+	fields := make([]string, 0, len(fieldsMap))
+	for field := range fieldsMap {
+		fields = append(fields, field)
+	}
+
+	return strings.Join(fields, ",")
+}
+
+// queryParamsToFilters converts URL query params to storage.Filter array
+func queryParamsToFilters(queryParams url.Values) []storage.Filter {
+	filters := make([]storage.Filter, 0)
+
+	// PostgREST reserved parameters that should not be treated as filters
+	reservedParams := map[string]struct{}{
+		"select": {},
+		"order":  {},
+		"limit":  {},
+		"offset": {},
+	}
+
+	for key, values := range queryParams {
+		if len(values) == 0 {
+			continue
+		}
+
+		// Skip PostgREST reserved parameters
+		if _, isReserved := reservedParams[key]; isReserved {
+			continue
+		}
+
+		// PostgREST uses format like: column=operator.value or column=eq.value
+		// For example: id=eq.123 or metadata->>name=eq.my-registry
+		parts := strings.SplitN(values[0], ".", 2)
+		if len(parts) == 2 {
+			filters = append(filters, storage.Filter{
+				Column:   key,
+				Operator: parts[0],
+				Value:    parts[1],
+			})
+		} else {
+			// Default to eq operator if not specified
+			filters = append(filters, storage.Filter{
+				Column:   key,
+				Operator: "eq",
+				Value:    values[0],
+			})
+		}
+	}
+
+	return filters
+}
+
+// fetchCurrentResource fetches current resource from storage with only excluded fields
+func fetchCurrentResource(
+	storage storage.Storage, tableName string, queryParams url.Values, excludeFields map[string]struct{},
+) (map[string]interface{}, error) {
+	// Build select parameter to only fetch fields that contain excluded nested fields
+	selectParam := buildSelectParam(excludeFields)
+	if selectParam == "" {
+		return nil, nil
+	}
+
+	// Convert query params to filters
+	filters := queryParamsToFilters(queryParams)
+	if len(filters) == 0 {
+		return nil, fmt.Errorf("no filters provided in query params")
+	}
+
+	klog.V(4).Infof("Fetching current resource from table: %s with filters: %+v, select: %s", tableName, filters, selectParam)
+
+	// Query using storage SDK (uses service_role token)
+	var resources []map[string]interface{}
+	if err := storage.GenericQuery(tableName, selectParam, filters, &resources); err != nil {
+		return nil, fmt.Errorf("failed to query resource: %w", err)
+	}
+
+	if len(resources) == 0 {
+		return nil, fmt.Errorf("resource not found")
+	}
+
+	// Return first resource
+	return resources[0], nil
+}
+
 // CreateStructProxyHandler creates a proxy handler that filters response based on struct api tags
 // The struct type T is used only for configuration extraction at initialization time
 // At runtime, responses are filtered using map-based JSON filtering for performance
@@ -222,6 +385,12 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 	excludeFields := extractExcludeFieldsFromTag(reflect.TypeOf(zero))
 
 	return func(c *gin.Context) {
+		// Handle PATCH requests with excluded fields backfilling
+		if c.Request.Method == "PATCH" && len(excludeFields) > 0 {
+			handlePatchWithBackfill(c, deps, tableName, excludeFields)
+			return
+		}
+
 		// Create proxy handler
 		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, CreatePostgrestAuthModifier(c))
 
@@ -265,4 +434,64 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 			c.Data(responseWriter.statusCode, c.Writer.Header().Get("Content-Type"), responseWriter.body.Bytes())
 		}
 	}
+}
+
+// handlePatchWithBackfill handles PATCH requests with excluded fields backfilling
+func handlePatchWithBackfill(c *gin.Context, deps *Dependencies, tableName string, excludeFields map[string]struct{}) {
+	// Read request body
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("Failed to read request body: %v", err),
+		})
+
+		return
+	}
+
+	c.Request.Body.Close()
+
+	// Parse request body
+	var requestBody map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &requestBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("Failed to parse request body: %v", err),
+		})
+
+		return
+	}
+
+	// Fetch current resource from storage (uses service_role token)
+	currentResource, err := fetchCurrentResource(
+		deps.Storage,
+		tableName,
+		c.Request.URL.Query(),
+		excludeFields,
+	)
+	if err != nil {
+		klog.Warningf("Failed to fetch current resource for backfill: %v", err)
+		// Continue without backfill if fetch fails (resource might not exist yet)
+	} else if currentResource != nil {
+		// Merge excluded fields from current resource into request body
+		mergeExcludedFields(requestBody, currentResource, excludeFields)
+		klog.V(4).Infof("Backfilled excluded fields for PATCH request")
+	}
+
+	// Re-serialize request body
+	modifiedBodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to marshal request body: %v", err),
+		})
+
+		return
+	}
+
+	// Replace request body
+	c.Request.Body = io.NopCloser(bytes.NewReader(modifiedBodyBytes))
+	c.Request.ContentLength = int64(len(modifiedBodyBytes))
+	c.Request.Header.Set("Content-Length", fmt.Sprintf("%d", len(modifiedBodyBytes)))
+
+	// Forward to PostgREST
+	proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, CreatePostgrestAuthModifier(c))
+	proxyHandler(c)
 }
