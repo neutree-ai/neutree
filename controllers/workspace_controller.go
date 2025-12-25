@@ -191,20 +191,29 @@ func (c *WorkspaceController) createOrUpdateEngine(engine *v1.Engine) error {
 		return nil
 	}
 
-	targetEngine := engines[0]
+	originalEngine := engines[0]
+	originalEngineID := originalEngine.ID
 
-	for k, v := range targetEngine.Spec.Versions {
-		if v.Version == engine.Spec.Versions[0].Version {
-			// Version already exists, merge it and update
-			targetEngine.Spec.Versions[k] = util.MergeEngineVersion(v, engine.Spec.Versions[0])
-			return c.storage.UpdateEngine(strconv.Itoa(targetEngine.ID), &targetEngine)
-		}
+	originalSpecCopy, err := util.DeepCopyObject(originalEngine.Spec)
+	if err != nil {
+		return errors.Wrapf(err, "failed to deep copy engine spec %s/%s",
+			engine.Metadata.Workspace, engine.Metadata.Name)
 	}
 
-	// Append new version
-	targetEngine.Spec.Versions = append(targetEngine.Spec.Versions, engine.Spec.Versions[0])
+	final := util.MergeEngine(&originalEngine, engine)
 
-	return c.storage.UpdateEngine(strconv.Itoa(targetEngine.ID), &targetEngine)
+	eq, _, err := util.JsonEqual(final.Spec, originalSpecCopy)
+	if err != nil {
+		return errors.Wrapf(err, "failed to compare engine spec %s/%s",
+			engine.Metadata.Workspace, engine.Metadata.Name)
+	}
+
+	if eq {
+		// No update needed
+		return nil
+	}
+
+	return c.storage.UpdateEngine(strconv.Itoa(originalEngineID), final)
 }
 
 func (c *WorkspaceController) DeleteWorkspaceEngine(workspace *v1.Workspace) error {
