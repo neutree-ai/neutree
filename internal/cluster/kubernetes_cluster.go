@@ -131,16 +131,16 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 		}
 	}
 
-	if len(errs) > 0 {
-		return utilerrors.NewAggregate(errs)
-	}
-
 	// Save cluster annotations (including last applied configs from components)
 	err = c.storage.UpdateCluster(reconcileCtx.Cluster.GetID(), &v1.Cluster{
 		Metadata: reconcileCtx.Cluster.Metadata,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to update cluster annotations")
+	}
+
+	if len(errs) > 0 {
+		return utilerrors.NewAggregate(errs)
 	}
 
 	reconcileCtx.Cluster.Status.Initialized = true
@@ -164,19 +164,29 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 		return errors.Wrap(err, "failed to get image prefix")
 	}
 
-	// Create components
-	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
-		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
-		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	reconcileComps := []component.Component{}
+	reconcileDeleteComps := []component.Component{}
+
+	// The Router component is a core component of the cluster and cannot be removed; it should be added first.
 	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	reconcileComps = append(reconcileComps, routerComp)
 
-	comps := []component.Component{metricsComp, routerComp}
+	needReconcileAdditionalComps, needDeleteAdditionalComps := c.ComputeAdditionalComponents(reconcileCtx, imagePrefix)
+	reconcileComps = append(reconcileComps, needReconcileAdditionalComps...)
+	reconcileDeleteComps = append(reconcileDeleteComps, needDeleteAdditionalComps...)
 
 	var errs []error
 
-	for _, comp := range comps {
+	for _, comp := range reconcileComps {
 		err = comp.Reconcile()
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	for _, comp := range reconcileDeleteComps {
+		err = comp.Delete()
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -195,6 +205,24 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	reconcileCtx.Cluster.Status.DashboardURL = endpoint
 
 	return nil
+}
+
+func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcileCtx *ReconcileContext,
+	imagePrefix string) ([]component.Component, []component.Component) {
+	reconcileComps := []component.Component{}
+	reconcileDeleteComps := []component.Component{}
+
+	// Only install metrics component when metrics remote write url is valid.
+	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
+		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
+		reconcileComps = append(reconcileComps, metricsComp)
+	} else {
+		reconcileDeleteComps = append(reconcileDeleteComps, metricsComp)
+	}
+
+	return reconcileComps, reconcileDeleteComps
 }
 
 func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {

@@ -233,7 +233,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
+{{ if .MetricsRemoteWriteURL }}
   vmagent:
     container_name: vmagent
     image: victoriametrics/vmagent:{{ .VictoriaMetricsVersion }}
@@ -256,7 +256,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
+{{ end }}
   kong-migrations:
     image: kong/kong:{{ .KongVersion }}
     container_name: kong-migrations
@@ -378,4 +378,6 @@ networks:
 
 volumes:
   pg_data:
+{{ if .MetricsRemoteWriteURL }}
   vmagentdata:
+{{ end }}
