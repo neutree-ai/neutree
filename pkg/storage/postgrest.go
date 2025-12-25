@@ -30,6 +30,23 @@ func (s *postgrestStorage) genericList(table string, response interface{}, optio
 	return parseResponse(response, responseContent)
 }
 
+// GenericQuery performs a generic query on any table with custom select fields
+func (s *postgrestStorage) GenericQuery(table string, selectFields string, filters []Filter, result interface{}) error {
+	builder := s.postgrestClient.From(table).Select(selectFields, "", false)
+
+	// Apply filters
+	for _, filter := range filters {
+		builder.Filter(filter.Column, filter.Operator, filter.Value)
+	}
+
+	responseContent, _, err := builder.Execute()
+	if err != nil {
+		return err
+	}
+
+	return parseResponse(result, responseContent)
+}
+
 func (s *postgrestStorage) ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error) {
 	var response []v1.ImageRegistry
 	err := s.genericList(IMAGE_REGISTRY_TABLE, &response, option)

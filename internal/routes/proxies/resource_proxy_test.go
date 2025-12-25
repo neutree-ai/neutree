@@ -2,6 +2,7 @@ package proxies
 
 import (
 	"io"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -426,5 +427,290 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			"l1.l2.l3.deep_secret": {},
 		}
 		assert.Equal(t, expected, result)
+	})
+}
+
+func Test_mergeExcludedFields(t *testing.T) {
+	t.Run("merge missing excluded field", func(t *testing.T) {
+		target := map[string]interface{}{
+			"id": "123",
+			"spec": map[string]interface{}{
+				"type": "hugging-face",
+				"url":  "https://huggingface.co",
+			},
+		}
+		source := map[string]interface{}{
+			"id": "123",
+			"spec": map[string]interface{}{
+				"type":        "hugging-face",
+				"url":         "https://huggingface.co",
+				"credentials": "hf_secret_token_123",
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields)
+
+		expected := map[string]interface{}{
+			"id": "123",
+			"spec": map[string]interface{}{
+				"type":        "hugging-face",
+				"url":         "https://huggingface.co",
+				"credentials": "hf_secret_token_123",
+			},
+		}
+		assert.Equal(t, expected, target)
+	})
+
+	t.Run("do not override existing excluded field", func(t *testing.T) {
+		target := map[string]interface{}{
+			"id": "123",
+			"spec": map[string]interface{}{
+				"type":        "hugging-face",
+				"url":         "https://huggingface.co",
+				"credentials": "new_token",
+			},
+		}
+		source := map[string]interface{}{
+			"id": "123",
+			"spec": map[string]interface{}{
+				"type":        "hugging-face",
+				"url":         "https://huggingface.co",
+				"credentials": "old_token",
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields)
+
+		// Should keep the new_token, not override with old_token
+		assert.Equal(t, "new_token", target["spec"].(map[string]interface{})["credentials"])
+	})
+
+	t.Run("merge multiple excluded fields", func(t *testing.T) {
+		target := map[string]interface{}{
+			"id": "123",
+			"spec": map[string]interface{}{
+				"type": "updated",
+			},
+			"status": map[string]interface{}{
+				"phase": "Active",
+			},
+		}
+		source := map[string]interface{}{
+			"id": "123",
+			"spec": map[string]interface{}{
+				"type":        "hugging-face",
+				"credentials": "hf_token",
+			},
+			"status": map[string]interface{}{
+				"phase":    "Active",
+				"sk_value": "secret_key",
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+			"status.sk_value":  {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields)
+
+		assert.Equal(t, "hf_token", target["spec"].(map[string]interface{})["credentials"])
+		assert.Equal(t, "secret_key", target["status"].(map[string]interface{})["sk_value"])
+		assert.Equal(t, "updated", target["spec"].(map[string]interface{})["type"])
+	})
+
+	t.Run("handle empty string as missing", func(t *testing.T) {
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"credentials": "",
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"credentials": "should_be_merged",
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields)
+
+		assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
+	})
+
+	t.Run("do not merge non-excluded fields", func(t *testing.T) {
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "new-type",
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type":        "old-type",
+				"credentials": "token",
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields)
+
+		// type should not be overridden
+		assert.Equal(t, "new-type", target["spec"].(map[string]interface{})["type"])
+		// credentials should be merged
+		assert.Equal(t, "token", target["spec"].(map[string]interface{})["credentials"])
+	})
+}
+
+func Test_buildSelectParam(t *testing.T) {
+	t.Run("build select param from excluded fields", func(t *testing.T) {
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+			"status.sk_value":  {},
+		}
+
+		result := buildSelectParam(excludeFields)
+
+		// Should contain both spec and status (order may vary)
+		assert.Contains(t, result, "spec")
+		assert.Contains(t, result, "status")
+	})
+
+	t.Run("return empty for no excluded fields", func(t *testing.T) {
+		excludeFields := map[string]struct{}{}
+
+		result := buildSelectParam(excludeFields)
+
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("handle single excluded field", func(t *testing.T) {
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		result := buildSelectParam(excludeFields)
+
+		assert.Equal(t, "spec", result)
+	})
+}
+
+func Test_isEmptyValue(t *testing.T) {
+	t.Run("nil is empty", func(t *testing.T) {
+		assert.True(t, isEmptyValue(nil))
+	})
+
+	t.Run("empty string is empty", func(t *testing.T) {
+		assert.True(t, isEmptyValue(""))
+	})
+
+	t.Run("non-empty string is not empty", func(t *testing.T) {
+		assert.False(t, isEmptyValue("hello"))
+	})
+
+	t.Run("empty map is empty", func(t *testing.T) {
+		assert.True(t, isEmptyValue(map[string]interface{}{}))
+	})
+
+	t.Run("non-empty map is not empty", func(t *testing.T) {
+		assert.False(t, isEmptyValue(map[string]interface{}{"key": "value"}))
+	})
+
+	t.Run("empty array is empty", func(t *testing.T) {
+		assert.True(t, isEmptyValue([]interface{}{}))
+	})
+
+	t.Run("non-empty array is not empty", func(t *testing.T) {
+		assert.False(t, isEmptyValue([]interface{}{1, 2, 3}))
+	})
+
+	t.Run("number is not empty", func(t *testing.T) {
+		assert.False(t, isEmptyValue(0))
+		assert.False(t, isEmptyValue(42))
+	})
+}
+
+func Test_queryParamsToFilters(t *testing.T) {
+	t.Run("convert simple filter", func(t *testing.T) {
+		params := url.Values{
+			"id": []string{"eq.123"},
+		}
+
+		filters := queryParamsToFilters(params)
+
+		assert.Len(t, filters, 1)
+		assert.Equal(t, "id", filters[0].Column)
+		assert.Equal(t, "eq", filters[0].Operator)
+		assert.Equal(t, "123", filters[0].Value)
+	})
+
+	t.Run("convert multiple filters", func(t *testing.T) {
+		params := url.Values{
+			"id":                     []string{"eq.123"},
+			"metadata->>name":        []string{"eq.test"},
+			"metadata->>workspace":   []string{"eq.default"},
+		}
+
+		filters := queryParamsToFilters(params)
+
+		assert.Len(t, filters, 3)
+	})
+
+	t.Run("skip reserved parameters", func(t *testing.T) {
+		params := url.Values{
+			"id":     []string{"eq.123"},
+			"select": []string{"spec,status"},
+			"order":  []string{"id.desc"},
+			"limit":  []string{"10"},
+			"offset": []string{"0"},
+		}
+
+		filters := queryParamsToFilters(params)
+
+		// Should only have the id filter, not the reserved params
+		assert.Len(t, filters, 1)
+		assert.Equal(t, "id", filters[0].Column)
+	})
+
+	t.Run("handle value without operator", func(t *testing.T) {
+		params := url.Values{
+			"id": []string{"123"},
+		}
+
+		filters := queryParamsToFilters(params)
+
+		assert.Len(t, filters, 1)
+		assert.Equal(t, "id", filters[0].Column)
+		assert.Equal(t, "eq", filters[0].Operator)
+		assert.Equal(t, "123", filters[0].Value)
+	})
+
+	t.Run("handle different operators", func(t *testing.T) {
+		params := url.Values{
+			"id":   []string{"gt.100"},
+			"name": []string{"like.*test*"},
+			"age":  []string{"lte.30"},
+		}
+
+		filters := queryParamsToFilters(params)
+
+		assert.Len(t, filters, 3)
+
+		// Verify operators
+		operatorMap := make(map[string]string)
+		for _, f := range filters {
+			operatorMap[f.Column] = f.Operator
+		}
+
+		assert.Equal(t, "gt", operatorMap["id"])
+		assert.Equal(t, "like", operatorMap["name"])
+		assert.Equal(t, "lte", operatorMap["age"])
 	})
 }
