@@ -118,7 +118,7 @@ func (o *RayOrchestrator) connectSSHClusterEndpointModel(modelRegistry v1.ModelR
 		return errors.Wrap(err, "failed to generate tmp ssh key file")
 	}
 
-	defer os.Remove(filepath.Dir(sshKeyPath))
+	defer os.RemoveAll(filepath.Dir(sshKeyPath))
 	// override the private key path
 	sshClusterConfig.Auth.SSHPrivateKey = sshKeyPath
 

@@ -258,11 +258,9 @@ func TestGetDeployedModelRealVersion_BentoML(t *testing.T) {
 		{
 			name: "bentoml registry model found with real version",
 			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
-				modelregistry.On("Connect").Return(nil)
 				modelregistry.On("GetModelVersion", "test", "latest").Return(&v1.ModelVersion{
 					Name: "v1.0.0",
 				}, nil)
-				modelregistry.On("Disconnect").Return(nil)
 			},
 			inputVersion: "latest",
 			expected:     "v1.0.0",
@@ -270,11 +268,9 @@ func TestGetDeployedModelRealVersion_BentoML(t *testing.T) {
 		{
 			name: "bentoml registry model found with real version with empty version",
 			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
-				modelregistry.On("Connect").Return(nil)
 				modelregistry.On("GetModelVersion", "test", "").Return(&v1.ModelVersion{
 					Name: "v1.0.0",
 				}, nil)
-				modelregistry.On("Disconnect").Return(nil)
 			},
 			inputVersion: "",
 			expected:     "v1.0.0",
@@ -282,9 +278,7 @@ func TestGetDeployedModelRealVersion_BentoML(t *testing.T) {
 		{
 			name: "bentoml registry model not found error",
 			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
-				modelregistry.On("Connect").Return(nil)
 				modelregistry.On("GetModelVersion", "test", "latest").Return(nil, assert.AnError)
-				modelregistry.On("Disconnect").Return(nil)
 			},
 			inputVersion: "latest",
 			wantErr:      true,

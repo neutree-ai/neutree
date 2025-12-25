@@ -341,13 +341,6 @@ func getDeployedModelRealVersion(modelRegistry *v1.ModelRegistry, modelName, mod
 			return "", errors.Wrapf(err, "failed to create model registry manager for model registry %s", modelRegistry.Metadata.Name)
 		}
 
-		err = registryManager.Connect()
-		if err != nil {
-			return "", errors.Wrapf(err, "failed to connect to model registry %s", modelRegistry.Metadata.Name)
-		}
-
-		defer registryManager.Disconnect() // nolint: errcheck
-
 		latestModelVersionInfo, err := registryManager.GetModelVersion(modelName, modelVersion)
 		if err != nil {
 			return "", errors.Wrapf(err, "failed to get latest model version for %s", modelName)
