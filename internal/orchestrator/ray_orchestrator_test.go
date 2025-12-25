@@ -974,6 +974,66 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 	}
 }
 
+func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
+	tests := []struct {
+		name         string
+		endpoint     *v1.Endpoint
+		expectedEnvs map[string]string
+	}{
+		{
+			name: "endpoint with nil engine",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "llama-endpoint",
+				},
+				Spec: &v1.EndpointSpec{},
+			},
+			expectedEnvs: map[string]string{},
+		},
+		{
+			name: "endpoint with llama-cpp engine",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "llama-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: "llama-cpp",
+					},
+				},
+			},
+			expectedEnvs: map[string]string{},
+		},
+		{
+			name: "endpoint with vllm engine",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "vllm-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: "vllm",
+					},
+				},
+			},
+			expectedEnvs: map[string]string{
+				"VLLM_SKIP_P2P_CHECK": "1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			applicationEnvs := map[string]string{}
+			setEngineSpecialEnv(tt.endpoint, applicationEnvs)
+			assert.Equal(t, tt.expectedEnvs, applicationEnvs)
+		})
+	}
+}
+
 func TestFormatServiceURL_WorkspaceInURL(t *testing.T) {
 	cluster := &v1.Cluster{
 		Status: &v1.ClusterStatus{

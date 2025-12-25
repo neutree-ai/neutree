@@ -420,11 +420,26 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
+	setEngineSpecialEnv(endpoint, applicationEnv)
+
 	app.RuntimeEnv = map[string]interface{}{
 		"env_vars": applicationEnv,
 	}
 
 	return app, nil
+}
+
+func setEngineSpecialEnv(endpoint *v1.Endpoint, applicationEnv map[string]string) {
+	// Elsewhere we set RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper="true" so that Ray workers act as a
+	// subreaper and reliably kill their child processes on exit. This helps ensure that no orphaned child processes remain.
+	// However, vLLM's GPU P2P connectivity check spawns child processes and determines P2P support by inspecting their exit
+	// codes. When the Ray subreaper is enabled, parent process can not get the children processes exit code,
+	// causing the P2P check to fail and breaking tensor-parallel vLLM runs.
+	// To avoid these spurious failures in this Ray configuration, we set VLLM_SKIP_P2P_CHECK=1 to skip vLLM's P2P check.
+	// TODO: In the future, we may need a more robust solution instead of skipping the check.
+	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == "vllm" {
+		applicationEnv["VLLM_SKIP_P2P_CHECK"] = "1"
+	}
 }
 
 // formatServiceURL constructs the service URL for an endpoint.
