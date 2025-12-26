@@ -11,10 +11,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-const (
-	metricsLastAppliedConfigAnnotation = "metrics." + v1.AnnotationLastAppliedConfig
-)
-
 type MetricsComponent struct {
 	cluster               *v1.Cluster
 	namespace             string

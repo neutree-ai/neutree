@@ -2,12 +2,11 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/manifest_apply"
+	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -32,45 +31,27 @@ func (r *RouterComponent) ApplyResources(ctx context.Context) error {
 		return errors.Wrapf(err, "failed to get route resources for cluster %s", r.cluster.Metadata.Name)
 	}
 
-	lastAppliedConfigJson := r.cluster.Metadata.Annotations[routerLastAppliedConfigAnnotation]
-	manifestApplier := manifest_apply.NewManifestApply(r.ctrlClient, r.namespace).WithNewObjects(objs).
-		WithLastAppliedConfig(lastAppliedConfigJson).
-		WithMutate(func(obj *unstructured.Unstructured) error {
-			labels := obj.GetLabels()
-			if labels == nil {
-				labels = make(map[string]string)
-			}
-			labels[v1.LabelManagedBy] = v1.LabelManagedByValue
-			obj.SetLabels(labels)
-			return nil
+	applier := deploy.NewKubernetesDeployer(
+		r.ctrlClient,
+		r.namespace,
+		r.cluster.Metadata.Name, // resourceName
+		"router",                // componentName
+	).
+		WithNewObjects(objs).
+		WithLabels(map[string]string{
+			"cluster":         r.cluster.Metadata.Name,
+			"workspace":       r.cluster.Metadata.Workspace,
+			v1.LabelManagedBy: v1.LabelManagedByValue,
 		}).
 		WithLogger(r.logger)
 
-	changedCount, err := manifestApplier.ApplyManifests(ctx)
+	changedCount, err := applier.Apply(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to apply manifests")
+		return errors.Wrap(err, "failed to apply router")
 	}
 
 	if changedCount > 0 {
-		r.logger.Info("Applied router manifests",
-			"changedObjects", changedCount)
-
-		// Save the current configuration as last applied config
-		// Only marshal the Items array, not the entire UnstructuredList
-		newConfigJSON, err := json.Marshal(objs.Items)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal deployment objects")
-		}
-
-		// Initialize annotations if needed
-		if r.cluster.Metadata.Annotations == nil {
-			r.cluster.Metadata.Annotations = make(map[string]string)
-		}
-
-		// Update last applied config in annotations
-		r.cluster.Metadata.Annotations[routerLastAppliedConfigAnnotation] = string(newConfigJSON)
-
-		r.logger.Info("Updated router configuration")
+		r.logger.Info("Applied router manifests", "changedObjects", changedCount)
 	}
 
 	return nil
@@ -78,23 +59,16 @@ func (r *RouterComponent) ApplyResources(ctx context.Context) error {
 
 // DeleteResources deletes all route resources from the cluster
 func (r *RouterComponent) DeleteResources(ctx context.Context) (bool, error) {
-	lastAppliedConfigJson := r.cluster.Metadata.Annotations[routerLastAppliedConfigAnnotation]
-	manifestApplier := manifest_apply.NewManifestApply(r.ctrlClient, r.namespace).
-		WithLastAppliedConfig(lastAppliedConfigJson).
-		WithMutate(func(obj *unstructured.Unstructured) error {
-			labels := obj.GetLabels()
-			if labels == nil {
-				labels = make(map[string]string)
-			}
-			labels[v1.LabelManagedBy] = v1.LabelManagedByValue
-			obj.SetLabels(labels)
-			return nil
-		}).
-		WithLogger(r.logger)
+	applier := deploy.NewKubernetesDeployer(
+		r.ctrlClient,
+		r.namespace,
+		r.cluster.Metadata.Name,
+		"router",
+	).WithLogger(r.logger)
 
-	deleted, err := manifestApplier.Delete(ctx)
+	deleted, err := applier.Delete(ctx)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to delete manifests")
+		return false, errors.Wrap(err, "failed to delete router")
 	}
 
 	if deleted {

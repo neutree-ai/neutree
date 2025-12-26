@@ -653,9 +653,9 @@ func Test_queryParamsToFilters(t *testing.T) {
 
 	t.Run("convert multiple filters", func(t *testing.T) {
 		params := url.Values{
-			"id":                     []string{"eq.123"},
-			"metadata->>name":        []string{"eq.test"},
-			"metadata->>workspace":   []string{"eq.default"},
+			"id":                   []string{"eq.123"},
+			"metadata->>name":      []string{"eq.test"},
+			"metadata->>workspace": []string{"eq.default"},
 		}
 
 		filters := queryParamsToFilters(params)

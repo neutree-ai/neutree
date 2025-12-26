@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/pkg/errors"
@@ -14,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/manifest_apply"
+	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -28,55 +27,32 @@ func (c *NativeKubernetesClusterReconciler) reconcileModelCache(reconcileCtx *Re
 }
 
 func (c *NativeKubernetesClusterReconciler) reconcileModelCacheResources(reconcileCtx *ReconcileContext) error {
-	var (
-		modelCacheLastAppliedConfigAnnotation = "modelcache." + v1.AnnotationLastAppliedConfig
-	)
-
 	objList, err := c.getModelCacheResources(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to get model cache resources")
 	}
 
-	lastAppliedConfig := reconcileCtx.Cluster.Metadata.GetAnnotation(modelCacheLastAppliedConfigAnnotation)
-	manifestApplier := manifest_apply.NewManifestApply(reconcileCtx.ctrClient, reconcileCtx.clusterNamespace).
-		WithLastAppliedConfig(lastAppliedConfig).
+	applier := deploy.NewKubernetesDeployer(
+		reconcileCtx.ctrClient,
+		reconcileCtx.clusterNamespace,
+		reconcileCtx.Cluster.Metadata.Name, // resourceName
+		"modelcache",                       // componentName
+	).
 		WithNewObjects(objList).
-		WithMutate(func(obj *unstructured.Unstructured) error {
-			labels := obj.GetLabels()
-			if labels == nil {
-				labels = make(map[string]string)
-			}
+		WithLabels(map[string]string{
+			"cluster":         reconcileCtx.Cluster.Metadata.Name,
+			"workspace":       reconcileCtx.Cluster.Metadata.Workspace,
+			v1.LabelManagedBy: v1.LabelManagedByValue,
+		}).
+		WithLogger(reconcileCtx.logger)
 
-			labels[v1.LabelManagedBy] = v1.LabelManagedByValue
-			obj.SetLabels(labels)
-
-			return nil
-		})
-
-	changedCount, err := manifestApplier.ApplyManifests(reconcileCtx.Ctx)
+	changedCount, err := applier.Apply(reconcileCtx.Ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to apply model cache manifests")
+		return errors.Wrap(err, "failed to apply model cache")
 	}
 
 	if changedCount > 0 {
-		reconcileCtx.logger.Info("Applied model cache manifests",
-			"changedObjects", changedCount)
-
-		// Save the current configuration as last applied config
-		// Only marshal the Items array, not the entire UnstructuredList
-		newConfigJSON, err := json.Marshal(objList.Items)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal objects")
-		}
-
-		// Initialize annotations if needed
-		if reconcileCtx.Cluster.Metadata.Annotations == nil {
-			reconcileCtx.Cluster.Metadata.Annotations = make(map[string]string)
-		}
-
-		// Update last applied config in annotations
-		reconcileCtx.Cluster.Metadata.Annotations[modelCacheLastAppliedConfigAnnotation] = string(newConfigJSON)
-		reconcileCtx.logger.Info("Updated model cache configuration")
+		reconcileCtx.logger.Info("Applied model cache manifests", "changedObjects", changedCount)
 	}
 
 	return nil

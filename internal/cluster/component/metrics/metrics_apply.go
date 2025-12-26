@@ -2,12 +2,11 @@ package metrics
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/manifest_apply"
+	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -32,46 +31,27 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 		return errors.Wrapf(err, "failed to get metrics resources for cluster %s", m.cluster.Metadata.Name)
 	}
 
-	lastAppliedConfigJson := m.cluster.Metadata.Annotations[metricsLastAppliedConfigAnnotation]
-	manifestApplier := manifest_apply.NewManifestApply(m.ctrlClient, m.namespace).
+	applier := deploy.NewKubernetesDeployer(
+		m.ctrlClient,
+		m.namespace,
+		m.cluster.Metadata.Name, // resourceName
+		"metrics",               // componentName
+	).
 		WithNewObjects(objs).
-		WithLastAppliedConfig(lastAppliedConfigJson).
-		WithMutate(func(obj *unstructured.Unstructured) error {
-			labels := obj.GetLabels()
-			if labels == nil {
-				labels = make(map[string]string)
-			}
-			labels[v1.LabelManagedBy] = v1.LabelManagedByValue
-			obj.SetLabels(labels)
-			return nil
+		WithLabels(map[string]string{
+			"cluster":         m.cluster.Metadata.Name,
+			"workspace":       m.cluster.Metadata.Workspace,
+			v1.LabelManagedBy: v1.LabelManagedByValue,
 		}).
 		WithLogger(m.logger)
 
-	changedCount, err := manifestApplier.ApplyManifests(ctx)
+	changedCount, err := applier.Apply(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to apply manifests")
+		return errors.Wrap(err, "failed to apply metrics")
 	}
 
 	if changedCount > 0 {
-		m.logger.Info("Applied metrics manifests",
-			"changedObjects", changedCount)
-
-		// Save the current configuration as last applied config
-		// Only marshal the Items array, not the entire UnstructuredList
-		newConfigJSON, err := json.Marshal(objs.Items)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal deployment objects")
-		}
-
-		// Initialize annotations if needed
-		if m.cluster.Metadata.Annotations == nil {
-			m.cluster.Metadata.Annotations = make(map[string]string)
-		}
-
-		// Update last applied config in annotations
-		m.cluster.Metadata.Annotations[metricsLastAppliedConfigAnnotation] = string(newConfigJSON)
-
-		m.logger.Info("Updated metrics configuration")
+		m.logger.Info("Applied metrics manifests", "changedObjects", changedCount)
 	}
 
 	return nil
@@ -79,23 +59,16 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 
 // DeleteResources deletes all metrics resources from the cluster
 func (m *MetricsComponent) DeleteResources(ctx context.Context) (bool, error) {
-	lastAppliedConfigJson := m.cluster.Metadata.Annotations[metricsLastAppliedConfigAnnotation]
-	manifestApplier := manifest_apply.NewManifestApply(m.ctrlClient, m.namespace).
-		WithLastAppliedConfig(lastAppliedConfigJson).
-		WithMutate(func(obj *unstructured.Unstructured) error {
-			labels := obj.GetLabels()
-			if labels == nil {
-				labels = make(map[string]string)
-			}
-			labels[v1.LabelManagedBy] = v1.LabelManagedByValue
-			obj.SetLabels(labels)
-			return nil
-		}).
-		WithLogger(m.logger)
+	applier := deploy.NewKubernetesDeployer(
+		m.ctrlClient,
+		m.namespace,
+		m.cluster.Metadata.Name,
+		"metrics",
+	).WithLogger(m.logger)
 
-	deleted, err := manifestApplier.Delete(ctx)
+	deleted, err := applier.Delete(ctx)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to delete manifests")
+		return false, errors.Wrap(err, "failed to delete metrics")
 	}
 
 	if deleted {
