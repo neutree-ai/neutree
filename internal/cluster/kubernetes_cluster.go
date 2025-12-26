@@ -131,14 +131,6 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 		}
 	}
 
-	// Save cluster annotations (including last applied configs from components)
-	err = c.storage.UpdateCluster(reconcileCtx.Cluster.GetID(), &v1.Cluster{
-		Metadata: reconcileCtx.Cluster.Metadata,
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to update cluster annotations")
-	}
-
 	if len(errs) > 0 {
 		return utilerrors.NewAggregate(errs)
 	}

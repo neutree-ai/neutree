@@ -252,7 +252,7 @@ func TestComputeAdditionalComponents_Metrics(t *testing.T) {
 			expectedDeleteCount:    0,
 		},
 		{
-			name:                   "Invalid URL for metrics",
+			name:                   "URL without HTTP/HTTPS scheme for metrics",
 			metricsRemoteWriteURL:  "invalid-url",
 			expectedReconcileCount: 0,
 			expectedDeleteCount:    1,
