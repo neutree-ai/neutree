@@ -16,6 +16,7 @@ import (
 
 	"slices"
 
+	"github.com/docker/go-units"
 	"github.com/google/uuid"
 	"github.com/klauspost/pgzip"
 	"github.com/pkg/errors"
@@ -46,24 +47,38 @@ const (
 
 // GetModelDetail gets detailed information about a specific model
 func GetModelDetail(homePath, modelName, version string) (*ModelMeta, error) {
-	tag := modelName
-	if version != "" {
-		tag = fmt.Sprintf("%s:%s", modelName, version)
+	actualVersion := version
+
+	if version == v1.LatestVersion {
+		latestPath := filepath.Join(homePath, "models", modelName, v1.LatestVersion)
+
+		data, err := os.ReadFile(latestPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, errors.Errorf("model %s not found", modelName)
+			}
+
+			return nil, errors.Wrap(err, "failed to read latest version file")
+		}
+
+		actualVersion = strings.TrimSpace(string(data))
 	}
 
-	cmd := exec.Command("bentoml", "models", "get", tag, "-o", "json")
-	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v1.BentoMLHomeEnv, homePath))
+	modelDir := filepath.Join(homePath, "models", modelName, actualVersion)
+	yamlPath := filepath.Join(modelDir, ModelYAMLFileName)
 
-	content, err := cmd.CombinedOutput()
+	data, err := os.ReadFile(yamlPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get model detail: %s", string(content))
+		if os.IsNotExist(err) {
+			return nil, errors.Errorf("model %s:%s not found", modelName, actualVersion)
+		}
+
+		return nil, errors.Wrap(err, "failed to read model.yaml")
 	}
 
 	var meta ModelMeta
-
-	err = json.Unmarshal(content, &meta)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal model detail")
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal model.yaml")
 	}
 
 	return &meta, nil
@@ -319,7 +334,30 @@ func GenerateVersion() (*string, error) {
 	return &lower, nil
 }
 
+func calculateDirectorySize(dir string) (int64, error) {
+	var totalSize int64
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !info.IsDir() {
+			totalSize += info.Size()
+		}
+
+		return nil
+	})
+
+	return totalSize, err
+}
+
 func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter io.Writer) (string, error) {
+	dirSize, err := calculateDirectorySize(srcDir)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to calculate directory size")
+	}
+
 	yamlPath := filepath.Join(srcDir, ModelYAMLFileName)
 	var yamlBytes []byte
 
@@ -330,13 +368,14 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 			micro := now.Nanosecond() / 1e3
 			y.CreationTime = fmt.Sprintf("%s.%06d+00:00",
 				now.Format("2006-01-02T15:04:05"), micro)
+			y.Size = units.HumanSize(float64(dirSize))
 			yamlBytes, _ = yaml.Marshal(&y)
 		} else {
 			yamlBytes = data
 		}
 	} else if os.IsNotExist(err) {
 		var y ModelYAML
-		if err := FillMinimalModelYAML(&y, modelName, version, modelName); err != nil {
+		if err := FillMinimalModelYAML(&y, modelName, version, modelName, dirSize); err != nil {
 			return "", err
 		}
 
@@ -458,6 +497,7 @@ type ModelYAML struct {
 	Name       string                 `yaml:"name"`
 	Version    string                 `yaml:"version"`
 	Module     string                 `yaml:"module"`
+	Size       string                 `yaml:"size,omitempty"`
 	APIVersion string                 `yaml:"api_version"`
 	Signatures map[string]interface{} `yaml:"signatures"`
 	Labels     map[string]string      `yaml:"labels"`
@@ -472,11 +512,12 @@ type ModelYAML struct {
 	CreationTime string `yaml:"creation_time"`
 }
 
-func FillMinimalModelYAML(y *ModelYAML, name, version, hfRepo string) error {
+func FillMinimalModelYAML(y *ModelYAML, name, version, hfRepo string, size int64) error {
 	*y = ModelYAML{
 		Name:       name,
 		Version:    version,
 		Module:     "",
+		Size:       units.HumanSize(float64(size)),
 		APIVersion: "v1",
 		Signatures: map[string]interface{}{},
 		Labels:     map[string]string{},
