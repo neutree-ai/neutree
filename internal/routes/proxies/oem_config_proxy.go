@@ -15,12 +15,11 @@ import (
 //   - DELETE: Use deletion timestamp pattern instead
 func RegisterOEMConfigRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	proxyGroup := group.Group("/oem_configs")
-	proxyGroup.Use(middlewares...)
 
 	handler := CreateStructProxyHandler[v1.OEMConfig](deps, "oem_configs")
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", handler)
+	proxyGroup.POST("", append(middlewares, handler)...)
+	proxyGroup.PATCH("", append(middlewares, handler)...)
 }
