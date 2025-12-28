@@ -460,6 +460,20 @@ func handlePatchWithBackfill(c *gin.Context, deps *Dependencies, tableName strin
 		return
 	}
 
+	if metadata, ok := requestBody["metadata"]; ok {
+		metadataMap, ok := metadata.(map[string]interface{})
+		if ok {
+			if _, exists := metadataMap["deletion_timestamp"]; exists {
+				// If deletion_timestamp is set, skip backfilling
+				klog.V(4).Infof("Skipping backfill for deletion request")
+				c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, CreatePostgrestAuthModifier(c))
+				proxyHandler(c)
+				return
+			}
+		}
+	}
+
 	// Fetch current resource from storage (uses service_role token)
 	currentResource, err := fetchCurrentResource(
 		deps.Storage,
