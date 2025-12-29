@@ -75,5 +75,7 @@ func (m *MetricsComponent) DeleteResources(ctx context.Context) (bool, error) {
 		m.logger.Info("Deleted all metrics resources")
 	}
 
+	delete(m.cluster.Metadata.Annotations, metricsLastAppliedConfigAnnotation)
+
 	return deleted, nil
 }

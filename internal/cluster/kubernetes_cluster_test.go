@@ -223,3 +223,60 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 		})
 	}
 }
+
+func TestComputeAdditionalComponents_Metrics(t *testing.T) {
+	cluster := &NativeKubernetesClusterReconciler{}
+
+	reconcileCtx := &ReconcileContext{
+		Cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "default",
+			},
+		},
+		kubernetesClusterConfig: &v1.KubernetesClusterConfig{},
+	}
+
+	imagePrefix := "test-prefix/"
+
+	tests := []struct {
+		name                   string
+		metricsRemoteWriteURL  string
+		expectedReconcileCount int
+		expectedDeleteCount    int
+	}{
+		{
+			name:                   "Valid HTTP URL for metrics",
+			metricsRemoteWriteURL:  "http://example.com/metrics",
+			expectedReconcileCount: 1,
+			expectedDeleteCount:    0,
+		},
+		{
+			name:                   "URL without HTTP/HTTPS scheme for metrics",
+			metricsRemoteWriteURL:  "invalid-url",
+			expectedReconcileCount: 0,
+			expectedDeleteCount:    1,
+		},
+		{
+			name:                   "Empty URL for metrics",
+			metricsRemoteWriteURL:  "",
+			expectedReconcileCount: 0,
+			expectedDeleteCount:    1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cluster.metricsRemoteWriteURL = tt.metricsRemoteWriteURL
+
+			reconcileComps, deleteComps := cluster.ComputeAdditionalComponents(reconcileCtx, imagePrefix)
+
+			if len(reconcileComps) != tt.expectedReconcileCount {
+				t.Errorf("expected %d reconcile components, got %d", tt.expectedReconcileCount, len(reconcileComps))
+			}
+			if len(deleteComps) != tt.expectedDeleteCount {
+				t.Errorf("expected %d delete components, got %d", tt.expectedDeleteCount, len(deleteComps))
+			}
+		})
+	}
+}
