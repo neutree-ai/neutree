@@ -5,14 +5,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 func TestExtractBody(t *testing.T) {
@@ -220,84 +217,78 @@ func TestExtractFilterValue(t *testing.T) {
 
 func TestExtractResourceIdentifiers(t *testing.T) {
 	tests := []struct {
-		name             string
-		queryParams      url.Values
-		tableName        string
+		name              string
+		bodyMap           map[string]interface{}
 		expectedWorkspace string
-		expectedName     string
-		wantErr          bool
+		expectedName      string
+		wantErr           bool
 	}{
 		{
-			name: "cluster with workspace and name",
-			queryParams: url.Values{
-				"metadata->>workspace": []string{"eq.default"},
-				"metadata->>name":      []string{"eq.my-cluster"},
+			name: "resource with workspace and name",
+			bodyMap: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"workspace": "default",
+					"name":      "my-cluster",
+				},
 			},
-			tableName:        storage.CLUSTERS_TABLE,
 			expectedWorkspace: "default",
-			expectedName:     "my-cluster",
-			wantErr:          false,
+			expectedName:      "my-cluster",
+			wantErr:           false,
 		},
 		{
-			name: "workspace with only name",
-			queryParams: url.Values{
-				"metadata->>name": []string{"eq.my-workspace"},
+			name: "non-workspaced resource with only name",
+			bodyMap: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name": "my-workspace",
+				},
 			},
-			tableName:        storage.WORKSPACE_TABLE,
 			expectedWorkspace: "",
-			expectedName:     "my-workspace",
-			wantErr:          false,
-		},
-		{
-			name: "user_profile with id",
-			queryParams: url.Values{
-				"id": []string{"eq.user-123"},
-			},
-			tableName:        storage.USER_PROFILE_TABLE,
-			expectedWorkspace: "",
-			expectedName:     "user-123",
-			wantErr:          false,
-		},
-		{
-			name: "missing workspace for cluster",
-			queryParams: url.Values{
-				"metadata->>name": []string{"eq.my-cluster"},
-			},
-			tableName: storage.CLUSTERS_TABLE,
-			wantErr:      true,
-		},
-		{
-			name: "missing name for workspace",
-			queryParams: url.Values{
-				"other-param": []string{"value"},
-			},
-			tableName: storage.WORKSPACE_TABLE,
-			wantErr:      true,
-		},
-		{
-			name: "missing id for user_profile",
-			queryParams: url.Values{
-				"other-param": []string{"value"},
-			},
-			tableName: storage.USER_PROFILE_TABLE,
-			wantErr:      true,
+			expectedName:      "my-workspace",
+			wantErr:           false,
 		},
 		{
 			name: "image_registry with workspace and name",
-			queryParams: url.Values{
-				"metadata->>workspace": []string{"eq.default"},
-				"metadata->>name":      []string{"eq.my-registry"},
+			bodyMap: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"workspace": "default",
+					"name":      "registry-smtx-io",
+				},
 			},
-			tableName:        storage.IMAGE_REGISTRY_TABLE,
 			expectedWorkspace: "default",
-			expectedName:     "my-registry",
-			wantErr:          false,
+			expectedName:      "registry-smtx-io",
+			wantErr:           false,
+		},
+		{
+			name: "missing metadata",
+			bodyMap: map[string]interface{}{
+				"spec": map[string]interface{}{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing name in metadata",
+			bodyMap: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"workspace": "default",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty name in metadata",
+			bodyMap: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"workspace": "default",
+					"name":      "",
+				},
+			},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			workspace, name, err := ExtractResourceIdentifiers(tt.queryParams, tt.tableName)
+			workspace, name, err := ExtractResourceIdentifiers(tt.bodyMap)
 
 			if tt.wantErr {
 				assert.Error(t, err)

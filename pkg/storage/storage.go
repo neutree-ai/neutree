@@ -190,6 +190,9 @@ type Storage interface {
 	// GenericQuery performs a generic query on any table with custom select fields
 	// Use this for internal operations that need service_role permissions
 	GenericQuery(table string, selectFields string, filters []Filter, result interface{}) error
+
+	// Count returns the number of rows matching the given filters
+	Count(table string, filters []Filter) (int, error)
 }
 
 type Options struct {

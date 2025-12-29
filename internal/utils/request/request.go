@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 
 	"github.com/gin-gonic/gin"
-
-	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // BodyContext holds parsed request body information
@@ -26,6 +23,7 @@ func ExtractBody(c *gin.Context) (*BodyContext, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
+
 	c.Request.Body.Close()
 
 	// Parse as JSON
@@ -85,40 +83,24 @@ func ExtractFilterValue(filter string) string {
 	return filter
 }
 
-// ExtractResourceIdentifiers extracts workspace and name from PostgREST query parameters
+// ExtractResourceIdentifiers extracts workspace and name from request body metadata
 // Returns (workspace, name, error)
-// - For user_profile: returns ("", id, nil) where id is the user ID
-// - For workspace: returns ("", name, nil) where name is the workspace name
-// - For other resources: returns (workspace, name, nil)
-// tableName should be one of the storage table constants (e.g., storage.WORKSPACE_TABLE)
-func ExtractResourceIdentifiers(queryParams url.Values, tableName string) (workspace, name string, err error) {
-	// For user_profile, we use id instead of name
-	if tableName == storage.USER_PROFILE_TABLE {
-		id := ExtractFilterValue(queryParams.Get("id"))
-		if id == "" {
-			return "", "", fmt.Errorf("user_profile id not found in query params")
-		}
-
-		return "", id, nil
+// workspace may be empty for non-workspaced resources
+func ExtractResourceIdentifiers(bodyMap map[string]interface{}) (workspace, name string, err error) {
+	// Extract metadata from body
+	metadata, ok := bodyMap["metadata"].(map[string]interface{})
+	if !ok {
+		return "", "", fmt.Errorf("metadata not found in request body")
 	}
 
-	// For workspace, we only need name (no workspace field)
-	if tableName == storage.WORKSPACE_TABLE {
-		name = ExtractFilterValue(queryParams.Get("metadata->>name"))
-		if name == "" {
-			return "", "", fmt.Errorf("workspace name not found in query params")
-		}
-
-		return "", name, nil
+	// Extract name (required)
+	name, ok = metadata["name"].(string)
+	if !ok || name == "" {
+		return "", "", fmt.Errorf("name not found in metadata")
 	}
 
-	// For other resources, we need both workspace and name
-	workspace = ExtractFilterValue(queryParams.Get("metadata->>workspace"))
-	name = ExtractFilterValue(queryParams.Get("metadata->>name"))
-
-	if workspace == "" || name == "" {
-		return "", "", fmt.Errorf("workspace or name not found in query params")
-	}
+	// Extract workspace (optional, may be empty for non-workspaced resources)
+	workspace, _ = metadata["workspace"].(string)
 
 	return workspace, name, nil
 }

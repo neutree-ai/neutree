@@ -47,6 +47,25 @@ func (s *postgrestStorage) GenericQuery(table string, selectFields string, filte
 	return parseResponse(result, responseContent)
 }
 
+func (s *postgrestStorage) Count(table string, filters []Filter) (int, error) {
+	type CountResult struct {
+		Count int `json:"count"`
+	}
+
+	var results []CountResult
+
+	err := s.GenericQuery(table, "count", filters, &results)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(results) == 0 {
+		return 0, nil
+	}
+
+	return results[0].Count, nil
+}
+
 func (s *postgrestStorage) ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error) {
 	var response []v1.ImageRegistry
 	err := s.genericList(IMAGE_REGISTRY_TABLE, &response, option)

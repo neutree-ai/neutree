@@ -1,29 +1,50 @@
 package proxies
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// RegisterImageRegistryRoutes registers image registry routes with field filtering based on struct tags
-// Fields marked with api:"-" tag in v1.ImageRegistry will be automatically excluded from responses
-//
-// Masked fields:
-//   - spec.authconfig: All authentication credentials
-//
-// Allowed methods: GET, POST, PATCH
-// Disallowed methods:
-//   - PUT: Not supported (use PATCH for updates)
-//   - DELETE: Use deletion timestamp pattern instead
+func validateImageRegistryDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
+	return func(workspace, name string) error {
+		fmt.Println("validateImageRegistryDeletion", workspace, name)
+
+		count, err := s.Count(storage.CLUSTERS_TABLE, []storage.Filter{
+			{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
+			{Column: "spec->>image_registry", Operator: "eq", Value: name},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to count clusters: %w", err)
+		}
+
+		if count > 0 {
+			return &middleware.DeletionError{
+				Code:    "10127",
+				Message: fmt.Sprintf("cannot delete image_registry '%s/%s'", workspace, name),
+				Hint:    fmt.Sprintf("%d cluster(s) still reference this image registry", count),
+			}
+		}
+
+		return nil
+	}
+}
+
 func RegisterImageRegistryRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	proxyGroup := group.Group("/image_registries")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.ImageRegistry](deps, "image_registries")
+	deletionValidation := middleware.DeletionValidation(
+		storage.IMAGE_REGISTRY_TABLE,
+		validateImageRegistryDeletion(deps.Storage),
+	)
+	handler := CreateStructProxyHandler[v1.ImageRegistry](deps, storage.IMAGE_REGISTRY_TABLE)
 
-	// Only register allowed methods
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", handler)
+	proxyGroup.PATCH("", deletionValidation, handler)
 }
