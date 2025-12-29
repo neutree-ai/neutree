@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // RegisterEngineRoutes registers engine routes
@@ -17,7 +18,7 @@ func RegisterEngineRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	proxyGroup := group.Group("/engines")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.Engine](deps, "engines")
+	handler := CreateStructProxyHandler[v1.Engine](deps, storage.ENGINE_TABLE)
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)

@@ -70,6 +70,63 @@ func (_c *MockStorage_CallDatabaseFunction_Call) RunAndReturn(run func(string, m
 	return _c
 }
 
+// Count provides a mock function with given fields: table, filters
+func (_m *MockStorage) Count(table string, filters []storage.Filter) (int, error) {
+	ret := _m.Called(table, filters)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Count")
+	}
+
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, []storage.Filter) (int, error)); ok {
+		return rf(table, filters)
+	}
+	if rf, ok := ret.Get(0).(func(string, []storage.Filter) int); ok {
+		r0 = rf(table, filters)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, []storage.Filter) error); ok {
+		r1 = rf(table, filters)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_Count_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Count'
+type MockStorage_Count_Call struct {
+	*mock.Call
+}
+
+// Count is a helper method to define mock.On call
+//   - table string
+//   - filters []storage.Filter
+func (_e *MockStorage_Expecter) Count(table interface{}, filters interface{}) *MockStorage_Count_Call {
+	return &MockStorage_Count_Call{Call: _e.mock.On("Count", table, filters)}
+}
+
+func (_c *MockStorage_Count_Call) Run(run func(table string, filters []storage.Filter)) *MockStorage_Count_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].([]storage.Filter))
+	})
+	return _c
+}
+
+func (_c *MockStorage_Count_Call) Return(_a0 int, _a1 error) *MockStorage_Count_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_Count_Call) RunAndReturn(run func(string, []storage.Filter) (int, error)) *MockStorage_Count_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateApiKey provides a mock function with given fields: data
 func (_m *MockStorage) CreateApiKey(data *v1.ApiKey) error {
 	ret := _m.Called(data)

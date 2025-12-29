@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/neutree-ai/neutree/internal/utils/request"
 )
 
 func Test_filterObject(t *testing.T) {
@@ -788,8 +790,8 @@ func TestIsSoftDeleteRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isSoftDeleteRequest(tt.requestBody)
-			assert.Equal(t, tt.expected, result, "isSoftDeleteRequest() should return %v for %s", tt.expected, tt.name)
+			result := request.IsSoftDeleteRequest(tt.requestBody)
+			assert.Equal(t, tt.expected, result, "IsSoftDeleteRequest() should return %v for %s", tt.expected, tt.name)
 		})
 	}
 }

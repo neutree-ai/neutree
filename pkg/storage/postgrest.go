@@ -47,6 +47,25 @@ func (s *postgrestStorage) GenericQuery(table string, selectFields string, filte
 	return parseResponse(result, responseContent)
 }
 
+func (s *postgrestStorage) Count(table string, filters []Filter) (int, error) {
+	type CountResult struct {
+		Count int `json:"count"`
+	}
+
+	var results []CountResult
+
+	err := s.GenericQuery(table, "count", filters, &results)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(results) == 0 {
+		return 0, nil
+	}
+
+	return results[0].Count, nil
+}
+
 func (s *postgrestStorage) ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error) {
 	var response []v1.ImageRegistry
 	err := s.genericList(IMAGE_REGISTRY_TABLE, &response, option)
@@ -516,7 +535,7 @@ func (s *postgrestStorage) CreateEngine(data *v1.Engine) error {
 	)
 
 	// Assuming the table name is "engines"
-	if _, _, err = s.postgrestClient.From("engines").Insert(data, true, "", "", "").Execute(); err != nil {
+	if _, _, err = s.postgrestClient.From(ENGINE_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
 		return err
 	}
 
@@ -529,7 +548,7 @@ func (s *postgrestStorage) DeleteEngine(id string) error {
 	)
 
 	// Assuming the table name is "engines"
-	if _, _, err = s.postgrestClient.From("engines").Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+	if _, _, err = s.postgrestClient.From(ENGINE_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
 		return err
 	}
 
@@ -542,7 +561,7 @@ func (s *postgrestStorage) UpdateEngine(id string, data *v1.Engine) error {
 	)
 
 	// Assuming the table name is "engines"
-	if _, _, err = s.postgrestClient.From("engines").Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+	if _, _, err = s.postgrestClient.From(ENGINE_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
 		return err
 	}
 
@@ -556,7 +575,7 @@ func (s *postgrestStorage) GetEngine(id string) (*v1.Engine, error) {
 	)
 
 	// Assuming the table name is "engines"
-	responseContent, _, err := s.postgrestClient.From("engines").Select("*", "", false).Filter("id", "eq", id).Execute()
+	responseContent, _, err := s.postgrestClient.From(ENGINE_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
 	if err != nil {
 		return nil, err
 	}
@@ -575,7 +594,7 @@ func (s *postgrestStorage) GetEngine(id string) (*v1.Engine, error) {
 func (s *postgrestStorage) ListEngine(option ListOption) ([]v1.Engine, error) {
 	var response []v1.Engine
 	// Assuming the table name is "engines"
-	err := s.genericList("engines", &response, option)
+	err := s.genericList(ENGINE_TABLE, &response, option)
 
 	return response, err
 }
