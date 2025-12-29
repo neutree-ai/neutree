@@ -8,6 +8,7 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/internal/cron"
 )
 
 // App represents the main application
@@ -32,6 +33,8 @@ func (a *App) Run(ctx context.Context) error {
 	a.config.AcceleratorManager.Start(ctx)
 
 	go a.config.ObsCollectConfigManager.Start(ctx)
+
+	go cron.StartCrons(ctx, a.config.Storage) //nolint:errcheck
 
 	// Start all controllers
 	for name, ctrl := range a.controllers {
