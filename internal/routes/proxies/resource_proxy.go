@@ -274,6 +274,22 @@ func isEmptyValue(v interface{}) bool {
 	}
 }
 
+// isSoftDeleteRequest checks if the request is a soft delete operation
+// A soft delete is identified by the presence of a non-empty deletion_timestamp field in metadata
+func isSoftDeleteRequest(requestBody map[string]interface{}) bool {
+	// Check for metadata.deletion_timestamp
+	if metadata, ok := requestBody["metadata"].(map[string]interface{}); ok {
+		if deletionTimestamp, exists := metadata["deletion_timestamp"]; exists {
+			// Check if deletion_timestamp is being set (not nil or empty)
+			if deletionTimestamp != nil && deletionTimestamp != "" {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // buildSelectParam builds PostgREST select parameter for excluded fields
 // For example, if excludeFields contains "spec.credentials", it returns "spec"
 func buildSelectParam(excludeFields map[string]struct{}) string {
@@ -456,6 +472,19 @@ func handlePatchWithBackfill(c *gin.Context, deps *Dependencies, tableName strin
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": fmt.Sprintf("Failed to parse request body: %v", err),
 		})
+
+		return
+	}
+
+	// Skip backfill for soft delete operations
+	if isSoftDeleteRequest(requestBody) {
+		// Restore request body and forward directly to PostgREST
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		c.Request.ContentLength = int64(len(bodyBytes))
+		c.Request.Header.Set("Content-Length", fmt.Sprintf("%d", len(bodyBytes)))
+
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, CreatePostgrestAuthModifier(c))
+		proxyHandler(c)
 
 		return
 	}
