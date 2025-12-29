@@ -75,7 +75,5 @@ func (r *RouterComponent) DeleteResources(ctx context.Context) (bool, error) {
 		r.logger.Info("Deleted all router resources")
 	}
 
-	delete(r.cluster.Metadata.Annotations, routerLastAppliedConfigAnnotation)
-
 	return deleted, nil
 }
