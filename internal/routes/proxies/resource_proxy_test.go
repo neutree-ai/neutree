@@ -714,3 +714,82 @@ func Test_queryParamsToFilters(t *testing.T) {
 		assert.Equal(t, "lte", operatorMap["age"])
 	})
 }
+
+func TestIsSoftDeleteRequest(t *testing.T) {
+	tests := []struct {
+		name        string
+		requestBody map[string]interface{}
+		expected    bool
+	}{
+		{
+			name: "soft delete with metadata.deletion_timestamp set to timestamp string",
+			requestBody: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":               "test-resource",
+					"deletion_timestamp": "2025-12-29T06:09:38.917Z",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "soft delete with metadata.deletion_timestamp set to non-empty value",
+			requestBody: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"deletion_timestamp": "some-value",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "not a soft delete - no deletion_timestamp field",
+			requestBody: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name": "test-resource",
+				},
+				"spec": map[string]interface{}{
+					"field": "value",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "not a soft delete - metadata.deletion_timestamp is nil",
+			requestBody: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":               "test-resource",
+					"deletion_timestamp": nil,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "not a soft delete - metadata.deletion_timestamp is empty string",
+			requestBody: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":               "test-resource",
+					"deletion_timestamp": "",
+				},
+			},
+			expected: false,
+		},
+		{
+			name:        "empty request body",
+			requestBody: map[string]interface{}{},
+			expected:    false,
+		},
+		{
+			name: "metadata is not a map",
+			requestBody: map[string]interface{}{
+				"metadata": "invalid-type",
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isSoftDeleteRequest(tt.requestBody)
+			assert.Equal(t, tt.expected, result, "isSoftDeleteRequest() should return %v for %s", tt.expected, tt.name)
+		})
+	}
+}
