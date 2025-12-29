@@ -333,7 +333,7 @@ func TestGetDeployedModelRealVersion_Huggingface(t *testing.T) {
 		{
 			name:         "huggingface registry model with empty version",
 			inputVersion: "",
-			expected:     "main",
+			expected:     "", // Empty version is passed to HuggingFace Hub to use default branch
 		},
 	}
 
