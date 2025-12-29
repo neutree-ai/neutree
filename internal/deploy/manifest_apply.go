@@ -1,4 +1,4 @@
-package manifest_apply
+package deploy
 
 import (
 	"context"
@@ -28,7 +28,7 @@ type ManifestApply struct {
 	// Optional configurations that can be set once and reused
 	lastAppliedConfigJSON string
 	newObjects            *unstructured.UnstructuredList
-	mutate                Mutate
+	mutates               []Mutate
 	logger                klog.Logger
 }
 
@@ -37,6 +37,7 @@ func NewManifestApply(ctrlClient client.Client, namespace string) *ManifestApply
 	return &ManifestApply{
 		ctrlClient: ctrlClient,
 		namespace:  namespace,
+		logger:     klog.Background(),
 	}
 }
 
@@ -52,9 +53,9 @@ func (m *ManifestApply) WithNewObjects(objects *unstructured.UnstructuredList) *
 	return m
 }
 
-// WithOwnershipSetter sets the ownership setter callback
-func (m *ManifestApply) WithMutate(mutate Mutate) *ManifestApply {
-	m.mutate = mutate
+// WithMutate sets the ownership setter callback
+func (m *ManifestApply) WithMutate(mutates Mutate) *ManifestApply {
+	m.mutates = append(m.mutates, mutates)
 	return m
 }
 
@@ -176,10 +177,10 @@ func (m *ManifestApply) computeManifestDiff() (*ManifestDiff, error) {
 	return diff, nil
 }
 
-// ApplyManifests applies changed objects to the cluster
-// Uses ownershipSetter from the manager if not provided
-// objects: Objects to apply
-// ownershipSetter: Optional override for ownership setter (uses manager's if nil)
+// ApplyManifests applies changed objects to the cluster.
+// Uses the Mutate callbacks configured via WithMutates to modify objects before applying.
+// ctx: Context for API calls and cancellation.
+// Returns the number of objects processed (applied + deleted) and an error, if any.
 func (m *ManifestApply) ApplyManifests(
 	ctx context.Context) (int, error) {
 	diff, err := m.computeManifestDiff()
@@ -198,10 +199,12 @@ func (m *ManifestApply) ApplyManifests(
 		obj := objects[i].DeepCopy()
 
 		// Set mutation if callback provided
-		if m.mutate != nil {
-			if err := m.mutate(obj); err != nil {
-				return 0, errors.Wrapf(err, "failed to set mutation for %s/%s",
-					obj.GetKind(), obj.GetName())
+		if m.mutates != nil {
+			for _, mutate := range m.mutates {
+				if err := mutate(obj); err != nil {
+					return 0, errors.Wrapf(err, "failed to set mutation for %s/%s",
+						obj.GetKind(), obj.GetName())
+				}
 			}
 		}
 

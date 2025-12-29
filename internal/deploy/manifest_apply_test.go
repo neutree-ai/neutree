@@ -1,4 +1,4 @@
-package manifest_apply
+package deploy
 
 import (
 	"context"
@@ -102,7 +102,7 @@ func TestNewManifestApply(t *testing.T) {
 	assert.Equal(t, namespace, ma.namespace)
 	assert.Empty(t, ma.lastAppliedConfigJSON)
 	assert.Nil(t, ma.newObjects)
-	assert.Nil(t, ma.mutate)
+	assert.Nil(t, ma.mutates)
 }
 
 func TestManifestApply_WithMethods(t *testing.T) {
@@ -125,7 +125,7 @@ func TestManifestApply_WithMethods(t *testing.T) {
 		return nil
 	}
 	ma = ma.WithMutate(mutateFunc)
-	assert.NotNil(t, ma.mutate)
+	assert.NotNil(t, ma.mutates)
 
 	logger := klog.NewKlogr()
 	ma = ma.WithLogger(logger)

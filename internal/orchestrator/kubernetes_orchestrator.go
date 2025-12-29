@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/pkg/errors"
@@ -10,14 +9,13 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/manifest_apply"
+	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -81,41 +79,28 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.Endp
 		return nil, errors.Wrapf(err, "failed to get kubernetes client for cluster %s", deployedCluster.Metadata.Name)
 	}
 
-	// Get last applied config from endpoint annotations
-	lastAppliedConfig := ""
-	if endpoint.Metadata.Annotations != nil {
-		lastAppliedConfig = endpoint.Metadata.Annotations[v1.AnnotationLastAppliedConfig]
-	}
-
-	// Create mutate callback to set ownership and labels
-	mutate := func(obj *unstructured.Unstructured) error {
-		// Set unified labels for resource tracking
-		labels := obj.GetLabels()
-		if labels == nil {
-			labels = make(map[string]string)
-		}
-
-		labels[v1.LabelManagedBy] = v1.LabelManagedByValue
-		obj.SetLabels(labels)
-
-		return nil
-	}
-
 	logger := klog.LoggerWithValues(klog.Background(),
 		"endpoint", endpoint.Metadata.WorkspaceName(),
 	)
 
-	// Use ManifestApply for automatic manifest management
-	manifestApply := manifest_apply.NewManifestApply(ctrlClient, util.ClusterNamespace(deployedCluster)).
-		WithLastAppliedConfig(lastAppliedConfig).
+	applier := deploy.NewKubernetesDeployer(
+		ctrlClient,
+		util.ClusterNamespace(deployedCluster),
+		endpoint.Metadata.Name, // resourceName
+		"deployment",           // componentName
+	).
 		WithNewObjects(deploymentObjects).
-		WithMutate(mutate).
+		WithLabels(map[string]string{
+			"endpoint":        endpoint.Metadata.Name,
+			"workspace":       endpoint.Metadata.Workspace,
+			v1.LabelManagedBy: v1.LabelManagedByValue,
+		}).
 		WithLogger(logger)
 
-	// Apply manifests (automatically handles diff computation, apply, and deletion)
-	changedCount, err := manifestApply.ApplyManifests(context.Background())
+	// Apply manifests (automatically handles configuration storage)
+	changedCount, err := applier.Apply(context.Background())
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to apply manifests")
+		return nil, errors.Wrap(err, "failed to apply endpoint")
 	}
 
 	if changedCount > 0 {
@@ -123,30 +108,6 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.Endp
 			"endpoint", endpoint.Metadata.Name,
 			"workspace", endpoint.Metadata.Workspace,
 			"changedObjects", changedCount)
-
-		// Save the current configuration as last applied config
-		newConfigJSON, err := json.Marshal(deploymentObjects.Items)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to marshal deployment objects")
-		}
-
-		// Initialize annotations if needed
-		if endpoint.Metadata.Annotations == nil {
-			endpoint.Metadata.Annotations = make(map[string]string)
-		}
-
-		// Update last applied config in annotations
-		endpoint.Metadata.Annotations[v1.AnnotationLastAppliedConfig] = string(newConfigJSON)
-		// Save cluster annotations (including last applied configs from components)
-		err = k.storage.UpdateEndpoint(endpoint.GetID(), &v1.Endpoint{
-			Metadata: endpoint.Metadata,
-		})
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to update cluster annotations")
-		}
-
-		klog.InfoS("Updated endpoint configuration",
-			"endpoint", endpoint.Metadata.Name)
 	}
 
 	return k.GetEndpointStatus(endpoint)
@@ -171,18 +132,15 @@ func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 		return errors.Wrapf(err, "failed to get kubernetes client for cluster %s", deployedCluster.Metadata.WorkspaceName())
 	}
 
-	// Get last applied config from endpoint annotations
-	lastAppliedConfig := ""
-	if endpoint.Metadata.Annotations != nil {
-		lastAppliedConfig = endpoint.Metadata.Annotations[v1.AnnotationLastAppliedConfig]
-	}
+	applier := deploy.NewKubernetesDeployer(
+		ctrlClient,
+		util.ClusterNamespace(deployedCluster),
+		endpoint.Metadata.Name,
+		"deployment",
+	)
 
-	// Use ManifestApply for automatic resource deletion
-	manifestApply := manifest_apply.NewManifestApply(ctrlClient, util.ClusterNamespace(deployedCluster)).
-		WithLastAppliedConfig(lastAppliedConfig)
-
-	// Delete all resources from last applied config
-	deleteFinished, err := manifestApply.Delete(context.Background())
+	// Delete all resources
+	deleteFinished, err := applier.Delete(context.Background())
 	if err != nil {
 		return errors.Wrap(err, "failed to delete endpoint resources")
 	}
