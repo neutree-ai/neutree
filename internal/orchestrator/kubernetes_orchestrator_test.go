@@ -1159,8 +1159,8 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
 					"registry_path": "test-model",
-					"path":          filepath.Join(modelPathPrefix, "test-model", "main"),
-					"version":       "main",
+					"path":          filepath.Join(modelPathPrefix, "test-model"),
+					"version":       "", // Empty version for HuggingFace to use default branch
 				},
 				Env: map[string]string{
 					v1.HFEndpoint: "https://huggingface.co",
@@ -1223,8 +1223,8 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
 					"registry_path": "test-model",
-					"path":          filepath.Join(modelPathPrefix, "test-model", "main"),
-					"version":       "main",
+					"path":          filepath.Join(modelPathPrefix, "test-model"),
+					"version":       "", // Empty version for HuggingFace to use default branch
 				},
 				Env: map[string]string{
 					v1.HFEndpoint: "https://huggingface.co",
@@ -1265,8 +1265,8 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing
 			expected: &DeploymentManifestVariables{
 				ModelArgs: map[string]interface{}{
 					"registry_path": "test-model",
-					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache", "test-model", "main"),
-					"version":       "main",
+					"path":          filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, "test-cache", "test-model"),
+					"version":       "", // Empty version for HuggingFace to use default branch
 				},
 				Env: map[string]string{
 					v1.HFEndpoint: "https://huggingface.co",

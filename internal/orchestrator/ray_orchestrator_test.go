@@ -933,11 +933,11 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 			expectedModelArgs: map[string]string{
 				"registry_type": "hugging-face",
 				"name":          "llama-2-7b",
-				"version":       "main",
+				"version":       "", // Empty version for HuggingFace to use default branch
 				"file":          "model.safetensors",
 				"task":          v1.TextGenerationModelTask,
 				"serve_name":    "llama-2-7b",
-				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "llama-2-7b", "main"),
+				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "llama-2-7b"),
 				"registry_path": "llama-2-7b",
 			},
 			expectedEnvs: map[string]string{

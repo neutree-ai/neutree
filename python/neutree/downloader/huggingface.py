@@ -37,6 +37,9 @@ class HuggingFaceDownloader(Downloader):
         token = None
         if credentials and credentials.get("token"):
             token = credentials.get("token")
-        version = metadata.get("version") if metadata else None
+        # Convert empty string to None so HuggingFace Hub uses default branch
+        # HuggingFace checks "if revision is None:" to use default branch
+        # Empty string would be treated as an invalid branch name
+        version = metadata.get("version") or None if metadata else None
 
         hf.snapshot_download(repo_id=repo_id, allow_patterns=allow_pattern, local_dir=dest, token=token, revision=version)

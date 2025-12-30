@@ -323,10 +323,9 @@ func getDeployedModelRealVersion(modelRegistry *v1.ModelRegistry, modelName, mod
 	}
 
 	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
-		if modelVersion == "" {
-			return "main", nil
-		}
-
+		// For HuggingFace, return the version as-is (including empty string).
+		// Empty string will be converted to None by the Python downloader,
+		// which causes huggingface_hub to use the repository's default branch (main/master/etc).
 		return modelVersion, nil
 	}
 
