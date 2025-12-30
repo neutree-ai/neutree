@@ -137,7 +137,12 @@ func getUsedImageRegistries(cluster *v1.Cluster, s storage.Storage) (*v1.ImageRe
 		return nil, storage.ErrResourceNotFound
 	}
 
-	return &imageRegistryList[0], nil
+	targetImageRegistry := &imageRegistryList[0]
+	if targetImageRegistry.Status == nil || targetImageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
+		return nil, errors.New("image registry " + cluster.Spec.ImageRegistry + " not ready")
+	}
+
+	return targetImageRegistry, nil
 }
 
 func convertToRay(acceleratorMgr accelerator.Manager, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {

@@ -80,6 +80,9 @@ func TestGetUsedImageRegistry(t *testing.T) {
 			URL:        "https://registry.example.com",
 			Repository: "my-repo",
 		},
+		Status: &v1.ImageRegistryStatus{
+			Phase: v1.ImageRegistryPhaseCONNECTED,
+		},
 	}
 
 	tests := []struct {
@@ -105,12 +108,44 @@ func TestGetUsedImageRegistry(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:  "get relate image registry success",
+			name:  "get related image registry success",
 			input: testCluster,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{*testImageRegistry}, nil)
 			},
 			wantErr: false,
+		},
+		{
+			name:  "related image registry not connected",
+			input: testCluster,
+			mockSetup: func(s *storagemocks.MockStorage) {
+				test, _ := util.DeepCopyObject(testImageRegistry)
+				test.Status = &v1.ImageRegistryStatus{
+					Phase: v1.ImageRegistryPhaseFAILED,
+				}
+				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{*test}, nil)
+			},
+			wantErr: true,
+		},
+		{
+			name:  "related image registry status is nil",
+			input: testCluster,
+			mockSetup: func(s *storagemocks.MockStorage) {
+				test, _ := util.DeepCopyObject(testImageRegistry)
+				test.Status = nil
+				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{*test}, nil)
+			},
+			wantErr: true,
+		},
+		{
+			name:  "related image registry status not set",
+			input: testCluster,
+			mockSetup: func(s *storagemocks.MockStorage) {
+				test, _ := util.DeepCopyObject(testImageRegistry)
+				test.Status = &v1.ImageRegistryStatus{}
+				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{*test}, nil)
+			},
+			wantErr: true,
 		},
 	}
 
