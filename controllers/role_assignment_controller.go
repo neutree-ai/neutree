@@ -60,7 +60,6 @@ func (c *RoleAssignmentController) sync(obj *v1.RoleAssignment) error {
 
 			err = c.storage.DeleteRoleAssignment(strconv.Itoa(obj.ID))
 			if err != nil {
-				// Don't wrap if it's already gone
 				if errors.Is(err, storage.ErrResourceNotFound) {
 					klog.Warningf("RoleAssignment %s (ID: %d) not found during final deletion, assuming already deleted", objName, obj.ID)
 					return nil
@@ -73,10 +72,11 @@ func (c *RoleAssignmentController) sync(obj *v1.RoleAssignment) error {
 		}
 
 		klog.Infof("Deleting role assignment %s (ID: %d)", objName, obj.ID)
-		// Update status to DELETED
-		err = c.updateStatus(obj, v1.RoleAssignmentPhaseDELETED, nil)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update role assignment %s (ID: %d) status to DELETED", objName, obj.ID)
+
+		updateErr := c.updateStatus(obj, v1.RoleAssignmentPhaseDELETED, nil)
+		if updateErr != nil {
+			klog.Errorf("failed to update role assignment %s (ID: %d) status: %v", objName, obj.ID, updateErr)
+			return errors.Wrapf(updateErr, "failed to update role assignment %s (ID: %d) status", objName, obj.ID)
 		}
 
 		return nil

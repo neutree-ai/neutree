@@ -85,6 +85,8 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 }
 
 func (c *EndpointController) handleDeletion(obj *v1.Endpoint) error {
+	isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+
 	if obj.Status != nil && obj.Status.Phase == v1.EndpointPhaseDELETED {
 		klog.Infof("Endpoint %s already marked as deleted, removing from DB", obj.Metadata.Name)
 
@@ -97,14 +99,12 @@ func (c *EndpointController) handleDeletion(obj *v1.Endpoint) error {
 		return nil
 	}
 
-	klog.Info("Deleting endpoint " + obj.Metadata.Name)
+	klog.Infof("Deleting endpoint %s (force=%v)", obj.Metadata.Name, isForceDelete)
 
-	// For deletion, we need to track if it succeeds to set correct phase
 	deleteErr := c.performDeletion(obj)
 
-	// Update status to DELETED if successful, or FAILED if not
 	phase := v1.EndpointPhaseDELETED
-	if deleteErr != nil {
+	if deleteErr != nil && !isForceDelete {
 		phase = v1.EndpointPhaseFAILED
 	}
 
@@ -114,7 +114,13 @@ func (c *EndpointController) handleDeletion(obj *v1.Endpoint) error {
 			obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
 	}
 
-	return deleteErr
+	LogForceDeletionWarning(isForceDelete, "endpoint", obj.Metadata.Workspace, obj.Metadata.Name, deleteErr)
+
+	if deleteErr != nil && !isForceDelete {
+		return deleteErr
+	}
+
+	return nil
 }
 
 func (c *EndpointController) performDeletion(obj *v1.Endpoint) error {

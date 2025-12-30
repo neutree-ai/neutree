@@ -59,11 +59,14 @@ func (c *ModelCatalogController) sync(modelCatalog *v1.ModelCatalog) error {
 			return nil
 		}
 
-		klog.Info("Deleting model catalog " + modelCatalog.Metadata.Name)
-		// Update status to DELETED
-		err := c.updateStatus(modelCatalog, v1.ModelCatalogPhaseDELETED, nil)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update model catalog %s/%s status to DELETED",
+		klog.Infof("Deleting model catalog %s", modelCatalog.Metadata.Name)
+
+		updateErr := c.updateStatus(modelCatalog, v1.ModelCatalogPhaseDELETED, nil)
+		if updateErr != nil {
+			klog.Errorf("failed to update model catalog %s/%s status: %v",
+				modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name, updateErr)
+
+			return errors.Wrapf(updateErr, "failed to update model catalog %s/%s status",
 				modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name)
 		}
 

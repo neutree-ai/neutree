@@ -65,13 +65,16 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 			return nil
 		}
 
-		klog.Info("Image registry " + obj.Metadata.Name + " is deleted")
+		klog.Infof("Deleting image registry %s", obj.Metadata.Name)
 
-		// Update status to DELETED (no operations needed for image registry deletion)
+		// No cleanup operations needed for image registry deletion
 		updateErr := c.updateStatus(obj, v1.ImageRegistryPhaseDELETED, nil)
 		if updateErr != nil {
 			klog.Errorf("failed to update image registry %s/%s status: %v",
 				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
+
+			return errors.Wrapf(updateErr, "failed to update image registry %s/%s status",
+				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
 		return nil

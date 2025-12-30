@@ -47,6 +47,8 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 	var err error
 
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
+		isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+
 		if obj.Status != nil && obj.Status.Phase == v1.ApiKeyPhaseDELETED {
 			klog.Infof("ApiKey %s already marked as deleted, removing from DB", obj.Metadata.Name)
 
@@ -59,19 +61,23 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 			return nil
 		}
 
-		klog.Info("Deleting api_key " + obj.Metadata.Name)
+		klog.Infof("Deleting api_key %s (force=%v)", obj.Metadata.Name, isForceDelete)
 
-		err = c.gw.DeleteAPIKey(obj)
-		if err != nil {
-			return errors.Wrapf(err, "failed to delete api_key %s/%s from gateway",
+		deleteErr := c.gw.DeleteAPIKey(obj)
+
+		updateErr := c.updateStatus(obj, v1.ApiKeyPhaseDELETED, deleteErr)
+		if updateErr != nil {
+			klog.Errorf("failed to update api_key %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
+
+			return errors.Wrapf(updateErr, "failed to update api_key %s/%s status",
 				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
-		// Update status to DELETED
-		err = c.updateStatus(obj, v1.ApiKeyPhaseDELETED, nil)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update api_key %s/%s status to DELETED",
-				obj.Metadata.Workspace, obj.Metadata.Name)
+		LogForceDeletionWarning(isForceDelete, "api_key", obj.Metadata.Workspace, obj.Metadata.Name, deleteErr)
+
+		if deleteErr != nil && !isForceDelete {
+			return deleteErr
 		}
 
 		return nil

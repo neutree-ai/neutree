@@ -49,6 +49,8 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 	// Handle deletion early - bypass defer block for already-deleted resources
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
+		isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+
 		if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
 			klog.Info("Model registry " + obj.Metadata.Name + " is already deleted, delete resource from storage")
 
@@ -61,7 +63,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			return nil
 		}
 
-		klog.Info("Deleting model registry " + obj.Metadata.Name)
+		klog.Infof("Deleting model registry %s (force=%v)", obj.Metadata.Name, isForceDelete)
 
 		// For deletion, we need to track if it succeeds to set correct phase
 		deleteErr := func() error {
@@ -78,8 +80,9 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 		}()
 
 		// Update status to DELETED if successful, or FAILED if not
+		// For force delete, always mark as DELETED even if there were errors
 		phase := v1.ModelRegistryPhaseDELETED
-		if deleteErr != nil {
+		if deleteErr != nil && !isForceDelete {
 			phase = v1.ModelRegistryPhaseFAILED
 		}
 
@@ -89,10 +92,12 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
 		}
 
+		LogForceDeletionWarning(isForceDelete, "model registry", obj.Metadata.Workspace, obj.Metadata.Name, deleteErr)
+
 		klog.Info("Model registry " + obj.Metadata.Name + " deletion processed")
 
-		// Return the original delete error if any
-		if deleteErr != nil {
+		// Return the original delete error if any, unless it's a force delete
+		if deleteErr != nil && !isForceDelete {
 			return deleteErr
 		}
 
