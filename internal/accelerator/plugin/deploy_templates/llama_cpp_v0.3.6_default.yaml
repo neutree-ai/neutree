@@ -6,9 +6,6 @@ metadata:
   labels:
     engine: {{ .EngineName }}
     engine_version: {{ .EngineVersion }}
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
-    endpoint: {{ .EndpointName }}
     routing_logic: {{ .RoutingLogic }}
     app: inference
 spec:

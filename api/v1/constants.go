@@ -2,7 +2,7 @@ package v1
 
 const (
 	// Resource management labels
-	LabelManagedBy      = "neutree.ai/managed-by"
+	LabelManagedBy      = "app.kubernetes.io/managed-by"
 	LabelManagedByValue = "neutree.ai"
 
 	// Resource management annotations

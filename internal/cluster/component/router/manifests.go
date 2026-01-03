@@ -10,8 +10,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: router
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -20,8 +18,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: router
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 rules:
 - apiGroups: [""] # "" indicates the core API group
   resources: ["pods"]
@@ -32,6 +28,8 @@ kind: RoleBinding
 metadata:
   name: router-rolebinding
   namespace: {{ .Namespace }}
+  labels:
+    app: router
 subjects:
   - kind: ServiceAccount
     name: router-service-account
@@ -48,8 +46,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: router
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 spec:
   replicas: {{ .Replicas }}
   selector:
@@ -134,8 +130,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: router
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 spec:
   selector:
     app: router

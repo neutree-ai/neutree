@@ -40,9 +40,9 @@ func (c *NativeKubernetesClusterReconciler) reconcileModelCacheResources(reconci
 	).
 		WithNewObjects(objList).
 		WithLabels(map[string]string{
-			"cluster":         reconcileCtx.Cluster.Metadata.Name,
-			"workspace":       reconcileCtx.Cluster.Metadata.Workspace,
-			v1.LabelManagedBy: v1.LabelManagedByValue,
+			v1.NeutreeClusterLabelKey:          reconcileCtx.Cluster.Metadata.Name,
+			v1.NeutreeClusterWorkspaceLabelKey: reconcileCtx.Cluster.Metadata.Workspace,
+			v1.LabelManagedBy:                  v1.LabelManagedByValue,
 		}).
 		WithLogger(reconcileCtx.logger)
 

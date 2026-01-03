@@ -8,17 +8,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 const (
 	// LastAppliedConfigKey is the key used to store last applied configuration in ConfigMap
 	LastAppliedConfigKey = "last-applied-config"
-
-	// ManagedByLabel is the standard Kubernetes label for managed-by
-	ManagedByLabel = "app.kubernetes.io/managed-by"
-
-	// ManagedByValue is the value for managed-by label
-	ManagedByValue = "neutree"
 )
 
 // ConfigStore manages component configuration storage using Kubernetes ConfigMaps
@@ -81,7 +77,7 @@ func (s *ConfigStore) Set(ctx context.Context, namespace, resourceName, componen
 		labels = make(map[string]string)
 	}
 
-	labels[ManagedByLabel] = ManagedByValue
+	labels[v1.LabelManagedBy] = v1.LabelManagedByValue
 	labels["neutree.io/resource"] = resourceName
 	labels["neutree.io/component"] = componentName
 

@@ -109,6 +109,12 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 		return errors.Wrap(err, "failed to generate image pull secret")
 	}
 
+	imagePullSecret.Labels = map[string]string{
+		v1.LabelManagedBy:                  v1.LabelManagedByValue,
+		v1.NeutreeClusterLabelKey:          reconcileCtx.Cluster.Metadata.Name,
+		v1.NeutreeClusterWorkspaceLabelKey: reconcileCtx.Cluster.Metadata.Workspace,
+	}
+
 	installObjs := []client.Object{ns, imagePullSecret}
 	for _, obj := range installObjs {
 		err = util.CreateOrPatch(reconcileCtx.Ctx, obj, reconcileCtx.ctrClient)

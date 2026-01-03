@@ -10,8 +10,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: vmagent
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 data:
   prometheus.yml: |
     global:
@@ -114,8 +112,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: vmagent
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -124,8 +120,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: vmagent
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 rules:
 - apiGroups: [""]
   resources: ["pods", "endpoints", "services"]
@@ -141,8 +135,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: vmagent
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 subjects:
 - kind: ServiceAccount
   name: vmagent-service-account
@@ -159,8 +151,6 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: vmagent
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
 spec:
   replicas: {{ .Replicas }}
   selector:
