@@ -13,15 +13,15 @@ import (
 
 func TestValidateRoleDeletion(t *testing.T) {
 	tests := []struct {
-		name                 string
-		workspace            string
-		roleName             string
-		roleAssignmentCount  int
-		queryError           error
-		expectError          bool
-		expectedCode         string
-		expectedHint         string
-		expectedMessagePart  string
+		name                string
+		workspace           string
+		roleName            string
+		roleAssignmentCount int
+		queryError          error
+		expectError         bool
+		expectedCode        string
+		expectedHint        string
+		expectedMessagePart string
 	}{
 		{
 			name:                "no dependencies - deletion allowed for workspace role",
