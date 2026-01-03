@@ -49,7 +49,7 @@ const (
 func GetModelDetail(homePath, modelName, version string) (*ModelMeta, error) {
 	actualVersion := version
 
-	if version == v1.LatestVersion {
+	if version == v1.LatestVersion || version == "" {
 		latestPath := filepath.Join(homePath, "models", modelName, v1.LatestVersion)
 
 		data, err := os.ReadFile(latestPath)
