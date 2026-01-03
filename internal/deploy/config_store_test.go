@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,7 +82,7 @@ func TestConfigStore_GetSet(t *testing.T) {
 				t.Fatalf("ConfigMap not found: %v", err)
 			}
 
-			if cm.Labels[ManagedByLabel] != ManagedByValue {
+			if cm.Labels[v1.LabelManagedBy] != v1.LabelManagedByValue {
 				t.Errorf("ConfigMap missing managed-by label")
 			}
 			if cm.Labels["neutree.io/resource"] != tt.resourceName {

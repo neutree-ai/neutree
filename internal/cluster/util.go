@@ -23,6 +23,7 @@ func generateInstallNs(cluster *v1.Cluster) *corev1.Namespace {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: util.ClusterNamespace(cluster),
 			Labels: map[string]string{
+				v1.LabelManagedBy:                  v1.LabelManagedByValue,
 				v1.NeutreeClusterLabelKey:          cluster.Metadata.Name,
 				v1.NeutreeClusterWorkspaceLabelKey: cluster.Metadata.Workspace,
 			},

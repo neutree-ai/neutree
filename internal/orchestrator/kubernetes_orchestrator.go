@@ -91,9 +91,10 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.Endp
 	).
 		WithNewObjects(deploymentObjects).
 		WithLabels(map[string]string{
-			"endpoint":        endpoint.Metadata.Name,
-			"workspace":       endpoint.Metadata.Workspace,
-			v1.LabelManagedBy: v1.LabelManagedByValue,
+			"endpoint":                         endpoint.Metadata.Name,
+			v1.NeutreeClusterLabelKey:          deployedCluster.Metadata.Name,
+			v1.NeutreeClusterWorkspaceLabelKey: deployedCluster.Metadata.Workspace,
+			v1.LabelManagedBy:                  v1.LabelManagedByValue,
 		}).
 		WithLogger(logger)
 

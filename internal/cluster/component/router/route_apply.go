@@ -39,9 +39,9 @@ func (r *RouterComponent) ApplyResources(ctx context.Context) error {
 	).
 		WithNewObjects(objs).
 		WithLabels(map[string]string{
-			"cluster":         r.cluster.Metadata.Name,
-			"workspace":       r.cluster.Metadata.Workspace,
-			v1.LabelManagedBy: v1.LabelManagedByValue,
+			v1.NeutreeClusterLabelKey:          r.cluster.Metadata.Name,
+			v1.NeutreeClusterWorkspaceLabelKey: r.cluster.Metadata.Workspace,
+			v1.LabelManagedBy:                  v1.LabelManagedByValue,
 		}).
 		WithLogger(r.logger)
 

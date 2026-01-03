@@ -39,9 +39,9 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 	).
 		WithNewObjects(objs).
 		WithLabels(map[string]string{
-			"cluster":         m.cluster.Metadata.Name,
-			"workspace":       m.cluster.Metadata.Workspace,
-			v1.LabelManagedBy: v1.LabelManagedByValue,
+			v1.NeutreeClusterLabelKey:          m.cluster.Metadata.Name,
+			v1.NeutreeClusterWorkspaceLabelKey: m.cluster.Metadata.Workspace,
+			v1.LabelManagedBy:                  v1.LabelManagedByValue,
 		}).
 		WithLogger(m.logger)
 
