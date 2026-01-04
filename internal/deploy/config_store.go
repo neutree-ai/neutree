@@ -78,8 +78,8 @@ func (s *ConfigStore) Set(ctx context.Context, namespace, resourceName, componen
 	}
 
 	labels[v1.LabelManagedBy] = v1.LabelManagedByValue
-	labels["neutree.io/resource"] = resourceName
-	labels["neutree.io/component"] = componentName
+	labels["neutree.ai/resource"] = resourceName
+	labels["neutree.ai/component"] = componentName
 
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
