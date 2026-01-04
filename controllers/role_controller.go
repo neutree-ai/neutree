@@ -56,11 +56,14 @@ func (c *RoleController) sync(obj *v1.Role) error {
 			return nil
 		}
 
-		klog.Info("Deleting role " + obj.Metadata.Name)
-		// Update status to DELETED
-		err = c.updateStatus(obj, v1.RolePhaseDELETED, nil)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update role %s/%s status to DELETED",
+		klog.Infof("Deleting role %s", obj.Metadata.Name)
+
+		updateErr := c.updateStatus(obj, v1.RolePhaseDELETED, nil)
+		if updateErr != nil {
+			klog.Errorf("failed to update role %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
+
+			return errors.Wrapf(updateErr, "failed to update role %s/%s status",
 				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 

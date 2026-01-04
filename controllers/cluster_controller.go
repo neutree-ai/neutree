@@ -129,6 +129,8 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 }
 
 func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
+	isForceDelete := IsForceDelete(c.Metadata.Annotations)
+
 	if c.Status != nil && c.Status.Phase == v1.ClusterPhaseDeleted {
 		klog.Info("Cluster " + c.Metadata.WorkspaceName() + " already deleted, delete resource from storage")
 
@@ -140,33 +142,44 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 		return nil
 	}
 
-	klog.Info("Deleting cluster " + c.Metadata.WorkspaceName())
+	klog.Infof("Deleting cluster %s (force=%v)", c.Metadata.WorkspaceName(), isForceDelete)
 
-	err := controller.gw.DeleteCluster(c)
-	if err != nil {
-		return errors.Wrap(err, "failed to delete cluster backend service "+c.Metadata.WorkspaceName())
+	deleteErr := func() error {
+		if err := controller.gw.DeleteCluster(c); err != nil {
+			return errors.Wrap(err, "failed to delete cluster backend service "+c.Metadata.WorkspaceName())
+		}
+
+		if c.Spec.Type == v1.SSHClusterType {
+			controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
+		}
+
+		r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
+		}
+
+		if err = r.ReconcileDelete(context.Background(), c); err != nil {
+			return errors.Wrapf(err, "failed to reconcile delete cluster %s", c.Metadata.WorkspaceName())
+		}
+
+		return nil
+	}()
+
+	// For non-force delete, return error immediately without updating status
+	if deleteErr != nil && !isForceDelete {
+		return deleteErr
 	}
 
-	if c.Spec.Type == v1.SSHClusterType {
-		controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
+	// Update status for successful delete or force delete
+	phase := v1.ClusterPhaseDeleted
+
+	updateErr := controller.updateStatus(c, phase, deleteErr)
+	if updateErr != nil {
+		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
+		return errors.Wrapf(updateErr, "failed to update cluster %s status", c.Metadata.WorkspaceName())
 	}
 
-	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
-	}
-
-	err = r.ReconcileDelete(context.Background(), c)
-	if err != nil {
-		return errors.Wrapf(err, "failed to reconcile delete cluster %s", c.Metadata.WorkspaceName())
-	}
-
-	klog.Info("Cluster " + c.Metadata.WorkspaceName() + " delete finished, mark as deleted")
-
-	err = controller.updateStatus(c, v1.ClusterPhaseDeleted, nil)
-	if err != nil {
-		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), err)
-	}
+	LogForceDeletionWarning(isForceDelete, "cluster", c.Metadata.Workspace, c.Metadata.Name, deleteErr)
 
 	return nil
 }

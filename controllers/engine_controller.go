@@ -56,11 +56,14 @@ func (c *EngineController) sync(obj *v1.Engine) error {
 			return nil
 		}
 
-		klog.Info("Deleting engine " + obj.Metadata.Name)
-		// Update status to DELETED
-		err = c.updateStatus(obj, v1.EnginePhaseDeleted, nil)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update engine %s/%s status to DELETED",
+		klog.Infof("Deleting engine %s", obj.Metadata.Name)
+
+		updateErr := c.updateStatus(obj, v1.EnginePhaseDeleted, nil)
+		if updateErr != nil {
+			klog.Errorf("failed to update engine %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
+
+			return errors.Wrapf(updateErr, "failed to update engine %s/%s status",
 				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 

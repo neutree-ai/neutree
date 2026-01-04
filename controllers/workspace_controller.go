@@ -52,12 +52,13 @@ func (c *WorkspaceController) sync(obj *v1.Workspace) error {
 	workspaceIDStr := strconv.Itoa(obj.ID)
 
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
+		isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+
 		if obj.Status != nil && obj.Status.Phase == v1.WorkspacePhaseDELETED {
 			klog.Infof("Workspace %s already marked as deleted, removing from DB", obj.Metadata.Name)
 
 			err = c.storage.DeleteWorkspace(workspaceIDStr)
 			if err != nil {
-				// Don't wrap ErrResourceNotFound, as it means already deleted.
 				if errors.Is(err, storage.ErrResourceNotFound) {
 					klog.Warningf("Workspace %s not found during deletion, assuming already deleted", obj.Metadata.Name)
 					return nil
@@ -69,18 +70,23 @@ func (c *WorkspaceController) sync(obj *v1.Workspace) error {
 			return nil
 		}
 
-		klog.Info("Deleting workspace " + obj.Metadata.Name)
+		klog.Infof("Deleting workspace %s (force=%v)", obj.Metadata.Name, isForceDelete)
 
-		err = c.DeleteWorkspaceEngine(obj)
-		if err != nil {
-			return errors.Wrapf(err, "failed to delete workspace engine %s", obj.Metadata.Name)
+		deleteErr := c.DeleteWorkspaceEngine(obj)
+
+		// For non-force delete, return error immediately without updating status
+		if deleteErr != nil && !isForceDelete {
+			return deleteErr
 		}
 
-		// Update status to DELETED
-		err = c.updateStatus(obj, v1.WorkspacePhaseDELETED, nil)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update workspace %s status to DELETED", obj.Metadata.Name)
+		// Update status for successful delete or force delete
+		updateErr := c.updateStatus(obj, v1.WorkspacePhaseDELETED, deleteErr)
+		if updateErr != nil {
+			klog.Errorf("failed to update workspace %s status: %v", obj.Metadata.Name, updateErr)
+			return errors.Wrapf(updateErr, "failed to update workspace %s status", obj.Metadata.Name)
 		}
+
+		LogForceDeletionWarning(isForceDelete, "workspace", obj.Metadata.Workspace, obj.Metadata.Name, deleteErr)
 
 		return nil
 	}

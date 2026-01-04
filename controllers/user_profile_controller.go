@@ -51,6 +51,8 @@ func (c *UserProfileController) sync(obj *v1.UserProfile) error {
 
 	// Handle deletion
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
+		isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+
 		// Phase 2: Already marked as DELETED, remove from DB
 		if obj.Status != nil && obj.Status.Phase == v1.UserProfilePhaseDELETED {
 			klog.Infof("UserProfile %s already marked as deleted, removing from DB", obj.Metadata.Name)
@@ -65,28 +67,33 @@ func (c *UserProfileController) sync(obj *v1.UserProfile) error {
 		}
 
 		// Phase 1: Perform GoTrue user deletion first
-		klog.Info("Deleting user profile " + obj.Metadata.Name)
+		klog.Infof("Deleting user profile %s (force=%v)", obj.Metadata.Name, isForceDelete)
 
-		// Delete user from GoTrue
 		deleteErr := c.deleteGoTrueUser(obj)
 
-		// Update status based on deletion result
+		// Determine phase: DELETED if successful or force delete, FAILED otherwise
 		phase := v1.UserProfilePhaseDELETED
-
-		if deleteErr != nil {
-			// If deletion fails, mark as FAILED to allow retry
-			klog.Errorf("Failed to delete user from GoTrue: %v", deleteErr)
-
+		if deleteErr != nil && !isForceDelete {
 			phase = v1.UserProfilePhaseFAILED
 		}
 
-		err = c.updateStatus(obj, phase, deleteErr)
-		if err != nil {
-			return errors.Wrapf(err, "failed to update user profile %s/%s status",
+		updateErr := c.updateStatus(obj, phase, deleteErr)
+		if updateErr != nil {
+			klog.Errorf("failed to update user profile %s/%s status: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
+
+			return errors.Wrapf(updateErr, "failed to update user profile %s/%s status",
 				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
-		return deleteErr
+		LogForceDeletionWarning(isForceDelete, "user profile", obj.Metadata.Workspace, obj.Metadata.Name, deleteErr)
+
+		// Return deletion error if any (unless force delete)
+		if deleteErr != nil && !isForceDelete {
+			return deleteErr
+		}
+
+		return nil
 	}
 
 	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.UserProfilePhasePENDING {
