@@ -85,8 +85,8 @@ func TestConfigStore_GetSet(t *testing.T) {
 			if cm.Labels[v1.LabelManagedBy] != v1.LabelManagedByValue {
 				t.Errorf("ConfigMap missing managed-by label")
 			}
-			if cm.Labels["neutree.io/resource"] != tt.resourceName {
-				t.Errorf("ConfigMap resource label = %v, want %v", cm.Labels["neutree.io/resource"], tt.resourceName)
+			if cm.Labels["neutree.ai/resource"] != tt.resourceName {
+				t.Errorf("ConfigMap resource label = %v, want %v", cm.Labels["neutree.ai/resource"], tt.resourceName)
 			}
 		})
 	}
