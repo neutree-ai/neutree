@@ -374,7 +374,7 @@ func (c *sshRayClusterReconciler) reconcileWorkerNode(reconcileCtx *ReconcileCon
 		}
 	}
 
-	// update cluster labels
+	// update cluster status
 	staticNodeProvisionStatusContent, err := json.Marshal(staticNodeProvisionStatusMap)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal static node provision status")

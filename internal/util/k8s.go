@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const ResourceSkipPatchAnnotation = "neutree.io/skip-patch"
+const ResourceSkipPatchAnnotation = "neutree.ai/skip-patch"
 
 func CreateOrPatch(ctx context.Context, obj client.Object, ctrClient client.Client) error {
 	err := ctrClient.Patch(ctx, obj, client.Apply, client.ForceOwnership, client.FieldOwner("neutree-controller"))
