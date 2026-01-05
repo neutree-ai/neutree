@@ -27,6 +27,62 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Function to replace image registry with mirror registry
+replace_image_registry() {
+    local image_url="$1"
+    local mirror_registry="$2"
+
+    if [ -z "$mirror_registry" ]; then
+        echo "$image_url"
+        return 0
+    fi
+
+    # Parse image: registry/repo:tag or repo:tag
+    local image_without_registry="$image_url"
+
+    # If image contains /, extract the part after the first registry
+    if [[ "$image_url" == *"/"* ]]; then
+        # Remove registry part (everything before first /)
+        # For docker.io/library/nginx:latest -> library/nginx:latest
+        # For gcr.io/project/image:tag -> project/image:tag
+        if [[ "$image_url" == *"."*"/"* ]] || [[ "$image_url" == "localhost"* ]]; then
+            # Has explicit registry
+            image_without_registry="${image_url#*/}"
+        fi
+    else
+        # No slash, it's like nginx:latest, add library/ prefix for docker hub compatibility
+        if [[ "$image_url" == *":"* ]]; then
+            local name="${image_url%:*}"
+            local tag="${image_url#*:}"
+            image_without_registry="library/${name}:${tag}"
+        else
+            image_without_registry="library/${image_url}:latest"
+        fi
+    fi
+
+    echo "${mirror_registry}/${image_without_registry}"
+}
+
+# Function to login to registry
+login_to_registry() {
+    local registry="$1"
+    local user="$2"
+    local pass="$3"
+
+    if [ -z "$registry" ] || [ -z "$user" ] || [ -z "$pass" ]; then
+        return 0
+    fi
+
+    print_info "Logging in to $registry..."
+    echo "$pass" | docker login "$registry" -u "$user" --password-stdin
+    if [ $? -ne 0 ]; then
+        print_error "Failed to login to registry"
+        return 1
+    fi
+    print_info "Successfully logged in to $registry"
+    return 0
+}
+
 # Function to read and format deploy template
 read_deploy_template() {
     local template_file="$1"
@@ -156,6 +212,9 @@ Options:
     -c, --schema FILE         Path to engine_schema.json file (optional)
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
+    -r, --mirror-registry URL Mirror registry URL to pull images from (e.g., my.registry.com)
+    -u, --registry-user USER  Mirror registry username for authentication
+    -p, --registry-pass PASS  Mirror registry password for authentication
     -h, --help                Show this help message
 
 Examples:
@@ -197,6 +256,15 @@ Examples:
         -c ./engine_schema.json \\
         -d "vLLM engine with values schema"
 
+    # Build with images pulled from mirror registry
+    $0 -n vllm -v v0.5.0 \\
+        -i "nvidia-gpu:neutree/vllm-cuda:v0.5.0" \\
+        -s "generate" \\
+        -r "my.registry.com" \\
+        -u "myuser" \\
+        -p "mypassword" \\
+        -d "vLLM engine pulling from mirror registry"
+
 EOF
 }
 
@@ -210,6 +278,9 @@ TEMPLATE_DIR=""
 SCHEMA_FILE=""
 OUTPUT_FILE=""
 DESCRIPTION=""
+MIRROR_REGISTRY=""
+REGISTRY_USER=""
+REGISTRY_PASS=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -247,6 +318,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         -d|--description)
             DESCRIPTION="$2"
+            shift 2
+            ;;
+        -r|--mirror-registry)
+            MIRROR_REGISTRY="$2"
+            shift 2
+            ;;
+        -u|--registry-user)
+            REGISTRY_USER="$2"
+            shift 2
+            ;;
+        -p|--registry-pass)
+            REGISTRY_PASS="$2"
             shift 2
             ;;
         -h|--help)
@@ -298,6 +381,18 @@ mkdir -p "$IMAGES_DIR"
 print_info "Building engine version package: $ENGINE_NAME $ENGINE_VERSION"
 print_info "Temporary directory: $TEMP_DIR"
 
+# Login to mirror registry if configured
+if [ -n "$MIRROR_REGISTRY" ]; then
+    print_info "Using mirror registry: $MIRROR_REGISTRY"
+    if [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_PASS" ]; then
+        login_to_registry "$MIRROR_REGISTRY" "$REGISTRY_USER" "$REGISTRY_PASS"
+        if [ $? -ne 0 ]; then
+            print_error "Failed to login to mirror registry"
+            exit 1
+        fi
+    fi
+fi
+
 # Export Docker images
 print_info "Exporting Docker images..."
 IFS=',' read -ra IMAGE_SPECS <<< "$IMAGES"
@@ -316,14 +411,33 @@ for spec in "${IMAGE_SPECS[@]}"; do
 
     print_info "Exporting $FULL_IMAGE for $ACCELERATOR..."
 
-    # Check if image exists, if not, pull it
+    # Determine the image to pull (from mirror registry if configured)
+    PULL_IMAGE="$FULL_IMAGE"
+    if [ -n "$MIRROR_REGISTRY" ]; then
+        PULL_IMAGE=$(replace_image_registry "$FULL_IMAGE" "$MIRROR_REGISTRY")
+        print_info "Will pull from mirror registry: $PULL_IMAGE"
+    fi
+
+    # Check if original image exists locally
     if ! docker image inspect "$FULL_IMAGE" > /dev/null 2>&1; then
         print_warn "Image $FULL_IMAGE not found locally. Pulling image..."
-        if ! docker pull "$FULL_IMAGE"; then
-            print_error "Failed to pull image $FULL_IMAGE"
+
+        # Pull from mirror registry or original source
+        if ! docker pull "$PULL_IMAGE"; then
+            print_error "Failed to pull image $PULL_IMAGE"
             exit 1
         fi
-        print_info "Successfully pulled $FULL_IMAGE"
+        print_info "Successfully pulled $PULL_IMAGE"
+
+        # If we pulled from mirror registry, tag it with the original name
+        if [ "$PULL_IMAGE" != "$FULL_IMAGE" ]; then
+            print_info "Tagging $PULL_IMAGE as $FULL_IMAGE"
+            docker tag "$PULL_IMAGE" "$FULL_IMAGE"
+            if [ $? -ne 0 ]; then
+                print_error "Failed to tag image"
+                exit 1
+            fi
+        fi
     fi
 
     docker save "$FULL_IMAGE" -o "$OUTPUT_TAR"
