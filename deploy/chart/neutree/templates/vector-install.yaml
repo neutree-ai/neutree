@@ -80,7 +80,7 @@ data:
         headers:
           content-type: application/json
         batch:
-          max_events: 10
+          max_events: 1
           timeout_secs: 1
 ---
 apiVersion: v1
