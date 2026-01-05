@@ -388,7 +388,7 @@ func TestBuildLlamacppDeployment(t *testing.T) {
 		ImageTag:        "v1.0.0",
 		ImagePullSecret: "my-secret",
 		EngineName:      "llama-cpp",
-		EngineVersion:   "v0.3.6",
+		EngineVersion:   "v0.3.7",
 		EndpointName:    "test-endpoint",
 		ModelArgs: map[string]interface{}{
 			"name":          "qwen2-0.5b-instruct",

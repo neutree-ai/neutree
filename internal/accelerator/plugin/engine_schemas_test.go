@@ -51,7 +51,7 @@ func TestGetEngineSchema(t *testing.T) {
 		},
 		{
 			name:        "Valid Llama.cpp engine",
-			engineName:  "llama-cpp-v0.3.6",
+			engineName:  "llama-cpp-v0.3.7",
 			expectError: false,
 		},
 		{
@@ -101,6 +101,6 @@ func TestEngineSchemas(t *testing.T) {
 
 	// Test that we have the expected engines registered
 	assert.Contains(t, EngineSchemas, "vllm-v0.8.5")
-	assert.Contains(t, EngineSchemas, "llama-cpp-v0.3.6")
+	assert.Contains(t, EngineSchemas, "llama-cpp-v0.3.7")
 	assert.Len(t, EngineSchemas, 2)
 }
