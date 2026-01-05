@@ -141,12 +141,12 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 		Spec: &v1.EngineSpec{
 			Versions: []*v1.EngineVersion{
 				{
-					Version:      "v0.3.6",
+					Version:      "v0.3.7",
 					ValuesSchema: llamaCppDefaultEngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"cpu": {
 							ImageName: "neutree/llama-cpp-python", // no official llama-cpp-python image, so use neutree image
-							Tag:       "v0.3.6",
+							Tag:       "v0.3.7",
 						},
 					},
 					DeployTemplate: map[string]map[string]string{
