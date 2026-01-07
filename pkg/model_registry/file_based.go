@@ -3,7 +3,6 @@ package model_registry
 import (
 	"io"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -180,8 +179,13 @@ func (n *nfsFile) GetModelPath(name, version string) (string, error) {
 }
 
 func (n *nfsFile) HealthyCheck() error {
-	if _, err := os.Stat(n.targetPath); err != nil {
-		return errors.Wrapf(err, "failed to access NFS mount path %s", n.targetPath)
+	existed, err := nfs.IsMountExist(n.nfsServerPath, n.targetPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to check NFS mount %s to %s", n.nfsServerPath, n.targetPath)
+	}
+
+	if !existed {
+		return errors.Errorf("NFS mount %s to %s does not exist", n.nfsServerPath, n.targetPath)
 	}
 
 	// Try to list models to verify functionality

@@ -29,21 +29,39 @@ var (
 	mountInterface = kmount.New("")
 )
 
-func MountNFS(device string, mountPoint string) error {
-	err := os.MkdirAll(mountPoint, os.FileMode(0644))
-	if err != nil {
-		return err
-	}
-
+// IsMountExist checks whether the given NFS device is mounted at the specified
+// mount point. It takes the device identifier (device) and the target mount
+// path (mountPoint) as arguments, and returns true if a matching mount is
+// found, false otherwise. An error is returned if the list of current mounts
+// cannot be retrieved.
+func IsMountExist(device string, mountPoint string) (bool, error) {
 	mountPoints, err := mountInterface.List()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	for _, mp := range mountPoints {
 		if mountPoint == mp.Path && device == mp.Device {
-			return nil
+			return true, nil
 		}
+	}
+
+	return false, nil
+}
+
+func MountNFS(device string, mountPoint string) error {
+	existed, err := IsMountExist(device, mountPoint)
+	if err != nil {
+		return err
+	}
+
+	if existed {
+		return nil
+	}
+
+	err = os.MkdirAll(mountPoint, os.FileMode(0644))
+	if err != nil {
+		return err
 	}
 
 	err = mountInterface.Mount(device, mountPoint, "nfs", defaultNFSMountOptions)
