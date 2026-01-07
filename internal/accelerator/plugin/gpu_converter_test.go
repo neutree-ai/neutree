@@ -50,8 +50,15 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 					v1.AcceleratorProductKey: "Tesla-T4",
 				},
 			},
-			expectedResource: nil,
-			wantErr:          false,
+			expectedResource: &v1.KubernetesResourceSpec{
+				Requests:     map[string]string{},
+				Limits:       map[string]string{},
+				NodeSelector: map[string]string{},
+				Env: map[string]string{
+					"NVIDIA_VISIBLE_DEVICES": "none",
+				},
+			},
+			wantErr: false,
 		},
 
 		{
@@ -64,8 +71,15 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 					v1.AcceleratorProductKey: "NVIDIA_A100",
 				},
 			},
-			expectedResource: nil,
-			wantErr:          false,
+			expectedResource: &v1.KubernetesResourceSpec{
+				Requests:     map[string]string{},
+				Limits:       map[string]string{},
+				NodeSelector: map[string]string{},
+				Env: map[string]string{
+					"NVIDIA_VISIBLE_DEVICES": "none",
+				},
+			},
+			wantErr: false,
 		},
 		{
 			name: "Convert NVIDIA GPU resource spec with none product to Kubernetes",

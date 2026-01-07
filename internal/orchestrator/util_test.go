@@ -40,6 +40,33 @@ func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {
 	assert.Equal(t, float64(2), ray.Resources["rdma/hca"])
 }
 
+func TestConverterManager_ConvertToRay_Accelerator_ZeroCount(t *testing.T) {
+
+	mgr := &acceleratormocks.MockManager{}
+	mgr.On("GetConverter", "nvidia_gpu").Return(plugin.NewGPUConverter(), true)
+
+	gpu := float64(0)
+	cpu := float64(16)
+	memory := float64(64)
+	spec := &v1.ResourceSpec{
+		GPU:    &gpu,
+		CPU:    &cpu,
+		Memory: &memory,
+	}
+	spec.SetAcceleratorType(string(v1.AcceleratorTypeNVIDIAGPU))
+	spec.SetAcceleratorProduct("NVIDIA-L20")
+	spec.AddCustomResource("rdma/hca", "2")
+
+	ray, err := convertToRay(mgr, spec)
+	require.NoError(t, err)
+	assert.NotNil(t, ray)
+	assert.Equal(t, float64(0), ray.NumGPUs)
+	assert.Equal(t, float64(16), ray.NumCPUs)
+	assert.Equal(t, float64(64*plugin.BytesPerGiB), ray.Memory)
+	assert.Equal(t, float64(0), ray.Resources["NVIDIA-L20"])
+	assert.Equal(t, float64(2), ray.Resources["rdma/hca"])
+}
+
 func TestConverterManager_ConvertToKubernetes_NVIDIA(t *testing.T) {
 	mgr := &acceleratormocks.MockManager{}
 
@@ -64,6 +91,33 @@ func TestConverterManager_ConvertToKubernetes_NVIDIA(t *testing.T) {
 	assert.Equal(t, "8", k8s.Requests["cpu"])
 	assert.Equal(t, "32Gi", k8s.Requests["memory"])
 	assert.Equal(t, "NVIDIA-L20", k8s.NodeSelector["nvidia.com/gpu.product"])
+}
+
+func TestConverterManager_ConvertToKubernetes_Accelerator_ZeroCount(t *testing.T) {
+	mgr := &acceleratormocks.MockManager{}
+
+	mgr.On("GetConverter", "nvidia_gpu").Return(plugin.NewGPUConverter(), true)
+
+	gpu := float64(0)
+	cpu := float64(8)
+	memory := float64(32)
+	spec := &v1.ResourceSpec{
+		GPU:    &gpu,
+		CPU:    &cpu,
+		Memory: &memory,
+	}
+	spec.SetAcceleratorType(string(v1.AcceleratorTypeNVIDIAGPU))
+	spec.SetAcceleratorProduct("NVIDIA-L20")
+
+	k8s, err := convertToKubernetes(mgr, spec)
+	require.NoError(t, err)
+	assert.NotNil(t, k8s)
+	assert.Equal(t, "", k8s.Requests["nvidia.com/gpu"])
+	assert.Equal(t, "", k8s.Limits["nvidia.com/gpu"])
+	assert.Equal(t, "8", k8s.Requests["cpu"])
+	assert.Equal(t, "32Gi", k8s.Requests["memory"])
+	assert.Equal(t, "", k8s.NodeSelector["nvidia.com/gpu.product"])
+	assert.Equal(t, "none", k8s.Env["NVIDIA_VISIBLE_DEVICES"])
 }
 
 func TestConverterManager_ConvertToRay_AMD(t *testing.T) {
