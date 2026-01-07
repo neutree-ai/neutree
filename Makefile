@@ -53,9 +53,9 @@ SHELL := /bin/bash
 MODULE_PATH = github.com/neutree-ai/neutree
 GO_BUILD_ARGS = \
 	-ldflags="-extldflags=-static \
-	-X '$(MODULE_PATH)/pkg/version.gitCommit=$(GIT_COMMIT)' \
-	-X '$(MODULE_PATH)/pkg/version.appVersion=$(IMAGE_TAG)' \
-	-X '$(MODULE_PATH)/pkg/version.buildTime=$(shell date --iso-8601=seconds)'"
+	-X '$(MODULE_PATH)/internal/version.gitCommit=$(GIT_COMMIT)' \
+	-X '$(MODULE_PATH)/internal/version.appVersion=$(IMAGE_TAG)' \
+	-X '$(MODULE_PATH)/internal/version.buildTime=$(shell date --iso-8601=seconds)'"
 
 MOCKERY_DIRS=./ pkg/model_registry pkg/storage pkg/command internal/orchestrator internal/cluster internal/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config internal/gateway internal/accelerator internal/auth internal/util
 MOCKERY_OUTPUT_DIRS=testing/mocks pkg/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/cluster/mocks internal/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks internal/gateway/mocks internal/accelerator/mocks internal/auth/mocks internal/util/mocks
