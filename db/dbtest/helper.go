@@ -1,12 +1,14 @@
 package dbtest
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"testing"
 
 	_ "github.com/lib/pq"
+	"github.com/pkg/errors"
 	"github.com/supabase-community/gotrue-go"
 	"github.com/supabase-community/gotrue-go/types"
 
@@ -112,4 +114,51 @@ func WithUserContext(t *testing.T, db *sql.DB, userID string, fn func(*sql.Tx)) 
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("failed to commit transaction: %v", err)
 	}
+}
+
+type SetContextFunc func(tx *sql.Tx) error
+
+func setUserContext(userID string) SetContextFunc {
+	return func(tx *sql.Tx) error {
+		_, err := tx.Exec(fmt.Sprintf("SET LOCAL request.jwt.claim.sub = '%s'", userID))
+		return errors.Wrapf(err, "failed to set user context for user %s", userID)
+	}
+}
+
+func setJwtSecretContext(jwtSecret string) SetContextFunc {
+	return func(tx *sql.Tx) error {
+		_, err := tx.Exec(fmt.Sprintf("SET LOCAL app.settings.jwt_secret = '%s'", jwtSecret))
+		return errors.Wrap(err, "failed to set jwt secret context")
+	}
+}
+
+func execWithContext(t *testing.T, db *sql.DB, ctxFuncs []SetContextFunc, fn func(*sql.Tx) error) error {
+	t.Helper()
+
+	ctx := context.Background()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	for _, set := range ctxFuncs {
+		if err := set(tx); err != nil {
+			t.Fatalf("failed to set context: %v", err)
+		}
+	}
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("failed to commit transaction: %v", err)
+	}
+
+	return nil
 }
