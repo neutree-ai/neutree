@@ -491,8 +491,10 @@ func (c *sshRayClusterReconciler) detectClusterAcceleratorType(reconcileCtx *Rec
 		return *reconcileCtx.Cluster.Spec.Config.AcceleratorType, nil
 	}
 
-	// then we check the last detected accelerator type in cluster status
-	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.AcceleratorType != nil {
+	// Check cached accelerator type, but only trust non-empty values
+	// Empty cached value should trigger re-detection to support dynamic GPU node addition
+	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.AcceleratorType != nil &&
+		*reconcileCtx.Cluster.Status.AcceleratorType != "" {
 		return *reconcileCtx.Cluster.Status.AcceleratorType, nil
 	}
 
@@ -513,15 +515,18 @@ func (c *sshRayClusterReconciler) detectClusterAcceleratorType(reconcileCtx *Rec
 			return "", errors.Wrap(err, "failed to get node accelerator type")
 		}
 
+		// Skip CPU-only nodes - they can coexist with accelerator nodes
+		if acceleratorType == "" {
+			continue
+		}
+
 		if detectAcceleratorType == "" {
 			detectAcceleratorType = acceleratorType
 			continue
 		}
 
-		if acceleratorType == "" {
-			continue
-		}
-
+		// If both detectAcceleratorType and acceleratorType are non-empty,
+		// ensure they match (we don't support mixed accelerator types like NVIDIA + AMD)
 		if detectAcceleratorType != acceleratorType {
 			return "", errors.New("cluster has different accelerator type")
 		}
