@@ -33,7 +33,8 @@ type Claims struct {
 }
 
 type ParsedInfo struct {
-	UserID string `json:"user_id"`
+	UserID string  `json:"user_id"`
+	KeyID  *string `json:"key_id,omitempty"`
 }
 
 type SelfContainedPayload struct {
@@ -85,7 +86,7 @@ func Auth(deps Dependencies) gin.HandlerFunc {
 
 		// For API key authentication, generate a postgrest token
 		if is_api_key {
-			postgrestToken, err := GeneratePostgrestToken(parsedInfo.UserID, deps.Config.JwtSecret)
+			postgrestToken, err := GeneratePostgrestToken(parsedInfo.UserID, parsedInfo.KeyID, deps.Config.JwtSecret)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"error": "Failed to generate authentication token",
@@ -142,6 +143,7 @@ func parseApiKey(authHeader string, config AuthConfig) (*ParsedInfo, error) {
 
 	return &ParsedInfo{
 		UserID: payload.UserID,
+		KeyID:  &payload.KeyID,
 	}, nil
 }
 
@@ -310,10 +312,11 @@ func createHMAC(data []byte, secret string) []byte {
 }
 
 // GeneratePostgrestToken generates a minimal JWT token for postgrest authentication
-func GeneratePostgrestToken(userID string, jwtSecret string) (string, error) {
+func GeneratePostgrestToken(userID string, keyID *string, jwtSecret string) (string, error) {
 	claims := jwt.MapClaims{
-		"sub":  userID,
-		"role": "api_user",
+		"sub":        userID,
+		"role":       "api_user",
+		"api_key_id": keyID,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

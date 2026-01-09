@@ -542,7 +542,7 @@ func TestGeneratePostgrestToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			token, err := GeneratePostgrestToken(tt.userID, tt.secret)
+			token, err := GeneratePostgrestToken(tt.userID, nil, tt.secret)
 
 			if tt.expectError {
 				assert.Error(t, err)
