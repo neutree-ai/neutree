@@ -925,6 +925,28 @@ func TestDetectClusterAcceleratorType(t *testing.T) {
 			expectedType: v1.AcceleratorTypeNVIDIAGPU.String(),
 		},
 		{
+			name: "should re-detect from nodes when accelerator is empty string, means cpu only",
+			reconcileCtx: &ReconcileContext{
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{
+						HeadIP: "127.0.0.1",
+					},
+				},
+				Cluster: &v1.Cluster{
+					Status: &v1.ClusterStatus{
+						AcceleratorType: pointer.String(""),
+					},
+				},
+			},
+			setupMock: func(acceleratorMgr *acceleratormocks.MockManager) {
+				acceleratorMgr.On("GetNodeAcceleratorType", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					ip := args.Get(1).(string)
+					assert.Equal(t, ip, "127.0.0.1")
+				}).Return(v1.AcceleratorTypeNVIDIAGPU.String(), nil).Once()
+			},
+			expectedType: v1.AcceleratorTypeNVIDIAGPU.String(),
+		},
+		{
 			name: "test detect failure from nodes",
 			reconcileCtx: &ReconcileContext{
 				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
