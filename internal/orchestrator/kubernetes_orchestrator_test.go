@@ -833,8 +833,8 @@ func TestKubernetesOrchestrator_setBasicVariables(t *testing.T) {
 		},
 	}
 
-	data := &DeploymentManifestVariables{}
-	k.setBasicVariables(data, endpoint, cluster, engine)
+	data := newDeploymentManifestVariables()
+	k.setBasicVariables(&data, endpoint, cluster, engine)
 
 	assert.Equal(t, "test-endpoint", data.EndpointName)
 	assert.Equal(t, "test-cluster", data.ClusterName)
@@ -936,21 +936,21 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 					},
 				},
 			},
-			expectedArgs: nil,
+			expectedArgs: map[string]interface{}{},
 		},
 		{
 			name: "with nil variables",
 			endpoint: &v1.Endpoint{
 				Spec: &v1.EndpointSpec{},
 			},
-			expectedArgs: nil,
+			expectedArgs: map[string]interface{}{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data := &DeploymentManifestVariables{}
-			k.setEngineArgs(data, tt.endpoint)
+			data := newDeploymentManifestVariables()
+			k.setEngineArgs(&data, tt.endpoint)
 			assert.Equal(t, tt.expectedArgs, data.EngineArgs)
 		})
 	}
@@ -990,8 +990,8 @@ func TestKubernetesOrchestrator_setEnvironmentVariables(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data := &DeploymentManifestVariables{}
-			k.setEnvironmentVariables(data, tt.endpoint)
+			data := newDeploymentManifestVariables()
+			k.setEnvironmentVariables(&data, tt.endpoint)
 			assert.Equal(t, tt.expectedEnv, data.Env)
 		})
 	}
@@ -1102,8 +1102,8 @@ func TestKubernetesOrchestrator_setModelArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data := &DeploymentManifestVariables{}
-			k.setModelArgs(data, tt.endpoint, tt.modelRegistry)
+			data := newDeploymentManifestVariables()
+			k.setModelArgs(&data, tt.endpoint, tt.modelRegistry)
 			assert.Equal(t, tt.expectedModelArgs, data.ModelArgs)
 		})
 	}
@@ -1112,8 +1112,8 @@ func TestKubernetesOrchestrator_setModelArgs(t *testing.T) {
 func TestKubernetesOrchestrator_addSharedMemoryVolume(t *testing.T) {
 	k := &kubernetesOrchestrator{}
 
-	data := &DeploymentManifestVariables{}
-	k.addSharedMemoryVolume(data)
+	data := newDeploymentManifestVariables()
+	k.addSharedMemoryVolume(&data)
 
 	require.Len(t, data.Volumes, 1)
 	assert.Equal(t, "dshm", data.Volumes[0].Name)
@@ -1729,9 +1729,9 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			k := &kubernetesOrchestrator{}
-			data := &DeploymentManifestVariables{}
+			data := newDeploymentManifestVariables()
 
-			err := k.setDeployImageVariables(data, tt.endpoint, tt.engine, tt.imageRegistry)
+			err := k.setDeployImageVariables(&data, tt.endpoint, tt.engine, tt.imageRegistry)
 
 			if tt.expectError {
 				assert.Error(t, err)

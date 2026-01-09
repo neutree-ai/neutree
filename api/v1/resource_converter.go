@@ -13,6 +13,7 @@ type KubernetesResourceSpec struct {
 	Requests     map[string]string `json:"requests,omitempty" yaml:"requests,omitempty"`
 	Limits       map[string]string `json:"limits,omitempty" yaml:"limits,omitempty"`
 	NodeSelector map[string]string `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty"`
+	Env          map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 }
 
 // Accelerator map reserved key constants

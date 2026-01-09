@@ -58,10 +58,6 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 		return nil, fmt.Errorf("resource spec is nil")
 	}
 
-	if spec.GPU == nil || *spec.GPU <= 0 {
-		return nil, nil
-	}
-
 	if spec.Accelerator == nil || spec.GetAcceleratorType() != string(v1.AcceleratorTypeNVIDIAGPU) {
 		return nil, nil
 	}
@@ -70,6 +66,12 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 		Requests:     make(map[string]string),
 		Limits:       make(map[string]string),
 		NodeSelector: make(map[string]string),
+		Env:          make(map[string]string),
+	}
+
+	if spec.GPU == nil || *spec.GPU <= 0 {
+		k8s.Env["NVIDIA_VISIBLE_DEVICES"] = "none"
+		return k8s, nil
 	}
 
 	// Set NVIDIA GPU

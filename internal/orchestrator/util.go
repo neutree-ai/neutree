@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"maps"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -150,46 +151,63 @@ func convertToRay(acceleratorMgr accelerator.Manager, spec *v1.ResourceSpec) (*v
 		return nil, fmt.Errorf("resource spec cannot be nil")
 	}
 
+	result := &v1.RayResourceSpec{
+		Resources: make(map[string]float64),
+	}
+
+	appendResource := []*v1.RayResourceSpec{}
+
+	// Convert CPU and Memory first
+	commonResult := convertCPUToRay(spec)
+	appendResource = append(appendResource, commonResult)
+
 	acceleratorType := spec.GetAcceleratorType()
 
 	if acceleratorType == "" {
 		klog.V(4).InfoS("No accelerator type specified, using CPU-only configuration")
-		return convertCPUToRay(spec), nil
-	}
-
-	klog.V(4).InfoS("Converting resource spec to Ray",
-		"acceleratorType", acceleratorType,
-		"gpu", spec.GPU,
-		"cpu", spec.CPU,
-		"memory", spec.Memory,
-	)
-
-	result := convertCPUToRay(spec)
-
-	converter, ok := acceleratorMgr.GetConverter(acceleratorType)
-	if !ok {
-		err := fmt.Errorf("no converter found for accelerator type: %s", acceleratorType)
-		klog.ErrorS(err, "Conversion failed",
+	} else {
+		klog.V(4).InfoS("Converting resource spec to Ray",
 			"acceleratorType", acceleratorType,
+			"gpu", spec.GPU,
+			"cpu", spec.CPU,
+			"memory", spec.Memory,
 		)
 
-		return nil, err
+		converter, ok := acceleratorMgr.GetConverter(acceleratorType)
+		if !ok {
+			err := fmt.Errorf("no converter found for accelerator type: %s", acceleratorType)
+			klog.ErrorS(err, "Conversion failed",
+				"acceleratorType", acceleratorType,
+			)
+
+			return nil, err
+		}
+
+		acceleratorResult, err := converter.ConvertToRay(spec)
+		if err != nil {
+			klog.ErrorS(err, "Converter execution failed",
+				"acceleratorType", acceleratorType,
+				"spec", spec,
+			)
+
+			return nil, fmt.Errorf("conversion failed for %s: %w", acceleratorType, err)
+		}
+
+		appendResource = append(appendResource, acceleratorResult)
 	}
 
-	acceleratorResult, err := converter.ConvertToRay(spec)
-	if err != nil {
-		klog.ErrorS(err, "Converter execution failed",
-			"acceleratorType", acceleratorType,
-			"spec", spec,
-		)
+	for _, res := range appendResource {
+		if res == nil {
+			continue
+		}
 
-		return nil, fmt.Errorf("conversion failed for %s: %w", acceleratorType, err)
-	}
+		result.NumGPUs += res.NumGPUs
+		result.NumCPUs += res.NumCPUs
+		result.Memory += res.Memory
 
-	// Merge accelerator-specific Ray resources
-	result.NumGPUs += acceleratorResult.NumGPUs
-	for k, v := range acceleratorResult.Resources {
-		result.Resources[k] = v
+		if res.Resources != nil {
+			maps.Copy(result.Resources, res.Resources)
+		}
 	}
 
 	// Add custom resources
@@ -218,57 +236,78 @@ func convertToKubernetes(acceleratorMgr accelerator.Manager, spec *v1.ResourceSp
 		return nil, fmt.Errorf("resource spec cannot be nil")
 	}
 
+	result := &v1.KubernetesResourceSpec{
+		Requests:     make(map[string]string),
+		Limits:       make(map[string]string),
+		NodeSelector: make(map[string]string),
+		Env:          make(map[string]string),
+	}
+
+	appendResource := []*v1.KubernetesResourceSpec{}
+
+	// Convert CPU and Memory first
+	commonResult := convertCPUToKubernetes(spec)
+	appendResource = append(appendResource, commonResult)
+
 	acceleratorType := spec.GetAcceleratorType()
 
 	if acceleratorType == "" {
 		klog.V(4).InfoS("No accelerator type specified, using CPU-only configuration")
-		return convertCPUToKubernetes(spec), nil
-	}
-
-	klog.V(4).InfoS("Converting resource spec to Kubernetes",
-		"acceleratorType", acceleratorType,
-		"gpu", spec.GPU,
-		"cpu", spec.CPU,
-	)
-
-	result := convertCPUToKubernetes(spec)
-
-	converter, ok := acceleratorMgr.GetConverter(acceleratorType)
-	if !ok {
-		err := fmt.Errorf("no converter found for accelerator type: %s", acceleratorType)
-		klog.ErrorS(err, "Conversion failed",
+	} else {
+		klog.V(4).InfoS("Converting resource spec to Kubernetes",
 			"acceleratorType", acceleratorType,
+			"gpu", spec.GPU,
+			"cpu", spec.CPU,
 		)
 
-		return nil, err
-	}
+		converter, ok := acceleratorMgr.GetConverter(acceleratorType)
+		if !ok {
+			err := fmt.Errorf("no converter found for accelerator type: %s", acceleratorType)
+			klog.ErrorS(err, "Conversion failed",
+				"acceleratorType", acceleratorType,
+			)
 
-	acceleratorResult, err := converter.ConvertToKubernetes(spec)
-	if err != nil {
-		klog.ErrorS(err, "Converter execution failed",
+			return nil, err
+		}
+
+		acceleratorResult, err := converter.ConvertToKubernetes(spec)
+		if err != nil {
+			klog.ErrorS(err, "Converter execution failed",
+				"acceleratorType", acceleratorType,
+				"spec", spec,
+			)
+
+			return nil, fmt.Errorf("conversion failed for %s: %w", acceleratorType, err)
+		}
+
+		klog.V(4).InfoS("Conversion successful",
 			"acceleratorType", acceleratorType,
-			"spec", spec,
+			"requests", result.Requests,
 		)
 
-		return nil, fmt.Errorf("conversion failed for %s: %w", acceleratorType, err)
+		appendResource = append(appendResource, acceleratorResult)
 	}
 
-	klog.V(4).InfoS("Conversion successful",
-		"acceleratorType", acceleratorType,
-		"requests", result.Requests,
-	)
+	for _, res := range appendResource {
+		if res == nil {
+			continue
+		}
 
-	// Merge accelerator-specific Kubernetes resources
-	for k, v := range acceleratorResult.Requests {
-		result.Requests[k] = v
-	}
+		if res.Requests != nil {
+			maps.Copy(result.Requests, res.Requests)
+		}
 
-	for k, v := range acceleratorResult.Limits {
-		result.Limits[k] = v
-	}
+		if res.Limits != nil {
+			maps.Copy(result.Limits, res.Limits)
+		}
 
-	for k, v := range acceleratorResult.NodeSelector {
-		result.NodeSelector[k] = v
+		if res.NodeSelector != nil {
+			maps.Copy(result.NodeSelector, res.NodeSelector)
+		}
+
+		if res.Env != nil {
+			maps.Copy(result.Env, res.Env)
+		}
 	}
 
 	// Add custom resources

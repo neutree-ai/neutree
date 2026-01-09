@@ -13,14 +13,14 @@ import (
 
 func TestValidateImageRegistryDeletion(t *testing.T) {
 	tests := []struct {
-		name          string
-		workspace     string
-		registryName  string
-		clusterCount  int
-		queryError    error
-		expectError   bool
-		expectedCode  string
-		expectedHint  string
+		name         string
+		workspace    string
+		registryName string
+		clusterCount int
+		queryError   error
+		expectError  bool
+		expectedCode string
+		expectedHint string
 	}{
 		{
 			name:         "no dependencies - deletion allowed",

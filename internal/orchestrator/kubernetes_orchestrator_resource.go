@@ -96,7 +96,7 @@ func (k *kubernetesOrchestrator) setRoutingLogic(data *DeploymentManifestVariabl
 func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
 	if endpoint.Spec.Variables != nil {
 		if v, ok := endpoint.Spec.Variables["engine_args"].(map[string]interface{}); ok {
-			data.EngineArgs = v
+			maps.Copy(data.EngineArgs, v)
 		}
 	}
 }
@@ -108,17 +108,29 @@ func (k *kubernetesOrchestrator) setResourceVariables(data *DeploymentManifestVa
 		return errors.Wrapf(err, "failed to convert resources for endpoint %s", endpoint.Metadata.Name)
 	}
 
-	data.Resources = resourceSpec.Requests
-	data.NodeSelector = resourceSpec.NodeSelector
+	if resourceSpec == nil {
+		return nil
+	}
+
+	if resourceSpec.Requests != nil {
+		maps.Copy(data.Resources, resourceSpec.Requests)
+	}
+
+	if resourceSpec.NodeSelector != nil {
+		maps.Copy(data.NodeSelector, resourceSpec.NodeSelector)
+	}
+
+	if resourceSpec.Env != nil {
+		maps.Copy(data.Env, resourceSpec.Env)
+	}
 
 	return nil
 }
 
 // setEnvironmentVariables initializes environment variables from endpoint spec
 func (k *kubernetesOrchestrator) setEnvironmentVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
-	data.Env = map[string]string{}
 	if endpoint.Spec.Env != nil {
-		data.Env = endpoint.Spec.Env
+		maps.Copy(data.Env, endpoint.Spec.Env)
 	}
 }
 
@@ -130,17 +142,24 @@ func (k *kubernetesOrchestrator) setModelCacheVariables(data *DeploymentManifest
 	}
 
 	volumes, volumeMounts, modelEnv := generateModelCacheConfig(modelCaches)
-	data.Volumes = volumes
-	data.VolumeMounts = volumeMounts
+	if len(volumes) > 0 {
+		data.Volumes = append(data.Volumes, volumes...)
+	}
 
-	maps.Copy(data.Env, modelEnv)
+	if len(volumeMounts) > 0 {
+		data.VolumeMounts = append(data.VolumeMounts, volumeMounts...)
+	}
+
+	if modelEnv != nil {
+		maps.Copy(data.Env, modelEnv)
+	}
 
 	return nil
 }
 
 // setModelArgs initializes model arguments from endpoint spec
 func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) {
-	data.ModelArgs = map[string]interface{}{
+	modelArgs := map[string]interface{}{
 		"name":          endpoint.Spec.Model.Name,
 		"version":       endpoint.Spec.Model.Version,
 		"file":          endpoint.Spec.Model.File,
@@ -149,12 +168,14 @@ func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables,
 		"registry_type": string(modelRegistry.Spec.Type),
 	}
 
-	data.ModelArgs["serve_name"] = endpoint.Spec.Model.Name
+	modelArgs["serve_name"] = endpoint.Spec.Model.Name
 
 	// only set serve_name with version when version is specified and not latest for non-huggingface model registry
 	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion && modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType {
-		data.ModelArgs["serve_name"] = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
+		modelArgs["serve_name"] = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
 	}
+
+	maps.Copy(data.ModelArgs, modelArgs)
 }
 
 // setModelRegistryVariables adapts model registry specific settings
@@ -246,7 +267,7 @@ func (k *kubernetesOrchestrator) addSharedMemoryVolume(data *DeploymentManifestV
 func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, modelRegistry *v1.ModelRegistry,
 	engine *v1.Engine, imageRegistry *v1.ImageRegistry) (DeploymentManifestVariables, error) {
 	// Initialize deployment manifest variables
-	data := DeploymentManifestVariables{}
+	data := newDeploymentManifestVariables()
 
 	// Set basic variables
 	k.setBasicVariables(&data, endpoint, deployedCluster, engine)
@@ -449,4 +470,16 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 	}
 
 	return volumes, volumeMounts, env
+}
+
+func newDeploymentManifestVariables() DeploymentManifestVariables {
+	return DeploymentManifestVariables{
+		Resources:    make(map[string]string),
+		NodeSelector: make(map[string]string),
+		Env:          make(map[string]string),
+		ModelArgs:    make(map[string]interface{}),
+		EngineArgs:   make(map[string]interface{}),
+		Volumes:      []corev1.Volume{},
+		VolumeMounts: []corev1.VolumeMount{},
+	}
 }
