@@ -78,9 +78,6 @@ spec:
       containers:
       - name: router
         image: {{ .ImagePrefix }}/neutree/router:{{ .Version }}
-        env:
-        - name: LMCACHE_LOG_LEVEL
-          value: DEBUG
         args:
         - --host
         - "0.0.0.0"
@@ -90,10 +87,6 @@ spec:
         - {{ .Namespace }}
         - --k8s-label-selector
         - "cluster={{ .ClusterName }},workspace={{ .Workspace }},app=inference"
-        - --routing-logic
-        - roundrobin
-        - --lmcache-controller-port
-        - "50051"
         - --session-key
         - "session_id"
         - --service-discovery
