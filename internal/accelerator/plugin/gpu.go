@@ -176,10 +176,14 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 				{
 					Version:      "v0.8.5",
 					ValuesSchema: vllmDefaultEngineSchema,
+				},
+				{
+					Version:      "v0.11.2",
+					ValuesSchema: vllmDefaultEngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"nvidia_gpu": {
 							ImageName: "vllm/vllm-openai", // use official vllm image with nvidia gpu support
-							Tag:       "v0.8.5",
+							Tag:       "v0.11.2",
 						},
 					},
 					DeployTemplate: map[string]map[string]string{
