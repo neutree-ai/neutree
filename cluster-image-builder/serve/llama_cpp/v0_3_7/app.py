@@ -254,6 +254,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
 
     # Configure backend deployment
     backend_deployment = Backend.options(
+        max_ongoing_requests=backend_options.get('max_ongoing_requests', 100),
         num_replicas=backend_options.get('num_replicas', 1),
         ray_actor_options={
             "num_cpus": backend_options.get('num_cpus', 1),
@@ -275,6 +276,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
 
     # Configure controller deployment with scheduler config
     controller_deployment = Controller.options(
+        max_ongoing_requests=backend_options.get('max_ongoing_requests', 100) * backend_options.get('num_replicas', 1),
         num_replicas=controller_options.get('num_replicas', 1),
         ray_actor_options={
             "num_cpus": controller_options.get('num_cpus', 0.1),
