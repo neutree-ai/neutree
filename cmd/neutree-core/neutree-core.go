@@ -21,7 +21,7 @@ import (
 
 func main() {
 	// Check for version flag first
-	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-v") {
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
 		info := version.Get()
 		fmt.Println(info.String())
 		os.Exit(0)
