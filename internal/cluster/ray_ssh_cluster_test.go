@@ -17,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"k8s.io/utils/pointer"
 )
 
@@ -703,6 +704,34 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 						},
 					},
 				},
+				NodeResources: map[string]*v1.ResourceStatus{
+					"192.168.1.1": {
+						Allocatable: &v1.ResourceInfo{
+							CPU:    8,
+							Memory: 16,
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 2,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_L20": 2,
+									},
+								},
+							},
+						},
+						Available: &v1.ResourceInfo{
+							CPU:    4,
+							Memory: 8,
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 1,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_L20": 1,
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 			wantErr: false,
 		},
@@ -829,6 +858,34 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 						},
 					},
 				},
+				NodeResources: map[string]*v1.ResourceStatus{
+					"192.168.1.1": {
+						Allocatable: &v1.ResourceInfo{
+							CPU:    8,
+							Memory: 16,
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 2,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_L20": 2,
+									},
+								},
+							},
+						},
+						Available: &v1.ResourceInfo{
+							CPU:    4,
+							Memory: 8,
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 1,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_L20": 1,
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 			wantErr: false,
 		},
@@ -859,9 +916,9 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				equal, _, err := util.JsonEqual(resources, tt.expectedResources)
+				equal, diff, err := util.JsonEqual(resources, tt.expectedResources)
 				assert.NoError(t, err)
-				assert.Equal(t, true, equal)
+				require.True(t, equal, "expected resources do not match actual resources: %s", diff)
 			}
 		})
 	}

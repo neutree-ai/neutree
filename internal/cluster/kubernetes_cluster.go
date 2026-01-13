@@ -354,82 +354,168 @@ func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 			Memory:            0,
 			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
 		},
+		NodeResources: make(map[string]*v1.ResourceStatus),
 	}
 
-	resourceParserMap := c.acceleratorMgr.GetAllParsers()
-
 	for nodeName, nodeInfo := range nodeResources {
-		allocatableCPU := nodeInfo.allocatableResource[corev1.ResourceCPU]
-		allocatableMemory := nodeInfo.allocatableResource[corev1.ResourceMemory]
-		result.Allocatable.CPU += allocatableCPU.AsApproximateFloat64()
-		result.Allocatable.Memory += allocatableMemory.AsApproximateFloat64()
-
-		availableCPU := nodeInfo.availableResource[corev1.ResourceCPU]
-		availableMemory := nodeInfo.availableResource[corev1.ResourceMemory]
-		result.Available.CPU += availableCPU.AsApproximateFloat64()
-		result.Available.Memory += availableMemory.AsApproximateFloat64()
-
 		klog.V(4).Infof("Node %s allocatable resources: %+v", nodeName, nodeInfo.allocatableResource)
 		klog.V(4).Infof("Node %s available resources: %+v", nodeName, nodeInfo.availableResource)
 
-		for _, parser := range resourceParserMap {
-			match := false
+		nodeResourceStatus, err := c.transformResources(
+			nodeInfo.availableResource,
+			nodeInfo.allocatableResource,
+			nodeInfo.labels,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform resources for node %s: %w", nodeName, err)
+		}
 
-			accelInfo, err := parser.ParseFromKubernetes(nodeInfo.allocatableResource, nodeInfo.labels)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse allocatable resources from Kubernetes: %w", err)
+		result.NodeResources[nodeName] = nodeResourceStatus
+
+		result.Allocatable.CPU += nodeResourceStatus.Allocatable.CPU
+		result.Allocatable.Memory += nodeResourceStatus.Allocatable.Memory
+		result.Available.CPU += nodeResourceStatus.Available.CPU
+		result.Available.Memory += nodeResourceStatus.Available.Memory
+
+		for acceleratorType, acceleratorGroups := range nodeResourceStatus.Allocatable.AcceleratorGroups {
+			existingGroup, exists := result.Allocatable.AcceleratorGroups[acceleratorType]
+			if exists {
+				existingGroup.Quantity += acceleratorGroups.Quantity
+			} else {
+				existingGroup = &v1.AcceleratorGroup{
+					Quantity:      acceleratorGroups.Quantity,
+					ProductGroups: make(map[v1.AcceleratorProduct]float64),
+				}
+				result.Allocatable.AcceleratorGroups[acceleratorType] = existingGroup
 			}
 
-			if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
-				match = true
+			for productType, quantity := range acceleratorGroups.ProductGroups {
+				if existingQuantity, exists := existingGroup.ProductGroups[productType]; exists {
+					existingGroup.ProductGroups[productType] = existingQuantity + quantity
+				} else {
+					existingGroup.ProductGroups[productType] = quantity
+				}
+			}
+		}
 
-				for key, group := range accelInfo.AcceleratorGroups {
-					if existingGroup, exists := result.Allocatable.AcceleratorGroups[key]; exists {
-						existingGroup.Quantity += group.Quantity
-						for productKey, quantity := range group.ProductGroups {
-							if existingQuantity, exists := existingGroup.ProductGroups[productKey]; exists {
-								existingGroup.ProductGroups[productKey] = existingQuantity + quantity
-							} else {
-								existingGroup.ProductGroups[productKey] = quantity
-							}
-						}
+		for acceleratorType, acceleratorGroups := range nodeResourceStatus.Available.AcceleratorGroups {
+			existingGroup, exists := result.Available.AcceleratorGroups[acceleratorType]
+			if exists {
+				existingGroup.Quantity += acceleratorGroups.Quantity
+			} else {
+				existingGroup = &v1.AcceleratorGroup{
+					Quantity:      acceleratorGroups.Quantity,
+					ProductGroups: make(map[v1.AcceleratorProduct]float64),
+				}
+				result.Available.AcceleratorGroups[acceleratorType] = existingGroup
+			}
 
-						result.Allocatable.AcceleratorGroups[key] = existingGroup
+			for productType, quantity := range acceleratorGroups.ProductGroups {
+				if existingQuantity, exists := existingGroup.ProductGroups[productType]; exists {
+					existingGroup.ProductGroups[productType] = existingQuantity + quantity
+				} else {
+					existingGroup.ProductGroups[productType] = quantity
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (c *NativeKubernetesClusterReconciler) transformResources(
+	availableResource, allocatableResource map[corev1.ResourceName]resource.Quantity,
+	labels map[string]string,
+) (*v1.ResourceStatus, error) {
+	result := &v1.ResourceStatus{
+		Allocatable: &v1.ResourceInfo{
+			CPU:               0,
+			Memory:            0,
+			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
+		},
+		Available: &v1.ResourceInfo{
+			CPU:               0,
+			Memory:            0,
+			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
+		},
+	}
+
+	allocatableCPU := allocatableResource[corev1.ResourceCPU]
+	allocatableMemory := allocatableResource[corev1.ResourceMemory]
+	result.Allocatable.CPU = allocatableCPU.AsApproximateFloat64()
+	result.Allocatable.Memory = allocatableMemory.AsApproximateFloat64()
+
+	availableCPU := availableResource[corev1.ResourceCPU]
+	availableMemory := availableResource[corev1.ResourceMemory]
+	result.Available.CPU = availableCPU.AsApproximateFloat64()
+	result.Available.Memory = availableMemory.AsApproximateFloat64()
+
+	resourceParserMap := c.acceleratorMgr.GetAllParsers()
+	for _, parser := range resourceParserMap {
+		match := false
+
+		accelInfo, err := parser.ParseFromKubernetes(allocatableResource, labels)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse allocatable resources from Kubernetes: %w", err)
+		}
+
+		if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
+			match = true
+
+			for acceleratorType, acceleratorGroups := range accelInfo.AcceleratorGroups {
+				existingGroup, exists := result.Allocatable.AcceleratorGroups[acceleratorType]
+				if exists {
+					existingGroup.Quantity += acceleratorGroups.Quantity
+				} else {
+					existingGroup = &v1.AcceleratorGroup{
+						Quantity:      acceleratorGroups.Quantity,
+						ProductGroups: make(map[v1.AcceleratorProduct]float64),
+					}
+					result.Allocatable.AcceleratorGroups[acceleratorType] = existingGroup
+				}
+
+				for productType, quantity := range acceleratorGroups.ProductGroups {
+					if existingQuantity, exists := existingGroup.ProductGroups[productType]; exists {
+						existingGroup.ProductGroups[productType] = existingQuantity + quantity
 					} else {
-						result.Allocatable.AcceleratorGroups[key] = accelInfo.AcceleratorGroups[key]
+						existingGroup.ProductGroups[productType] = quantity
 					}
 				}
 			}
+		}
 
-			accelInfo, err = parser.ParseFromKubernetes(nodeInfo.availableResource, nodeInfo.labels)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse available resources from Kubernetes: %w", err)
-			}
+		accelInfo, err = parser.ParseFromKubernetes(availableResource, labels)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse available resources from Kubernetes: %w", err)
+		}
 
-			if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
-				match = true
+		if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
+			match = true
 
-				for key, group := range accelInfo.AcceleratorGroups {
-					if existingGroup, exists := result.Available.AcceleratorGroups[key]; exists {
-						existingGroup.Quantity += group.Quantity
-						for productKey, quantity := range group.ProductGroups {
-							if existingQuantity, exists := existingGroup.ProductGroups[productKey]; exists {
-								existingGroup.ProductGroups[productKey] = existingQuantity + quantity
-							} else {
-								existingGroup.ProductGroups[productKey] = quantity
-							}
-						}
+			for acceleratorType, acceleratorGroups := range accelInfo.AcceleratorGroups {
+				existingGroup, exists := result.Available.AcceleratorGroups[acceleratorType]
+				if exists {
+					existingGroup.Quantity += acceleratorGroups.Quantity
+				} else {
+					existingGroup = &v1.AcceleratorGroup{
+						Quantity:      acceleratorGroups.Quantity,
+						ProductGroups: make(map[v1.AcceleratorProduct]float64),
+					}
+					result.Available.AcceleratorGroups[acceleratorType] = existingGroup
+				}
 
-						result.Available.AcceleratorGroups[key] = existingGroup
+				for productType, quantity := range acceleratorGroups.ProductGroups {
+					if existingQuantity, exists := existingGroup.ProductGroups[productType]; exists {
+						existingGroup.ProductGroups[productType] = existingQuantity + quantity
 					} else {
-						result.Available.AcceleratorGroups[key] = accelInfo.AcceleratorGroups[key]
+						existingGroup.ProductGroups[productType] = quantity
 					}
 				}
 			}
+		}
 
-			if match {
-				break
-			}
+		if match {
+			break
 		}
 	}
 

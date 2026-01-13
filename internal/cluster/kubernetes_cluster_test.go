@@ -113,6 +113,34 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 					CPU:    12,
 					Memory: 48,
 				},
+				NodeResources: map[string]*v1.ResourceStatus{
+					"node-1": {
+						Allocatable: &v1.ResourceInfo{
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 2,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_A100": 2,
+									},
+								},
+							},
+							CPU:    16,
+							Memory: 64,
+						},
+						Available: &v1.ResourceInfo{
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 1,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_A100": 1,
+									},
+								},
+							},
+							CPU:    12,
+							Memory: 48,
+						},
+					},
+				},
 			},
 		},
 		{
@@ -158,6 +186,34 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 					CPU:    16,
 					Memory: 64,
 				},
+				NodeResources: map[string]*v1.ResourceStatus{
+					"node-1": {
+						Allocatable: &v1.ResourceInfo{
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 2,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_A100": 2,
+									},
+								},
+							},
+							CPU:    16,
+							Memory: 64,
+						},
+						Available: &v1.ResourceInfo{
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 2,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_A100": 2,
+									},
+								},
+							},
+							CPU:    16,
+							Memory: 64,
+						},
+					},
+				},
 			},
 		},
 		{
@@ -200,7 +256,7 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 			acceleratorMgr := acceleratormocks.NewMockManager(t)
 			acceleratorMgr.On("GetAllParsers").Return(map[string]plugin.ResourceParser{
 				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
-			})
+			}).Maybe()
 			cluster.acceleratorMgr = acceleratorMgr
 			reconcileCtx := &ReconcileContext{
 				Ctx: context.TODO(),

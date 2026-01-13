@@ -40,6 +40,15 @@ type ClusterResources struct {
 	// Available represents the currently available (unallocated) resources in the cluster.
 	// Available = Allocatable - Allocated
 	Available *ResourceInfo `json:"available,omitempty"`
+
+	NodeResources map[string]*ResourceStatus `json:"node_resources,omitempty"`
+}
+
+type ResourceStatus struct {
+	// Allocatable represents the total resources that can be allocated on the node.
+	Allocatable *ResourceInfo `json:"allocatable,omitempty"`
+	// Available represents the currently available (unallocated) resources on the node.
+	Available *ResourceInfo `json:"available,omitempty"`
 }
 
 // ResourceInfo represents a complete set of resources including CPU, Memory, and Accelerators.
