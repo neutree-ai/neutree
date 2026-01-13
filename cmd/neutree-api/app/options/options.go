@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/internal/version"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -108,6 +109,6 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		StorageAccessURL: o.Storage.AccessURL,
 		AuthEndpoint:     o.External.AuthEndpoint,
 		GrafanaURL:       grafanaExternalURL,
-		Version:          o.API.Version,
+		Version:          version.Get().AppVersion,
 	}, nil
 }
