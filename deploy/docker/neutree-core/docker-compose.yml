@@ -219,7 +219,6 @@ services:
       - --gin-mode=release
       - --auth-endpoint=http://auth:9999
       - --grafana-url={{ .GrafanaURL }}
-      - --version={{ .NeutreeVersion }}
     ports:
       - 3000:3000
     networks:

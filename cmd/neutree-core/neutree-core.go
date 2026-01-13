@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,10 +15,18 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/options"
+	"github.com/neutree-ai/neutree/internal/version"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
 func main() {
+	// Check for version flag first
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
+		info := version.Get()
+		fmt.Println(info.String())
+		os.Exit(0)
+	}
+
 	klog.InitFlags(nil)
 	defer klog.Flush()
 
