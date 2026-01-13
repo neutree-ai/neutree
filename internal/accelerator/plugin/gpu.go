@@ -165,6 +165,11 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 		return nil, errors.Wrap(err, "failed to load vLLM V1 engine schema")
 	}
 
+	vllmV0_11_2EngineSchema, err := GetVLLMV0_11_2EngineSchema()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load vLLM V0.11.2 engine schema")
+	}
+
 	vllmV1Engine := &v1.Engine{
 		APIVersion: "v1",
 		Kind:       "Engine",
@@ -176,10 +181,14 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 				{
 					Version:      "v0.8.5",
 					ValuesSchema: vllmDefaultEngineSchema,
+				},
+				{
+					Version:      "v0.11.2",
+					ValuesSchema: vllmV0_11_2EngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"nvidia_gpu": {
 							ImageName: "vllm/vllm-openai", // use official vllm image with nvidia gpu support
-							Tag:       "v0.8.5",
+							Tag:       "v0.11.2",
 						},
 					},
 					DeployTemplate: map[string]map[string]string{

@@ -185,6 +185,11 @@ func (p *AMDGPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.Ge
 		return nil, errors.Wrap(err, "failed to load vLLM V1 engine schema")
 	}
 
+	vllmV0_11_2EngineSchema, err := GetVLLMV0_11_2EngineSchema()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load vLLM V0.11.2 engine schema")
+	}
+
 	vllmV1Engine := &v1.Engine{
 		APIVersion: "v1",
 		Kind:       "Engine",
@@ -196,10 +201,14 @@ func (p *AMDGPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.Ge
 				{
 					Version:      "v0.8.5",
 					ValuesSchema: vllmDefaultEngineSchema,
+				},
+				{
+					Version:      "v0.11.2",
+					ValuesSchema: vllmV0_11_2EngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"amd_gpu": {
 							ImageName: "rocm/vllm", // use official vllm image with amd gpu support
-							Tag:       "rocm6.3.1_vllm_0.8.5_20250521",
+							Tag:       "rocm7.0.0_vllm_0.11.2_20251210",
 						},
 					},
 					DeployTemplate: map[string]map[string]string{
