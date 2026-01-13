@@ -15,7 +15,6 @@ import (
 
 var (
 	defaultNFSMountOptions = []string{
-		"vers=4.1",
 		"rsize=1048576",
 		"wsize=1048576",
 		"hard",
