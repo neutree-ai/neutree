@@ -105,10 +105,6 @@ func getEndpointModelRegistry(s storage.Storage, endpoint *v1.Endpoint) (*v1.Mod
 		return nil, storage.ErrResourceNotFound
 	}
 
-	if modelRegistry[0].Status == nil || modelRegistry[0].Status.Phase != v1.ModelRegistryPhaseCONNECTED {
-		return nil, errors.New("model registry " + endpoint.Spec.Model.Registry + " not ready")
-	}
-
 	return &modelRegistry[0], nil
 }
 
@@ -138,12 +134,7 @@ func getUsedImageRegistries(cluster *v1.Cluster, s storage.Storage) (*v1.ImageRe
 		return nil, storage.ErrResourceNotFound
 	}
 
-	targetImageRegistry := &imageRegistryList[0]
-	if targetImageRegistry.Status == nil || targetImageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
-		return nil, errors.New("image registry " + cluster.Spec.ImageRegistry + " not ready")
-	}
-
-	return targetImageRegistry, nil
+	return &imageRegistryList[0], nil
 }
 
 func convertToRay(acceleratorMgr accelerator.Manager, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
@@ -393,4 +384,12 @@ func getDeployedModelRealVersion(modelRegistry *v1.ModelRegistry, modelName, mod
 	}
 
 	return "", fmt.Errorf("unsupported model registry type: %s", modelRegistry.Spec.Type)
+}
+
+func IsEndpointPaused(endpoint *v1.Endpoint) bool {
+	if endpoint.Spec != nil && endpoint.Spec.Replicas.Num != nil && *endpoint.Spec.Replicas.Num == 0 {
+		return true
+	}
+
+	return false
 }

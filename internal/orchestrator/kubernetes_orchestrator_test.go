@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -8,9 +10,311 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/pointer"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+// FakeK8sClient wraps controller-runtime fake client with builder methods
+type FakeK8sClient struct {
+	client.Client
+	t *testing.T
+}
+
+func NewFakeK8sClient(t *testing.T) *FakeK8sClient {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	return &FakeK8sClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		t:      t,
+	}
+}
+
+func (f *FakeK8sClient) WithGetError(err error) *FakeK8sClient {
+	// For error simulation, we'll use interceptor pattern
+	// Return a wrapper that simulates errors
+	return &FakeK8sClient{
+		Client: &errorClient{Client: f.Client, getError: err},
+		t:      f.t,
+	}
+}
+
+func (f *FakeK8sClient) WithDeploymentNotFound() *FakeK8sClient {
+	// No deployment to add, will return NotFound naturally
+	return f
+}
+
+func (f *FakeK8sClient) WithDeployment(name string, replicas, readyReplicas, updatedReplicas int32) *FakeK8sClient {
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Namespace:  "test-namespace",
+			Generation: 1,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app":      "inference",
+					"endpoint": name,
+				},
+			},
+		},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 1,
+			Replicas:           replicas,
+			ReadyReplicas:      readyReplicas,
+			UpdatedReplicas:    updatedReplicas,
+			AvailableReplicas:  readyReplicas,
+			Conditions: []appsv1.DeploymentCondition{
+				{
+					Type:   appsv1.DeploymentProgressing,
+					Status: corev1.ConditionTrue,
+					Reason: "NewReplicaSetAvailable",
+				},
+				{
+					Type:   appsv1.DeploymentAvailable,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+
+	err := f.Client.Create(context.Background(), deployment)
+	if err != nil {
+		f.t.Fatalf("failed to create deployment: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) WithDeploymentWithCondition(name string, replicas, readyReplicas, updatedReplicas int32, condType, reason, message string) *FakeK8sClient {
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Namespace:  "test-namespace",
+			Generation: 1,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app":      "inference",
+					"endpoint": name,
+				},
+			},
+		},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 1,
+			Replicas:           replicas,
+			ReadyReplicas:      readyReplicas,
+			UpdatedReplicas:    updatedReplicas,
+			AvailableReplicas:  readyReplicas,
+			Conditions: []appsv1.DeploymentCondition{
+				{
+					Type:    appsv1.DeploymentConditionType(condType),
+					Status:  corev1.ConditionFalse,
+					Reason:  reason,
+					Message: message,
+				},
+			},
+		},
+	}
+
+	err := f.Client.Create(context.Background(), deployment)
+	if err != nil {
+		f.t.Fatalf("failed to create deployment: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) WithPods(count int) *FakeK8sClient {
+	for i := 0; i < count; i++ {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("pod-%d", i),
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app":      "inference",
+					"endpoint": "chat-model",
+				},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{
+					{
+						Name:  "main-container",
+						Ready: true,
+						State: corev1.ContainerState{
+							Running: &corev1.ContainerStateRunning{},
+						},
+					},
+				},
+			},
+		}
+		err := f.Client.Create(context.Background(), pod)
+		if err != nil {
+			f.t.Fatalf("failed to create pod: %v", err)
+		}
+	}
+	return f
+}
+
+func (f *FakeK8sClient) WithPodInCrashLoopBackOff(containerName string, restartCount int32) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-crash",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:         containerName,
+					Ready:        false,
+					RestartCount: restartCount,
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason:  "CrashLoopBackOff",
+							Message: "Container is crashing",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) WithPodInImagePullBackOff(containerName string) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-image-pull",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  containerName,
+					Ready: false,
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason:  "ImagePullBackOff",
+							Message: "Failed to pull image",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) WithPodOOMKilled(containerName string) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-oom",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  containerName,
+					Ready: false,
+					LastTerminationState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Reason:  "OOMKilled",
+							Message: "Out of memory",
+						},
+					},
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason: "CrashLoopBackOff",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) WithUnschedulablePod(message string) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-unschedulable",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			Conditions: []corev1.PodCondition{
+				{
+					Type:    corev1.PodScheduled,
+					Status:  corev1.ConditionFalse,
+					Reason:  "Unschedulable",
+					Message: message,
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) AssertExpectations() {
+	// No-op for compatibility with test code
+}
+
+// errorClient wraps a client to simulate errors
+type errorClient struct {
+	client.Client
+	getError error
+}
+
+func (e *errorClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if e.getError != nil {
+		return e.getError
+	}
+	return e.Client.Get(ctx, key, obj, opts...)
+}
 
 var testVllmDeploymentTemplate = `apiVersion: apps/v1
 kind: Deployment
@@ -1914,6 +2218,230 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 			if !eq {
 				t.Errorf("expected and actual envs do not match, want: %+v, got: %+v", tt.expectedEnvs, envs)
 			}
+		})
+	}
+}
+
+func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
+	newEndpoint := func() *v1.Endpoint {
+		return &v1.Endpoint{
+			Metadata: &v1.Metadata{
+				Workspace: "production",
+				Name:      "chat-model",
+			},
+			Spec: &v1.EndpointSpec{
+				Replicas: v1.ReplicaSpec{
+					Num: pointer.Int(1),
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name           string
+		inputEndpoint  func() *v1.Endpoint
+		setupMock      func(*testing.T) *FakeK8sClient
+		expectedPhase  v1.EndpointPhase
+		expectErrorMsg string
+		expectError    bool
+	}{
+		{
+			name: "return error if deployment fetch fails",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).WithGetError(assert.AnError)
+			},
+			expectError: true,
+		},
+		{
+			name: "return Deleted for non-existing deployment when deletion timestamp is set",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Metadata.DeletionTimestamp = "2024-01-01T00:00:00Z"
+				return ep
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).WithDeploymentNotFound()
+			},
+			expectedPhase: v1.EndpointPhaseDELETED,
+			expectError:   false,
+		},
+		{
+			name: "return Deleting for existing deployment when deletion timestamp is set",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Metadata.DeletionTimestamp = "2024-01-01T00:00:00Z"
+				return ep
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).WithDeployment(newEndpoint().Metadata.Name, 1, 1, 1)
+			},
+			expectedPhase:  v1.EndpointPhaseDELETING,
+			expectErrorMsg: "Endpoint deleting in progress",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying for deployment not found when not deleting",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).WithDeploymentNotFound()
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Endpoint deployment not found",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying for endpoint with zero replicas but pods still exist",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Spec.Replicas.Num = pointer.Int(0)
+				return ep
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 0, 0, 0).
+					WithPods(1) // Still has pods
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "waiting for all pods to terminate",
+			expectError:    false,
+		},
+		{
+			name: "return Paused for endpoint with zero replicas and no pods",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Spec.Replicas.Num = pointer.Int(0)
+				return ep
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 0, 0, 0).
+					WithPods(0)
+			},
+			expectedPhase: v1.EndpointPhasePAUSED,
+			expectError:   false,
+		},
+		{
+			name: "return Running for deployment with all replicas ready",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 1, 1).
+					WithPods(1)
+			},
+			expectedPhase: v1.EndpointPhaseRUNNING,
+			expectError:   false,
+		},
+		{
+			name: "return Deploying for deployment with not all replicas ready",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithPods(1)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Deployment: 0/1 replicas ready",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for pod in CrashLoopBackOff with high restart count",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithPodInCrashLoopBackOff("test-container", 5)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "CrashLoopBackOff",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for pod with ImagePullBackOff",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithPodInImagePullBackOff("test-container")
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "failed to pull image",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for pod with OOMKilled",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithPodOOMKilled("test-container")
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "OOM (Out of Memory)",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for unschedulable pod",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithUnschedulablePod("Insufficient cpu")
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "unschedulable",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying with deployment conditions message",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeploymentWithCondition(newEndpoint().Metadata.Name, 1, 0, 0, "Progressing", "NewReplicaSetAvailable", "ReplicaSet is progressing")
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "ReplicaSet is progressing",
+			expectError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := tt.setupMock(t)
+
+			o := &kubernetesOrchestrator{}
+
+			status, err := o.getEndpointStats(fakeClient, "test-namespace", tt.inputEndpoint())
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedPhase, status.Phase)
+				if tt.expectErrorMsg != "" {
+					assert.Contains(t, status.ErrorMessage, tt.expectErrorMsg)
+				}
+			}
+
+			fakeClient.AssertExpectations()
 		})
 	}
 }

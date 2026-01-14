@@ -3,11 +3,13 @@ package orchestrator
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.openly.dev/pointy"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
@@ -18,6 +20,52 @@ import (
 )
 
 func intPtr(i int) *int { return &i }
+
+func newTestRayOrchestratorCtx(s *storagemocks.MockStorage, dashboardService *dashboardmocks.MockDashboardService, endpoint *v1.Endpoint) (*RayOrchestrator, *OrchestratorContext) {
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster"},
+		Spec: &v1.ClusterSpec{
+			Type: v1.SSHClusterType,
+		},
+		Status: &v1.ClusterStatus{
+			DashboardURL: "http://127.0.0.1:8265",
+			Phase:        v1.ClusterPhaseRunning,
+		},
+	}
+
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{{Version: "0.5.0"}},
+		},
+		Status: &v1.EngineStatus{Phase: v1.EnginePhaseCreated},
+	}
+	modelRegistry := &v1.ModelRegistry{
+		Metadata: &v1.Metadata{Name: "test-registry"},
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.HuggingFaceModelRegistryType,
+			Url:  "https://huggingface.co",
+		},
+		Status: &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
+	}
+
+	o := &RayOrchestrator{
+		cluster: cluster,
+		storage: s,
+	}
+
+	ctx := &OrchestratorContext{
+		Cluster:       cluster,
+		Engine:        engine,
+		ModelRegistry: modelRegistry,
+		Endpoint:      endpoint,
+		rayService:    dashboardService,
+		logger:        klog.LoggerWithValues(klog.Background(), "endpoint", endpoint.Metadata.WorkspaceName()),
+	}
+
+	return o, ctx
+
+}
 
 func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 	endpoint := &v1.Endpoint{
@@ -54,31 +102,12 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 	tests := []struct {
 		name        string
 		setupMock   func(*dashboardmocks.MockDashboardService, *storagemocks.MockStorage)
-		testFunc    func(*RayOrchestrator) error
+		testFunc    func(o *RayOrchestrator, ctx *OrchestratorContext) error
 		expectError bool
 	}{
 		{
 			name: "CreateEndpoint uses consistent app name",
 			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService, mockStorage *storagemocks.MockStorage) {
-				// Mock storage dependencies
-				mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-				}}, nil)
-				mockStorage.On("ListEngine", mock.Anything).Return([]v1.Engine{{
-					Metadata: &v1.Metadata{Name: "vllm"},
-					Spec: &v1.EngineSpec{
-						Versions: []*v1.EngineVersion{{Version: "0.5.0"}},
-					},
-					Status: &v1.EngineStatus{Phase: v1.EnginePhaseCreated},
-				}}, nil)
-				mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{{
-					Metadata: &v1.Metadata{Name: "test-registry"},
-					Spec: &v1.ModelRegistrySpec{
-						Type: v1.HuggingFaceModelRegistryType,
-						Url:  "https://huggingface.co",
-					},
-					Status: &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
-				}}, nil)
 
 				// Mock dashboard service
 				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
@@ -94,8 +123,8 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 					return false
 				})).Return(nil)
 			},
-			testFunc: func(o *RayOrchestrator) error {
-				_, err := o.CreateEndpoint(endpoint)
+			testFunc: func(o *RayOrchestrator, ctx *OrchestratorContext) error {
+				err := o.createOrUpdate(ctx)
 				return err
 			},
 			expectError: false,
@@ -103,11 +132,6 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 		{
 			name: "DeleteEndpoint uses consistent app name",
 			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService, mockStorage *storagemocks.MockStorage) {
-				// Mock storage dependencies
-				mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-				}}, nil)
-
 				// Mock dashboard service with existing application
 				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
 					Applications: map[string]dashboard.RayServeApplicationStatus{
@@ -136,8 +160,9 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 					return true
 				})).Return(nil)
 			},
-			testFunc: func(o *RayOrchestrator) error {
-				return o.DeleteEndpoint(endpoint)
+			testFunc: func(o *RayOrchestrator, ctx *OrchestratorContext) error {
+				err := o.deleteEndpoint(ctx)
+				return err
 			},
 			expectError: false,
 		},
@@ -151,9 +176,14 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 							Message: "Application is healthy",
 						},
 					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {
+							Status: dashboard.ProxyStatusHealthy,
+						},
+					},
 				}, nil)
 			},
-			testFunc: func(o *RayOrchestrator) error {
+			testFunc: func(o *RayOrchestrator, ctx *OrchestratorContext) error {
 				status, err := o.GetEndpointStatus(endpoint)
 				if err != nil {
 					return err
@@ -178,22 +208,9 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 				return mockDashboard
 			}
 
-			o := &RayOrchestrator{
-				storage: mockStorage,
-				cluster: &v1.Cluster{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-					Spec: &v1.ClusterSpec{
-						Version: "v1.0.0",
-						Config:  &v1.ClusterConfig{},
-					},
-					Status: &v1.ClusterStatus{
-						Initialized:  true,
-						DashboardURL: "http://127.0.0.1:8265",
-					},
-				},
-			}
+			o, ctx := newTestRayOrchestratorCtx(mockStorage, mockDashboard, endpoint)
 
-			err := tt.testFunc(o)
+			err := tt.testFunc(o, ctx)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -207,7 +224,7 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 	}
 }
 
-func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T) {
+func TestRayOrchestrator_createOrUpdateEndpoint_ApplicationNameConsistency(t *testing.T) {
 	endpoint := &v1.Endpoint{
 		Metadata: &v1.Metadata{
 			Workspace: "production",
@@ -240,34 +257,13 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 	assert.Equal(t, "production_chat-model", expectedAppName)
 
 	tests := []struct {
-		name          string
-		setupMock     func(*dashboardmocks.MockDashboardService, *storagemocks.MockStorage)
-		expectError   bool
-		expectedPhase v1.EndpointPhase
+		name        string
+		setupMock   func(*dashboardmocks.MockDashboardService, *storagemocks.MockStorage)
+		expectError bool
 	}{
 		{
 			name: "CreateEndpoint with new application",
 			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService, mockStorage *storagemocks.MockStorage) {
-				// Mock storage dependencies
-				mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-				}}, nil)
-				mockStorage.On("ListEngine", mock.Anything).Return([]v1.Engine{{
-					Metadata: &v1.Metadata{Name: "vllm"},
-					Spec: &v1.EngineSpec{
-						Versions: []*v1.EngineVersion{{Version: "0.5.0"}},
-					},
-					Status: &v1.EngineStatus{Phase: v1.EnginePhaseCreated},
-				}}, nil)
-				mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{{
-					Metadata: &v1.Metadata{Name: "test-registry"},
-					Spec: &v1.ModelRegistrySpec{
-						Type: v1.HuggingFaceModelRegistryType,
-						Url:  "https://huggingface.co",
-					},
-					Status: &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
-				}}, nil)
-
 				// Mock dashboard service - no existing applications
 				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
 					Applications: map[string]dashboard.RayServeApplicationStatus{},
@@ -281,32 +277,11 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 					return req.Applications[0].Name == expectedAppName
 				})).Return(nil)
 			},
-			expectError:   false,
-			expectedPhase: v1.EndpointPhaseRUNNING,
+			expectError: false,
 		},
 		{
 			name: "CreateEndpoint with existing application update",
 			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService, mockStorage *storagemocks.MockStorage) {
-				// Mock storage dependencies
-				mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-				}}, nil)
-				mockStorage.On("ListEngine", mock.Anything).Return([]v1.Engine{{
-					Metadata: &v1.Metadata{Name: "vllm"},
-					Spec: &v1.EngineSpec{
-						Versions: []*v1.EngineVersion{{Version: "0.5.0"}},
-					},
-					Status: &v1.EngineStatus{Phase: v1.EnginePhaseCreated},
-				}}, nil)
-				mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{{
-					Metadata: &v1.Metadata{Name: "test-registry"},
-					Spec: &v1.ModelRegistrySpec{
-						Type: v1.HuggingFaceModelRegistryType,
-						Url:  "https://huggingface.co",
-					},
-					Status: &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
-				}}, nil)
-
 				// Mock dashboard service - existing application with same name but different config
 				existingApp := &dashboard.RayServeApplication{
 					Name:        expectedAppName,
@@ -331,8 +306,7 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 					return req.Applications[0].Name == expectedAppName
 				})).Return(nil)
 			},
-			expectError:   false,
-			expectedPhase: v1.EndpointPhaseRUNNING,
+			expectError: false,
 		},
 	}
 
@@ -345,34 +319,14 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 				tt.setupMock(mockDashboard, mockStorage)
 			}
 
-			dashboard.NewDashboardService = func(dashboardUrl string) dashboard.DashboardService {
-				return mockDashboard
-			}
+			o, ctx := newTestRayOrchestratorCtx(mockStorage, mockDashboard, endpoint)
 
-			o := &RayOrchestrator{
-				storage: mockStorage,
-				cluster: &v1.Cluster{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-					Spec: &v1.ClusterSpec{
-						Version: "v1.0.0",
-						Config:  &v1.ClusterConfig{},
-					},
-					Status: &v1.ClusterStatus{
-						Initialized:  true,
-						DashboardURL: "http://127.0.0.1:8265",
-					},
-				},
-			}
-
-			status, err := o.CreateEndpoint(endpoint)
+			err := o.createOrUpdate(ctx)
 
 			if tt.expectError {
 				assert.Error(t, err)
-				assert.Nil(t, status)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, status)
-				assert.Equal(t, tt.expectedPhase, status.Phase)
 			}
 
 			mockDashboard.AssertExpectations(t)
@@ -381,7 +335,7 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 	}
 }
 
-func TestRayOrchestrator_CreateEndpoint_WithZeroReplicas(t *testing.T) {
+func TestRayOrchestrator_deleteEndpoint(t *testing.T) {
 	endpoint := &v1.Endpoint{
 		Metadata: &v1.Metadata{
 			Workspace: "production",
@@ -411,33 +365,22 @@ func TestRayOrchestrator_CreateEndpoint_WithZeroReplicas(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		setupMock     func(*dashboardmocks.MockDashboardService, *storagemocks.MockStorage)
-		expectedPhase v1.EndpointPhase
-		expectError   bool
+		name        string
+		setupMock   func(*dashboardmocks.MockDashboardService, *storagemocks.MockStorage)
+		expectError bool
 	}{
 		{
-			name: "CreateEndpoint with zero replicas, no existing application",
+			name: "deleteEndpoint with no existing application",
 			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService, mockStorage *storagemocks.MockStorage) {
-				// Mock storage dependencies
-				mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-				}}, nil)
 				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
 					Applications: map[string]dashboard.RayServeApplicationStatus{},
 				}, nil)
 			},
-			expectedPhase: v1.EndpointPhaseRUNNING,
-			expectError:   false,
+			expectError: false,
 		},
 		{
-			name: "CreateEndpoint with zero replicas, existing application",
+			name: "deleteEndpoint with existing application",
 			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService, mockStorage *storagemocks.MockStorage) {
-				// Mock storage dependencies
-				mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-				}}, nil)
-
 				appName := EndpointToServeApplicationName(endpoint)
 				// Mock dashboard service - existing application with same name but different config
 				existingApp := &dashboard.RayServeApplication{
@@ -460,8 +403,7 @@ func TestRayOrchestrator_CreateEndpoint_WithZeroReplicas(t *testing.T) {
 					return len(req.Applications) == 0
 				})).Return(nil)
 			},
-			expectedPhase: v1.EndpointPhaseRUNNING,
-			expectError:   false,
+			expectError: false,
 		},
 	}
 
@@ -474,33 +416,13 @@ func TestRayOrchestrator_CreateEndpoint_WithZeroReplicas(t *testing.T) {
 				tt.setupMock(mockDashboard, mockStorage)
 			}
 
-			dashboard.NewDashboardService = func(dashboardUrl string) dashboard.DashboardService {
-				return mockDashboard
-			}
+			o, ctx := newTestRayOrchestratorCtx(mockStorage, mockDashboard, endpoint)
 
-			o := &RayOrchestrator{
-				storage: mockStorage,
-				cluster: &v1.Cluster{
-					Metadata: &v1.Metadata{Name: "test-cluster"},
-					Spec: &v1.ClusterSpec{
-						Version: "v1.0.0",
-						Config:  &v1.ClusterConfig{},
-					},
-					Status: &v1.ClusterStatus{
-						Initialized:  true,
-						DashboardURL: "http://127.0.0.1:8265",
-					},
-				},
-			}
-
-			status, err := o.CreateEndpoint(endpoint)
+			err := o.deleteEndpoint(ctx)
 			if tt.expectError {
 				assert.Error(t, err)
-				assert.Nil(t, status)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, status)
-				assert.Equal(t, tt.expectedPhase, status.Phase)
 			}
 
 			mockDashboard.AssertExpectations(t)
@@ -1053,28 +975,68 @@ func TestFormatServiceURL_WorkspaceInURL(t *testing.T) {
 	assert.Equal(t, "http://ray-dashboard.example.com:8000/production/chat-model", url)
 }
 
-func TestRayOrchestrator_GetEndpointStatus_WithZeroReplicas(t *testing.T) {
+func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
+	newEndpoint := func() *v1.Endpoint {
+		return &v1.Endpoint{
+			Metadata: &v1.Metadata{
+				Workspace: "production",
+				Name:      "chat-model",
+			},
+			Spec: &v1.EndpointSpec{
+				Replicas: v1.ReplicaSpec{
+					Num: pointy.Int(1),
+				},
+			},
+		}
+	}
+
+	applicationName := "production_chat-model"
+
 	tests := []struct {
-		name          string
-		setupMock     func(*dashboardmocks.MockDashboardService)
-		expectedPhase v1.EndpointPhase
-		expectError   bool
+		name           string
+		inputEndpoint  func() *v1.Endpoint
+		setupMock      func(*dashboardmocks.MockDashboardService)
+		expectedPhase  v1.EndpointPhase
+		expectErrorMsg string
+		expectError    bool
 	}{
 		{
-			name: "GetEndpointStatus with zero replicas, no existing application",
+			name: "return error if application fetch fails",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{},
+				}, assert.AnError)
+			},
+			expectError: true,
+		},
+		{
+			name: "return Deleted for non-existing application",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
+				return ep
+			},
 			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
 				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
 					Applications: map[string]dashboard.RayServeApplicationStatus{},
 				}, nil)
 			},
-			expectedPhase: v1.EndpointPhaseRUNNING,
+			expectedPhase: v1.EndpointPhaseDELETED,
 			expectError:   false,
 		},
 		{
-			name: "GetEndpointStatus with zero replicas, existing application",
+			name: "return Deleting for existing application when deletion timestamp is set",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
+				return ep
+			},
 			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
 				existingApp := &dashboard.RayServeApplication{
-					Name:        "production_chat-model",
+					Name:        applicationName,
 					RoutePrefix: "/production/chat-model",
 					ImportPath:  "old.import.path",
 					Args:        map[string]interface{}{"old": "config"},
@@ -1082,15 +1044,317 @@ func TestRayOrchestrator_GetEndpointStatus_WithZeroReplicas(t *testing.T) {
 
 				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
 					Applications: map[string]dashboard.RayServeApplicationStatus{
-						"production_chat-model": {
+						applicationName: {
 							Status:            "RUNNING",
 							DeployedAppConfig: existingApp,
 						},
 					},
 				}, nil)
 			},
-			expectedPhase: v1.EndpointPhasePENDING,
+			expectedPhase:  v1.EndpointPhaseDELETING,
+			expectErrorMsg: "Endpoint deleting in progress",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying for endpoint with zero replicas but application still existing ",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Spec.Replicas.Num = pointy.Int(0)
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "RUNNING",
+							DeployedAppConfig: existingApp,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Endpoint pausing in progress",
+			expectError:    false,
+		},
+		{
+			name: "return Paused for endpoint with zero replicas and application not existing ",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Spec.Replicas.Num = pointy.Int(0)
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{}, nil)
+			},
+			expectedPhase: v1.EndpointPhasePAUSED,
 			expectError:   false,
+		},
+		{
+			name: "return Deploying for none application",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Endpoint deploying in progress",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying for application is in DEPLOYING status",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Endpoint deploying in progress",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying for application is in NOT_STARTED status",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "NOT_STARTED",
+							DeployedAppConfig: existingApp,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Endpoint deploying in progress",
+			expectError:    false,
+		},
+		{
+			name: "return failed for application is in DEPLOY_FAILED status",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOY_FAILED",
+							DeployedAppConfig: existingApp,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Endpoint failed",
+		},
+		{
+			name: "return failed for application is in UNHEALTHY status",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "UNHEALTHY",
+							DeployedAppConfig: existingApp,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Endpoint failed",
+		},
+		{
+			name: "return Running for application is in Running status and proxy is healthy",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "RUNNING",
+							DeployedAppConfig: existingApp,
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {
+							Status: dashboard.ProxyStatusHealthy,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseRUNNING,
+			expectError:   false,
+		},
+		{
+			name: "return Deploying for application is in Running status but none proxy",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "RUNNING",
+							DeployedAppConfig: existingApp,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Endpoint deploying in progress",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying for application is in Running status but proxy is unhealthy",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "Running",
+							DeployedAppConfig: existingApp,
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {
+							Status: dashboard.ProxyStatusUnhealthy,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Endpoint deploying in progress",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying for status not catched case",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "UNDEFINED_STATUS",
+							DeployedAppConfig: existingApp,
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Endpoint deploying in progress",
+			expectError:    false,
+		},
+		{
+			name: "should merge errormsgs from different checks when ray serve application is not in Running status",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {
+									Name:    "BACKEND",
+									Message: "backend deployment is error",
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Deployment BACKEND: backend deployment is error",
+			expectError:    false,
 		},
 	}
 
@@ -1119,26 +1383,15 @@ func TestRayOrchestrator_GetEndpointStatus_WithZeroReplicas(t *testing.T) {
 				},
 			}
 
-			endpoint := &v1.Endpoint{
-				Metadata: &v1.Metadata{
-					Workspace: "production",
-					Name:      "chat-model",
-				},
-				Spec: &v1.EndpointSpec{
-					Replicas: v1.ReplicaSpec{
-						Num: pointy.Int(0),
-					},
-				},
-			}
-
-			status, err := o.GetEndpointStatus(endpoint)
+			status, err := o.GetEndpointStatus(tt.inputEndpoint())
 			if tt.expectError {
 				assert.Error(t, err)
-				assert.Nil(t, status)
 			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, status)
 				assert.Equal(t, tt.expectedPhase, status.Phase)
+				if tt.expectErrorMsg != "" {
+					assert.Contains(t, status.ErrorMessage, tt.expectErrorMsg)
+				}
+				assert.NoError(t, err)
 			}
 
 			mockDashboard.AssertExpectations(t)

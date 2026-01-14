@@ -37,14 +37,14 @@ type ReconcileContext struct {
 	sshRayClusterConfig *v1.RayClusterConfig
 	sshConfigGenerator  *raySSHLocalConfigGenerator
 
+	rayService dashboard.DashboardService
+
 	// kubernetes cluster specific fields
 	ctrClient        client.Client
 	clusterNamespace string
 
 	// native kubernetes cluster specific fields
 	kubernetesClusterConfig *v1.KubernetesClusterConfig
-
-	rayService dashboard.DashboardService
 
 	logger klog.Logger
 }

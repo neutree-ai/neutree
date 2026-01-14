@@ -48,57 +48,108 @@ func (o *RayOrchestrator) getDashboardService() (dashboard.DashboardService, err
 	return dashboard.NewDashboardService(o.cluster.Status.DashboardURL), nil
 }
 
-// CreateEndpoint deploys a new endpoint using Ray Serve.
-func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
-	if endpoint.Spec.Replicas.Num != nil && *endpoint.Spec.Replicas.Num == 0 {
-		// If replicas is set to 0, we treat it as a deletion request.
-		klog.Infof("Endpoint %s replicas set to 0, treating as deletion request.", endpoint.Metadata.WorkspaceName())
-
-		err := o.deleteEndpoint(endpoint)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to set endpoint with 0 replicas")
-		}
-
-		return &v1.EndpointStatus{
-			Phase:        v1.EndpointPhaseRUNNING,
-			ErrorMessage: "",
-		}, nil
-	}
-
-	return o.createOrUpdate(endpoint)
-}
-
-func (o *RayOrchestrator) createOrUpdate(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
-	// pre-check related resources
+func (o *RayOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoint) (*OrchestratorContext, error) {
 	deployedCluster, err := getEndpointDeployCluster(o.storage, endpoint)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list cluster")
+		return nil, errors.Wrap(err, "failed to get deploy cluster")
 	}
 
-	_, err = getUsedEngine(o.storage, endpoint)
+	engine, err := getUsedEngine(o.storage, endpoint)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list engine")
+		return nil, errors.Wrap(err, "failed to get engine")
 	}
 
 	modelRegistry, err := getEndpointModelRegistry(o.storage, endpoint)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list model registry")
+		return nil, errors.Wrap(err, "failed to get model registry")
 	}
 
-	// call ray dashboard API
 	dashboardService, err := o.getDashboardService()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get dashboard service for creating endpoint")
+		return nil, errors.Wrap(err, "failed to get dashboard service")
 	}
 
-	currentAppsResp, err := dashboardService.GetServeApplications()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get current serve applications")
+	return &OrchestratorContext{
+		Cluster:       deployedCluster,
+		Engine:        engine,
+		ModelRegistry: modelRegistry,
+		Endpoint:      endpoint,
+		rayService:    dashboardService,
+		logger:        klog.LoggerWithValues(klog.Background(), "endpoint", endpoint.Metadata.WorkspaceName()),
+	}, nil
+}
+
+func (o *RayOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
+	// validate cluster status
+	if ctx.Cluster.Status == nil || ctx.Cluster.Status.Phase != v1.ClusterPhaseRunning {
+		return errors.Errorf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
 	}
 
-	newApp, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, o.acceleratorMgr)
+	if ctx.Cluster.Spec.Type != v1.SSHClusterType {
+		return errors.Errorf("deploy cluster %s is not ssh type", ctx.Cluster.Metadata.WorkspaceName())
+	}
+
+	// validate engine status
+	if ctx.Engine.Status == nil || ctx.Engine.Status.Phase != v1.EnginePhaseCreated {
+		return errors.Errorf("engine %s not ready", ctx.Engine.Metadata.WorkspaceName())
+	}
+
+	// validate model registry status
+	if ctx.ModelRegistry.Status == nil || ctx.ModelRegistry.Status.Phase != v1.ModelRegistryPhaseCONNECTED {
+		return errors.Errorf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
+	}
+
+	return nil
+}
+
+// CreateEndpoint deploys a new endpoint using Ray Serve.
+func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
+	ctx, err := o.prepareOrchestratorContext(endpoint)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to convert endpoint to application")
+		return errors.Wrapf(err, "failed to prepare context for endpoint %s", endpoint.Metadata.WorkspaceName())
+	}
+
+	err = o.validateDependencies(ctx)
+	if err != nil {
+		return errors.Wrapf(err, "failed to validate dependencies for endpoint %s", endpoint.Metadata.WorkspaceName())
+	}
+
+	ctx.logger.V(4).Info("Creating or updating endpoint in Ray Serve")
+	// always exec connect model to cluster, for cluster may dynamic scale, we need ensure model exists on all cluster nodes.
+	// todo: In order to reduce model connection actions, a new controller may be created in the future to uniformly manage model connections on the cluster.
+	err = o.connectSSHClusterEndpointModel(*ctx.ModelRegistry, *ctx.Endpoint, connect)
+	if err != nil {
+		return errors.Wrapf(err, "failed to connect model registry before creating endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+	}
+
+	return o.createOrUpdate(ctx)
+}
+
+func (o *RayOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
+	ctx, err := o.prepareOrchestratorContext(endpoint)
+	if err != nil {
+		return errors.Wrapf(err, "failed to prepare context for endpoint %s", endpoint.Metadata.WorkspaceName())
+	}
+
+	ctx.logger.V(4).Info("Pausing endpoint by deleting from Ray Serve")
+
+	err = o.deleteEndpoint(ctx)
+	if err != nil {
+		return errors.Wrapf(err, "failed to pause endpoint %s", endpoint.Metadata.WorkspaceName())
+	}
+
+	return nil
+}
+
+func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
+	currentAppsResp, err := ctx.rayService.GetServeApplications()
+	if err != nil {
+		return errors.Wrapf(err, "failed to get current serve applications for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+	}
+
+	newApp, err := EndpointToApplication(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, o.acceleratorMgr)
+	if err != nil {
+		return errors.Wrapf(err, "failed to convert endpoint to application for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
 	// Build the list of applications for the PUT request
@@ -116,16 +167,13 @@ func (o *RayOrchestrator) createOrUpdate(endpoint *v1.Endpoint) (*v1.EndpointSta
 
 				equal, diff, err := util.JsonEqual(appStatus.DeployedAppConfig, newApp)
 				if err != nil {
-					return &v1.EndpointStatus{
-						Phase:        v1.EndpointPhaseFAILED,
-						ErrorMessage: errors.Wrap(err, "failed to compare serve application").Error(),
-					}, nil // Return nil error as the operation failed but we captured status
+					return errors.Wrapf(err, "failed to compare serve application for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 				}
 
 				if equal {
 					needUpdate = false
 				} else {
-					klog.Infof("Serve application diff: %s, need to update", diff)
+					ctx.logger.Info("Serve application need to update", "diff", diff)
 
 					updatedAppsList[len(updatedAppsList)-1] = newApp
 				}
@@ -142,41 +190,37 @@ func (o *RayOrchestrator) createOrUpdate(endpoint *v1.Endpoint) (*v1.EndpointSta
 			Applications: updatedAppsList,
 		}
 
-		err = dashboardService.UpdateServeApplications(updateReq)
+		err = ctx.rayService.UpdateServeApplications(updateReq)
 		if err != nil {
-			return &v1.EndpointStatus{
-				Phase:        v1.EndpointPhaseFAILED,
-				ErrorMessage: errors.Wrap(err, "failed to update serve applications").Error(),
-			}, nil // Return nil error as the operation failed but we captured status
+			return errors.Wrapf(err, "failed to update serve applications for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 		}
 	}
 
-	return &v1.EndpointStatus{
-		Phase:        v1.EndpointPhaseRUNNING,
-		ErrorMessage: "",
-	}, nil
+	return nil
 }
 
 // DeleteEndpoint removes an endpoint from Ray Serve.
 func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
-	return o.deleteEndpoint(endpoint)
+	// delete endpoint should not validate dependencies
+	ctx, err := o.prepareOrchestratorContext(endpoint)
+	if err != nil {
+		return errors.Wrapf(err, "failed to prepare context for endpoint %s", endpoint.Metadata.WorkspaceName())
+	}
+
+	err = o.connectSSHClusterEndpointModel(*ctx.ModelRegistry, *ctx.Endpoint, disconnect)
+	if err != nil {
+		return errors.Wrapf(err, "failed to disconnect model registry before deleting endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+	}
+
+	ctx.logger.V(4).Info("Deleting endpoint from Ray Serve")
+
+	return o.deleteEndpoint(ctx)
 }
 
-func (o *RayOrchestrator) deleteEndpoint(endpoint *v1.Endpoint) error {
-	// pre-check cluster
-	_, err := getEndpointDeployCluster(o.storage, endpoint)
+func (o *RayOrchestrator) deleteEndpoint(ctx *OrchestratorContext) error {
+	currentAppsResp, err := ctx.rayService.GetServeApplications()
 	if err != nil {
-		return errors.Wrap(err, "failed to list cluster")
-	}
-
-	dashboardService, err := o.getDashboardService()
-	if err != nil {
-		return errors.Wrap(err, "failed to get dashboard service for deleting endpoint")
-	}
-
-	currentAppsResp, err := dashboardService.GetServeApplications()
-	if err != nil {
-		return errors.Wrap(err, "failed to get current serve applications before deletion")
+		return errors.Wrapf(err, "failed to get current serve applications before deletion of endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
 	// Build the list of applications excluding the one to delete
@@ -184,7 +228,7 @@ func (o *RayOrchestrator) deleteEndpoint(endpoint *v1.Endpoint) error {
 	found := false
 
 	for name, appStatus := range currentAppsResp.Applications {
-		if name == EndpointToServeApplicationName(endpoint) {
+		if name == EndpointToServeApplicationName(ctx.Endpoint) {
 			found = true
 			continue // Skip the endpoint to be deleted
 		}
@@ -194,7 +238,7 @@ func (o *RayOrchestrator) deleteEndpoint(endpoint *v1.Endpoint) error {
 
 	if !found {
 		// Endpoint not found, consider it successfully deleted (idempotency)
-		klog.Infof("Endpoint %s not found during deletion, assuming already deleted.\n", endpoint.Metadata.Name)
+		ctx.logger.Info("Endpoint not found during deletion, assuming already deleted")
 		return nil
 	}
 
@@ -202,9 +246,9 @@ func (o *RayOrchestrator) deleteEndpoint(endpoint *v1.Endpoint) error {
 		Applications: updatedAppsList,
 	}
 
-	err = dashboardService.UpdateServeApplications(updateReq)
+	err = ctx.rayService.UpdateServeApplications(updateReq)
 	if err != nil {
-		return errors.Wrap(err, "failed to update serve applications for deletion")
+		return errors.Wrapf(err, "failed to update serve applications for deletion of endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
 	return nil
@@ -217,94 +261,131 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	// or parse the status field from the GetServeApplications response.
 	dashboardService, err := o.getDashboardService()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get dashboard service for getting endpoint status")
+		return nil, errors.Wrapf(err, "failed to get dashboard service for getting endpoint %s status", endpoint.Metadata.WorkspaceName())
 	}
 
 	currentAppsResp, err := dashboardService.GetServeApplications()
 	if err != nil {
-		return &v1.EndpointStatus{
-			Phase:        v1.EndpointPhaseFAILED,
-			ErrorMessage: errors.Wrap(err, "failed to get serve applications to check status").Error(),
-		}, nil
+		return nil, errors.Wrapf(err, "failed to get current serve applications for endpoint %s status", endpoint.Metadata.WorkspaceName())
 	}
 
-	// For zero replicas, the Running phase indicates successful deletion of the application.
-	// Therefore, here we check if the application still exists.
-	// This differs from the behavior when the number of replicas is greater than 0.
-	expectZeroReplicas := endpoint.Spec.Replicas.Num != nil && *endpoint.Spec.Replicas.Num == 0
+	isDeleting := endpoint.GetDeletionTimestamp() != ""
 	status, exists := currentAppsResp.Applications[EndpointToServeApplicationName(endpoint)]
 
-	switch {
-	case !exists && expectZeroReplicas:
-		return &v1.EndpointStatus{
-			Phase:        v1.EndpointPhaseRUNNING,
-			ErrorMessage: "",
-		}, nil
-	case exists && expectZeroReplicas:
-		return &v1.EndpointStatus{
-			Phase:        v1.EndpointPhasePENDING,
-			ErrorMessage: "Endpoint deletion in progress: still exists in Ray Serve applications",
-		}, nil
-	case !exists && !expectZeroReplicas:
-		return &v1.EndpointStatus{
-			Phase:        v1.EndpointPhasePENDING,
-			ErrorMessage: "Endpoint not found in Ray Serve applications",
-		}, nil
-	default:
-		// Basic status mapping
-		// https://docs.ray.io/en/latest/serve/api/doc/ray.serve.schema.ApplicationStatus.html#ray.serve.schema.ApplicationStatus
-		var phase v1.EndpointPhase
-
-		switch status.Status {
-		case "RUNNING", "DELETING", "DEPLOYING", "UNHEALTHY", "NOT_STARTED":
-			phase = v1.EndpointPhaseRUNNING
-		case "DEPLOY_FAILED":
-			phase = v1.EndpointPhaseFAILED
-		default:
-			phase = v1.EndpointPhaseRUNNING
+	if isDeleting {
+		if !exists {
+			return &v1.EndpointStatus{
+				Phase:        v1.EndpointPhaseDELETED,
+				ErrorMessage: "",
+			}, nil
 		}
 
 		return &v1.EndpointStatus{
-			Phase:        phase,
-			ErrorMessage: status.Message, // Use message from Ray if available
+			Phase:        v1.EndpointPhaseDELETING,
+			ErrorMessage: "Endpoint deleting in progress: waiting for Ray Serve to delete the application",
 		}, nil
 	}
-}
 
-func (o *RayOrchestrator) ConnectEndpointModel(endpoint *v1.Endpoint) error {
-	modelRegistry, err := getEndpointModelRegistry(o.storage, endpoint)
-	if err != nil {
-		return errors.Wrap(err, "failed to get model registry")
+	isPaused := IsEndpointPaused(endpoint)
+	if isPaused {
+		if !exists {
+			return &v1.EndpointStatus{
+				Phase:        v1.EndpointPhasePAUSED,
+				ErrorMessage: "",
+			}, nil
+		}
+
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseDEPLOYING,
+			ErrorMessage: "Endpoint pausing in progress: waiting for Ray Serve to delete the application",
+		}, nil
 	}
 
-	op := connect
+	if !exists {
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseDEPLOYING,
+			ErrorMessage: "Endpoint deploying in progress: Endpoint not found in Ray Serve applications",
+		}, nil
+	}
 
-	switch o.cluster.Spec.Type {
-	case v1.SSHClusterType:
-		return o.connectSSHClusterEndpointModel(*modelRegistry, *endpoint, op)
-	case v1.KubernetesClusterType:
-		return o.connectKubernetesClusterEndpointModel(*modelRegistry, *endpoint, op)
+	proxyReady := true
+
+	if len(currentAppsResp.Proxies) == 0 {
+		proxyReady = false
+	}
+
+	for _, proxyStatus := range currentAppsResp.Proxies {
+		if proxyStatus.Status != dashboard.ProxyStatusHealthy {
+			proxyReady = false
+			break
+		}
+	}
+
+	// Basic status mapping
+	// https://docs.ray.io/en/latest/serve/api/doc/ray.serve.schema.ApplicationStatus.html#ray.serve.schema.ApplicationStatus
+	var phase v1.EndpointPhase
+	var errorMessages []string
+
+	switch status.Status {
+	case "DEPLOYING", "NOT_STARTED":
+		phase = v1.EndpointPhaseDEPLOYING
+	case "DEPLOY_FAILED", "UNHEALTHY":
+		phase = v1.EndpointPhaseFAILED
+	case "RUNNING":
+		if !proxyReady {
+			phase = v1.EndpointPhaseDEPLOYING
+
+			errorMessages = append(errorMessages, "Proxy not healthy")
+		} else {
+			phase = v1.EndpointPhaseRUNNING
+		}
 	default:
-		return fmt.Errorf("unsupported cluster type: %s", o.cluster.Spec.Type)
-	}
-}
+		phase = v1.EndpointPhaseDEPLOYING
 
-func (o *RayOrchestrator) DisconnectEndpointModel(endpoint *v1.Endpoint) error {
-	modelRegistry, err := getEndpointModelRegistry(o.storage, endpoint)
-	if err != nil {
-		return errors.Wrap(err, "failed to get model registry")
+		errorMessages = append(errorMessages, fmt.Sprintf("Unknown application status: %s", status.Status))
 	}
 
-	op := disconnect
-
-	switch o.cluster.Spec.Type {
-	case v1.SSHClusterType:
-		return o.connectSSHClusterEndpointModel(*modelRegistry, *endpoint, op)
-	case v1.KubernetesClusterType:
-		return o.connectKubernetesClusterEndpointModel(*modelRegistry, *endpoint, op)
-	default:
-		return fmt.Errorf("unsupported cluster type: %s", o.cluster.Spec.Type)
+	if phase == v1.EndpointPhaseRUNNING {
+		return &v1.EndpointStatus{
+			Phase:        phase,
+			ErrorMessage: "",
+		}, nil
 	}
+
+	// Merge Ray Serve error messages
+	if status.Message != "" {
+		errorMessages = append(errorMessages, status.Message)
+	}
+
+	if len(status.Deployments) == 0 {
+		errorMessages = append(errorMessages, "No deployments found for the application")
+	}
+
+	// merge Ray Serve error messages
+	for _, deployment := range status.Deployments {
+		if deployment.Status != dashboard.DeploymentStatusHealthy && deployment.Message != "" {
+			errorMessages = append(errorMessages, fmt.Sprintf("Deployment %s: %s", deployment.Name, deployment.Message))
+		}
+	}
+
+	errorMsg := strings.Join(errorMessages, "; ")
+	// Add prefix to error message based on phase
+	if errorMsg != "" {
+		switch phase {
+		// no prefix
+		case v1.EndpointPhaseDEPLOYING:
+			errorMsg = "Endpoint deploying in progress: " + errorMsg
+		case v1.EndpointPhaseFAILED:
+			errorMsg = "Endpoint failed: " + errorMsg
+		}
+	}
+
+	endpointStatus := &v1.EndpointStatus{
+		Phase:        phase,
+		ErrorMessage: errorMsg, // Use merged error message
+	}
+
+	return endpointStatus, nil
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
@@ -331,7 +412,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	rayResource, err := convertToRay(acceleratorMgr, endpoint.Spec.Resources)
 	if err != nil {
-		klog.Errorf("Failed to convert resources to Ray format: %v", err)
+		klog.Errorf("Failed to convert endpoint %s resources to Ray format: %v", endpoint.Metadata.WorkspaceName(), err)
 		return dashboard.RayServeApplication{}, err
 	}
 

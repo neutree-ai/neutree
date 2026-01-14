@@ -44,10 +44,13 @@ type EndpointSpec struct {
 type EndpointPhase string
 
 const (
-	EndpointPhasePENDING EndpointPhase = "Pending"
-	EndpointPhaseRUNNING EndpointPhase = "Running"
-	EndpointPhaseFAILED  EndpointPhase = "Failed"
-	EndpointPhaseDELETED EndpointPhase = "Deleted"
+	EndpointPhasePENDING   EndpointPhase = "Pending"
+	EndpointPhaseRUNNING   EndpointPhase = "Running"
+	EndpointPhaseFAILED    EndpointPhase = "Failed"
+	EndpointPhaseDELETED   EndpointPhase = "Deleted"
+	EndpointPhasePAUSED    EndpointPhase = "Paused"
+	EndpointPhaseDEPLOYING EndpointPhase = "Deploying"
+	EndpointPhaseDELETING  EndpointPhase = "Deleting"
 )
 
 type EndpointStatus struct {
