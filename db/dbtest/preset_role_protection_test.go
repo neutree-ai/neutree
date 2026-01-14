@@ -23,26 +23,18 @@ func TestPresetRoleProtection_CannotUpdatePresetRole(t *testing.T) {
 	}
 
 	err = executeAsUser(t, adminDB, userID, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `
+		_, err := tx.ExecContext(ctx, `
 			UPDATE api.roles
 			SET spec = ROW((spec).preset_key, ARRAY['workspace:read']::api.permission_action[])::api.role_spec
 			WHERE (metadata).name = 'admin'
 		`)
-		if err != nil {
-			return err
-		}
-
-		rows, _ := result.RowsAffected()
-		if rows != 0 {
-			t.Fatalf("expected 0 rows affected by RLS policy, got %d", rows)
-		}
-		return nil
+		return err
 	})
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected RLS error: preset role should not be updatable")
 	}
-	t.Logf("preset role update blocked by RLS (0 rows affected)")
+	t.Logf("preset role update blocked by RLS: %v", err)
 }
 
 func TestPresetRoleProtection_CannotDeletePresetRole(t *testing.T) {
