@@ -418,3 +418,71 @@ func TestUserProfileRBAC_AdminCannotDeleteSelf(t *testing.T) {
 	}
 	t.Logf("admin cannot delete self (trigger blocked)")
 }
+
+func TestUserProfileRBAC_CannotSoftDeleteAdminUser(t *testing.T) {
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+
+	tx1, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+
+	deleterID := createUserWithPermissions(t, tx1, "admin-user-deleter", "adminuserdeleter@test.local",
+		[]string{"user_profile:delete", "user_profile:read"})
+
+	if err = tx1.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	err = executeAsUser(t, adminDB, deleterID, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE api.user_profiles
+			SET metadata = ROW((metadata).name, (metadata).display_name, (metadata).workspace, CURRENT_TIMESTAMP, (metadata).creation_timestamp, CURRENT_TIMESTAMP, (metadata).labels, (metadata).annotations)::api.metadata
+			WHERE (metadata).name = 'admin'
+		`)
+		return err
+	})
+
+	if err == nil {
+		t.Fatal("expected RLS error: admin user should not be soft deletable")
+	}
+	t.Logf("admin user soft delete blocked by RLS: %v", err)
+}
+
+func TestUserProfileRBAC_CannotHardDeleteAdminUser(t *testing.T) {
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+
+	tx1, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+
+	deleterID := createUserWithPermissions(t, tx1, "admin-user-deleter2", "adminuserdeleter2@test.local",
+		[]string{"user_profile:delete", "user_profile:read"})
+
+	if err = tx1.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	err = executeAsUser(t, adminDB, deleterID, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `
+			DELETE FROM api.user_profiles
+			WHERE (metadata).name = 'admin'
+		`)
+		if err != nil {
+			return err
+		}
+		rows, _ := result.RowsAffected()
+		if rows != 0 {
+			t.Fatalf("expected 0 rows deleted, got %d", rows)
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	t.Logf("admin user hard delete blocked by RLS (0 rows affected)")
+}

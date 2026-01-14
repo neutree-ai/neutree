@@ -11,7 +11,20 @@ import (
 )
 
 func validateUserProfileDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
-	return func(workspace, userID string) error {
+	return func(workspace, username string) error {
+		userProfiles, err := s.ListUserProfile(storage.ListOption{
+			Filters: []storage.Filter{{Column: "metadata->>name", Operator: "eq", Value: username}},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to get user profile: %w", err)
+		}
+
+		if len(userProfiles) == 0 {
+			return nil
+		}
+
+		userID := userProfiles[0].ID
+
 		count, err := s.Count(storage.ROLE_ASSIGNMENT_TABLE, []storage.Filter{
 			{Column: "spec->>user_id", Operator: "eq", Value: userID},
 		})
@@ -22,7 +35,7 @@ func validateUserProfileDeletion(s storage.Storage) middleware.DeletionValidator
 		if count > 0 {
 			return &middleware.DeletionError{
 				Code:    "10130",
-				Message: fmt.Sprintf("cannot delete user_profile '%s'", userID),
+				Message: fmt.Sprintf("cannot delete user_profile '%s'", username),
 				Hint:    fmt.Sprintf("%d role assignment(s) still reference this user", count),
 			}
 		}
