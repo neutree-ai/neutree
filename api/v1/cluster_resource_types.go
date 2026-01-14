@@ -41,6 +41,9 @@ type ClusterResources struct {
 	// Available = Allocatable - Allocated
 	Available *ResourceInfo `json:"available,omitempty"`
 
+	// NodeResources contains per-node resource information.
+	// Key: node identifier (IP address for SSH clusters, node name for Kubernetes clusters).
+	// Value: ResourceStatus for that node.
 	NodeResources map[string]*ResourceStatus `json:"node_resources,omitempty"`
 }
 
