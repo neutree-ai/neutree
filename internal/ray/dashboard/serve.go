@@ -27,9 +27,14 @@ type RayServeApplicationStatus struct {
 	DeployedAppConfig *RayServeApplication `json:"deployed_app_config"` // Used when getting current apps
 }
 
+type ProxyStatus struct {
+	Status string `json:"status,omitempty"`
+}
+
 // RayServeApplicationsResponse represents the full response when getting applications.
 type RayServeApplicationsResponse struct {
 	Applications map[string]RayServeApplicationStatus `json:"applications"`
+	Proxies      map[string]ProxyStatus               `json:"proxies"`
 }
 
 // GetServeApplications retrieves the current Ray Serve applications.

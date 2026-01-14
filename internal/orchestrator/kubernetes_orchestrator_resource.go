@@ -196,7 +196,6 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 	switch modelRegistry.Spec.Type {
 	case v1.BentoMLModelRegistryType:
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
-		// todo: support local file type env set
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
 			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 			if err != nil {
@@ -226,7 +225,6 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			})
 		}
 
-		// todo: support local file type env set
 	case v1.HuggingFaceModelRegistryType:
 		data.Env[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
 		if modelRegistry.Spec.Credentials != "" {

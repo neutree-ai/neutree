@@ -387,7 +387,6 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	switch modelRegistry.Spec.Type {
 	case v1.BentoMLModelRegistryType:
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
-		// todo: support local file type env set
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
 			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 			if err != nil {
