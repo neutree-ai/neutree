@@ -23,26 +23,18 @@ func TestPresetRoleAssignmentProtection_CannotUpdateAdminGlobalAssignment(t *tes
 	}
 
 	err = executeAsUser(t, adminDB, userID, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `
+		_, err := tx.ExecContext(ctx, `
 			UPDATE api.role_assignments
 			SET spec = ROW((spec).user_id, (spec).workspace, (spec).global, 'workspace-user')::api.role_assignment_spec
 			WHERE (metadata).name = 'admin-global-role-assignment'
 		`)
-		if err != nil {
-			return err
-		}
-
-		rows, _ := result.RowsAffected()
-		if rows != 0 {
-			t.Fatalf("expected 0 rows affected by RLS policy, got %d", rows)
-		}
-		return nil
+		return err
 	})
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected RLS error: admin global role assignment should not be updatable")
 	}
-	t.Logf("admin global role assignment update blocked by RLS (0 rows affected)")
+	t.Logf("admin global role assignment update blocked by RLS: %v", err)
 }
 
 func TestPresetRoleAssignmentProtection_CannotDeleteAdminGlobalAssignment(t *testing.T) {
