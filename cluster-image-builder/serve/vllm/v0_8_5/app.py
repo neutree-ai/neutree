@@ -13,7 +13,6 @@ from starlette_context.plugins import RequestIdPlugin
 from starlette_context.middleware import RawContextMiddleware
 from fastapi.middleware import Middleware
 
-import bentoml
 from ray import serve
 from ray.serve import Application
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
@@ -63,7 +62,7 @@ class Backend:
             model_registry_type: Type of model registry ("bentoml" or "hugging-face")
             model_name: Name of the model in the registry
             model_version: Version of the model
-            model_file: Specific model file name (for bentoml)
+            model_file: Specific model file name (for GGUF models)
             model_task: Task type (e.g., "text-generation", "text-embedding", "text-rerank")
             **engine_kwargs: Additional keyword arguments passed directly to AsyncEngineArgs
         """

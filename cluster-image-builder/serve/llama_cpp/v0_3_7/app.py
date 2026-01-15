@@ -12,7 +12,6 @@ from ray.serve import Application
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, StreamingResponse
-import bentoml
 import llama_cpp
 from llama_cpp import Llama, LlamaGrammar
 from llama_cpp.server.settings import ModelSettings
@@ -50,7 +49,7 @@ class Backend:
             model_registry_type: Type of model registry ("bentoml" or "hugging-face")
             model_name: Name of the model in the registry
             model_version: Version of the model
-            model_file: Specific model file name (for hugging-face)
+            model_file: Specific model file name (for GGUF models)
             model_task: Task type (e.g., "text-generation", "text-embedding")
             **model_settings: Additional model settings for llama-cpp
         """
