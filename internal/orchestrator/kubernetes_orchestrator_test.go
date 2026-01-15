@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/pointer"
 )
 
 var testVllmDeploymentTemplate = `apiVersion: apps/v1
@@ -1692,7 +1693,7 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 						Version: "v0.5.0",
 					},
 					Resources: &v1.ResourceSpec{
-						CPU: floatPtr(4.0),
+						CPU: pointer.String("4.0"),
 					},
 				},
 			},
@@ -1915,8 +1916,4 @@ func TestGenerateModelCacheConfig(t *testing.T) {
 			}
 		})
 	}
-}
-
-func floatPtr(f float64) *float64 {
-	return &f
 }

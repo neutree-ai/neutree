@@ -36,8 +36,8 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 				Name:     "test-model",
 			},
 			Resources: &v1.ResourceSpec{
-				CPU:         pointy.Float64(1.0),
-				GPU:         pointy.Float64(1.0),
+				CPU:         pointy.String("1.0"),
+				GPU:         pointy.String("1.0"),
 				Accelerator: make(map[string]string),
 			},
 			Replicas: v1.ReplicaSpec{
@@ -224,8 +224,8 @@ func TestRayOrchestrator_CreateEndpoint_ApplicationNameConsistency(t *testing.T)
 				Name:     "test-model",
 			},
 			Resources: &v1.ResourceSpec{
-				CPU:         pointy.Float64(1.0),
-				GPU:         pointy.Float64(1.0),
+				CPU:         pointy.String("1.0"),
+				GPU:         pointy.String("1.0"),
 				Accelerator: make(map[string]string),
 			},
 			Replicas: v1.ReplicaSpec{
@@ -398,8 +398,8 @@ func TestRayOrchestrator_CreateEndpoint_WithZeroReplicas(t *testing.T) {
 				Name:     "test-model",
 			},
 			Resources: &v1.ResourceSpec{
-				CPU:         pointy.Float64(1.0),
-				GPU:         pointy.Float64(1.0),
+				CPU:         pointy.String("1.0"),
+				GPU:         pointy.String("1.0"),
 				Accelerator: make(map[string]string),
 			},
 			Replicas: v1.ReplicaSpec{
