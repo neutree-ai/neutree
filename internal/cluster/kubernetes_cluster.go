@@ -96,7 +96,9 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 	if !reconcileCtx.Cluster.Status.Initialized {
 		reconcileCtx.Cluster.Status.Phase = v1.ClusterPhaseInitializing
 
-		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), reconcileCtx.Cluster)
+		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
+			Status: reconcileCtx.Cluster.Status,
+		})
 		if err != nil {
 			return errors.Wrap(err, "failed to update cluster status")
 		}
