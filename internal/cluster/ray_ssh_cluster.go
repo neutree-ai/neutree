@@ -647,9 +647,8 @@ func (c *sshRayClusterReconciler) calculateClusterResources(
 	}
 
 	result := &v1.ClusterResources{
-		Allocatable:   clusterResourceStatus.Allocatable,
-		Available:     clusterResourceStatus.Available,
-		NodeResources: nodeResources,
+		ResourceStatus: *clusterResourceStatus,
+		NodeResources:  nodeResources,
 	}
 
 	return result, nil

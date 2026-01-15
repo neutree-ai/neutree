@@ -344,15 +344,17 @@ func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 
 	// Initialize result
 	result := &v1.ClusterResources{
-		Allocatable: &v1.ResourceInfo{
-			CPU:               0,
-			Memory:            0,
-			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
-		},
-		Available: &v1.ResourceInfo{
-			CPU:               0,
-			Memory:            0,
-			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
+		ResourceStatus: v1.ResourceStatus{
+			Allocatable: &v1.ResourceInfo{
+				CPU:               0,
+				Memory:            0,
+				AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
+			},
+			Available: &v1.ResourceInfo{
+				CPU:               0,
+				Memory:            0,
+				AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
+			},
 		},
 		NodeResources: make(map[string]*v1.ResourceStatus),
 	}
