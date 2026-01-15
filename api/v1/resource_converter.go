@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 // RayResourceSpec represents Ray resource specification
 type RayResourceSpec struct {
 	NumGPUs   float64            `json:"num_gpus,omitempty" yaml:"num_gpus,omitempty"`
@@ -61,7 +63,7 @@ func (r *ResourceSpec) GetCustomResources() map[string]string {
 func (r *ResourceSpec) HasAccelerator() bool {
 	var gpu float64
 	if r.GPU != nil {
-		gpu = *r.GPU
+		gpu, _ = strconv.ParseFloat(*r.GPU, 64)
 	}
 
 	return gpu > 0 && r.GetAcceleratorType() != ""
@@ -97,4 +99,49 @@ func (r *ResourceSpec) AddCustomResource(key, value string) {
 // IsReservedKey checks whether the key is reserved
 func IsReservedKey(key string) bool {
 	return key == AcceleratorTypeKey || key == AcceleratorProductKey
+}
+
+// GetGPUCount returns the GPU count
+// If GPU is nil or cannot be parsed, it returns 0.
+func (r *ResourceSpec) GetGPUCount() float64 {
+	if r.GPU == nil {
+		return 0
+	}
+
+	gpuCount, err := strconv.ParseFloat(*r.GPU, 64)
+	if err != nil {
+		return 0
+	}
+
+	return gpuCount
+}
+
+// GetCPUCount returns the CPU count
+// If CPU is nil or cannot be parsed, it returns 0.
+func (r *ResourceSpec) GetCPUCount() float64 {
+	if r.CPU == nil {
+		return 0
+	}
+
+	cpuCount, err := strconv.ParseFloat(*r.CPU, 64)
+	if err != nil {
+		return 0
+	}
+
+	return cpuCount
+}
+
+// GetMemoryInGB returns the memory in GB
+// If Memory is nil or cannot be parsed, it returns 0.
+func (r *ResourceSpec) GetMemoryInGB() float64 {
+	if r.Memory == nil {
+		return 0
+	}
+
+	memoryInGB, err := strconv.ParseFloat(*r.Memory, 64)
+	if err != nil {
+		return 0
+	}
+
+	return memoryInGB
 }

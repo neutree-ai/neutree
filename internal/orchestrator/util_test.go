@@ -18,9 +18,9 @@ func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {
 	mgr := &acceleratormocks.MockManager{}
 	mgr.On("GetConverter", "nvidia_gpu").Return(plugin.NewGPUConverter(), true)
 
-	gpu := float64(2)
-	cpu := float64(16)
-	memory := float64(64)
+	gpu := "2"
+	cpu := "16"
+	memory := "64"
 	spec := &v1.ResourceSpec{
 		GPU:    &gpu,
 		CPU:    &cpu,
@@ -45,9 +45,9 @@ func TestConverterManager_ConvertToRay_Accelerator_ZeroCount(t *testing.T) {
 	mgr := &acceleratormocks.MockManager{}
 	mgr.On("GetConverter", "nvidia_gpu").Return(plugin.NewGPUConverter(), true)
 
-	gpu := float64(0)
-	cpu := float64(16)
-	memory := float64(64)
+	gpu := "0"
+	cpu := "16"
+	memory := "64"
 	spec := &v1.ResourceSpec{
 		GPU:    &gpu,
 		CPU:    &cpu,
@@ -72,9 +72,9 @@ func TestConverterManager_ConvertToKubernetes_NVIDIA(t *testing.T) {
 
 	mgr.On("GetConverter", "nvidia_gpu").Return(plugin.NewGPUConverter(), true)
 
-	gpu := float64(1)
-	cpu := float64(8)
-	memory := float64(32)
+	gpu := "1"
+	cpu := "8"
+	memory := "32"
 	spec := &v1.ResourceSpec{
 		GPU:    &gpu,
 		CPU:    &cpu,
@@ -98,9 +98,9 @@ func TestConverterManager_ConvertToKubernetes_Accelerator_ZeroCount(t *testing.T
 
 	mgr.On("GetConverter", "nvidia_gpu").Return(plugin.NewGPUConverter(), true)
 
-	gpu := float64(0)
-	cpu := float64(8)
-	memory := float64(32)
+	gpu := "0"
+	cpu := "8"
+	memory := "32"
 	spec := &v1.ResourceSpec{
 		GPU:    &gpu,
 		CPU:    &cpu,
@@ -125,9 +125,9 @@ func TestConverterManager_ConvertToRay_AMD(t *testing.T) {
 
 	mgr.On("GetConverter", "amd_gpu").Return(plugin.NewAMDGPUConverter(), true)
 
-	gpu := float64(1)
-	cpu := float64(8)
-	memory := float64(32)
+	gpu := "1"
+	cpu := "8"
+	memory := "32"
 	spec := &v1.ResourceSpec{
 		GPU:    &gpu,
 		CPU:    &cpu,
@@ -149,9 +149,9 @@ func TestConverterManager_ConvertToKubernetes_AMD(t *testing.T) {
 
 	mgr.On("GetConverter", "amd_gpu").Return(plugin.NewAMDGPUConverter(), true)
 
-	gpu := float64(1)
-	cpu := float64(8)
-	memory := float64(32)
+	gpu := "1"
+	cpu := "8"
+	memory := "32"
 	spec := &v1.ResourceSpec{
 		GPU:    &gpu,
 		CPU:    &cpu,
@@ -173,8 +173,8 @@ func TestConverterManager_ConvertToKubernetes_AMD(t *testing.T) {
 func TestConverterManager_CPUOnly(t *testing.T) {
 	mgr := &acceleratormocks.MockManager{}
 
-	cpu := float64(4)
-	memory := float64(8)
+	cpu := "4"
+	memory := "8"
 	spec := &v1.ResourceSpec{
 		CPU:    &cpu,
 		Memory: &memory,
@@ -216,7 +216,7 @@ func TestCPUOnly_MinimalConfig(t *testing.T) {
 func TestConverterManager_CPUOnly_OnlyCPU(t *testing.T) {
 	mgr := &acceleratormocks.MockManager{}
 
-	cpu := float64(2)
+	cpu := "2"
 	spec := &v1.ResourceSpec{
 		CPU: &cpu,
 	}
@@ -237,7 +237,7 @@ func TestConverterManager_CPUOnly_OnlyCPU(t *testing.T) {
 func TestCPUOnly_OnlyMemory(t *testing.T) {
 	mgr := &acceleratormocks.MockManager{}
 
-	memory := float64(16)
+	memory := "16"
 	spec := &v1.ResourceSpec{
 		Memory: &memory,
 	}
@@ -258,9 +258,9 @@ func TestCPUOnly_OnlyMemory(t *testing.T) {
 func TestGPUZero_NoAcceleratorType(t *testing.T) {
 	mgr := &acceleratormocks.MockManager{}
 
-	gpu := float64(0)
-	cpu := float64(4)
-	memory := float64(8)
+	gpu := "0"
+	cpu := "4"
+	memory := "8"
 	spec := &v1.ResourceSpec{
 		GPU:    &gpu,
 		CPU:    &cpu,
@@ -286,7 +286,7 @@ func TestNoConverterFound(t *testing.T) {
 
 	mgr.On("GetConverter", "unknown_gpu").Return(nil, false)
 
-	gpu := float64(1)
+	gpu := "1"
 	spec := &v1.ResourceSpec{
 		GPU: &gpu,
 	}

@@ -324,12 +324,12 @@ func convertCPUToRay(spec *v1.ResourceSpec) *v1.RayResourceSpec {
 		Resources: make(map[string]float64),
 	}
 
-	if spec.CPU != nil {
-		res.NumCPUs = *spec.CPU
+	if spec.GetCPUCount() > 0 {
+		res.NumCPUs = spec.GetCPUCount()
 	}
 
-	if spec.Memory != nil {
-		res.Memory = *spec.Memory * plugin.BytesPerGiB
+	if spec.GetMemoryInGB() > 0 {
+		res.Memory = spec.GetMemoryInGB() * plugin.BytesPerGiB
 	}
 
 	return res
@@ -342,14 +342,14 @@ func convertCPUToKubernetes(spec *v1.ResourceSpec) *v1.KubernetesResourceSpec {
 		NodeSelector: make(map[string]string),
 	}
 
-	if spec.CPU != nil && *spec.CPU > 0 {
-		cpuStr := fmt.Sprintf("%.0f", *spec.CPU)
+	if spec.GetCPUCount() > 0 {
+		cpuStr := fmt.Sprintf("%.0f", spec.GetCPUCount())
 		res.Requests["cpu"] = cpuStr
 		res.Limits["cpu"] = cpuStr
 	}
 
-	if spec.Memory != nil && *spec.Memory > 0 {
-		memoryStr := fmt.Sprintf("%.0fGi", *spec.Memory)
+	if spec.GetMemoryInGB() > 0 {
+		memoryStr := fmt.Sprintf("%.0fGi", spec.GetMemoryInGB())
 		res.Requests["memory"] = memoryStr
 		res.Limits["memory"] = memoryStr
 	}
