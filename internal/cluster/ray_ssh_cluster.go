@@ -404,7 +404,9 @@ func (c *sshRayClusterReconciler) initialize(reconcileCtx *ReconcileContext) err
 	if !reconcileCtx.Cluster.Status.Initialized {
 		reconcileCtx.Cluster.Status.Phase = v1.ClusterPhaseInitializing
 
-		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), reconcileCtx.Cluster) //nolint:errcheck
+		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
+			Status: reconcileCtx.Cluster.Status,
+		})
 		if err != nil {
 			return errors.Wrap(err, "failed to update cluster status")
 		}
@@ -445,7 +447,9 @@ func (c *sshRayClusterReconciler) initialize(reconcileCtx *ReconcileContext) err
 	reconcileCtx.Cluster.Status.Initialized = true
 	reconcileCtx.Cluster.Status.DashboardURL = dashboardUrl
 
-	err = c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), reconcileCtx.Cluster) //nolint:errcheck
+	err = c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
+		Status: reconcileCtx.Cluster.Status,
+	})
 	if err != nil {
 		return errors.Wrap(err, "failed to update cluster status")
 	}

@@ -176,7 +176,7 @@ services:
       - --storage-access-url=http://postgrest:6432
       - --storage-jwt-secret={{ .JwtSecret }}
       - --controller-workers=5
-      - --default-cluster-version=v1
+      - --default-cluster-version=v1.0.0
       - --metrics-remote-write-url={{ .MetricsRemoteWriteURL }}
       - --gateway-type=kong
       - --gateway-proxy-url=http://{{ .NodeIP }}:80
