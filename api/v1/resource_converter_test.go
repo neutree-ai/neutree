@@ -5,12 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/pointer"
 )
-
-// Helper function to create float64 pointer
-func float64Ptr(f float64) *float64 {
-	return &f
-}
 
 // TestGetAcceleratorType tests the GetAcceleratorType method
 func TestGetAcceleratorType(t *testing.T) {
@@ -165,7 +161,7 @@ func TestHasAccelerator(t *testing.T) {
 		{
 			name: "has GPU and accelerator type",
 			resource: &ResourceSpec{
-				GPU: float64Ptr(2),
+				GPU: pointer.String("2"),
 				Accelerator: map[string]string{
 					AcceleratorTypeKey: "nvidia",
 				},
@@ -175,7 +171,7 @@ func TestHasAccelerator(t *testing.T) {
 		{
 			name: "has GPU but no accelerator type",
 			resource: &ResourceSpec{
-				GPU: float64Ptr(2),
+				GPU: pointer.String("2"),
 				Accelerator: map[string]string{
 					AcceleratorProductKey: "a100",
 				},
@@ -194,7 +190,7 @@ func TestHasAccelerator(t *testing.T) {
 		{
 			name: "has GPU=0 and accelerator type",
 			resource: &ResourceSpec{
-				GPU: float64Ptr(0),
+				GPU: pointer.String("0"),
 				Accelerator: map[string]string{
 					AcceleratorTypeKey: "nvidia",
 				},
@@ -204,7 +200,7 @@ func TestHasAccelerator(t *testing.T) {
 		{
 			name: "has fractional GPU and accelerator type",
 			resource: &ResourceSpec{
-				GPU: float64Ptr(0.5),
+				GPU: pointer.String("0.5"),
 				Accelerator: map[string]string{
 					AcceleratorTypeKey: "nvidia",
 				},
@@ -503,9 +499,9 @@ func TestResourceSpecIntegration(t *testing.T) {
 			name: "build complete accelerator spec",
 			setup: func() *ResourceSpec {
 				r := &ResourceSpec{
-					CPU:    float64Ptr(4),
-					GPU:    float64Ptr(2),
-					Memory: float64Ptr(16),
+					CPU:    pointer.String("4"),
+					GPU:    pointer.String("2"),
+					Memory: pointer.String("16"),
 				}
 				r.SetAcceleratorType("nvidia_gpu")
 				r.SetAcceleratorProduct("a100")
@@ -528,7 +524,7 @@ func TestResourceSpecIntegration(t *testing.T) {
 			name: "modify existing accelerator",
 			setup: func() *ResourceSpec {
 				r := &ResourceSpec{
-					GPU: float64Ptr(1),
+					GPU: pointer.String("1"),
 					Accelerator: map[string]string{
 						AcceleratorTypeKey:    "amd_gpu",
 						AcceleratorProductKey: "mi100",
@@ -554,8 +550,8 @@ func TestResourceSpecIntegration(t *testing.T) {
 			name: "no accelerator configured",
 			setup: func() *ResourceSpec {
 				return &ResourceSpec{
-					CPU:    float64Ptr(8),
-					Memory: float64Ptr(32),
+					CPU:    pointer.String("8"),
+					Memory: pointer.String("32"),
 				}
 			},
 			validate: func(t *testing.T, r *ResourceSpec) {

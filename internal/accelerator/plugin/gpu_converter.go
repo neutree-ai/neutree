@@ -28,7 +28,7 @@ func (c *GPUConverter) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSpec,
 		return nil, fmt.Errorf("resource spec is nil")
 	}
 
-	if spec.GPU == nil || *spec.GPU <= 0 {
+	if spec.GetGPUCount() == 0 {
 		return nil, nil
 	}
 
@@ -40,12 +40,12 @@ func (c *GPUConverter) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSpec,
 		Resources: make(map[string]float64),
 	}
 
-	res.NumGPUs = *spec.GPU
+	res.NumGPUs = spec.GetGPUCount()
 
 	// Set accelerator product model as custom resource
 	if product := spec.GetAcceleratorProduct(); product != "" {
 		if spec.GPU != nil {
-			res.Resources[product] = float64(*spec.GPU)
+			res.Resources[product] = spec.GetGPUCount()
 		}
 	}
 
@@ -69,13 +69,13 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 		Env:          make(map[string]string),
 	}
 
-	if spec.GPU == nil || *spec.GPU <= 0 {
+	if spec.GetGPUCount() == 0 {
 		k8s.Env["NVIDIA_VISIBLE_DEVICES"] = "none"
 		return k8s, nil
 	}
 
 	// Set NVIDIA GPU
-	gpuCount := fmt.Sprintf("%.0f", *spec.GPU)
+	gpuCount := fmt.Sprintf("%.0f", spec.GetGPUCount())
 	k8s.Requests[c.kubernetesResourceName.String()] = gpuCount
 	k8s.Limits[c.kubernetesResourceName.String()] = gpuCount
 
