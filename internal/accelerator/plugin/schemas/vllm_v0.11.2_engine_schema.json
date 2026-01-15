@@ -144,10 +144,6 @@
       "type": ["string", "object"],
       "description": "Pooler config for output pooling behavior"
     },
-    "override_pooler_config": {
-      "type": ["string", "object"],
-      "description": "[DEPRECATED] Use pooler_config instead"
-    },
     "logits_processor_pattern": {
       "type": "string",
       "description": "Regex pattern for valid logits processor names"
@@ -235,22 +231,6 @@
       "type": "string",
       "default": "",
       "description": "Path to reasoning parser plugin"
-    },
-    "guided_decoding_backend": {
-      "type": "string",
-      "description": "[DEPRECATED] Guided decoding backend"
-    },
-    "guided_decoding_disable_fallback": {
-      "type": "boolean",
-      "description": "[DEPRECATED] Disable fallback in guided decoding"
-    },
-    "guided_decoding_disable_any_whitespace": {
-      "type": "boolean",
-      "description": "[DEPRECATED] Disable any whitespace"
-    },
-    "guided_decoding_disable_additional_properties": {
-      "type": "boolean",
-      "description": "[DEPRECATED] Disable additional properties"
     },
     "distributed_executor_backend": {
       "type": "string",
@@ -390,22 +370,6 @@
       "enum": ["linear", "round_robin"],
       "default": "linear",
       "description": "Expert placement strategy for MoE layers"
-    },
-    "num_redundant_experts": {
-      "type": "integer",
-      "description": "[DEPRECATED] Number of redundant experts"
-    },
-    "eplb_window_size": {
-      "type": "integer",
-      "description": "[DEPRECATED] EPLB window size"
-    },
-    "eplb_step_interval": {
-      "type": "integer",
-      "description": "[DEPRECATED] EPLB step interval"
-    },
-    "eplb_log_balancedness": {
-      "type": "boolean",
-      "description": "[DEPRECATED] Log EPLB balancedness"
     },
     "max_parallel_loading_workers": {
       "type": "integer",
@@ -600,12 +564,6 @@
       "default": 16,
       "description": "Maximum LoRA rank"
     },
-    "lora_extra_vocab_size": {
-      "type": "integer",
-      "enum": [256, 512],
-      "default": 256,
-      "description": "[DEPRECATED] Max extra vocabulary size"
-    },
     "lora_dtype": {
       "type": "string",
       "default": "auto",
@@ -705,13 +663,6 @@
         "type": "integer"
       },
       "description": "Sizes to capture cudagraph"
-    },
-    "cuda_graph_sizes": {
-      "type": "array",
-      "items": {
-        "type": "integer"
-      },
-      "description": "[DEPRECATED] Use cudagraph_capture_sizes"
     },
     "max_cudagraph_capture_size": {
       "type": "integer",
@@ -886,11 +837,6 @@
       "type": "number",
       "minimum": 0,
       "description": "RoPE theta parameter"
-    },
-    "enable_reasoning": {
-      "type": "boolean",
-      "default": false,
-      "description": "Enable reasoning mode"
     },
     "max_seq_len_to_capture": {
       "type": "integer",
