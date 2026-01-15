@@ -33,12 +33,18 @@ import (
 //	    },
 //	}
 type ClusterResources struct {
-	// Allocatable represents the total resources that can be allocated in the cluster.
-	// This corresponds to the sum of all node's allocatable resources.
-	Allocatable *ResourceInfo `json:"allocatable,omitempty"`
+	ResourceStatus `json:",inline"`
 
-	// Available represents the currently available (unallocated) resources in the cluster.
-	// Available = Allocatable - Allocated
+	// NodeResources contains per-node resource information.
+	// Key: node identifier (IP address for SSH clusters, node name for Kubernetes clusters).
+	// Value: ResourceStatus for that node.
+	NodeResources map[string]*ResourceStatus `json:"node_resources,omitempty"`
+}
+
+type ResourceStatus struct {
+	// Allocatable represents the total resources that can be allocated on the node.
+	Allocatable *ResourceInfo `json:"allocatable,omitempty"`
+	// Available represents the currently available (unallocated) resources on the node.
 	Available *ResourceInfo `json:"available,omitempty"`
 }
 

@@ -8,28 +8,30 @@ import (
 func TestClusterResources_Serialization(t *testing.T) {
 	// Create a sample ClusterResources
 	clusterResources := &ClusterResources{
-		Allocatable: &ResourceInfo{
-			CPU:    96.0,
-			Memory: 512.0,
-			AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
-				"nvidia_gpu": {
-					Quantity: 8.0,
-					ProductGroups: map[AcceleratorProduct]float64{
-						"Tesla-V100": 4.0,
-						"Tesla-T4":   4.0,
+		ResourceStatus: ResourceStatus{
+			Allocatable: &ResourceInfo{
+				CPU:    96.0,
+				Memory: 512.0,
+				AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
+					"nvidia_gpu": {
+						Quantity: 8.0,
+						ProductGroups: map[AcceleratorProduct]float64{
+							"Tesla-V100": 4.0,
+							"Tesla-T4":   4.0,
+						},
 					},
 				},
 			},
-		},
-		Available: &ResourceInfo{
-			CPU:    80.0,
-			Memory: 400.0,
-			AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
-				"nvidia_gpu": {
-					Quantity: 6.0,
-					ProductGroups: map[AcceleratorProduct]float64{
-						"Tesla-V100": 3.0,
-						"Tesla-T4":   3.0,
+			Available: &ResourceInfo{
+				CPU:    80.0,
+				Memory: 400.0,
+				AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
+					"nvidia_gpu": {
+						Quantity: 6.0,
+						ProductGroups: map[AcceleratorProduct]float64{
+							"Tesla-V100": 3.0,
+							"Tesla-T4":   3.0,
+						},
 					},
 				},
 			},
@@ -62,21 +64,23 @@ func TestClusterResources_Serialization(t *testing.T) {
 
 func TestClusterResources_HelperMethods(t *testing.T) {
 	clusterResources := &ClusterResources{
-		Allocatable: &ResourceInfo{
-			CPU:    96.0,
-			Memory: 512.0,
-			AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
-				"nvidia_gpu": {
-					Quantity: 8.0,
+		ResourceStatus: ResourceStatus{
+			Allocatable: &ResourceInfo{
+				CPU:    96.0,
+				Memory: 512.0,
+				AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
+					"nvidia_gpu": {
+						Quantity: 8.0,
+					},
 				},
 			},
-		},
-		Available: &ResourceInfo{
-			CPU:    80.0,
-			Memory: 400.0,
-			AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
-				"nvidia_gpu": {
-					Quantity: 6.0,
+			Available: &ResourceInfo{
+				CPU:    80.0,
+				Memory: 400.0,
+				AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
+					"nvidia_gpu": {
+						Quantity: 6.0,
+					},
 				},
 			},
 		},
@@ -129,12 +133,14 @@ func TestClusterResources_HelperMethods(t *testing.T) {
 
 func TestClusterResources_GetProductModels(t *testing.T) {
 	clusterResources := &ClusterResources{
-		Allocatable: &ResourceInfo{
-			AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
-				"nvidia_gpu": {
-					ProductGroups: map[AcceleratorProduct]float64{
-						"Tesla-V100": 4.0,
-						"Tesla-T4":   4.0,
+		ResourceStatus: ResourceStatus{
+			Allocatable: &ResourceInfo{
+				AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
+					"nvidia_gpu": {
+						ProductGroups: map[AcceleratorProduct]float64{
+							"Tesla-V100": 4.0,
+							"Tesla-T4":   4.0,
+						},
 					},
 				},
 			},
