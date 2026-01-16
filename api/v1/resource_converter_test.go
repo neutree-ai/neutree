@@ -5,12 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/pointer"
 )
-
-// Helper function to create float64 pointer
-func float64Ptr(f float64) *float64 {
-	return &f
-}
 
 // TestGetAcceleratorType tests the GetAcceleratorType method
 func TestGetAcceleratorType(t *testing.T) {
@@ -165,7 +161,7 @@ func TestHasAccelerator(t *testing.T) {
 		{
 			name: "has GPU and accelerator type",
 			resource: &ResourceSpec{
-				GPU: float64Ptr(2),
+				GPU: pointer.String("2"),
 				Accelerator: map[string]string{
 					AcceleratorTypeKey: "nvidia",
 				},
@@ -175,7 +171,7 @@ func TestHasAccelerator(t *testing.T) {
 		{
 			name: "has GPU but no accelerator type",
 			resource: &ResourceSpec{
-				GPU: float64Ptr(2),
+				GPU: pointer.String("2"),
 				Accelerator: map[string]string{
 					AcceleratorProductKey: "a100",
 				},
@@ -194,7 +190,7 @@ func TestHasAccelerator(t *testing.T) {
 		{
 			name: "has GPU=0 and accelerator type",
 			resource: &ResourceSpec{
-				GPU: float64Ptr(0),
+				GPU: pointer.String("0"),
 				Accelerator: map[string]string{
 					AcceleratorTypeKey: "nvidia",
 				},
@@ -204,7 +200,7 @@ func TestHasAccelerator(t *testing.T) {
 		{
 			name: "has fractional GPU and accelerator type",
 			resource: &ResourceSpec{
-				GPU: float64Ptr(0.5),
+				GPU: pointer.String("0.5"),
 				Accelerator: map[string]string{
 					AcceleratorTypeKey: "nvidia",
 				},
@@ -503,9 +499,9 @@ func TestResourceSpecIntegration(t *testing.T) {
 			name: "build complete accelerator spec",
 			setup: func() *ResourceSpec {
 				r := &ResourceSpec{
-					CPU:    float64Ptr(4),
-					GPU:    float64Ptr(2),
-					Memory: float64Ptr(16),
+					CPU:    pointer.String("4"),
+					GPU:    pointer.String("2"),
+					Memory: pointer.String("16"),
 				}
 				r.SetAcceleratorType("nvidia_gpu")
 				r.SetAcceleratorProduct("a100")
@@ -528,7 +524,7 @@ func TestResourceSpecIntegration(t *testing.T) {
 			name: "modify existing accelerator",
 			setup: func() *ResourceSpec {
 				r := &ResourceSpec{
-					GPU: float64Ptr(1),
+					GPU: pointer.String("1"),
 					Accelerator: map[string]string{
 						AcceleratorTypeKey:    "amd_gpu",
 						AcceleratorProductKey: "mi100",
@@ -554,8 +550,8 @@ func TestResourceSpecIntegration(t *testing.T) {
 			name: "no accelerator configured",
 			setup: func() *ResourceSpec {
 				return &ResourceSpec{
-					CPU:    float64Ptr(8),
-					Memory: float64Ptr(32),
+					CPU:    pointer.String("8"),
+					Memory: pointer.String("32"),
 				}
 			},
 			validate: func(t *testing.T, r *ResourceSpec) {
@@ -571,6 +567,175 @@ func TestResourceSpecIntegration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := tt.setup()
 			tt.validate(t, r)
+		})
+	}
+}
+
+func Test_GetGPUCount(t *testing.T) {
+	tests := []struct {
+		name     string
+		resource *ResourceSpec
+		expected float64
+	}{
+		{
+			name:     "nil GPU",
+			resource: &ResourceSpec{},
+			expected: 0,
+		},
+		{
+			name: "zero GPU",
+			resource: &ResourceSpec{
+				GPU: pointer.String("0"),
+			},
+			expected: 0,
+		},
+		{
+			name: "positive integer GPU",
+			resource: &ResourceSpec{
+				GPU: pointer.String("4"),
+			},
+			expected: 4,
+		},
+		{
+			name: "positive fractional GPU",
+			resource: &ResourceSpec{
+				GPU: pointer.String("2.5"),
+			},
+			expected: 2.5,
+		},
+		{
+			name: "invalid GPU value",
+			resource: &ResourceSpec{
+				GPU: pointer.String("invalid"),
+			},
+			expected: 0,
+		},
+		{
+			name: "empty GPU string",
+			resource: &ResourceSpec{
+				GPU: pointer.String(""),
+			},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.resource.GetGPUCount()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func Test_GetCPUCount(t *testing.T) {
+	tests := []struct {
+		name     string
+		resource *ResourceSpec
+		expected float64
+	}{
+		{
+			name:     "nil CPU",
+			resource: &ResourceSpec{},
+			expected: 0,
+		},
+		{
+			name: "zero CPU",
+			resource: &ResourceSpec{
+				CPU: pointer.String("0"),
+			},
+			expected: 0,
+		},
+		{
+			name: "positive integer CPU",
+			resource: &ResourceSpec{
+				CPU: pointer.String("8"),
+			},
+			expected: 8,
+		},
+		{
+			name: "positive fractional CPU",
+			resource: &ResourceSpec{
+				CPU: pointer.String("4.5"),
+			},
+			expected: 4.5,
+		},
+		{
+			name: "invalid CPU value",
+			resource: &ResourceSpec{
+				CPU: pointer.String("invalid"),
+			},
+			expected: 0,
+		},
+		{
+			name: "empty CPU string",
+			resource: &ResourceSpec{
+				CPU: pointer.String(""),
+			},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.resource.GetCPUCount()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+
+}
+
+func Test_GetMemoryInGB(t *testing.T) {
+	tests := []struct {
+		name     string
+		resource *ResourceSpec
+		expected float64
+	}{
+		{
+			name:     "nil Memory",
+			resource: &ResourceSpec{},
+			expected: 0,
+		},
+		{
+			name: "zero Memory",
+			resource: &ResourceSpec{
+				Memory: pointer.String("0"),
+			},
+			expected: 0,
+		},
+		{
+			name: "positive integer Memory",
+			resource: &ResourceSpec{
+				Memory: pointer.String("16"),
+			},
+			expected: 16,
+		},
+		{
+			name: "positive fractional Memory",
+			resource: &ResourceSpec{
+				Memory: pointer.String("12.5"),
+			},
+			expected: 12.5,
+		},
+		{
+			name: "invalid Memory value",
+			resource: &ResourceSpec{
+				Memory: pointer.String("invalid"),
+			},
+			expected: 0,
+		},
+		{
+			name: "empty Memory string",
+			resource: &ResourceSpec{
+				Memory: pointer.String(""),
+			},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.resource.GetMemoryInGB()
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

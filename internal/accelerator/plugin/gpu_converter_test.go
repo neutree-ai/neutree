@@ -18,9 +18,9 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec to Kubernetes",
 			resourceInfo: &v1.ResourceSpec{
-				GPU:    pointer.Float64(2),
-				CPU:    pointer.Float64(8),
-				Memory: pointer.Float64(32),
+				GPU:    pointer.String("2"),
+				CPU:    pointer.String("8"),
+				Memory: pointer.String("32"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
 					v1.AcceleratorProductKey: "Tesla-T4",
@@ -42,9 +42,9 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec with zero GPU to Kubernetes",
 			resourceInfo: &v1.ResourceSpec{
-				GPU:    pointer.Float64(0),
-				CPU:    pointer.Float64(8),
-				Memory: pointer.Float64(32),
+				GPU:    pointer.String("0"),
+				CPU:    pointer.String("8"),
+				Memory: pointer.String("32"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
 					v1.AcceleratorProductKey: "Tesla-T4",
@@ -64,8 +64,8 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec with nil GPU to Kubernetes",
 			resourceInfo: &v1.ResourceSpec{
-				CPU:    pointer.Float64(16),
-				Memory: pointer.Float64(64),
+				CPU:    pointer.String("16"),
+				Memory: pointer.String("64"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
 					v1.AcceleratorProductKey: "NVIDIA_A100",
@@ -84,9 +84,9 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec with none product to Kubernetes",
 			resourceInfo: &v1.ResourceSpec{
-				GPU:    pointer.Float64(3),
-				CPU:    pointer.Float64(16),
-				Memory: pointer.Float64(64),
+				GPU:    pointer.String("3"),
+				CPU:    pointer.String("16"),
+				Memory: pointer.String("64"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
 				},
@@ -111,9 +111,9 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec with wrong accelerator type",
 			resourceInfo: &v1.ResourceSpec{
-				GPU:    pointer.Float64(2),
-				CPU:    pointer.Float64(8),
-				Memory: pointer.Float64(32),
+				GPU:    pointer.String("2"),
+				CPU:    pointer.String("8"),
+				Memory: pointer.String("32"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeAMDGPU),
 					v1.AcceleratorProductKey: "AMD_Instinct_MI100",
@@ -154,9 +154,9 @@ func TestNVIDIAGPU_ConvertToRay(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec to Ray",
 			resourceInfo: &v1.ResourceSpec{
-				GPU:    pointer.Float64(2),
-				CPU:    pointer.Float64(8),
-				Memory: pointer.Float64(32),
+				GPU:    pointer.String("2"),
+				CPU:    pointer.String("8"),
+				Memory: pointer.String("32"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
 					v1.AcceleratorProductKey: "NVIDIA-L20",
@@ -173,9 +173,9 @@ func TestNVIDIAGPU_ConvertToRay(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec with zero GPU to Ray",
 			resourceInfo: &v1.ResourceSpec{
-				GPU:    pointer.Float64(0),
-				CPU:    pointer.Float64(8),
-				Memory: pointer.Float64(32),
+				GPU:    pointer.String("0"),
+				CPU:    pointer.String("8"),
+				Memory: pointer.String("32"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
 					v1.AcceleratorProductKey: "NVIDIA-L20",
@@ -187,8 +187,8 @@ func TestNVIDIAGPU_ConvertToRay(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec with nil GPU to Ray",
 			resourceInfo: &v1.ResourceSpec{
-				CPU:    pointer.Float64(16),
-				Memory: pointer.Float64(64),
+				CPU:    pointer.String("16"),
+				Memory: pointer.String("64"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
 					v1.AcceleratorProductKey: "NVIDIA_A100",
@@ -200,9 +200,9 @@ func TestNVIDIAGPU_ConvertToRay(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec with none product to Ray",
 			resourceInfo: &v1.ResourceSpec{
-				GPU:    pointer.Float64(3),
-				CPU:    pointer.Float64(16),
-				Memory: pointer.Float64(64),
+				GPU:    pointer.String("3"),
+				CPU:    pointer.String("16"),
+				Memory: pointer.String("64"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
 				},
@@ -224,9 +224,9 @@ func TestNVIDIAGPU_ConvertToRay(t *testing.T) {
 		{
 			name: "Convert NVIDIA GPU resource spec with wrong accelerator type",
 			resourceInfo: &v1.ResourceSpec{
-				GPU:    pointer.Float64(2),
-				CPU:    pointer.Float64(8),
-				Memory: pointer.Float64(32),
+				GPU:    pointer.String("2"),
+				CPU:    pointer.String("8"),
+				Memory: pointer.String("32"),
 				Accelerator: map[string]string{
 					v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeAMDGPU),
 					v1.AcceleratorProductKey: "AMD_Instinct_MI100",

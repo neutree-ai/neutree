@@ -28,7 +28,7 @@ func (c *AMDGPUConverter) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSp
 		return nil, fmt.Errorf("resource spec is nil")
 	}
 
-	if spec.GPU == nil || *spec.GPU <= 0 {
+	if spec.GetGPUCount() == 0 {
 		return nil, nil
 	}
 
@@ -41,13 +41,11 @@ func (c *AMDGPUConverter) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSp
 	}
 
 	// Set GPU count
-	if spec.GPU != nil && *spec.GPU > 0 {
-		ray.NumGPUs = *spec.GPU
-	}
+	ray.NumGPUs = spec.GetGPUCount()
 
 	// Set accelerator product model as custom resource
 	if product := spec.GetAcceleratorProduct(); product != "" {
-		ray.Resources[product] = *spec.GPU
+		ray.Resources[product] = spec.GetGPUCount()
 	}
 
 	return ray, nil
@@ -59,7 +57,7 @@ func (c *AMDGPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubern
 		return nil, fmt.Errorf("resource spec is nil")
 	}
 
-	if spec.GPU == nil || *spec.GPU <= 0 {
+	if spec.GetGPUCount() == 0 {
 		return nil, nil
 	}
 
@@ -74,7 +72,7 @@ func (c *AMDGPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubern
 	}
 
 	// Set AMD GPU
-	gpuCount := fmt.Sprintf("%.0f", *spec.GPU)
+	gpuCount := fmt.Sprintf("%.0f", spec.GetGPUCount())
 	res.Requests[c.kubernetesResourceName.String()] = gpuCount
 	res.Limits[c.kubernetesResourceName.String()] = gpuCount
 

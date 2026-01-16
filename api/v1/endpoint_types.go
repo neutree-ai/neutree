@@ -20,10 +20,10 @@ type EndpointEngineSpec struct {
 }
 
 type ResourceSpec struct {
-	CPU         *float64          `json:"cpu,omitempty"`
-	GPU         *float64          `json:"gpu,omitempty"`
+	CPU         *string           `json:"cpu,omitempty"`
+	GPU         *string           `json:"gpu,omitempty"`
 	Accelerator map[string]string `json:"accelerator,omitempty"`
-	Memory      *float64          `json:"memory,omitempty"`
+	Memory      *string           `json:"memory,omitempty"`
 }
 
 type ReplicaSpec struct {

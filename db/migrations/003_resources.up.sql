@@ -15,10 +15,10 @@ CREATE TYPE api.endpoint_engine_spec AS (
 );
 
 CREATE TYPE api.resource_spec AS (
-    cpu FLOAT,
-    gpu FLOAT,
+    cpu TEXT,
+    gpu TEXT,
     accelerator json,
-    memory FLOAT
+    memory TEXT
 );
 
 CREATE TYPE api.replica_spec AS (
