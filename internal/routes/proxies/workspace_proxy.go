@@ -16,7 +16,6 @@ func validateWorkspaceDeletion(s storage.Storage) middleware.DeletionValidatorFu
 		tables := []string{
 			storage.ENDPOINT_TABLE,
 			storage.CLUSTERS_TABLE,
-			storage.ENGINE_TABLE,
 			storage.MODEL_REGISTRY_TABLE,
 			storage.IMAGE_REGISTRY_TABLE,
 			storage.MODEL_CATALOG_TABLE,
