@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Neutree" width="200">
+  <img src="assets/logo.png" alt="Neutree" width="80">
 </p>
 
 # Neutree
