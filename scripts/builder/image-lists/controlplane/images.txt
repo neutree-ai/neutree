@@ -1,5 +1,5 @@
 neutree/jwt-cli:6.2.0
-docker.io/grafana/grafana:11.5.3
+grafana/grafana:11.5.3
 ghcr.io/groundnuty/k8s-wait-for:v2.0
 kong/kong:3.9
 migrate/migrate:v4.18.3

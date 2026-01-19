@@ -30,7 +30,7 @@ spec:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
             - --storage-jwt-secret={{ .Values.jwtSecret }}
             - --controller-workers=5
-            - --default-cluster-version=v15
+            - --default-cluster-version=v1.0.0
             {{- if  index .Values "victoria-metrics-cluster" "enabled" }}
             - --metrics-remote-write-url=http://{{ include "neutree.fullname" . }}-victoria-metrics-cluster-vminsert:8480/insert/0/prometheus/
             {{- else if .Values.metrics.remoteWriteUrl }}
