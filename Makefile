@@ -251,8 +251,13 @@ release-binary:
 release-chart: sync-deploy-manifests ## Build the chart to publish with a release
 	@if echo "${VERSION}" | grep -qE '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$$'; then \
 		echo "Updating chart version to ${VERSION}"; \
-		sed -i "s/version: .*/version: ${VERSION}/" deploy/chart/neutree/Chart.yaml; \
-		sed -i "s/appVersion: .*/appVersion: ${VERSION}/" deploy/chart/neutree/Chart.yaml; \
+		if [ "$(HOST_OS)" = "darwin" ]; then \
+			sed -i '' 's/^version: .*/version: ${VERSION}/' deploy/chart/neutree/Chart.yaml; \
+			sed -i '' 's/^appVersion: .*/appVersion: ${VERSION}/' deploy/chart/neutree/Chart.yaml; \
+		else \
+			sed -i 's/^version: .*/version: ${VERSION}/' deploy/chart/neutree/Chart.yaml; \
+			sed -i 's/^appVersion: .*/appVersion: ${VERSION}/' deploy/chart/neutree/Chart.yaml; \
+		fi; \
 	else \
 		echo "Skipping chart version update because VERSION (${VERSION}) is not a valid semver."; \
 	fi
