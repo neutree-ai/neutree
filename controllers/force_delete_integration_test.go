@@ -430,8 +430,12 @@ func TestForceDelete_EndpointController(t *testing.T) {
 
 			// Mock orchestrator calls during endpoint deletion
 			mockOrchestrator.On("DeleteEndpoint", obj).Return(nil).Maybe()
-			mockOrchestrator.On("DisconnectEndpointModel", obj).Return(nil).Maybe()
-
+			if !tt.forceDelete {
+				// In normal delete, GetEndpointStatus may return RUNNING initially
+				mockOrchestrator.On("GetEndpointStatus", obj).Return(&v1.EndpointStatus{
+					Phase: v1.EndpointPhaseDELETED,
+				}, nil).Once()
+			}
 			// Mock updateStatus call
 			mockStorage.On("UpdateEndpoint", "1", mock.MatchedBy(func(e *v1.Endpoint) bool {
 				return e.Status != nil && e.Status.Phase == tt.wantPhase

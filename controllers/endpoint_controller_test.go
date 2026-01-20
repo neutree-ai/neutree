@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -103,9 +104,6 @@ func TestEndpointController_Sync_Deletion(t *testing.T) {
 func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 	id := 1
 	cluster := v1.Cluster{Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"}}
-	imageRegistry := v1.ImageRegistry{Metadata: &v1.Metadata{Name: "default-registry", Workspace: "default"}}
-	engine := v1.Engine{Metadata: &v1.Metadata{Name: "test-engine"}}
-	modelRegistry := v1.ModelRegistry{Metadata: &v1.Metadata{Name: "test-model-registry"}}
 
 	okStatus := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
 
@@ -120,11 +118,8 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 			in:   ep(id, ""),
 			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
-				s.On("ListEngine", mock.Anything).Return([]v1.Engine{engine}, nil).Maybe()
-				s.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil).Maybe()
-				o.On("ConnectEndpointModel", mock.Anything).Return(nil)
-				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
+				o.On("CreateEndpoint", mock.Anything).Return(nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
 				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(nil)
 			},
 			wantErr: false,
@@ -134,24 +129,20 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 			in:   ep(id, ""),
 			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
-				s.On("ListEngine", mock.Anything).Return([]v1.Engine{engine}, nil).Maybe()
-				s.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil).Maybe()
-				o.On("ConnectEndpointModel", mock.Anything).Return(nil)
-				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
+				o.On("CreateEndpoint", mock.Anything).Return(nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
+
 				// Defer block catches updateStatus error and logs it without returning
 				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(assert.AnError)
 			},
 			wantErr: false, // Changed: defer block logs error but doesn't return it
 		},
 		{
-			name: "running health ok",
+			name: "always create even if already running",
 			in:   ep(id, v1.EndpointPhaseRUNNING),
 			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{imageRegistry}, nil).Maybe()
-				o.On("CreateEndpoint", mock.Anything).Return(okStatus, nil)
-				o.On("ConnectEndpointModel", mock.Anything).Return(nil)
+				o.On("CreateEndpoint", mock.Anything).Return(nil)
 				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
 			},
 			wantErr: false,
@@ -212,6 +203,228 @@ func TestEndpointController_Reconcile(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			ms.AssertExpectations(t)
+		})
+	}
+}
+
+func Test_UpdateStatusOnError(t *testing.T) {
+	newEndpoint := func() *v1.Endpoint {
+		return &v1.Endpoint{
+			ID: 1,
+			Metadata: &v1.Metadata{
+				Name:      "test-endpoint",
+				Workspace: "default",
+			},
+			Spec: &v1.EndpointSpec{
+				Cluster: "test",
+			},
+			Status: &v1.EndpointStatus{},
+		}
+	}
+
+	forceDeleteAnnotations := map[string]string{
+		"neutree.ai/force-delete": forceDeleteAnnotationValue,
+	}
+
+	testErr := errors.New("test error")
+	tests := []struct {
+		name      string
+		input     func() *v1.Endpoint
+		inputErr  error
+		mockSetup func(*storagemocks.MockStorage, *orchestratormocks.MockOrchestrator)
+	}{
+		{
+			name:     "update status succeed",
+			input:    func() *v1.Endpoint { return newEndpoint() },
+			inputErr: nil,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase: v1.EndpointPhaseRUNNING,
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseRUNNING &&
+						ep.Status.ErrorMessage == ""
+				})).Return(nil)
+			},
+		},
+		{
+			name: "process force delete first",
+			input: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
+				ep.SetAnnotations(forceDeleteAnnotations)
+				return ep
+			},
+			inputErr: nil,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseDELETED &&
+						ep.Status.ErrorMessage == ""
+				})).Return(nil)
+			},
+		},
+		{
+			name: "process force delete first even with error",
+			input: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
+				ep.SetAnnotations(forceDeleteAnnotations)
+				return ep
+			},
+			inputErr: testErr,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseDELETED &&
+						ep.Status.ErrorMessage == ""
+				})).Return(nil)
+			},
+		},
+		{
+			name: "process reconcile error without force delete",
+			input: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
+				return ep
+			},
+			inputErr: testErr,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseDELETING &&
+						ep.Status.ErrorMessage == "test error"
+				})).Return(nil)
+			},
+		},
+		{
+			name: "process reconcile error without force delete and with deletion timestamp",
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: testErr,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseFAILED &&
+						ep.Status.ErrorMessage == "test error"
+				})).Return(nil)
+			},
+		},
+		{
+			name: "get actual failed status when no reconcile error",
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: nil,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase: v1.EndpointPhaseFAILED,
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseFAILED &&
+						ep.Status.ErrorMessage == ""
+				})).Return(nil)
+			},
+		},
+		{
+			name: "get actual status failed will not update status",
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: nil,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase: v1.EndpointPhaseFAILED,
+				}, assert.AnError)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storagemocks.MockStorage{}
+			mockOrchestrator := &orchestratormocks.MockOrchestrator{}
+			tt.mockSetup(mockStorage, mockOrchestrator)
+			c := newTestEndpointController(mockStorage, mockOrchestrator)
+			c.updateStatusOnError(tt.input(), tt.inputErr)
+			mockStorage.AssertExpectations(t)
+			mockOrchestrator.AssertExpectations(t)
+		})
+	}
+
+}
+
+func Test_ShouldUpdateStatus(t *testing.T) {
+	tests := []struct {
+		name      string
+		oldStatus *v1.EndpointStatus
+		newStatus *v1.EndpointStatus
+		want      bool
+	}{
+		{
+			name:      "nil old status",
+			oldStatus: nil,
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+			want:      true,
+		},
+		{
+			name:      "both nil statuses",
+			oldStatus: nil,
+			newStatus: nil,
+			want:      false,
+		},
+		{
+			name:      "new status nil",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+			newStatus: nil,
+			want:      false,
+		},
+		{
+			name:      "different phase",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhasePENDING},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+			want:      true,
+		},
+		{
+			name:      "same phase, different error message",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ErrorMessage: "old error"},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ErrorMessage: "new error"},
+			want:      true,
+		},
+		{
+			name:      "same phase and error message",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ErrorMessage: "same error"},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ErrorMessage: "same error"},
+			want:      false,
+		},
+
+		{
+			name:      "same phase, different service URL",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServiceURL: "old-url"},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServiceURL: "new-url"},
+			want:      true,
+		},
+		{
+			name:      "same phase and service URL",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServiceURL: "same-url"},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServiceURL: "same-url"},
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &EndpointController{}
+			got := c.shouldUpdateStatus(&v1.Endpoint{Status: tt.oldStatus}, tt.newStatus)
+			if got != tt.want {
+				t.Errorf("shouldUpdateStatus() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }

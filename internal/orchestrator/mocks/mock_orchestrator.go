@@ -21,12 +21,12 @@ func (_m *MockOrchestrator) EXPECT() *MockOrchestrator_Expecter {
 	return &MockOrchestrator_Expecter{mock: &_m.Mock}
 }
 
-// ConnectEndpointModel provides a mock function with given fields: endpoint
-func (_m *MockOrchestrator) ConnectEndpointModel(endpoint *v1.Endpoint) error {
+// CreateEndpoint provides a mock function with given fields: endpoint
+func (_m *MockOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 	ret := _m.Called(endpoint)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ConnectEndpointModel")
+		panic("no return value specified for CreateEndpoint")
 	}
 
 	var r0 error
@@ -37,64 +37,6 @@ func (_m *MockOrchestrator) ConnectEndpointModel(endpoint *v1.Endpoint) error {
 	}
 
 	return r0
-}
-
-// MockOrchestrator_ConnectEndpointModel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConnectEndpointModel'
-type MockOrchestrator_ConnectEndpointModel_Call struct {
-	*mock.Call
-}
-
-// ConnectEndpointModel is a helper method to define mock.On call
-//   - endpoint *v1.Endpoint
-func (_e *MockOrchestrator_Expecter) ConnectEndpointModel(endpoint interface{}) *MockOrchestrator_ConnectEndpointModel_Call {
-	return &MockOrchestrator_ConnectEndpointModel_Call{Call: _e.mock.On("ConnectEndpointModel", endpoint)}
-}
-
-func (_c *MockOrchestrator_ConnectEndpointModel_Call) Run(run func(endpoint *v1.Endpoint)) *MockOrchestrator_ConnectEndpointModel_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*v1.Endpoint))
-	})
-	return _c
-}
-
-func (_c *MockOrchestrator_ConnectEndpointModel_Call) Return(_a0 error) *MockOrchestrator_ConnectEndpointModel_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockOrchestrator_ConnectEndpointModel_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockOrchestrator_ConnectEndpointModel_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CreateEndpoint provides a mock function with given fields: endpoint
-func (_m *MockOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
-	ret := _m.Called(endpoint)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CreateEndpoint")
-	}
-
-	var r0 *v1.EndpointStatus
-	var r1 error
-	if rf, ok := ret.Get(0).(func(*v1.Endpoint) (*v1.EndpointStatus, error)); ok {
-		return rf(endpoint)
-	}
-	if rf, ok := ret.Get(0).(func(*v1.Endpoint) *v1.EndpointStatus); ok {
-		r0 = rf(endpoint)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*v1.EndpointStatus)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(*v1.Endpoint) error); ok {
-		r1 = rf(endpoint)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
 }
 
 // MockOrchestrator_CreateEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEndpoint'
@@ -115,12 +57,12 @@ func (_c *MockOrchestrator_CreateEndpoint_Call) Run(run func(endpoint *v1.Endpoi
 	return _c
 }
 
-func (_c *MockOrchestrator_CreateEndpoint_Call) Return(_a0 *v1.EndpointStatus, _a1 error) *MockOrchestrator_CreateEndpoint_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockOrchestrator_CreateEndpoint_Call) Return(_a0 error) *MockOrchestrator_CreateEndpoint_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockOrchestrator_CreateEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) (*v1.EndpointStatus, error)) *MockOrchestrator_CreateEndpoint_Call {
+func (_c *MockOrchestrator_CreateEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockOrchestrator_CreateEndpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -167,52 +109,6 @@ func (_c *MockOrchestrator_DeleteEndpoint_Call) Return(_a0 error) *MockOrchestra
 }
 
 func (_c *MockOrchestrator_DeleteEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockOrchestrator_DeleteEndpoint_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// DisconnectEndpointModel provides a mock function with given fields: endpoint
-func (_m *MockOrchestrator) DisconnectEndpointModel(endpoint *v1.Endpoint) error {
-	ret := _m.Called(endpoint)
-
-	if len(ret) == 0 {
-		panic("no return value specified for DisconnectEndpointModel")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*v1.Endpoint) error); ok {
-		r0 = rf(endpoint)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockOrchestrator_DisconnectEndpointModel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DisconnectEndpointModel'
-type MockOrchestrator_DisconnectEndpointModel_Call struct {
-	*mock.Call
-}
-
-// DisconnectEndpointModel is a helper method to define mock.On call
-//   - endpoint *v1.Endpoint
-func (_e *MockOrchestrator_Expecter) DisconnectEndpointModel(endpoint interface{}) *MockOrchestrator_DisconnectEndpointModel_Call {
-	return &MockOrchestrator_DisconnectEndpointModel_Call{Call: _e.mock.On("DisconnectEndpointModel", endpoint)}
-}
-
-func (_c *MockOrchestrator_DisconnectEndpointModel_Call) Run(run func(endpoint *v1.Endpoint)) *MockOrchestrator_DisconnectEndpointModel_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*v1.Endpoint))
-	})
-	return _c
-}
-
-func (_c *MockOrchestrator_DisconnectEndpointModel_Call) Return(_a0 error) *MockOrchestrator_DisconnectEndpointModel_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockOrchestrator_DisconnectEndpointModel_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockOrchestrator_DisconnectEndpointModel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -271,6 +167,52 @@ func (_c *MockOrchestrator_GetEndpointStatus_Call) Return(_a0 *v1.EndpointStatus
 }
 
 func (_c *MockOrchestrator_GetEndpointStatus_Call) RunAndReturn(run func(*v1.Endpoint) (*v1.EndpointStatus, error)) *MockOrchestrator_GetEndpointStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PauseEndpoint provides a mock function with given fields: endpoint
+func (_m *MockOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
+	ret := _m.Called(endpoint)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PauseEndpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Endpoint) error); ok {
+		r0 = rf(endpoint)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockOrchestrator_PauseEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PauseEndpoint'
+type MockOrchestrator_PauseEndpoint_Call struct {
+	*mock.Call
+}
+
+// PauseEndpoint is a helper method to define mock.On call
+//   - endpoint *v1.Endpoint
+func (_e *MockOrchestrator_Expecter) PauseEndpoint(endpoint interface{}) *MockOrchestrator_PauseEndpoint_Call {
+	return &MockOrchestrator_PauseEndpoint_Call{Call: _e.mock.On("PauseEndpoint", endpoint)}
+}
+
+func (_c *MockOrchestrator_PauseEndpoint_Call) Run(run func(endpoint *v1.Endpoint)) *MockOrchestrator_PauseEndpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Endpoint))
+	})
+	return _c
+}
+
+func (_c *MockOrchestrator_PauseEndpoint_Call) Return(_a0 error) *MockOrchestrator_PauseEndpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockOrchestrator_PauseEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) error) *MockOrchestrator_PauseEndpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

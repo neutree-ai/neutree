@@ -6,6 +6,12 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	DeploymentStatusHealthy = "HEALTHY"
+	ProxyStatusHealthy      = "HEALTHY"
+	ProxyStatusUnhealthy    = "UNHEALTHY"
+)
+
 // RayServeApplication represents the structure expected by the Ray Serve API.
 type RayServeApplication struct {
 	Name        string                 `json:"name"`
@@ -22,14 +28,26 @@ type RayServeApplicationsRequest struct {
 
 // RayServeApplicationStatus represents the status part of the response from Ray Serve API.
 type RayServeApplicationStatus struct {
-	Status            string               `json:"status"`
-	Message           string               `json:"message"`
-	DeployedAppConfig *RayServeApplication `json:"deployed_app_config"` // Used when getting current apps
+	Status            string                `json:"status"`
+	Message           string                `json:"message"`
+	DeployedAppConfig *RayServeApplication  `json:"deployed_app_config"` // Used when getting current apps
+	Deployments       map[string]Deployment `json:"deployments,omitempty"`
+}
+
+type Deployment struct {
+	Name    string `json:"name"`
+	Status  string `json:"status,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type ProxyStatus struct {
+	Status string `json:"status,omitempty"`
 }
 
 // RayServeApplicationsResponse represents the full response when getting applications.
 type RayServeApplicationsResponse struct {
 	Applications map[string]RayServeApplicationStatus `json:"applications"`
+	Proxies      map[string]ProxyStatus               `json:"proxies"`
 }
 
 // GetServeApplications retrieves the current Ray Serve applications.
