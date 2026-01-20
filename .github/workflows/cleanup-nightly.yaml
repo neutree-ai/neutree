@@ -1,0 +1,171 @@
+name: Cleanup Nightly Tags and Images
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: "Keep nightly tags for N days"
+        required: false
+        default: "7"
+        type: string
+      dry_run:
+        description: "Only print what would be deleted"
+        required: false
+        default: "false"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REPO: ${{ secrets.IMAGE_REPO }}
+      IMAGE_PROJECT: ${{ secrets.RELEASE_IMAGE_PROJECT }}
+      IMAGE_PUSH_USERNAME: ${{ secrets.IMAGE_PUSH_USERNAME }}
+      IMAGE_PUSH_TOKEN: ${{ secrets.IMAGE_PUSH_TOKEN }}
+      RETENTION_DAYS: ${{ github.event.inputs.retention_days }}
+      DRY_RUN: ${{ github.event.inputs.dry_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete old nightly git tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          RETENTION_DAYS="${RETENTION_DAYS:-7}"
+          DRY_RUN="${DRY_RUN:-false}"
+          CUTOFF_DATE=$(date -u -d "${RETENTION_DAYS} days ago" +%Y%m%d)
+          echo "Cutoff date: ${CUTOFF_DATE} (keep last ${RETENTION_DAYS} days)"
+          git fetch --tags --prune
+          mapfile -t TAGS < <(git tag -l '*-nightly-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]')
+          for tag in "${TAGS[@]}"; do
+            if [[ "${tag}" =~ -nightly-([0-9]{8})$ ]]; then
+              tag_date="${BASH_REMATCH[1]}"
+              if [[ "${tag_date}" < "${CUTOFF_DATE}" ]]; then
+                echo "Delete tag ${tag}"
+                if [[ "${DRY_RUN}" != "true" ]]; then
+                  git tag -d "${tag}"
+                  git push origin ":refs/tags/${tag}"
+                fi
+              fi
+            fi
+          done
+          echo "CUTOFF_DATE=${CUTOFF_DATE}" >> "$GITHUB_ENV"
+
+      - name: Delete old nightly GitHub releases
+        uses: actions/github-script@v6
+        env:
+          DRY_RUN: ${{ env.DRY_RUN }}
+          CUTOFF_DATE: ${{ env.CUTOFF_DATE }}
+        with:
+          script: |
+            const dryRun = process.env.DRY_RUN === 'true';
+            const cutoff = process.env.CUTOFF_DATE;
+            const nightlyRe = /-nightly-(\d{8})$/;
+            let page = 1;
+            while (true) {
+              const { data: releases } = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+                page,
+              });
+              if (!releases.length) break;
+              for (const release of releases) {
+                const match = nightlyRe.exec(release.tag_name || '');
+                if (!match) continue;
+                const tagDate = match[1];
+                if (tagDate < cutoff) {
+                  core.info(`Delete release ${release.id} (${release.tag_name})`);
+                  if (!dryRun) {
+                    await github.rest.repos.deleteRelease({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      release_id: release.id,
+                    });
+                  }
+                }
+              }
+              page += 1;
+            }
+
+      - name: Delete old nightly Docker Hub tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          RETENTION_DAYS="${RETENTION_DAYS:-7}"
+          DRY_RUN="${DRY_RUN:-false}"
+          CUTOFF_DATE="${CUTOFF_DATE:-$(date -u -d "${RETENTION_DAYS} days ago" +%Y%m%d)}"
+
+          if [[ -z "${IMAGE_REPO:-}" || -z "${IMAGE_PROJECT:-}" ]]; then
+            echo "IMAGE_REPO or IMAGE_PROJECT not set, skip Docker cleanup."
+            exit 0
+          fi
+          if [[ "${IMAGE_REPO}" != "docker.io" && "${IMAGE_REPO}" != "index.docker.io" ]]; then
+            echo "IMAGE_REPO=${IMAGE_REPO} is not docker.io, skip Docker Hub cleanup."
+            exit 0
+          fi
+          if [[ -z "${IMAGE_PUSH_USERNAME:-}" || -z "${IMAGE_PUSH_TOKEN:-}" ]]; then
+            echo "Docker Hub credentials not set, skip Docker cleanup."
+            exit 0
+          fi
+
+          login_payload=$(printf '{"username":"%s","password":"%s"}' "${IMAGE_PUSH_USERNAME}" "${IMAGE_PUSH_TOKEN}")
+          token=$(curl -s -H "Content-Type: application/json" -d "${login_payload}" https://hub.docker.com/v2/users/login/ | jq -r .token)
+          if [[ -z "${token}" || "${token}" == "null" ]]; then
+            echo "Failed to get Docker Hub token."
+            exit 1
+          fi
+
+          repos=(
+            "neutree-core"
+            "neutree-core-amd64"
+            "neutree-core-arm64"
+            "neutree-api"
+            "neutree-api-amd64"
+            "neutree-api-arm64"
+            "neutree-db-scripts"
+            "neutree-db-scripts-amd64"
+            "neutree-db-scripts-arm64"
+          )
+
+          for repo in "${repos[@]}"; do
+            next="https://hub.docker.com/v2/repositories/${IMAGE_PROJECT}/${repo}/tags?page_size=100"
+            while [[ -n "${next}" && "${next}" != "null" ]]; do
+              tmp_file="$(mktemp)"
+              http_code=$(curl -s -o "${tmp_file}" -w "%{http_code}" -H "Authorization: JWT ${token}" "${next}")
+              if [[ "${http_code}" == "404" ]]; then
+                echo "Repo ${IMAGE_PROJECT}/${repo} not found, skip."
+                rm -f "${tmp_file}"
+                break
+              fi
+              if [[ "${http_code}" != "200" ]]; then
+                echo "Failed to list tags for ${IMAGE_PROJECT}/${repo} (HTTP ${http_code})."
+                rm -f "${tmp_file}"
+                break
+              fi
+              next=$(jq -r '.next' "${tmp_file}")
+              mapfile -t tags < <(jq -r '.results[].name' "${tmp_file}")
+              rm -f "${tmp_file}"
+
+              for tag in "${tags[@]}"; do
+                if [[ "${tag}" =~ -nightly-([0-9]{8})$ ]]; then
+                  tag_date="${BASH_REMATCH[1]}"
+                  if [[ "${tag_date}" < "${CUTOFF_DATE}" ]]; then
+                    echo "Delete Docker tag ${repo}:${tag}"
+                    if [[ "${DRY_RUN}" != "true" ]]; then
+                      curl -s -X DELETE -H "Authorization: JWT ${token}" \
+                        "https://hub.docker.com/v2/repositories/${IMAGE_PROJECT}/${repo}/tags/${tag}/" >/dev/null
+                    fi
+                  fi
+                fi
+              done
+            done
+          done
