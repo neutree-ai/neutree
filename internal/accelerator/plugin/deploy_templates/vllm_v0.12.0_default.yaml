@@ -1,0 +1,157 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .EndpointName }}
+  namespace: {{ .Namespace }}
+  labels:
+    engine: {{ .EngineName }}
+    engine_version: {{ .EngineVersion }}
+    routing_logic: {{ .RoutingLogic }}
+    app: inference
+spec:
+  replicas: {{ .Replicas }}
+  progressDeadlineSeconds: 1200
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      cluster: {{ .ClusterName }}
+      workspace: {{ .Workspace }}
+      endpoint: {{ .EndpointName }}
+      app: inference
+  template:
+    metadata:
+      labels:
+        engine: {{ .EngineName }}
+        engine_version: {{ .EngineVersion }}
+        cluster: {{ .ClusterName }}
+        workspace: {{ .Workspace }}
+        endpoint: {{ .EndpointName }}
+        routing_logic: {{ .RoutingLogic }}
+        app: inference
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: endpoint
+                      operator: In
+                      values:
+                        - {{ .EndpointName }}
+                topologyKey: "kubernetes.io/hostname"
+      {{- if .NodeSelector }}
+      nodeSelector:
+        {{- range $key, $value := .NodeSelector }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
+      {{- if .ImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .ImagePullSecret }}
+      {{- end }}
+
+      {{- if .Volumes }}
+      volumes:
+{{ .Volumes | toYaml | indent 6 }}
+      {{- end }}
+      initContainers:
+        - name: model-downloader
+          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
+          command:
+            - bash
+            - -c
+          args:
+            - >-
+              python3 -m neutree.downloader
+              --name="{{ .ModelArgs.name }}"
+              --registry_type="{{ .ModelArgs.registry_type }}"
+              --registry_path="{{ .ModelArgs.registry_path }}"
+              --path="{{ .ModelArgs.path }}"
+              --version="{{ .ModelArgs.version }}"
+              --file="{{ .ModelArgs.file }}"
+              --task="{{ .ModelArgs.task }}"
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
+
+      containers:
+        - name: {{ .EngineName }}
+          image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
+          command:
+          - vllm
+          - serve
+          - {{ .ModelArgs.path }}
+          - --host
+          - "0.0.0.0"
+          - "--port"
+          - "8000"
+          - --served-model-name
+          - {{ .ModelArgs.serve_name }}
+          - --task
+          {{- if eq .ModelArgs.task "text-embedding" }}
+          - embedding
+          {{- else if eq .ModelArgs.task "text-generation" }}
+          - generate
+          {{- else if eq .ModelArgs.task "text-rerank" }}
+          - score
+          {{- else }}
+          - {{ .ModelArgs.task }}
+          {{- end }}
+          {{- if .EngineArgs }}
+          {{- range $key, $value := .EngineArgs }}
+          - --{{ $key }}
+      {{- if ne (printf "%v" $value) "true"}}
+          - "{{ $value }}"
+      {{- end }}
+          {{- end }}
+          {{- end }}
+          resources:
+            limits:
+              {{- range $key, $value := .Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+            requests:
+              {{- range $key, $value := .Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          ports:
+            - containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}

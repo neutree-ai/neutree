@@ -1,0 +1,1040 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "vLLM v0.12.0 Engine Configuration",
+  "description": "Configuration schema for vLLM v0.12.0 engine parameters",
+  "properties": {
+    "headless": {
+      "type": "boolean",
+      "default": false,
+      "description": "Run in headless mode"
+    },
+    "api_server_count": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "How many API server processes to run"
+    },
+    "config": {
+      "type": "string",
+      "description": "Read CLI options from a config file"
+    },
+    "disable_log_stats": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable logging statistics"
+    },
+    "aggregate_engine_logging": {
+      "type": "boolean",
+      "default": false,
+      "description": "Log aggregate rather than per-engine statistics when using data parallelism"
+    },
+    "enable_log_requests": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable logging requests"
+    },
+    "host": {
+      "type": "string",
+      "description": "Host name"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "default": 8000,
+      "description": "Port number"
+    },
+    "uds": {
+      "type": "string",
+      "description": "Unix domain socket path"
+    },
+    "uvicorn_log_level": {
+      "type": "string",
+      "enum": ["critical", "debug", "error", "info", "trace", "warning"],
+      "default": "info",
+      "description": "Log level for uvicorn"
+    },
+    "disable_uvicorn_access_log": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable uvicorn access log"
+    },
+    "allow_credentials": {
+      "type": "boolean",
+      "default": false,
+      "description": "Allow credentials"
+    },
+    "allowed_origins": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": ["*"],
+      "description": "Allowed origins"
+    },
+    "allowed_methods": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": ["*"],
+      "description": "Allowed methods"
+    },
+    "allowed_headers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": ["*"],
+      "description": "Allowed headers"
+    },
+    "api_key": {
+      "type": "string",
+      "description": "API key for authentication"
+    },
+    "lora_modules": {
+      "type": "string",
+      "description": "LoRA modules configurations"
+    },
+    "chat_template": {
+      "type": "string",
+      "description": "The file path to the chat template"
+    },
+    "chat_template_content_format": {
+      "type": "string",
+      "enum": ["auto", "openai", "string"],
+      "default": "auto",
+      "description": "The format to render message content within a chat template"
+    },
+    "trust_request_chat_template": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to trust the chat template provided in the request"
+    },
+    "response_role": {
+      "type": "string",
+      "default": "assistant",
+      "description": "The role name to return if request.add_generation_prompt=true"
+    },
+    "ssl_keyfile": {
+      "type": "string",
+      "description": "The file path to the SSL key file"
+    },
+    "ssl_certfile": {
+      "type": "string",
+      "description": "The file path to the SSL cert file"
+    },
+    "ssl_ca_certs": {
+      "type": "string",
+      "description": "The CA certificates file"
+    },
+    "enable_ssl_refresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Refresh SSL Context when SSL certificate files change"
+    },
+    "ssl_cert_reqs": {
+      "type": "integer",
+      "default": 0,
+      "description": "Whether client certificate is required"
+    },
+    "root_path": {
+      "type": "string",
+      "description": "FastAPI root_path when app is behind a path based routing proxy"
+    },
+    "middleware": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Additional ASGI middleware to apply to the app"
+    },
+    "return_tokens_as_token_ids": {
+      "type": "boolean",
+      "default": false,
+      "description": "Return tokens as token IDs when max_logprobs is specified"
+    },
+    "disable_frontend_multiprocessing": {
+      "type": "boolean",
+      "default": false,
+      "description": "Run the OpenAI frontend server in the same process as the model serving engine"
+    },
+    "enable_request_id_headers": {
+      "type": "boolean",
+      "default": false,
+      "description": "API server will add X-Request-Id header to responses"
+    },
+    "enable_auto_tool_choice": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable auto tool choice for supported models"
+    },
+    "exclude_tools_when_tool_choice_none": {
+      "type": "boolean",
+      "default": false,
+      "description": "Exclude tool definitions in prompts when tool_choice='none'"
+    },
+    "tool_call_parser": {
+      "type": "string",
+      "description": "Select the tool call parser"
+    },
+    "tool_parser_plugin": {
+      "type": "string",
+      "default": "",
+      "description": "Specify the tool parser plugin"
+    },
+    "tool_server": {
+      "type": "string",
+      "description": "Comma-separated list of host:port pairs for tool server"
+    },
+    "log_config_file": {
+      "type": "string",
+      "description": "Path to logging config JSON file"
+    },
+    "max_log_len": {
+      "type": "integer",
+      "description": "Max number of prompt characters or prompt ID numbers being printed in log"
+    },
+    "disable_fastapi_docs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable FastAPI's OpenAPI schema, Swagger UI, and ReDoc endpoint"
+    },
+    "enable_prompt_tokens_details": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable prompt_tokens_details in usage"
+    },
+    "enable_server_load_tracking": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable tracking server_load_metrics in the app state"
+    },
+    "enable_force_include_usage": {
+      "type": "boolean",
+      "default": false,
+      "description": "Including usage on every request"
+    },
+    "enable_tokenizer_info_endpoint": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable the /get_tokenizer_info endpoint"
+    },
+    "enable_log_outputs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Log model outputs (generations)"
+    },
+    "h11_max_incomplete_event_size": {
+      "type": "integer",
+      "default": 4194304,
+      "description": "Maximum size (bytes) of an incomplete HTTP event"
+    },
+    "h11_max_header_count": {
+      "type": "integer",
+      "default": 256,
+      "description": "Maximum number of HTTP headers allowed in a request"
+    },
+    "log_error_stack": {
+      "type": "boolean",
+      "default": false,
+      "description": "Log the stack trace of error responses"
+    },
+    "tokens_only": {
+      "type": "boolean",
+      "default": false,
+      "description": "Only enable the Tokens In<>Out endpoint"
+    },
+    "model": {
+      "type": "string",
+      "default": "facebook/opt-125m",
+      "description": "Name or path of the Hugging Face model to use"
+    },
+    "runner": {
+      "type": "string",
+      "enum": ["auto", "draft", "generate", "pooling"],
+      "default": "auto",
+      "description": "The type of model runner to use"
+    },
+    "convert": {
+      "type": "string",
+      "enum": ["auto", "classify", "embed", "none", "reward"],
+      "default": "auto",
+      "description": "Convert the model using adapters"
+    },
+    "tokenizer": {
+      "type": "string",
+      "description": "Name or path of the Hugging Face tokenizer to use"
+    },
+    "tokenizer_mode": {
+      "type": "string",
+      "enum": ["auto", "slow", "mistral", "hf"],
+      "default": "auto",
+      "description": "The tokenizer mode to use"
+    },
+    "trust_remote_code": {
+      "type": "boolean",
+      "default": false,
+      "description": "Trust remote code from Hugging Face"
+    },
+    "dtype": {
+      "type": "string",
+      "enum": ["auto", "half", "float16", "bfloat16", "float", "float32"],
+      "default": "auto",
+      "description": "Data type for model weights and activations"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Random seed for reproducibility"
+    },
+    "hf_config_path": {
+      "type": "string",
+      "description": "Name or path of the Hugging Face config to use"
+    },
+    "allowed_local_media_path": {
+      "type": "string",
+      "default": "",
+      "description": "Allowing API requests to read local images or videos from directories"
+    },
+    "allowed_media_domains": {
+      "type": "string",
+      "description": "If set, only media URLs that belong to this domain can be used"
+    },
+    "revision": {
+      "type": "string",
+      "description": "The specific model version to use"
+    },
+    "code_revision": {
+      "type": "string",
+      "description": "The specific revision to use for the model code"
+    },
+    "tokenizer_revision": {
+      "type": "string",
+      "description": "The specific revision to use for the tokenizer"
+    },
+    "max_model_len": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Model context length"
+    },
+    "quantization": {
+      "type": "string",
+      "description": "Method used to quantize the weights"
+    },
+    "enforce_eager": {
+      "type": "boolean",
+      "default": false,
+      "description": "Always use eager-mode PyTorch"
+    },
+    "max_logprobs": {
+      "type": "integer",
+      "minimum": -1,
+      "default": 20,
+      "description": "Maximum number of log probabilities to return"
+    },
+    "logprobs_mode": {
+      "type": "string",
+      "enum": ["processed_logits", "processed_logprobs", "raw_logits", "raw_logprobs"],
+      "default": "raw_logprobs",
+      "description": "Indicates the content returned in the logprobs and prompt_logprobs"
+    },
+    "disable_sliding_window": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable sliding window"
+    },
+    "disable_cascade_attn": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable cascade attention for V1"
+    },
+    "skip_tokenizer_init": {
+      "type": "boolean",
+      "default": false,
+      "description": "Skip initialization of tokenizer and detokenizer"
+    },
+    "enable_prompt_embeds": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable passing text embeddings as inputs via the prompt_embeds key"
+    },
+    "served_model_name": {
+      "type": "string",
+      "description": "The model name used in the API"
+    },
+    "config_format": {
+      "type": "string",
+      "enum": ["auto", "hf", "mistral"],
+      "default": "auto",
+      "description": "The format of the model config to load"
+    },
+    "hf_token": {
+      "type": "string",
+      "description": "The token to use as HTTP bearer authorization for remote files"
+    },
+    "hf_overrides": {
+      "type": "object",
+      "default": {},
+      "description": "Arguments to be forwarded to the Hugging Face config"
+    },
+    "mm_processor_kwargs": {
+      "type": "object",
+      "description": "Arguments to be forwarded to the model's processor for multi-modal data"
+    },
+    "pooler_config": {
+      "type": "object",
+      "description": "Pooler config which controls the behaviour of output pooling"
+    },
+    "logits_processor_pattern": {
+      "type": "string",
+      "description": "Optional regex pattern specifying valid logits processor qualified names"
+    },
+    "generation_config": {
+      "type": "string",
+      "default": "auto",
+      "description": "The folder path to the generation config"
+    },
+    "override_generation_config": {
+      "type": "object",
+      "default": {},
+      "description": "Overrides or sets generation config"
+    },
+    "enable_sleep_mode": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable sleep mode for the engine"
+    },
+    "model_impl": {
+      "type": "string",
+      "enum": ["auto", "terratorch", "transformers", "vllm"],
+      "default": "auto",
+      "description": "Which implementation of the model to use"
+    },
+    "override_attention_dtype": {
+      "type": "string",
+      "description": "Override dtype for attention"
+    },
+    "logits_processors": {
+      "type": "string",
+      "description": "One or more logits processors' fully-qualified class names"
+    },
+    "io_processor_plugin": {
+      "type": "string",
+      "description": "IOProcessor plugin name to load at model startup"
+    },
+    "load_format": {
+      "type": "string",
+      "default": "auto",
+      "description": "The format of the model weights to load"
+    },
+    "download_dir": {
+      "type": "string",
+      "description": "Directory to download and load the weights"
+    },
+    "safetensors_load_strategy": {
+      "type": "string",
+      "enum": ["lazy", "eager", "torchao"],
+      "default": "lazy",
+      "description": "Specifies the loading strategy for safetensors weights"
+    },
+    "model_loader_extra_config": {
+      "type": "object",
+      "default": {},
+      "description": "Extra config for model loader"
+    },
+    "ignore_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": ["original/**/*"],
+      "description": "The list of patterns to ignore when loading the model"
+    },
+    "use_tqdm_on_load": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to enable tqdm for showing progress bar when loading model weights"
+    },
+    "pt_load_map_location": {
+      "type": "string",
+      "default": "cpu",
+      "description": "The map location for loading pytorch checkpoint"
+    },
+    "structured_outputs_backend": {
+      "type": "string",
+      "enum": ["outlines", "lm-format-enforcer"],
+      "default": "outlines",
+      "description": "Backend to use for structured outputs"
+    },
+    "reasoning_parser": {
+      "type": "string",
+      "default": "",
+      "description": "Select the reasoning parser depending on the model"
+    },
+    "reasoning_parser_plugin": {
+      "type": "string",
+      "default": "",
+      "description": "Path to a dynamically reasoning parser plugin"
+    },
+    "distributed_executor_backend": {
+      "type": "string",
+      "enum": ["ray", "mp", "external_launcher", "uni"],
+      "description": "Backend to use for distributed model workers"
+    },
+    "pipeline_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of pipeline parallel groups"
+    },
+    "master_addr": {
+      "type": "string",
+      "default": "127.0.0.1",
+      "description": "Distributed master address for multi-node distributed inference"
+    },
+    "master_port": {
+      "type": "integer",
+      "default": 29501,
+      "description": "Distributed master port for multi-node distributed inference"
+    },
+    "nnodes": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of nodes for multi-node distributed inference"
+    },
+    "node_rank": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Distributed node rank for multi-node distributed inference"
+    },
+    "tensor_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of tensor parallel groups"
+    },
+    "decode_context_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of decode context parallel groups"
+    },
+    "dcp_kv_cache_interleave_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Interleave size of kv_cache storage while using DCP"
+    },
+    "cp_kv_cache_interleave_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Interleave size of kv_cache storage while using DCP or PCP"
+    },
+    "prefill_context_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of prefill context parallel groups"
+    },
+    "data_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of data parallel groups"
+    },
+    "data_parallel_rank": {
+      "type": "integer",
+      "description": "Data parallel rank of this instance"
+    },
+    "data_parallel_start_rank": {
+      "type": "integer",
+      "description": "Starting data parallel rank for secondary nodes"
+    },
+    "data_parallel_size_local": {
+      "type": "integer",
+      "description": "Number of data parallel replicas to run on this node"
+    },
+    "data_parallel_address": {
+      "type": "string",
+      "description": "Address of data parallel cluster head-node"
+    },
+    "data_parallel_rpc_port": {
+      "type": "integer",
+      "description": "Port for data parallel RPC communication"
+    },
+    "data_parallel_backend": {
+      "type": "string",
+      "enum": ["mp", "ray"],
+      "default": "mp",
+      "description": "Backend for data parallel"
+    },
+    "data_parallel_hybrid_lb": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to use hybrid DP LB mode"
+    },
+    "data_parallel_external_lb": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to use external DP LB mode"
+    },
+    "enable_expert_parallel": {
+      "type": "boolean",
+      "default": false,
+      "description": "Use expert parallelism instead of tensor parallelism for MoE layers"
+    },
+    "all2all_backend": {
+      "type": "string",
+      "enum": ["allgather_reducescatter", "deepep_high_throughput", "deepep_low_latency", "flashinfer_all2allv", "naive", "pplx"],
+      "description": "All2All backend for MoE expert parallel communication"
+    },
+    "enable_dbo": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable dual batch overlap for the model executor"
+    },
+    "dbo_decode_token_threshold": {
+      "type": "integer",
+      "default": 32,
+      "description": "The threshold for dual batch overlap for batches only containing decodes"
+    },
+    "dbo_prefill_token_threshold": {
+      "type": "integer",
+      "default": 512,
+      "description": "The threshold for dual batch overlap for batches that contain one or more prefills"
+    },
+    "disable_nccl_for_dp_synchronization": {
+      "type": "boolean",
+      "default": false,
+      "description": "Forces the dp synchronization logic to use Gloo instead of NCCL"
+    },
+    "enable_eplb": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable expert parallelism load balancing for MoE layers"
+    },
+    "eplb_config": {
+      "type": "object",
+      "description": "Expert parallelism configuration"
+    },
+    "expert_placement_strategy": {
+      "type": "string",
+      "enum": ["linear", "round_robin"],
+      "default": "linear",
+      "description": "The expert placement strategy for MoE layers"
+    },
+    "max_parallel_loading_workers": {
+      "type": "integer",
+      "description": "Maximum number of parallel loading workers"
+    },
+    "ray_workers_use_nsight": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to profile Ray workers with nsight"
+    },
+    "disable_custom_all_reduce": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable the custom all-reduce kernel"
+    },
+    "worker_cls": {
+      "type": "string",
+      "default": "auto",
+      "description": "The full name of the worker class to use"
+    },
+    "worker_extension_cls": {
+      "type": "string",
+      "default": "",
+      "description": "The full name of the worker extension class to use"
+    },
+    "enable_multimodal_encoder_data_parallel": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable multimodal encoder data parallel"
+    },
+    "block_size": {
+      "type": "integer",
+      "enum": [1, 8, 16, 32, 64, 128, 256],
+      "description": "Size of a contiguous cache block in number of tokens"
+    },
+    "gpu_memory_utilization": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.9,
+      "description": "The fraction of GPU memory to be used for the model executor"
+    },
+    "kv_cache_memory_bytes": {
+      "type": "integer",
+      "description": "Size of KV Cache per GPU in bytes"
+    },
+    "swap_space": {
+      "type": "number",
+      "minimum": 0,
+      "default": 4,
+      "description": "Size of the CPU swap space per GPU (in GiB)"
+    },
+    "kv_cache_dtype": {
+      "type": "string",
+      "enum": ["auto", "fp8", "fp8_e4m3", "fp8_e5m2", "fp8_ds_mla", "fp8_inc", "bfloat16"],
+      "default": "auto",
+      "description": "Data type for kv cache storage"
+    },
+    "num_gpu_blocks_override": {
+      "type": "integer",
+      "description": "Number of GPU blocks to use"
+    },
+    "enable_prefix_caching": {
+      "type": "boolean",
+      "description": "Whether to enable prefix caching"
+    },
+    "prefix_caching_hash_algo": {
+      "type": "string",
+      "enum": ["sha256", "sha256_cbor"],
+      "default": "sha256",
+      "description": "Set the hash algorithm for prefix caching"
+    },
+    "cpu_offload_gb": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0,
+      "description": "The space in GiB to offload to CPU, per GPU"
+    },
+    "calculate_kv_scales": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable dynamic calculation of k_scale and v_scale when kv_cache_dtype is fp8"
+    },
+    "kv_sharing_fast_prefill": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable KV sharing fast prefill optimization"
+    },
+    "mamba_cache_dtype": {
+      "type": "string",
+      "enum": ["auto", "float32"],
+      "default": "auto",
+      "description": "The data type to use for the Mamba cache"
+    },
+    "mamba_ssm_cache_dtype": {
+      "type": "string",
+      "enum": ["auto", "float32"],
+      "default": "auto",
+      "description": "The data type to use for the Mamba cache (ssm state only)"
+    },
+    "mamba_block_size": {
+      "type": "integer",
+      "description": "Size of a contiguous cache block in number of tokens for mamba cache"
+    },
+    "kv_offloading_size": {
+      "type": "integer",
+      "description": "Size of the KV cache offloading buffer in GiB"
+    },
+    "kv_offloading_backend": {
+      "type": "string",
+      "enum": ["lmcache", "native"],
+      "description": "The backend to use for KV cache offloading"
+    },
+    "limit_mm_per_prompt": {
+      "type": "object",
+      "default": {},
+      "description": "The maximum number of input items allowed per prompt for each modality"
+    },
+    "enable_mm_embeds": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable passing multimodal embeddings"
+    },
+    "media_io_kwargs": {
+      "type": "object",
+      "default": {},
+      "description": "Additional args passed to process media inputs, keyed by modalities"
+    },
+    "mm_processor_kwargs": {
+      "type": "object",
+      "description": "Arguments to be forwarded to the model's processor for multi-modal data"
+    },
+    "mm_processor_cache_gb": {
+      "type": "number",
+      "default": 4,
+      "description": "The size (in GiB) of the multi-modal processor cache"
+    },
+    "disable_mm_preprocessor_cache": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable multi-modal preprocessor cache"
+    },
+    "mm_processor_cache_type": {
+      "type": "string",
+      "enum": ["lru", "shm"],
+      "default": "lru",
+      "description": "Type of cache to use for the multi-modal preprocessor/mapper"
+    },
+    "mm_shm_cache_max_object_size_mb": {
+      "type": "integer",
+      "default": 128,
+      "description": "Size limit (in MiB) for each object stored in the multi-modal processor shared memory cache"
+    },
+    "mm_encoder_attn_backend": {
+      "type": "string",
+      "description": "Optional override for the multi-modal encoder attention backend"
+    },
+    "interleave_mm_strings": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable fully interleaved support for multimodal prompts"
+    },
+    "skip_mm_profiling": {
+      "type": "boolean",
+      "default": false,
+      "description": "Skip multimodal memory profiling"
+    },
+    "video_pruning_rate": {
+      "type": "number",
+      "description": "Sets pruning rate for video pruning via Efficient Video Sampling"
+    },
+    "enable_lora": {
+      "type": "boolean",
+      "description": "Enable handling of LoRA adapters"
+    },
+    "max_loras": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Max number of LoRAs in a single batch"
+    },
+    "max_lora_rank": {
+      "type": "integer",
+      "enum": [1, 8, 16, 32, 64, 128, 256, 320, 512],
+      "default": 16,
+      "description": "Max LoRA rank"
+    },
+    "lora_dtype": {
+      "type": "string",
+      "default": "auto",
+      "description": "Data type for LoRA"
+    },
+    "max_cpu_loras": {
+      "type": "integer",
+      "description": "Maximum number of LoRAs to store in CPU memory"
+    },
+    "fully_sharded_loras": {
+      "type": "boolean",
+      "default": false,
+      "description": "Use the fully sharded layers"
+    },
+    "default_mm_loras": {
+      "type": "object",
+      "description": "Dictionary mapping specific modalities to LoRA model paths"
+    },
+    "otlp_traces_endpoint": {
+      "type": "string",
+      "description": "Target URL to which OpenTelemetry traces will be sent"
+    },
+    "collect_detailed_traces": {
+      "type": "string",
+      "enum": ["all", "model", "worker", "model,worker", "model,all", "worker,model", "worker,all", "all,model", "all,worker"],
+      "description": "Collect detailed traces for the specified modules"
+    },
+    "show_hidden_metrics_for_version": {
+      "type": "string",
+      "description": "Enable deprecated Prometheus metrics that have been hidden since the specified version"
+    },
+    "kv_cache_metrics": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable KV cache residency metrics"
+    },
+    "kv_cache_metrics_sample": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.01,
+      "description": "Sampling rate for KV cache metrics"
+    },
+    "max_num_batched_tokens": {
+      "type": "integer",
+      "description": "Maximum number of tokens to be processed in a single iteration"
+    },
+    "max_num_seqs": {
+      "type": "integer",
+      "description": "Maximum number of sequences to be processed in a single iteration"
+    },
+    "max_num_partial_prefills": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "For chunked prefill, the maximum number of sequences that can be partially prefilled concurrently"
+    },
+    "max_long_partial_prefills": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "For chunked prefill, the maximum number of prompts longer than long_prefill_token_threshold"
+    },
+    "long_prefill_token_threshold": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "For chunked prefill, a request is considered long if the prompt is longer than this number of tokens"
+    },
+    "scheduling_policy": {
+      "type": "string",
+      "enum": ["fcfs", "priority"],
+      "default": "fcfs",
+      "description": "The scheduling policy to use"
+    },
+    "enable_chunked_prefill": {
+      "type": "boolean",
+      "description": "Enable chunked prefill"
+    },
+    "disable_chunked_mm_input": {
+      "type": "boolean",
+      "default": false,
+      "description": "Do not want to partially schedule a multimodal item"
+    },
+    "scheduler_cls": {
+      "type": "string",
+      "description": "The scheduler class to use"
+    },
+    "disable_hybrid_kv_cache_manager": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable hybrid KV cache manager"
+    },
+    "async_scheduling": {
+      "type": "boolean",
+      "default": false,
+      "description": "Perform async scheduling"
+    },
+    "stream_interval": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "The interval (or buffer size) for streaming in terms of token length"
+    },
+    "cudagraph_capture_sizes": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "Sizes to capture cudagraph"
+    },
+    "max_cudagraph_capture_size": {
+      "type": "integer",
+      "description": "The maximum cudagraph capture size"
+    },
+    "cudagraph_mode": {
+      "type": "string",
+      "description": "Cudagraph mode configuration"
+    },
+    "cudagraph_num_of_warmups": {
+      "type": "integer",
+      "default": 0,
+      "description": "Number of warmups for cudagraph"
+    },
+    "cudagraph_copy_inputs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to copy inputs for cudagraph"
+    },
+    "cudagraph_specialize_lora": {
+      "type": "boolean",
+      "default": true,
+      "description": "Specialize cudagraph for LoRA"
+    },
+    "compile_sizes": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "Compilation sizes for inductor"
+    },
+    "inductor_compile_config": {
+      "type": "object",
+      "description": "Inductor compilation configuration"
+    },
+    "inductor_passes": {
+      "type": "object",
+      "default": {},
+      "description": "Custom inductor passes"
+    },
+    "backend": {
+      "type": "string",
+      "default": "inductor",
+      "description": "Compilation backend"
+    },
+    "custom_ops": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Custom ops for compilation"
+    },
+    "splitting_ops": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Splitting ops for compilation"
+    },
+    "compile_mm_encoder": {
+      "type": "boolean",
+      "default": false,
+      "description": "Compile multimodal encoder"
+    },
+    "use_inductor_graph_partition": {
+      "type": "boolean",
+      "description": "Use inductor graph partition"
+    },
+    "pass_config": {
+      "type": "object",
+      "default": {},
+      "description": "Pass configuration"
+    },
+    "speculative_config": {
+      "type": "object",
+      "description": "Speculative decoding configuration"
+    },
+    "kv_transfer_config": {
+      "type": "object",
+      "description": "The configurations for distributed KV cache transfer"
+    },
+    "kv_events_config": {
+      "type": "object",
+      "description": "The configurations for event publishing"
+    },
+    "ec_transfer_config": {
+      "type": "object",
+      "description": "The configurations for distributed EC cache transfer"
+    },
+    "compilation_config": {
+      "type": "object",
+      "description": "Torch.compile and cudagraph capture configuration for the model"
+    },
+    "additional_config": {
+      "type": "object",
+      "default": {},
+      "description": "Additional config for specified platform"
+    },
+    "structured_outputs_config": {
+      "type": "object",
+      "description": "Structured outputs configuration"
+    },
+    "optimization_level": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "default": 2,
+      "description": "The optimization level"
+    }
+  }
+}
