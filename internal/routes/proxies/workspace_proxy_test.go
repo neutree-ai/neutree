@@ -29,7 +29,6 @@ func TestValidateWorkspaceDeletion(t *testing.T) {
 			counts: map[string]int{
 				storage.ENDPOINT_TABLE:        0,
 				storage.CLUSTERS_TABLE:        0,
-				storage.ENGINE_TABLE:          0,
 				storage.MODEL_REGISTRY_TABLE:  0,
 				storage.IMAGE_REGISTRY_TABLE:  0,
 				storage.MODEL_CATALOG_TABLE:   0,
@@ -47,7 +46,6 @@ func TestValidateWorkspaceDeletion(t *testing.T) {
 			counts: map[string]int{
 				storage.ENDPOINT_TABLE:        2,
 				storage.CLUSTERS_TABLE:        1,
-				storage.ENGINE_TABLE:          0,
 				storage.MODEL_REGISTRY_TABLE:  0,
 				storage.IMAGE_REGISTRY_TABLE:  0,
 				storage.MODEL_CATALOG_TABLE:   0,
@@ -82,7 +80,6 @@ func TestValidateWorkspaceDeletion(t *testing.T) {
 			tables := []string{
 				storage.ENDPOINT_TABLE,
 				storage.CLUSTERS_TABLE,
-				storage.ENGINE_TABLE,
 				storage.MODEL_REGISTRY_TABLE,
 				storage.IMAGE_REGISTRY_TABLE,
 				storage.MODEL_CATALOG_TABLE,
