@@ -1,6 +1,9 @@
 package metrics
 
-import "github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
+import (
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
+	"github.com/neutree-ai/neutree/internal/util"
+)
 
 var metricsManifestTemplate = `
 apiVersion: v1
@@ -104,6 +107,93 @@ data:
       - source_labels: [__meta_kubernetes_pod_label_engine]
         action: replace
         target_label: engine
+    # Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
+    - job_name: 'node-exporter-http'
+      kubernetes_sd_configs:
+      - role: node
+      # Use HTTP scheme for direct node-exporter access
+      scheme: http
+      relabel_configs:
+      # Set the __address__ to node IP and port 9100
+      - source_labels: [__address__]
+        action: replace
+        target_label: __address__
+        regex: '([^:]+)(?::\d+)?'
+        replacement: '$1:9100'
+      # Use node name as instance label
+      - source_labels: [__meta_kubernetes_node_name]
+        action: replace
+        target_label: instance
+      # Add node name as additional label
+      - source_labels: [__meta_kubernetes_node_name]
+        action: replace
+        target_label: node
+      # Add cluster and workspace labels
+      - target_label: neutree_cluster
+        replacement: {{ .ClusterName }}
+      - target_label: workspace
+        replacement: {{ .Workspace }}
+    # Scrape node-exporter metrics from all nodes (HTTPS - with kube-rbac-proxy)
+    - job_name: 'node-exporter-https'
+      kubernetes_sd_configs:
+      - role: node
+      # Use bearer token for authentication with kube-rbac-proxy
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      # Use HTTPS scheme
+      scheme: https
+      # Skip TLS verification for self-signed certificates
+      tls_config:
+        insecure_skip_verify: true
+      relabel_configs:
+      # Set the __address__ to node IP and port 9100
+      - source_labels: [__address__]
+        action: replace
+        target_label: __address__
+        regex: '([^:]+)(?::\d+)?'
+        replacement: '$1:9100'
+      # Use node name as instance label
+      - source_labels: [__meta_kubernetes_node_name]
+        action: replace
+        target_label: instance
+      # Add node name as additional label
+      - source_labels: [__meta_kubernetes_node_name]
+        action: replace
+        target_label: node
+      # Add cluster and workspace labels
+      - target_label: neutree_cluster
+        replacement: {{ .ClusterName }}
+      - target_label: workspace
+        replacement: {{ .Workspace }}
+    # Scrape dcgm-exporter metrics from GPU nodes
+    - job_name: 'dcgm-exporter'
+      kubernetes_sd_configs:
+      - role: pod
+        selectors:
+        - role: pod
+          label: app=nvidia-dcgm-exporter
+      relabel_configs:
+      # Set the __address__ to pod IP and port 9400
+      - source_labels: [__meta_kubernetes_pod_ip]
+        action: replace
+        target_label: __address__
+        regex: (.+)
+        replacement: $1:9400
+      # Add node name from pod's node
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        action: replace
+        target_label: node
+      # Add pod metadata as labels
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod
+      # Add cluster and workspace labels
+      - target_label: neutree_cluster
+        replacement: {{ .ClusterName }}
+      - target_label: workspace
+        replacement: {{ .Workspace }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -142,6 +232,43 @@ subjects:
 roleRef:
   kind: Role
   name: vmagent-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vmagent-node-reader-{{ .HashSuffix }}
+  labels:
+    app: vmagent
+    cluster: {{ .ClusterName }}
+    workspace: {{ .Workspace }}
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/metrics", "nodes/proxy"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vmagent-node-reader-{{ .HashSuffix }}
+  labels:
+    app: vmagent
+    cluster: {{ .ClusterName }}
+    workspace: {{ .Workspace }}
+subjects:
+- kind: ServiceAccount
+  name: vmagent-service-account
+  namespace: {{ .Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: vmagent-node-reader-{{ .HashSuffix }}
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
@@ -216,6 +343,7 @@ type MetricsManifestVariables struct {
 	MetricsRemoteWriteURL string
 	Replicas              int
 	Resources             map[string]string
+	HashSuffix            string
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
@@ -238,5 +366,6 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		MetricsRemoteWriteURL: m.metricsRemoteWriteURL,
 		Replicas:              replicas,
 		Resources:             resources,
+		HashSuffix:            util.HashString(m.cluster.Key()),
 	}
 }
