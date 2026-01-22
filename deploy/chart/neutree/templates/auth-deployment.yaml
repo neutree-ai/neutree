@@ -35,7 +35,7 @@ spec:
             - name: GOTRUE_MAILER_URLPATHS_CONFIRMATION
               value: "/verify"
             - name: GOTRUE_JWT_SECRET
-              value: {{.Values.jwtSecret }}
+              value: {{ include "neutree.jwtSecret" . }}
             - name: GOTRUE_JWT_EXP
               value: "3600"
             - name: GOTRUE_JWT_DEFAULT_GROUP_NAME

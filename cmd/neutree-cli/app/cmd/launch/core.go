@@ -57,6 +57,10 @@ Examples:
   # With remote metrics storage and Grafana
   neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com --grafana-url http://grafana.example.com:3030`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if options.jwtSecret == "" {
+				return fmt.Errorf("--jwt-secret is required")
+			}
+
 			// set default node ip
 			if options.nodeIP == "" {
 				ip, err := util.GetHostIP()
@@ -69,7 +73,7 @@ Examples:
 		},
 	}
 
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.jwtSecret, "jwt-secret", "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp", "neutree core jwt secret")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.jwtSecret, "jwt-secret", "", "neutree core jwt secret (required)")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", "v0.0.1", "neutree core version")
