@@ -12,7 +12,7 @@ CREATE TYPE api.model_catalog_spec AS (
 
 CREATE TYPE api.model_catalog_status AS (
     phase TEXT,
-    last_transition_time TIMESTAMP,
+    last_transition_time TIMESTAMPTZ,
     error_message TEXT
 );
 

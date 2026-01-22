@@ -85,12 +85,12 @@ CREATE TYPE api.api_key_spec AS (
 
 CREATE TYPE api.api_key_status AS (
     phase TEXT,
-    last_transition_time TIMESTAMP,
+    last_transition_time TIMESTAMPTZ,
     error_message TEXT,
     sk_value TEXT,  -- The secret key value
     usage BIGINT,
-    last_used_at TIMESTAMP,
-    last_sync_at TIMESTAMP
+    last_used_at TIMESTAMPTZ,
+    last_sync_at TIMESTAMPTZ
 );
 
 CREATE TABLE api.api_keys (

@@ -5,9 +5,9 @@ CREATE TYPE api.metadata AS (
     name TEXT,
     display_name TEXT,
     workspace TEXT, -- null for global resources
-    deletion_timestamp TIMESTAMP,
-    creation_timestamp TIMESTAMP,
-    update_timestamp TIMESTAMP,
+    deletion_timestamp TIMESTAMPTZ,
+    creation_timestamp TIMESTAMPTZ,
+    update_timestamp TIMESTAMPTZ,
     labels json
 );
 
