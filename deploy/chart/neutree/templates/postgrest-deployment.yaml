@@ -33,9 +33,9 @@ spec:
             - name: PGRST_SERVER_PORT
               value: "6432"
             - name: PGRST_JWT_SECRET
-              value: "{{.Values.jwtSecret }}"
+              value: "{{ include "neutree.jwtSecret" . }}"
             - name: PGRST_APP_SETTINGS_JWT_SECRET
-              value: "{{.Values.jwtSecret }}"
+              value: "{{ include "neutree.jwtSecret" . }}"
             - name: PGRST_DB_EXTRA_SEARCH_PATH
               value: "auth"
             - name: PGRST_DB_AGGREGATES_ENABLED
