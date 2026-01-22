@@ -36,7 +36,7 @@ spec:
           imagePullPolicy: {{.Values.dbScripts.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
-            - "cp -r /db/migrations/* /migrations/"
+            - "cp -r /db/migrations/* /migrations/ && sed -i 's/kong_admin_password/{{.Values.db.password }}/g' /migrations/*.sql"
           volumeMounts:
             - name: migrations
               mountPath: /migrations

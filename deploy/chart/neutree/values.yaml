@@ -51,7 +51,7 @@ db:
     tag: "13"
     pullPolicy: IfNotPresent
   user: postgres
-  password: pgpassword
+  password: neutree
   name: neutree
   resources:
     requests:

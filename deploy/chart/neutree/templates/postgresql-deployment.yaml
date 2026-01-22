@@ -26,7 +26,7 @@ spec:
           imagePullPolicy: {{.Values.dbScripts.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
-            - "cp -r /db/init-scripts/* /docker-entrypoint-initdb.d/"
+            - "cp -r /db/init-scripts/* /docker-entrypoint-initdb.d/ && sed -i 's/auth_admin_password/{{.Values.db.password }}/g' /docker-entrypoint-initdb.d/*.sql"
           volumeMounts:
             - name: postgresql-initdb
               mountPath: /docker-entrypoint-initdb.d

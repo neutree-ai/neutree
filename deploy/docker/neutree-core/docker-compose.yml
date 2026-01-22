@@ -4,7 +4,7 @@ services:
   copy-db-scripts:
     image: neutree/neutree-db-scripts:{{ .NeutreeVersion }}
     container_name: copy-db-scripts
-    command: bash -c 'cp -rf /db /host/'
+    command: bash -c 'cp -rf /db /host/ && sed -i "s/auth_admin_password/{{ .DbPassword }}/g" /host/db/init-scripts/*.sql && sed -i "s/kong_admin_password/{{ .DbPassword }}/g" /host/db/migrations/*.sql'
     volumes:
       - {{ .NeutreeCoreWorkDir }}:/host/
     networks:
@@ -18,7 +18,7 @@ services:
     container_name: postgres
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: pgpassword
+      POSTGRES_PASSWORD: {{ .DbPassword }}
       POSTGRES_DB: neutree
     depends_on:
       copy-db-scripts:
@@ -57,7 +57,7 @@ services:
       GOTRUE_SITE_URL: http://localhost:9999
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       GOTRUE_LOG_LEVEL: INFO
-      DATABASE_URL: "postgres://auth_admin:auth_admin_password@postgres:5432/neutree"
+      DATABASE_URL: "postgres://auth_admin:{{ .DbPassword }}@postgres:5432/neutree"
       GOTRUE_COOKIE_KEY: "neutree"
     networks:
       - neutree
@@ -88,7 +88,7 @@ services:
         condition: service_healthy
       copy-db-scripts:
         condition: service_completed_successfully
-    command: -source=file://migrations -database "postgres://postgres:pgpassword@postgres:5432/neutree?sslmode=disable" up
+    command: -source=file://migrations -database "postgres://postgres:{{ .DbPassword }}@postgres:5432/neutree?sslmode=disable" up
     volumes:
       - {{ .NeutreeCoreWorkDir }}/db/migrations:/migrations
     networks:
@@ -110,7 +110,7 @@ services:
       - PGOPTIONS=-c neutree.admin_password={{ .AdminPassword }}
     volumes:
       - {{ .NeutreeCoreWorkDir }}/db/seed:/seed
-    command: 'bash -c ''for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://postgres:pgpassword@postgres:5432/neutree?sslmode=disable -f $$file; done'''
+    command: 'bash -c ''for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://postgres:{{ .DbPassword }}@postgres:5432/neutree?sslmode=disable -f $$file; done'''
     restart: none
     deploy:
       restart_policy:
@@ -120,7 +120,7 @@ services:
     image: postgrest/postgrest:v14.0
     container_name: postgrest
     environment:
-      PGRST_DB_URI: postgres://postgres:pgpassword@postgres:5432/neutree
+      PGRST_DB_URI: postgres://postgres:{{ .DbPassword }}@postgres:5432/neutree
       PGRST_DB_SCHEMA: api
       PGRST_SERVER_HOST: 0.0.0.0
       PGRST_SERVER_PORT: 6432
@@ -151,7 +151,7 @@ services:
       PG_META_DB_NAME: "neutree"
       PG_META_DB_USER: "postgres"
       PG_META_DB_PORT: 5432
-      PG_META_DB_PASSWORD: "pgpassword"
+      PG_META_DB_PASSWORD: "{{ .DbPassword }}"
     networks:
       - neutree
     depends_on:
@@ -263,7 +263,7 @@ services:
       KONG_PG_HOST: "postgres"
       KONG_PG_DATABASE: "neutree"
       KONG_PG_USER: "kong_admin"
-      KONG_PG_PASSWORD: "kong_admin_password"
+      KONG_PG_PASSWORD: "{{ .DbPassword }}"
       KONG_PG_SCHEME: "kong"
     networks:
       - neutree
@@ -289,7 +289,7 @@ services:
       KONG_PG_HOST: "postgres"
       KONG_PG_DATABASE: "neutree"
       KONG_PG_USER: "kong_admin"
-      KONG_PG_PASSWORD: "kong_admin_password"
+      KONG_PG_PASSWORD: "{{ .DbPassword }}"
       KONG_PG_SCHEME: "kong"
     depends_on:
       postgres:
@@ -333,7 +333,7 @@ services:
       KONG_PG_HOST: "postgres"
       KONG_PG_DATABASE: "neutree"
       KONG_PG_USER: "kong_admin"
-      KONG_PG_PASSWORD: "kong_admin_password"
+      KONG_PG_PASSWORD: "{{ .DbPassword }}"
       KONG_PG_SCHEME: "kong"
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ERROR_LOG: /dev/stderr
