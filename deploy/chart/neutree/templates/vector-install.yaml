@@ -134,7 +134,7 @@ spec:
             - '{"role":"service_role"}'
           env:
             - name: JWT_SECRET
-              value: {{.Values.jwtSecret}}
+              value: {{ include "neutree.jwtSecret" . }}
           volumeMounts:
             - name: jwt-secret
               mountPath: "/etc/vector/cridentials/"

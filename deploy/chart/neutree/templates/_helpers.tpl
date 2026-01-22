@@ -87,3 +87,10 @@ Usage: include "neutree.image" (dict "global" .Values.global "componentRegistry"
 {{- printf "%s:%s" $repository $tag -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Get the JWT secret with validation.
+*/}}
+{{- define "neutree.jwtSecret" -}}
+{{- required "jwtSecret is required. Please set it in values.yaml or via --set jwtSecret=<your-secret>" .Values.jwtSecret -}}
+{{- end -}}
