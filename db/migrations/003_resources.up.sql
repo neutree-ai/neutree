@@ -38,7 +38,7 @@ CREATE TYPE api.endpoint_spec AS (
 CREATE TYPE api.endpoint_status AS (
     phase TEXT,
     service_url TEXT,
-    last_transition_time TIMESTAMP,
+    last_transition_time TIMESTAMPTZ,
     error_message TEXT
 );
 
@@ -101,7 +101,7 @@ CREATE TYPE api.image_registry_spec AS (
 
 CREATE TYPE api.image_registry_status AS (
     phase TEXT,
-    last_transition_time TIMESTAMP,
+    last_transition_time TIMESTAMPTZ,
     error_message TEXT
 );
 
@@ -163,7 +163,7 @@ CREATE TYPE api.model_registry_spec AS (
 
 CREATE TYPE api.model_registry_status AS (
     phase TEXT,
-    last_transition_time TIMESTAMP,
+    last_transition_time TIMESTAMPTZ,
     error_message TEXT
 );
 
@@ -229,7 +229,7 @@ CREATE TYPE api.engine_spec AS (
 
 CREATE TYPE api.engine_status AS (
     phase TEXT,
-    last_transition_time TIMESTAMP,
+    last_transition_time TIMESTAMPTZ,
     error_message TEXT
 );
 
@@ -294,7 +294,7 @@ CREATE TYPE api.cluster_status AS (
     phase TEXT,
     image TEXT,
     dashboard_url TEXT,
-    last_transition_time TIMESTAMP,
+    last_transition_time TIMESTAMPTZ,
     error_message TEXT,
     ready_nodes integer,
     desired_nodes integer,

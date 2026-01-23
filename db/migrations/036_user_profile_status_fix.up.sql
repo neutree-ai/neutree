@@ -1,6 +1,6 @@
 CREATE TYPE api.user_profile_status_new AS (
     phase TEXT,
-    last_transition_time TIMESTAMP,
+    last_transition_time TIMESTAMPTZ,
     error_message TEXT,
     synced_spec api.user_profile_spec
 );
