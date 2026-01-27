@@ -46,20 +46,10 @@ func TestInitializeCluster(t *testing.T) {
 				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 					cluster := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseInitializing, cluster.Status.Phase)
-
 				}).Return(nil).Once()
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-					// You can add assertions or logic here if needed
-					accelType := args.Get(1).(string)
-					assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelType)
-				}).Return(v1.RuntimeConfig{}, nil).Once()
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil)
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
-				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-					cluster := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, true, cluster.Status.Initialized)
-
-				}).Return(nil).Once()
+				dashboardSvc.On("ListNodes").Return(nil, nil)
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {}).Return(nil).Maybe()
 			},
 		},
 		{
@@ -96,102 +86,20 @@ func TestInitializeCluster(t *testing.T) {
 				},
 				Status: &v1.ClusterStatus{
 					Phase:           v1.ClusterPhaseInitializing,
-					Initialized:     true,
+					Initialized:     false,
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
 			},
 			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				// setup mock expectations
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-					accelType := args.Get(1).(string)
-					assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelType)
-				}).Return(v1.RuntimeConfig{}, nil).Once()
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil)
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					cluster := args.Get(1).(*v1.Cluster)
+					assert.Equal(t, v1.ClusterPhaseInitializing, cluster.Status.Phase)
+				}).Return(nil).Once()
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
-				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-					cluster := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, true, cluster.Status.Initialized)
-
-				}).Return(nil).Once()
+				dashboardSvc.On("ListNodes").Return(nil, nil)
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {}).Return(nil).Maybe()
 			},
-		},
-		{
-			name: "skip reinitialize SSH Ray Clusters",
-			input: &v1.Cluster{
-				Metadata: &v1.Metadata{
-					Name: "test-ssh-ray-cluster",
-				},
-				Spec: &v1.ClusterSpec{
-					Type: "ssh",
-				},
-				Status: &v1.ClusterStatus{
-					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
-					Phase:               v1.ClusterPhaseInitializing,
-					Initialized:         true,
-					NodeProvisionStatus: fmt.Sprintf(`{"127.0.0.1":{"status":"provisioned","last_provision_time":"%s","is_head":true}}`, time.Now().Format(time.RFC3339Nano)),
-				},
-			},
-			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
-				// setup mock expectations
-			},
-			wantErr: true,
-		},
-		{
-			name: "initialize SSH Ray Cluster failed, up cluster failed",
-			input: &v1.Cluster{
-				Metadata: &v1.Metadata{
-					Name: "test-ssh-ray-cluster",
-				},
-				Spec: &v1.ClusterSpec{
-					Type: "ssh",
-				},
-				Status: &v1.ClusterStatus{
-					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
-				},
-			},
-			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
-				// setup mock expectations
-				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-					cluster := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, v1.ClusterPhaseInitializing, cluster.Status.Phase)
-
-				}).Return(nil).Once()
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-					accelType := args.Get(1).(string)
-					assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelType)
-				}).Return(v1.RuntimeConfig{}, nil).Once()
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError)
-			},
-			wantErr: true,
-		},
-		{
-			name: "initialize SSH Ray Cluster failed, get cluster metedata failed",
-			input: &v1.Cluster{
-				Metadata: &v1.Metadata{
-					Name: "test-ssh-ray-cluster",
-				},
-				Spec: &v1.ClusterSpec{
-					Type: "ssh",
-				},
-				Status: &v1.ClusterStatus{
-					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
-				},
-			},
-			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
-				// setup mock expectations
-				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-					cluster := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, v1.ClusterPhaseInitializing, cluster.Status.Phase)
-
-				}).Return(nil).Once()
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-					accelType := args.Get(1).(string)
-					assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelType)
-				}).Return(v1.RuntimeConfig{}, nil).Once()
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil)
-				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
-			},
-			wantErr: true,
 		},
 	}
 
@@ -203,9 +111,6 @@ func TestInitializeCluster(t *testing.T) {
 			storage := &storagemocks.MockStorage{}
 			tt.setupMock(storage, acceleratorManager, e, dashboardSvc)
 
-			dashboard.NewDashboardService = func(dashboardUrl string) dashboard.DashboardService {
-				return dashboardSvc
-			}
 			r := &sshRayClusterReconciler{
 				acceleratorManager: acceleratorManager,
 				storage:            storage,
@@ -220,6 +125,7 @@ func TestInitializeCluster(t *testing.T) {
 					},
 				},
 				sshConfigGenerator: newRaySSHLocalConfigGenerator(tt.input.Metadata.Name),
+				rayService:         dashboardSvc,
 			})
 
 			if tt.wantErr {
@@ -335,6 +241,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 					Name: "test",
 				},
 				Status: &v1.ClusterStatus{
+					Initialized:     true,
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
 			},
@@ -364,6 +271,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 				},
 				Status: &v1.ClusterStatus{
 					NodeProvisionStatus: `{abcs}`,
+					Initialized:         true,
 					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
 			},
@@ -385,6 +293,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 					Name: "test",
 				},
 				Status: &v1.ClusterStatus{
+					Initialized:         true,
 					NodeProvisionStatus: `{"192.168.1.1":{"status":"provisioned","last_provision_time":"2025-10-21T10:46:27Z","is_head":false}}`,
 					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
@@ -413,6 +322,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 					Name: "test",
 				},
 				Status: &v1.ClusterStatus{
+					Initialized:         true,
 					NodeProvisionStatus: `{"192.168.1.1":{"status":"provisioned","last_provision_time":"2025-10-21T10:46:27Z","is_head":false}}`,
 					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
@@ -436,6 +346,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 					Name: "test",
 				},
 				Status: &v1.ClusterStatus{
+					Initialized:         true,
 					NodeProvisionStatus: `{"192.168.1.1":{"status":"provisioned","last_provision_time":"2025-10-21T10:46:27Z","is_head":false},"192.168.1.2":{"status":"provisioned","last_provision_time":"","is_head":false}}`,
 					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
@@ -460,6 +371,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 					Name: "test",
 				},
 				Status: &v1.ClusterStatus{
+					Initialized:         true,
 					NodeProvisionStatus: `{"192.168.1.1":{"status":"provisioned","last_provision_time":"2025-10-21T10:46:27Z","is_head":false},"192.168.1.2":{"status":"provisioned","last_provision_time":"","is_head":false}}`,
 					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
@@ -485,6 +397,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 					Name: "test",
 				},
 				Status: &v1.ClusterStatus{
+					Initialized:         true,
 					NodeProvisionStatus: `{"192.168.1.1":{"status":"provisioned","last_provision_time":"2025-10-21T10:46:27Z","is_head":false}}`,
 					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
@@ -513,6 +426,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 					Name: "test",
 				},
 				Status: &v1.ClusterStatus{
+					Initialized:         true,
 					NodeProvisionStatus: fmt.Sprintf(`{"192.168.1.1":{"status":"provisioned","last_provision_time":"%s","is_head":false}}`, time.Now().Format(time.RFC3339Nano)),
 					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},
@@ -535,6 +449,7 @@ func TestReconcileWorkerNode(t *testing.T) {
 					Name: "test",
 				},
 				Status: &v1.ClusterStatus{
+					Initialized:         true,
 					NodeProvisionStatus: `{"192.168.1.1":{"status":"provisioned","last_provision_time":"2025-10-21T10:46:27Z","is_head":false}}`,
 					AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 				},

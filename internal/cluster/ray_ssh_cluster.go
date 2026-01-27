@@ -60,11 +60,12 @@ func newRaySSHClusterReconcile(storage storage.Storage, acceleratorManager accel
 // now only used during cluster initialization
 func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileContext, messages ...string) {
 	for _, message := range messages {
-		klog.Info(message + ":" + reconcileCtx.Cluster.Metadata.WorkspaceName())
+		klog.Info(message + ": " + reconcileCtx.Cluster.Metadata.WorkspaceName())
 	}
 
 	reconcileCtx.lock.Lock()
 	defer reconcileCtx.lock.Unlock()
+
 	for _, message := range messages {
 		reconcileCtx.processMessages = append(reconcileCtx.processMessages, formatMessageWithTimestamp(message))
 	}
@@ -74,6 +75,7 @@ func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileC
 		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
 			Status: reconcileCtx.Cluster.Status,
 		})
+
 		if err != nil {
 			klog.Warningf("Failed to update cluster process message for cluster %s: %v", reconcileCtx.Cluster.Metadata.WorkspaceName(), err)
 		}
@@ -119,6 +121,9 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 			reconcileCtx.processMessages = append(reconcileCtx.processMessages, formatMessageWithTimestamp("Cluster initialization failed: "+err.Error()))
 			return errors.New(strings.Join(reconcileCtx.processMessages, "\n"))
 		}
+
+		reconcileCtx.Cluster.Status.Initialized = true
+		reconcileCtx.Cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
 
 		return nil
 	}
@@ -256,6 +261,11 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		klog.Warningf("Failed to set head node provision status: %v", err)
 	}
 
+	_, err = reconcileCtx.rayService.GetClusterMetadata()
+	if err != nil {
+		return errors.Wrap(err, "failed to get cluster metadata after bringing up head node")
+	}
+
 	return nil
 }
 
@@ -370,6 +380,7 @@ func (c *sshRayClusterReconciler) reconcileWorkerNode(reconcileCtx *ReconcileCon
 
 		eg.Go(func() error {
 			c.logWithProcessMessage(reconcileCtx, fmt.Sprintf("Starting worker node %s", ip))
+
 			err := c.startNode(reconcileCtx, ip)
 			if err != nil {
 				nodeOpErrors[i] = errors.Wrap(err, "failed to start ray node "+ip)
@@ -387,6 +398,7 @@ func (c *sshRayClusterReconciler) reconcileWorkerNode(reconcileCtx *ReconcileCon
 
 		eg.Go(func() error {
 			c.logWithProcessMessage(reconcileCtx, fmt.Sprintf("Stopping worker node %s", ip))
+
 			err := c.stopNode(reconcileCtx, ip, false)
 			if err != nil {
 				nodeOpErrors[i+len(nodeIpToStart)] = errors.Wrap(err, "failed to stop ray node "+ip)
@@ -460,35 +472,22 @@ func (c *sshRayClusterReconciler) initialize(reconcileCtx *ReconcileContext) err
 		}
 	}
 
-	c.logWithProcessMessage(reconcileCtx, "Start to initialize cluster ", "Starting head node for uping Ray cluster ")
+	c.logWithProcessMessage(reconcileCtx, "Start to initialize cluster ",
+		fmt.Sprintf("Starting head node %s for bringing up Ray cluster ", reconcileCtx.sshClusterConfig.Provider.HeadIP))
+
 	err := c.reconcileHeadNode(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to reconcile head node during initialization")
 	}
 
-	c.logWithProcessMessage(reconcileCtx, "Start head node successfully ", "Verify head node readiness ")
-	_, err = reconcileCtx.rayService.GetClusterMetadata()
-	if err != nil {
-		return errors.Wrap(err, "failed to get cluster metadata during initialization")
-	}
+	c.logWithProcessMessage(reconcileCtx, fmt.Sprintf("Start head node %s successfully ", reconcileCtx.sshClusterConfig.Provider.HeadIP), "Starting worker nodes ")
 
-	c.logWithProcessMessage(reconcileCtx, "Verify head node readiness successfully", "Starting worker nodes ")
 	err = c.reconcileWorkerNode(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to reconcile worker node during initialization")
 	}
 
 	c.logWithProcessMessage(reconcileCtx, "Start worker nodes successfully", "Cluster "+reconcileCtx.Cluster.Metadata.WorkspaceName()+" initialized successfully")
-
-	reconcileCtx.Cluster.Status.Initialized = true
-	reconcileCtx.Cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
-
-	err = c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
-		Status: reconcileCtx.Cluster.Status,
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to update cluster status")
-	}
 
 	return nil
 }
