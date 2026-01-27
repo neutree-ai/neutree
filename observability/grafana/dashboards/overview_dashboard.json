@@ -1,0 +1,229 @@
+{
+	"annotations": {"list": []},
+	"tags": ["overview","cluster"],
+	"id": null,
+	"editable": true,
+	"schemaVersion": 40,
+	"version": 1,
+	"refresh": "10s",
+	"panels": [
+		{
+			"type": "gauge",
+			"title": "CPU Utilization (Avg)",
+			"id": 2,
+			"gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+			"datasource": "${datasource}",
+			"targets": [
+				{
+					"expr": "avg(avg by (neutree_cluster) (ray_node_cpu_utilization{neutree_cluster=~\"$Cluster\"} / 100 ) or avg by (neutree_cluster) (1 - avg by (instance) (rate(node_cpu_seconds_total{job=~\"node-exporter.*\", mode=\"idle\", neutree_cluster=~\"$Cluster\"}[5m]))))",
+					"format": "time_series",
+					"instant": true,
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+			"options": {"showThresholdLabels": false, "showThresholdMarkers": true},
+			"valueName": "current",
+			"thresholds": "0.7,0.8"
+		},
+		{
+			"type": "gauge",
+			"title": "Memory Utilization (Avg)",
+			"id": 3,
+			"gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+			"datasource": "${datasource}",
+			"targets": [
+				{
+					"expr": "avg((sum by (neutree_cluster) (ray_node_mem_used{neutree_cluster=~\"$Cluster\"}) / sum by (neutree_cluster) (ray_node_mem_total{neutree_cluster=~\"$Cluster\"})) or avg by (neutree_cluster) (1 - (node_memory_MemAvailable_bytes{job=~\"node-exporter.*\", neutree_cluster=~\"$Cluster\"} / node_memory_MemTotal_bytes{job=~\"node-exporter.*\", neutree_cluster=~\"$Cluster\"})))",
+					"format": "time_series",
+					"instant": true,
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+			"options": {"showThresholdLabels": false, "showThresholdMarkers": true},
+			"valueName": "current",
+			"thresholds": "0.7,0.8"
+		},
+		{
+			"type": "gauge",
+			"title": "GPU Utilization (Avg)",
+			"id": 4,
+			"gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+			"datasource": "${datasource}",
+			"targets": [
+				{
+					"expr": "avg((sum by (neutree_cluster) (ray_node_gpus_utilization{neutree_cluster=~\"$Cluster\"} / 100 ) / (sum by (neutree_cluster) (autoscaler_cluster_resources{resource=\"GPU\",neutree_cluster=~\"$Cluster\"}) or vector(0))) or (avg by (neutree_cluster) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=~\"$Cluster\"}) / 100))",
+					"format": "time_series",
+					"instant": true,
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+			"options": {"showThresholdLabels": false, "showThresholdMarkers": true},
+			"valueName": "current",
+			"thresholds": "0.7,0.8"
+		},
+		{
+			"type": "gauge",
+			"title": "GPU Memory Utilization (Avg)",
+			"id": 5,
+			"gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+			"datasource": "${datasource}",
+			"targets": [
+				{
+					"expr": "avg((sum by (neutree_cluster) (ray_node_gram_used{neutree_cluster=~\"$Cluster\"}) / (sum by (neutree_cluster) (ray_node_gram_available{neutree_cluster=~\"$Cluster\"} + ray_node_gram_used{neutree_cluster=~\"$Cluster\"} ) or vector(0))) or (sum by (neutree_cluster) (DCGM_FI_DEV_FB_USED{neutree_cluster=~\"$Cluster\"}) / sum by (neutree_cluster) (DCGM_FI_DEV_FB_TOTAL{neutree_cluster=~\"$Cluster\"})))",
+					"format": "time_series",
+					"instant": true,
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+			"options": {"showThresholdLabels": false, "showThresholdMarkers": true},
+			"valueName": "current",
+			"thresholds": "0.7,0.8"
+		},
+		{
+			"type": "graph",
+			"title": "Cluster Utilization",
+			"id": 1,
+			"gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
+			"datasource": "${datasource}",
+			"legend": {"show": true, "values": true},
+			"targets": [
+				{
+					"expr": "avg(avg by (neutree_cluster) (ray_node_cpu_utilization{neutree_cluster=~\"$Cluster\"} / 100) or avg by (neutree_cluster) (1 - avg by (instance) (rate(node_cpu_seconds_total{job=~\"node-exporter.*\", mode=\"idle\", neutree_cluster=~\"$Cluster\"}[5m]))))",
+					"legendFormat": "CPU utilization",
+					"refId": "A"
+				},
+				{
+					"expr": "avg((sum by (neutree_cluster) (ray_node_mem_used{neutree_cluster=~\"$Cluster\"}) / sum by (neutree_cluster) (ray_node_mem_total{neutree_cluster=~\"$Cluster\"})) or avg by (neutree_cluster) (1 - (node_memory_MemAvailable_bytes{job=~\"node-exporter.*\", neutree_cluster=~\"$Cluster\"} / node_memory_MemTotal_bytes{job=~\"node-exporter.*\", neutree_cluster=~\"$Cluster\"})))",
+					"legendFormat": "Memory utilization",
+					"refId": "B"
+				},
+				{
+					"expr": "avg((sum by (neutree_cluster) (ray_node_gpus_utilization{neutree_cluster=~\"$Cluster\"} / 100) / (sum by (neutree_cluster) (autoscaler_cluster_resources{resource=\"GPU\",neutree_cluster=~\"$Cluster\"}) or vector(0))) or (avg by (neutree_cluster) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=~\"$Cluster\"}) / 100))",
+					"legendFormat": "GPU utilization",
+					"refId": "C"
+				},
+				{
+					"expr": "avg((sum by (neutree_cluster) (ray_node_gram_used{neutree_cluster=~\"$Cluster\"}) / (sum by (neutree_cluster) (ray_node_gram_available{neutree_cluster=~\"$Cluster\"} + ray_node_gram_used{neutree_cluster=~\"$Cluster\"} ) or vector(0))) or (sum by (neutree_cluster) (DCGM_FI_DEV_FB_USED{neutree_cluster=~\"$Cluster\"}) / sum by (neutree_cluster) (DCGM_FI_DEV_FB_TOTAL{neutree_cluster=~\"$Cluster\"})))",
+					"legendFormat": "GPU Memory utilization",
+					"refId": "D"
+				}
+			],
+			"lines": true,
+			"linewidth": 2,
+			"fill": 1,
+			"yaxes": [
+				{"format": "percentunit", "min": 0, "max": 1, "show": true},
+				{"format": "short", "show": false}
+			],
+			"tooltip": {"shared": true, "value_type": "individual"}
+		},
+		{
+			"type": "stat",
+			"title": "Average Latency",
+			"id": 6,
+			"gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+			"datasource": "${datasource}",
+			"targets": [
+				{
+					"expr": "avg( (avg by (neutree_cluster, application) (ray_serve_http_request_latency_ms_sum{neutree_cluster=~\"$Cluster\"} / (ray_serve_num_http_requests_total{neutree_cluster=~\"$Cluster\"}  * 1000))) or (avg by (neutree_cluster) (router:avg_latency{neutree_cluster=~\"$Cluster\"})) )",
+					"legendFormat": "Average Latency",
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"color": {"mode": "thresholds"},
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{"color": "green", "value": null},
+							{"color": "red", "value": 1}
+						]
+					}
+				},
+				"overrides": []
+			},
+			"options": {
+				"colorMode": "value",
+				"graphMode": "area",
+				"justifyMode": "auto",
+				"orientation": "auto",
+				"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+				"textMode": "auto",
+				"wideLayout": true
+			}
+		},
+		{
+			"type": "stat",
+			"title": "Current QPS",
+			"id": 7,
+			"gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+			"datasource": "${datasource}",
+			"targets": [
+				{
+					"expr": "sum( (sum by (neutree_cluster) (rate(ray_serve_num_http_requests_total{neutree_cluster=~\"$Cluster\"}[1m]))) or (sum by (neutree_cluster) (router:current_qps{neutree_cluster=~\"$Cluster\"})) )",
+					"legendFormat": "Current QPS",
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"color": {"mode": "thresholds"},
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{"color": "green", "value": null},
+							{"color": "red", "value": 80}
+						]
+					}
+				},
+				"overrides": []
+			},
+			"options": {
+				"colorMode": "value",
+				"graphMode": "area",
+				"justifyMode": "auto",
+				"orientation": "auto",
+				"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+				"textMode": "auto",
+				"wideLayout": true
+			}
+		}
+	],
+	"templating": {
+		"list": [
+			{
+				"description": "Filter queries of a specific Prometheus type.",
+				"hide": 2,
+				"includeAll": false,
+				"multi": false,
+				"name": "datasource",
+				"options": [],
+				"query": "prometheus",
+				"refresh": 1,
+				"regex": "",
+				"skipUrlSync": false,
+				"type": "datasource"
+			},
+			{
+				"name": "Cluster",
+				"type": "query",
+				"label": "Cluster",
+				"datasource": "$datasource",
+				"query": "label_values(neutree_cluster)",
+                "allValue": ".*",
+				"multi": false,
+				"includeAll": true
+			}
+		]
+	},
+	"time": {"from": "now-1h", "to": "now"},
+	"timepicker": {},
+	"uid": "overview",
+	"title": "Overview",
+	"timezone": ""
+}

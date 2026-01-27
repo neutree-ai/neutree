@@ -159,7 +159,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(router:current_qps)",
+          "expr": "sum(router:current_qps{neutree_cluster=~\"$Cluster\"})",
           "legendFormat": "Current QPS",
           "range": true,
           "refId": "A"
