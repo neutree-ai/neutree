@@ -170,6 +170,38 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 		t.Logf("validation correctly blocked insert with error code 10025: %v", err)
 	})
 
+	t.Run("cluster router.resources.cpu invalid - error code 10115", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Try to insert cluster with router.resources.memory invalid
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1xxxx", "memory":"1Gi"}, "access_mode":"LoadBalancer"}}}'::jsonb, 'test-imageregistry', '')::api.cluster_spec,
+				ROW('test-cluster-resources', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: router.resources is required for Kubernetes clusters")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10115"`) {
+			t.Fatalf("expected error code 10115, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked insert with error code 10115: %v", err)
+	})
+
 	t.Run("cluster router.resources.memory is missing - error code 10026", func(t *testing.T) {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
@@ -424,6 +456,90 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 		}
 
 		t.Logf("validation correctly blocked insert with error code 10205: %v", err)
+	})
+
+	t.Run("cluster modelcaches.name cannot be modified - error code 10206", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Insert cluster with modelcaches
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": [{"name": "cache-name-1"}]}'::jsonb, 'test-imageregistry-modelcache-update', '')::api.cluster_spec,
+				ROW('test-cluster-modelcache-update', NULL, 'test-workspace-modelcache-update', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+		if err != nil {
+			t.Fatalf("failed to create test cluster: %v", err)
+		}
+
+		// Try to update the cluster with a different modelcaches.name
+		_, err = tx.ExecContext(ctx, `
+			UPDATE api.clusters
+			SET spec = ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": [{"name": "cache-name-2"}]}'::jsonb, 'test-imageregistry-modelcache-update', '')::api.cluster_spec
+			WHERE (metadata).name = 'test-cluster-modelcache-update'
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: model_caches.name cannot be modified")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10206"`) {
+			t.Fatalf("expected error code 10206, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked update with error code 10206: %v", err)
+	})
+
+	t.Run("cluster modelcaches.pvc.storageClassName cannot be modified - error code 10207", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Insert cluster with modelcaches having PVC storageClassName
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": [{"name": "cache-pvc", "pvc": {"storageClassName": "fast-storage", "resources": {"requests": {"storage": "10Gi"}}}}]}'::jsonb, 'test-imageregistry-pvc-update', '')::api.cluster_spec,
+				ROW('test-cluster-pvc-update', NULL, 'test-workspace-pvc-update', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+		if err != nil {
+			t.Fatalf("failed to create test cluster: %v", err)
+		}
+
+		// Try to update the cluster with a different storageClassName
+		_, err = tx.ExecContext(ctx, `
+			UPDATE api.clusters
+			SET spec = ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"xxxx", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}, "model_caches": [{"name": "cache-pvc", "pvc": {"storageClassName": "slow-storage", "resources": {"requests": {"storage": "10Gi"}}}}]}'::jsonb, 'test-imageregistry-pvc-update', '')::api.cluster_spec
+			WHERE (metadata).name = 'test-cluster-pvc-update'
+		`)
+
+		if err == nil {
+			t.Fatal("expected validation error: model_caches.pvc.storageClassName cannot be modified")
+		}
+
+		// Check that the error message contains the correct error code
+		if !strings.Contains(err.Error(), `"code": "10207"`) {
+			t.Fatalf("expected error code 10207, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked update with error code 10207: %v", err)
 	})
 
 }
