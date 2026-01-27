@@ -302,7 +302,7 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 func (k *Kong) syncEndpointRoute(ep *v1.Endpoint, gwService *kong.Service) (*kong.Route, error) {
 	route := &kong.Route{
 		Name:      pointy.String("neutree-endpoint-" + util.HashString(ep.Key())),
-		Paths:     []*string{pointy.String("~" + getEndpointRoutePath(ep))},
+		Paths:     []*string{pointy.String(getEndpointRoutePath(ep))},
 		Service:   gwService,
 		Protocols: []*string{pointy.String("http"), pointy.String("https")},
 	}
