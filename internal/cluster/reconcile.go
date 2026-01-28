@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -36,6 +37,8 @@ type ReconcileContext struct {
 	sshClusterConfig    *v1.RaySSHProvisionClusterConfig
 	sshRayClusterConfig *v1.RayClusterConfig
 	sshConfigGenerator  *raySSHLocalConfigGenerator
+	processMessages     []string
+	lock                sync.Mutex
 
 	rayService dashboard.DashboardService
 
