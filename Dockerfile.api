@@ -61,9 +61,11 @@ ENV NODE_ENV production
 ARG DEFAULT_CLUSTER_VERSION
 ENV VITE_DEFAULT_CLUSTER_VERSION=${DEFAULT_CLUSTER_VERSION}
 
-# Copy requirements file
+# Copy requirements file and install dependencies
 COPY requirements.txt .
-RUN apt-get update && apt-get install util-linux python3 python3-dev nfs-common python3-pip build-essential libssl-dev libffi-dev -y && pip install -U --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install util-linux python3 python3-dev nfs-common python3-pip build-essential libssl-dev libffi-dev -y && \
+    pip install -U --no-cache-dir -r requirements.txt && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy api binary
 WORKDIR /
@@ -73,5 +75,26 @@ COPY --from=go-builder /workspace/neutree-api .
 RUN mkdir -p /public
 COPY --from=fronted-builder /app/refine/dist /public
 
-USER root
-ENTRYPOINT ["/neutree-api"]
+# Create entrypoint script to start rpcbind, rpc.statd and neutree-api
+RUN cat > /entrypoint.sh <<'EOF'
+#!/bin/bash
+set -e
+
+# Start rpcbind in background
+/sbin/rpcbind -w
+echo "rpcbind started"
+
+# Start rpc.statd in background
+/sbin/rpc.statd
+echo "rpc.statd started"
+
+# Wait a moment for services to be ready
+sleep 1
+
+# Start main application (replace current process)
+exec /neutree-api "$@"
+EOF
+
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
