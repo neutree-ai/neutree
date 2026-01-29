@@ -4,7 +4,7 @@ services:
     container_name: neutree-db-test
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: pgpassword
+      POSTGRES_PASSWORD: neutree
       POSTGRES_DB: neutree_test
     ports:
       - "5432:5432"
@@ -50,7 +50,7 @@ services:
     depends_on:
       auth:
         condition: service_healthy
-    command: -source=file://migrations -database "postgres://postgres:pgpassword@postgres:5432/neutree_test?sslmode=disable" up
+    command: -source=file://migrations -database "postgres://postgres:neutree@postgres:5432/neutree_test?sslmode=disable" up
     volumes:
       - ./migrations:/migrations
     restart: "no"
@@ -66,7 +66,7 @@ services:
     command: >
       bash -c "
         for file in /seed/*.sql; do
-          psql postgres://postgres:pgpassword@postgres:5432/neutree_test -f $$file;
+          psql postgres://postgres:neutree@postgres:5432/neutree_test -f $$file;
         done
       "
     volumes:

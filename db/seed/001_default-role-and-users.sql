@@ -24,6 +24,7 @@ BEGIN
     END IF;
 
     PERFORM api.update_admin_permissions();
+    PERFORM api.update_workspace_user_permissions();
 END
 $$;
 
