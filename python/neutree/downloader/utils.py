@@ -1,8 +1,12 @@
 import os
 import shutil
-from typing import Callable
+import json
+import datetime
+import time
+from typing import Callable, Optional
 from typing import Dict, Any, Tuple
 from .entity import DownloadRequest
+from huggingface_hub.utils.sha import git_hash, sha_fileobj
 
 
 def ensure_dir(path: str) -> None:
@@ -83,3 +87,130 @@ def build_request_from_model_args(model_args: Dict[str, Any]) -> Tuple[str, Down
                              recursive=recursive, overwrite=overwrite, retries=retries,
                              timeout=timeout, metadata=model_args)
     return backend, dl_req
+
+
+# File verification utilities
+
+class FileLock:
+    """Simple file lock using fcntl for Unix/Linux systems.
+
+    Uses non-blocking mode with retry logic to acquire the lock.
+    """
+    def __init__(self, lockfile: str, timeout: float = 300.0):
+        self.lockfile = lockfile
+        self.timeout = timeout
+        self.lockfd = None
+
+    def __enter__(self):
+        import fcntl
+
+        ensure_dir(os.path.dirname(self.lockfile))
+        self.lockfd = open(self.lockfile, 'w')
+
+        start_time = time.time()
+        try:
+            while True:
+                try:
+                    fcntl.flock(self.lockfd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return self
+                except (IOError, OSError):
+                    elapsed = time.time() - start_time
+                    if elapsed > self.timeout:
+                        raise TimeoutError(f"Could not acquire lock on {self.lockfile} within {self.timeout}s")
+                    time.sleep(0.1)
+        except:
+            # If we fail to acquire the lock, close the file descriptor to prevent leak
+            if self.lockfd:
+                self.lockfd.close()
+                self.lockfd = None
+            raise
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        import fcntl
+
+        if self.lockfd:
+            try:
+                fcntl.flock(self.lockfd.fileno(), fcntl.LOCK_UN)
+            except:
+                pass
+            self.lockfd.close()
+            self.lockfd = None
+
+def compute_sha256(filepath: str) -> str:
+    """Compute SHA256 hash of a file using 8MB buffer."""
+    with open(filepath, "rb") as stream:
+        return sha_fileobj(stream, 8 * 1024 * 1024).hex()
+
+
+def compute_git_sha1(filepath: str) -> str:
+    """Compute git SHA1 hash of a file (blob format)."""
+    with open(filepath, "rb") as f:
+        data = f.read()
+
+    return git_hash(data)
+
+def should_skip_verification() -> bool:
+    """Check if file verification should be skipped.
+
+    Set environment variable NEUTREE_VERIFY_SKIP=1/true/yes to skip verification.
+    Or when HF_HUB_OFFLINE=1 (offline mode), verification is also skipped.
+    Default is false (perform verification).
+    """
+    # Skip verification if explicitly requested
+    if env_bool("NEUTREE_VERIFY_SKIP", False):
+        return True
+
+    # Skip verification in offline mode (cannot fetch remote file list from API)
+    if env_bool("HF_HUB_OFFLINE", False):
+        return True
+
+    return False
+
+def should_keep_failed_files() -> bool:
+    """Check if failed verification files should be kept (for debugging).
+
+    Set environment variable NEUTREE_VERIFY_KEEP_FAILED=1/true/yes to keep failed files.
+    Default is false (delete failed files to force re-download).
+    """
+    return env_bool("NEUTREE_VERIFY_KEEP_FAILED", False)
+
+
+def load_verification_record(verify_dir: str, file_relpath: str) -> Optional[Dict[str, Any]]:
+    """Load verification record for a file.
+
+    Returns:
+        Dict with keys: algorithm, expected_hash, actual_hash, verified_at, passed
+        or None if record doesn't exist.
+    """
+    record_path = os.path.join(verify_dir, file_relpath + ".json")
+    try:
+        with open(record_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def save_verification_record_with_algo(verify_dir: str, file_relpath: str, algorithm: str, expected: str, actual: str, passed: bool) -> None:
+    """Save verification record with algorithm information."""
+    record_path = os.path.join(verify_dir, file_relpath + ".json")
+    ensure_dir(os.path.dirname(record_path))
+
+    record = {
+        "algorithm": algorithm,
+        "expected_hash": expected,
+        "actual_hash": actual,
+        "verified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "passed": passed
+    }
+
+    with open(record_path, "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2)
+
+
+def delete_verification_record(verify_dir: str, file_relpath: str) -> None:
+    """Delete verification record for a file."""
+    record_path = os.path.join(verify_dir, file_relpath + ".json")
+    try:
+        os.remove(record_path)
+    except FileNotFoundError:
+        # If the verification record file does not exist, there is nothing to delete.
+        pass
