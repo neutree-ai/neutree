@@ -405,6 +405,26 @@ func TestRayOrchestrator_deleteEndpoint(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name: "UpdateServeApplications should ignore the application which deployedConfig is nil",
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService, mockStorage *storagemocks.MockStorage) {
+				appName := EndpointToServeApplicationName(endpoint)
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						appName: {
+							Status: "RUNNING",
+						},
+						"test": {
+							Status: "DELETING",
+						},
+					},
+				}, nil)
+				mockDashboard.On("UpdateServeApplications", mock.MatchedBy(func(req dashboard.RayServeApplicationsRequest) bool {
+					return len(req.Applications) == 0
+				})).Return(nil)
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
