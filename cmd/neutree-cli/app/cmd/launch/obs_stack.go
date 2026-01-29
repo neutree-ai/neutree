@@ -35,11 +35,11 @@ Components:
 
 Deployment Options:
   • Local single-node deployment (default)
-  
+
 Examples:
   # Deploy with default settings
   neutree-cli launch obs-stack
-  
+
   # Deploy with custom registry
   neutree-cli launch obs-stack --mirror-registry my.registry.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,6 +92,8 @@ func installObsStackSingleNodeByDocker(exector command.Executor, options obsStac
 		}
 
 		fmt.Println(string(composeContent))
+
+		return nil
 	}
 
 	output, err := exector.Execute(context.Background(), "docker",
