@@ -233,7 +233,10 @@ func (o *RayOrchestrator) deleteEndpoint(ctx *OrchestratorContext) error {
 			continue // Skip the endpoint to be deleted
 		}
 
-		updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+		// When the application is deleted, the deployed application configuration is empty, ignored it.
+		if appStatus.DeployedAppConfig != nil {
+			updatedAppsList = append(updatedAppsList, *appStatus.DeployedAppConfig)
+		}
 	}
 
 	if !found {
