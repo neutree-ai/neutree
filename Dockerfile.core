@@ -24,13 +24,35 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} \
 
 FROM --platform=linux/${ARCH} ubuntu:22.04
 
-# Copy requirements file
+# Copy requirements file and install dependencies
 COPY requirements.txt .
-
-# Install dependencies
-RUN apt-get update && apt-get install rsync openssh-client util-linux python3 python3-dev nfs-common python3-pip build-essential libssl-dev libffi-dev -y && pip install -U --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install rsync openssh-client util-linux python3 python3-dev nfs-common python3-pip build-essential libssl-dev libffi-dev -y && \
+    pip install -U --no-cache-dir -r requirements.txt && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /
 COPY --from=builder /workspace/neutree-core .
-USER root
-ENTRYPOINT ["/neutree-core"]
+
+# Create entrypoint script to start rpcbind, rpc.statd and neutree-core
+RUN cat > /entrypoint.sh <<'EOF'
+#!/bin/bash
+set -e
+
+# Start rpcbind in background
+/sbin/rpcbind -w
+echo "rpcbind started"
+
+# Start rpc.statd in background
+/sbin/rpc.statd
+echo "rpc.statd started"
+
+# Wait a moment for services to be ready
+sleep 1
+
+# Start main application (replace current process)
+exec /neutree-core "$@"
+EOF
+
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -172,7 +172,6 @@ services:
     security_opt:
       - seccomp:unconfined
     command:
-      - ./neutree-core
       - --storage-access-url=http://postgrest:6432
       - --storage-jwt-secret={{ .JwtSecret }}
       - --controller-workers=5
@@ -210,7 +209,6 @@ services:
     security_opt:
       - seccomp:unconfined
     command:
-      - ./neutree-api
       - --storage-access-url=http://postgrest:6432
       - --storage-jwt-secret={{ .JwtSecret }}
       - --host=0.0.0.0
