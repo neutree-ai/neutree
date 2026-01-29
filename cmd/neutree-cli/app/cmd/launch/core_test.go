@@ -32,7 +32,7 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 				mirrorRegistry: "",
 			},
 			expectedFields: map[string]string{
-				"jwt-secret":               "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp",
+				"jwt-secret":               "",
 				"metrics-remote-write-url": "",
 				"version":                  "v0.0.1",
 			},
@@ -48,7 +48,7 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 				mirrorRegistry: "",
 			},
 			expectedFields: map[string]string{
-				"jwt-secret":               "mDCvM4zSk0ghmpyKhgqWb0g4igcOP0Lp",
+				"jwt-secret":               "",
 				"metrics-remote-write-url": "",
 				"version":                  "v0.0.1",
 			},
