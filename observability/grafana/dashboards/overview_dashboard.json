@@ -72,7 +72,7 @@
 			"datasource": "${datasource}",
 			"targets": [
 				{
-					"expr": "avg((sum by (neutree_cluster) (ray_node_gram_used{neutree_cluster=~\"$Cluster\"}) / (sum by (neutree_cluster) (ray_node_gram_available{neutree_cluster=~\"$Cluster\"} + ray_node_gram_used{neutree_cluster=~\"$Cluster\"} ) or vector(0))) or (sum by (neutree_cluster) (DCGM_FI_DEV_FB_USED{neutree_cluster=~\"$Cluster\"}) / sum by (neutree_cluster) (DCGM_FI_DEV_FB_TOTAL{neutree_cluster=~\"$Cluster\"})))",
+					"expr": "avg((sum by (neutree_cluster) (ray_node_gram_used{neutree_cluster=~\"$Cluster\"}) / (sum by (neutree_cluster) (ray_node_gram_available{neutree_cluster=~\"$Cluster\"} + ray_node_gram_used{neutree_cluster=~\"$Cluster\"} ) or vector(0))) or (sum by (neutree_cluster) (DCGM_FI_DEV_FB_USED{neutree_cluster=~\"$Cluster\"}) / sum by (neutree_cluster) (DCGM_FI_DEV_FB_FREE{neutree_cluster=~\"$Cluster\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=~\"$Cluster\"})))",
 					"format": "time_series",
 					"instant": true,
 					"refId": "A"
@@ -107,7 +107,7 @@
 					"refId": "C"
 				},
 				{
-					"expr": "avg((sum by (neutree_cluster) (ray_node_gram_used{neutree_cluster=~\"$Cluster\"}) / (sum by (neutree_cluster) (ray_node_gram_available{neutree_cluster=~\"$Cluster\"} + ray_node_gram_used{neutree_cluster=~\"$Cluster\"} ) or vector(0))) or (sum by (neutree_cluster) (DCGM_FI_DEV_FB_USED{neutree_cluster=~\"$Cluster\"}) / sum by (neutree_cluster) (DCGM_FI_DEV_FB_TOTAL{neutree_cluster=~\"$Cluster\"})))",
+					"expr": "avg((sum by (neutree_cluster) (ray_node_gram_used{neutree_cluster=~\"$Cluster\"}) / (sum by (neutree_cluster) (ray_node_gram_available{neutree_cluster=~\"$Cluster\"} + ray_node_gram_used{neutree_cluster=~\"$Cluster\"} ) or vector(0))) or (sum by (neutree_cluster) (DCGM_FI_DEV_FB_USED{neutree_cluster=~\"$Cluster\"}) / sum by (neutree_cluster) (DCGM_FI_DEV_FB_FREE{neutree_cluster=~\"$Cluster\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=~\"$Cluster\"})))",
 					"legendFormat": "GPU Memory utilization",
 					"refId": "D"
 				}

@@ -930,7 +930,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"}) by (node) / sum(DCGM_FI_DEV_FB_TOTAL{neutree_cluster=\"$Cluster\"}) by (node)",
+          "expr": "sum(DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"}) by (node) / sum(DCGM_FI_DEV_FB_FREE{neutree_cluster=\"$Cluster\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"}) by (node)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{ node }}",
