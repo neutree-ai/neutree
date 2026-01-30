@@ -115,13 +115,19 @@ class Backend:
         elif model_task in ["text-rerank", "score"]:
             task = "score"
 
-        engine_args = AsyncEngineArgs(
+        # merge engine args
+        args = dict(
             task=task,
             model=model_path,
             served_model_name=self.model_id,
             disable_log_stats=False,
             enable_prefix_caching=True,
-            **engine_kwargs
+        )
+
+        args.update(engine_kwargs)
+
+        engine_args = AsyncEngineArgs(
+            **args
         )
 
         self.engine = AsyncLLMEngine.from_engine_args(engine_args)
