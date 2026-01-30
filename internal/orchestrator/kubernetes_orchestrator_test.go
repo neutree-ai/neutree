@@ -1212,11 +1212,17 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 
 	tests := []struct {
 		name         string
+		engine       *v1.Engine
 		endpoint     *v1.Endpoint
 		expectedArgs map[string]interface{}
 	}{
 		{
 			name: "with engine args",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
 			endpoint: &v1.Endpoint{
 				Spec: &v1.EndpointSpec{
 					Variables: map[string]interface{}{
@@ -1234,6 +1240,11 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 		},
 		{
 			name: "without engine args",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
 			endpoint: &v1.Endpoint{
 				Spec: &v1.EndpointSpec{
 					Variables: map[string]interface{}{
@@ -1245,17 +1256,58 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 		},
 		{
 			name: "with nil variables",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
 			endpoint: &v1.Endpoint{
 				Spec: &v1.EndpointSpec{},
 			},
 			expectedArgs: map[string]interface{}{},
+		},
+		{
+			name: "llama-cpp engine with default interrupt_requests",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "llama-cpp",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{},
+			},
+			expectedArgs: map[string]interface{}{
+				"interrupt_requests": "false",
+			},
+		},
+		{
+			name: "llama-cpp engine with user override",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "llama-cpp",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"interrupt_requests": "true",
+							"n_ctx":              "2048",
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"interrupt_requests": "true",
+				"n_ctx":              "2048",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := newDeploymentManifestVariables()
-			k.setEngineArgs(&data, tt.endpoint)
+			k.setEngineArgs(&data, tt.endpoint, tt.engine)
 			assert.Equal(t, tt.expectedArgs, data.EngineArgs)
 		})
 	}
