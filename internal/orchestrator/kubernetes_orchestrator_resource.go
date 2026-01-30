@@ -92,8 +92,23 @@ func (k *kubernetesOrchestrator) setRoutingLogic(data *DeploymentManifestVariabl
 	}
 }
 
+// setEngineDefaultArgs sets default arguments for specific engines
+func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVariables, engine *v1.Engine) {
+	switch engine.Metadata.Name { //nolint:gocritic
+	case "llama-cpp":
+		// Set default parameters for llama-cpp engine
+		if _, exists := data.EngineArgs["interrupt_requests"]; !exists {
+			data.EngineArgs["interrupt_requests"] = "false"
+		}
+	}
+}
+
 // setEngineArgs sets engine arguments from endpoint variables
-func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
+func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
+	// Set engine-specific default arguments first
+	k.setEngineDefaultArgs(data, engine)
+
+	// Then apply user-provided arguments (can override defaults)
 	if endpoint.Spec.Variables != nil {
 		if v, ok := endpoint.Spec.Variables["engine_args"].(map[string]interface{}); ok {
 			maps.Copy(data.EngineArgs, v)
@@ -279,7 +294,7 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	k.setRoutingLogic(&data, endpoint)
 
 	// Set engine args
-	k.setEngineArgs(&data, endpoint)
+	k.setEngineArgs(&data, endpoint, engine)
 
 	// Set resource variables
 	if err := k.setResourceVariables(&data, endpoint); err != nil {

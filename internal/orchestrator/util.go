@@ -52,6 +52,11 @@ func getUsedEngine(s storage.Storage, endpoint *v1.Endpoint) (*v1.Engine, error)
 				Operator: "eq",
 				Value:    strconv.Quote(endpoint.Spec.Engine.Engine),
 			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(endpoint.Metadata.Workspace),
+			},
 		},
 	})
 	if err != nil {

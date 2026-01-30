@@ -96,7 +96,7 @@ spec:
               --model $(find {{ .ModelArgs.path }} -name "{{ .ModelArgs.file }}" | head -n 1)
               --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.serve_name }}
               {{- if eq .ModelArgs.task "text-embedding" }} --embedding{{- end }}
-              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{- if ne (printf "%v" $value) "true"}} "{{ $value }}"{{- end }}{{- end }}{{- end }}
+              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }} "{{ $value }}" {{- end }}{{- end }}
           resources:
             limits:
               {{- range $key, $value := .Resources }}
