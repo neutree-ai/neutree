@@ -129,11 +129,6 @@ func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.Workspace
 		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
-	// Preserve existing fields if needed, e.g., ServiceURL
-	if obj.Status != nil {
-		newStatus.ServiceURL = obj.Status.ServiceURL
-	}
-
 	// Avoid unnecessary updates if status hasn't changed meaningfully
 	// (simple check for phase and error message presence)
 	if obj.Status != nil && obj.Status.Phase == newStatus.Phase &&

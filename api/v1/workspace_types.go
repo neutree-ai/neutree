@@ -18,7 +18,6 @@ type WorkspaceStatus struct {
 	ErrorMessage       string         `json:"error_message,omitempty"`
 	LastTransitionTime string         `json:"last_transition_time,omitempty"`
 	Phase              WorkspacePhase `json:"phase,omitempty"`
-	ServiceURL         string         `json:"service_url,omitempty"`
 }
 
 type Workspace struct {
