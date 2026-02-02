@@ -369,6 +369,8 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 			y.CreationTime = fmt.Sprintf("%s.%06d+00:00",
 				now.Format("2006-01-02T15:04:05"), micro)
 			y.Size = units.HumanSize(float64(dirSize))
+			y.Name = modelName
+			y.Version = version
 			yamlBytes, _ = yaml.Marshal(&y)
 		} else {
 			yamlBytes = data
