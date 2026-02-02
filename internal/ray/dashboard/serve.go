@@ -7,9 +7,10 @@ import (
 )
 
 const (
-	DeploymentStatusHealthy = "HEALTHY"
-	ProxyStatusHealthy      = "HEALTHY"
-	ProxyStatusUnhealthy    = "UNHEALTHY"
+	DeploymentStatusHealthy   = "HEALTHY"
+	DeploymentStatusUnhealthy = "UNHEALTHY"
+	ProxyStatusHealthy        = "HEALTHY"
+	ProxyStatusUnhealthy      = "UNHEALTHY"
 )
 
 // RayServeApplication represents the structure expected by the Ray Serve API.
