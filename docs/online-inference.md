@@ -62,6 +62,40 @@ When an endpoint has multiple replicas, the routing strategy affects KV cache hi
 - **Round Robin**: Distributes requests evenly across replicas in rotation.
 - **Consistent Hashing with Bounded Loads**: Routes requests with similar prefixes to the same replica for better KV cache reuse. Falls back to next replica when load exceeds threshold.
 
+### Consistent Hashing with Bounded Loads Algorithm
+
+The CHWBL algorithm balances KV cache locality with load distribution:
+
+**Hash Ring Construction**
+
+Each replica is mapped to multiple positions on a hash ring using virtual nodes (default: 100 per replica). Virtual node positions are computed as `MD5(replica_id:index)`. More virtual nodes improve load distribution uniformity.
+
+**Cache Key Extraction**
+
+For OpenAI-compatible chat completions, the cache key is derived from:
+- System prompt (if present)
+- First N user messages (configurable, default: 2)
+
+This ensures conversations with similar prefixes route to the same replica, maximizing KV cache reuse. For non-chat requests, the full payload is used as the cache key.
+
+**Request Routing**
+
+1. Hash the cache key and locate the nearest replica on the ring (binary search)
+2. Check if the target replica meets the load constraint:
+   - Calculate average load: `avg_load = (total_load + 1) / num_replicas`
+   - Calculate threshold: `threshold = avg_load × load_factor` (default load_factor: 1.25)
+   - Accept if `(replica_load + 1) ≤ threshold`
+3. If rejected, check the next replica on the ring
+4. If all replicas exceed the threshold, fall back to the initially selected replica
+
+**Configuration Parameters**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `virtual_nodes_per_replica` | 100 | Number of virtual nodes per replica on the hash ring |
+| `load_factor` | 1.25 | Maximum load relative to average (1.25 = 25% above average) |
+| `max_user_messages_for_cache` | 2 | Number of user messages included in cache key |
+
 ## GPU Allocation
 
 Neutree uses `CUDA_VISIBLE_DEVICES` to control GPU access. Important notes:
