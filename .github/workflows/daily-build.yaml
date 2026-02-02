@@ -15,15 +15,15 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Git
         run: |
-            git config user.name "${{ github.actor }}"
-            git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
       - name: Create Nightly Tag
         id: create_nightly_tag
         run: |
           DATE=$(date +'%Y%m%d')
-          git tag v1.0.0-nightly-$DATE -m v1.0.0-nightly-$DATE
-          git push origin v1.0.0-nightly-$DATE
-          echo "tag=v1.0.0-nightly-$DATE" >> $GITHUB_OUTPUT
+          git tag v1.0.1-nightly-$DATE -m v1.0.1-nightly-$DATE
+          git push origin v1.0.1-nightly-$DATE
+          echo "tag=v1.0.1-nightly-$DATE" >> $GITHUB_OUTPUT
       - name: Trigger Workflow
         uses: actions/github-script@v6
         env:
