@@ -8,6 +8,7 @@ import (
 	postgrest "github.com/supabase-community/postgrest-go"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	v1beta1 "github.com/neutree-ai/neutree/api/v1beta1"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
@@ -921,6 +922,72 @@ func (s *postgrestStorage) GetUserProfile(id string) (*v1.UserProfile, error) {
 func (s *postgrestStorage) ListUserProfile(option ListOption) ([]v1.UserProfile, error) {
 	var response []v1.UserProfile
 	err := s.genericList(USER_PROFILE_TABLE, &response, option)
+
+	return response, err
+}
+
+// ExternalEndpoint storage implementations
+func (s *postgrestStorage) CreateExternalEndpoint(data *v1beta1.ExternalEndpoint) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(EXTERNAL_ENDPOINT_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteExternalEndpoint(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(EXTERNAL_ENDPOINT_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateExternalEndpoint(id string, data *v1beta1.ExternalEndpoint) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(EXTERNAL_ENDPOINT_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetExternalEndpoint(id string) (*v1beta1.ExternalEndpoint, error) {
+	var (
+		response []v1beta1.ExternalEndpoint
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(EXTERNAL_ENDPOINT_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListExternalEndpoint(option ListOption) ([]v1beta1.ExternalEndpoint, error) {
+	var response []v1beta1.ExternalEndpoint
+	err := s.genericList(EXTERNAL_ENDPOINT_TABLE, &response, option)
 
 	return response, err
 }

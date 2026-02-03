@@ -4,6 +4,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	v1beta1 "github.com/neutree-ai/neutree/api/v1beta1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -283,6 +284,30 @@ func NewUserProfileControllerFactory() ControllerFactory {
 			controllers.WithAfterReconcileHook(opts.afterHooks),
 			controllers.WithReconciler(userProfileController),
 			controllers.WithObject(&v1.UserProfile{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		)
+
+		return ctrl, nil
+	}
+}
+
+func NewExternalEndpointControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		externalEndpointController, err := controllers.NewExternalEndpointController(&controllers.ExternalEndpointControllerOption{
+			Storage: opts.config.Storage,
+			Gw:      opts.config.Gateway,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create external endpoint controller")
+		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(externalEndpointController),
+			controllers.WithObject(&v1beta1.ExternalEndpoint{}),
 			controllers.WithScheme(opts.scheme),
 			controllers.WithStorage(opts.storage),
 		)

@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/pflag"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	v1beta1 "github.com/neutree-ai/neutree/api/v1beta1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/options"
 	"github.com/neutree-ai/neutree/internal/version"
@@ -54,7 +55,8 @@ func main() {
 	}
 
 	scheme := scheme.NewScheme()
-	v1.AddToScheme(scheme) //nolint:errcheck
+	v1.AddToScheme(scheme)      //nolint:errcheck
+	v1beta1.AddToScheme(scheme) //nolint:errcheck
 
 	c, err := opts.Config(scheme)
 	if err != nil {

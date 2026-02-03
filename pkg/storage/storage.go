@@ -8,6 +8,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	v1beta1 "github.com/neutree-ai/neutree/api/v1beta1"
 )
 
 var (
@@ -15,17 +16,18 @@ var (
 )
 
 const (
-	ENDPOINT_TABLE        = "endpoints"
-	ENGINE_TABLE          = "engines"
-	IMAGE_REGISTRY_TABLE  = "image_registries"
-	CLUSTERS_TABLE        = "clusters"
-	MODEL_REGISTRY_TABLE  = "model_registries"
-	MODEL_CATALOG_TABLE   = "model_catalogs"
-	ROLE_TABLE            = "roles"
-	ROLE_ASSIGNMENT_TABLE = "role_assignments"
-	WORKSPACE_TABLE       = "workspaces"
-	API_KEY_TABLE         = "api_keys"
-	USER_PROFILE_TABLE    = "user_profiles"
+	ENDPOINT_TABLE          = "endpoints"
+	ENGINE_TABLE            = "engines"
+	IMAGE_REGISTRY_TABLE    = "image_registries"
+	CLUSTERS_TABLE          = "clusters"
+	MODEL_REGISTRY_TABLE    = "model_registries"
+	MODEL_CATALOG_TABLE     = "model_catalogs"
+	ROLE_TABLE              = "roles"
+	ROLE_ASSIGNMENT_TABLE   = "role_assignments"
+	WORKSPACE_TABLE         = "workspaces"
+	API_KEY_TABLE           = "api_keys"
+	USER_PROFILE_TABLE      = "user_profiles"
+	EXTERNAL_ENDPOINT_TABLE = "external_endpoints"
 )
 
 type ImageRegistryStorage interface {
@@ -171,6 +173,19 @@ type UserProfileStorage interface {
 	ListUserProfile(option ListOption) ([]v1.UserProfile, error)
 }
 
+type ExternalEndpointStorage interface {
+	// CreateExternalEndpoint creates a new external endpoint in the database.
+	CreateExternalEndpoint(data *v1beta1.ExternalEndpoint) error
+	// DeleteExternalEndpoint deletes an external endpoint by its ID.
+	DeleteExternalEndpoint(id string) error
+	// UpdateExternalEndpoint updates an existing external endpoint in the database.
+	UpdateExternalEndpoint(id string, data *v1beta1.ExternalEndpoint) error
+	// GetExternalEndpoint retrieves an external endpoint by its ID.
+	GetExternalEndpoint(id string) (*v1beta1.ExternalEndpoint, error)
+	// ListExternalEndpoint retrieves a list of external endpoints with optional filters.
+	ListExternalEndpoint(option ListOption) ([]v1beta1.ExternalEndpoint, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -183,6 +198,7 @@ type Storage interface {
 	EndpointStorage
 	ModelCatalogStorage
 	UserProfileStorage
+	ExternalEndpointStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error
