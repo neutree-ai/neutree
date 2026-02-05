@@ -1,5 +1,5 @@
 ARG RAY_BASE_IMAGE
-ARG RAY_BRANCH="ray-2.53.0-neutree"
+ARG RAY_BRANCH="62e25abd88072fb26c8816d5916cf33b615da366"
 ARG COMMON_WORKDIR=/app
 ARG RAY_REPO="https://github.com/neutree-ai/ray.git"
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"

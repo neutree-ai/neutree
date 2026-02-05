@@ -2,7 +2,7 @@
 # default base image
 ARG VLLM_BRANCH="v0.8.5-neutree"
 ARG VLLM_REPO="https://github.com/neutree-ai/vllm.git"
-ARG RAY_BRANCH="ray-2.53.0-neutree"
+ARG RAY_BRANCH="62e25abd88072fb26c8816d5916cf33b615da366"
 ARG RAY_REPO="https://github.com/neutree-ai/ray.git"
 ARG USE_CYTHON="0"
 ARG BUILD_RPD="1"
