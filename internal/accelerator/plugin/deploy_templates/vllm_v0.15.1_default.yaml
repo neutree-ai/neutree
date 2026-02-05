@@ -99,13 +99,6 @@ spec:
           - "8000"
           - --served-model-name
           - {{ .ModelArgs.serve_name }}
-          {{- if eq .ModelArgs.task "text-embedding" }}
-          - --convert
-          - embed
-          {{- else if eq .ModelArgs.task "text-rerank" }}
-          - --convert
-          - classify
-          {{- end }}
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
           - --{{ $key }}
