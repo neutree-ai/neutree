@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/pkg/client"
 	"github.com/neutree-ai/neutree/pkg/model_registry/bentoml"
 )
@@ -89,16 +90,16 @@ func NewPushCmd() *cobra.Command {
 			}
 
 			clientOptions := []client.ClientOption{
-				client.WithAPIKey(apiKey),
+				client.WithAPIKey(global.APIKey),
 				client.WithTimeout(0),
 			}
 
-			if insecure {
+			if global.Insecure {
 				clientOptions = append(clientOptions, client.WithInsecureSkipVerify())
 			}
 
 			// Create client
-			c := client.NewClient(serverURL, clientOptions...)
+			c := client.NewClient(global.ServerURL, clientOptions...)
 			_, err = c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
 			if err != nil {
 				return fmt.Errorf("failed to get model registry %s: %w", registry, err)

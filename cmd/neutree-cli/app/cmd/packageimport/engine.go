@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	engine "github.com/neutree-ai/neutree/internal/cli/packageimport"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
@@ -89,19 +90,19 @@ func runEngineImport(opts *EngineImportOptions) error {
 	ctx := context.Background()
 
 	// Validate API connection
-	if serverURL == "" {
-		return fmt.Errorf("API URL is required (use --api-url or set NEUTREE_API_URL env var)")
+	if global.ServerURL == "" {
+		return fmt.Errorf("server URL is required (use --server-url or set NEUTREE_SERVER_URL)")
 	}
 
 	// Initialize API client
 	klog.Info("Initializing API client...")
 
 	clientOpts := []client.ClientOption{}
-	if apiKey != "" {
-		clientOpts = append(clientOpts, client.WithAPIKey(apiKey))
+	if global.APIKey != "" {
+		clientOpts = append(clientOpts, client.WithAPIKey(global.APIKey))
 	}
 
-	apiClient := client.NewClient(serverURL, clientOpts...)
+	apiClient := client.NewClient(global.ServerURL, clientOpts...)
 
 	// Create importer with engines service
 	importer := engine.NewImporter(apiClient)
