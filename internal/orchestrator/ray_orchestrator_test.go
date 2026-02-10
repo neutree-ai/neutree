@@ -556,6 +556,50 @@ func TestEndpointToApplication_ApplicationNameConsistency(t *testing.T) {
 	assert.Equal(t, "production_chat-model", app.Name)
 }
 
+func TestEndpointToApplication_NilDeploymentOptions(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "production",
+			Name:      "chat-model",
+		},
+		Spec: &v1.EndpointSpec{
+			Engine: &v1.EndpointEngineSpec{
+				Engine:  "vllm",
+				Version: "0.5.0",
+			},
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{},
+			},
+			Replicas: v1.ReplicaSpec{
+				Num: pointy.Int(1),
+			},
+			DeploymentOptions: nil,
+			Model: &v1.ModelSpec{
+				Name: "test-model",
+			},
+		},
+	}
+
+	modelRegistry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.HuggingFaceModelRegistryType,
+		},
+	}
+
+	deployedCluster := &v1.Cluster{}
+	mgr := &acceleratormocks.MockManager{}
+
+	app, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, mgr)
+	assert.NoError(t, err)
+	assert.Equal(t, "production_chat-model", app.Name)
+
+	// Verify deployment_options was populated correctly despite nil input
+	deploymentOptions, ok := app.Args["deployment_options"].(map[string]interface{})
+	assert.True(t, ok)
+	assert.NotNil(t, deploymentOptions["backend"])
+	assert.NotNil(t, deploymentOptions["controller"])
+}
+
 func TestEndpointToApplication_RouteConsistency(t *testing.T) {
 	endpoint := &v1.Endpoint{
 		Metadata: &v1.Metadata{
