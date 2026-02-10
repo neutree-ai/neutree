@@ -916,6 +916,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"--cap-add=SYS_ADMIN",
 					"--security-opt=seccomp=unconfined",
 					"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
+					"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 					"--ulimit nofile=65536:65536",
 				},
 			},
