@@ -24,7 +24,7 @@ func GetTestDB(t *testing.T) *sql.DB {
 	host := getEnvOrDefault("POSTGRES_HOST", "localhost")
 	port := getEnvOrDefault("POSTGRES_PORT", "5432")
 	user := getEnvOrDefault("POSTGRES_USER", "postgres")
-	password := getEnvOrDefault("POSTGRES_PASSWORD", "neutree")
+	password := getEnvOrDefault("POSTGRES_PASSWORD", "pgpassword")
 	dbname := getEnvOrDefault("POSTGRES_DB", "neutree_test")
 
 	// Connection string

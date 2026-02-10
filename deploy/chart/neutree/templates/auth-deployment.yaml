@@ -59,7 +59,7 @@ spec:
             - name: GOTRUE_LOG_LEVEL
               value: "INFO"
             - name: DATABASE_URL
-              value: postgres://auth_admin:{{.Values.db.password }}@{{ include "neutree.fullname" . }}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable
+              value: postgres://auth_admin:auth_admin_password@{{ include "neutree.fullname" . }}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable
             - name: GOTRUE_COOKIE_KEY
               value: {{.Values.db.name }}
           readinessProbe:

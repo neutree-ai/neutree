@@ -4,7 +4,7 @@ services:
   copy-db-scripts:
     image: neutree/neutree-db-scripts:{{ .NeutreeVersion }}
     container_name: copy-db-scripts
-    command: bash -c 'cp -rf /db /host/ && sed -i "s/auth_admin_password/{{ .DbPassword }}/g" /host/db/init-scripts/*.sql && sed -i "s/kong_admin_password/{{ .DbPassword }}/g" /host/db/migrations/*.sql'
+    command: bash -c 'cp -rf /db /host/'
     volumes:
       - {{ .NeutreeCoreWorkDir }}:/host/
     networks:
@@ -57,7 +57,7 @@ services:
       GOTRUE_SITE_URL: http://localhost:9999
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       GOTRUE_LOG_LEVEL: INFO
-      DATABASE_URL: "postgres://auth_admin:{{ .DbPassword }}@postgres:5432/neutree"
+      DATABASE_URL: "postgres://auth_admin:auth_admin_password@postgres:5432/neutree"
       GOTRUE_COOKIE_KEY: "neutree"
     networks:
       - neutree
@@ -263,7 +263,7 @@ services:
       KONG_PG_HOST: "postgres"
       KONG_PG_DATABASE: "neutree"
       KONG_PG_USER: "kong_admin"
-      KONG_PG_PASSWORD: "{{ .DbPassword }}"
+      KONG_PG_PASSWORD: "kong_admin_password"
       KONG_PG_SCHEME: "kong"
     networks:
       - neutree
@@ -289,7 +289,7 @@ services:
       KONG_PG_HOST: "postgres"
       KONG_PG_DATABASE: "neutree"
       KONG_PG_USER: "kong_admin"
-      KONG_PG_PASSWORD: "{{ .DbPassword }}"
+      KONG_PG_PASSWORD: "kong_admin_password"
       KONG_PG_SCHEME: "kong"
     depends_on:
       postgres:
@@ -333,7 +333,7 @@ services:
       KONG_PG_HOST: "postgres"
       KONG_PG_DATABASE: "neutree"
       KONG_PG_USER: "kong_admin"
-      KONG_PG_PASSWORD: "{{ .DbPassword }}"
+      KONG_PG_PASSWORD: "kong_admin_password"
       KONG_PG_SCHEME: "kong"
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ERROR_LOG: /dev/stderr
