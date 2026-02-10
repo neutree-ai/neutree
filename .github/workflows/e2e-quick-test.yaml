@@ -1,0 +1,161 @@
+name: Quick E2E Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_model:
+        description: 'Model to test'
+        required: false
+        type: string
+        default: 'Qwen/Qwen3-0.6B'
+      version_override:
+        description: 'Override version tag (default: latest tag on branch)'
+        required: false
+        type: string
+      label_filter:
+        description: 'Ginkgo label filter (e.g. quick, quick-k8s)'
+        required: false
+        type: string
+        default: ''
+  pull_request:
+    branches: [main]
+    types: [labeled]
+
+jobs:
+  e2e-test:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'e2e-test'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for git describe
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.0'
+
+      - name: Configure git for private modules
+        env:
+          TOKEN: ${{ secrets.CI_ACCESS_TOKEN }}
+          USERNAME: ${{ secrets.CI_USERNAME }}
+        run: git config --global url."https://${USERNAME}:${TOKEN}@github.com".insteadOf "https://github.com"
+
+      - name: Get latest tag version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version_override }}" ]; then
+            VERSION="${{ github.event.inputs.version_override }}"
+          else
+            # Get latest tag from current branch
+            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.1-nightly-$(date +%Y%m%d)")
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Using version: ${VERSION}"
+
+      - name: Build CLI from source
+        run: make build-neutree-cli
+
+      - name: Setup SSH for local cluster
+        run: |
+          # Start SSH service (required for self-SSH in Ray cluster)
+          sudo systemctl start ssh
+          sudo systemctl status ssh
+
+          # Generate SSH key if not exists
+          if [ ! -f ~/.ssh/id_rsa ]; then
+            ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+          fi
+          cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+
+          # Add localhost to known_hosts
+          ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+          ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts
+
+          # Test SSH connection
+          ssh -o StrictHostKeyChecking=no localhost echo "SSH connection successful"
+
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose-plugin
+
+      - name: Launch neutree-core with tagged images
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+        run: |
+          echo "Launching neutree-core with version: ${VERSION}"
+
+          # Use built CLI to launch neutree-core with tagged images
+          ./bin/neutree-cli launch neutree-core \
+            --version "${VERSION}" \
+            --admin-password "${ADMIN_PASSWORD:-testpassword123}"
+
+          # Wait for services to be healthy
+          echo "Waiting for services to start..."
+          sleep 45
+          docker ps
+
+      - name: Update containers with PR code
+        run: |
+          # Update db scripts, core, and api with current PR code
+          make docker-test-db-scripts
+          sleep 10 # Wait for migrations to complete
+
+          make docker-test-core
+          make docker-test-api
+
+          # Wait for services to stabilize
+          sleep 20
+
+          # Verify services are running
+          docker ps
+          curl -sf http://localhost:3000/api/v1/system/health || echo "API not ready yet"
+
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+
+      - name: Run E2E tests
+        env:
+          E2E_API_ENDPOINT: http://localhost:3000/api/v1
+          E2E_GATEWAY_URL: http://localhost:80
+          E2E_ADMIN_EMAIL: admin@neutree.local
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD || 'testpassword123' }}
+          E2E_HF_TOKEN: ${{ secrets.E2E_HF_TOKEN }}
+          E2E_WORKSPACE: default
+          E2E_NODE_IP: 127.0.0.1
+          E2E_SSH_USER: runner
+          E2E_SSH_PRIVATE_KEY_FILE: ~/.ssh/id_rsa
+          E2E_TEST_MODEL: ${{ github.event.inputs.test_model || 'Qwen/Qwen3-0.6B' }}
+          E2E_TEST_ENGINE: llama-cpp
+          E2E_LABEL_FILTER: ${{ github.event.inputs.label_filter }}
+        run: |
+          cd test/e2e
+          if [ -n "$E2E_LABEL_FILTER" ]; then
+            ginkgo -v --timeout 45m --label-filter="$E2E_LABEL_FILTER" ./...
+          else
+            ginkgo -v --timeout 45m ./...
+          fi
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Docker containers ==="
+          docker ps -a
+          echo "=== neutree-api logs ==="
+          docker logs neutree-api 2>&1 | tail -100 || true
+          echo "=== neutree-core logs ==="
+          docker logs neutree-core 2>&1 | tail -100 || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -p neutree-core down -v || true

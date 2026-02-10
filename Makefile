@@ -298,6 +298,32 @@ docker-test-db-scripts: ## Overwrite db scripts for testing, and restart related
 	docker restart migration
 	docker restart post-migration-hook
 
+E2E_LABEL_FILTER ?=
+
+.PHONY: e2e-test
+e2e-test: ## Run E2E tests (requires neutree-core to be running)
+ifdef E2E_LABEL_FILTER
+	cd test/e2e && ginkgo -v --timeout 45m --label-filter="$(E2E_LABEL_FILTER)" ./...
+else
+	cd test/e2e && ginkgo -v --timeout 45m ./...
+endif
+
+.PHONY: e2e-test-local
+e2e-test-local: build-neutree-cli ## Run E2E tests locally with full setup
+	$(eval VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.1-nightly-$$(date +%Y%m%d)"))
+	@echo "Using version: $(VERSION)"
+	# Launch neutree-core with tagged images
+	./bin/neutree-cli launch neutree-core --version $(VERSION) --admin-password admin
+	sleep 30
+	# Update with local code
+	$(MAKE) docker-test-db-scripts
+	sleep 10
+	$(MAKE) docker-test-core
+	$(MAKE) docker-test-api
+	sleep 20
+	# Run e2e tests
+	$(MAKE) e2e-test
+
 VENDIR := $(TOOLS_BIN_DIR)/vendir
 
 vendir: $(VENDIR) # Download vendir if not yet.
