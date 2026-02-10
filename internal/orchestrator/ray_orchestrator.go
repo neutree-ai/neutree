@@ -404,6 +404,9 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	// Make a shallow copy of deployment options so we can safely adjust scheduler type for Ray
 	deploymentOptions := maps.Clone(endpoint.Spec.DeploymentOptions)
+	if deploymentOptions == nil {
+		deploymentOptions = make(map[string]interface{})
+	}
 
 	// Normalize scheduler type: API layer accepts "roundrobin" as alias; Ray expects "pow2"
 	if schedulerRaw, ok := deploymentOptions["scheduler"].(map[string]interface{}); ok {
