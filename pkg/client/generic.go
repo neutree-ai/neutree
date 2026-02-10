@@ -23,32 +23,18 @@ func NewGenericService(client *Client, s *scheme.Scheme) *GenericService {
 	}
 }
 
-// kindEndpoint maps a Kind to its REST API endpoint path segment.
-var kindEndpoint = map[string]string{
-	"Workspace":      "workspaces",
-	"Engine":         "engines",
-	"Cluster":        "clusters",
-	"Endpoint":       "endpoints",
-	"ImageRegistry":  "image_registries",
-	"ModelRegistry":  "model_registries",
-	"ModelCatalog":   "model_catalogs",
-	"Role":           "roles",
-	"RoleAssignment": "role_assignments",
-	"OEMConfig":      "oem_configs",
-}
-
 // unsupportedKinds are kinds that cannot be created via the REST API.
 var unsupportedKinds = map[string]string{
 	"ApiKey":      "ApiKey only supports GET/PATCH, not POST creation",
 	"UserProfile": "UserProfile is created through the auth system, not the REST API",
 }
 
-func endpointForKind(kind string) (string, error) {
+func (s *GenericService) endpointForKind(kind string) (string, error) {
 	if reason, ok := unsupportedKinds[kind]; ok {
 		return "", fmt.Errorf("kind %s is not supported for apply: %s", kind, reason)
 	}
 
-	ep, ok := kindEndpoint[kind]
+	ep, ok := s.scheme.KindToTable(kind)
 	if !ok {
 		return "", fmt.Errorf("unknown kind: %s", kind)
 	}
@@ -65,7 +51,7 @@ type ExistsResult struct {
 // Exists checks whether a resource of the given kind with the specified workspace+name already exists.
 // For Workspace kind, only name is used for lookup.
 func (s *GenericService) Exists(kind, workspace, name string) (*ExistsResult, error) {
-	ep, err := endpointForKind(kind)
+	ep, err := s.endpointForKind(kind)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +91,7 @@ func (s *GenericService) Exists(kind, workspace, name string) (*ExistsResult, er
 
 // Create creates a new resource of the given kind.
 func (s *GenericService) Create(kind string, data any) error {
-	ep, err := endpointForKind(kind)
+	ep, err := s.endpointForKind(kind)
 	if err != nil {
 		return err
 	}
@@ -117,7 +103,7 @@ func (s *GenericService) Create(kind string, data any) error {
 
 // Update updates an existing resource of the given kind by ID.
 func (s *GenericService) Update(kind string, id string, data any) error {
-	ep, err := endpointForKind(kind)
+	ep, err := s.endpointForKind(kind)
 	if err != nil {
 		return err
 	}
