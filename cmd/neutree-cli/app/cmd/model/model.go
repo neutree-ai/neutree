@@ -4,13 +4,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Common flag variables
+// model-specific flag variables
 var (
-	serverURL string
-	apiKey    string
 	workspace string
 	registry  string
-	insecure  bool
 )
 
 func NewModelCmd() *cobra.Command {
@@ -20,12 +17,9 @@ func NewModelCmd() *cobra.Command {
 		Long:  `These commands help you manage models in the registry`,
 	}
 
-	// Add global flags
-	cmd.PersistentFlags().StringVar(&serverURL, "server-url", "", "Server URL")
-	cmd.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key")
+	// model-specific flags
 	cmd.PersistentFlags().StringVarP(&workspace, "workspace", "w", "default", "Workspace to use")
 	cmd.PersistentFlags().StringVarP(&registry, "registry", "r", "default", "Registry to use")
-	cmd.PersistentFlags().BoolVar(&insecure, "insecure", false, "Skip TLS verification")
 
 	// Add subcommands
 	cmd.AddCommand(NewListCmd())

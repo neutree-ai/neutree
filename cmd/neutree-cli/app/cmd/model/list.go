@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
 
@@ -17,15 +18,15 @@ func NewListCmd() *cobra.Command {
 		Long:  `List all models in the registry with their basic information`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientOptions := []client.ClientOption{
-				client.WithAPIKey(apiKey),
+				client.WithAPIKey(global.APIKey),
 			}
 
-			if insecure {
+			if global.Insecure {
 				clientOptions = append(clientOptions, client.WithInsecureSkipVerify())
 			}
 
 			// Create client
-			c := client.NewClient(serverURL, clientOptions...)
+			c := client.NewClient(global.ServerURL, clientOptions...)
 			_, err := c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
 			if err != nil {
 				return fmt.Errorf("failed to get model registry %s: %w", registry, err)

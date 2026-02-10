@@ -2,9 +2,8 @@ package packageimport
 
 import "github.com/spf13/cobra"
 
+// import-specific flag variables
 var (
-	serverURL        string
-	apiKey           string
 	mirrorRegistry   string
 	registryUsername string
 	registryPassword string
@@ -28,9 +27,7 @@ Use the appropriate subcommand based on the package type you want to import.
 `,
 	}
 
-	// Add global flags
-	importCmd.PersistentFlags().StringVar(&serverURL, "server-url", "", "Server URL")
-	importCmd.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key")
+	// import-specific flags
 	importCmd.PersistentFlags().StringVar(&workspace, "workspace", "default", "Workspace")
 	importCmd.PersistentFlags().StringVar(&mirrorRegistry, "mirror-registry", "", "Container image registry to push images to (if required)")
 	importCmd.PersistentFlags().StringVar(&registryUsername, "registry-username", "", "Username for the container image registry (if required)")
