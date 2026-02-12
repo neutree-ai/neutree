@@ -18,7 +18,7 @@ services:
     container_name: postgres
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: pgpassword
+      POSTGRES_PASSWORD: {{ .DbPassword }}
       POSTGRES_DB: neutree
     depends_on:
       copy-db-scripts:
@@ -88,7 +88,7 @@ services:
         condition: service_healthy
       copy-db-scripts:
         condition: service_completed_successfully
-    command: -source=file://migrations -database "postgres://postgres:pgpassword@postgres:5432/neutree?sslmode=disable" up
+    command: -source=file://migrations -database "postgres://postgres:{{ .DbPassword }}@postgres:5432/neutree?sslmode=disable" up
     volumes:
       - {{ .NeutreeCoreWorkDir }}/db/migrations:/migrations
     networks:
@@ -110,7 +110,7 @@ services:
       - PGOPTIONS=-c neutree.admin_password={{ .AdminPassword }}
     volumes:
       - {{ .NeutreeCoreWorkDir }}/db/seed:/seed
-    command: 'bash -c ''for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://postgres:pgpassword@postgres:5432/neutree?sslmode=disable -f $$file; done'''
+    command: 'bash -c ''for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://postgres:{{ .DbPassword }}@postgres:5432/neutree?sslmode=disable -f $$file; done'''
     restart: none
     deploy:
       restart_policy:
@@ -120,7 +120,7 @@ services:
     image: postgrest/postgrest:v14.0
     container_name: postgrest
     environment:
-      PGRST_DB_URI: postgres://postgres:pgpassword@postgres:5432/neutree
+      PGRST_DB_URI: postgres://postgres:{{ .DbPassword }}@postgres:5432/neutree
       PGRST_DB_SCHEMA: api
       PGRST_SERVER_HOST: 0.0.0.0
       PGRST_SERVER_PORT: 6432
@@ -151,7 +151,7 @@ services:
       PG_META_DB_NAME: "neutree"
       PG_META_DB_USER: "postgres"
       PG_META_DB_PORT: 5432
-      PG_META_DB_PASSWORD: "pgpassword"
+      PG_META_DB_PASSWORD: "{{ .DbPassword }}"
     networks:
       - neutree
     depends_on:

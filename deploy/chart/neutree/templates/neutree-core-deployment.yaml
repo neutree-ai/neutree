@@ -28,7 +28,7 @@ spec:
                   fieldPath: metadata.namespace
           args:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
-            - --storage-jwt-secret={{ .Values.jwtSecret }}
+            - --storage-jwt-secret={{ include "neutree.jwtSecret" . }}
             - --controller-workers=5
             - --default-cluster-version=v1.0.0
             {{- if  index .Values "victoria-metrics-cluster" "enabled" }}

@@ -28,7 +28,7 @@ spec:
                   fieldPath: metadata.namespace
           args:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
-            - --storage-jwt-secret={{.Values.jwtSecret  }}
+            - --storage-jwt-secret={{ include "neutree.jwtSecret" . }}
             - --host=0.0.0.0
             - --port=3000
             - --static-dir=./public
