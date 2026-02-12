@@ -332,6 +332,12 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	switch status.Status {
 	case "DEPLOYING", "NOT_STARTED":
 		phase = v1.EndpointPhaseDEPLOYING
+		for _, deployment := range status.Deployments {
+			if deployment.Status == dashboard.DeploymentStatusUnhealthy {
+				phase = v1.EndpointPhaseFAILED
+				break
+			}
+		}
 	case "DEPLOY_FAILED", "UNHEALTHY":
 		phase = v1.EndpointPhaseFAILED
 	case "RUNNING":
