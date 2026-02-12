@@ -33,7 +33,12 @@ func (c *sshRayClusterReconciler) upCluster(reconcileCtx *ReconcileContext, rest
 		}
 	}
 
-	upArgs := []string{fmt.Sprintf("RAY_TMPDIR=%s", reconcileCtx.sshConfigGenerator.BasePath()), "ray", "up", "--disable-usage-stats", "--no-config-cache", "-y", "-v"}
+	// Set RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1 to keep head node shm size consistent with worker nodes
+	upArgs := []string{
+		fmt.Sprintf("RAY_TMPDIR=%s", reconcileCtx.sshConfigGenerator.BasePath()),
+		"RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
+		"ray", "up", "--disable-usage-stats", "--no-config-cache", "-y", "-v",
+	}
 	if !restart {
 		upArgs = append(upArgs, "--no-restart")
 	}
@@ -299,6 +304,8 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		"--cap-add=SYS_ADMIN",
 		"--security-opt=seccomp=unconfined",
 		"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
+		// Reduce Ray object store memory from default 30% to 10%, freeing memory for inference engines
+		"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 		// Increase nofile ulimit to avoid "Too many open files" error in Ray workers
 		"--ulimit nofile=65536:65536",
 	}
