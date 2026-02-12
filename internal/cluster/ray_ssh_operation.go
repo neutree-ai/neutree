@@ -323,6 +323,9 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		"--ulimit nofile=65536:65536",
 		// Mount Docker socket for runtime_env.container support (engine version isolation)
 		"--volume /var/run/docker.sock:/var/run/docker.sock",
+		// Share host /tmp with Ray container so that temp directories created by Ray's
+		// container plugin are visible to sibling engine containers via docker.sock.
+		"--volume /tmp:/tmp",
 	}
 
 	headLabel := fmt.Sprintf(`--labels='{"%s":"%s"}'`,

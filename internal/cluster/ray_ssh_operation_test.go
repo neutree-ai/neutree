@@ -919,6 +919,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 					"--ulimit nofile=65536:65536",
 					"--volume /var/run/docker.sock:/var/run/docker.sock",
+					"--volume /tmp:/tmp",
 				},
 			},
 			HeadStartRayCommands: []string{
@@ -1159,6 +1160,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 							"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 							"--ulimit nofile=65536:65536",
 							"--volume /var/run/docker.sock:/var/run/docker.sock",
+							"--volume /tmp:/tmp",
 						},
 					},
 					HeadStartRayCommands: []string{
