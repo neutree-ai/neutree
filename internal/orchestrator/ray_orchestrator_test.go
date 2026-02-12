@@ -13,6 +13,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -677,6 +678,94 @@ func TestEndpointToApplication_SchedulerAliasRoundrobinToPow2(t *testing.T) {
 	assert.Equal(t, "pow2", scheduler["type"])
 }
 
+func TestEndpointToApplication_ResourceNameNormalization(t *testing.T) {
+	makeEndpoint := func(product string) *v1.Endpoint {
+		gpu := "2"
+		ep := &v1.Endpoint{
+			Metadata: &v1.Metadata{
+				Name:      "ep",
+				Workspace: "ws",
+			},
+			Spec: &v1.EndpointSpec{
+				Engine: &v1.EndpointEngineSpec{
+					Engine:  "vllm",
+					Version: "v0.11.2",
+				},
+				Model: &v1.ModelSpec{
+					Name:    "m",
+					Version: "v1",
+					Task:    "text-generation",
+				},
+				Resources: &v1.ResourceSpec{
+					GPU: &gpu,
+				},
+				Replicas:          v1.ReplicaSpec{Num: intPtr(1)},
+				DeploymentOptions: map[string]interface{}{},
+				Env:               map[string]string{},
+			},
+		}
+		ep.Spec.Resources.SetAcceleratorType(string(v1.AcceleratorTypeNVIDIAGPU))
+		ep.Spec.Resources.SetAcceleratorProduct(product)
+		return ep
+	}
+
+	modelRegistry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.BentoMLModelRegistryType,
+		},
+	}
+
+	tests := []struct {
+		name            string
+		product         string
+		clusterVersion  string
+		expectedResKey  string
+	}{
+		{
+			name:           "v1.0.1 normalizes underscored resource name",
+			product:        "NVIDIA_L20",
+			clusterVersion: "v1.0.1",
+			expectedResKey: "NVIDIAL20",
+		},
+		{
+			name:           "v1.0.0 preserves underscored resource name",
+			product:        "NVIDIA_L20",
+			clusterVersion: "v1.0.0",
+			expectedResKey: "NVIDIA_L20",
+		},
+		{
+			name:           "v1.0.1 no-op for name without underscore",
+			product:        "NVIDIAL20",
+			clusterVersion: "v1.0.1",
+			expectedResKey: "NVIDIAL20",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := &acceleratormocks.MockManager{}
+			mgr.On("GetConverter", string(v1.AcceleratorTypeNVIDIAGPU)).
+				Return(plugin.NewGPUConverter(), true)
+
+			cluster := &v1.Cluster{
+				Spec: &v1.ClusterSpec{
+					Version: tt.clusterVersion,
+				},
+			}
+
+			app, err := EndpointToApplication(makeEndpoint(tt.product), cluster, modelRegistry, mgr)
+			assert.NoError(t, err)
+
+			deploymentOptions := app.Args["deployment_options"].(map[string]interface{})
+			backend := deploymentOptions["backend"].(map[string]interface{})
+			resources := backend["resources"].(map[string]float64)
+
+			_, exists := resources[tt.expectedResKey]
+			assert.True(t, exists, "expected resource key %q in resources: %v", tt.expectedResKey, resources)
+		})
+	}
+}
+
 func TestEndpointToApplication_setModelArgs(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -962,9 +1051,10 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 
 func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 	tests := []struct {
-		name         string
-		endpoint     *v1.Endpoint
-		expectedEnvs map[string]string
+		name            string
+		endpoint        *v1.Endpoint
+		deployedCluster *v1.Cluster
+		expectedEnvs    map[string]string
 	}{
 		{
 			name: "endpoint with nil engine",
@@ -975,7 +1065,8 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 				},
 				Spec: &v1.EndpointSpec{},
 			},
-			expectedEnvs: map[string]string{},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
+			expectedEnvs:    map[string]string{},
 		},
 		{
 			name: "endpoint with llama-cpp engine",
@@ -990,10 +1081,11 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 					},
 				},
 			},
-			expectedEnvs: map[string]string{},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
+			expectedEnvs:    map[string]string{},
 		},
 		{
-			name: "endpoint with vllm engine",
+			name: "vllm engine on old cluster sets VLLM_SKIP_P2P_CHECK",
 			endpoint: &v1.Endpoint{
 				Metadata: &v1.Metadata{
 					Workspace: "default",
@@ -1005,16 +1097,33 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 					},
 				},
 			},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
 			expectedEnvs: map[string]string{
 				"VLLM_SKIP_P2P_CHECK": "1",
 			},
+		},
+		{
+			name: "vllm engine on new cluster does not set VLLM_SKIP_P2P_CHECK",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "vllm-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: "vllm",
+					},
+				},
+			},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.1"}},
+			expectedEnvs:    map[string]string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			applicationEnvs := map[string]string{}
-			setEngineSpecialEnv(tt.endpoint, applicationEnvs)
+			setEngineSpecialEnv(tt.endpoint, tt.deployedCluster, applicationEnvs)
 			assert.Equal(t, tt.expectedEnvs, applicationEnvs)
 		})
 	}

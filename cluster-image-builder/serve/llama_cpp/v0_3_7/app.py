@@ -9,6 +9,7 @@ from typing import Dict, Any, AsyncGenerator, Optional
 import ray
 from ray import serve
 from ray.serve import Application
+from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, StreamingResponse
@@ -29,6 +30,57 @@ class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
     CONSISTENT_HASH = "consistent_hash"
+
+
+# Mapping from scheduler type to request router class path
+SCHEDULER_CLASS_PATHS = {
+    SchedulerType.STATIC_HASH: "serve._replica_scheduler.static_hash_scheduler:StaticHashReplicaScheduler",
+    SchedulerType.CONSISTENT_HASH: "serve._replica_scheduler.chwbl_scheduler:ConsistentHashReplicaScheduler",
+}
+
+
+def _build_request_router_config(scheduler_config: Dict[str, Any]) -> Optional[RequestRouterConfig]:
+    """Build RequestRouterConfig based on scheduler configuration.
+
+    Args:
+        scheduler_config: Dictionary containing scheduler configuration with keys:
+            - type: SchedulerType (pow2, static_hash, consistent_hash)
+            - virtual_nodes: Number of virtual nodes for consistent hash (default: 100)
+            - load_factor: Load factor for bounded load (default: 1.25)
+            - max_user_messages_for_cache: Number of user messages for cache key (default: 2)
+
+    Returns:
+        RequestRouterConfig if custom scheduler is specified, None for default POW2.
+    """
+    scheduler_type = scheduler_config.get('type', SchedulerType.POW2)
+
+    # Use default POW2 scheduler
+    if scheduler_type == SchedulerType.POW2:
+        print(f"[app_builder] Using default POW2 scheduler")
+        return None
+
+    # Get the custom router class path
+    router_class_path = SCHEDULER_CLASS_PATHS.get(scheduler_type)
+    if not router_class_path:
+        print(f"[app_builder] Unknown scheduler type: {scheduler_type}, using default POW2")
+        return None
+
+    # Build kwargs for the custom router
+    router_kwargs = {}
+    if scheduler_type == SchedulerType.CONSISTENT_HASH:
+        router_kwargs = {
+            "virtual_nodes_per_replica": scheduler_config.get('virtual_nodes', 100),
+            "load_factor": scheduler_config.get('load_factor', 1.25),
+            "max_user_messages_for_cache": scheduler_config.get('max_user_messages_for_cache', 2),
+        }
+
+    print(f"[app_builder] Using custom scheduler: {scheduler_type}, class: {router_class_path}, kwargs: {router_kwargs}")
+
+    return RequestRouterConfig(
+        request_router_class=router_class_path,
+        request_router_kwargs=router_kwargs,
+    )
+
 
 @serve.deployment
 class Backend:
@@ -136,54 +188,18 @@ app.add_middleware(
 )
 app.add_middleware(RawContextMiddleware, plugins=(RequestIdPlugin(),))
 
-@serve.deployment
+@serve.deployment(ray_actor_options={"num_cpus": 0.1})
 @serve.ingress(app)
 class Controller:
-    def __init__(self,
-                 backend: DeploymentHandle,
-                 scheduler_type: str = SchedulerType.POW2,
-                 virtual_nodes: int = 100,
-                 load_factor: float = 1.25):
+    def __init__(self, backend: DeploymentHandle):
         """
         Controller deployment that handles HTTP routing and calls the backend.
 
         Args:
             backend: Handle to the Backend deployment
-            scheduler_type: Type of scheduler to use
-            virtual_nodes: Number of virtual nodes for consistent hash scheduler
-            load_factor: Load factor for consistent hash scheduler
         """
         self.backend = backend
-
-        # Setup router with custom scheduler if specified
-        handle = self.backend
-        if not handle.is_initialized:
-            handle._init()
-
-        # Only modify the scheduler if necessary
-        if scheduler_type != SchedulerType.POW2:
-            try:
-                router = handle._router._asyncio_router
-                original_scheduler = router._replica_scheduler
-
-                if scheduler_type == SchedulerType.STATIC_HASH:
-                    from serve._replica_scheduler.static_hash_scheduler import StaticHashReplicaScheduler
-                    new_scheduler = StaticHashReplicaScheduler()
-                elif scheduler_type == SchedulerType.CONSISTENT_HASH:
-                    from serve._replica_scheduler.chwbl_scheduler import ConsistentHashReplicaScheduler
-                    new_scheduler = ConsistentHashReplicaScheduler(
-                        virtual_nodes_per_replica=virtual_nodes,
-                        load_factor=load_factor
-                    )
-
-                new_scheduler.update_replicas(list(original_scheduler.curr_replicas.values()))
-                router._replica_scheduler = new_scheduler
-                print(f"[Controller] Replaced scheduler with {scheduler_type}")
-            except Exception as e:
-                print(f"[Controller] Failed to replace scheduler: {e}")
-                print("[Controller] Using default scheduler")
-        else:
-            print("[Controller] Using POW2 scheduler")
+        print("[Controller] Initialized with backend handle")
 
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
@@ -246,23 +262,28 @@ def app_builder(args: Dict[str, Any]) -> Application:
     backend_options = deployment_options.get('backend', {})
     controller_options = deployment_options.get('controller', {})
 
-    # Extract scheduler configuration
+    # Extract scheduler configuration and build RequestRouterConfig
     scheduler_config = deployment_options.get('scheduler', {})
-    scheduler_type = scheduler_config.get('type', SchedulerType.POW2)
-    virtual_nodes = scheduler_config.get('virtual_nodes', 100)
-    load_factor = scheduler_config.get('load_factor', 1.25)
+    request_router_config = _build_request_router_config(scheduler_config)
 
-    # Configure backend deployment
-    backend_deployment = Backend.options(
-        max_ongoing_requests=backend_options.get('max_ongoing_requests', 100),
-        num_replicas=backend_options.get('num_replicas', 1),
-        ray_actor_options={
+    # Build backend deployment options
+    backend_deploy_options = {
+        "max_ongoing_requests": backend_options.get('max_ongoing_requests', 100),
+        "num_replicas": backend_options.get('num_replicas', 1),
+        "ray_actor_options": {
             "num_cpus": backend_options.get('num_cpus', 1),
             "num_gpus": backend_options.get('num_gpus', 0),
             "memory": backend_options.get('memory', None),
             "resources": backend_options.get('resources', {})
         }
-    ).bind(
+    }
+
+    # Add request_router_config if custom scheduler is specified
+    if request_router_config is not None:
+        backend_deploy_options["request_router_config"] = request_router_config
+
+    # Configure backend deployment
+    backend_deployment = Backend.options(**backend_deploy_options).bind(
         model_registry_type=model.get('registry_type'),
         model_name=model.get('name'),
         model_version=model.get('version'),
@@ -274,7 +295,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         **model_settings
     )
 
-    # Configure controller deployment with scheduler config
+    # Configure controller deployment
     controller_deployment = Controller.options(
         max_ongoing_requests=backend_options.get('max_ongoing_requests', 100) * backend_options.get('num_replicas', 1),
         num_replicas=controller_options.get('num_replicas', 1),
@@ -284,9 +305,6 @@ def app_builder(args: Dict[str, Any]) -> Application:
         }
     ).bind(
         backend=backend_deployment,
-        scheduler_type=scheduler_type,
-        virtual_nodes=virtual_nodes,
-        load_factor=load_factor
     )
 
     return controller_deployment

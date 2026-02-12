@@ -35,3 +35,6 @@ scripts/dashboard/output
 
 cluster-image-builder/downloader
 scripts/builder/dist
+
+claude.md
+.claude

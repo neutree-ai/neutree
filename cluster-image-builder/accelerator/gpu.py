@@ -31,9 +31,9 @@ def count_nvidia_accelerators(gpu_names):
     """
     accelerator_counts = {}
     for gpu in gpu_names:
-        accelerator_type = gpu.replace(" ","_")
+        accelerator_type = gpu.replace(" ","")
         if not accelerator_type.startswith("NVIDIA_"):
-            accelerator_type = "NVIDIA_" + accelerator_type
+            accelerator_type = "NVIDIA" + accelerator_type
         if accelerator_counts.get(accelerator_type) is None:
             accelerator_counts[accelerator_type] = 1
         else:
