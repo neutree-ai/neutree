@@ -1,5 +1,6 @@
 ARG RAY_BASE_IMAGE
 ARG RAY_COMMIT
+ARG VLLM_VERSION=0.11.2
 ARG COMMON_WORKDIR=/app
 ARG RAY_REPO
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
@@ -26,35 +27,27 @@ RUN /ray/python/build-wheel-manylinux2014.sh
 
 FROM ${RAY_BASE_IMAGE}
 
-# Install NFS dependencies and Docker CLI
-USER root
-RUN apt-get update && apt-get install -y util-linux nfs-common docker.io \
-    && ln -sf /usr/bin/docker /usr/bin/podman
+ARG VLLM_VERSION
 
 USER ray
 
-# Install ray
+# Install ray (same version as cluster image)
 RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
     cd /install \
     && pip install -U -r python/requirements.txt \
     && pip uninstall -y ray \
     && pip install .whl/*.whl
 
-# Install dependencies
+# Install common dependencies
 RUN --mount=type=bind,src=requirements,target=requirements \
-    pip install --no-cache-dir -r requirements/common.txt && \
-    if [ $(uname -m) = "aarch64" ]; then \
-        pip install --no-cache-dir -r requirements/cuda_arm.txt; \
-    else \
-        pip install --no-cache-dir -r requirements/cuda.txt; \
-    fi
+    pip install --no-cache-dir -r requirements/common.txt
+
+# Install vLLM (specific version)
+RUN pip install --no-cache-dir vllm==${VLLM_VERSION}
 
 # Copy Python files
 COPY *.py ./
 COPY serve ./serve
-COPY accelerator ./accelerator
 COPY downloader ./downloader
-
-EXPOSE 8265 6379 8000
 
 CMD ["/bin/bash"]

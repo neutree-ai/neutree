@@ -321,6 +321,8 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 		// Increase nofile ulimit to avoid "Too many open files" error in Ray workers
 		"--ulimit nofile=65536:65536",
+		// Mount Docker socket for runtime_env.container support (engine version isolation)
+		"--volume /var/run/docker.sock:/var/run/docker.sock",
 	}
 
 	headLabel := fmt.Sprintf(`--labels='{"%s":"%s"}'`,
@@ -401,6 +403,14 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	// ModelCaches is now in ClusterConfig level
 	mutateModelCaches(rayClusterConfig, reconcileContext.Cluster.Spec.Config.ModelCaches)
 
+	// Grant the ray user access to docker.sock for runtime_env.container support.
+	// The mounted docker.sock is typically owned by root:docker with 660 permissions,
+	// so the ray user needs explicit permission to use it.
+	dockerSockPermCmd := "sudo chmod 666 /var/run/docker.sock"
+	rayClusterConfig.HeadStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.HeadStartRayCommands...)
+	rayClusterConfig.WorkerStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.WorkerStartRayCommands...)
+	rayClusterConfig.StaticWorkerStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.StaticWorkerStartRayCommands...)
+
 	return rayClusterConfig, nil
 }
 
@@ -433,4 +443,5 @@ func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v
 		sshRayClusterConfig.StaticWorkerStartRayCommands = append([]string{modifyPermissionCommand},
 			sshRayClusterConfig.StaticWorkerStartRayCommands...)
 	}
+
 }

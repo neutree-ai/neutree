@@ -1,0 +1,72 @@
+name: release-engine-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: "engine name (e.g: vllm)"
+        required: true
+        type: choice
+        options:
+          - vllm
+      engine_version:
+        description: "engine version (e.g: v0.11.2)"
+        required: true
+        type: string
+      ray_version:
+        description: "the ray version branch/tag to build from"
+        required: false
+        type: string
+        default: "ray-2.53.0-neutree"
+      ray_short_version:
+        description: "ray short version for image tag (e.g: 2.53.0)"
+        required: false
+        type: string
+        default: "2.53.0"
+
+jobs:
+  build-amd64-image:
+    runs-on: ["serve-builder","X64"]
+    name: build amd64 engine image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: build and push engine image
+        run: |
+          cd cluster-image-builder
+          make docker-build-engine-${{ github.event.inputs.engine }} docker-push-engine-${{ github.event.inputs.engine }}
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+          ARCH: amd64
+          VLLM_VERSION: ${{ github.event.inputs.engine_version }}
+          RAY_VERSION: ${{ github.event.inputs.ray_version }}
+          RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+  push-manifests:
+    runs-on: ["serve-builder","X64"]
+    name: merge and push manifests
+    needs:
+      - build-amd64-image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: push manifests
+        run: |
+          cd cluster-image-builder
+          make docker-push-manifest-engine-${{ github.event.inputs.engine }}
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+          ALL_ARCH: amd64
+          VLLM_VERSION: ${{ github.event.inputs.engine_version }}
+          RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}

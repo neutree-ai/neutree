@@ -549,7 +549,7 @@ func TestEndpointToApplication_ApplicationNameConsistency(t *testing.T) {
 
 	mgr := &acceleratormocks.MockManager{}
 
-	app, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, mgr)
+	app, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, nil, mgr)
 	assert.NoError(t, err)
 	// Verify that the application name matches the naming function
 	expectedName := EndpointToServeApplicationName(endpoint)
@@ -590,7 +590,7 @@ func TestEndpointToApplication_NilDeploymentOptions(t *testing.T) {
 	deployedCluster := &v1.Cluster{}
 	mgr := &acceleratormocks.MockManager{}
 
-	app, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, mgr)
+	app, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, nil, mgr)
 	assert.NoError(t, err)
 	assert.Equal(t, "production_chat-model", app.Name)
 
@@ -628,7 +628,7 @@ func TestEndpointToApplication_RouteConsistency(t *testing.T) {
 		},
 	}
 
-	app, err := EndpointToApplication(endpoint, &v1.Cluster{}, modelRegistry, nil)
+	app, err := EndpointToApplication(endpoint, &v1.Cluster{}, modelRegistry, nil, nil)
 	assert.NoError(t, err)
 
 	// Verify that the route prefix includes workspace
@@ -670,7 +670,7 @@ func TestEndpointToApplication_SchedulerAliasRoundrobinToPow2(t *testing.T) {
 		},
 	}
 
-	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, nil)
+	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, nil, nil)
 	assert.NoError(t, err)
 
 	deploymentOptions := app.Args["deployment_options"].(map[string]interface{})
@@ -753,7 +753,7 @@ func TestEndpointToApplication_ResourceNameNormalization(t *testing.T) {
 				},
 			}
 
-			app, err := EndpointToApplication(makeEndpoint(tt.product), cluster, modelRegistry, mgr)
+			app, err := EndpointToApplication(makeEndpoint(tt.product), cluster, modelRegistry, nil, mgr)
 			assert.NoError(t, err)
 
 			deploymentOptions := app.Args["deployment_options"].(map[string]interface{})
@@ -1025,7 +1025,7 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app, err := EndpointToApplication(tt.endpoint, tt.cluster, tt.modelRegistry, nil)
+			app, err := EndpointToApplication(tt.endpoint, tt.cluster, tt.modelRegistry, nil, nil)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -1047,6 +1047,242 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildEngineContainerConfig(t *testing.T) {
+	defaultImageRegistry := &v1.ImageRegistry{
+		Spec: &v1.ImageRegistrySpec{
+			URL: "http://registry.example.com",
+		},
+	}
+
+	tests := []struct {
+		name            string
+		endpoint        *v1.Endpoint
+		cluster         *v1.Cluster
+		imageRegistry   *v1.ImageRegistry
+		modelCaches     []v1.ModelCache
+		expectNil       bool
+		expectedImage   string
+		expectedOptions []string
+	}{
+		{
+			name: "non-SSH cluster returns nil",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.11.2"},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+			},
+			imageRegistry: defaultImageRegistry,
+			expectNil:     true,
+		},
+		{
+			name: "nil cluster spec returns nil",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.11.2"},
+				},
+			},
+			cluster:       &v1.Cluster{},
+			imageRegistry: defaultImageRegistry,
+			expectNil:     true,
+		},
+		{
+			name: "SSH cluster generates container config",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.11.2"},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType},
+			},
+			imageRegistry: defaultImageRegistry,
+			expectNil:     false,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.11.2-ray2.53.0",
+			expectedOptions: []string{
+				"--runtime=nvidia",
+				"--gpus=all",
+				"--network host",
+			},
+		},
+		{
+			name: "SSH cluster with model caches includes host path volume mounts",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType},
+			},
+			imageRegistry: defaultImageRegistry,
+			modelCaches: []v1.ModelCache{
+				{
+					Name:     "default",
+					HostPath: &corev1.HostPathVolumeSource{Path: "/data/models"},
+				},
+			},
+			expectNil:     false,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedOptions: []string{
+				"--runtime=nvidia",
+				"--gpus=all",
+				"--network host",
+				"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),
+			},
+		},
+		{
+			name: "engine name with hyphens is converted to underscores",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "v0.3.7"},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType},
+			},
+			imageRegistry: defaultImageRegistry,
+			expectNil:     false,
+			expectedImage: "registry.example.com/neutree/engine-llama_cpp:v0.3.7-ray2.53.0",
+		},
+		{
+			name: "model cache without HostPath is skipped",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.11.2"},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType},
+			},
+			imageRegistry: defaultImageRegistry,
+			modelCaches: []v1.ModelCache{
+				{Name: "nfs-cache"},
+			},
+			expectNil:     false,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.11.2-ray2.53.0",
+			expectedOptions: []string{
+				"--runtime=nvidia",
+				"--gpus=all",
+				"--network host",
+			},
+		},
+		{
+			name: "registry with custom repository",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.11.2"},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType},
+			},
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "http://registry.example.com",
+					Repository: "custom-repo",
+				},
+			},
+			expectNil:     false,
+			expectedImage: "registry.example.com/custom-repo/neutree/engine-vllm:v0.11.2-ray2.53.0",
+			expectedOptions: []string{
+				"--runtime=nvidia",
+				"--gpus=all",
+				"--network host",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildEngineContainerConfig(tt.endpoint, tt.cluster, tt.imageRegistry, tt.modelCaches)
+
+			if tt.expectNil {
+				assert.Nil(t, result)
+				return
+			}
+
+			assert.NotNil(t, result)
+			assert.Equal(t, tt.expectedImage, result["image"])
+
+			if tt.expectedOptions != nil {
+				runOptions, ok := result["run_options"].([]string)
+				assert.True(t, ok)
+				assert.Equal(t, tt.expectedOptions, runOptions)
+			}
+		})
+	}
+}
+
+func TestEndpointToApplication_SSHClusterContainerConfig(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-endpoint",
+		},
+		Spec: &v1.EndpointSpec{
+			Engine: &v1.EndpointEngineSpec{
+				Engine:  "vllm",
+				Version: "v0.11.2",
+			},
+			Model: &v1.ModelSpec{
+				Name: "test-model",
+				Task: v1.TextGenerationModelTask,
+			},
+			Resources:         &v1.ResourceSpec{},
+			DeploymentOptions: map[string]interface{}{},
+			Variables:         map[string]interface{}{},
+		},
+	}
+
+	cluster := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			Type: v1.SSHClusterType,
+			Config: &v1.ClusterConfig{
+				ModelCaches: []v1.ModelCache{
+					{
+						Name:     "default",
+						HostPath: &corev1.HostPathVolumeSource{Path: "/data/models"},
+					},
+				},
+			},
+		},
+	}
+
+	modelRegistry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.HuggingFaceModelRegistryType,
+			Url:  "https://huggingface.co",
+		},
+	}
+
+	imageRegistry := &v1.ImageRegistry{
+		Spec: &v1.ImageRegistrySpec{
+			URL: "http://registry.example.com",
+		},
+	}
+
+	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, imageRegistry, nil)
+	assert.NoError(t, err)
+
+	// Verify container config is present
+	containerRaw, ok := app.RuntimeEnv["container"]
+	assert.True(t, ok, "runtime_env should have 'container' key for SSH cluster")
+
+	container, ok := containerRaw.(map[string]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, "registry.example.com/neutree/engine-vllm:v0.11.2-ray2.53.0", container["image"])
+
+	runOptions, ok := container["run_options"].([]string)
+	assert.True(t, ok)
+	assert.Contains(t, runOptions, "--runtime=nvidia")
+	assert.Contains(t, runOptions, "--gpus=all")
+	assert.Contains(t, runOptions, "--network host")
+	assert.Contains(t, runOptions, "-v /data/models:"+filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"))
 }
 
 func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {

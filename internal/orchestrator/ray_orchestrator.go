@@ -65,6 +65,11 @@ func (o *RayOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoint) (*Or
 		return nil, errors.Wrap(err, "failed to get model registry")
 	}
 
+	imageRegistry, err := getUsedImageRegistries(deployedCluster, o.storage)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get used image registry")
+	}
+
 	dashboardService, err := o.getDashboardService()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get dashboard service")
@@ -74,6 +79,7 @@ func (o *RayOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoint) (*Or
 		Cluster:       deployedCluster,
 		Engine:        engine,
 		ModelRegistry: modelRegistry,
+		ImageRegistry: imageRegistry,
 		Endpoint:      endpoint,
 		rayService:    dashboardService,
 		logger:        klog.LoggerWithValues(klog.Background(), "endpoint", endpoint.Metadata.WorkspaceName()),
@@ -98,6 +104,11 @@ func (o *RayOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
 	// validate model registry status
 	if ctx.ModelRegistry.Status == nil || ctx.ModelRegistry.Status.Phase != v1.ModelRegistryPhaseCONNECTED {
 		return errors.Errorf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
+	}
+
+	// validate image registry status
+	if ctx.ImageRegistry.Status == nil || ctx.ImageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
+		return errors.Errorf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
 	}
 
 	return nil
@@ -148,7 +159,7 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 		return errors.Wrapf(err, "failed to get current serve applications for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
-	newApp, err := EndpointToApplication(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, o.acceleratorMgr)
+	newApp, err := EndpointToApplication(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, ctx.ImageRegistry, o.acceleratorMgr)
 	if err != nil {
 		return errors.Wrapf(err, "failed to convert endpoint to application for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
@@ -394,7 +405,8 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
 func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
-	modelRegistry *v1.ModelRegistry, acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
+	modelRegistry *v1.ModelRegistry, imageRegistry *v1.ImageRegistry,
+	acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
 	app := dashboard.RayServeApplication{
 		Name:        EndpointToServeApplicationName(endpoint),
 		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
@@ -527,7 +539,56 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		"env_vars": applicationEnv,
 	}
 
+	// Generate runtime_env.container for engine version isolation (SSH clusters).
+	// The engine image runs as a sibling container on the host via docker.sock.
+	if containerConfig := buildEngineContainerConfig(endpoint, deployedCluster, imageRegistry, modelCaches); containerConfig != nil {
+		app.RuntimeEnv["container"] = containerConfig
+	}
+
 	return app, nil
+}
+
+// buildEngineContainerConfig constructs the runtime_env.container config for
+// running the engine in an isolated container. Returns nil if the cluster is not
+// an SSH cluster (container isolation only applies to SSH clusters).
+func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
+	imageRegistry *v1.ImageRegistry, modelCaches []v1.ModelCache) map[string]interface{} {
+	if cluster.Spec == nil || cluster.Spec.Type != v1.SSHClusterType {
+		return nil
+	}
+
+	if imageRegistry == nil {
+		return nil
+	}
+
+	imagePrefix, err := util.GetImagePrefix(imageRegistry)
+	if err != nil {
+		klog.Warningf("Failed to get image prefix for engine container, using default: %v", err)
+		imagePrefix = "neutree"
+	}
+
+	engineName := strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_")
+	engineVersion := endpoint.Spec.Engine.Version
+	imageRef := fmt.Sprintf("%s/neutree/engine-%s:%s-ray2.53.0", imagePrefix, engineName, engineVersion)
+
+	runOptions := []string{
+		"--runtime=nvidia",
+		"--gpus=all",
+		"--network host",
+	}
+
+	// Mount model caches using HOST paths (docker.sock creates containers on host)
+	for _, mc := range modelCaches {
+		if mc.HostPath != nil {
+			containerMountPath := filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, mc.Name)
+			runOptions = append(runOptions, fmt.Sprintf("-v %s:%s", mc.HostPath.Path, containerMountPath))
+		}
+	}
+
+	return map[string]interface{}{
+		"image":       imageRef,
+		"run_options": runOptions,
+	}
 }
 
 func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, applicationEnv map[string]string) {

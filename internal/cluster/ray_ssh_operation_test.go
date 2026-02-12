@@ -918,9 +918,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 					"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 					"--ulimit nofile=65536:65536",
+					"--volume /var/run/docker.sock:/var/run/docker.sock",
 				},
 			},
 			HeadStartRayCommands: []string{
+				"sudo chmod 666 /var/run/docker.sock",
 				"ray stop",
 				strings.Join([]string{
 					`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
@@ -932,6 +934,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				}, " "),
 			},
 			WorkerStartRayCommands: []string{
+				"sudo chmod 666 /var/run/docker.sock",
 				"ray stop",
 				strings.Join([]string{
 					`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
@@ -940,6 +943,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				}, " "),
 			},
 			StaticWorkerStartRayCommands: []string{
+				"sudo chmod 666 /var/run/docker.sock",
 				"ray stop",
 				strings.Join([]string{
 					`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
@@ -1154,9 +1158,11 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 							"-e RAY_process_group_cleanup_enabled=true",
 							"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 							"--ulimit nofile=65536:65536",
+							"--volume /var/run/docker.sock:/var/run/docker.sock",
 						},
 					},
 					HeadStartRayCommands: []string{
+						"sudo chmod 666 /var/run/docker.sock",
 						"ray stop",
 						strings.Join([]string{
 							`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
@@ -1167,6 +1173,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						}, " "),
 					},
 					WorkerStartRayCommands: []string{
+						"sudo chmod 666 /var/run/docker.sock",
 						"ray stop",
 						strings.Join([]string{
 							`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
@@ -1175,6 +1182,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						}, " "),
 					},
 					StaticWorkerStartRayCommands: []string{
+						"sudo chmod 666 /var/run/docker.sock",
 						"ray stop",
 						strings.Join([]string{
 							`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
