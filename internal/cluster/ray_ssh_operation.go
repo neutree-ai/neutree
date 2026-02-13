@@ -11,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -299,11 +300,25 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 
 	rayClusterConfig.Docker.Image = imagePrefix + "/neutree/neutree-serve:" + cluster.Spec.Version
 	rayClusterConfig.Docker.PullBeforeRun = true
+	// RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper causes parent processes to lose
+	// child exit codes. Ray 2.53.0+ (serving version > v1.0.0) provides RAY_process_group_cleanup_enabled
+	// which doesn't have this issue.
+	rayProcessCleanupEnv := "-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true"
+
+	isNewForCleanup, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
+	if err != nil {
+		klog.Warningf("Failed to parse cluster version %s for process cleanup env, assuming new version: %v", cluster.Spec.Version, err)
+
+		rayProcessCleanupEnv = "-e RAY_process_group_cleanup_enabled=true"
+	} else if isNewForCleanup {
+		rayProcessCleanupEnv = "-e RAY_process_group_cleanup_enabled=true"
+	}
+
 	rayClusterConfig.Docker.RunOptions = []string{
 		"--privileged",
 		"--cap-add=SYS_ADMIN",
 		"--security-opt=seccomp=unconfined",
-		"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
+		rayProcessCleanupEnv,
 		// Reduce Ray object store memory from default 30% to 10%, freeing memory for inference engines
 		"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 		// Increase nofile ulimit to avoid "Too many open files" error in Ray workers
@@ -319,19 +334,38 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType,
 		v1.NeutreeServingVersionLabel, cluster.Spec.Version)
 
-	commonArgs := fmt.Sprintf(`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
-		"--min-worker-port=10002 --max-worker-port=20000 "+
-		`--runtime-env-agent-port=56999 --dashboard-agent-grpc-port=8078 --metrics-export-port=%d`, v1.RayletMetricsPort)
+	// --dashboard-agent-grpc-port and --dashboard-grpc-port are deprecated in Ray 2.53.0 (serving version > v1.0.0)
+	includeDeprecatedGrpcFlags := false
+
+	isNewForGrpc, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
+	if err != nil {
+		klog.Warningf("Failed to parse cluster version %s, assuming new version: %v", cluster.Spec.Version, err)
+	} else if !isNewForGrpc {
+		includeDeprecatedGrpcFlags = true
+	}
+
+	commonArgs := `--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 ` +
+		"--min-worker-port=10002 --max-worker-port=20000 " +
+		`--runtime-env-agent-port=56999`
+	if includeDeprecatedGrpcFlags {
+		commonArgs += " --dashboard-agent-grpc-port=8078"
+	}
+
+	commonArgs += fmt.Sprintf(` --metrics-export-port=%d`, v1.RayletMetricsPort)
+
+	headCmdParts := []string{
+		`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
+		commonArgs,
+	}
+	if includeDeprecatedGrpcFlags {
+		headCmdParts = append(headCmdParts, "--dashboard-grpc-port=8079")
+	}
+
+	headCmdParts = append(headCmdParts, "--dashboard-port=8265", "--ray-client-server-port=10001", headLabel)
+
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",
-		strings.Join([]string{
-			`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
-			commonArgs,
-			"--dashboard-grpc-port=8079",
-			"--dashboard-port=8265",
-			"--ray-client-server-port=10001",
-			headLabel,
-		}, " "),
+		strings.Join(headCmdParts, " "),
 	}
 	rayClusterConfig.WorkerStartRayCommands = []string{
 		"ray stop",
