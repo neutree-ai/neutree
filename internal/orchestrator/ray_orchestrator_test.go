@@ -1106,7 +1106,6 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			expectedOptions: []string{
 				"--runtime=nvidia",
 				"--gpus=all",
-				"--network host",
 			},
 		},
 		{
@@ -1131,7 +1130,6 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			expectedOptions: []string{
 				"--runtime=nvidia",
 				"--gpus=all",
-				"--network host",
 				"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),
 			},
 		},
@@ -1168,7 +1166,6 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			expectedOptions: []string{
 				"--runtime=nvidia",
 				"--gpus=all",
-				"--network host",
 			},
 		},
 		{
@@ -1192,7 +1189,6 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			expectedOptions: []string{
 				"--runtime=nvidia",
 				"--gpus=all",
-				"--network host",
 			},
 		},
 	}
@@ -1281,7 +1277,7 @@ func TestEndpointToApplication_SSHClusterContainerConfig(t *testing.T) {
 	assert.True(t, ok)
 	assert.Contains(t, runOptions, "--runtime=nvidia")
 	assert.Contains(t, runOptions, "--gpus=all")
-	assert.Contains(t, runOptions, "--network host")
+	assert.NotContains(t, runOptions, "--network host")
 	assert.Contains(t, runOptions, "-v /data/models:"+filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"))
 }
 

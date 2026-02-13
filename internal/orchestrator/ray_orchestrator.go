@@ -574,7 +574,6 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 	runOptions := []string{
 		"--runtime=nvidia",
 		"--gpus=all",
-		"--network host",
 	}
 
 	// Mount model caches using HOST paths (docker.sock creates containers on host)
