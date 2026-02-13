@@ -326,6 +326,12 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		// Share host /tmp with Ray container so that temp directories created by Ray's
 		// container plugin are visible to sibling engine containers via docker.sock.
 		"--volume /tmp:/tmp",
+		// Share host PID namespace so that engine containers (which also use --pid=host)
+		// can see the raylet process and verify it's alive via RAY_RAYLET_PID.
+		"--pid=host",
+		// Share host IPC namespace so that Ray container and engine containers can
+		// communicate via shared memory (used by Ray Object Store).
+		"--ipc=host",
 	}
 
 	headLabel := fmt.Sprintf(`--labels='{"%s":"%s"}'`,

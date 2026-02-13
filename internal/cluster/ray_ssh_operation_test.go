@@ -920,6 +920,8 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"--ulimit nofile=65536:65536",
 					"--volume /var/run/docker.sock:/var/run/docker.sock",
 					"--volume /tmp:/tmp",
+					"--pid=host",
+					"--ipc=host",
 				},
 			},
 			HeadStartRayCommands: []string{
@@ -1161,6 +1163,8 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 							"--ulimit nofile=65536:65536",
 							"--volume /var/run/docker.sock:/var/run/docker.sock",
 							"--volume /tmp:/tmp",
+							"--pid=host",
+							"--ipc=host",
 						},
 					},
 					HeadStartRayCommands: []string{
