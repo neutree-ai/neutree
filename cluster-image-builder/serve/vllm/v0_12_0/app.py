@@ -22,14 +22,12 @@ from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.v1.engine.async_llm import AsyncLLM
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionRequest, ChatCompletionResponse, ErrorResponse,
-    EmbeddingRequest, EmbeddingResponse,
-    ScoreRequest, ScoreResponse,
-    RerankRequest, RerankResponse,
-    EmbeddingCompletionRequest
 )
+from vllm.entrypoints.pooling.embed.protocol import EmbeddingCompletionRequest
+from vllm.entrypoints.pooling.score.protocol import RerankRequest
 from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
-from vllm.entrypoints.openai.serving_embedding import OpenAIServingEmbedding
-from vllm.entrypoints.openai.serving_score import ServingScores
+from vllm.entrypoints.pooling.embed.serving import OpenAIServingEmbedding
+from vllm.entrypoints.pooling.score.serving import ServingScores
 from vllm.entrypoints.openai.serving_models import BaseModelPath, OpenAIServingModels
 
 from downloader import get_downloader, build_request_from_model_args
