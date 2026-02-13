@@ -217,6 +217,10 @@ func (p *AMDGPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.Ge
 						},
 					},
 				},
+				{
+					Version:      "v0.12.0",
+					ValuesSchema: vllmDefaultEngineSchema,
+				},
 			},
 			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
 		},
