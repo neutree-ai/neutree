@@ -143,27 +143,19 @@ docker-push-manifest: $(addprefix docker-push-manifest-,$(ALL_DOCKER_BUILD))
 
 .PHONY: docker-push-manifest-core
 docker-push-manifest-core: ## Push the core manifest docker image.
-	docker manifest create --amend $(NEUTREE_CORE_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_CORE_IMAGE)\-&:$(IMAGE_TAG)~g")
-	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_CORE_IMAGE}:${IMAGE_TAG} ${NEUTREE_CORE_IMAGE}-$${arch}:${IMAGE_TAG}; done
-	docker manifest push --purge ${NEUTREE_CORE_IMAGE}:${IMAGE_TAG}
+	docker buildx imagetools create -t $(NEUTREE_CORE_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_CORE_IMAGE)\-&:$(IMAGE_TAG)~g")
 
 .PHONY: docker-push-manifest-api
 docker-push-manifest-api: ## Push the api manifest docker image.
-	docker manifest create --amend $(NEUTREE_API_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_API_IMAGE)\-&:$(IMAGE_TAG)~g")
-	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_API_IMAGE}:${IMAGE_TAG} ${NEUTREE_API_IMAGE}-$${arch}:${IMAGE_TAG}; done
-	docker manifest push --purge ${NEUTREE_API_IMAGE}:${IMAGE_TAG}
+	docker buildx imagetools create -t $(NEUTREE_API_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_API_IMAGE)\-&:$(IMAGE_TAG)~g")
 
 .PHONY: docker-push-manifest-db-scripts
 docker-push-manifest-db-scripts: ## Push the db scripts manifest docker image.
-	docker manifest create --amend $(NEUTREE_DB_SCRIPTS_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_DB_SCRIPTS_IMAGE)\-&:$(IMAGE_TAG)~g")
-	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_DB_SCRIPTS_IMAGE}:${IMAGE_TAG} ${NEUTREE_DB_SCRIPTS_IMAGE}-$${arch}:${IMAGE_TAG}; done
-	docker manifest push --purge ${NEUTREE_DB_SCRIPTS_IMAGE}:${IMAGE_TAG}
+	docker buildx imagetools create -t $(NEUTREE_DB_SCRIPTS_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_DB_SCRIPTS_IMAGE)\-&:$(IMAGE_TAG)~g")
 
 .PHONY: docker-push-manifest-runtime
 docker-push-manifest-runtime: ## Push the runtime manifest docker image.
-	docker manifest create --amend $(NEUTREE_RUNTIME_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_RUNTIME_IMAGE)\-&:$(IMAGE_TAG)~g")
-	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${NEUTREE_RUNTIME_IMAGE}:${IMAGE_TAG} ${NEUTREE_RUNTIME_IMAGE}-$${arch}:${IMAGE_TAG}; done
-	docker manifest push --purge ${NEUTREE_RUNTIME_IMAGE}:${IMAGE_TAG}
+	docker buildx imagetools create -t $(NEUTREE_RUNTIME_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_RUNTIME_IMAGE)\-&:$(IMAGE_TAG)~g")
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
