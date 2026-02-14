@@ -321,6 +321,9 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		rayProcessCleanupEnv,
 		// Reduce Ray object store memory from default 30% to 10%, freeing memory for inference engines
 		"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
+		// Disable OpenTelemetry metrics backend to avoid histogram bucket mismatch assertion error
+		// when different vLLM endpoints have different max_model_len (Ray 2.53.0 defaults to true)
+		"-e RAY_enable_open_telemetry=false",
 		// Increase nofile ulimit to avoid "Too many open files" error in Ray workers
 		"--ulimit nofile=65536:65536",
 	}
