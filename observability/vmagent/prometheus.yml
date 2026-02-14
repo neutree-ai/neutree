@@ -20,9 +20,10 @@ scrape_configs:
       regex: '([^_]+)_(.+)'
       target_label: application
       replacement: '$2'
-  # Convert ray_vllm: prefix to vllm: prefix
-  # ray_vllm:e2e_request_latency_seconds_bucket => vllm:e2e_request_latency_seconds_bucket
+  # Convert ray_vllm: or ray_vllm_ prefix to vllm: prefix
+  # ray_vllm:e2e_request_latency_seconds_bucket => vllm:e2e_request_latency_seconds_bucket (old clusters)
+  # ray_vllm_e2e_request_latency_seconds_bucket => vllm:e2e_request_latency_seconds_bucket (Ray 2.53.0+)
     - source_labels: [__name__]
-      regex: ray_vllm:(.+)
+      regex: 'ray_vllm[:_](.+)'
       target_label: __name__
-      replacement: vllm:$1
+      replacement: 'vllm:$1'
