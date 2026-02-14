@@ -108,7 +108,3 @@ class StaticHashReplicaScheduler(RequestRouter):
             f"Remaining: {len(self._replicas)}"
         )
 
-    @property
-    def curr_replicas(self) -> Dict[ReplicaID, RunningReplica]:
-        """Return the current replicas."""
-        return self._replicas

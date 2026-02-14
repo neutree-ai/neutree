@@ -1,7 +1,6 @@
 import hashlib
 import logging
 import bisect
-import threading
 from typing import Dict, List, Set, Tuple, Optional
 
 from ray.serve._private.common import ReplicaID
@@ -25,29 +24,30 @@ class ConsistentHashReplicaScheduler(RequestRouter):
     between consistent routing and load distribution.
     """
 
-    def __init__(
-        self,
-        *args,
-        virtual_nodes_per_replica: int = 100,
-        load_factor: float = 1.25,
-        max_user_messages_for_cache: int = 2,
-        **kwargs,
-    ):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Consistent hashing settings
-        self._virtual_nodes = virtual_nodes_per_replica
-        self._load_factor = load_factor
+        # Consistent hashing settings (defaults, overridden by initialize_state)
+        self._virtual_nodes = 100
+        self._load_factor = 1.25
 
         # Cache key extraction settings for chat completions
-        self._max_user_messages_for_cache = max_user_messages_for_cache
+        self._max_user_messages_for_cache = 2
 
         # Hash ring data structures
         self._hash_to_replica_id: Dict[int, ReplicaID] = {}  # Maps hash points to replica IDs
         self._sorted_hashes: List[int] = []  # Sorted list of hash points for binary search
 
-        # Lock for thread-safe updates
-        self._load_lock = threading.Lock()
+    def initialize_state(
+        self,
+        virtual_nodes_per_replica: int = 100,
+        load_factor: float = 1.25,
+        max_user_messages_for_cache: int = 2,
+    ):
+        """Initialize custom scheduler state from request_router_kwargs."""
+        self._virtual_nodes = virtual_nodes_per_replica
+        self._load_factor = load_factor
+        self._max_user_messages_for_cache = max_user_messages_for_cache
 
         logger.info(
             f"Initialized ConsistentHashReplicaScheduler with "
@@ -57,18 +57,17 @@ class ConsistentHashReplicaScheduler(RequestRouter):
         )
 
     def _create_load_snapshot(self) -> Dict[ReplicaID, int]:
-        """Create a snapshot of current replica loads (thread-safe).
+        """Create a snapshot of current replica loads.
 
         Returns:
             A dictionary mapping replica_id to its current load.
         """
-        with self._load_lock:
-            snapshot = {}
-            for replica_id in self._replicas:
-                load = self._replica_queue_len_cache.get(replica_id)
-                snapshot[replica_id] = load if load is not None else 0
+        snapshot = {}
+        for replica_id in self._replicas:
+            load = self._replica_queue_len_cache.get(replica_id)
+            snapshot[replica_id] = load if load is not None else 0
 
-            return snapshot
+        return snapshot
 
     async def choose_replicas(
         self,
@@ -100,9 +99,6 @@ class ConsistentHashReplicaScheduler(RequestRouter):
         replica_hash, replica_idx = self._search(payload_hash)
         initial_replica_id = self._hash_to_replica_id[replica_hash]
 
-        if initial_replica_id not in candidate_map:
-            return [candidate_replicas]
-
         logger.debug(
             f"CHWBL: Initial lookup for payload hash {payload_hash} -> "
             f"replica {initial_replica_id}"
@@ -113,6 +109,7 @@ class ConsistentHashReplicaScheduler(RequestRouter):
 
         # Start from the initial replica and check load constraints
         checked_replica_ids: Set[ReplicaID] = set()
+        default_replica_id = None
         current_idx = replica_idx
         while len(checked_replica_ids) < len(candidate_map):
             current_hash = self._sorted_hashes[current_idx]
@@ -124,6 +121,9 @@ class ConsistentHashReplicaScheduler(RequestRouter):
                 continue
 
             checked_replica_ids.add(current_replica_id)
+
+            if default_replica_id is None:
+                default_replica_id = current_replica_id
 
             # Check if this replica meets the load constraints using snapshot
             if self._check_load_with_snapshot(current_replica_id, load_snapshot):
@@ -137,13 +137,14 @@ class ConsistentHashReplicaScheduler(RequestRouter):
             # Move to next replica
             current_idx = (current_idx + 1) % len(self._sorted_hashes)
 
-        # All replicas overloaded, fallback to primary to preserve affinity
+        # All replicas overloaded, fallback to first candidate on ring to preserve affinity
+        fallback_id = default_replica_id
         logger.warning(
-            f"CHWBL: Using primary replica {initial_replica_id} "
+            f"CHWBL: Using fallback replica {fallback_id} "
             f"as no replica met load factor for payload hash {payload_hash}, "
-            f"snapshot_load={load_snapshot.get(initial_replica_id, 0)}"
+            f"snapshot_load={load_snapshot.get(fallback_id, 0)}"
         )
-        return [[candidate_map[initial_replica_id]]]
+        return [[candidate_map[fallback_id]]]
 
     def _check_load_with_snapshot(
         self, replica_id: ReplicaID, load_snapshot: Dict[ReplicaID, int]
@@ -248,26 +249,20 @@ class ConsistentHashReplicaScheduler(RequestRouter):
 
         Called by the router when a request finishes processing.
         """
-        with self._load_lock:
-            current_load = self._replica_queue_len_cache.get(replica_id)
-            if current_load is None:
-                logger.warning(
-                    f"CHWBL: Attempted to decrement load for {replica_id} but no load info exists"
-                )
-                return
-
-            new_load = max(0, current_load - 1)  # Ensure non-negative
-            self._replica_queue_len_cache.update(replica_id, new_load)
-
-            logger.debug(
-                f"CHWBL: Decremented load for {replica_id}: "
-                f"{current_load} -> {new_load}"
+        current_load = self._replica_queue_len_cache.get(replica_id)
+        if current_load is None:
+            logger.warning(
+                f"CHWBL: Attempted to decrement load for {replica_id} but no load info exists"
             )
+            return
 
-    @property
-    def curr_replicas(self) -> Dict[ReplicaID, RunningReplica]:
-        """Return the current replicas."""
-        return self._replicas
+        new_load = max(0, current_load - 1)  # Ensure non-negative
+        self._replica_queue_len_cache.update(replica_id, new_load)
+
+        logger.debug(
+            f"CHWBL: Decremented load for {replica_id}: "
+            f"{current_load} -> {new_load}"
+        )
 
     def _extract_cache_key(self, payload, request_id: str) -> str:
         """Extract cache key from OpenAI-compatible chat completions payload.
