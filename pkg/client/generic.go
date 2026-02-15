@@ -189,6 +189,7 @@ func (s *GenericService) Delete(kind, id, workspace, name string, opts DeleteOpt
 	return rs.update(id, payload)
 }
 
+
 // ResolveKind resolves a user input string (case-insensitive, singular or plural)
 // to the canonical kind name. For example: "endpoint", "Endpoint", "endpoints" all → "Endpoint".
 func (s *GenericService) ResolveKind(input string) (string, error) {

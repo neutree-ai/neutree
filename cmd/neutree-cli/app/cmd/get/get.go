@@ -158,6 +158,7 @@ func clearScreen() {
 	fmt.Print("\033[H\033[2J")
 }
 
+
 // --- data fetching ---
 
 func fetchResources(c *client.Client, kind, name, workspace string) ([]json.RawMessage, error) {
