@@ -27,6 +27,7 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &nfe)
 }
 
+
 const kindWorkspace = "Workspace"
 
 // GenericService provides kind-based generic CRUD operations for apply workflows.

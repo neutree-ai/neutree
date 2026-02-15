@@ -159,6 +159,7 @@ func clearScreen() {
 }
 
 
+
 // --- data fetching ---
 
 func fetchResources(c *client.Client, kind, name, workspace string) ([]json.RawMessage, error) {
