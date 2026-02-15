@@ -8,10 +8,12 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/apply"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/cleanup"
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/get"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/model"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/packageimport"
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/wait"
 )
 
 func NewNeutreeCliCommand() *cobra.Command {
@@ -47,9 +49,11 @@ Examples:
 
 	neutreeCliCmd.AddCommand(apply.NewApplyCmd())
 	neutreeCliCmd.AddCommand(cleanup.NewCleanupCmd())
+	neutreeCliCmd.AddCommand(get.NewGetCmd())
 	neutreeCliCmd.AddCommand(launch.NewLaunchCmd())
 	neutreeCliCmd.AddCommand(model.NewModelCmd())
 	neutreeCliCmd.AddCommand(packageimport.NewImportCmd())
+	neutreeCliCmd.AddCommand(wait.NewWaitCmd())
 	neutreeCliCmd.AddCommand(newVersionCmd())
 
 	return neutreeCliCmd

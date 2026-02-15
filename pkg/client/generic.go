@@ -113,6 +113,123 @@ func (s *GenericService) Update(kind string, id string, data any) error {
 	return rs.update(id, data)
 }
 
+// ResolveKind resolves a user input string (case-insensitive, singular or plural)
+// to the canonical kind name. For example: "endpoint", "Endpoint", "endpoints" all → "Endpoint".
+func (s *GenericService) ResolveKind(input string) (string, error) {
+	kind, ok := s.scheme.ResolveKind(input)
+	if !ok {
+		return "", fmt.Errorf("unknown kind: %s", input)
+	}
+
+	return kind, nil
+}
+
+// readEndpointForKind returns the table endpoint for a kind without checking unsupportedKinds
+// (read operations are allowed for all kinds).
+func (s *GenericService) readEndpointForKind(kind string) (string, error) {
+	ep, ok := s.scheme.KindToTable(kind)
+	if !ok {
+		return "", fmt.Errorf("unknown kind: %s", kind)
+	}
+
+	return ep, nil
+}
+
+// List retrieves all resources of the given kind, optionally filtered by workspace.
+func (s *GenericService) List(kind, workspace string) ([]json.RawMessage, error) {
+	ep, err := s.readEndpointForKind(kind)
+	if err != nil {
+		return nil, err
+	}
+
+	rs := newResourceService(s.client, ep, kind)
+
+	params := url.Values{}
+	if kind != "Workspace" && workspace != "" {
+		params.Add("metadata->>workspace", "eq."+workspace)
+	}
+
+	var items []json.RawMessage
+	if err := rs.list(params, &items); err != nil {
+		return nil, fmt.Errorf("failed to list %s: %w", kind, err)
+	}
+
+	return items, nil
+}
+
+// Get retrieves a single resource of the given kind by workspace and name.
+func (s *GenericService) Get(kind, workspace, name string) (json.RawMessage, error) {
+	ep, err := s.readEndpointForKind(kind)
+	if err != nil {
+		return nil, err
+	}
+
+	rs := newResourceService(s.client, ep, kind)
+
+	params := url.Values{}
+	params.Add("metadata->>name", "eq."+name)
+
+	if kind != "Workspace" && workspace != "" {
+		params.Add("metadata->>workspace", "eq."+workspace)
+	}
+
+	var items []json.RawMessage
+	if err := rs.list(params, &items); err != nil {
+		return nil, fmt.Errorf("failed to get %s %s: %w", kind, name, err)
+	}
+
+	if len(items) == 0 {
+		return nil, fmt.Errorf("%s %q not found", kind, name)
+	}
+
+	return items[0], nil
+}
+
+// ExtractPhase extracts the status.phase field from raw JSON resource data.
+func ExtractPhase(data json.RawMessage) string {
+	var holder struct {
+		Status struct {
+			Phase string `json:"phase"`
+		} `json:"status"`
+	}
+
+	if err := json.Unmarshal(data, &holder); err != nil {
+		return ""
+	}
+
+	return holder.Status.Phase
+}
+
+// ExtractMetadataField extracts a field from metadata in raw JSON resource data.
+func ExtractMetadataField(data json.RawMessage, field string) string {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+
+	metaRaw, ok := raw["metadata"]
+	if !ok {
+		return ""
+	}
+
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(metaRaw, &meta); err != nil {
+		return ""
+	}
+
+	valRaw, ok := meta[field]
+	if !ok {
+		return ""
+	}
+
+	var val string
+	if err := json.Unmarshal(valRaw, &val); err != nil {
+		return ""
+	}
+
+	return val
+}
+
 // BuildScheme creates and returns a scheme with all v1 types registered.
 func BuildScheme() (*scheme.Scheme, error) {
 	s := scheme.NewScheme()
