@@ -9,6 +9,8 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
+const kindWorkspace = "Workspace"
+
 // GenericService provides kind-based generic CRUD operations for apply workflows.
 type GenericService struct {
 	client *Client
@@ -61,7 +63,7 @@ func (s *GenericService) Exists(kind, workspace, name string) (*ExistsResult, er
 	params := url.Values{}
 	params.Add("metadata->>name", "eq."+name)
 
-	if kind != "Workspace" && workspace != "" {
+	if kind != kindWorkspace && workspace != "" {
 		params.Add("metadata->>workspace", "eq."+workspace)
 	}
 
@@ -145,7 +147,7 @@ func (s *GenericService) List(kind, workspace string) ([]json.RawMessage, error)
 	rs := newResourceService(s.client, ep, kind)
 
 	params := url.Values{}
-	if kind != "Workspace" && workspace != "" {
+	if kind != kindWorkspace && workspace != "" {
 		params.Add("metadata->>workspace", "eq."+workspace)
 	}
 
@@ -169,7 +171,7 @@ func (s *GenericService) Get(kind, workspace, name string) (json.RawMessage, err
 	params := url.Values{}
 	params.Add("metadata->>name", "eq."+name)
 
-	if kind != "Workspace" && workspace != "" {
+	if kind != kindWorkspace && workspace != "" {
 		params.Add("metadata->>workspace", "eq."+workspace)
 	}
 

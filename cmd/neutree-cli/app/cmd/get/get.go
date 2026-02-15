@@ -111,16 +111,20 @@ func runOnce(c *client.Client, kind, name string, opts *getOptions, printer *res
 }
 
 func runWatch(c *client.Client, kind, name string, opts *getOptions, printer *resourcePrinter) error {
-	fetch := func() error {
+	refresh := func() error {
 		items, err := fetchResources(c, kind, name, opts.workspace)
 		if err != nil {
 			return err
 		}
 
+		clearScreen()
+
+		printer.headerPrinted = false
+
 		return printer.print(items)
 	}
 
-	if err := fetch(); err != nil {
+	if err := refresh(); err != nil {
 		return err
 	}
 
@@ -135,11 +139,16 @@ func runWatch(c *client.Client, kind, name string, opts *getOptions, printer *re
 		case <-timer.C:
 			return nil
 		case <-ticker.C:
-			if err := fetch(); err != nil {
+			if err := refresh(); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// clearScreen moves the cursor to the top-left and clears the terminal.
+func clearScreen() {
+	fmt.Print("\033[H\033[2J")
 }
 
 // --- data fetching ---

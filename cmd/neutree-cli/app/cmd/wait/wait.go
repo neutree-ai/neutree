@@ -168,7 +168,7 @@ type deleteCondition struct{}
 
 func (d deleteCondition) match(json.RawMessage) bool { return false }
 func (d deleteCondition) matchNotFound() bool        { return true }
-func (d deleteCondition) String() string              { return "delete" }
+func (d deleteCondition) String() string             { return "delete" }
 
 // jsonpathCondition waits for a jsonpath expression to match a value.
 type jsonpathCondition struct {
