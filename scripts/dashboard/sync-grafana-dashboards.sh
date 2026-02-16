@@ -11,3 +11,5 @@ echo "✅ All Grafana dashboards have been synchronized and converted successful
 
 mv output/*.json ../../observability/grafana/dashboards/
 echo "📂 Moved converted dashboards to observability/grafana/dashboards/"
+
+python3 ./inject_theme.py
