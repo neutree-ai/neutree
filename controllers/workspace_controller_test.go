@@ -320,7 +320,7 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 			}
 
 			// Directly call the Reconcile method.
-			err := c.Reconcile(tt.inputKey)
+			_, err := c.Reconcile(tt.inputKey)
 
 			// Assertions.
 			if tt.wantErr {

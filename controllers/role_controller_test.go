@@ -279,7 +279,7 @@ func TestRoleController_Reconcile(t *testing.T) {
 			}
 
 			// Directly call the Reconcile method.
-			err := c.Reconcile(tt.inputKey)
+			result, err := c.Reconcile(tt.inputKey)
 
 			// Assertions.
 			if tt.wantErr {
@@ -290,6 +290,11 @@ func TestRoleController_Reconcile(t *testing.T) {
 				}
 			} else {
 				assert.NoError(t, err)
+				if role, ok := tt.inputKey.(*v1.Role); ok && role.Metadata != nil &&
+					role.Metadata.DeletionTimestamp != "" &&
+					(role.Status == nil || role.Status.Phase != v1.RolePhaseDELETED) {
+					assert.True(t, result.RequeueAfter > 0)
+				}
 			}
 			// Verify mock expectations.
 			mockStorage.AssertExpectations(t)

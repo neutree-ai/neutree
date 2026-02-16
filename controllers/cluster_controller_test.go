@@ -229,7 +229,7 @@ func TestClusterController_Reconcile(t *testing.T) {
 			}
 
 			c := &ClusterController{storage: mockStorage, syncHandler: func(*v1.Cluster) error { return nil }}
-			err := c.Reconcile(tt.input)
+			_, err := c.Reconcile(tt.input)
 
 			if tt.wantErr {
 				assert.Error(t, err)

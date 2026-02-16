@@ -9,6 +9,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/gateway"
@@ -59,15 +60,15 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 	return c, nil
 }
 
-func (c *ClusterController) Reconcile(obj interface{}) error {
+func (c *ClusterController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	cluster, ok := obj.(*v1.Cluster)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.Cluster")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.Cluster")
 	}
 
 	klog.V(4).Info("Reconciling cluster " + cluster.Metadata.WorkspaceName())
 
-	return c.syncHandler(cluster)
+	return reconcile.Result{}, c.syncHandler(cluster)
 }
 
 func (controller *ClusterController) sync(obj *v1.Cluster) error {

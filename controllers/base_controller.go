@@ -9,6 +9,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -19,7 +20,7 @@ const (
 type HookFunc func(obj interface{}) error
 
 type Reconciler interface {
-	Reconcile(obj interface{}) error
+	Reconcile(obj interface{}) (reconcile.Result, error)
 }
 
 type BaseController struct {
@@ -89,8 +90,23 @@ func (bc *BaseController) processNextWorkItem(r Reconciler) bool {
 		}
 	}
 
-	if err := r.Reconcile(obj); err != nil {
+	result, err := r.Reconcile(obj)
+	if err != nil {
 		klog.Error(err)
+
+		if result.RequeueAfter > 0 {
+			bc.queue.AddAfter(key, result.RequeueAfter)
+		} else if result.Requeue {
+			bc.queue.AddRateLimited(key)
+		}
+	} else {
+		bc.queue.Forget(key)
+
+		if result.RequeueAfter > 0 {
+			bc.queue.AddAfter(key, result.RequeueAfter)
+		} else if result.Requeue {
+			bc.queue.Add(key)
+		}
 	}
 
 	for _, hook := range bc.afterReconcileHooks {

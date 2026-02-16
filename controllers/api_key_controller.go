@@ -5,6 +5,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -32,15 +33,15 @@ func NewApiKeyController(option *ApiKeyControllerOption) (*ApiKeyController, err
 	return c, nil
 }
 
-func (c *ApiKeyController) Reconcile(obj interface{}) error {
+func (c *ApiKeyController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	apiKey, ok := obj.(*v1.ApiKey)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.ApiKey")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.ApiKey")
 	}
 
 	klog.V(4).Info("Reconcile api_key " + apiKey.Metadata.Name)
 
-	return c.syncHandler(apiKey)
+	return reconcile.Result{}, c.syncHandler(apiKey)
 }
 
 func (c *ApiKeyController) sync(obj *v1.ApiKey) error {

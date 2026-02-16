@@ -196,7 +196,7 @@ func TestEndpointController_Reconcile(t *testing.T) {
 				tt.setup(ms)
 			}
 			c := &EndpointController{storage: ms, syncHandler: func(*v1.Endpoint) error { return nil }}
-			err := c.Reconcile(tt.key)
+			_, err := c.Reconcile(tt.key)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {

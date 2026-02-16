@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -37,15 +38,15 @@ func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRe
 	return c, nil
 }
 
-func (c *ImageRegistryController) Reconcile(obj interface{}) error {
+func (c *ImageRegistryController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	imageRegistry, ok := obj.(*v1.ImageRegistry)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.ImageRegistry")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.ImageRegistry")
 	}
 
 	klog.V(4).Info("Reconcile image registry " + imageRegistry.Metadata.Name)
 
-	return c.syncHandler(imageRegistry)
+	return reconcile.Result{}, c.syncHandler(imageRegistry)
 }
 
 func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
