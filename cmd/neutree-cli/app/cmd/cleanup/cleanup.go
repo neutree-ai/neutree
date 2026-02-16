@@ -70,8 +70,12 @@ func runCleanup(executor command.Executor, opts *cleanupOptions, component strin
 	workDir := launch.LaunchWorkDir()
 	composeFile := filepath.Join(workDir, component, "docker-compose.yml")
 
-	if _, err := os.Stat(composeFile); os.IsNotExist(err) {
-		return fmt.Errorf("compose file not found at %s: has %q been launched?", composeFile, component)
+	if _, err := os.Stat(composeFile); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("compose file not found at %s: has %q been launched?", composeFile, component)
+		}
+
+		return errors.Wrapf(err, "failed to stat compose file at %s", composeFile)
 	}
 
 	if !opts.force {
