@@ -26,6 +26,12 @@ type ServerConfig struct {
 	Host string
 }
 
+type NotifyConfig struct {
+	Enabled bool
+	DBURI   string
+	Channel string
+}
+
 type CoreConfig struct {
 	ObjectStorage           storage.ObjectStorage
 	Storage                 storage.Storage
@@ -44,6 +50,7 @@ type CoreConfig struct {
 
 	// core server config
 	ServerConfig *ServerConfig
+	NotifyConfig *NotifyConfig
 
 	Scheme *scheme.Scheme
 }

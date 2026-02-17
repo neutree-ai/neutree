@@ -7,6 +7,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
+	"github.com/neutree-ai/neutree/cmd/neutree-core/app/notify"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cron"
 )
@@ -35,6 +36,24 @@ func (a *App) Run(ctx context.Context) error {
 	go a.config.ObsCollectConfigManager.Start(ctx)
 
 	go cron.StartCrons(ctx, a.config.Storage) //nolint:errcheck
+
+	if a.config.NotifyConfig != nil && a.config.NotifyConfig.Enabled {
+		notify.Start(ctx, a.config.NotifyConfig.DBURI, a.config.NotifyConfig.Channel,
+			func(kind, id string) {
+				if kind != "role" {
+					return
+				}
+
+				ctrl, ok := a.controllers["role"]
+				if !ok {
+					klog.Warningf("notify event ignored: role controller not found (id=%s)", id)
+					return
+				}
+
+				ctrl.Enqueue(id)
+			},
+		)
+	}
 
 	// Start all controllers
 	for name, ctrl := range a.controllers {

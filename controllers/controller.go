@@ -57,6 +57,7 @@ func (r *objectReader) Get(id string) (scheme.Object, error) {
 type Controller interface {
 	Start(ctx context.Context)
 	Name() string
+	Enqueue(id string)
 }
 
 type Options func(*controller)
@@ -77,6 +78,10 @@ func (c *controller) Start(ctx context.Context) {
 
 func (c *controller) Name() string {
 	return c.name
+}
+
+func (c *controller) Enqueue(id string) {
+	c.BaseController.queue.Add(id)
 }
 
 func NewController(name string, opts ...Options) *controller {

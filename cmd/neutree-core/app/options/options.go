@@ -154,6 +154,11 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		Port: o.Server.Port,
 		Host: o.Server.Host,
 	}
+	c.NotifyConfig = &config.NotifyConfig{
+		Enabled: o.Storage.NotifyEnabled,
+		DBURI:   o.Storage.DBURI,
+		Channel: o.Storage.NotifyChannel,
+	}
 
 	jwtToken, err := storage.CreateServiceToken(o.Storage.JwtSecret)
 	if err != nil {
