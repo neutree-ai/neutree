@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -113,6 +114,62 @@ func (s *GenericService) Update(kind string, id string, data any) error {
 	rs := newResourceService(s.client, ep, kind)
 
 	return rs.update(id, data)
+}
+
+// DeleteOptions configures the soft-delete request.
+type DeleteOptions struct {
+	Force bool // set neutree.ai/force-delete annotation
+}
+
+// Delete soft-deletes a resource of the given kind by ID.
+// It first GETs the resource to retrieve its full metadata, then sends a PATCH
+// setting metadata.deletion_timestamp. The full metadata is needed because
+// PostgREST replaces the entire composite field on PATCH.
+func (s *GenericService) Delete(kind, id, workspace, name string, opts DeleteOptions) error {
+	ep, err := s.endpointForKind(kind)
+	if err != nil {
+		return err
+	}
+
+	// GET current resource to retrieve full metadata for backfill
+	data, err := s.Get(kind, workspace, name)
+	if err != nil {
+		return fmt.Errorf("failed to get %s %s before delete: %w", kind, name, err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("failed to parse %s %s: %w", kind, name, err)
+	}
+
+	var meta map[string]any
+	if metaRaw, ok := raw["metadata"]; ok {
+		if err := json.Unmarshal(metaRaw, &meta); err != nil {
+			return fmt.Errorf("failed to parse metadata of %s %s: %w", kind, name, err)
+		}
+	} else {
+		meta = map[string]any{}
+	}
+
+	if opts.Force {
+		annotations, _ := meta["annotations"].(map[string]any)
+		if annotations == nil {
+			annotations = map[string]any{}
+		}
+
+		annotations["neutree.ai/force-delete"] = "true"
+		meta["annotations"] = annotations
+	}
+
+	meta["deletion_timestamp"] = time.Now().UTC().Format(time.RFC3339)
+
+	payload := map[string]any{
+		"metadata": meta,
+	}
+
+	rs := newResourceService(s.client, ep, kind)
+
+	return rs.update(id, payload)
 }
 
 // ResolveKind resolves a user input string (case-insensitive, singular or plural)
