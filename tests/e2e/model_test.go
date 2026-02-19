@@ -323,7 +323,7 @@ var _ = Describe("Model", Ordered, func() {
 
 	Describe("List", Label("model", "list"), func() {
 
-		It("should list models in the registry", Label("C2613133"), func() {
+		It("should list models in the registry", Label("C2613133", "C2611878"), func() {
 			name := "e2e-list-basic"
 			version := "v1.0"
 			DeferCleanup(Model.EnsureDeleted, name, version)

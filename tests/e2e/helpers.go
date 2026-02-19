@@ -212,6 +212,48 @@ func ParseKV(stdout string) map[string]string {
 	return result
 }
 
+// --- Docker helpers ---
+
+// DockerRun runs a container in detached mode and returns its ID.
+func DockerRun(args ...string) string {
+	fullArgs := append([]string{"run", "-d"}, args...)
+	cmd := exec.Command("docker", fullArgs...)
+	out, err := cmd.Output()
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(),
+		"docker run failed: %v", err)
+	return strings.TrimSpace(string(out))
+}
+
+// DockerRemove force-removes a container, ignoring errors.
+func DockerRemove(containerID string) {
+	exec.Command("docker", "rm", "-f", containerID).Run() //nolint:errcheck
+}
+
+// DockerPort returns the host port mapped to a container port.
+func DockerPort(containerID, containerPort string) string {
+	cmd := exec.Command("docker", "port", containerID, containerPort)
+	out, err := cmd.Output()
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(),
+		"docker port failed: %v", err)
+	// Output format: "0.0.0.0:32768\n" or "[::]:32768\n"
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)
+	_, port, _ := strings.Cut(parts[0], ":")
+	return port
+}
+
+// StartLocalRegistry starts a registry:2 container on a random port
+// and returns (host URL, container ID).
+func StartLocalRegistry() (string, string) {
+	id := DockerRun("-p", "0:5000", "registry:2")
+	port := DockerPort(id, "5000")
+	return "localhost:" + port, id
+}
+
+// StopLocalRegistry stops and removes the registry container.
+func StopLocalRegistry(containerID string) {
+	DockerRemove(containerID)
+}
+
 // --- Environment helpers ---
 
 // testRegistry returns the model registry name for tests.
