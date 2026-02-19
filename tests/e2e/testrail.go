@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 // TestRail status IDs
@@ -39,7 +40,7 @@ func ReportToTestRail(runID string, caseResults []CaseResult) error {
 	}
 
 	type trResult struct {
-		CaseID   string `json:"case_id"`
+		CaseID   int    `json:"case_id"`
 		StatusID int    `json:"status_id"`
 		Comment  string `json:"comment,omitempty"`
 	}
@@ -58,9 +59,14 @@ func ReportToTestRail(runID string, caseResults []CaseResult) error {
 		if len(caseID) > 0 && caseID[0] == 'C' {
 			caseID = caseID[1:]
 		}
+		caseIDInt, err := strconv.Atoi(caseID)
+		if err != nil {
+			fmt.Printf("Skipping invalid case ID %q: %v\n", r.CaseID, err)
+			continue
+		}
 
 		payload.Results = append(payload.Results, trResult{
-			CaseID:   caseID,
+			CaseID:   caseIDInt,
 			StatusID: statusID,
 			Comment:  r.Comment,
 		})
