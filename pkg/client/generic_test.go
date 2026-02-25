@@ -2,6 +2,8 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,6 +47,46 @@ func TestExtractPhase(t *testing.T) {
 			assert.Equal(t, tt.want, ExtractPhase(tt.data))
 		})
 	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "NotFoundError",
+			err:  &NotFoundError{Kind: "Endpoint", Name: "my-ep"},
+			want: true,
+		},
+		{
+			name: "wrapped NotFoundError",
+			err:  fmt.Errorf("outer: %w", &NotFoundError{Kind: "Endpoint", Name: "my-ep"}),
+			want: true,
+		},
+		{
+			name: "other error",
+			err:  errors.New("connection refused"),
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsNotFound(tt.err))
+		})
+	}
+}
+
+func TestNotFoundError_Error(t *testing.T) {
+	err := &NotFoundError{Kind: "Endpoint", Name: "my-ep"}
+	assert.Equal(t, `Endpoint "my-ep" not found`, err.Error())
 }
 
 func TestExtractMetadataField(t *testing.T) {
