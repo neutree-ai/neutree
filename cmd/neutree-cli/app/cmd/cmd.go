@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/apply"
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/cleanup"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/model"
@@ -45,6 +46,7 @@ Examples:
 	}
 
 	neutreeCliCmd.AddCommand(apply.NewApplyCmd())
+	neutreeCliCmd.AddCommand(cleanup.NewCleanupCmd())
 	neutreeCliCmd.AddCommand(launch.NewLaunchCmd())
 	neutreeCliCmd.AddCommand(model.NewModelCmd())
 	neutreeCliCmd.AddCommand(packageimport.NewImportCmd())
