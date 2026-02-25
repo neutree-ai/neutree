@@ -26,6 +26,9 @@ RUN /ray/python/build-wheel-manylinux2014.sh
 
 FROM ${RAY_BASE_IMAGE}
 
+# Disable OTEL metrics backend due to metrics loss issue, fall back to OpenCensus
+ENV RAY_enable_open_telemetry=false
+
 # Install NFS dependencies
 USER root
 RUN apt-get update && apt-get install util-linux nfs-common -y
