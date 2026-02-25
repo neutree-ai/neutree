@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"time"
@@ -9,6 +10,22 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
+
+// NotFoundError is returned when a resource does not exist.
+type NotFoundError struct {
+	Kind string
+	Name string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("%s %q not found", e.Kind, e.Name)
+}
+
+// IsNotFound returns true if the error indicates a resource was not found.
+func IsNotFound(err error) bool {
+	var nfe *NotFoundError
+	return errors.As(err, &nfe)
+}
 
 const kindWorkspace = "Workspace"
 
@@ -238,7 +255,7 @@ func (s *GenericService) Get(kind, workspace, name string) (json.RawMessage, err
 	}
 
 	if len(items) == 0 {
-		return nil, fmt.Errorf("%s %q not found", kind, name)
+		return nil, &NotFoundError{Kind: kind, Name: name}
 	}
 
 	return items[0], nil

@@ -131,12 +131,18 @@ func runWatch(c *client.Client, kind, name string, opts *getOptions, printer *re
 	ticker := time.NewTicker(opts.interval)
 	defer ticker.Stop()
 
-	timer := time.NewTimer(opts.timeout)
-	defer timer.Stop()
+	// Treat non-positive timeout as no timeout (watch indefinitely).
+	var timerC <-chan time.Time
+	if opts.timeout > 0 {
+		timer := time.NewTimer(opts.timeout)
+		defer timer.Stop()
+
+		timerC = timer.C
+	}
 
 	for {
 		select {
-		case <-timer.C:
+		case <-timerC:
 			return nil
 		case <-ticker.C:
 			if err := refresh(); err != nil {
@@ -269,6 +275,9 @@ func formatAge(timestamp string) string {
 	}
 
 	d := time.Since(t)
+	if d < 0 {
+		d = 0
+	}
 
 	switch {
 	case d < time.Minute:

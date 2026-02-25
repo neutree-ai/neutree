@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -126,6 +125,11 @@ func runDeleteByName(c *client.Client, opts *deleteOptions, args []string) error
 
 	name := args[1]
 	workspace := opts.workspace
+
+	// Workspace kind does not belong to a workspace; blank it for display and API calls.
+	if kind == "Workspace" {
+		workspace = ""
+	}
 
 	label := resourceLabel(kind, workspace, name)
 
@@ -259,14 +263,26 @@ func waitForDeletion(c *client.Client, kind, workspace, name string, timeout, in
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	var lastErr error
+
 	for {
 		select {
 		case <-timer.C:
+			if lastErr != nil {
+				return fmt.Errorf("timeout waiting for %s/%s to be deleted: %w", kind, name, lastErr)
+			}
+
 			return fmt.Errorf("timeout waiting for %s/%s to be deleted", kind, name)
 		case <-ticker.C:
 			_, err := c.Generic.Get(kind, workspace, name)
-			if err != nil && strings.Contains(err.Error(), "not found") {
-				return nil
+			if err != nil {
+				if client.IsNotFound(err) {
+					return nil
+				}
+
+				lastErr = err
+
+				return fmt.Errorf("error while waiting for %s/%s deletion: %w", kind, name, err)
 			}
 		}
 	}

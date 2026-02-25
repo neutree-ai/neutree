@@ -128,7 +128,7 @@ runGet → runOnce / runWatch
      └── printTable
 ```
 
-`resourcePrinter` holds state so that `--watch` mode prints the table header only on the first iteration.
+`resourcePrinter` holds state for header printing. In `--watch` mode, each refresh clears the screen and reprints the full table (including header) so the display always shows the latest snapshot.
 
 ### `wait`
 

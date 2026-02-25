@@ -32,6 +32,11 @@ func TestFormatAge(t *testing.T) {
 			timestamp: "2020-01-01T00:00:00",
 			want:      "", // just check it doesn't return <unknown>
 		},
+		{
+			name:      "future timestamp clamps to 0s",
+			timestamp: "2099-01-01T00:00:00Z",
+			want:      "0s",
+		},
 	}
 
 	for _, tt := range tests {

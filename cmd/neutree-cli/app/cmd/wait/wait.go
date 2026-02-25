@@ -10,6 +10,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
+	"github.com/neutree-ai/neutree/pkg/client"
 )
 
 // --- options & command ---
@@ -87,7 +88,7 @@ func runWait(opts *waitOptions, args []string) error {
 		data, err := c.Generic.Get(kind, opts.workspace, name)
 		if err != nil {
 			// For delete condition, "not found" means success
-			if cond.matchNotFound() && strings.Contains(err.Error(), "not found") {
+			if cond.matchNotFound() && client.IsNotFound(err) {
 				return true, nil
 			}
 
@@ -109,12 +110,18 @@ func runWait(opts *waitOptions, args []string) error {
 	ticker := time.NewTicker(opts.interval)
 	defer ticker.Stop()
 
-	timer := time.NewTimer(opts.timeout)
-	defer timer.Stop()
+	// Treat non-positive timeout as no timeout (wait indefinitely).
+	var timerC <-chan time.Time
+	if opts.timeout > 0 {
+		timer := time.NewTimer(opts.timeout)
+		defer timer.Stop()
+
+		timerC = timer.C
+	}
 
 	for {
 		select {
-		case <-timer.C:
+		case <-timerC:
 			return fmt.Errorf("timeout waiting for %s/%s: %s", kind, name, cond)
 		case <-ticker.C:
 			done, err := poll()
