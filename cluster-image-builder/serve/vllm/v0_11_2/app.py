@@ -101,7 +101,6 @@ class Backend:
             self.enable_auto_tools = True
 
         # Reasoning configuration (read but don't pop - engine needs these too)
-        self.enable_reasoning = engine_kwargs.get("enable_reasoning", False)
         self.reasoning_parser = engine_kwargs.get("reasoning_parser", None)
 
         # Extract chat template parameters
@@ -175,7 +174,7 @@ class Backend:
                 chat_template_content_format=self.chat_template_content_format,
                 enable_auto_tools=self.enable_auto_tools,
                 tool_parser=self.tool_parser,
-                reasoning_parser=self.reasoning_parser if self.enable_reasoning else "",
+                reasoning_parser=self.reasoning_parser,
                 enable_prompt_tokens_details=self.enable_prompt_tokens_details,
             )
         return self.openai_serving_chat
