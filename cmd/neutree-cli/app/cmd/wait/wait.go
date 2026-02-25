@@ -112,6 +112,7 @@ func runWait(opts *waitOptions, args []string) error {
 
 	// Treat non-positive timeout as no timeout (wait indefinitely).
 	var timerC <-chan time.Time
+
 	if opts.timeout > 0 {
 		timer := time.NewTimer(opts.timeout)
 		defer timer.Stop()

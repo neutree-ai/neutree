@@ -280,8 +280,6 @@ func waitForDeletion(c *client.Client, kind, workspace, name string, timeout, in
 					return nil
 				}
 
-				lastErr = err
-
 				return fmt.Errorf("error while waiting for %s/%s deletion: %w", kind, name, err)
 			}
 		}

@@ -133,6 +133,7 @@ func runWatch(c *client.Client, kind, name string, opts *getOptions, printer *re
 
 	// Treat non-positive timeout as no timeout (watch indefinitely).
 	var timerC <-chan time.Time
+
 	if opts.timeout > 0 {
 		timer := time.NewTimer(opts.timeout)
 		defer timer.Stop()
