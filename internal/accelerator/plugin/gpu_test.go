@@ -67,7 +67,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 	tests := []struct {
 		name                    string
 		mockSetup               func(*commandmocks.MockExecutor)
-		expecteAcceleratorCount int
+		expectedAcceleratorCount int
 	}{
 		{
 			name: "Node without GPU resources",
@@ -81,7 +81,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 					assert.True(t, strings.Contains(strings.Join(cmds, " "), "lspci -nn"))
 				}).Return([]byte("{}"), nil).Once()
 			},
-			expecteAcceleratorCount: 0,
+			expectedAcceleratorCount: 0,
 		},
 		{
 			name: "Node with 2 NVIDIA 3D controller GPUs (should not count audio devices)",
@@ -95,7 +95,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 					assert.True(t, strings.Contains(strings.Join(cmds, " "), "lspci -nn"))
 				}).Return([]byte(testNvidiaLspciOutput), nil).Once()
 			},
-			expecteAcceleratorCount: 2,
+			expectedAcceleratorCount: 2,
 		},
 		{
 			name: "Node with 1 NVIDIA VGA compatible GPU",
@@ -109,7 +109,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 					assert.True(t, strings.Contains(strings.Join(cmds, " "), "lspci -nn"))
 				}).Return([]byte(testNvidiaVGALspciOutput), nil).Once()
 			},
-			expecteAcceleratorCount: 1,
+			expectedAcceleratorCount: 1,
 		},
 	}
 
@@ -117,6 +117,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExector := &commandmocks.MockExecutor{}
 			tt.mockSetup(mockExector)
+
 			p := &GPUAcceleratorPlugin{
 				executor: mockExector,
 			}
@@ -125,7 +126,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 				SSHPrivateKey: "MTIzCg==",
 			})
 			assert.NoError(t, err)
-			assert.Len(t, accelerators, tt.expecteAcceleratorCount)
+			assert.Len(t, accelerators, tt.expectedAcceleratorCount)
 		})
 	}
 }
@@ -176,6 +177,7 @@ func TestGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExector := &commandmocks.MockExecutor{}
 			tt.mockSetup(mockExector)
+
 			p := &GPUAcceleratorPlugin{
 				executor: mockExector,
 			}

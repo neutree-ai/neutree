@@ -120,7 +120,7 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 			continue
 		}
 
-		if strings.Contains(line, "3D controller") || strings.Contains(line, "VGA compatible controller") {
+		if strings.Contains(lineLower, "3d controller") || strings.Contains(lineLower, "vga compatible controller") {
 			accelerators = append(accelerators, v1.Accelerator{
 				Type: "",
 				ID:   strconv.Itoa(count),
