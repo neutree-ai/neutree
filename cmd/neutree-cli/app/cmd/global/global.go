@@ -1,9 +1,12 @@
 package global
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/neutree-ai/neutree/pkg/client"
 )
 
 var (
@@ -28,4 +31,22 @@ func ResolveEnv() {
 	if APIKey == "" {
 		APIKey = os.Getenv("NEUTREE_API_KEY")
 	}
+}
+
+// NewClient validates global flags and creates a new API client.
+func NewClient() (*client.Client, error) {
+	if ServerURL == "" {
+		return nil, fmt.Errorf("server URL is required: use --server-url or set NEUTREE_SERVER_URL")
+	}
+
+	if APIKey == "" {
+		return nil, fmt.Errorf("API key is required: use --api-key or set NEUTREE_API_KEY")
+	}
+
+	opts := []client.ClientOption{client.WithAPIKey(APIKey)}
+	if Insecure {
+		opts = append(opts, client.WithInsecureSkipVerify())
+	}
+
+	return client.NewClient(ServerURL, opts...), nil
 }

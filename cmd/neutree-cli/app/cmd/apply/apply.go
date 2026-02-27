@@ -53,6 +53,8 @@ Examples:
 
   # Apply with force update for existing resources
   neutree-cli apply -f resources.yaml --server-url https://api.neutree.ai --api-key sk_xxx --force-update`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runApply(opts)
 		},
@@ -67,12 +69,9 @@ Examples:
 }
 
 func runApply(opts *applyOptions) error {
-	if global.ServerURL == "" {
-		return fmt.Errorf("server URL is required: use --server-url or set NEUTREE_SERVER_URL")
-	}
-
-	if global.APIKey == "" {
-		return fmt.Errorf("API key is required: use --api-key or set NEUTREE_API_KEY")
+	c, err := global.NewClient()
+	if err != nil {
+		return err
 	}
 
 	// Build scheme and decoder
@@ -101,9 +100,6 @@ func runApply(opts *applyOptions) error {
 
 	// Sort by dependency order
 	sortByPriority(resources)
-
-	// Create client
-	c := client.NewClient(global.ServerURL, client.WithAPIKey(global.APIKey))
 
 	// Apply each resource
 	var hasError bool

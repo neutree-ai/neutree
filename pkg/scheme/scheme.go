@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // Scheme defines a simple type registry for mapping VersionKind to Go types.
@@ -119,6 +120,37 @@ func (s *Scheme) ObjectKind(obj ObjectKind) string {
 func (s *Scheme) KindToTable(kind string) (string, bool) {
 	table, ok := s.kindToTable[kind]
 	return table, ok
+}
+
+// ResolveKind resolves a user input string to a canonical kind name.
+// It handles exact kind match, table name match, and case-insensitive matching.
+func (s *Scheme) ResolveKind(input string) (string, bool) {
+	// Exact kind match (e.g., "Endpoint")
+	if _, ok := s.kindToTable[input]; ok {
+		return input, true
+	}
+
+	// Exact table name match (e.g., "endpoints")
+	if kind, ok := s.tableToKind[input]; ok {
+		return kind, true
+	}
+
+	// Case-insensitive kind match (e.g., "endpoint" → "Endpoint")
+	lower := strings.ToLower(input)
+	for kind := range s.kindToTable {
+		if strings.ToLower(kind) == lower {
+			return kind, true
+		}
+	}
+
+	// Case-insensitive table match (e.g., "Endpoints" → "Endpoint")
+	for table, kind := range s.tableToKind {
+		if strings.ToLower(table) == lower {
+			return kind, true
+		}
+	}
+
+	return "", false
 }
 
 // CodecFactory is a simplified factory for creating decoders.
