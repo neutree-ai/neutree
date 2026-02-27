@@ -27,7 +27,6 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &nfe)
 }
 
-
 const kindWorkspace = "Workspace"
 
 // GenericService provides kind-based generic CRUD operations for apply workflows.
@@ -189,8 +188,6 @@ func (s *GenericService) Delete(kind, id, workspace, name string, opts DeleteOpt
 
 	return rs.update(id, payload)
 }
-
-
 
 // ResolveKind resolves a user input string (case-insensitive, singular or plural)
 // to the canonical kind name. For example: "endpoint", "Endpoint", "endpoints" all → "Endpoint".

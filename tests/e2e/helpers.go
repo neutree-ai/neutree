@@ -2,8 +2,9 @@ package e2e
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,10 @@ var cliBinary string
 
 // runID is a short random suffix generated once per test run,
 // used in resource names to avoid collisions between parallel runs.
-var runID = fmt.Sprintf("%06d", rand.Intn(1000000))
+var runID = func() string {
+	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
+	return fmt.Sprintf("%06d", n.Int64())
+}()
 
 // --- Suite setup / teardown ---
 
@@ -68,7 +72,9 @@ func RunCLIWithStdin(stdin string, args ...string) CLIResult {
 		"--api-key", os.Getenv("NEUTREE_API_KEY"),
 		"--insecure",
 	}
-	fullArgs := append(injected, args...)
+	fullArgs := make([]string, 0, len(injected)+len(args))
+	fullArgs = append(fullArgs, injected...)
+	fullArgs = append(fullArgs, args...)
 
 	cmd := exec.Command(cliBinary, fullArgs...)
 
@@ -83,6 +89,7 @@ func RunCLIWithStdin(stdin string, args ...string) CLIResult {
 	err := cmd.Run()
 
 	exitCode := 0
+
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
@@ -127,7 +134,6 @@ func ExpectStdoutContains(r CLIResult, substr string) {
 		"stdout does not contain %q\nfull stdout: %s", substr, r.Stdout)
 }
 
-
 // --- Output parsing ---
 
 // ParseTable parses tabwriter table output (header row + data rows) into
@@ -144,19 +150,24 @@ func ParseTable(stdout string) []map[string]string {
 	headers := extractColumns(lines[0], positions)
 
 	var rows []map[string]string
+
 	for _, line := range lines[1:] {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+
 		values := extractColumns(line, positions)
 		row := make(map[string]string, len(headers))
+
 		for i, h := range headers {
 			if i < len(values) {
 				row[h] = values[i]
 			}
 		}
+
 		rows = append(rows, row)
 	}
+
 	return rows
 }
 
@@ -164,13 +175,16 @@ func ParseTable(stdout string) []map[string]string {
 // for transitions from a gap of 2+ spaces to a non-space character.
 func tableColumnPositions(header string) []int {
 	positions := []int{0}
+
 	i := 0
 	for i < len(header) {
 		if header[i] == ' ' {
 			start := i
+
 			for i < len(header) && header[i] == ' ' {
 				i++
 			}
+
 			if i < len(header) && i-start >= 2 {
 				positions = append(positions, i)
 			}
@@ -178,37 +192,45 @@ func tableColumnPositions(header string) []int {
 			i++
 		}
 	}
+
 	return positions
 }
 
 // extractColumns slices a line into column values based on pre-computed positions.
 func extractColumns(line string, positions []int) []string {
 	cols := make([]string, len(positions))
+
 	for i, start := range positions {
 		end := len(line)
 		if i+1 < len(positions) {
 			end = positions[i+1]
 		}
+
 		if start >= len(line) {
 			continue
 		}
+
 		if end > len(line) {
 			end = len(line)
 		}
+
 		cols[i] = strings.TrimSpace(line[start:end])
 	}
+
 	return cols
 }
 
 // ParseKV parses tabwriter key-value output ("Key:  Value" per line) into a map.
 func ParseKV(stdout string) map[string]string {
 	result := make(map[string]string)
+
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if key, value, ok := strings.Cut(line, ":"); ok && key != "" {
 			result[strings.TrimSpace(key)] = strings.TrimSpace(value)
 		}
 	}
+
 	return result
 }
 
@@ -221,6 +243,7 @@ func DockerRun(args ...string) string {
 	out, err := cmd.Output()
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(),
 		"docker run failed: %v", err)
+
 	return strings.TrimSpace(string(out))
 }
 
@@ -238,6 +261,7 @@ func DockerPort(containerID, containerPort string) string {
 	// Output format: "0.0.0.0:32768\n" or "[::]:32768\n"
 	parts := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)
 	_, port, _ := strings.Cut(parts[0], ":")
+
 	return port
 }
 
@@ -246,6 +270,7 @@ func DockerPort(containerID, containerPort string) string {
 func StartLocalRegistry() (string, string) {
 	id := DockerRun("-p", "0:5000", "registry:2")
 	port := DockerPort(id, "5000")
+
 	return "localhost:" + port, id
 }
 
@@ -261,6 +286,7 @@ func testRegistry() string {
 	if r := os.Getenv("E2E_MODEL_REGISTRY"); r != "" {
 		return r
 	}
+
 	return "e2e-registry-" + runID
 }
 
@@ -269,6 +295,7 @@ func testWorkspace() string {
 	if w := os.Getenv("E2E_WORKSPACE"); w != "" {
 		return w
 	}
+
 	return "default"
 }
 
@@ -286,9 +313,11 @@ func renderTemplate(templatePath string, defaults map[string]string) (string, er
 		if v := os.Getenv(key); v != "" {
 			return v
 		}
+
 		if defaults != nil {
 			return defaults[key]
 		}
+
 		return ""
 	})
 
@@ -310,8 +339,10 @@ func renderTemplateToTempFile(templatePath string, defaults map[string]string) (
 	if _, err := tmpFile.WriteString(rendered); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpFile.Name())
+
 		return "", err
 	}
+
 	tmpFile.Close()
 
 	return tmpFile.Name(), nil

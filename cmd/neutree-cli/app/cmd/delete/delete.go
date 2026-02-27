@@ -132,7 +132,6 @@ func runDeleteByName(c *client.Client, opts *deleteOptions, args []string) error
 		workspace = ""
 	}
 
-
 	label := resourceLabel(kind, workspace, name)
 
 	result, err := c.Generic.Exists(kind, workspace, name)

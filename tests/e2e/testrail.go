@@ -59,6 +59,7 @@ func ReportToTestRail(runID string, caseResults []CaseResult) error {
 		if len(caseID) > 0 && caseID[0] == 'C' {
 			caseID = caseID[1:]
 		}
+
 		caseIDInt, err := strconv.Atoi(caseID)
 		if err != nil {
 			fmt.Printf("Skipping invalid case ID %q: %v\n", r.CaseID, err)

@@ -251,11 +251,11 @@ func TestExtractResourceIdentifiers(t *testing.T) {
 			bodyMap: map[string]interface{}{
 				"metadata": map[string]interface{}{
 					"workspace": "default",
-					"name":      "registry-smtx-io",
+					"name":      "registry-neutree-ai",
 				},
 			},
 			expectedWorkspace: "default",
-			expectedName:      "registry-smtx-io",
+			expectedName:      "registry-neutree-ai",
 			wantErr:           false,
 		},
 		{
