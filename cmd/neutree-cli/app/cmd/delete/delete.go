@@ -3,6 +3,7 @@ package delete
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -257,33 +258,26 @@ func runDeleteFromFile(c *client.Client, opts *deleteOptions) error {
 
 // waitForDeletion polls until the resource no longer exists or the timeout expires.
 func waitForDeletion(c *client.Client, kind, workspace, name string, timeout, interval time.Duration) error {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	deadline := time.Now().Add(timeout)
 
 	var lastErr error
 
-	for {
-		select {
-		case <-timer.C:
-			if lastErr != nil {
-				return fmt.Errorf("timeout waiting for %s/%s to be deleted: %w", kind, name, lastErr)
+	for time.Now().Before(deadline) {
+		_, err := c.Generic.Get(kind, workspace, name)
+		if err != nil {
+			if client.IsNotFound(err) {
+				return nil
 			}
 
-			return fmt.Errorf("timeout waiting for %s/%s to be deleted", kind, name)
-		case <-ticker.C:
-			_, err := c.Generic.Get(kind, workspace, name)
-			if err != nil {
-				if client.IsNotFound(err) {
-					return nil
-				}
-
-				return fmt.Errorf("error while waiting for %s/%s deletion: %w", kind, name, err)
-			}
+			lastErr = err
+		} else {
+			lastErr = nil
 		}
+
+		time.Sleep(interval)
 	}
+
+	return errors.Join(fmt.Errorf("timeout waiting for %s/%s to be deleted", kind, name), lastErr)
 }
 
 // resourceLabel builds a display label like "Kind/workspace/name" or "Kind/name".
