@@ -163,6 +163,13 @@ ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 test: prepare-build-cli mockgen fmt vet lint ## Run unit test
 	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e\|mocks\|db/dbtest')
 
+LABEL_FILTER ?=
+
+.PHONY: e2e-test
+e2e-test: ## Run E2E tests (requires NEUTREE_SERVER_URL and NEUTREE_API_KEY)
+	$(if $(wildcard .env),set -a && source .env && set +a &&) go test -v -timeout 10m ./tests/e2e/... \
+		--ginkgo.v --ginkgo.no-color --ginkgo.silence-skips $(if $(LABEL_FILTER),--ginkgo.label-filter="$(LABEL_FILTER)")
+
 ##@ Database Testing
 
 .PHONY: db-test

@@ -89,6 +89,7 @@ func TestNotFoundError_Error(t *testing.T) {
 	assert.Equal(t, `Endpoint "my-ep" not found`, err.Error())
 }
 
+
 func TestExtractMetadataField(t *testing.T) {
 	data := json.RawMessage(`{
 		"metadata": {
