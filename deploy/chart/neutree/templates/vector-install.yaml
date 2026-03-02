@@ -35,8 +35,13 @@ data:
               .extracted_data.timestamp = .started_at
               .extracted_data.status = .response.status
               .extracted_data.url_spilt = split!(.request.uri, "/")
-              .extracted_data.endpoint_name = .extracted_data.url_spilt[4]  # endpoint name from /workspace/{workspace}/endpoint/{endpoint_name}
+              .extracted_data.endpoint_type = .extracted_data.url_spilt[3]  # "endpoint" or "external-endpoint"
+              .extracted_data.endpoint_name = .extracted_data.url_spilt[4]  # endpoint name from /workspace/{workspace}/{type}/{endpoint_name}
               .extracted_data.api_key_id = .consumer.custom_id
+
+              if exists(.ai."statistics".meta) && exists(.ai."statistics".meta.request_model) {
+                  .extracted_data.model_name = .ai."statistics".meta.request_model
+              }
 
               if to_int!(.extracted_data.total_tokens) > 0 {
                   ._has_usage = true
@@ -60,7 +65,11 @@ data:
               "p_api_key_id": .extracted_data.api_key_id,
               "p_request_id": .extracted_data.request_id,
               "p_usage_amount": .extracted_data.total_tokens,
-              "p_endpoint_name": .extracted_data.endpoint_name
+              "p_endpoint_name": .extracted_data.endpoint_name,
+              "p_endpoint_type": .extracted_data.endpoint_type,
+              "p_model_name": .extracted_data.model_name,
+              "p_prompt_tokens": .extracted_data.prompt_tokens,
+              "p_completion_tokens": .extracted_data.completion_tokens
           }
     sinks:
       postgrest_rpc:
