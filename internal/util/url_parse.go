@@ -32,6 +32,7 @@ func ParseURLComponents(rawURL string) (*URLComponents, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "invalid port in URL: %s", rawURL)
 		}
+
 		port = p
 	} else if scheme == "http" {
 		port = 80

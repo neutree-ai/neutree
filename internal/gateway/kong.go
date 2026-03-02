@@ -145,7 +145,7 @@ func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
 	aiStatisticsPlugin := k.generateAIStatisticsPlugin(ep, route)
 	needPluginMap[*aiStatisticsPlugin.InstanceName] = aiStatisticsPlugin
 
-	if getEndpointRouteType(ep) == "/v1/chat/completions" {
+	if getEndpointRouteType(ep) == v1.RouteTypeChatCompletions {
 		formatPlugin := k.generateAIFormatAnthropicPlugin(ep, route)
 		needPluginMap[*formatPlugin.InstanceName] = formatPlugin
 	}
@@ -474,15 +474,15 @@ func isResourceNotFoundError(err error) bool {
 func getEndpointRouteType(ep *v1.Endpoint) string {
 	switch ep.Spec.Model.Task {
 	case v1.TextGenerationModelTask:
-		return "/v1/chat/completions"
+		return v1.RouteTypeChatCompletions
 	case v1.TextEmbeddingModelTask:
-		return "/v1/embeddings"
+		return v1.RouteTypeEmbeddings
 	case v1.TextRerankModelTask:
-		return "/v1/rerank"
+		return v1.RouteTypeRerank
 	}
 
 	// default return text generation route type.
-	return "/v1/chat/completions"
+	return v1.RouteTypeChatCompletions
 }
 
 func getEndpointRoutePath(ep *v1.Endpoint) string {
@@ -508,10 +508,11 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to generate model router plugin for %s", ee.Metadata.Name)
 	}
+
 	needPluginMap[*modelRouterPlugin.InstanceName] = modelRouterPlugin
 
 	// Add Anthropic format plugin for chat completions route
-	if ee.Spec.RouteType == "/v1/chat/completions" {
+	if ee.Spec.RouteType == v1.RouteTypeChatCompletions {
 		formatPlugin := k.generateExternalEndpointAIFormatAnthropicPlugin(ee, route)
 		needPluginMap[*formatPlugin.InstanceName] = formatPlugin
 	}

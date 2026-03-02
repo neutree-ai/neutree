@@ -32,6 +32,7 @@ func (a *ExternalEndpointAuthSpec) AuthHeaderValue() string {
 	if a.Type == ExternalEndpointAuthTypeBearer {
 		return "Bearer " + a.Credential
 	}
+
 	return a.Credential
 }
 
@@ -48,11 +49,18 @@ type ExternalEndpointUpstreamEntry struct {
 	ModelMapping map[string]string `json:"model_mapping"`
 }
 
+// Route type constants for AI statistics
+const (
+	RouteTypeChatCompletions = "/v1/chat/completions"
+	RouteTypeEmbeddings      = "/v1/embeddings"
+	RouteTypeRerank          = "/v1/rerank"
+)
+
 type ExternalEndpointSpec struct {
 	// Upstreams is the list of upstream entries
 	Upstreams []ExternalEndpointUpstreamEntry `json:"upstreams"`
 
-	// RouteType is the AI statistics type: "/v1/chat/completions", "/v1/embeddings", "/v1/rerank"
+	// RouteType is the AI statistics route type
 	RouteType string `json:"route_type"`
 
 	// Timeout is the request timeout in milliseconds, default 60000
@@ -76,10 +84,10 @@ type ExternalEndpointStatus struct {
 }
 
 type ExternalEndpoint struct {
-	ID         int                    `json:"id,omitempty"`
-	APIVersion string                 `json:"api_version,omitempty"`
-	Kind       string                 `json:"kind,omitempty"`
-	Metadata   *Metadata              `json:"metadata,omitempty"`
+	ID         int                     `json:"id,omitempty"`
+	APIVersion string                  `json:"api_version,omitempty"`
+	Kind       string                  `json:"kind,omitempty"`
+	Metadata   *Metadata               `json:"metadata,omitempty"`
 	Spec       *ExternalEndpointSpec   `json:"spec,omitempty"`
 	Status     *ExternalEndpointStatus `json:"status,omitempty"`
 }
