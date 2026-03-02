@@ -206,10 +206,17 @@ func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[str
 			excludeFields[fieldPath] = struct{}{}
 		}
 
-		// Recursively process nested structs
+		// Recursively process nested structs and slices
 		fieldType := field.Type
 		if fieldType.Kind() == reflect.Ptr {
 			fieldType = fieldType.Elem()
+		}
+
+		if fieldType.Kind() == reflect.Slice {
+			fieldType = fieldType.Elem()
+			if fieldType.Kind() == reflect.Ptr {
+				fieldType = fieldType.Elem()
+			}
 		}
 
 		if fieldType.Kind() == reflect.Struct {

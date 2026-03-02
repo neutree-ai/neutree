@@ -405,6 +405,47 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 		assert.Equal(t, expected, result)
 	})
 
+	t.Run("extract fields from slice element type", func(t *testing.T) {
+		type Auth struct {
+			Type       string `json:"type"`
+			Credential string `json:"credential" api:"-"`
+		}
+
+		type UpstreamEntry struct {
+			URL  string `json:"url"`
+			Auth *Auth  `json:"auth"`
+		}
+
+		type TestObject struct {
+			ID        string          `json:"id"`
+			Upstreams []UpstreamEntry `json:"upstreams"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"upstreams.auth.credential": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("extract fields from pointer slice element type", func(t *testing.T) {
+		type Inner struct {
+			Secret string `json:"secret" api:"-"`
+		}
+
+		type TestObject struct {
+			Items []*Inner `json:"items"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"items.secret": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
 	t.Run("deeply nested structs", func(t *testing.T) {
 		type Level3 struct {
 			DeepSecret string `json:"deep_secret" api:"-"`
