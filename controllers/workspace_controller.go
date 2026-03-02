@@ -8,6 +8,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -36,15 +37,15 @@ func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceContro
 	return c, nil
 }
 
-func (c *WorkspaceController) Reconcile(obj interface{}) error {
+func (c *WorkspaceController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	workspace, ok := obj.(*v1.Workspace)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.Workspace")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.Workspace")
 	}
 
 	klog.V(4).Info("Reconcile workspace " + workspace.Metadata.Name)
 
-	return c.syncHandler(workspace)
+	return reconcile.Result{}, c.syncHandler(workspace)
 }
 
 func (c *WorkspaceController) sync(obj *v1.Workspace) error {

@@ -7,6 +7,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -29,15 +30,15 @@ func NewEngineController(option *EngineControllerOption) (*EngineController, err
 	return c, nil
 }
 
-func (c *EngineController) Reconcile(obj interface{}) error {
+func (c *EngineController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	engine, ok := obj.(*v1.Engine)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.Engine")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.Engine")
 	}
 
 	klog.V(4).Info("Reconcile engine " + engine.Metadata.Name)
 
-	return c.syncHandler(engine)
+	return reconcile.Result{}, c.syncHandler(engine)
 }
 
 func (c *EngineController) sync(obj *v1.Engine) error {

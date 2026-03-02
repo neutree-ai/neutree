@@ -7,6 +7,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
@@ -40,15 +41,15 @@ func NewEndpointController(option *EndpointControllerOption) (*EndpointControlle
 	return c, nil
 }
 
-func (c *EndpointController) Reconcile(obj interface{}) error {
+func (c *EndpointController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	endpoint, ok := obj.(*v1.Endpoint)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.Endpoint")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.Endpoint")
 	}
 
 	klog.V(4).Info("Reconcile endpoint " + endpoint.Metadata.WorkspaceName())
 
-	return c.syncHandler(endpoint)
+	return reconcile.Result{}, c.syncHandler(endpoint)
 }
 
 func (c *EndpointController) sync(obj *v1.Endpoint) error {

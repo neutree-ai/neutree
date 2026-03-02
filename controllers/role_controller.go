@@ -2,11 +2,13 @@ package controllers
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -14,6 +16,8 @@ type RoleController struct {
 	storage     storage.Storage
 	syncHandler func(role *v1.Role) error // Added syncHandler field
 }
+
+const roleDeleteRequeueAfter = 100 * time.Millisecond
 
 type RoleControllerOption struct {
 	Storage storage.Storage
@@ -29,15 +33,20 @@ func NewRoleController(option *RoleControllerOption) (*RoleController, error) {
 	return c, nil
 }
 
-func (c *RoleController) Reconcile(obj interface{}) error {
+func (c *RoleController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	role, ok := obj.(*v1.Role)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.Role")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.Role")
 	}
 
 	klog.V(4).Info("Reconcile role " + role.Metadata.Name)
 
-	return c.syncHandler(role)
+	if role.Metadata != nil && role.Metadata.DeletionTimestamp != "" &&
+		(role.Status == nil || role.Status.Phase != v1.RolePhaseDELETED) {
+		return reconcile.Result{RequeueAfter: roleDeleteRequeueAfter}, c.syncHandler(role)
+	}
+
+	return reconcile.Result{}, c.syncHandler(role)
 }
 
 func (c *RoleController) sync(obj *v1.Role) error {
