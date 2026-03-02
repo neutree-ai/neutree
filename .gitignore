@@ -1,5 +1,7 @@
 .vscode
 .idea
+.agents
+.claude
 bin
 vendor
 .swp

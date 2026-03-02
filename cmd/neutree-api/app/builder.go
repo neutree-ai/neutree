@@ -61,9 +61,10 @@ func NewBuilder() *Builder {
 		"rest/model-registries": ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
 		"rest/endpoints":        ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
 		"rest/engines":          ProxiesRouteFactory(proxies.RegisterEngineRoutes),
-		"rest/model-catalogs":   ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
-		"rest/oem-configs":      ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
-		"rest/rpc":              ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
+		"rest/model-catalogs":       ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
+		"rest/oem-configs":          ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
+		"rest/rpc":                  ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
+		"rest/external-endpoints":   ProxiesRouteFactory(proxies.RegisterExternalEndpointRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {
@@ -98,10 +99,11 @@ func NewBuilder() *Builder {
 		"rest/model-registries": {"auth"},
 		"rest/endpoints":        {"auth"},
 		"rest/engines":          {"auth"},
-		"rest/model-catalogs":   {"auth"},
-		"rest/oem-configs":      {"auth"},
-		"rest/rpc":              {"auth"},
-		"credentials":           {"auth"},
+		"rest/model-catalogs":       {"auth"},
+		"rest/oem-configs":          {"auth"},
+		"rest/rpc":                  {"auth"},
+		"rest/external-endpoints":   {"auth"},
+		"credentials":               {"auth"},
 	}
 
 	for route, middlewares := range defaultRoutesToMiddlewares {

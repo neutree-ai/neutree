@@ -38,9 +38,10 @@ var kindPriority = map[string]int{
 	"Role":           1,
 	"OEMConfig":      1,
 	"Cluster":        2,
-	"Endpoint":       3,
-	"ModelCatalog":   3,
-	"RoleAssignment": 3,
+	"Endpoint":         3,
+	"ExternalEndpoint": 3,
+	"ModelCatalog":     3,
+	"RoleAssignment":   3,
 }
 
 // NewDeleteCmd creates the delete cobra command.
