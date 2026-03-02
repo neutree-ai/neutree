@@ -44,7 +44,7 @@ func TestSyncApiKeyUsage(t *testing.T) {
 				'v1',
 				'ApiDailyUsage',
 				ROW('daily-usage-1', NULL, 'test-workspace', NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
-				ROW($1::uuid, CURRENT_DATE, 100, '{}'::jsonb)::api.api_daily_usage_spec,
+				ROW($1::uuid, CURRENT_DATE, 100, '{}'::jsonb, NULL::jsonb)::api.api_daily_usage_spec,
 				ROW(now())::api.api_daily_usage_status
 			)
 		`, apiKeyID)
@@ -132,7 +132,7 @@ func TestSyncApiKeyUsage(t *testing.T) {
 				'v1',
 				'ApiDailyUsage',
 				ROW('daily-usage-2', NULL, 'test-workspace-2', NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
-				ROW($1::uuid, CURRENT_DATE, 200, '{}'::jsonb)::api.api_daily_usage_spec,
+				ROW($1::uuid, CURRENT_DATE, 200, '{}'::jsonb, NULL::jsonb)::api.api_daily_usage_spec,
 				ROW(now())::api.api_daily_usage_status
 			)
 		`, apiKeyID)
@@ -201,7 +201,7 @@ func TestSyncApiKeyUsage(t *testing.T) {
 					'v1',
 					'ApiDailyUsage',
 					ROW($2, NULL, 'test-workspace-3', NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
-					ROW($1::uuid, CURRENT_DATE - $3::integer, 50, '{}'::jsonb)::api.api_daily_usage_spec,
+					ROW($1::uuid, CURRENT_DATE - $3::integer, 50, '{}'::jsonb, NULL::jsonb)::api.api_daily_usage_spec,
 					ROW(now())::api.api_daily_usage_status
 				)
 			`, apiKeyID, fmt.Sprintf("daily-usage-%s-%d", apiKeyID, i), i)
