@@ -9,6 +9,33 @@ local ModelRouterHandler = {
 -- Phase: access
 -- ============================================================
 function ModelRouterHandler:access(conf)
+    -- Handle GET /v1/models — return available models from config
+    local request_path = kong.request.get_path()
+    local prefix = conf.route_prefix or ""
+    local suffix = request_path
+    if prefix ~= "" then
+        local prefix_pattern = "^" .. prefix:gsub("([%-%.%+%[%]%(%)%$%^%%%?%*])", "%%%1")
+        suffix = request_path:gsub(prefix_pattern, "", 1)
+    end
+
+    if (suffix == "/v1/models" or suffix == "/v1/models/") and kong.request.get_method() == "GET" then
+        local models = {}
+        for _, entry in ipairs(conf.upstreams) do
+            for model_name, _ in pairs(entry.model_mapping) do
+                models[#models + 1] = {
+                    id = model_name,
+                    object = "model",
+                    created = 0,
+                    owned_by = "external-endpoint",
+                }
+            end
+        end
+        return kong.response.exit(200, {
+            object = "list",
+            data = models,
+        })
+    end
+
     -- Read and parse request body to extract model field
     local body = kong.request.get_raw_body()
     if not body or body == "" then
@@ -62,19 +89,10 @@ function ModelRouterHandler:access(conf)
     kong.service.set_target(matched_entry.host, matched_entry.port)
     kong.service.request.set_scheme(matched_entry.scheme)
 
-    -- Calculate the path suffix: original request path minus route_prefix
-    local request_path = kong.request.get_path()
-    local prefix = conf.route_prefix
-    local suffix = request_path
-    if prefix and prefix ~= "" then
-        local prefix_pattern = "^" .. prefix:gsub("([%-%.%+%[%]%(%)%$%^%%%?%*])", "%%%1")
-        suffix = request_path:gsub(prefix_pattern, "", 1)
-    end
+    -- Build upstream path: base path + suffix (suffix already computed above)
     if suffix == "" then
         suffix = "/"
     end
-
-    -- Build upstream path: base path + suffix
     local upstream_base = matched_entry.path or "/"
     if upstream_base == "/" then
         upstream_base = ""
