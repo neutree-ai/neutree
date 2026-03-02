@@ -36,6 +36,27 @@ function ModelRouterHandler:access(conf)
         })
     end
 
+    local method = kong.request.get_method()
+    if (suffix == "/anthropic/v1/models" or suffix == "/anthropic/v1/models/") and method == "GET" then
+        local models = {}
+        for _, entry in ipairs(conf.upstreams) do
+            for model_name, _ in pairs(entry.model_mapping) do
+                models[#models + 1] = {
+                    id = model_name,
+                    type = "model",
+                    display_name = model_name,
+                    created_at = "2025-01-01T00:00:00Z",
+                }
+            end
+        end
+        return kong.response.exit(200, {
+            data = models,
+            has_more = false,
+            first_id = models[1] and models[1].id or nil,
+            last_id = models[#models] and models[#models].id or nil,
+        })
+    end
+
     -- Read and parse request body to extract model field
     local body = kong.request.get_raw_body()
     if not body or body == "" then
