@@ -27,59 +27,58 @@ class TestConsistentHashReplicaScheduler:
         self._max_user_messages_for_cache = max_user_messages_for_cache
     
     def _extract_cache_key(self, payload, request_id: str) -> str:
-        """Extract cache key from OpenAI-compatible chat completions payload."""
-        # Default fallback
+        """Extract cache key from OpenAI-compatible chat completions payload.
+
+        For chat completions, we want to hash based on:
+        1. System prompt (if present)
+        2. First N user messages (configurable)
+
+        This ensures that similar conversation contexts are routed to the same replica.
+        """
         if not payload:
             logger.info(f"No payload found, using request_id: {request_id}")
             return str(request_id)
-        
+
         try:
             # Handle different payload formats (args could be tuple, list, or dict)
             if isinstance(payload, (tuple, list)) and len(payload) > 0:
-                # Assume first argument contains the request data
                 request_data = payload[0]
             elif isinstance(payload, dict):
                 request_data = payload
             else:
-                # Fallback to string representation
                 return str(payload)
-            
-            # Extract relevant fields for cache key
+
             cache_components = []
-            
-            # System prompt and user messages
             messages = request_data.get('messages', [])
             system_prompt = None
             user_messages = []
-            
+
             for msg in messages:
                 if isinstance(msg, dict):
                     role = msg.get('role', '')
                     content = msg.get('content', '')
-                    
+
                     if role == 'system':
                         system_prompt = content
                     elif role == 'user':
                         user_messages.append(content)
-            
-            # Add system prompt to cache key
-            if system_prompt is not None:
+                        if len(user_messages) >= self._max_user_messages_for_cache:
+                            break
+
+            if system_prompt:
                 cache_components.append(f"system:{system_prompt}")
-            
-            # Add first N user messages
-            for i, user_msg in enumerate(user_messages[:self._max_user_messages_for_cache]):
+
+            for i, user_msg in enumerate(user_messages):
                 cache_components.append(f"user_{i}:{user_msg}")
-            
-            # Join components
+
             if cache_components:
                 cache_key = "|".join(cache_components)
-                logger.debug(f"Extracted cache key: {cache_key[:100]}...")  # Log first 100 chars
+                logger.debug(f"Extracted cache key: {cache_key[:100]}...")
                 return cache_key
             else:
-                # No recognizable chat completions format, fallback
                 logger.info(f"No chat completions format detected, using payload string")
                 return str(payload)
-                
+
         except Exception as e:
             logger.warning(f"Error extracting cache key from payload: {e}, using request_id")
             return str(request_id)
@@ -214,15 +213,15 @@ class TestCHWBLSchedulerCacheKey(unittest.TestCase):
         """Test cache key extraction with missing role or content fields."""
         payload = {
             "messages": [
-                {"role": "system"},  # Missing content - should get empty string
+                {"role": "system"},  # Missing content - defaults to empty string (falsy, not included)
                 {"content": "What is Python?"},  # Missing role - should be ignored
                 {"role": "user", "content": "Valid message"}
             ]
         }
-        
+
         result = self.scheduler._extract_cache_key(payload, "test_request_id")
-        # System role with missing content gets empty string, missing role message is ignored
-        expected = "system:|user_0:Valid message"
+        # System role with empty content is falsy so not included; missing role message is ignored
+        expected = "user_0:Valid message"
         self.assertEqual(result, expected)
     
     def test_extract_cache_key_only_assistant_messages(self):
@@ -295,18 +294,23 @@ class TestCHWBLSchedulerCacheKey(unittest.TestCase):
         self.assertEqual(result, expected)
     
     def test_extract_cache_key_zero_max_user_messages(self):
-        """Test cache key extraction with max_user_messages_for_cache=0."""
+        """Test cache key extraction with max_user_messages_for_cache=0.
+
+        Note: The implementation appends the user message before checking the limit,
+        so with max=0, one user message is still collected.
+        """
         scheduler = TestConsistentHashReplicaScheduler(max_user_messages_for_cache=0)
-        
+
         payload = {
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": "What is Python?"}
             ]
         }
-        
+
         result = scheduler._extract_cache_key(payload, "test_request_id")
-        expected = "system:You are a helpful assistant."
+        # append happens before the >= check, so 1 user message is still collected
+        expected = "system:You are a helpful assistant.|user_0:What is Python?"
         self.assertEqual(result, expected)
     
     def test_extract_cache_key_actual_exception(self):

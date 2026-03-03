@@ -5,12 +5,28 @@ import sys
 import os
 import importlib
 
+# Flags deprecated in Ray 2.53.0
+DEPRECATED_FLAGS = {"--dashboard-grpc-port", "--dashboard-agent-grpc-port"}
+
+
+def filter_deprecated_args(args):
+    """Filter out deprecated Ray flags (--flag=value format)."""
+    filtered = []
+    for arg in args:
+        flag_name = arg.split("=")[0]
+        if flag_name in DEPRECATED_FLAGS:
+            print(f"Filtering deprecated Ray flag: {arg}")
+            continue
+        filtered.append(arg)
+    return filtered
+
+
 def main():
     if len(sys.argv) < 1:
         print("Usage: {} [additional ray start arguments]".format(sys.argv[0]))
         sys.exit(1)
 
-    additional_args = sys.argv[1:]
+    additional_args = filter_deprecated_args(sys.argv[1:])
 
     accelerator_counts = {}
     accelerator_type = os.environ.get("ACCELERATOR_TYPE", "")

@@ -962,9 +962,10 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 
 func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 	tests := []struct {
-		name         string
-		endpoint     *v1.Endpoint
-		expectedEnvs map[string]string
+		name            string
+		endpoint        *v1.Endpoint
+		deployedCluster *v1.Cluster
+		expectedEnvs    map[string]string
 	}{
 		{
 			name: "endpoint with nil engine",
@@ -975,7 +976,8 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 				},
 				Spec: &v1.EndpointSpec{},
 			},
-			expectedEnvs: map[string]string{},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
+			expectedEnvs:    map[string]string{},
 		},
 		{
 			name: "endpoint with llama-cpp engine",
@@ -990,10 +992,11 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 					},
 				},
 			},
-			expectedEnvs: map[string]string{},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
+			expectedEnvs:    map[string]string{},
 		},
 		{
-			name: "endpoint with vllm engine",
+			name: "vllm engine on old cluster sets VLLM_SKIP_P2P_CHECK",
 			endpoint: &v1.Endpoint{
 				Metadata: &v1.Metadata{
 					Workspace: "default",
@@ -1005,16 +1008,33 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 					},
 				},
 			},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
 			expectedEnvs: map[string]string{
 				"VLLM_SKIP_P2P_CHECK": "1",
 			},
+		},
+		{
+			name: "vllm engine on new cluster does not set VLLM_SKIP_P2P_CHECK",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "vllm-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: "vllm",
+					},
+				},
+			},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.1"}},
+			expectedEnvs:    map[string]string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			applicationEnvs := map[string]string{}
-			setEngineSpecialEnv(tt.endpoint, applicationEnvs)
+			setEngineSpecialEnv(tt.endpoint, tt.deployedCluster, applicationEnvs)
 			assert.Equal(t, tt.expectedEnvs, applicationEnvs)
 		})
 	}

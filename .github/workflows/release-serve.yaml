@@ -11,6 +11,16 @@ on:
         description: "the release version (e.g : 0.1.0)"
         required: true
         type: string
+      ray_version:
+        description: "the ray version branch/tag to build from"
+        required: false
+        type: string
+        default: "ray-2.53.0-neutree"
+      accelerators:
+        description: "accelerator types to build (e.g : gpu, amd-gpu)"
+        required: false
+        type: string
+        default: "gpu"
 
 jobs:
   build-amd64-image:
@@ -28,7 +38,7 @@ jobs:
           username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
       - name: build amd64 image
-        run: cd cluster-image-builder; export ARCH=amd64 VERSION=${{ github.event.inputs.version }}; make docker-build && make docker-push
+        run: cd cluster-image-builder; export ARCH=amd64 VERSION=${{ github.event.inputs.version }} RAY_VERSION=${{ github.event.inputs.ray_version }} ACCELERATORS="${{ github.event.inputs.accelerators }}"; make docker-build && make docker-push
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
@@ -51,7 +61,7 @@ jobs:
       - name: push manifests
         run: |
           cd cluster-image-builder
-          export VERSION=${{ github.event.inputs.version }} ALL_ARCH=amd64; make docker-push-manifest
+          export VERSION=${{ github.event.inputs.version }} RAY_VERSION=${{ github.event.inputs.ray_version }} ALL_ARCH=amd64 ACCELERATORS="${{ github.event.inputs.accelerators }}"; make docker-push-manifest
 
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}

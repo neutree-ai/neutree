@@ -917,6 +917,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"--security-opt=seccomp=unconfined",
 					"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 					"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
+					"-e RAY_enable_open_telemetry=false",
 					"--ulimit nofile=65536:65536",
 				},
 			},
@@ -1090,6 +1091,103 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				config := defaultExpectedConfig()
 				config.Docker.Image = "registry.example.com/custom-repo/neutree/neutree-serve:v1.0.0"
 				return config
+			},
+			expectError: false,
+		},
+		{
+			name: "success - version v1.0.1 excludes deprecated grpc flags",
+			cluster: &v1.Cluster{
+				Metadata: &v1.Metadata{Name: "test-cluster"},
+				Spec: &v1.ClusterSpec{
+					Version: "v1.0.1",
+					Config: &v1.ClusterConfig{
+						SSHConfig: &v1.RaySSHProvisionClusterConfig{
+							Auth: v1.Auth{
+								SSHUser: "root",
+							},
+						},
+					},
+				},
+			},
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "http://registry.example.com",
+					Repository: "",
+					AuthConfig: v1.ImageRegistryAuthConfig{
+						Username: "user",
+						Password: "pass",
+					},
+				},
+			},
+			inputConfig: &v1.RayClusterConfig{
+				ClusterName: "test-cluster",
+			},
+			expectedConfig: func() *v1.RayClusterConfig {
+				newVersion := "v1.0.1"
+				newHeadLabel := fmt.Sprintf(`--labels='{"%s":"%s"}'`,
+					v1.NeutreeServingVersionLabel, newVersion)
+				newAutoScaleWorkerLabel := fmt.Sprintf(`--labels='{"%s":"%s","%s":"%s"}'`,
+					v1.NeutreeNodeProvisionTypeLabel, v1.AutoScaleNodeProvisionType,
+					v1.NeutreeServingVersionLabel, newVersion)
+				newStaticWorkerLabel := fmt.Sprintf(`--labels='{"%s":"%s","%s":"%s"}'`,
+					v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType,
+					v1.NeutreeServingVersionLabel, newVersion)
+				newCommonArgs := fmt.Sprintf(`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
+					"--min-worker-port=10002 --max-worker-port=20000 "+
+					`--runtime-env-agent-port=56999 --metrics-export-port=%d`, v1.RayletMetricsPort)
+
+				return &v1.RayClusterConfig{
+					ClusterName: "test-cluster",
+					Provider: v1.Provider{
+						Type: "local",
+					},
+					Auth: v1.Auth{
+						SSHUser: "root",
+					},
+					Docker: v1.Docker{
+						ContainerName: "ray_container",
+						PullBeforeRun: true,
+						Image:         "registry.example.com/neutree/neutree-serve:v1.0.1",
+						RunOptions: []string{
+							"--privileged",
+							"--cap-add=SYS_ADMIN",
+							"--security-opt=seccomp=unconfined",
+							"-e RAY_process_group_cleanup_enabled=true",
+							"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
+							"-e RAY_enable_open_telemetry=false",
+							"--ulimit nofile=65536:65536",
+						},
+					},
+					HeadStartRayCommands: []string{
+						"ray stop",
+						strings.Join([]string{
+							`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
+							newCommonArgs,
+							"--dashboard-port=8265",
+							"--ray-client-server-port=10001",
+							newHeadLabel,
+						}, " "),
+					},
+					WorkerStartRayCommands: []string{
+						"ray stop",
+						strings.Join([]string{
+							`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
+							newCommonArgs,
+							newAutoScaleWorkerLabel,
+						}, " "),
+					},
+					StaticWorkerStartRayCommands: []string{
+						"ray stop",
+						strings.Join([]string{
+							`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
+							newCommonArgs,
+							newStaticWorkerLabel,
+						}, " "),
+					},
+					InitializationCommands: []string{
+						"docker login registry.example.com -u 'user' -p 'pass'",
+					},
+				}
 			},
 			expectError: false,
 		},
