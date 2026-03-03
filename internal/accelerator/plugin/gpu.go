@@ -5,11 +5,11 @@ import (
 	"encoding/base64"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/command"
@@ -97,29 +97,35 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 		SSHPrivateKey: sshKeyPath,
 	}, "", p.executor.Execute)
 
-	output, err := sshRunner.Run(ctx, "nvidia-smi --query-gpu=name,uuid --format=csv,noheader", true, nil, true, nil, "", false)
-	// if the node is not a GPU node, 'nvidia-smi' command will return an error, so ignore the command exec error.
-	// but also we need check the connect failed error.
+	// Use lspci instead of nvidia-smi to detect GPU hardware.
+	// lspci reads PCI bus info directly, independent of driver status,
+	// avoiding race conditions during boot when nvidia driver is still loading.
+	output, err := sshRunner.Run(ctx, "lspci -nn", true, nil, true, nil, "", false)
 	if err != nil {
 		if err == command_runner.ErrConnectionFailed {
 			return nil, errors.Wrapf(err, "connect to node %s failed", nodeIP)
 		}
 
-		klog.V(4).ErrorS(err, "run command failed", "output", output)
-
-		return nil, nil
+		return nil, errors.Wrapf(err, "get node %s pci info failed", nodeIP)
 	}
 
 	var accelerators []v1.Accelerator
 
-	gpuInfoList := strings.Split(output, "\n")
-	for i := 0; i < len(gpuInfoList); i++ {
-		tmp := strings.Split(strings.ReplaceAll(gpuInfoList[i], " ", ""), ",")
-		if len(tmp) == 2 {
+	lines := strings.Split(output, "\n")
+	count := 0
+
+	for _, line := range lines {
+		lineLower := strings.ToLower(line)
+		if !strings.Contains(lineLower, "10de:") {
+			continue
+		}
+
+		if strings.Contains(lineLower, "3d controller") || strings.Contains(lineLower, "vga compatible controller") {
 			accelerators = append(accelerators, v1.Accelerator{
-				Type: tmp[0],
-				ID:   tmp[1],
+				Type: "",
+				ID:   strconv.Itoa(count),
 			})
+			count++
 		}
 	}
 
