@@ -2,7 +2,9 @@ package bentoml
 
 import (
 	"archive/tar"
+	"crypto/sha256"
 	"encoding/base32"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -403,7 +405,10 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 
 	tw := tar.NewWriter(gzw)
 
-	// Add model.yaml
+	// Collect checksums: relPath -> sha256 hex (computed while streaming)
+	checksums := make(map[string]string)
+
+	// Add model.yaml (content may have been modified, hash the actual bytes written)
 	hdr := &tar.Header{
 		Name:     ModelYAMLFileName,
 		Mode:     0o644,
@@ -419,6 +424,9 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 		return "", err
 	}
 
+	yamlHash := sha256.Sum256(yamlBytes)
+	checksums[ModelYAMLFileName] = hex.EncodeToString(yamlHash[:])
+
 	// Update progress for yaml file
 	if progressWriter != nil {
 		_, _ = progressWriter.Write(make([]byte, len(yamlBytes)))
@@ -427,7 +435,7 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 	// Pre-allocate buffer for better performance - reuse across files
 	buf := make([]byte, 16*1024*1024)
 
-	// Add all files with progress
+	// Add all files with progress, computing SHA256 inline via TeeReader
 	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -460,21 +468,30 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 		}
 		defer f.Close()
 
-		// Use io.TeeReader to copy data and update progress simultaneously
+		// Chain TeeReaders: file -> progress + sha256 hash -> tar writer
+		h := sha256.New()
 		var reader io.Reader = f
 		if progressWriter != nil {
-			reader = io.TeeReader(f, progressWriter)
+			reader = io.TeeReader(reader, progressWriter)
 		}
+		reader = io.TeeReader(reader, h)
 
 		_, err = io.CopyBuffer(tw, reader, buf)
 		if err != nil {
 			return err
 		}
 
+		checksums[rel] = hex.EncodeToString(h.Sum(nil))
+
 		return nil
 	})
 
 	if err != nil {
+		return "", err
+	}
+
+	// Append .neutree/checksums/ entries to the archive
+	if err = writeChecksumsToTar(tw, checksums); err != nil {
 		return "", err
 	}
 
@@ -532,6 +549,39 @@ func FillMinimalModelYAML(y *ModelYAML, name, version, hfRepo string, size int64
 	y.Context.FrameworkVersion = map[string]string{}
 	y.Context.BentoVersion = "1.4.6"
 	y.Context.PythonVersion = "3.12"
+
+	return nil
+}
+
+// checksumRecord is the JSON structure written to .neutree/checksums/<file>.json.
+type checksumRecord struct {
+	Algorithm string `json:"algorithm"`
+	Hash      string `json:"hash"`
+}
+
+// writeChecksumsToTar appends .neutree/checksums/<relpath>.json entries to a tar writer.
+func writeChecksumsToTar(tw *tar.Writer, checksums map[string]string) error {
+	for relPath, hash := range checksums {
+		record := checksumRecord{Algorithm: "sha256", Hash: hash}
+		data, _ := json.Marshal(record)
+
+		entryName := filepath.Join(".neutree", "checksums", relPath+".json")
+		hdr := &tar.Header{
+			Name:     entryName,
+			Mode:     0o644,
+			Size:     int64(len(data)),
+			ModTime:  time.Now(),
+			Typeflag: tar.TypeReg,
+		}
+
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+
+		if _, err := tw.Write(data); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
