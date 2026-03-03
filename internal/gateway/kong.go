@@ -224,6 +224,10 @@ if auth_header then
   if token then
     kong.service.request.set_header("kong_apikey", token)
   end
+end
+local x_api_key = kong.request.get_header("x-api-key")
+if x_api_key then
+  kong.service.request.set_header("kong_apikey", x_api_key)
 end`,
 			},
 		},
@@ -301,7 +305,8 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 	}
 
 	if !result {
-		klog.Info("plugin config diff: ", diff)
+		klog.Infof("plugin config changed, updating plugin: %s", *plugin.InstanceName)
+		klog.V(4).Info("plugin config diff: ", diff)
 
 		curPlugin.Config = plugin.Config
 
@@ -571,27 +576,112 @@ func (k *Kong) GetExternalEndpointServeUrl(ee *v1.ExternalEndpoint) (string, err
 	return k.proxyUrl + getExternalEndpointRoutePath(ee), nil
 }
 
-func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Service, error) {
-	upstreamURL := ee.Spec.Upstreams[0].Upstream.URL
-
-	// Parse the upstream URL
-	uc, err := util.ParseURLComponents(upstreamURL)
+// resolveEndpointRef resolves an endpoint ref (internal endpoint name) to its cluster serve address.
+// Returns scheme, host, port, path for the resolved endpoint.
+func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host string, port int, path string, err error) {
+	endpoints, err := k.storage.ListEndpoint(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(endpointName),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(workspace),
+			},
+		},
+	})
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse upstream URL: %s", upstreamURL)
+		return "", "", 0, "", errors.Wrapf(err, "failed to list endpoint by name %s", endpointName)
+	}
+
+	if len(endpoints) == 0 {
+		return "", "", 0, "", fmt.Errorf("internal endpoint %s not found in workspace %s", endpointName, workspace)
+	}
+
+	ep := &endpoints[0]
+
+	clusters, err := k.storage.ListCluster(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(ep.Spec.Cluster),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(workspace),
+			},
+		},
+	})
+	if err != nil {
+		return "", "", 0, "", errors.Wrapf(err, "failed to list cluster by name %s", ep.Spec.Cluster)
+	}
+
+	if len(clusters) == 0 {
+		return "", "", 0, "", fmt.Errorf("cluster %s not found for endpoint %s", ep.Spec.Cluster, endpointName)
+	}
+
+	if clusters[0].Status == nil {
+		return "", "", 0, "", fmt.Errorf("cluster %s is never initialized", ep.Spec.Cluster)
+	}
+
+	scheme, host, port, err = util.GetClusterServeAddress(&clusters[0])
+	if err != nil {
+		return "", "", 0, "", errors.Wrapf(err, "failed to get cluster serve address")
+	}
+
+	path = fmt.Sprintf("/%s/%s", workspace, endpointName)
+
+	return scheme, host, port, path, nil
+}
+
+func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Service, error) {
+	var serviceHost string
+	var servicePort int
+	var serviceScheme string
+	var servicePath string
+
+	firstEntry := ee.Spec.Upstreams[0]
+	if firstEntry.EndpointRef != nil {
+		// Resolve internal endpoint ref
+		scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *firstEntry.EndpointRef)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to resolve endpoint ref: %s", *firstEntry.EndpointRef)
+		}
+
+		serviceScheme = scheme
+		serviceHost = host
+		servicePort = port
+		servicePath = path
+	} else {
+		// Parse external upstream URL
+		uc, err := util.ParseURLComponents(firstEntry.Upstream.URL)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse upstream URL: %s", firstEntry.Upstream.URL)
+		}
+
+		serviceScheme = uc.Scheme
+		serviceHost = uc.Host
+		servicePort = uc.Port
+		servicePath = uc.Path
 	}
 
 	timeout := 60000
-	if ee.Spec.Timeout != nil {
+	if ee.Spec.Timeout != nil && *ee.Spec.Timeout > 0 {
 		timeout = *ee.Spec.Timeout
 	}
 
 	gwServiceName := "neutree-external-endpoint-" + util.HashString(ee.Key())
 	gwService := &kong.Service{
 		Name:        &gwServiceName,
-		Host:        &uc.Host,
-		Port:        &uc.Port,
-		Protocol:    &uc.Scheme,
-		Path:        &uc.Path,
+		Host:        &serviceHost,
+		Port:        &servicePort,
+		Protocol:    &serviceScheme,
+		Path:        &servicePath,
 		ReadTimeout: &timeout,
 	}
 
@@ -704,22 +794,41 @@ func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint
 	var upstreams []map[string]interface{}
 
 	for _, entry := range ee.Spec.Upstreams {
-		uc, err := util.ParseURLComponents(entry.Upstream.URL)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse upstream URL for model_mapping %v", entry.ModelMapping)
-		}
+		var upstreamEntry map[string]interface{}
 
-		upstreamEntry := map[string]interface{}{
-			"model_mapping": entry.ModelMapping,
-			"scheme":        uc.Scheme,
-			"host":          uc.Host,
-			"port":          uc.Port,
-			"path":          uc.Path,
-			"auth_header":   nil,
-		}
+		if entry.EndpointRef != nil {
+			// Resolve internal endpoint ref
+			scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *entry.EndpointRef)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to resolve endpoint ref %s for model_mapping %v", *entry.EndpointRef, entry.ModelMapping)
+			}
 
-		if entry.Auth != nil {
-			upstreamEntry["auth_header"] = entry.Auth.AuthHeaderValue()
+			upstreamEntry = map[string]interface{}{
+				"model_mapping": entry.ModelMapping,
+				"scheme":        scheme,
+				"host":          host,
+				"port":          port,
+				"path":          path,
+				"auth_header":   nil,
+			}
+		} else {
+			uc, err := util.ParseURLComponents(entry.Upstream.URL)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to parse upstream URL for model_mapping %v", entry.ModelMapping)
+			}
+
+			upstreamEntry = map[string]interface{}{
+				"model_mapping": entry.ModelMapping,
+				"scheme":        uc.Scheme,
+				"host":          uc.Host,
+				"port":          uc.Port,
+				"path":          uc.Path,
+				"auth_header":   nil,
+			}
+
+			if entry.Auth != nil {
+				upstreamEntry["auth_header"] = entry.Auth.AuthHeaderValue()
+			}
 		}
 
 		upstreams = append(upstreams, upstreamEntry)

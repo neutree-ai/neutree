@@ -37,10 +37,13 @@ func (a *ExternalEndpointAuthSpec) AuthHeaderValue() string {
 }
 
 type ExternalEndpointUpstreamEntry struct {
-	// Upstream is the external API configuration for this entry
-	Upstream *ExternalEndpointUpstreamSpec `json:"upstream"`
+	// Upstream is the external API configuration (for external upstream type)
+	Upstream *ExternalEndpointUpstreamSpec `json:"upstream,omitempty"`
 
-	// Auth is the authentication configuration for this entry (optional)
+	// EndpointRef is the name of an Internal Endpoint in the same workspace (for endpoint ref type)
+	EndpointRef *string `json:"endpoint_ref,omitempty"`
+
+	// Auth is the authentication configuration for this entry (only for external upstream type)
 	Auth *ExternalEndpointAuthSpec `json:"auth,omitempty"`
 
 	// ModelMapping maps client-facing model names to upstream model names
