@@ -28,7 +28,7 @@ type commonOptions struct {
 
 func NewLaunchCmd() *cobra.Command {
 	commonOptions := &commonOptions{
-		workDir: launchWorkDir(),
+		workDir: LaunchWorkDir(),
 	}
 
 	launchCmd := &cobra.Command{
@@ -75,7 +75,7 @@ Examples:
 	return launchCmd
 }
 
-func launchWorkDir() string {
+func LaunchWorkDir() string {
 	if os.Getenv("NEUTREE_LAUNCH_WORK_DIR") != "" {
 		return os.Getenv("NEUTREE_LAUNCH_WORK_DIR")
 	}

@@ -37,4 +37,7 @@ cluster-image-builder/downloader
 scripts/builder/dist
 
 claude.md
-.claude
+
+# local agents
+.agents/
+.claude/

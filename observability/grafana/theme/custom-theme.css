@@ -1,0 +1,262 @@
+/* ============================================================
+   Grafana Custom Theme
+   ============================================================ */
+
+/* ---------- Dark Mode ---------- */
+body[class*="theme-dark"],
+body:not([class*="theme-light"]) {
+  --ui-bg: hsl(217.5, 9.09%, 17.25%);
+  --ui-card: hsl(210, 9.09%, 12.94%);
+  --ui-border: hsl(0, 0%, 18.46%);
+  --ui-input: hsl(214.29, 5.04%, 27.25%);
+  --ui-primary: hsl(226.73, 58.43%, 65.1%);
+  --ui-fg: hsl(334, 34%, 98%);
+  --ui-muted-fg: hsl(0, 0%, 60.77%);
+  --ui-destructive: hsl(358.16, 68.78%, 53.53%);
+  --ui-radius: 0.5rem;
+}
+
+/* ---------- Light Mode ---------- */
+body[class*="theme-light"] {
+  --ui-bg: hsl(0, 0%, 97.69%);
+  --ui-card: hsl(0, 0%, 100%);
+  --ui-border: hsl(0, 0%, 80.78%);
+  --ui-input: hsl(0, 0%, 80.78%);
+  --ui-primary: hsl(211.29, 100%, 50%);
+  --ui-fg: hsl(334, 55%, 1%);
+  --ui-muted-fg: hsl(206.04, 0%, 50.77%);
+  --ui-destructive: hsl(3.19, 100%, 59.41%);
+  --ui-radius: 0.5rem;
+}
+
+/* ---------- Global Background ---------- */
+body,
+.main-view,
+[class*="page-wrapper"]>div>div:first-child {
+  background-color: var(--ui-bg) !important;
+}
+
+/* ---------- Panel Container ---------- */
+section[class*="panel-container"] {
+  background-color: var(--ui-card) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-radius: var(--ui-radius) !important;
+}
+
+/* ---------- Panel Title ---------- */
+[class*="panel-title"] {
+  color: var(--ui-muted-fg) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+
+/* ---------- Padding ---------- */
+[data-testid="data-testid dashboard controls"] {
+  padding: 0 0 8px 0 !important;
+}
+
+[class*="-canvas-wrapper-old"] [class*="-body"] {
+  padding: 0 !important;
+  margin-top: -32px !important;
+}
+
+/* ---------- Dashboard Variable Controls ---------- */
+[class*="submenu-controls"],
+[class*="SubMenu"] {
+  background-color: var(--ui-bg) !important;
+  border-bottom: 1px solid var(--ui-border) !important;
+  z-index: 10 !important;
+  position: relative !important;
+  padding: 8px 8px 8px 16px !important;
+}
+
+/* Variable Container */
+[data-testid="data-testid template variable"] {
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* Variable Label */
+[data-testid="data-testid template variable"]>label {
+  background-color: var(--ui-input) !important;
+  color: var(--ui-fg) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-right: none !important;
+  border-radius: var(--ui-radius) 0 0 var(--ui-radius) !important;
+  font-size: 13px !important;
+  padding: 5px 12px !important;
+  line-height: 1.4 !important;
+  white-space: nowrap !important;
+}
+
+/* Variable Dropdown - Outer Wrapper */
+[data-testid="data-testid template variable"] [class*="-input-wrapper"] {
+  background-color: var(--ui-card) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-left: none !important;
+  border-radius: 0 var(--ui-radius) var(--ui-radius) 0 !important;
+}
+
+/* Variable Dropdown - Inner Container */
+[data-testid="data-testid template variable"] [class*="-input-wrapper"]>div:not([class*="input-suffix"]):not([class*="a11yText"]) {
+  background-color: var(--ui-card) !important;
+  border: none !important;
+  border-radius: 0 var(--ui-radius) var(--ui-radius) 0 !important;
+}
+
+/* Variable Value Container */
+[data-testid="data-testid template variable"] [class*="select-value-container"] {
+  background-color: transparent !important;
+}
+
+/* Variable Selected Value */
+div[class*="singleValue"],
+div[class*="grafana-select-value-container"] {
+  color: var(--ui-fg) !important;
+  font-size: 13px !important;
+}
+
+/* Variable Dropdown Arrow */
+div[class*="input-suffix"] {
+  color: var(--ui-muted-fg) !important;
+}
+
+div[class*="input-suffix"] svg {
+  fill: var(--ui-muted-fg) !important;
+}
+
+/* Variable Dropdown Menu (expanded) */
+div[class*="menu"],
+[class*="options-group"] {
+  z-index: 1050 !important;
+  background-color: var(--ui-card) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-radius: var(--ui-radius) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Dropdown Options */
+div[class*="option"] {
+  color: var(--ui-fg) !important;
+  font-size: 13px !important;
+}
+
+div[class*="option"]:hover,
+div[class*="option"][class*="focused"] {
+  background-color: var(--ui-input) !important;
+}
+
+div[class*="option"][class*="selected"] {
+  background-color: var(--ui-primary) !important;
+  color: #fff !important;
+}
+
+/* ---------- Time Picker / Toolbar Buttons ---------- */
+button[class*="toolbar-button"],
+button[data-testid="data-testid TimePicker Open Button"],
+.button-group button {
+  background-color: var(--ui-card) !important;
+  color: var(--ui-fg) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-radius: var(--ui-radius) !important;
+}
+
+/* Button Group Connectors */
+.button-group {
+  gap: 0 !important;
+}
+
+.button-group button:first-child {
+  border-radius: var(--ui-radius) 0 0 var(--ui-radius) !important;
+  border-right: none !important;
+}
+
+.button-group button:last-child {
+  border-radius: 0 var(--ui-radius) var(--ui-radius) 0 !important;
+}
+
+/* ---------- Refresh Picker ---------- */
+[class*="refresh-picker"] button,
+[class*="RefreshPicker"] button {
+  background-color: var(--ui-card) !important;
+  color: var(--ui-fg) !important;
+  border: 1px solid var(--ui-border) !important;
+}
+
+/* ---------- Top Navigation ---------- */
+[class*="navbar"],
+header[class*="page-toolbar"] {
+  background-color: var(--ui-card) !important;
+  border-bottom: 1px solid var(--ui-border) !important;
+}
+
+/* ---------- Inputs / Selects ---------- */
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+[class*="gf-form-input"] {
+  border-color: var(--ui-border) !important;
+  border-radius: var(--ui-radius) !important;
+  color: var(--ui-fg) !important;
+}
+
+/* ---------- Tables ---------- */
+table tbody tr:nth-child(odd) {
+  background-color: color-mix(in srgb, var(--ui-input) 15%, transparent) !important;
+}
+
+table tbody tr:hover {
+  background-color: color-mix(in srgb, var(--ui-primary) 8%, transparent) !important;
+}
+
+table th {
+  color: var(--ui-muted-fg) !important;
+  border-bottom: 1px solid var(--ui-border) !important;
+}
+
+/* ---------- Links ---------- */
+a:not([class*="btn"]):not([class*="variable"]) {
+  color: var(--ui-primary) !important;
+}
+
+/* ---------- Row Title ---------- */
+.dashboard-row .dashboard-row__title {
+  color: var(--ui-fg) !important;
+}
+
+/* ---------- Tooltip ---------- */
+[class*="tooltip"]:not([class*="panel"]) {
+  background-color: var(--ui-card) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-radius: var(--ui-radius) !important;
+  color: var(--ui-fg) !important;
+}
+
+/* ---------- Alert ---------- */
+[class*="alert-error"],
+[class*="alerting"] {
+  border-color: var(--ui-destructive) !important;
+}
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--ui-input);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ui-muted-fg);
+}
+
+/* Hide the injected theme panel itself */
+div[data-griditem-key="grid-item-9999"] {
+  visibility: hidden !important;
+}

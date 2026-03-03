@@ -278,6 +278,8 @@ grafana:
     security:
       preinstall_disabled: true
       allow_embedding: true
+    panels:
+      disable_sanitize_html: true
     grafana_net:
       url: ""
   dashboardProviders:

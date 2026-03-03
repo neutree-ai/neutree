@@ -105,6 +105,67 @@ func Test_Scheme_AddKnownTableTypes(t *testing.T) {
 	assert.Equal(t, "", table)
 }
 
+func Test_Scheme_ResolveKind(t *testing.T) {
+	s := NewScheme()
+	s.AddKnownTypes(&schemetesting.TestObject{})
+	s.AddKnownTableTypes(map[string]string{
+		"test_objects": "TestObject",
+	})
+
+	tests := []struct {
+		name     string
+		input    string
+		wantKind string
+		wantOK   bool
+	}{
+		{
+			name:     "exact kind match",
+			input:    "TestObject",
+			wantKind: "TestObject",
+			wantOK:   true,
+		},
+		{
+			name:     "exact table match",
+			input:    "test_objects",
+			wantKind: "TestObject",
+			wantOK:   true,
+		},
+		{
+			name:     "case-insensitive kind match",
+			input:    "testobject",
+			wantKind: "TestObject",
+			wantOK:   true,
+		},
+		{
+			name:     "case-insensitive kind match uppercase",
+			input:    "TESTOBJECT",
+			wantKind: "TestObject",
+			wantOK:   true,
+		},
+		{
+			name:     "case-insensitive table match",
+			input:    "Test_Objects",
+			wantKind: "TestObject",
+			wantOK:   true,
+		},
+		{
+			name:   "unknown kind",
+			input:  "DoesNotExist",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kind, ok := s.ResolveKind(tt.input)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.Equal(t, tt.wantKind, kind)
+			}
+		})
+	}
+}
+
 func Test_Scheme_New(t *testing.T) {
 	s := NewScheme()
 	s.AddKnownTypes(&schemetesting.TestObject{})
