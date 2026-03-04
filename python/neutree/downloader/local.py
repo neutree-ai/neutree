@@ -97,7 +97,7 @@ class LocalDownloader(Downloader):
         """
         checksums_dir = os.path.join(dest, ".neutree", "checksums")
         if not os.path.isdir(checksums_dir):
-            logger.info("No checksums found in source, skipping verification")
+            logger.info("No checksums found in downloaded model (.neutree/checksums), skipping verification")
             return
 
         verify_dir = os.path.join(dest, ".neutree", "verify")
@@ -126,15 +126,21 @@ class LocalDownloader(Downloader):
             logger.info(f"Starting verification for {total_files} file(s)")
 
             for i, checksum_path in enumerate(records, 1):
-                with open(checksum_path, "r", encoding="utf-8") as f:
-                    record = json.load(f)
-
-                expected_hash = record["hash"]
-                algorithm = record["algorithm"]
-
                 # Restore file relative path: strip checksums_dir prefix and .json suffix
                 rel = os.path.relpath(checksum_path, checksums_dir)
                 file_relpath = rel[:-5]  # strip .json
+
+                try:
+                    with open(checksum_path, "r", encoding="utf-8") as f:
+                        record = json.load(f)
+
+                    expected_hash = record["hash"]
+                    algorithm = record["algorithm"]
+                except (json.JSONDecodeError, OSError, KeyError) as e:
+                    logger.error(
+                        f"Failed to parse checksum record for '{file_relpath}' at '{checksum_path}': {e}")
+                    failures.append(file_relpath)
+                    continue
 
                 logger.info(f"Verifying [{i}/{total_files}] {file_relpath} (using {algorithm})")
 
@@ -153,10 +159,16 @@ class LocalDownloader(Downloader):
                     logger.debug(f"Skipping {file_relpath} (not found locally)")
                     continue
 
+                if algorithm != "sha256":
+                    logger.error(
+                        f"Unsupported checksum algorithm '{algorithm}' for {file_relpath}; expected 'sha256'")
+                    failures.append(file_relpath)
+                    continue
+
                 try:
                     actual_hash = compute_sha256(abs_path)
                 except Exception as e:
-                    logger.error(f"Failed to compute {algorithm} for {file_relpath}: {e}")
+                    logger.error(f"Failed to compute sha256 for {file_relpath}: {e}")
                     failures.append(file_relpath)
                     continue
 

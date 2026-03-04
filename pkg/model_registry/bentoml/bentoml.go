@@ -447,7 +447,7 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 		}
 
 		// Skip HuggingFace download cache directory — not part of model content.
-		if strings.HasPrefix(rel, ".cache") {
+		if rel == ".cache" || strings.HasPrefix(rel, ".cache"+string(filepath.Separator)) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
