@@ -9,6 +9,21 @@ local AIStatisticsPluginHandler = {
     VERSION = "0.0.1",
 }
 
+local SUPPORTED_ROUTE_TYPES = {
+    "/v1/chat/completions",
+    "/v1/embeddings",
+    "/v1/rerank",
+}
+
+local function detect_route_type(request_path)
+    for _, rt in ipairs(SUPPORTED_ROUTE_TYPES) do
+        if string.match(request_path, rt .. "$") then
+            return rt
+        end
+    end
+    return nil
+end
+
 -- copy from https://github.com/Kong/kong/blob/c415a933fc71865372c0891e7aa5421b10e85901/kong/llm/plugin/shared-filters/normalize-sse-chunk.lua#L25
 -- get the token text from an event frame
 local function get_token_text(event_t)
@@ -22,7 +37,7 @@ local function get_token_text(event_t)
     return (type(token_text) == "string" and token_text) or ""
 end
 
-local function handle_json_response(conf)
+local function handle_json_response()
     local response_body = kong.service.response.get_raw_body()
     if response_body == nil then
         -- response body is nil, ignore
@@ -35,16 +50,18 @@ local function handle_json_response(conf)
         return
     end
 
+    local route_type = kong.ctx.plugin.route_type
+
     kong.ctx.plugin.response_model = ai_response.model
     if ai_response.usage then
-        if conf.route_type == "/v1/chat/completions" then
+        if route_type == "/v1/chat/completions" then
             kong.ctx.plugin.completions_tokens = ai_response.usage.completion_tokens
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
             kong.ctx.plugin.total_tokens = ai_response.usage.total_tokens
-        elseif conf.route_type == "/v1/embeddings" then
+        elseif route_type == "/v1/embeddings" then
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
             kong.ctx.plugin.total_tokens = ai_response.usage.total_tokens
-        elseif conf.route_type == "/v1/rerank" then
+        elseif route_type == "/v1/rerank" then
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
             kong.ctx.plugin.total_tokens = ai_response.usage.total_tokens
         end
@@ -105,11 +122,25 @@ end
 
 function AIStatisticsPluginHandler:access(conf)
     local request_path = kong.request.get_path()
-    -- skip request not match route_type
-    if not string.match(request_path, conf.route_type.."$") then
-        kong.ctx.plugin.skip = true
-        return
+    local route_type
+
+    if conf.route_type and type(conf.route_type) == "string" then
+        -- IE: configured route_type, skip if not matching
+        if not string.match(request_path, conf.route_type .. "$") then
+            kong.ctx.plugin.skip = true
+            return
+        end
+        route_type = conf.route_type
+    else
+        -- EE: no configured route_type, detect from request path
+        route_type = detect_route_type(request_path)
+        if not route_type then
+            kong.ctx.plugin.skip = true
+            return
+        end
     end
+
+    kong.ctx.plugin.route_type = route_type
     local content_type = kong.request.get_header("Content-Type") or "application/json"
     if string.find(content_type, "application/json", nil, true) then
         local request_body = kong.request.get_raw_body()
@@ -167,7 +198,7 @@ function AIStatisticsPluginHandler:header_filter(conf)
         return true
     end
 
-    handle_json_response(conf)
+    handle_json_response()
 end
 
 function AIStatisticsPluginHandler:log(conf)

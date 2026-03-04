@@ -13,17 +13,17 @@ CREATE TYPE api.external_endpoint_auth_spec AS (
     credential TEXT
 );
 
--- Upstream entry with auth and model mapping
+-- Upstream entry with auth, model mapping, and optional endpoint ref
 CREATE TYPE api.external_endpoint_upstream_entry AS (
     upstream api.external_endpoint_upstream_spec,
     auth api.external_endpoint_auth_spec,
-    model_mapping JSONB
+    model_mapping JSONB,
+    endpoint_ref TEXT
 );
 
 -- ExternalEndpoint spec
 CREATE TYPE api.external_endpoint_spec AS (
     upstreams api.external_endpoint_upstream_entry[],
-    route_type TEXT,
     timeout INTEGER
 );
 

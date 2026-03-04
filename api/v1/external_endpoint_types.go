@@ -63,9 +63,6 @@ type ExternalEndpointSpec struct {
 	// Upstreams is the list of upstream entries
 	Upstreams []ExternalEndpointUpstreamEntry `json:"upstreams"`
 
-	// RouteType is the AI statistics route type
-	RouteType string `json:"route_type"`
-
 	// Timeout is the request timeout in milliseconds, default 60000
 	Timeout *int `json:"timeout,omitempty"`
 }

@@ -516,11 +516,9 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
 
 	needPluginMap[*modelRouterPlugin.InstanceName] = modelRouterPlugin
 
-	// Add Anthropic format plugin for chat completions route
-	if ee.Spec.RouteType == v1.RouteTypeChatCompletions {
-		formatPlugin := k.generateExternalEndpointAIFormatAnthropicPlugin(ee, route)
-		needPluginMap[*formatPlugin.InstanceName] = formatPlugin
-	}
+	// Add Anthropic format plugin unconditionally - it self-filters by path (/anthropic/v1/messages)
+	formatPlugin := k.generateExternalEndpointAIFormatAnthropicPlugin(ee, route)
+	needPluginMap[*formatPlugin.InstanceName] = formatPlugin
 
 	// Add AI statistics plugin
 	aiStatisticsPlugin := k.generateExternalEndpointAIStatisticsPlugin(ee, route)
@@ -854,9 +852,7 @@ func (k *Kong) generateExternalEndpointAIStatisticsPlugin(ee *v1.ExternalEndpoin
 		InstanceName: &instanceName,
 		Route:        curRoute,
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
-		Config: map[string]interface{}{
-			"route_type": ee.Spec.RouteType,
-		},
+		Config: map[string]interface{}{},
 	}
 }
 
