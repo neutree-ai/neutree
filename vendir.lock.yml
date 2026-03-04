@@ -24,4 +24,8 @@ directories:
   - directory: {}
     path: .
   path: deploy/chart/neutree/vmagent/
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/chart/neutree/init-scripts/
 kind: LockConfig

@@ -33,3 +33,9 @@ directories:
   - path: .
     directory:
       path: observability/vmagent/
+
+- path: deploy/chart/neutree/init-scripts/
+  contents:
+  - path: .
+    directory:
+      path: db/init-scripts/
