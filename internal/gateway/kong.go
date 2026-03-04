@@ -643,6 +643,10 @@ func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Servi
 	var serviceScheme string
 	var servicePath string
 
+	if len(ee.Spec.Upstreams) == 0 {
+		return nil, errors.Errorf("external endpoint %s has no upstreams configured", ee.Key())
+	}
+
 	firstEntry := ee.Spec.Upstreams[0]
 	if firstEntry.EndpointRef != nil {
 		// Resolve internal endpoint ref
@@ -655,7 +659,7 @@ func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Servi
 		serviceHost = host
 		servicePort = port
 		servicePath = path
-	} else {
+	} else if firstEntry.Upstream != nil {
 		// Parse external upstream URL
 		uc, err := util.ParseURLComponents(firstEntry.Upstream.URL)
 		if err != nil {
@@ -666,6 +670,8 @@ func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Servi
 		serviceHost = uc.Host
 		servicePort = uc.Port
 		servicePath = uc.Path
+	} else {
+		return nil, errors.Errorf("first upstream entry of external endpoint %s has neither endpoint_ref nor upstream configured", ee.Key())
 	}
 
 	timeout := 60000
@@ -809,7 +815,7 @@ func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint
 				"path":          path,
 				"auth_header":   nil,
 			}
-		} else {
+		} else if entry.Upstream != nil {
 			uc, err := util.ParseURLComponents(entry.Upstream.URL)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to parse upstream URL for model_mapping %v", entry.ModelMapping)
@@ -827,6 +833,8 @@ func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint
 			if entry.Auth != nil {
 				upstreamEntry["auth_header"] = entry.Auth.AuthHeaderValue()
 			}
+		} else {
+			return nil, errors.Errorf("upstream entry for model_mapping %v has neither endpoint_ref nor upstream configured", entry.ModelMapping)
 		}
 
 		upstreams = append(upstreams, upstreamEntry)

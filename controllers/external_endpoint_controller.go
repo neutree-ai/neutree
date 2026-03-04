@@ -115,10 +115,13 @@ func (c *ExternalEndpointController) sync(obj *v1.ExternalEndpoint) error {
 
 func (c *ExternalEndpointController) updateStatus(obj *v1.ExternalEndpoint, phase v1.ExternalEndpointPhase, err error) error {
 	serviceURL := ""
+	if obj.Status != nil {
+		serviceURL = obj.Status.ServiceURL
+	}
 
 	if phase == v1.ExternalEndpointPhaseRUNNING {
 		url, urlErr := c.gw.GetExternalEndpointServeUrl(obj)
-		if urlErr == nil {
+		if urlErr == nil && url != "" {
 			serviceURL = url
 		}
 	}

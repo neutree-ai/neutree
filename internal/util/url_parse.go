@@ -24,7 +24,15 @@ func ParseURLComponents(rawURL string) (*URLComponents, error) {
 	}
 
 	scheme := u.Scheme
+	if scheme != "http" && scheme != "https" {
+		return nil, errors.Errorf("unsupported or missing scheme in URL: %s", rawURL)
+	}
+
 	host := u.Hostname()
+	if host == "" {
+		return nil, errors.Errorf("missing host in URL: %s", rawURL)
+	}
+
 	port := 443
 
 	if u.Port() != "" {
