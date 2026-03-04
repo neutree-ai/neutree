@@ -107,8 +107,30 @@ function ModelRouterHandler:access(conf)
     end
 
     -- Switch upstream using Kong PDK
-    kong.service.set_target(matched_entry.host, matched_entry.port)
+    -- If target host is a domain name (not IP), resolve DNS first to avoid
+    -- "no host allowed" errors in buffered proxy context.
+    local target_host = matched_entry.host
+    local connect_host = target_host
+    if not target_host:match("^%d+%.%d+%.%d+%.%d+$") then
+        local toip = require("socket").dns.toip
+        local ip, err = toip(target_host)
+        if not ip then
+            return kong.response.exit(502, {
+                error = {
+                    message = "DNS resolution failed for upstream: " .. target_host .. " (" .. (err or "unknown") .. ")",
+                    type = "upstream_error",
+                },
+            })
+        end
+        connect_host = ip
+    end
+    kong.service.set_target(connect_host, matched_entry.port)
     kong.service.request.set_scheme(matched_entry.scheme)
+    if connect_host ~= target_host then
+        -- Restore original hostname for Host header and SNI (proxy_ssl_name uses $upstream_host)
+        kong.service.request.set_header("Host", target_host)
+        ngx.var.upstream_host = target_host
+    end
 
     -- Build upstream path: base path + suffix (suffix already computed above)
     if suffix == "" then
