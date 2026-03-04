@@ -451,6 +451,7 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
+
 			return nil
 		}
 
@@ -478,10 +479,12 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 
 		// Chain TeeReaders: file -> progress + sha256 hash -> tar writer
 		h := sha256.New()
+
 		var reader io.Reader = f
 		if progressWriter != nil {
 			reader = io.TeeReader(reader, progressWriter)
 		}
+
 		reader = io.TeeReader(reader, h)
 
 		_, err = io.CopyBuffer(tw, reader, buf)
