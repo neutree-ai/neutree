@@ -24,7 +24,7 @@ func ParseURLComponents(rawURL string) (*URLComponents, error) {
 	}
 
 	scheme := u.Scheme
-	if scheme != "http" && scheme != "https" {
+	if scheme != SchemeHTTP && scheme != SchemeHTTPS {
 		return nil, errors.Errorf("unsupported or missing scheme in URL: %s", rawURL)
 	}
 
@@ -42,7 +42,7 @@ func ParseURLComponents(rawURL string) (*URLComponents, error) {
 		}
 
 		port = p
-	} else if scheme == "http" {
+	} else if scheme == SchemeHTTP {
 		port = 80
 	}
 

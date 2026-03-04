@@ -648,7 +648,9 @@ func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Servi
 	}
 
 	firstEntry := ee.Spec.Upstreams[0]
-	if firstEntry.EndpointRef != nil {
+
+	switch {
+	case firstEntry.EndpointRef != nil:
 		// Resolve internal endpoint ref
 		scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *firstEntry.EndpointRef)
 		if err != nil {
@@ -659,7 +661,7 @@ func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Servi
 		serviceHost = host
 		servicePort = port
 		servicePath = path
-	} else if firstEntry.Upstream != nil {
+	case firstEntry.Upstream != nil:
 		// Parse external upstream URL
 		uc, err := util.ParseURLComponents(firstEntry.Upstream.URL)
 		if err != nil {
@@ -670,7 +672,7 @@ func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Servi
 		serviceHost = uc.Host
 		servicePort = uc.Port
 		servicePath = uc.Path
-	} else {
+	default:
 		return nil, errors.Errorf("first upstream entry of external endpoint %s has neither endpoint_ref nor upstream configured", ee.Key())
 	}
 
@@ -800,7 +802,8 @@ func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint
 	for _, entry := range ee.Spec.Upstreams {
 		var upstreamEntry map[string]interface{}
 
-		if entry.EndpointRef != nil {
+		switch {
+		case entry.EndpointRef != nil:
 			// Resolve internal endpoint ref
 			scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *entry.EndpointRef)
 			if err != nil {
@@ -815,7 +818,7 @@ func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint
 				"path":          path,
 				"auth_header":   nil,
 			}
-		} else if entry.Upstream != nil {
+		case entry.Upstream != nil:
 			uc, err := util.ParseURLComponents(entry.Upstream.URL)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to parse upstream URL for model_mapping %v", entry.ModelMapping)
@@ -833,7 +836,7 @@ func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint
 			if entry.Auth != nil {
 				upstreamEntry["auth_header"] = entry.Auth.AuthHeaderValue()
 			}
-		} else {
+		default:
 			return nil, errors.Errorf("upstream entry for model_mapping %v has neither endpoint_ref nor upstream configured", entry.ModelMapping)
 		}
 
