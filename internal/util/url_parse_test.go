@@ -38,6 +38,21 @@ func TestParseURLComponents(t *testing.T) {
 			rawURL: "https://api.example.com",
 			want:   &URLComponents{Scheme: "https", Host: "api.example.com", Port: 443, Path: "/"},
 		},
+		{
+			name:    "missing scheme",
+			rawURL:  "api.openai.com",
+			wantErr: true,
+		},
+		{
+			name:    "unsupported scheme",
+			rawURL:  "ftp://example.com",
+			wantErr: true,
+		},
+		{
+			name:    "empty host",
+			rawURL:  "https://",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -191,6 +191,27 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "empty serve URL preserves existing serviceURL",
+			in: func() *v1.ExternalEndpoint {
+				e := ee(id, v1.ExternalEndpointPhasePENDING)
+				e.Status = &v1.ExternalEndpointStatus{
+					Phase:      v1.ExternalEndpointPhasePENDING,
+					ServiceURL: "http://existing-url",
+				}
+				return e
+			}(),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil)
+				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("", nil)
+				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
+					return ee.Status != nil &&
+						ee.Status.Phase == v1.ExternalEndpointPhaseRUNNING &&
+						ee.Status.ServiceURL == "http://existing-url"
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
