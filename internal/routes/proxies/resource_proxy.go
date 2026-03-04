@@ -268,6 +268,7 @@ func mergeExcludedFieldsRecursive(target, source map[string]interface{}, exclude
 				for i := 0; i < len(sourceArr) && i < len(targetArr); i++ {
 					sourceElem, sourceOk := sourceArr[i].(map[string]interface{})
 					targetElem, targetOk := targetArr[i].(map[string]interface{})
+
 					if sourceOk && targetOk {
 						mergeExcludedFieldsRecursive(targetElem, sourceElem, excludeFields, fieldPath)
 					}

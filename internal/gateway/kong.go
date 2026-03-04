@@ -852,7 +852,7 @@ func (k *Kong) generateExternalEndpointAIStatisticsPlugin(ee *v1.ExternalEndpoin
 		InstanceName: &instanceName,
 		Route:        curRoute,
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
-		Config: map[string]interface{}{},
+		Config:       map[string]interface{}{},
 	}
 }
 
