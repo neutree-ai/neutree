@@ -739,6 +739,28 @@ func TestEndpointAcceleratorValidation(t *testing.T) {
 		t.Logf("validation correctly blocked number value: %v", err)
 	})
 
+	t.Run("accelerator is not a JSON object (array) - error code 10108", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, buildInsert(`'["nvidia_gpu", "Tesla-V100"]'::json`))
+
+		if err == nil {
+			t.Fatal("expected validation error for array accelerator")
+		}
+
+		if !strings.Contains(err.Error(), `"code": "10108"`) {
+			t.Fatalf("expected error code 10108, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked non-object accelerator: %v", err)
+	})
+
 	t.Run("accelerator with valid string values - success", func(t *testing.T) {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
