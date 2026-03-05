@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/docker/docker/api/types/registry"
 	"github.com/pkg/errors"
@@ -33,6 +35,12 @@ func NewImporter(apiClient *client.Client) *Importer {
 	}
 }
 
+// isManifestFile returns true if the path points to a standalone manifest YAML file.
+func isManifestFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".yaml" || ext == ".yml"
+}
+
 // Import imports a package
 func (i *Importer) Import(ctx context.Context, opts *ImportOptions) (*ImportResult, error) {
 	result := &ImportResult{
@@ -45,6 +53,84 @@ func (i *Importer) Import(ctx context.Context, opts *ImportOptions) (*ImportResu
 		return nil, errors.Wrap(err, "invalid import options")
 	}
 
+	if isManifestFile(opts.PackagePath) {
+		return i.importFromManifest(ctx, opts, result)
+	}
+
+	return i.importFromArchive(ctx, opts, result)
+}
+
+// importFromManifest handles manifest-only mode import.
+func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, result *ImportResult) (*ImportResult, error) {
+	klog.Info("Parsing standalone manifest file")
+
+	manifest, err := i.parser.ParseManifestFile(opts.PackagePath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse manifest file")
+	}
+
+	// If skip image load, just register engine metadata
+	if opts.SkipImageLoad {
+		klog.Info("Skipping image handling as per configuration")
+		return i.registerEngines(ctx, opts, manifest, result)
+	}
+
+	// If package_url is present, download and extract, then push images
+	if manifest.Metadata != nil && manifest.Metadata.PackageURL != "" {
+		klog.Infof("Package URL found: %s", manifest.Metadata.PackageURL)
+
+		// Create temporary directory if not specified
+		if opts.ExtractPath == "" {
+			tempDir, err := os.MkdirTemp("", "neutree-*")
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to create temporary directory")
+			}
+
+			opts.ExtractPath = tempDir
+
+			defer os.RemoveAll(tempDir)
+		}
+
+		// Download the package archive
+		archivePath := filepath.Join(opts.ExtractPath, "package.tar.gz")
+		if err := downloadPackage(ctx, manifest.Metadata.PackageURL, archivePath); err != nil {
+			return nil, errors.Wrap(err, "failed to download package from URL")
+		}
+
+		// Extract the downloaded archive
+		klog.Infof("Extracting downloaded package to %s", opts.ExtractPath)
+
+		if err := i.extractor.Extract(archivePath, opts.ExtractPath); err != nil {
+			return nil, errors.Wrap(err, "failed to extract downloaded package")
+		}
+
+		// Re-parse manifest from extracted content to get validated image references
+		manifest, err = i.parser.ParseManifest(opts.ExtractPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse manifest from extracted package")
+		}
+
+		// Push images
+		klog.Info("Pushing images to registry")
+
+		pushedImages, err := i.pushImages(ctx, opts, manifest)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to push images to registry")
+		}
+
+		result.ImagesImported = pushedImages
+
+		return i.registerEngines(ctx, opts, manifest, result)
+	}
+
+	// No package_url and not skipping images — register metadata only
+	klog.Info("No package URL specified, registering engine metadata only (no images to process)")
+
+	return i.registerEngines(ctx, opts, manifest, result)
+}
+
+// importFromArchive handles the traditional tar.gz archive import flow.
+func (i *Importer) importFromArchive(ctx context.Context, opts *ImportOptions, result *ImportResult) (*ImportResult, error) {
 	// Create temporary directory if not specified
 	if opts.ExtractPath == "" {
 		tempDir, err := os.MkdirTemp("", "neutree-*")
@@ -82,6 +168,11 @@ func (i *Importer) Import(ctx context.Context, opts *ImportOptions) (*ImportResu
 
 	result.ImagesImported = pushedImages
 
+	return i.registerEngines(ctx, opts, manifest, result)
+}
+
+// registerEngines registers engine metadata from manifest.
+func (i *Importer) registerEngines(ctx context.Context, opts *ImportOptions, manifest *PackageManifest, result *ImportResult) (*ImportResult, error) {
 	if len(manifest.Engines) > 0 {
 		klog.Infof("Engines to import: %d", len(manifest.Engines))
 
@@ -165,6 +256,11 @@ func (i *Importer) validateOptions(opts *ImportOptions) error {
 		return errors.New("cannot skip image load when image push is enabled")
 	}
 
+	// For manifest-only mode with skip image load, registry config is not required
+	if isManifestFile(opts.PackagePath) && opts.SkipImageLoad {
+		return nil
+	}
+
 	if !opts.SkipImagePush {
 		if opts.MirrorRegistry == "" || opts.RegistryUser == "" || opts.RegistryPassword == "" {
 			return errors.New("image registry config is required when not skipping image push")
@@ -246,6 +342,27 @@ func NewValidator() *Validator {
 
 // ValidatePackage validates a package without importing it
 func (v *Validator) ValidatePackage(packagePath string) error {
+	if isManifestFile(packagePath) {
+		return v.validateManifestFile(packagePath)
+	}
+
+	return v.validateArchive(packagePath)
+}
+
+// validateManifestFile validates a standalone manifest YAML file.
+func (v *Validator) validateManifestFile(manifestPath string) error {
+	_, err := v.parser.ParseManifestFile(manifestPath)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse manifest file")
+	}
+
+	klog.Info("Manifest validation successful")
+
+	return nil
+}
+
+// validateArchive validates a tar.gz archive package.
+func (v *Validator) validateArchive(packagePath string) error {
 	// Create temporary directory
 	tempDir, err := os.MkdirTemp("", "neutree-validate-*")
 	if err != nil {

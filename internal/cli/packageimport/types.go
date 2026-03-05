@@ -40,6 +40,9 @@ type PackageMetadata struct {
 
 	// Tags for categorizing the package
 	Tags []string `json:"tags,omitempty" yaml:"tags,omitempty"`
+
+	// PackageURL is the URL to download the full package archive (.tar.gz)
+	PackageURL string `json:"package_url,omitempty" yaml:"package_url,omitempty"`
 }
 
 // ImageSpec describes a container image for a specific accelerator
