@@ -505,6 +505,11 @@ cd - > /dev/null
 
 # Move to final location
 mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
+
+# Copy standalone manifest.yaml for release
+MANIFEST_OUTPUT="${ENGINE_NAME}-${ENGINE_VERSION}-manifest.yaml"
+cp "$PACKAGE_DIR/manifest.yaml" "$OUTPUT_DIR/$MANIFEST_OUTPUT"
+print_info "Standalone manifest copied to: $OUTPUT_DIR/$MANIFEST_OUTPUT"
 # Calculate checksum
 print_info "Calculating checksum..."
 if command -v md5sum &> /dev/null; then

@@ -96,6 +96,23 @@ func (p *Parser) parseYAMLManifest(path string) (*PackageManifest, error) {
 	return &manifest, nil
 }
 
+// ParseManifestFile parses a standalone manifest YAML file (not from an extracted archive).
+// It validates engine configuration but skips image file existence checks.
+func (p *Parser) ParseManifestFile(path string) (*PackageManifest, error) {
+	manifest, err := p.parseYAMLManifest(path)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse YAML manifest")
+	}
+
+	for idx := range manifest.Engines {
+		if err := p.validateEngineConfig(manifest.Engines[idx]); err != nil {
+			return nil, errors.Wrap(err, "invalid engine configuration in manifest")
+		}
+	}
+
+	return manifest, nil
+}
+
 func (p *Parser) validateManifest(manifest *PackageManifest, extractedPath string) error {
 	if manifest == nil {
 		return errors.New("manifest is nil")
