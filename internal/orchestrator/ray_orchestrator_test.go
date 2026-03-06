@@ -739,6 +739,22 @@ func TestEndpointToApplication_ResourceNameNormalization(t *testing.T) {
 		},
 	}
 
+	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
+
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{
+				{
+					Version: "v0.11.2",
+					Images: map[string]*v1.EngineImage{
+						"nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.11.2-ray2.53.0"},
+					},
+				},
+			},
+		},
+	}
+
 	tests := []struct {
 		name           string
 		product        string
@@ -746,10 +762,10 @@ func TestEndpointToApplication_ResourceNameNormalization(t *testing.T) {
 		expectedResKey string
 	}{
 		{
-			name:           "v1.0.1 normalizes underscored resource name",
+			name:           "v1.0.1 preserves underscored resource name",
 			product:        "NVIDIA_L20",
 			clusterVersion: "v1.0.1",
-			expectedResKey: "NVIDIAL20",
+			expectedResKey: "NVIDIA_L20",
 		},
 		{
 			name:           "v1.0.0 preserves underscored resource name",
@@ -767,17 +783,22 @@ func TestEndpointToApplication_ResourceNameNormalization(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mgr := &acceleratormocks.MockManager{}
-			mgr.On("GetConverter", string(v1.AcceleratorTypeNVIDIAGPU)).
+			mgr := acceleratormocks.NewMockManager(t)
+			mgr.EXPECT().GetConverter(nvidiaGPU).
 				Return(plugin.NewGPUConverter(), true)
+			mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).
+				Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 
 			cluster := &v1.Cluster{
 				Spec: &v1.ClusterSpec{
 					Version: tt.clusterVersion,
 				},
+				Status: &v1.ClusterStatus{
+					AcceleratorType: &nvidiaGPU,
+				},
 			}
 
-			app, err := EndpointToApplication(makeEndpoint(tt.product), cluster, modelRegistry, nil, nil, mgr)
+			app, err := EndpointToApplication(makeEndpoint(tt.product), cluster, modelRegistry, engine, nil, mgr)
 			assert.NoError(t, err)
 
 			deploymentOptions := app.Args["deployment_options"].(map[string]interface{})
