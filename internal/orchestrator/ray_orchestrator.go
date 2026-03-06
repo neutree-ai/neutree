@@ -680,6 +680,9 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 					fmt.Sprintf("-v %s:%s:ro", v1.HamiCoreHostLibPath, v1.HamiCoreLibPath),
 					fmt.Sprintf("-e LD_PRELOAD=%s", v1.HamiCoreLibPath),
 					fmt.Sprintf("-e CUDA_DEVICE_MEMORY_LIMIT=%dm", memLimitMiB),
+					// HAMi-core uses /tmp/vgpulock/lock for cross-process synchronization.
+					// Mount a tmpfs so Docker creates the directory automatically.
+					"--tmpfs /tmp/vgpulock:rw,noexec,nosuid,size=1m",
 				)
 			}
 		}
