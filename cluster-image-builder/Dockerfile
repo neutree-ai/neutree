@@ -26,8 +26,18 @@ WORKDIR /ray
 COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
 RUN /ray/python/build-wheel-manylinux2014.sh
 
-# --- HAMi-core library for fractional GPU memory isolation ---
-FROM projecthami/hami-core:latest AS hami_core
+# --- HAMi-core library build (fractional GPU memory isolation) ---
+ARG HAMI_CORE_REPO=https://github.com/Project-HAMi/HAMi-core.git
+ARG HAMI_CORE_COMMIT=ec8979d
+FROM nvidia/cuda:12.2.0-devel-ubuntu20.04 AS hami_core
+ARG HAMI_CORE_REPO
+ARG HAMI_CORE_COMMIT
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends cmake git \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone ${HAMI_CORE_REPO} /libvgpu \
+    && cd /libvgpu && git checkout ${HAMI_CORE_COMMIT} \
+    && bash ./build.sh
 
 # --- Final image ---
 FROM ubuntu:22.04
@@ -79,7 +89,7 @@ ENV RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL=minor
 ENV RAY_enable_open_telemetry=false
 
 # Copy HAMi-core library for fractional GPU memory isolation
-COPY --from=hami_core /libvgpu.so /usr/lib/libvgpu.so
+COPY --from=hami_core /libvgpu/build/libvgpu.so /usr/lib/libvgpu.so
 
 # Copy GPU detection + Ray start scripts (no engine code)
 COPY start.py ./
