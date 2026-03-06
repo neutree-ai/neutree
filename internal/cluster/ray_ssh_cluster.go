@@ -752,6 +752,10 @@ func (c *sshRayClusterReconciler) transformResources(availableResource, allocata
 			for key, group := range allocatableInfo.AcceleratorGroups {
 				if existingGroup, exists := result.Allocatable.AcceleratorGroups[key]; exists {
 					existingGroup.Quantity += group.Quantity
+					// Keep first non-zero memory per device (homogeneous GPUs)
+					if existingGroup.MemoryPerDeviceMiB == 0 && group.MemoryPerDeviceMiB > 0 {
+						existingGroup.MemoryPerDeviceMiB = group.MemoryPerDeviceMiB
+					}
 					for productKey, quantity := range group.ProductGroups {
 						if existingQuantity, exists := existingGroup.ProductGroups[productKey]; exists {
 							existingGroup.ProductGroups[productKey] = existingQuantity + quantity
@@ -776,6 +780,10 @@ func (c *sshRayClusterReconciler) transformResources(availableResource, allocata
 			for key, group := range availableInfo.AcceleratorGroups {
 				if existingGroup, exists := result.Available.AcceleratorGroups[key]; exists {
 					existingGroup.Quantity += group.Quantity
+					// Keep first non-zero memory per device (homogeneous GPUs)
+					if existingGroup.MemoryPerDeviceMiB == 0 && group.MemoryPerDeviceMiB > 0 {
+						existingGroup.MemoryPerDeviceMiB = group.MemoryPerDeviceMiB
+					}
 					for productKey, quantity := range group.ProductGroups {
 						if existingQuantity, exists := existingGroup.ProductGroups[productKey]; exists {
 							existingGroup.ProductGroups[productKey] = existingQuantity + quantity

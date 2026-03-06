@@ -99,6 +99,10 @@ type AcceleratorGroup struct {
 	//     "Tesla-T4": 4
 	//   }
 	ProductGroups map[AcceleratorProduct]float64 `json:"product_groups,omitempty"`
+
+	// MemoryPerDeviceMiB is the per-GPU memory in MiB, reported by nvidia-smi.
+	// Used for fractional GPU memory isolation via HAMi-core.
+	MemoryPerDeviceMiB int64 `json:"memory_per_device_mib,omitempty"`
 }
 
 // ============================================================================

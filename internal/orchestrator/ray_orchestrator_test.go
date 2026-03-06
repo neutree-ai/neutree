@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -765,19 +766,36 @@ func TestEndpointToApplication_ResourceNameNormalization(t *testing.T) {
 		},
 	}
 
+	resNormEngine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{{
+				Version: "v0.11.2",
+				Images: map[string]*v1.EngineImage{
+					"nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.11.2-ray2.53.0"},
+				},
+			}},
+		},
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mgr := &acceleratormocks.MockManager{}
 			mgr.On("GetConverter", string(v1.AcceleratorTypeNVIDIAGPU)).
 				Return(plugin.NewGPUConverter(), true)
+			mgr.On("GetEngineContainerRunOptions", mock.Anything).Return([]string{}, nil).Maybe()
 
+			nvidiaGPUType := string(v1.AcceleratorTypeNVIDIAGPU)
 			cluster := &v1.Cluster{
 				Spec: &v1.ClusterSpec{
 					Version: tt.clusterVersion,
 				},
+				Status: &v1.ClusterStatus{
+					AcceleratorType: &nvidiaGPUType,
+				},
 			}
 
-			app, err := EndpointToApplication(makeEndpoint(tt.product), cluster, modelRegistry, nil, nil, mgr)
+			app, err := EndpointToApplication(makeEndpoint(tt.product), cluster, modelRegistry, resNormEngine, nil, mgr)
 			assert.NoError(t, err)
 
 			deploymentOptions := app.Args["deployment_options"].(map[string]interface{})
@@ -1218,6 +1236,126 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 				},
 			},
 			expectedImage: "registry.example.com/custom-repo/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				"--rm",
+			},
+		},
+		{
+			name: "fractional GPU (0.5) injects HAMi-core with correct memory limit",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Resources: &v1.ResourceSpec{GPU: pointy.String("0.5")},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"},
+				Status: &v1.ClusterStatus{
+					AcceleratorType: &nvidiaGPU,
+					ResourceInfo: &v1.ClusterResources{
+						ResourceStatus: v1.ResourceStatus{
+							Allocatable: &v1.ResourceInfo{
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {Quantity: 4, MemoryPerDeviceMiB: 81920},
+								},
+							},
+						},
+					},
+				},
+			},
+			engine:        defaultEngine,
+			imageRegistry: defaultImageRegistry,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				fmt.Sprintf("-v %s:%s:ro", v1.HamiCoreHostLibPath, v1.HamiCoreLibPath),
+				fmt.Sprintf("-e LD_PRELOAD=%s", v1.HamiCoreLibPath),
+				"-e CUDA_DEVICE_MEMORY_LIMIT=40960m",
+				"--rm",
+			},
+		},
+		{
+			name: "fractional GPU (0.25) calculates correct memory limit",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Resources: &v1.ResourceSpec{GPU: pointy.String("0.25")},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"},
+				Status: &v1.ClusterStatus{
+					AcceleratorType: &nvidiaGPU,
+					ResourceInfo: &v1.ClusterResources{
+						ResourceStatus: v1.ResourceStatus{
+							Allocatable: &v1.ResourceInfo{
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {Quantity: 4, MemoryPerDeviceMiB: 81920},
+								},
+							},
+						},
+					},
+				},
+			},
+			engine:        defaultEngine,
+			imageRegistry: defaultImageRegistry,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				fmt.Sprintf("-v %s:%s:ro", v1.HamiCoreHostLibPath, v1.HamiCoreLibPath),
+				fmt.Sprintf("-e LD_PRELOAD=%s", v1.HamiCoreLibPath),
+				"-e CUDA_DEVICE_MEMORY_LIMIT=20480m",
+				"--rm",
+			},
+		},
+		{
+			name: "whole GPU (1.0) does not inject HAMi-core",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Resources: &v1.ResourceSpec{GPU: pointy.String("1.0")},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"},
+				Status: &v1.ClusterStatus{
+					AcceleratorType: &nvidiaGPU,
+					ResourceInfo: &v1.ClusterResources{
+						ResourceStatus: v1.ResourceStatus{
+							Allocatable: &v1.ResourceInfo{
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {Quantity: 4, MemoryPerDeviceMiB: 81920},
+								},
+							},
+						},
+					},
+				},
+			},
+			engine:        defaultEngine,
+			imageRegistry: defaultImageRegistry,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				"--rm",
+			},
+		},
+		{
+			name: "fractional GPU without ResourceInfo degrades gracefully",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Resources: &v1.ResourceSpec{GPU: pointy.String("0.5")},
+				},
+			},
+			cluster:       sshClusterWithAccelerator,
+			engine:        defaultEngine,
+			imageRegistry: defaultImageRegistry,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
 			expectedOptions: []string{
 				"--runtime=nvidia",
 				"--gpus all",

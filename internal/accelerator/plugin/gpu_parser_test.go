@@ -188,6 +188,44 @@ func TestGPUParser_ParserFromRay(t *testing.T) {
 			wantErr:  false,
 		},
 		{
+			name: "Ray resource with gpu_memory_mib_per_device",
+			rayResource: map[string]float64{
+				"GPU":                        4,
+				"NVIDIA_A100-SXM4-80GB":      4,
+				"gpu_memory_mib_per_device":   81920,
+			},
+			expected: &v1.ResourceInfo{
+				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorTypeNVIDIAGPU: {
+						Quantity: 4,
+						ProductGroups: map[v1.AcceleratorProduct]float64{
+							"NVIDIA_A100-SXM4-80GB": 4,
+						},
+						MemoryPerDeviceMiB: 81920,
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Ray resource without gpu_memory_mib_per_device",
+			rayResource: map[string]float64{
+				"GPU":        2,
+				"NVIDIA_L20": 2,
+			},
+			expected: &v1.ResourceInfo{
+				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorTypeNVIDIAGPU: {
+						Quantity: 2,
+						ProductGroups: map[v1.AcceleratorProduct]float64{
+							"NVIDIA_L20": 2,
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name:        "Nil Ray resource map",
 			rayResource: nil,
 			expected:    nil,

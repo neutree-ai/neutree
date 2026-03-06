@@ -2,10 +2,15 @@ import subprocess
 
 def get_accelerator_counts():
     """
-    Retrieve the number of GPUs and their names.
+    Retrieve the number of GPUs and their names, plus per-device memory.
     """
     gpu_names = get_gpu_names()
-    return count_nvidia_accelerators(gpu_names)
+    counts = count_nvidia_accelerators(gpu_names)
+    # Add per-device GPU memory as a Ray custom resource
+    memory_mib = get_gpu_memory_mib()
+    if memory_mib > 0:
+        counts["gpu_memory_mib_per_device"] = memory_mib
+    return counts
 
 def get_gpu_names():
     """
@@ -24,6 +29,20 @@ def get_gpu_names():
     except FileNotFoundError:
         print("nvidia-smi not found, please ensure that the NVIDIA drivers are installed")
         return []
+
+def get_gpu_memory_mib():
+    """Query per-GPU memory in MiB via nvidia-smi. Returns first GPU's memory."""
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            encoding="utf-8"
+        )
+        lines = [line.strip() for line in output.strip().splitlines() if line.strip()]
+        if lines:
+            return int(lines[0])
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        pass
+    return 0
 
 def count_nvidia_accelerators(gpu_names):
     """

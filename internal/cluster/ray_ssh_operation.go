@@ -429,6 +429,14 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	rayClusterConfig.WorkerStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.WorkerStartRayCommands...)
 	rayClusterConfig.StaticWorkerStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.StaticWorkerStartRayCommands...)
 
+	// Copy HAMi-core libvgpu.so from the container to the host for fractional GPU memory isolation.
+	// Engine containers bind-mount this library from the host path.
+	hamiSetupCmd := fmt.Sprintf("sudo mkdir -p %s && sudo cp %s %s",
+		v1.HamiCoreHostDir, v1.HamiCoreLibPath, v1.HamiCoreHostLibPath)
+	rayClusterConfig.HeadStartRayCommands = append([]string{hamiSetupCmd}, rayClusterConfig.HeadStartRayCommands...)
+	rayClusterConfig.WorkerStartRayCommands = append([]string{hamiSetupCmd}, rayClusterConfig.WorkerStartRayCommands...)
+	rayClusterConfig.StaticWorkerStartRayCommands = append([]string{hamiSetupCmd}, rayClusterConfig.StaticWorkerStartRayCommands...)
+
 	return rayClusterConfig, nil
 }
 

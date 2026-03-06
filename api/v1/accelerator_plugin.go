@@ -24,6 +24,11 @@ const (
 
 	PluginAPIGroupPath = "/v1/plugin"
 	RegisterPath       = PluginAPIGroupPath + "/register"
+
+	// HAMi-core paths for fractional GPU memory isolation
+	HamiCoreHostDir     = "/var/lib/.neutree/hami"
+	HamiCoreHostLibPath = "/var/lib/.neutree/hami/libvgpu.so"
+	HamiCoreLibPath     = "/usr/lib/libvgpu.so"
 )
 
 type AcceleratorType string

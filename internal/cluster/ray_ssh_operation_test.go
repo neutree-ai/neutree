@@ -918,6 +918,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 					"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 					"-e RAY_enable_open_telemetry=false",
+					"-e RAY_EXPERIMENTAL_RUNTIME_ENV_CONTAINER_RUNTIME=docker",
 					"--ulimit nofile=65536:65536",
 					"--volume /var/run/docker.sock:/var/run/docker.sock",
 					"--volume /tmp:/tmp",
@@ -926,6 +927,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				},
 			},
 			HeadStartRayCommands: []string{
+				fmt.Sprintf("sudo mkdir -p %s && sudo cp %s %s", v1.HamiCoreHostDir, v1.HamiCoreLibPath, v1.HamiCoreHostLibPath),
 				"sudo chmod 666 /var/run/docker.sock",
 				"ray stop",
 				strings.Join([]string{
@@ -938,6 +940,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				}, " "),
 			},
 			WorkerStartRayCommands: []string{
+				fmt.Sprintf("sudo mkdir -p %s && sudo cp %s %s", v1.HamiCoreHostDir, v1.HamiCoreLibPath, v1.HamiCoreHostLibPath),
 				"sudo chmod 666 /var/run/docker.sock",
 				"ray stop",
 				strings.Join([]string{
@@ -947,6 +950,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				}, " "),
 			},
 			StaticWorkerStartRayCommands: []string{
+				fmt.Sprintf("sudo mkdir -p %s && sudo cp %s %s", v1.HamiCoreHostDir, v1.HamiCoreLibPath, v1.HamiCoreHostLibPath),
 				"sudo chmod 666 /var/run/docker.sock",
 				"ray stop",
 				strings.Join([]string{
@@ -1162,6 +1166,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 							"-e RAY_process_group_cleanup_enabled=true",
 							"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 							"-e RAY_enable_open_telemetry=false",
+							"-e RAY_EXPERIMENTAL_RUNTIME_ENV_CONTAINER_RUNTIME=docker",
 							"--ulimit nofile=65536:65536",
 							"--volume /var/run/docker.sock:/var/run/docker.sock",
 							"--volume /tmp:/tmp",
@@ -1170,6 +1175,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						},
 					},
 					HeadStartRayCommands: []string{
+						fmt.Sprintf("sudo mkdir -p %s && sudo cp %s %s", v1.HamiCoreHostDir, v1.HamiCoreLibPath, v1.HamiCoreHostLibPath),
 						"sudo chmod 666 /var/run/docker.sock",
 						"ray stop",
 						strings.Join([]string{
@@ -1181,6 +1187,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						}, " "),
 					},
 					WorkerStartRayCommands: []string{
+						fmt.Sprintf("sudo mkdir -p %s && sudo cp %s %s", v1.HamiCoreHostDir, v1.HamiCoreLibPath, v1.HamiCoreHostLibPath),
 						"sudo chmod 666 /var/run/docker.sock",
 						"ray stop",
 						strings.Join([]string{
@@ -1190,6 +1197,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						}, " "),
 					},
 					StaticWorkerStartRayCommands: []string{
+						fmt.Sprintf("sudo mkdir -p %s && sudo cp %s %s", v1.HamiCoreHostDir, v1.HamiCoreLibPath, v1.HamiCoreHostLibPath),
 						"sudo chmod 666 /var/run/docker.sock",
 						"ray stop",
 						strings.Join([]string{

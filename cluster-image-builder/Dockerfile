@@ -26,6 +26,9 @@ WORKDIR /ray
 COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
 RUN /ray/python/build-wheel-manylinux2014.sh
 
+# --- HAMi-core library for fractional GPU memory isolation ---
+FROM projecthami/hami-core:latest AS hami_core
+
 # --- Final image ---
 FROM ubuntu:22.04
 
@@ -74,6 +77,9 @@ RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
 ENV RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL=minor
 # Disable OTEL metrics backend due to metrics loss issue, fall back to OpenCensus
 ENV RAY_enable_open_telemetry=false
+
+# Copy HAMi-core library for fractional GPU memory isolation
+COPY --from=hami_core /libvgpu.so /usr/lib/libvgpu.so
 
 # Copy GPU detection + Ray start scripts (no engine code)
 COPY start.py ./

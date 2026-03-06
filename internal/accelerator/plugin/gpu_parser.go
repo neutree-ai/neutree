@@ -77,14 +77,21 @@ func (p *GPUResourceParser) ParseFromRay(resource map[string]float64) (*v1.Resou
 		return nil, nil
 	}
 
+	group := &v1.AcceleratorGroup{
+		Quantity: totalGPUs,
+		ProductGroups: map[v1.AcceleratorProduct]float64{
+			v1.AcceleratorProduct(productName): productQuantity,
+		},
+	}
+
+	// Extract per-device GPU memory if reported
+	if memMiB, ok := resource["gpu_memory_mib_per_device"]; ok && memMiB > 0 {
+		group.MemoryPerDeviceMiB = int64(memMiB)
+	}
+
 	resourceInfo := &v1.ResourceInfo{
 		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
-			v1.AcceleratorTypeNVIDIAGPU: {
-				Quantity: totalGPUs,
-				ProductGroups: map[v1.AcceleratorProduct]float64{
-					v1.AcceleratorProduct(productName): productQuantity,
-				},
-			},
+			v1.AcceleratorTypeNVIDIAGPU: group,
 		},
 	}
 

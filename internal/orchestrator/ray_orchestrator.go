@@ -663,6 +663,28 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 		}
 	}
 
+	// Inject HAMi-core for fractional GPU memory isolation.
+	// When gpu < 1.0, calculate absolute memory limit from per-device memory and inject
+	// libvgpu.so via LD_PRELOAD to enforce the limit.
+	if endpoint.Spec.Resources != nil && cluster.Status != nil && cluster.Status.ResourceInfo != nil {
+		gpuCount := endpoint.Spec.Resources.GetGPUCount()
+		if gpuCount > 0 && gpuCount < 1 {
+			acceleratorType := v1.AcceleratorType("")
+			if cluster.Status.AcceleratorType != nil {
+				acceleratorType = v1.AcceleratorType(*cluster.Status.AcceleratorType)
+			}
+
+			if group, ok := cluster.Status.ResourceInfo.Allocatable.AcceleratorGroups[acceleratorType]; ok && group.MemoryPerDeviceMiB > 0 {
+				memLimitMiB := int64(float64(group.MemoryPerDeviceMiB) * gpuCount)
+				runOptions = append(runOptions,
+					fmt.Sprintf("-v %s:%s:ro", v1.HamiCoreHostLibPath, v1.HamiCoreLibPath),
+					fmt.Sprintf("-e LD_PRELOAD=%s", v1.HamiCoreLibPath),
+					fmt.Sprintf("-e CUDA_DEVICE_MEMORY_LIMIT=%dm", memLimitMiB),
+				)
+			}
+		}
+	}
+
 	// Auto-remove engine container when it exits to prevent residual containers on the host.
 	// Engine containers run in foreground (no -d), so Ray collects exit codes and logs via
 	// the docker run process pipe before --rm triggers cleanup.
