@@ -29,6 +29,9 @@ deploy/chart/neutree/grafana-dashboards
 deploy/docker/neutree-core/vmagent
 deploy/chart/neutree/vmagent
 
+# postgresql init scripts
+deploy/chart/neutree/init-scripts
+
 scripts/dashboard/ray-upstream
 scripts/dashboard/vllm-upstream
 scripts/dashboard/output
