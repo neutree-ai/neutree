@@ -9,8 +9,7 @@ local schema = {
           {
             route_type = {
               type = "string",
-              required = true,
-              one_of = {"/v1/chat/completions","/v1/embeddings","/v1/rerank"},
+              required = false,
             },
           },
         },

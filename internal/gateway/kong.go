@@ -145,6 +145,11 @@ func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
 	aiStatisticsPlugin := k.generateAIStatisticsPlugin(ep, route)
 	needPluginMap[*aiStatisticsPlugin.InstanceName] = aiStatisticsPlugin
 
+	if getEndpointRouteType(ep) == v1.RouteTypeChatCompletions {
+		formatPlugin := k.generateAIFormatAnthropicPlugin(ep, route)
+		needPluginMap[*formatPlugin.InstanceName] = formatPlugin
+	}
+
 	for _, plugin := range needPluginMap {
 		err = k.syncPlugin(plugin)
 		if err != nil {
@@ -219,6 +224,10 @@ if auth_header then
   if token then
     kong.service.request.set_header("kong_apikey", token)
   end
+end
+local x_api_key = kong.request.get_header("x-api-key")
+if x_api_key then
+  kong.service.request.set_header("kong_apikey", x_api_key)
 end`,
 			},
 		},
@@ -234,6 +243,16 @@ func (k *Kong) generateAIStatisticsPlugin(ep *v1.Endpoint, curRoute *kong.Route)
 		Config: map[string]interface{}{
 			"route_type": getEndpointRouteType(ep),
 		},
+	}
+}
+
+func (k *Kong) generateAIFormatAnthropicPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-format-anthropic"),
+		InstanceName: pointy.String("neutree-ai-format-anthropic-" + util.HashString(ep.Key())),
+		Route:        curRoute,
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config:       map[string]interface{}{},
 	}
 }
 
@@ -286,7 +305,8 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 	}
 
 	if !result {
-		klog.Info("plugin config diff: ", diff)
+		klog.Infof("plugin config changed, updating plugin: %s", *plugin.InstanceName)
+		klog.V(4).Info("plugin config diff: ", diff)
 
 		curPlugin.Config = plugin.Config
 
@@ -459,17 +479,406 @@ func isResourceNotFoundError(err error) bool {
 func getEndpointRouteType(ep *v1.Endpoint) string {
 	switch ep.Spec.Model.Task {
 	case v1.TextGenerationModelTask:
-		return "/v1/chat/completions"
+		return v1.RouteTypeChatCompletions
 	case v1.TextEmbeddingModelTask:
-		return "/v1/embeddings"
+		return v1.RouteTypeEmbeddings
 	case v1.TextRerankModelTask:
-		return "/v1/rerank"
+		return v1.RouteTypeRerank
 	}
 
 	// default return text generation route type.
-	return "/v1/chat/completions"
+	return v1.RouteTypeChatCompletions
 }
 
 func getEndpointRoutePath(ep *v1.Endpoint) string {
 	return "/workspace/" + ep.Metadata.Workspace + "/endpoint/" + ep.Metadata.Name
+}
+
+// SyncExternalEndpoint synchronizes an external endpoint configuration to Kong
+func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
+	gwService, err := k.syncExternalEndpointService(ee)
+	if err != nil {
+		return errors.Wrapf(err, "failed to sync external endpoint service %s", ee.Metadata.Name)
+	}
+
+	route, err := k.syncExternalEndpointRoute(ee, gwService)
+	if err != nil {
+		return errors.Wrapf(err, "failed to sync external endpoint route %s", ee.Metadata.Name)
+	}
+
+	// sync route plugins
+	needPluginMap := make(map[string]*kong.Plugin)
+
+	modelRouterPlugin, err := k.generateExternalEndpointModelRouterPlugin(ee, route)
+	if err != nil {
+		return errors.Wrapf(err, "failed to generate model router plugin for %s", ee.Metadata.Name)
+	}
+
+	needPluginMap[*modelRouterPlugin.InstanceName] = modelRouterPlugin
+
+	// Add Anthropic format plugin unconditionally - it self-filters by path (/anthropic/v1/messages)
+	formatPlugin := k.generateExternalEndpointAIFormatAnthropicPlugin(ee, route)
+	needPluginMap[*formatPlugin.InstanceName] = formatPlugin
+
+	// Add AI statistics plugin
+	aiStatisticsPlugin := k.generateExternalEndpointAIStatisticsPlugin(ee, route)
+	needPluginMap[*aiStatisticsPlugin.InstanceName] = aiStatisticsPlugin
+
+	for _, plugin := range needPluginMap {
+		err = k.syncPlugin(plugin)
+		if err != nil {
+			return errors.Wrapf(err, "failed to sync plugin %s", *plugin.Name)
+		}
+	}
+
+	curPlugins, err := k.kongClient.Plugins.ListAllForRoute(context.Background(), route.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list plugins for route %s", *route.Name)
+	}
+
+	var needDeletePlugins []*kong.Plugin
+
+	for _, curPlugin := range curPlugins {
+		if _, ok := needPluginMap[*curPlugin.InstanceName]; !ok {
+			needDeletePlugins = append(needDeletePlugins, curPlugin)
+		}
+	}
+
+	for _, needDeletePlugin := range needDeletePlugins {
+		err = k.kongClient.Plugins.Delete(context.Background(), needDeletePlugin.ID)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete plugin %s", *needDeletePlugin.Name)
+		}
+	}
+
+	return nil
+}
+
+// DeleteExternalEndpoint removes an external endpoint configuration from Kong
+func (k *Kong) DeleteExternalEndpoint(ee *v1.ExternalEndpoint) error {
+	err := k.deleteExternalEndpointRoute(ee)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete external endpoint route %s", ee.Metadata.Name)
+	}
+
+	err = k.deleteExternalEndpointService(ee)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete external endpoint service %s", ee.Metadata.Name)
+	}
+
+	return nil
+}
+
+// GetExternalEndpointServeUrl returns the external endpoint serving url
+func (k *Kong) GetExternalEndpointServeUrl(ee *v1.ExternalEndpoint) (string, error) {
+	return k.proxyUrl + getExternalEndpointRoutePath(ee), nil
+}
+
+// resolveEndpointRef resolves an endpoint ref (internal endpoint name) to its cluster serve address.
+// Returns scheme, host, port, path for the resolved endpoint.
+func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host string, port int, path string, err error) {
+	endpoints, err := k.storage.ListEndpoint(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(endpointName),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(workspace),
+			},
+		},
+	})
+	if err != nil {
+		return "", "", 0, "", errors.Wrapf(err, "failed to list endpoint by name %s", endpointName)
+	}
+
+	if len(endpoints) == 0 {
+		return "", "", 0, "", fmt.Errorf("internal endpoint %s not found in workspace %s", endpointName, workspace)
+	}
+
+	ep := &endpoints[0]
+
+	clusters, err := k.storage.ListCluster(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(ep.Spec.Cluster),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(workspace),
+			},
+		},
+	})
+	if err != nil {
+		return "", "", 0, "", errors.Wrapf(err, "failed to list cluster by name %s", ep.Spec.Cluster)
+	}
+
+	if len(clusters) == 0 {
+		return "", "", 0, "", fmt.Errorf("cluster %s not found for endpoint %s", ep.Spec.Cluster, endpointName)
+	}
+
+	if clusters[0].Status == nil {
+		return "", "", 0, "", fmt.Errorf("cluster %s is never initialized", ep.Spec.Cluster)
+	}
+
+	scheme, host, port, err = util.GetClusterServeAddress(&clusters[0])
+	if err != nil {
+		return "", "", 0, "", errors.Wrapf(err, "failed to get cluster serve address")
+	}
+
+	path = fmt.Sprintf("/%s/%s", workspace, endpointName)
+
+	return scheme, host, port, path, nil
+}
+
+func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Service, error) {
+	var serviceHost string
+	var servicePort int
+	var serviceScheme string
+	var servicePath string
+
+	if len(ee.Spec.Upstreams) == 0 {
+		return nil, errors.Errorf("external endpoint %s has no upstreams configured", ee.Key())
+	}
+
+	firstEntry := ee.Spec.Upstreams[0]
+
+	switch {
+	case firstEntry.EndpointRef != nil:
+		// Resolve internal endpoint ref
+		scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *firstEntry.EndpointRef)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to resolve endpoint ref: %s", *firstEntry.EndpointRef)
+		}
+
+		serviceScheme = scheme
+		serviceHost = host
+		servicePort = port
+		servicePath = path
+	case firstEntry.Upstream != nil:
+		// Parse external upstream URL
+		uc, err := util.ParseURLComponents(firstEntry.Upstream.URL)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse upstream URL: %s", firstEntry.Upstream.URL)
+		}
+
+		serviceScheme = uc.Scheme
+		serviceHost = uc.Host
+		servicePort = uc.Port
+		servicePath = uc.Path
+	default:
+		return nil, errors.Errorf("first upstream entry of external endpoint %s has neither endpoint_ref nor upstream configured", ee.Key())
+	}
+
+	timeout := 60000
+	if ee.Spec.Timeout != nil && *ee.Spec.Timeout > 0 {
+		timeout = *ee.Spec.Timeout
+	}
+
+	gwServiceName := "neutree-external-endpoint-" + util.HashString(ee.Key())
+	gwService := &kong.Service{
+		Name:        &gwServiceName,
+		Host:        &serviceHost,
+		Port:        &servicePort,
+		Protocol:    &serviceScheme,
+		Path:        &servicePath,
+		ReadTimeout: &timeout,
+	}
+
+	curGwService, err := k.kongClient.Services.Get(context.Background(), &gwServiceName)
+	if err != nil && !isResourceNotFoundError(err) {
+		return nil, errors.Wrapf(err, "failed to get service by name %s", gwServiceName)
+	}
+
+	if isResourceNotFoundError(err) {
+		curGwService, err = k.kongClient.Services.Create(context.Background(), gwService)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create service by name %s", gwServiceName)
+		}
+	}
+
+	if *curGwService.Host != *gwService.Host || *curGwService.Port != *gwService.Port ||
+		*curGwService.Protocol != *gwService.Protocol || *curGwService.Path != *gwService.Path ||
+		*curGwService.ReadTimeout != *gwService.ReadTimeout {
+		curGwService.Host = gwService.Host
+		curGwService.Port = gwService.Port
+		curGwService.Protocol = gwService.Protocol
+		curGwService.Path = gwService.Path
+		curGwService.ReadTimeout = gwService.ReadTimeout
+
+		_, err = k.kongClient.Services.Update(context.Background(), curGwService)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to update service by name %s", gwServiceName)
+		}
+	}
+
+	return curGwService, nil
+}
+
+func (k *Kong) deleteExternalEndpointService(ee *v1.ExternalEndpoint) error {
+	gwName := "neutree-external-endpoint-" + util.HashString(ee.Key())
+	gw, err := k.kongClient.Services.Get(context.Background(), &gwName)
+
+	if err != nil && !isResourceNotFoundError(err) {
+		return errors.Wrapf(err, "failed to get service by name %s", gwName)
+	}
+
+	if isResourceNotFoundError(err) {
+		return nil
+	}
+
+	err = k.kongClient.Services.Delete(context.Background(), gw.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete service by name %s", gwName)
+	}
+
+	return nil
+}
+
+func (k *Kong) syncExternalEndpointRoute(ee *v1.ExternalEndpoint, gwService *kong.Service) (*kong.Route, error) {
+	route := &kong.Route{
+		Name:      pointy.String("neutree-external-endpoint-" + util.HashString(ee.Key())),
+		Paths:     []*string{pointy.String(getExternalEndpointRoutePath(ee))},
+		Service:   gwService,
+		Protocols: []*string{pointy.String("http"), pointy.String("https")},
+	}
+
+	curRoute, err := k.kongClient.Routes.Get(context.Background(), route.Name)
+	if err != nil && !isResourceNotFoundError(err) {
+		return nil, errors.Wrapf(err, "failed to get route by name %s", *route.Name)
+	}
+
+	if isResourceNotFoundError(err) {
+		curRoute, err = k.kongClient.Routes.Create(context.Background(), route)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create route by name %s", *route.Name)
+		}
+	}
+
+	if *curRoute.Paths[0] != *route.Paths[0] || *curRoute.Service.ID != *route.Service.ID {
+		curRoute.Paths = route.Paths
+		curRoute.Service = route.Service
+
+		_, err = k.kongClient.Routes.Update(context.Background(), curRoute)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to update route by name %s", *route.Name)
+		}
+	}
+
+	return curRoute, nil
+}
+
+func (k *Kong) deleteExternalEndpointRoute(ee *v1.ExternalEndpoint) error {
+	routeName := "neutree-external-endpoint-" + util.HashString(ee.Key())
+	route, err := k.kongClient.Routes.Get(context.Background(), pointy.String(routeName))
+
+	if err != nil && !isResourceNotFoundError(err) {
+		return errors.Wrapf(err, "failed to get route by name %s", routeName)
+	}
+
+	if isResourceNotFoundError(err) {
+		return nil
+	}
+
+	err = k.kongClient.Routes.Delete(context.Background(), route.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to delete route by name %s", routeName)
+	}
+
+	return nil
+}
+
+func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) (*kong.Plugin, error) {
+	instanceName := "neutree-model-router-external-endpoint-" + util.HashString(ee.Key())
+
+	var upstreams []map[string]interface{}
+
+	for _, entry := range ee.Spec.Upstreams {
+		var upstreamEntry map[string]interface{}
+
+		switch {
+		case entry.EndpointRef != nil:
+			// Resolve internal endpoint ref
+			scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *entry.EndpointRef)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to resolve endpoint ref %s for model_mapping %v", *entry.EndpointRef, entry.ModelMapping)
+			}
+
+			upstreamEntry = map[string]interface{}{
+				"model_mapping": entry.ModelMapping,
+				"scheme":        scheme,
+				"host":          host,
+				"port":          port,
+				"path":          path,
+				"auth_header":   nil,
+			}
+		case entry.Upstream != nil:
+			uc, err := util.ParseURLComponents(entry.Upstream.URL)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to parse upstream URL for model_mapping %v", entry.ModelMapping)
+			}
+
+			upstreamEntry = map[string]interface{}{
+				"model_mapping": entry.ModelMapping,
+				"scheme":        uc.Scheme,
+				"host":          uc.Host,
+				"port":          uc.Port,
+				"path":          uc.Path,
+				"auth_header":   nil,
+			}
+
+			if entry.Auth != nil {
+				upstreamEntry["auth_header"] = entry.Auth.AuthHeaderValue()
+			}
+		default:
+			return nil, errors.Errorf("upstream entry for model_mapping %v has neither endpoint_ref nor upstream configured", entry.ModelMapping)
+		}
+
+		upstreams = append(upstreams, upstreamEntry)
+	}
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-model-router"),
+		InstanceName: &instanceName,
+		Route:        curRoute,
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config: map[string]interface{}{
+			"route_prefix": getExternalEndpointRoutePath(ee),
+			"upstreams":    upstreams,
+		},
+	}, nil
+}
+
+func (k *Kong) generateExternalEndpointAIStatisticsPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) *kong.Plugin {
+	instanceName := "neutree-ai-statistics-external-endpoint-" + util.HashString(ee.Key())
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-statistics"),
+		InstanceName: &instanceName,
+		Route:        curRoute,
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config:       map[string]interface{}{},
+	}
+}
+
+func (k *Kong) generateExternalEndpointAIFormatAnthropicPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) *kong.Plugin {
+	instanceName := "neutree-ai-format-anthropic-external-endpoint-" + util.HashString(ee.Key())
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-format-anthropic"),
+		InstanceName: &instanceName,
+		Route:        curRoute,
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config:       map[string]interface{}{},
+	}
+}
+
+func getExternalEndpointRoutePath(ee *v1.ExternalEndpoint) string {
+	return "/workspace/" + ee.Metadata.Workspace + "/external-endpoint/" + ee.Metadata.Name
 }

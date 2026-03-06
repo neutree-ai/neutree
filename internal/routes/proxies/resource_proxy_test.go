@@ -405,6 +405,47 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 		assert.Equal(t, expected, result)
 	})
 
+	t.Run("extract fields from slice element type", func(t *testing.T) {
+		type Auth struct {
+			Type       string `json:"type"`
+			Credential string `json:"credential" api:"-"`
+		}
+
+		type UpstreamEntry struct {
+			URL  string `json:"url"`
+			Auth *Auth  `json:"auth"`
+		}
+
+		type TestObject struct {
+			ID        string          `json:"id"`
+			Upstreams []UpstreamEntry `json:"upstreams"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"upstreams.auth.credential": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("extract fields from pointer slice element type", func(t *testing.T) {
+		type Inner struct {
+			Secret string `json:"secret" api:"-"`
+		}
+
+		type TestObject struct {
+			Items []*Inner `json:"items"`
+		}
+
+		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+
+		expected := map[string]struct{}{
+			"items.secret": {},
+		}
+		assert.Equal(t, expected, result)
+	})
+
 	t.Run("deeply nested structs", func(t *testing.T) {
 		type Level3 struct {
 			DeepSecret string `json:"deep_secret" api:"-"`
@@ -544,6 +585,98 @@ func Test_mergeExcludedFields(t *testing.T) {
 		mergeExcludedFields(target, source, excludeFields)
 
 		assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
+	})
+
+	t.Run("merge excluded field inside array elements", func(t *testing.T) {
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					map[string]interface{}{
+						"url": "https://api.example.com",
+						"auth": map[string]interface{}{
+							"type":       "bearer",
+							"credential": "",
+						},
+					},
+				},
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					map[string]interface{}{
+						"url": "https://api.example.com",
+						"auth": map[string]interface{}{
+							"type":       "bearer",
+							"credential": "sk-secret-token",
+						},
+					},
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.upstreams.auth.credential": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields)
+
+		upstreams := target["spec"].(map[string]interface{})["upstreams"].([]interface{})
+		auth := upstreams[0].(map[string]interface{})["auth"].(map[string]interface{})
+		assert.Equal(t, "sk-secret-token", auth["credential"])
+	})
+
+	t.Run("merge excluded field inside array with multiple elements", func(t *testing.T) {
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					map[string]interface{}{
+						"url": "https://api1.example.com",
+						"auth": map[string]interface{}{
+							"type":       "bearer",
+							"credential": "",
+						},
+					},
+					map[string]interface{}{
+						"url": "https://api2.example.com",
+						"auth": map[string]interface{}{
+							"type":       "api_key",
+							"credential": "",
+						},
+					},
+				},
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					map[string]interface{}{
+						"url": "https://api1.example.com",
+						"auth": map[string]interface{}{
+							"type":       "bearer",
+							"credential": "token-1",
+						},
+					},
+					map[string]interface{}{
+						"url": "https://api2.example.com",
+						"auth": map[string]interface{}{
+							"type":       "api_key",
+							"credential": "token-2",
+						},
+					},
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.upstreams.auth.credential": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields)
+
+		upstreams := target["spec"].(map[string]interface{})["upstreams"].([]interface{})
+		auth0 := upstreams[0].(map[string]interface{})["auth"].(map[string]interface{})
+		auth1 := upstreams[1].(map[string]interface{})["auth"].(map[string]interface{})
+		assert.Equal(t, "token-1", auth0["credential"])
+		assert.Equal(t, "token-2", auth1["credential"])
 	})
 
 	t.Run("do not merge non-excluded fields", func(t *testing.T) {

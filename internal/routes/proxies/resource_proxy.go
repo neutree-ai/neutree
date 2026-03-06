@@ -206,10 +206,17 @@ func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[str
 			excludeFields[fieldPath] = struct{}{}
 		}
 
-		// Recursively process nested structs
+		// Recursively process nested structs and slices
 		fieldType := field.Type
 		if fieldType.Kind() == reflect.Ptr {
 			fieldType = fieldType.Elem()
+		}
+
+		if fieldType.Kind() == reflect.Slice {
+			fieldType = fieldType.Elem()
+			if fieldType.Kind() == reflect.Ptr {
+				fieldType = fieldType.Elem()
+			}
 		}
 
 		if fieldType.Kind() == reflect.Struct {
@@ -251,6 +258,20 @@ func mergeExcludedFieldsRecursive(target, source map[string]interface{}, exclude
 				target[key] = make(map[string]interface{})
 				if targetMap, ok := target[key].(map[string]interface{}); ok {
 					mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, fieldPath)
+				}
+			}
+		}
+
+		// Recursively merge array elements
+		if sourceArr, ok := sourceValue.([]interface{}); ok {
+			if targetArr, ok := target[key].([]interface{}); ok {
+				for i := 0; i < len(sourceArr) && i < len(targetArr); i++ {
+					sourceElem, sourceOk := sourceArr[i].(map[string]interface{})
+					targetElem, targetOk := targetArr[i].(map[string]interface{})
+
+					if sourceOk && targetOk {
+						mergeExcludedFieldsRecursive(targetElem, sourceElem, excludeFields, fieldPath)
+					}
 				}
 			}
 		}

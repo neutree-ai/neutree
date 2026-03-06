@@ -290,3 +290,27 @@ func NewUserProfileControllerFactory() ControllerFactory {
 		return ctrl, nil
 	}
 }
+
+func NewExternalEndpointControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		externalEndpointController, err := controllers.NewExternalEndpointController(&controllers.ExternalEndpointControllerOption{
+			Storage: opts.config.Storage,
+			Gw:      opts.config.Gateway,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create external endpoint controller")
+		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(externalEndpointController),
+			controllers.WithObject(&v1.ExternalEndpoint{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		)
+
+		return ctrl, nil
+	}
+}
