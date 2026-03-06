@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -643,5 +644,156 @@ func TestModelRegistryValidation(t *testing.T) {
 		}
 
 		t.Logf("successfully inserted model registry with ID: %d", registryID)
+	})
+}
+
+func TestEndpointAcceleratorValidation(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	// Helper to build endpoint INSERT with a given accelerator JSON literal
+	buildInsert := func(acceleratorLiteral string) string {
+		return fmt.Sprintf(`
+			INSERT INTO api.endpoints (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Endpoint',
+				ROW(
+					'test-cluster',
+					ROW('test-registry', 'test-model', '', 'v1', '')::api.model_spec,
+					ROW('vllm', 'v0.11.2')::api.endpoint_engine_spec,
+					ROW('4', '2', %s, '16')::api.resource_spec,
+					ROW(1)::api.replica_spec,
+					NULL,
+					NULL,
+					NULL
+				)::api.endpoint_spec,
+				ROW('test-ep-accel', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`, acceleratorLiteral)
+	}
+
+	t.Run("accelerator with nested object value - error code 10108", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, buildInsert(`'{"type": "nvidia_gpu", "product_groups": {"Tesla-V100": 1, "Tesla-A100": 1}}'::json`))
+
+		if err == nil {
+			t.Fatal("expected validation error for nested object value in accelerator")
+		}
+
+		if !strings.Contains(err.Error(), `"code": "10108"`) {
+			t.Fatalf("expected error code 10108, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked nested object: %v", err)
+	})
+
+	t.Run("accelerator with array value - error code 10108", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, buildInsert(`'{"type": "nvidia_gpu", "products": ["Tesla-V100", "Tesla-A100"]}'::json`))
+
+		if err == nil {
+			t.Fatal("expected validation error for array value in accelerator")
+		}
+
+		if !strings.Contains(err.Error(), `"code": "10108"`) {
+			t.Fatalf("expected error code 10108, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked array value: %v", err)
+	})
+
+	t.Run("accelerator with number value - error code 10108", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, buildInsert(`'{"type": "nvidia_gpu", "count": 4}'::json`))
+
+		if err == nil {
+			t.Fatal("expected validation error for number value in accelerator")
+		}
+
+		if !strings.Contains(err.Error(), `"code": "10108"`) {
+			t.Fatalf("expected error code 10108, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked number value: %v", err)
+	})
+
+	t.Run("accelerator is not a JSON object (array) - error code 10108", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, buildInsert(`'["nvidia_gpu", "Tesla-V100"]'::json`))
+
+		if err == nil {
+			t.Fatal("expected validation error for array accelerator")
+		}
+
+		if !strings.Contains(err.Error(), `"code": "10108"`) {
+			t.Fatalf("expected error code 10108, got: %v", err)
+		}
+
+		t.Logf("validation correctly blocked non-object accelerator: %v", err)
+	})
+
+	t.Run("accelerator with valid string values - success", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, buildInsert(`'{"type": "nvidia_gpu", "product": "Tesla-V100"}'::json`))
+
+		if err != nil {
+			t.Fatalf("expected success for valid accelerator, got: %v", err)
+		}
+
+		t.Log("valid accelerator accepted successfully")
+	})
+
+	t.Run("accelerator is NULL - success", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, buildInsert("NULL"))
+
+		if err != nil {
+			t.Fatalf("expected success for NULL accelerator, got: %v", err)
+		}
+
+		t.Log("NULL accelerator accepted successfully")
 	})
 }
