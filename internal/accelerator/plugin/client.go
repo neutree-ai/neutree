@@ -79,6 +79,17 @@ func (u *acceleratorPluginClient) GetNodeRuntimeConfig(ctx context.Context,
 	return response, nil
 }
 
+func (u *acceleratorPluginClient) GetContainerRuntimeConfig() v1.RuntimeConfig {
+	response := &v1.GetContainerRuntimeConfigResponse{}
+
+	err := u.doGet(context.Background(), v1.GetContainerRuntimeConfigPath, response)
+	if err != nil {
+		return v1.RuntimeConfig{}
+	}
+
+	return response.RuntimeConfig
+}
+
 func (u *acceleratorPluginClient) GetResourceConverter() ResourceConverter {
 	return u
 }

@@ -34,6 +34,11 @@ type Manager interface {
 
 	// GetParser retrieves a resource parser by accelerator type
 	GetParser(acceleratorType string) (plugin.ResourceParser, bool)
+
+	// GetEngineContainerRunOptions returns Docker run_options for engine containers.
+	// Delegates to the registered plugin's GetContainerRuntimeConfig() and converts
+	// RuntimeConfig fields (Runtime, Options, Env) to Docker CLI flags.
+	GetEngineContainerRunOptions(acceleratorType string) ([]string, error)
 }
 
 type registerPlugin struct {
@@ -384,4 +389,31 @@ func (a *manager) GetParser(acceleratorType string) (plugin.ResourceParser, bool
 	parser := p.Handle().GetResourceParser()
 
 	return parser, parser != nil
+}
+
+func (a *manager) GetEngineContainerRunOptions(acceleratorType string) ([]string, error) {
+	if acceleratorType == "" {
+		return nil, nil
+	}
+
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		return nil, errors.Errorf("accelerator plugin %s not found", acceleratorType)
+	}
+
+	rc := p.Handle().GetContainerRuntimeConfig()
+
+	var opts []string
+
+	if rc.Runtime != "" {
+		opts = append(opts, "--runtime="+rc.Runtime)
+	}
+
+	opts = append(opts, rc.Options...)
+
+	for k, v := range rc.Env {
+		opts = append(opts, "-e", k+"="+v)
+	}
+
+	return opts, nil
 }

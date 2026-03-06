@@ -13,7 +13,6 @@ from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, StreamingResponse
-import bentoml
 import llama_cpp
 from llama_cpp import Llama, LlamaGrammar
 from llama_cpp.server.settings import ModelSettings
