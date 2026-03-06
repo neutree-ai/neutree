@@ -338,6 +338,9 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		// Share host IPC namespace so that Ray container and engine containers can
 		// communicate via shared memory (used by Ray Object Store).
 		"--ipc=host",
+		// Mount HAMi-core host directory so that libvgpu.so copied inside the
+		// container lands on the host, where engine containers can bind-mount it.
+		fmt.Sprintf("--volume %s:%s", v1.HamiCoreHostDir, v1.HamiCoreHostDir),
 	}
 
 	headLabel := fmt.Sprintf(`--labels='{"%s":"%s"}'`,

@@ -924,6 +924,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					"--volume /tmp:/tmp",
 					"--pid=host",
 					"--ipc=host",
+					fmt.Sprintf("--volume %s:%s", v1.HamiCoreHostDir, v1.HamiCoreHostDir),
 				},
 			},
 			HeadStartRayCommands: []string{
@@ -1172,6 +1173,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 							"--volume /tmp:/tmp",
 							"--pid=host",
 							"--ipc=host",
+							fmt.Sprintf("--volume %s:%s", v1.HamiCoreHostDir, v1.HamiCoreHostDir),
 						},
 					},
 					HeadStartRayCommands: []string{
