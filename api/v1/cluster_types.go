@@ -128,6 +128,10 @@ type ClusterStatus struct {
 	// AcceleratorType is the accelerator type of the cluster, e.g. nvidia_gpu, amd_gpu, etc.
 	// It is currently only used for SSH clusters to avoid frequent parsing of node accelerators.
 	AcceleratorType *string `json:"accelerator_type,omitempty"`
+
+	// ObservedSpecHash is the SHA256 hash of the last successfully applied ClusterSpec.
+	// Used to detect spec changes and trigger the Updating phase.
+	ObservedSpecHash string `json:"observed_spec_hash,omitempty"`
 }
 
 type NodeProvision struct {
@@ -164,6 +168,8 @@ const (
 	ClusterPhaseFailed       ClusterPhase = "Failed"
 	ClusterPhaseDeleted      ClusterPhase = "Deleted"
 	ClusterPhaseInitializing ClusterPhase = "Initializing"
+	ClusterPhaseUpdating     ClusterPhase = "Updating"
+	ClusterPhaseDeleting     ClusterPhase = "Deleting"
 )
 
 func (obj *Cluster) GetName() string {

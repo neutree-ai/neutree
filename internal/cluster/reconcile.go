@@ -26,6 +26,10 @@ var (
 type ClusterReconcile interface {
 	Reconcile(ctx context.Context, cluster *v1.Cluster) error
 	ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error
+	// GetClusterStatus returns *v1.ClusterStatus with Phase and resource fields populated.
+	// Reconciler reads cluster context (IsInitialized, ObservedSpecHash) + queries infrastructure
+	// Returns fine-grained Phase (Running/Initializing/Updating/Failed) + resource fields.
+	GetClusterStatus(ctx context.Context, cluster *v1.Cluster) (*v1.ClusterStatus, error)
 }
 
 type ReconcileContext struct {

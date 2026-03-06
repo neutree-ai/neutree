@@ -83,6 +83,9 @@ func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileC
 }
 
 func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Cluster) error {
+	// Early write: detect spec change and write Updating phase for user feedback
+	WriteEarlyUpdating(cluster, c.storage)
+
 	imageRegistry, err := getUsedImageRegistries(cluster, c.storage)
 	if err != nil {
 		return errors.Wrap(err, "failed to get used image registries")
@@ -107,13 +110,6 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 	}
 
 	defer c.cleanupConfig(reconcileCtx) //nolint:errcheck
-
-	defer func() {
-		err = c.setClusterStatus(reconcileCtx)
-		if err != nil {
-			klog.Error(err, "failed to set cluster status")
-		}
-	}()
 
 	if reconcileCtx.Cluster.Status == nil || !reconcileCtx.Cluster.Status.Initialized {
 		err = c.initialize(reconcileCtx)
@@ -141,29 +137,67 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 	return nil
 }
 
-func (c *sshRayClusterReconciler) setClusterStatus(reconcileCtx *ReconcileContext) error {
-	clusterStatus, err := getRayClusterStatus(reconcileCtx.rayService)
+func (c *sshRayClusterReconciler) GetClusterStatus(ctx context.Context, cluster *v1.Cluster) (*v1.ClusterStatus, error) {
+	sshClusterConfig, err := util.ParseSSHClusterConfig(cluster)
 	if err != nil {
-		return errors.Wrap(err, "failed to get ray cluster status")
+		return nil, errors.Wrap(err, "failed to parse ssh cluster config")
 	}
 
-	setClusterStatus(reconcileCtx.Cluster, clusterStatus)
-	reconcileCtx.Cluster.Status.DesiredNodes += len(reconcileCtx.sshClusterConfig.Provider.WorkerIPs)
+	dashboardSvc := c.getDashboardService(sshClusterConfig.Provider.HeadIP)
 
-	// Collect cluster resources (including accelerators) if cluster is running
-	if reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseRunning {
-		resources, err := c.calculateClusterResources(reconcileCtx)
-		if err != nil {
-			return errors.Wrap(err, "failed to calculate cluster resources")
-		}
-
-		reconcileCtx.Cluster.Status.ResourceInfo = resources
+	rayStatus, err := getRayClusterStatus(dashboardSvc)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get ray cluster status")
 	}
 
-	return nil
+	desiredNodes := 1 + len(sshClusterConfig.Provider.WorkerIPs)
+	readyNodes := rayStatus.ReadyNodes
+	isResourceReady := desiredNodes > 0 && readyNodes >= desiredNodes
+	phase := DetermineClusterPhase(isResourceReady, cluster)
+
+	status := &v1.ClusterStatus{
+		Phase:        phase,
+		ReadyNodes:   readyNodes,
+		DesiredNodes: desiredNodes,
+		Version:      rayStatus.NeutreeServeVersion,
+		RayVersion:   rayStatus.RayVersion,
+		Initialized:  isResourceReady || cluster.IsInitialized(),
+	}
+
+	// Set ObservedSpecHash when phase is Running
+	if phase == v1.ClusterPhaseRunning {
+		status.ObservedSpecHash = ComputeClusterSpecHash(cluster.Spec)
+	}
+
+	// Preserve NodeProvisionStatus and AcceleratorType from cluster.Status (set during Reconcile)
+	if cluster.Status != nil {
+		status.NodeProvisionStatus = cluster.Status.NodeProvisionStatus
+		status.AcceleratorType = cluster.Status.AcceleratorType
+		status.DashboardURL = cluster.Status.DashboardURL
+	}
+
+	// Collect cluster resources
+	reconcileCtx := &ReconcileContext{
+		Ctx:              ctx,
+		Cluster:          cluster,
+		sshClusterConfig: sshClusterConfig,
+		rayService:       dashboardSvc,
+	}
+
+	resources, err := c.calculateClusterResources(reconcileCtx)
+	if err != nil {
+		klog.Warningf("failed to calculate cluster resources for %s: %v", cluster.Metadata.WorkspaceName(), err)
+	} else {
+		status.ResourceInfo = resources
+	}
+
+	return status, nil
 }
 
 func (c *sshRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {
+	// Early write: set Deleting phase for user feedback
+	WriteEarlyDeleting(cluster, c.storage)
+
 	imageRegistry, err := getUsedImageRegistries(cluster, c.storage)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get used image registry")

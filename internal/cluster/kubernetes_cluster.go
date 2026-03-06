@@ -3,7 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -89,21 +89,6 @@ func (c *NativeKubernetesClusterReconciler) generateConfig(reconcileCtx *Reconci
 }
 
 func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileContext) error {
-	if reconcileCtx.Cluster.Status == nil {
-		reconcileCtx.Cluster.Status = &v1.ClusterStatus{}
-	}
-
-	if !reconcileCtx.Cluster.Status.Initialized {
-		reconcileCtx.Cluster.Status.Phase = v1.ClusterPhaseInitializing
-
-		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
-			Status: reconcileCtx.Cluster.Status,
-		})
-		if err != nil {
-			return errors.Wrap(err, "failed to update cluster status")
-		}
-	}
-
 	ns := generateInstallNs(reconcileCtx.Cluster)
 
 	imagePullSecret, err := generateImagePullSecret(ns.Name, reconcileCtx.ImageRegistry)
@@ -141,21 +126,6 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 
 	if len(errs) > 0 {
 		return utilerrors.NewAggregate(errs)
-	}
-
-	// Note: Component configurations are now stored in ConfigMaps,
-	// no need to update cluster annotations in database
-
-	reconcileCtx.Cluster.Status.Initialized = true
-
-	// Collect cluster resources if cluster is running
-	if reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseRunning {
-		resources, err := c.calculateResources(reconcileCtx)
-		if err != nil {
-			return errors.Wrap(err, "failed to calculate cluster resources")
-		}
-
-		reconcileCtx.Cluster.Status.ResourceInfo = resources
 	}
 
 	return nil
@@ -199,14 +169,6 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 		return utilerrors.NewAggregate(errs)
 	}
 
-	// Get the router service endpoint
-	endpoint, err := routerComp.GetRouteEndpoint(reconcileCtx.Ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to get router service endpoint")
-	}
-
-	reconcileCtx.Cluster.Status.DashboardURL = endpoint
-
 	return nil
 }
 
@@ -243,6 +205,134 @@ func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context,
 
 	return c.reconcileDelete(reconcileCtx)
 }
+
+func (c *NativeKubernetesClusterReconciler) GetClusterStatus(ctx context.Context, cluster *v1.Cluster) (*v1.ClusterStatus, error) {
+	// --- Infrastructure: hard failure ---
+	config, err := util.ParseKubernetesClusterConfig(cluster)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse kubernetes cluster config")
+	}
+
+	ctrlClient, err := util.GetClientFromCluster(cluster)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create kubernetes client")
+	}
+
+	namespace := util.ClusterNamespace(cluster)
+
+	imageRegistry, err := getUsedImageRegistries(cluster, c.storage)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get image registries")
+	}
+
+	imagePrefix, err := util.GetImagePrefix(imageRegistry)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get image prefix")
+	}
+
+	// --- Component status checks: failures treated as not ready ---
+	var componentErrors []string
+
+	// 1. Router (core component)
+	routerReady := false
+	routerComp := router.NewRouterComponent(cluster, namespace, imagePrefix, ImagePullSecretName, *config, ctrlClient)
+
+	routerStatus, err := routerComp.CheckResourcesStatus(ctx)
+	if err != nil {
+		componentErrors = append(componentErrors, fmt.Sprintf("router: %v", err))
+	} else {
+		routerReady = routerStatus.DeploymentReady && routerStatus.ServiceReady
+		if !routerReady {
+			componentErrors = append(componentErrors, fmt.Sprintf("router: %s", routerStatus.String()))
+		}
+	}
+
+	// 2. Metrics (optional - only check when metricsRemoteWriteURL is valid)
+	metricsReady := true
+	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
+		metricsComp := metrics.NewMetricsComponent(cluster, namespace, imagePrefix, ImagePullSecretName,
+			c.metricsRemoteWriteURL, *config, ctrlClient)
+
+		metricsStatus, err := metricsComp.CheckResourcesStatus(ctx)
+		if err != nil {
+			metricsReady = false
+			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %v", err))
+		} else if !metricsStatus.DeploymentReady {
+			metricsReady = false
+			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %s", metricsStatus.String()))
+		}
+	}
+
+	// 3. Model Cache PVC (only PVC-type caches need status check)
+	modelCacheReady := true
+
+	cacheReconcileCtx := &ReconcileContext{
+		Cluster:          cluster,
+		Ctx:              ctx,
+		ctrClient:        ctrlClient,
+		clusterNamespace: namespace,
+	}
+	if err := c.reconcileModelCacheStatus(cacheReconcileCtx); err != nil {
+		modelCacheReady = false
+		componentErrors = append(componentErrors, fmt.Sprintf("model cache: %v", err))
+	}
+
+	// --- Aggregate ---
+	isResourceReady := routerReady && metricsReady && modelCacheReady
+	phase := DetermineClusterPhase(isResourceReady, cluster)
+
+	// Endpoint
+	var dashboardURL string
+	if routerReady {
+		if endpoint, err := routerComp.GetRouteEndpoint(ctx); err != nil {
+			klog.Warningf("router ready but failed to get endpoint for %s: %v", cluster.Metadata.WorkspaceName(), err)
+		} else {
+			dashboardURL = endpoint
+		}
+	}
+
+	status := &v1.ClusterStatus{
+		Phase:        phase,
+		DashboardURL: dashboardURL,
+		Initialized:  isResourceReady || cluster.IsInitialized(),
+	}
+
+	// Set ObservedSpecHash when phase is Running
+	if phase == v1.ClusterPhaseRunning {
+		status.ObservedSpecHash = ComputeClusterSpecHash(cluster.Spec)
+	}
+
+	// Preserve fields from cluster.Status
+	if cluster.Status != nil {
+		status.AcceleratorType = cluster.Status.AcceleratorType
+		if dashboardURL == "" {
+			status.DashboardURL = cluster.Status.DashboardURL
+		}
+	}
+
+	// Record component errors when not ready
+	if !isResourceReady && len(componentErrors) > 0 {
+		status.ErrorMessage = strings.Join(componentErrors, "; ")
+	}
+
+	// Calculate resources (failure doesn't affect phase)
+	reconcileCtx := &ReconcileContext{
+		Cluster:          cluster,
+		Ctx:              ctx,
+		ctrClient:        ctrlClient,
+		clusterNamespace: namespace,
+	}
+
+	resources, err := c.calculateResources(reconcileCtx)
+	if err != nil {
+		klog.Warningf("failed to calculate cluster resources for %s: %v", cluster.Metadata.WorkspaceName(), err)
+	} else {
+		status.ResourceInfo = resources
+	}
+
+	return status, nil
+}
+
 
 func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *ReconcileContext) error {
 	ns := generateInstallNs(reconcileCtx.Cluster)

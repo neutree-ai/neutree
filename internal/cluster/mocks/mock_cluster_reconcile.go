@@ -22,6 +22,65 @@ func (_m *MockClusterReconcile) EXPECT() *MockClusterReconcile_Expecter {
 	return &MockClusterReconcile_Expecter{mock: &_m.Mock}
 }
 
+// GetClusterStatus provides a mock function with given fields: ctx, _a1
+func (_m *MockClusterReconcile) GetClusterStatus(ctx context.Context, _a1 *v1.Cluster) (*v1.ClusterStatus, error) {
+	ret := _m.Called(ctx, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterStatus")
+	}
+
+	var r0 *v1.ClusterStatus
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.Cluster) (*v1.ClusterStatus, error)); ok {
+		return rf(ctx, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.Cluster) *v1.ClusterStatus); ok {
+		r0 = rf(ctx, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.ClusterStatus)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *v1.Cluster) error); ok {
+		r1 = rf(ctx, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClusterReconcile_GetClusterStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusterStatus'
+type MockClusterReconcile_GetClusterStatus_Call struct {
+	*mock.Call
+}
+
+// GetClusterStatus is a helper method to define mock.On call
+//   - ctx context.Context
+//   - _a1 *v1.Cluster
+func (_e *MockClusterReconcile_Expecter) GetClusterStatus(ctx interface{}, _a1 interface{}) *MockClusterReconcile_GetClusterStatus_Call {
+	return &MockClusterReconcile_GetClusterStatus_Call{Call: _e.mock.On("GetClusterStatus", ctx, _a1)}
+}
+
+func (_c *MockClusterReconcile_GetClusterStatus_Call) Run(run func(ctx context.Context, _a1 *v1.Cluster)) *MockClusterReconcile_GetClusterStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*v1.Cluster))
+	})
+	return _c
+}
+
+func (_c *MockClusterReconcile_GetClusterStatus_Call) Return(_a0 *v1.ClusterStatus, _a1 error) *MockClusterReconcile_GetClusterStatus_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClusterReconcile_GetClusterStatus_Call) RunAndReturn(run func(context.Context, *v1.Cluster) (*v1.ClusterStatus, error)) *MockClusterReconcile_GetClusterStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Reconcile provides a mock function with given fields: ctx, _a1
 func (_m *MockClusterReconcile) Reconcile(ctx context.Context, _a1 *v1.Cluster) error {
 	ret := _m.Called(ctx, _a1)

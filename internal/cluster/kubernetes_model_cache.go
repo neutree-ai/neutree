@@ -18,12 +18,7 @@ import (
 )
 
 func (c *NativeKubernetesClusterReconciler) reconcileModelCache(reconcileCtx *ReconcileContext) error {
-	err := c.reconcileModelCacheResources(reconcileCtx)
-	if err != nil {
-		return errors.Wrapf(err, "failed to reconcile model cache resource")
-	}
-
-	return c.reconcileModelCacheStatus(reconcileCtx)
+	return c.reconcileModelCacheResources(reconcileCtx)
 }
 
 func (c *NativeKubernetesClusterReconciler) reconcileModelCacheResources(reconcileCtx *ReconcileContext) error {
