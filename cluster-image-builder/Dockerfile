@@ -3,6 +3,8 @@ ARG COMMON_WORKDIR=/app
 ARG RAY_REPO
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
 ARG PYTHON_VERSION=3.12
+ARG HAMI_CORE_REPO=https://github.com/Project-HAMi/HAMi-core.git
+ARG HAMI_CORE_COMMIT=ec8979d
 
 # --- Ray source fetch ---
 FROM alpine/git:v2.47.2 AS ray_fetch
@@ -27,8 +29,6 @@ COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
 RUN /ray/python/build-wheel-manylinux2014.sh
 
 # --- HAMi-core library build (fractional GPU memory isolation) ---
-ARG HAMI_CORE_REPO=https://github.com/Project-HAMi/HAMi-core.git
-ARG HAMI_CORE_COMMIT=ec8979d
 FROM nvidia/cuda:12.2.0-devel-ubuntu20.04 AS hami_core
 ARG HAMI_CORE_REPO
 ARG HAMI_CORE_COMMIT
