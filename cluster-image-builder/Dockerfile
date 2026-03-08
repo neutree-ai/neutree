@@ -33,6 +33,8 @@ FROM nvidia/cuda:12.2.0-devel-ubuntu20.04 AS hami_core
 ARG HAMI_CORE_REPO
 ARG HAMI_CORE_COMMIT
 ENV DEBIAN_FRONTEND=noninteractive
+# CI_COMMIT_REF_NAME avoids CMake error when building from detached HEAD
+ENV CI_COMMIT_REF_NAME=main
 RUN apt-get update && apt-get install -y --no-install-recommends cmake git \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone ${HAMI_CORE_REPO} /libvgpu \
