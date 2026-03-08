@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ImageRegistry
+metadata:
+  name: ${E2E_IMAGE_REGISTRY}
+  workspace: ${E2E_WORKSPACE}
+spec:
+  url: ${E2E_IMAGE_REGISTRY_URL}
+  repository: ${E2E_IMAGE_REGISTRY_REPO}
