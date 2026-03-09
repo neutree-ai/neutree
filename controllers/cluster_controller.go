@@ -236,7 +236,6 @@ func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcil
 
 		return
 	}
-
 }
 
 func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {
