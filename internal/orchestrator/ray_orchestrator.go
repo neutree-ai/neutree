@@ -592,13 +592,17 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 		return nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
 	}
 
-	// Get cluster accelerator type
+	// Get accelerator type from endpoint resources (consistent with K8s orchestrator).
+	// Default to "cpu" when no accelerator type is specified.
 	acceleratorType := ""
-	if cluster.Status != nil && cluster.Status.AcceleratorType != nil {
-		acceleratorType = *cluster.Status.AcceleratorType
+	if endpoint.Spec.Resources != nil {
+		acceleratorType = endpoint.Spec.Resources.GetAcceleratorType()
+	}
+	if acceleratorType == "" {
+		acceleratorType = "cpu"
 	}
 
-	// Look up engine image using accelerator type key (shared with K8s)
+	// Look up engine image using the determined accelerator type key
 	engineImage := targetVersion.GetImageForAccelerator(acceleratorType)
 
 	if engineImage == nil {

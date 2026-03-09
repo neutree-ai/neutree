@@ -1144,6 +1144,19 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 		return mgr
 	}
 
+	gpuEndpoint := func(engineVersion string) *v1.Endpoint {
+		return &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: engineVersion},
+				Resources: &v1.ResourceSpec{
+					Accelerator: map[string]string{
+						v1.AcceleratorTypeKey: nvidiaGPU,
+					},
+				},
+			},
+		}
+	}
+
 	tests := []struct {
 		name            string
 		endpoint        *v1.Endpoint
@@ -1157,12 +1170,8 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 		expectedOptions []string
 	}{
 		{
-			name: "SSH cluster with engine image generates container config",
-			endpoint: &v1.Endpoint{
-				Spec: &v1.EndpointSpec{
-					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
-				},
-			},
+			name:     "SSH cluster with engine image generates container config",
+			endpoint: gpuEndpoint("v0.12.0"),
 			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
@@ -1174,12 +1183,8 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "SSH cluster with model caches includes host path volume mounts",
-			endpoint: &v1.Endpoint{
-				Spec: &v1.EndpointSpec{
-					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
-				},
-			},
+			name:     "SSH cluster with model caches includes host path volume mounts",
+			endpoint: gpuEndpoint("v0.12.0"),
 			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
@@ -1198,12 +1203,8 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "engine version without image returns error",
-			endpoint: &v1.Endpoint{
-				Spec: &v1.EndpointSpec{
-					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.8.5"},
-				},
-			},
+			name:     "engine version without image returns error",
+			endpoint: gpuEndpoint("v0.8.5"),
 			cluster: sshClusterWithAccelerator,
 			engine: &v1.Engine{
 				Metadata: &v1.Metadata{Name: "vllm"},
@@ -1217,12 +1218,8 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			expectErr:     true,
 		},
 		{
-			name: "model cache without HostPath is skipped",
-			endpoint: &v1.Endpoint{
-				Spec: &v1.EndpointSpec{
-					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
-				},
-			},
+			name:     "model cache without HostPath is skipped",
+			endpoint: gpuEndpoint("v0.12.0"),
 			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
@@ -1237,12 +1234,8 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "registry with custom repository",
-			endpoint: &v1.Endpoint{
-				Spec: &v1.EndpointSpec{
-					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
-				},
-			},
+			name:     "registry with custom repository",
+			endpoint: gpuEndpoint("v0.12.0"),
 			cluster: sshClusterWithAccelerator,
 			engine:  defaultEngine,
 			imageRegistry: &v1.ImageRegistry{
@@ -1423,7 +1416,11 @@ func TestEndpointToApplication_SSHClusterContainerConfig(t *testing.T) {
 				Name: "test-model",
 				Task: v1.TextGenerationModelTask,
 			},
-			Resources:         &v1.ResourceSpec{},
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{
+					v1.AcceleratorTypeKey: acceleratorType,
+				},
+			},
 			DeploymentOptions: map[string]interface{}{},
 			Variables:         map[string]interface{}{},
 		},
@@ -1478,8 +1475,8 @@ func TestEndpointToApplication_SSHClusterContainerConfig(t *testing.T) {
 	}
 
 	mgr := acceleratormocks.NewMockManager(t)
+	mgr.EXPECT().GetConverter(acceleratorType).Return(plugin.NewGPUConverter(), true)
 	mgr.EXPECT().GetEngineContainerRunOptions(acceleratorType).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
-	mgr.EXPECT().GetConverter(mock.Anything).Return(nil, false).Maybe()
 
 	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, engine, imageRegistry, mgr)
 	assert.NoError(t, err)
