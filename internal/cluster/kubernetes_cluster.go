@@ -249,6 +249,7 @@ func (c *NativeKubernetesClusterReconciler) GetClusterStatus(ctx context.Context
 
 	// 2. Metrics (optional - only check when metricsRemoteWriteURL is valid)
 	metricsReady := true
+
 	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
 		metricsComp := metrics.NewMetricsComponent(cluster, namespace, imagePrefix, ImagePullSecretName,
 			c.metricsRemoteWriteURL, *config, ctrlClient)
@@ -256,33 +257,33 @@ func (c *NativeKubernetesClusterReconciler) GetClusterStatus(ctx context.Context
 		metricsStatus, err := metricsComp.CheckResourcesStatus(ctx)
 		if err != nil {
 			metricsReady = false
-			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %v", err))
+			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %v", err)) //nolint:gocritic
 		} else if !metricsStatus.DeploymentReady {
 			metricsReady = false
-			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %s", metricsStatus.String()))
+			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %s", metricsStatus.String())) //nolint:gocritic
 		}
 	}
 
 	// 3. Model Cache PVC (only PVC-type caches need status check)
 	modelCacheReady := true
-
 	cacheReconcileCtx := &ReconcileContext{
 		Cluster:          cluster,
 		Ctx:              ctx,
 		ctrClient:        ctrlClient,
 		clusterNamespace: namespace,
 	}
+
 	if err := c.reconcileModelCacheStatus(cacheReconcileCtx); err != nil {
 		modelCacheReady = false
-		componentErrors = append(componentErrors, fmt.Sprintf("model cache: %v", err))
+		componentErrors = append(componentErrors, fmt.Sprintf("model cache: %v", err)) //nolint:gocritic
 	}
 
 	// --- Aggregate ---
 	isResourceReady := routerReady && metricsReady && modelCacheReady
 	phase := DetermineClusterPhase(isResourceReady, cluster)
 
-	// Endpoint
 	var dashboardURL string
+
 	if routerReady {
 		if endpoint, err := routerComp.GetRouteEndpoint(ctx); err != nil {
 			klog.Warningf("router ready but failed to get endpoint for %s: %v", cluster.Metadata.WorkspaceName(), err)
@@ -332,7 +333,6 @@ func (c *NativeKubernetesClusterReconciler) GetClusterStatus(ctx context.Context
 
 	return status, nil
 }
-
 
 func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *ReconcileContext) error {
 	ns := generateInstallNs(reconcileCtx.Cluster)

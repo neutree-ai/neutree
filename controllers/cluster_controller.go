@@ -237,7 +237,7 @@ func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcil
 		return
 	}
 
-	// Initialized, no reconcile error → maintain existing status (skip update)
+	// Initialized, no reconcile error → maintain existing status (skip update).
 }
 
 func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {
