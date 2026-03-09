@@ -257,10 +257,10 @@ func (c *NativeKubernetesClusterReconciler) GetClusterStatus(ctx context.Context
 		metricsStatus, err := metricsComp.CheckResourcesStatus(ctx)
 		if err != nil {
 			metricsReady = false
-			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %v", err)) //nolint:gocritic
+			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %v", err)) //nolint:wsl
 		} else if !metricsStatus.DeploymentReady {
 			metricsReady = false
-			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %s", metricsStatus.String())) //nolint:gocritic
+			componentErrors = append(componentErrors, fmt.Sprintf("metrics: %s", metricsStatus.String())) //nolint:wsl
 		}
 	}
 
@@ -275,7 +275,7 @@ func (c *NativeKubernetesClusterReconciler) GetClusterStatus(ctx context.Context
 
 	if err := c.reconcileModelCacheStatus(cacheReconcileCtx); err != nil {
 		modelCacheReady = false
-		componentErrors = append(componentErrors, fmt.Sprintf("model cache: %v", err)) //nolint:gocritic
+		componentErrors = append(componentErrors, fmt.Sprintf("model cache: %v", err)) //nolint:wsl
 	}
 
 	// --- Aggregate ---
