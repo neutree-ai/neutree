@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Cluster
+metadata:
+  name: ${CLUSTER_NAME}
+  workspace: ${CLUSTER_WORKSPACE}
+spec:
+  type: kubernetes
+  image_registry: ${CLUSTER_IMAGE_REGISTRY}
+  version: "${CLUSTER_VERSION}"
+  config:
+    kubernetes_config:
+      kubeconfig: "${CLUSTER_KUBECONFIG}"
+      router:
+        access_mode: NodePort
+        replicas: ${CLUSTER_ROUTER_REPLICAS}
+        version: "${CLUSTER_VERSION}"
+        resources:
+          cpu: "1"
+          memory: 2Gi

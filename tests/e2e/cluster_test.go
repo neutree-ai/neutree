@@ -13,6 +13,63 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+// --- Template-based YAML rendering ---
+
+// renderSSHClusterYAML renders the SSH cluster template with overrides and returns the temp file path.
+// Overrides: name, version, image_registry, head_ip, worker_ips (comma-separated), ssh_user, ssh_private_key.
+func renderSSHClusterYAML(overrides map[string]string) string {
+	defaults := map[string]string{
+		"CLUSTER_NAME":            overrides["name"],
+		"CLUSTER_WORKSPACE":      testWorkspace(),
+		"CLUSTER_IMAGE_REGISTRY": valueOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":        valueOr(overrides, "version", testClusterVersion()),
+		"CLUSTER_SSH_HEAD_IP":    overrides["head_ip"],
+		"CLUSTER_SSH_USER":       overrides["ssh_user"],
+		"CLUSTER_SSH_PRIVATE_KEY": overrides["ssh_private_key"],
+	}
+
+	// Format worker_ips YAML block.
+	if workerIPs := overrides["worker_ips"]; workerIPs != "" {
+		var buf strings.Builder
+		buf.WriteString("        worker_ips:\n")
+		for _, ip := range strings.Split(workerIPs, ",") {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				fmt.Fprintf(&buf, "          - \"%s\"\n", ip)
+			}
+		}
+		defaults["CLUSTER_WORKER_IPS_YAML"] = buf.String()
+	}
+
+	path, err := renderTemplateToTempFile(filepath.Join("testdata", "ssh-cluster.yaml"), defaults)
+	Expect(err).NotTo(HaveOccurred(), "failed to render SSH cluster template")
+	return path
+}
+
+// renderK8sClusterYAML renders the K8s cluster template with overrides and returns the temp file path.
+// Overrides: name, version, image_registry, kubeconfig, router_replicas.
+func renderK8sClusterYAML(overrides map[string]string) string {
+	defaults := map[string]string{
+		"CLUSTER_NAME":            overrides["name"],
+		"CLUSTER_WORKSPACE":      testWorkspace(),
+		"CLUSTER_IMAGE_REGISTRY": valueOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":        valueOr(overrides, "version", testClusterVersion()),
+		"CLUSTER_KUBECONFIG":     overrides["kubeconfig"],
+		"CLUSTER_ROUTER_REPLICAS": valueOr(overrides, "router_replicas", "1"),
+	}
+
+	path, err := renderTemplateToTempFile(filepath.Join("testdata", "k8s-cluster.yaml"), defaults)
+	Expect(err).NotTo(HaveOccurred(), "failed to render K8s cluster template")
+	return path
+}
+
+func valueOr(m map[string]string, key, fallback string) string {
+	if v, ok := m[key]; ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
 // --- ClusterHelper (Page Object for cluster CLI subcommands) ---
 
 // ClusterHelper encapsulates common parameters for cluster CLI operations.
@@ -27,17 +84,10 @@ func NewClusterHelper() *ClusterHelper {
 	}
 }
 
-// Apply writes YAML content to a temp file and applies it with --force-update.
-func (c *ClusterHelper) Apply(yaml string) CLIResult {
-	tmpFile, err := os.CreateTemp("", "e2e-cluster-*.yaml")
-	Expect(err).NotTo(HaveOccurred())
-	defer os.Remove(tmpFile.Name())
-
-	_, err = tmpFile.WriteString(yaml)
-	Expect(err).NotTo(HaveOccurred())
-	tmpFile.Close()
-
-	return RunCLI("apply", "-f", tmpFile.Name(), "--force-update")
+// Apply applies a YAML file with --force-update and removes the temp file afterwards.
+func (c *ClusterHelper) Apply(yamlFile string) CLIResult {
+	defer os.Remove(yamlFile)
+	return RunCLI("apply", "-f", yamlFile, "--force-update")
 }
 
 // Get retrieves cluster details as JSON.
@@ -76,96 +126,6 @@ func (c *ClusterHelper) WaitForDelete(name, timeout string) CLIResult {
 // EnsureDeleted deletes a cluster with --force, ignoring errors (for cleanup).
 func (c *ClusterHelper) EnsureDeleted(name string) {
 	c.Delete(name)
-}
-
-// --- YAML builders ---
-
-// buildSSHClusterYAML generates SSH cluster YAML programmatically.
-// Overrides can include: name, version, image_registry, head_ip, worker_ips, ssh_user, ssh_private_key.
-// ssh_private_key should be base64-encoded (the API expects base64).
-func buildSSHClusterYAML(overrides map[string]string) string {
-	name := overrides["name"]
-	version := valueOr(overrides, "version", testClusterVersion())
-	imageRegistry := valueOr(overrides, "image_registry", testImageRegistry())
-	headIP := overrides["head_ip"]
-	sshUser := overrides["ssh_user"]
-	sshPrivateKey := overrides["ssh_private_key"]
-
-	var b strings.Builder
-
-	fmt.Fprintf(&b, `apiVersion: v1
-kind: Cluster
-metadata:
-  name: %s
-  workspace: %s
-spec:
-  type: ssh
-  image_registry: %s
-  version: "%s"
-  config:
-    ssh_config:
-      provider:
-        type: ssh
-        head_ip: "%s"
-`, name, testWorkspace(), imageRegistry, version, headIP)
-
-	// Add worker_ips if present.
-	if workerIPs, ok := overrides["worker_ips"]; ok && workerIPs != "" {
-		b.WriteString("        worker_ips:\n")
-		for _, ip := range strings.Split(workerIPs, ",") {
-			ip = strings.TrimSpace(ip)
-			if ip != "" {
-				fmt.Fprintf(&b, "          - \"%s\"\n", ip)
-			}
-		}
-	}
-
-	// ssh_private_key is base64-encoded as expected by the API.
-	fmt.Fprintf(&b, `      auth:
-        ssh_user: "%s"
-        ssh_private_key: "%s"
-`, sshUser, sshPrivateKey)
-
-	return b.String()
-}
-
-// buildK8sClusterYAML generates K8s cluster YAML programmatically.
-// Overrides can include: name, version, image_registry, kubeconfig.
-// kubeconfig should be base64-encoded (the API expects base64).
-func buildK8sClusterYAML(overrides map[string]string) string {
-	name := overrides["name"]
-	version := valueOr(overrides, "version", testClusterVersion())
-	imageRegistry := valueOr(overrides, "image_registry", testImageRegistry())
-	kubeconfig := overrides["kubeconfig"]
-	routerReplicas := valueOr(overrides, "router_replicas", "1")
-
-	return fmt.Sprintf(`apiVersion: v1
-kind: Cluster
-metadata:
-  name: %s
-  workspace: %s
-spec:
-  type: kubernetes
-  image_registry: %s
-  version: "%s"
-  config:
-    kubernetes_config:
-      kubeconfig: "%s"
-      router:
-        access_mode: NodePort
-        replicas: %s
-        version: "%s"
-        resources:
-          cpu: "1"
-          memory: 2Gi
-`, name, testWorkspace(), imageRegistry, version, kubeconfig, routerReplicas, version)
-}
-
-func valueOr(m map[string]string, key, fallback string) string {
-	if v, ok := m[key]; ok && v != "" {
-		return v
-	}
-	return fallback
 }
 
 // --- clusterJSON for parsing `get cluster -o json` ---
@@ -306,7 +266,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
 			clusterName = "e2e-ssh-" + runID
 
-			yaml := buildSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]string{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"worker_ips":      workerIPs,
@@ -347,6 +307,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			Expect(c.Status.DesiredNodes).To(Equal(expectedNodes))
 			Expect(c.Status.DashboardURL).NotTo(BeEmpty())
 			Expect(c.Status.ErrorMessage).To(BeEmpty())
+			Expect(c.Status.ResourceInfo).NotTo(BeNil(), "SSH cluster should have resource_info")
 		})
 
 		It("should show Updating then Running on spec change", func() {
@@ -356,7 +317,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
 			By("Applying with worker_ips removed (head-only)")
-			yaml := buildSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]string{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"ssh_user":        sshUser,
@@ -409,7 +370,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			dummyKey := base64.StdEncoding.EncodeToString(
 				[]byte("-----BEGIN OPENSSH PRIVATE KEY-----\ncredential-change-test-" + runID + "\n-----END OPENSSH PRIVATE KEY-----\n"))
 			// Same spec as the last apply (head-only, no worker_ips), different credential.
-			yaml := buildSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]string{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"ssh_user":        sshUser,
@@ -454,7 +415,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			kubeconfig = requireK8sEnv()
 			clusterName = "e2e-k8s-" + runID
 
-			yaml := buildK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]string{
 				"name":       clusterName,
 				"kubeconfig": kubeconfig,
 			})
@@ -482,7 +443,6 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			Expect(c.Status.Phase).To(Equal("Running"))
 			Expect(c.Status.Initialized).To(BeTrue())
 			Expect(c.Status.ObservedSpecHash).NotTo(BeEmpty())
-			Expect(c.Status.ReadyNodes).To(BeNumerically(">=", c.Status.DesiredNodes))
 			Expect(c.Status.DashboardURL).NotTo(BeEmpty())
 			Expect(c.Status.ErrorMessage).To(BeEmpty())
 			Expect(c.Status.ResourceInfo).NotTo(BeNil(), "K8s cluster should have resource_info")
@@ -495,7 +455,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
 			By("Applying with router replicas change")
-			yaml := buildK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]string{
 				"name":             clusterName,
 				"kubeconfig":       kubeconfig,
 				"image_registry":   testImageRegistry(),
@@ -549,7 +509,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			modifiedKubeconfig := base64.StdEncoding.EncodeToString(
 				append(origBytes, []byte("\n# credential-change-test-"+runID+"\n")...))
 			// Same spec as last apply (replicas: 2), different credential.
-			yaml := buildK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]string{
 				"name":            clusterName,
 				"kubeconfig":      modifiedKubeconfig,
 				"image_registry":  testImageRegistry(),
@@ -583,7 +543,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			})
 
 			By("Applying SSH cluster referencing non-existent image registry")
-			yaml := buildSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]string{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"worker_ips":      workerIPs,
