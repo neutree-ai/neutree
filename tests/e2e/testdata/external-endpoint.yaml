@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ExternalEndpoint
+metadata:
+  name: ${E2E_EE_NAME}
+  workspace: ${E2E_WORKSPACE}
+spec:
+  upstreams:
+    - upstream:
+        url: ${E2E_MOCK_UPSTREAM_URL}
+      auth:
+        type: bearer
+        credential: ${E2E_MOCK_AUTH_TOKEN}
+      model_mapping:
+        fast: gpt-4o-mini
+        smart: gpt-4o

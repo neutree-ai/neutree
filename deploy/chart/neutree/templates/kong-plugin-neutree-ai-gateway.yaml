@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+data:
+{{ (.Files.Glob "gateway/kong/plugins/neutree-ai-gateway/*").AsConfig | indent 2 }}
+metadata:
+  labels:
+    app.kubernetes.io/component: kong-plugin
+  name: neutree-ai-gateway

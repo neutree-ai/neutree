@@ -327,7 +327,7 @@ services:
     container_name: kong
     environment:
       KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE: 20m
-      KONG_PLUGINS: bundled,neutree-ai-statistics,neutree-ai-format-anthropic,neutree-model-router
+      KONG_PLUGINS: bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-format-anthropic,neutree-model-router
       LUA_PATH: "/neutree-kong-plugin/?.lua;;"
       KONG_DATABASE: "postgres"
       KONG_PG_HOST: "postgres"

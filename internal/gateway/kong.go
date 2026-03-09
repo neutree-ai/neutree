@@ -142,13 +142,8 @@ func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
 	// sync route plugins
 	needPluginMap := make(map[string]*kong.Plugin)
 
-	aiStatisticsPlugin := k.generateAIStatisticsPlugin(ep, route)
-	needPluginMap[*aiStatisticsPlugin.InstanceName] = aiStatisticsPlugin
-
-	if getEndpointRouteType(ep) == v1.RouteTypeChatCompletions {
-		formatPlugin := k.generateAIFormatAnthropicPlugin(ep, route)
-		needPluginMap[*formatPlugin.InstanceName] = formatPlugin
-	}
+	aiGatewayPlugin := k.generateAIGatewayPlugin(ep, route)
+	needPluginMap[*aiGatewayPlugin.InstanceName] = aiGatewayPlugin
 
 	for _, plugin := range needPluginMap {
 		err = k.syncPlugin(plugin)
@@ -165,6 +160,9 @@ func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
 	var needDeletePlugins []*kong.Plugin
 
 	for _, curPlugin := range curPlugins {
+		if !isManagedAIRoutePlugin(curPlugin) {
+			continue
+		}
 		if _, ok := needPluginMap[*curPlugin.InstanceName]; !ok {
 			needDeletePlugins = append(needDeletePlugins, curPlugin)
 		}
@@ -234,25 +232,15 @@ end`,
 	}
 }
 
-func (k *Kong) generateAIStatisticsPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
+func (k *Kong) generateAIGatewayPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
 	return &kong.Plugin{
-		Name:         pointy.String("neutree-ai-statistics"),
-		InstanceName: pointy.String("neutree-ai-statistics-" + util.HashString(ep.Key())),
+		Name:         pointy.String("neutree-ai-gateway"),
+		InstanceName: pointy.String("neutree-ai-gateway-" + util.HashString(ep.Key())),
 		Route:        curRoute,
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
 		Config: map[string]interface{}{
 			"route_type": getEndpointRouteType(ep),
 		},
-	}
-}
-
-func (k *Kong) generateAIFormatAnthropicPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
-	return &kong.Plugin{
-		Name:         pointy.String("neutree-ai-format-anthropic"),
-		InstanceName: pointy.String("neutree-ai-format-anthropic-" + util.HashString(ep.Key())),
-		Route:        curRoute,
-		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
-		Config:       map[string]interface{}{},
 	}
 }
 
@@ -317,6 +305,19 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 	}
 
 	return nil
+}
+
+func isManagedAIRoutePlugin(plugin *kong.Plugin) bool {
+	if plugin == nil || plugin.Name == nil {
+		return false
+	}
+
+	switch *plugin.Name {
+	case "neutree-ai-gateway", "neutree-ai-statistics", "neutree-ai-format-anthropic", "neutree-model-router":
+		return true
+	default:
+		return false
+	}
 }
 
 func (k *Kong) syncEndpointRoute(ep *v1.Endpoint, gwService *kong.Service) (*kong.Route, error) {
@@ -509,20 +510,12 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
 	// sync route plugins
 	needPluginMap := make(map[string]*kong.Plugin)
 
-	modelRouterPlugin, err := k.generateExternalEndpointModelRouterPlugin(ee, route)
+	aiGatewayPlugin, err := k.generateExternalEndpointAIGatewayPlugin(ee, route)
 	if err != nil {
-		return errors.Wrapf(err, "failed to generate model router plugin for %s", ee.Metadata.Name)
+		return errors.Wrapf(err, "failed to generate ai gateway plugin for %s", ee.Metadata.Name)
 	}
 
-	needPluginMap[*modelRouterPlugin.InstanceName] = modelRouterPlugin
-
-	// Add Anthropic format plugin unconditionally - it self-filters by path (/anthropic/v1/messages)
-	formatPlugin := k.generateExternalEndpointAIFormatAnthropicPlugin(ee, route)
-	needPluginMap[*formatPlugin.InstanceName] = formatPlugin
-
-	// Add AI statistics plugin
-	aiStatisticsPlugin := k.generateExternalEndpointAIStatisticsPlugin(ee, route)
-	needPluginMap[*aiStatisticsPlugin.InstanceName] = aiStatisticsPlugin
+	needPluginMap[*aiGatewayPlugin.InstanceName] = aiGatewayPlugin
 
 	for _, plugin := range needPluginMap {
 		err = k.syncPlugin(plugin)
@@ -539,6 +532,9 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
 	var needDeletePlugins []*kong.Plugin
 
 	for _, curPlugin := range curPlugins {
+		if !isManagedAIRoutePlugin(curPlugin) {
+			continue
+		}
 		if _, ok := needPluginMap[*curPlugin.InstanceName]; !ok {
 			needDeletePlugins = append(needDeletePlugins, curPlugin)
 		}
@@ -794,8 +790,8 @@ func (k *Kong) deleteExternalEndpointRoute(ee *v1.ExternalEndpoint) error {
 	return nil
 }
 
-func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) (*kong.Plugin, error) {
-	instanceName := "neutree-model-router-external-endpoint-" + util.HashString(ee.Key())
+func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) (*kong.Plugin, error) {
+	instanceName := "neutree-ai-gateway-external-endpoint-" + util.HashString(ee.Key())
 
 	var upstreams []map[string]interface{}
 
@@ -844,7 +840,7 @@ func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint
 	}
 
 	return &kong.Plugin{
-		Name:         pointy.String("neutree-model-router"),
+		Name:         pointy.String("neutree-ai-gateway"),
 		InstanceName: &instanceName,
 		Route:        curRoute,
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
@@ -853,30 +849,6 @@ func (k *Kong) generateExternalEndpointModelRouterPlugin(ee *v1.ExternalEndpoint
 			"upstreams":    upstreams,
 		},
 	}, nil
-}
-
-func (k *Kong) generateExternalEndpointAIStatisticsPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) *kong.Plugin {
-	instanceName := "neutree-ai-statistics-external-endpoint-" + util.HashString(ee.Key())
-
-	return &kong.Plugin{
-		Name:         pointy.String("neutree-ai-statistics"),
-		InstanceName: &instanceName,
-		Route:        curRoute,
-		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
-		Config:       map[string]interface{}{},
-	}
-}
-
-func (k *Kong) generateExternalEndpointAIFormatAnthropicPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) *kong.Plugin {
-	instanceName := "neutree-ai-format-anthropic-external-endpoint-" + util.HashString(ee.Key())
-
-	return &kong.Plugin{
-		Name:         pointy.String("neutree-ai-format-anthropic"),
-		InstanceName: &instanceName,
-		Route:        curRoute,
-		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
-		Config:       map[string]interface{}{},
-	}
 }
 
 func getExternalEndpointRoutePath(ee *v1.ExternalEndpoint) string {

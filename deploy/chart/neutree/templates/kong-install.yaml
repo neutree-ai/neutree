@@ -511,13 +511,15 @@ spec:
         - name: LUA_PATH
           value: "/neutree-kong-plugin/?.lua;;"
         - name: KONG_PLUGINS
-          value: "bundled,neutree-ai-statistics,neutree-ai-format-anthropic,neutree-model-router"
+          value: "bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-format-anthropic,neutree-model-router"
         args: [ "/bin/bash", "-c", "export KONG_NGINX_DAEMON=on KONG_PREFIX=`mktemp -d` KONG_KEYRING_ENABLED=off; until kong start; do echo 'waiting for db'; sleep 1; done; kong stop"]
         volumeMounts:
           - name: kong-kong-prefix-dir
             mountPath: /kong_prefix/
           - name: kong-kong-tmp
             mountPath: /tmp
+          - name: neutree-ai-gateway
+            mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-gateway
           - name: neutree-ai-statistics
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-statistics
           - name: neutree-ai-format-anthropic
@@ -605,7 +607,7 @@ spec:
         - name: LUA_PATH
           value: "/neutree-kong-plugin/?.lua;;"
         - name: KONG_PLUGINS
-          value: "bundled,neutree-ai-statistics,neutree-ai-format-anthropic,neutree-model-router"
+          value: "bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-format-anthropic,neutree-model-router"
         lifecycle:
           preStop:
             exec:
@@ -634,6 +636,8 @@ spec:
             mountPath: /kong_prefix/
           - name: kong-kong-tmp
             mountPath: /tmp
+          - name: neutree-ai-gateway
+            mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-gateway
           - name: neutree-ai-statistics
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-statistics
           - name: neutree-ai-format-anthropic
@@ -675,6 +679,9 @@ spec:
         - name: kong-kong-tmp
           emptyDir:
             sizeLimit: 1Gi
+        - name: neutree-ai-gateway
+          configMap:
+            name: neutree-ai-gateway
         - name: neutree-ai-statistics
           configMap:
             name: neutree-ai-statistics
