@@ -163,6 +163,7 @@ func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
 		if !isManagedAIRoutePlugin(curPlugin) {
 			continue
 		}
+
 		if _, ok := needPluginMap[*curPlugin.InstanceName]; !ok {
 			needDeletePlugins = append(needDeletePlugins, curPlugin)
 		}
@@ -535,6 +536,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
 		if !isManagedAIRoutePlugin(curPlugin) {
 			continue
 		}
+
 		if _, ok := needPluginMap[*curPlugin.InstanceName]; !ok {
 			needDeletePlugins = append(needDeletePlugins, curPlugin)
 		}
