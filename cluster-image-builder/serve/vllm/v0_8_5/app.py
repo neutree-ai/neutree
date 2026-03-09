@@ -35,6 +35,33 @@ from vllm.engine.metrics import RayPrometheusStatLogger
 from downloader import get_downloader, build_request_from_model_args
 
 
+def _sanitize_metric_cls(base_cls):
+    """Wrap a Ray metric class to replace ':' with '_' in names.
+
+    Ray 2.53+ no longer allows ':' in metric names (FutureWarning, will
+    become an error).  vLLM v0.8.5 still registers names like
+    ``vllm:num_requests_running``; this wrapper transparently sanitises
+    them before they reach Ray.
+    """
+    class _Sanitized(base_cls):
+        def __init__(self, name, *args, **kwargs):
+            super().__init__(name.replace(":", "_"), *args, **kwargs)
+    return _Sanitized
+
+
+_BaseRayMetrics = RayPrometheusStatLogger._metrics_cls
+
+
+class _SanitizedRayMetrics(_BaseRayMetrics):
+    _gauge_cls = _sanitize_metric_cls(_BaseRayMetrics._gauge_cls)
+    _counter_cls = _sanitize_metric_cls(_BaseRayMetrics._counter_cls)
+    _histogram_cls = _sanitize_metric_cls(_BaseRayMetrics._histogram_cls)
+
+
+class _SanitizedRayStatLogger(RayPrometheusStatLogger):
+    _metrics_cls = _SanitizedRayMetrics
+
+
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
@@ -152,7 +179,7 @@ class Backend:
         if hasattr(ctx, "app_name"):
             labels["application"] = ctx.app_name
 
-        stat_logger = RayPrometheusStatLogger(
+        stat_logger = _SanitizedRayStatLogger(
             local_interval=0.5,
             labels=labels,
             vllm_config=self.engine.engine.vllm_config)
