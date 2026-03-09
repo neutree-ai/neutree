@@ -619,9 +619,9 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 		}
 	}
 
-	// Get accelerator-specific run_options from plugin
+	// Get accelerator-specific run_options from plugin (skip for CPU — no special runtime needed)
 	var runOptions []string
-	if acceleratorMgr != nil && acceleratorType != "" {
+	if acceleratorMgr != nil && acceleratorType != "" && acceleratorType != "cpu" {
 		opts, err := acceleratorMgr.GetEngineContainerRunOptions(acceleratorType)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get engine container run options for accelerator %s", acceleratorType)
