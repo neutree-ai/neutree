@@ -42,9 +42,10 @@ RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
 RUN --mount=type=bind,src=requirements,target=requirements \
     uv pip install --system -r requirements/common.txt
 
-# Copy Neutree serve layer code
+# Copy Neutree serve layer code and install downloader dependencies
 COPY serve ./serve
 COPY downloader ./downloader
+RUN uv pip install --system -r downloader/requirements.txt
 
 # Ensure "python" is in PATH (some base images only provide "python3")
 RUN ln -sf $(which python3) /usr/bin/python 2>/dev/null || true

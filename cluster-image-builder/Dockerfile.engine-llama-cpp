@@ -53,9 +53,10 @@ RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
 RUN --mount=type=bind,src=requirements,target=requirements \
     pip install --no-cache-dir -r requirements/common.txt
 
-# Copy Neutree serve layer code
+# Copy Neutree serve layer code and install downloader dependencies
 COPY serve ./serve
 COPY downloader ./downloader
+RUN pip install --no-cache-dir -r downloader/requirements.txt
 
 ENTRYPOINT []
 CMD ["/bin/bash"]
