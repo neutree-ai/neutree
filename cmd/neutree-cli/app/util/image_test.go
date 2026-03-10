@@ -61,6 +61,20 @@ func TestReplaceImageRegistry(t *testing.T) {
 			want:           "mirror.example.com:5000/library/nginx:latest",
 			wantErr:        false,
 		},
+		{
+			name:           "mirror registry with https scheme and project path",
+			imageURL:       "docker.io/library/nginx:latest",
+			mirrorRegistry: "https://mirror.example.com:5000/my-project",
+			want:           "mirror.example.com:5000/my-project/library/nginx:latest",
+			wantErr:        false,
+		},
+		{
+			name:           "mirror registry with project path without scheme",
+			imageURL:       "docker.io/library/nginx:latest",
+			mirrorRegistry: "mirror.example.com:5000/my-project",
+			want:           "mirror.example.com:5000/my-project/library/nginx:latest",
+			wantErr:        false,
+		},
 	}
 
 	for _, tt := range tests {

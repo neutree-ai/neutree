@@ -13,10 +13,7 @@ func ReplaceImageRegistry(imageURL, mirrorRegistry string) (string, error) {
 		return imageURL, nil
 	}
 
-	normalizedRegistry, err := internalutil.NormalizeRegistryHost(mirrorRegistry)
-	if err != nil {
-		return "", fmt.Errorf("invalid mirror registry %q: %w", mirrorRegistry, err)
-	}
+	normalizedRegistry := internalutil.StripRegistryScheme(mirrorRegistry)
 
 	ref, err := name.ParseReference(imageURL)
 	if err != nil {

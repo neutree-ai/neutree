@@ -77,11 +77,16 @@ func parseRegistryHost(rawURL string) (string, error) {
 	return parsed.Host, nil
 }
 
-// NormalizeRegistryHost strips any scheme from a registry address and returns
-// the bare host:port. Use this to sanitize user-provided registry addresses
-// before passing them to Docker commands or image name construction.
-func NormalizeRegistryHost(rawURL string) (string, error) {
-	return parseRegistryHost(rawURL)
+// StripRegistryScheme removes the http:// or https:// scheme prefix from a
+// registry address, preserving any path (e.g. project) component.
+// "https://registry.example.com:5000/project" → "registry.example.com:5000/project"
+// "registry.example.com:5000/project" → "registry.example.com:5000/project" (no-op)
+func StripRegistryScheme(rawURL string) string {
+	stripped := strings.TrimPrefix(rawURL, "https://")
+	stripped = strings.TrimPrefix(stripped, "http://")
+	stripped = strings.TrimRight(stripped, "/")
+
+	return stripped
 }
 
 func GetImageRegistryHost(r *v1.ImageRegistry) (string, error) {
