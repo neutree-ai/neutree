@@ -102,7 +102,8 @@ func TestImportOptionsValidation(t *testing.T) {
 		{
 			name: "with mirror registry and registry project when not skipping push",
 			setupFunc: func() string {
-				tmpFile, _ := os.CreateTemp("", "test-*.tar.gz")
+				tmpFile, err := os.CreateTemp("", "test-*.tar.gz")
+				require.NoError(t, err)
 				tmpFile.Close()
 				return tmpFile.Name()
 			},
@@ -140,6 +141,59 @@ func TestImportOptionsValidation(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestBuildImagePrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry string
+		project  string
+		expected string
+	}{
+		{
+			name:     "registry only without project",
+			registry: "registry.example.com",
+			project:  "",
+			expected: "registry.example.com",
+		},
+		{
+			name:     "registry with project",
+			registry: "registry.example.com",
+			project:  "neutree-ai",
+			expected: "registry.example.com/neutree-ai",
+		},
+		{
+			name:     "project with leading and trailing slashes",
+			registry: "registry.example.com",
+			project:  "/neutree-ai/",
+			expected: "registry.example.com/neutree-ai",
+		},
+		{
+			name:     "project with whitespace",
+			registry: "registry.example.com",
+			project:  "  neutree-ai  ",
+			expected: "registry.example.com/neutree-ai",
+		},
+		{
+			name:     "project with only slashes",
+			registry: "registry.example.com",
+			project:  "///",
+			expected: "registry.example.com",
+		},
+		{
+			name:     "registry with port and project",
+			registry: "registry.example.com:5000",
+			project:  "my-project",
+			expected: "registry.example.com:5000/my-project",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildImagePrefix(tt.registry, tt.project)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"strings"
 
 	"github.com/docker/docker/api/types/registry"
 	"github.com/pkg/errors"
@@ -139,10 +140,7 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 
 	registryAuth := base64.URLEncoding.EncodeToString(authConfigBytes)
 
-	imagePrefix := mirrorRegistry
-	if opts.RegistryProject != "" {
-		imagePrefix = mirrorRegistry + "/" + opts.RegistryProject
-	}
+	imagePrefix := buildImagePrefix(mirrorRegistry, opts.RegistryProject)
 
 	pushedImages, err := imagePusher.PushImagesToMirrorRegistry(ctx, imagePrefix, registryAuth, manifest)
 	if err != nil {
@@ -274,4 +272,14 @@ func (v *Validator) ValidatePackage(packagePath string) error {
 func ValidatePackage(packagePath string) error {
 	v := NewValidator()
 	return v.ValidatePackage(packagePath)
+}
+
+// buildImagePrefix composes the image prefix from registry and optional project.
+func buildImagePrefix(registry, project string) string {
+	project = strings.Trim(strings.TrimSpace(project), "/")
+	if project != "" {
+		return registry + "/" + project
+	}
+
+	return registry
 }
