@@ -99,6 +99,26 @@ func TestImportOptionsValidation(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name: "with mirror registry and registry project when not skipping push",
+			setupFunc: func() string {
+				tmpFile, _ := os.CreateTemp("", "test-*.tar.gz")
+				tmpFile.Close()
+				return tmpFile.Name()
+			},
+			cleanupFunc: func(path string) {
+				os.Remove(path)
+			},
+			opts: &ImportOptions{
+				PackagePath:      "", // Will be set by setupFunc
+				SkipImagePush:    false,
+				MirrorRegistry:   "registry.mirror.com",
+				RegistryProject:  "neutree-ai",
+				RegistryUser:     "user",
+				RegistryPassword: "pass",
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {

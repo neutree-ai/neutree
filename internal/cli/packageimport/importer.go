@@ -139,7 +139,12 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 
 	registryAuth := base64.URLEncoding.EncodeToString(authConfigBytes)
 
-	pushedImages, err := imagePusher.PushImagesToMirrorRegistry(ctx, mirrorRegistry, registryAuth, manifest)
+	imagePrefix := mirrorRegistry
+	if opts.RegistryProject != "" {
+		imagePrefix = mirrorRegistry + "/" + opts.RegistryProject
+	}
+
+	pushedImages, err := imagePusher.PushImagesToMirrorRegistry(ctx, imagePrefix, registryAuth, manifest)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to push images to mirror registry")
 	}
