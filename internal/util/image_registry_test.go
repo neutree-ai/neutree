@@ -25,10 +25,10 @@ func TestGetImagePrefix(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "invalid URL format",
+			name: "empty URL",
 			imageRegistry: &v1.ImageRegistry{
 				Spec: &v1.ImageRegistrySpec{
-					URL:        "::invalid-url::",
+					URL:        "",
 					Repository: "repo",
 				},
 			},
@@ -68,6 +68,61 @@ func TestGetImagePrefix(t *testing.T) {
 			want:    "",
 			wantErr: true,
 		},
+		{
+			name: "URL without scheme",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "registry.example.com",
+					Repository: "my-repo",
+				},
+			},
+			want:    "registry.example.com/my-repo",
+			wantErr: false,
+		},
+		{
+			name: "URL without scheme with port",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "registry.example.com:5000",
+					Repository: "prod",
+				},
+			},
+			want:    "registry.example.com:5000/prod",
+			wantErr: false,
+		},
+		{
+			name: "URL without scheme with port and no repository",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "registry.example.com:5000",
+					Repository: "",
+				},
+			},
+			want:    "registry.example.com:5000",
+			wantErr: false,
+		},
+		{
+			name: "URL without scheme with trailing slash",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "registry.example.com:5000/",
+					Repository: "repo",
+				},
+			},
+			want:    "registry.example.com:5000/repo",
+			wantErr: false,
+		},
+		{
+			name: "URL with http scheme",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "http://registry.example.com:5000",
+					Repository: "repo",
+				},
+			},
+			want:    "registry.example.com:5000/repo",
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -78,6 +133,130 @@ func TestGetImagePrefix(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("getImagePrefix() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripRegistryScheme(t *testing.T) {
+	tests := []struct {
+		name   string
+		rawURL string
+		want   string
+	}{
+		{
+			name:   "https scheme",
+			rawURL: "https://registry.example.com",
+			want:   "registry.example.com",
+		},
+		{
+			name:   "http scheme",
+			rawURL: "http://registry.example.com:5000",
+			want:   "registry.example.com:5000",
+		},
+		{
+			name:   "no scheme",
+			rawURL: "registry.example.com:5000",
+			want:   "registry.example.com:5000",
+		},
+		{
+			name:   "https scheme with project path",
+			rawURL: "https://registry.example.com:5000/my-project",
+			want:   "registry.example.com:5000/my-project",
+		},
+		{
+			name:   "no scheme with project path",
+			rawURL: "registry.example.com:5000/my-project",
+			want:   "registry.example.com:5000/my-project",
+		},
+		{
+			name:   "trailing slash stripped",
+			rawURL: "https://registry.example.com:5000/",
+			want:   "registry.example.com:5000",
+		},
+		{
+			name:   "empty string",
+			rawURL: "",
+			want:   "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripRegistryScheme(tt.rawURL)
+			if got != tt.want {
+				t.Errorf("StripRegistryScheme() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetImageRegistryHost(t *testing.T) {
+	tests := []struct {
+		name          string
+		imageRegistry *v1.ImageRegistry
+		want          string
+		wantErr       bool
+	}{
+		{
+			name: "URL with https scheme",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL: "https://registry.example.com",
+				},
+			},
+			want:    "registry.example.com",
+			wantErr: false,
+		},
+		{
+			name: "URL without scheme",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL: "registry.example.com",
+				},
+			},
+			want:    "registry.example.com",
+			wantErr: false,
+		},
+		{
+			name: "URL without scheme with port",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL: "registry.example.com:5000",
+				},
+			},
+			want:    "registry.example.com:5000",
+			wantErr: false,
+		},
+		{
+			name: "URL with https scheme and port",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL: "https://registry.example.com:5000",
+				},
+			},
+			want:    "registry.example.com:5000",
+			wantErr: false,
+		},
+		{
+			name: "empty URL",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL: "",
+				},
+			},
+			want:    "",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetImageRegistryHost(tt.imageRegistry)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetImageRegistryHost() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("GetImageRegistryHost() = %v, want %v", got, tt.want)
 			}
 		})
 	}

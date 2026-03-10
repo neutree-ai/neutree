@@ -123,7 +123,7 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 		return []string{}, nil
 	}
 
-	mirrorRegistry := opts.MirrorRegistry
+	mirrorRegistry := util.StripRegistryScheme(opts.MirrorRegistry)
 	user, token := opts.RegistryUser, opts.RegistryPassword
 
 	authConfig := registry.AuthConfig{

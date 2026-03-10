@@ -46,28 +46,55 @@ func GetImageRegistryAuthInfo(r *v1.ImageRegistry) (string, string, error) {
 	return "", "", nil
 }
 
-func GetImageRegistryHost(r *v1.ImageRegistry) (string, error) {
-	parsedURL, err := url.Parse(r.Spec.URL)
-	if err != nil {
-		return "", err
+// parseRegistryHost normalizes a registry URL by stripping any scheme and
+// returning only the host (with optional port). It handles both formats:
+// "registry.example.com:5000" and "https://registry.example.com:5000".
+func parseRegistryHost(rawURL string) (string, error) {
+	// Normalize by stripping scheme and trailing slash, preserving any path component.
+	stripped := StripRegistryScheme(rawURL)
+
+	if stripped == "" {
+		return "", errors.New("empty registry host")
 	}
 
-	return parsedURL.Host, nil
+	// Validate by prepending a dummy scheme and parsing
+	parsed, err := url.Parse("dummy://" + stripped)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to parse registry url")
+	}
+
+	if parsed.Host == "" {
+		return "", errors.New("invalid registry url: " + rawURL)
+	}
+
+	return parsed.Host, nil
+}
+
+// StripRegistryScheme removes the http:// or https:// scheme prefix from a
+// registry address, preserving any path (e.g. project) component.
+// "https://registry.example.com:5000/project" → "registry.example.com:5000/project"
+// "registry.example.com:5000/project" → "registry.example.com:5000/project" (no-op)
+func StripRegistryScheme(rawURL string) string {
+	stripped := strings.TrimPrefix(rawURL, "https://")
+	stripped = strings.TrimPrefix(stripped, "http://")
+	stripped = strings.TrimRight(stripped, "/")
+
+	return stripped
+}
+
+func GetImageRegistryHost(r *v1.ImageRegistry) (string, error) {
+	return parseRegistryHost(r.Spec.URL)
 }
 
 func GetImagePrefix(imageRegistry *v1.ImageRegistry) (string, error) {
-	registryURL, err := url.Parse(imageRegistry.Spec.URL)
+	host, err := parseRegistryHost(imageRegistry.Spec.URL)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
 	}
 
-	if registryURL.Host == "" {
-		return "", errors.New("invalid image registry url: " + imageRegistry.Spec.URL)
-	}
-
 	if imageRegistry.Spec.Repository == "" {
-		return registryURL.Host, nil
+		return host, nil
 	}
 
-	return registryURL.Host + "/" + imageRegistry.Spec.Repository, nil
+	return host + "/" + imageRegistry.Spec.Repository, nil
 }
