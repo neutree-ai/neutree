@@ -2,3 +2,4 @@ sse-starlette>=2.1.3
 starlette-context>=0.3.6
 pydantic-settings>=2.8.1
 kantoku>=0.18.3
+huggingface-hub>=0.32.0

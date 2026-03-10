@@ -34,10 +34,10 @@ ARG LLAMA_CPP_VERSION
 ENV HOME=/home/ray
 WORKDIR ${HOME}
 
-# System dependencies for llama-cpp-python
+# System dependencies for llama-cpp-python (git needed for pip to fetch source)
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends \
-    build-essential cmake \
+    build-essential cmake git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install llama-cpp-python
