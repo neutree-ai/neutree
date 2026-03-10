@@ -9,6 +9,7 @@ import fnmatch
 from .base import Downloader
 from .utils import (
     ensure_dir,
+    resolve_allow_pattern,
     compute_sha256,
     should_skip_verification,
     should_keep_failed_files,
@@ -51,9 +52,7 @@ class LocalDownloader(Downloader):
 
         ensure_dir(dest)
 
-        allow_pattern = metadata.get("file")
-        if allow_pattern == "":
-            allow_pattern = None
+        allow_pattern = resolve_allow_pattern(metadata)
 
         if recursive:
             # copy all files; skip existing unless overwrite

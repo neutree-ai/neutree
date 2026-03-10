@@ -7,6 +7,7 @@ from .base import Downloader
 from huggingface_hub.hf_api import RepoFile
 from .utils import (
     ensure_dir,
+    resolve_allow_pattern,
     compute_sha256,
     compute_git_sha1,
     should_keep_failed_files,
@@ -62,9 +63,7 @@ class HuggingFaceDownloader(Downloader):
 
         # Resolve repo id and file from metadata or source
         repo_id = source
-        allow_pattern = metadata.get("file")
-        if allow_pattern == "":
-            allow_pattern = None
+        allow_pattern = resolve_allow_pattern(metadata)
 
         token = None
         if credentials and credentials.get("token"):
