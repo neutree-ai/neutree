@@ -83,6 +83,9 @@ func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileC
 }
 
 func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Cluster) error {
+	// Early write: detect phase change (Initializing/Updating) for user feedback
+	WriteEarlyStatus(cluster, c.storage)
+
 	imageRegistry, err := getUsedImageRegistries(cluster, c.storage)
 	if err != nil {
 		return errors.Wrap(err, "failed to get used image registries")
@@ -108,62 +111,69 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 
 	defer c.cleanupConfig(reconcileCtx) //nolint:errcheck
 
-	defer func() {
-		err = c.setClusterStatus(reconcileCtx)
-		if err != nil {
-			klog.Error(err, "failed to set cluster status")
-		}
-	}()
-
 	if reconcileCtx.Cluster.Status == nil || !reconcileCtx.Cluster.Status.Initialized {
 		err = c.initialize(reconcileCtx)
 		if err != nil {
 			reconcileCtx.processMessages = append(reconcileCtx.processMessages, formatMessageWithTimestamp("Cluster initialization failed: "+err.Error()))
 			return errors.New(strings.Join(reconcileCtx.processMessages, "\n"))
 		}
+	} else {
+		err = c.reconcileHeadNode(reconcileCtx)
+		if err != nil {
+			return errors.Wrap(err, "failed to reconcile head node")
+		}
 
-		reconcileCtx.Cluster.Status.Initialized = true
-		reconcileCtx.Cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
-
-		return nil
+		err = c.reconcileWorkerNode(reconcileCtx)
+		if err != nil {
+			return errors.Wrap(err, "failed to reconcile worker node")
+		}
 	}
 
-	err = c.reconcileHeadNode(reconcileCtx)
-	if err != nil {
-		return errors.Wrap(err, "failed to reconcile head node")
-	}
-
-	err = c.reconcileWorkerNode(reconcileCtx)
-	if err != nil {
-		return errors.Wrap(err, "failed to reconcile worker node")
-	}
-
-	return nil
+	return c.checkAndUpdateStatus(reconcileCtx)
 }
 
-func (c *sshRayClusterReconciler) setClusterStatus(reconcileCtx *ReconcileContext) error {
-	clusterStatus, err := getRayClusterStatus(reconcileCtx.rayService)
+func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileContext) error {
+	cluster := reconcileCtx.Cluster
+
+	rayStatus, err := getRayClusterStatus(reconcileCtx.rayService)
 	if err != nil {
 		return errors.Wrap(err, "failed to get ray cluster status")
 	}
 
-	setClusterStatus(reconcileCtx.Cluster, clusterStatus)
-	reconcileCtx.Cluster.Status.DesiredNodes += len(reconcileCtx.sshClusterConfig.Provider.WorkerIPs)
+	desiredNodes := 1 + len(reconcileCtx.sshClusterConfig.Provider.WorkerIPs)
+	readyNodes := rayStatus.ReadyNodes
 
-	// Collect cluster resources (including accelerators) if cluster is running
-	if reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseRunning {
-		resources, err := c.calculateClusterResources(reconcileCtx)
-		if err != nil {
-			return errors.Wrap(err, "failed to calculate cluster resources")
-		}
+	if cluster.Status == nil {
+		cluster.Status = &v1.ClusterStatus{}
+	}
 
-		reconcileCtx.Cluster.Status.ResourceInfo = resources
+	cluster.Status.ReadyNodes = readyNodes
+	cluster.Status.DesiredNodes = desiredNodes
+	cluster.Status.Version = rayStatus.NeutreeServeVersion
+	cluster.Status.RayVersion = rayStatus.RayVersion
+
+	if desiredNodes <= 0 || readyNodes < desiredNodes {
+		return fmt.Errorf("cluster not ready: %d/%d nodes ready", readyNodes, desiredNodes)
+	}
+
+	cluster.Status.Initialized = true
+	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
+
+	// Calculate resources only when cluster is ready (avoids unnecessary Ray dashboard calls during init/update)
+	resources, err := c.calculateClusterResources(reconcileCtx)
+	if err != nil {
+		klog.Warningf("failed to calculate cluster resources for %s: %v", cluster.Metadata.WorkspaceName(), err)
+	} else {
+		cluster.Status.ResourceInfo = resources
 	}
 
 	return nil
 }
 
 func (c *sshRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {
+	// Early write: set Deleting phase for user feedback
+	WriteEarlyDeleting(cluster, c.storage)
+
 	imageRegistry, err := getUsedImageRegistries(cluster, c.storage)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get used image registry")

@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"testing"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func TestIsForceDelete(t *testing.T) {
@@ -23,7 +25,7 @@ func TestIsForceDelete(t *testing.T) {
 		{
 			name: "force delete true",
 			annotations: map[string]string{
-				"neutree.ai/force-delete": forceDeleteAnnotationValue,
+				"neutree.ai/force-delete": "true",
 			},
 			want: true,
 		},
@@ -51,7 +53,7 @@ func TestIsForceDelete(t *testing.T) {
 		{
 			name: "force delete with other annotations",
 			annotations: map[string]string{
-				"neutree.ai/force-delete": forceDeleteAnnotationValue,
+				"neutree.ai/force-delete": "true",
 				"other-annotation":        "value",
 			},
 			want: true,
@@ -60,8 +62,8 @@ func TestIsForceDelete(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsForceDelete(tt.annotations); got != tt.want {
-				t.Errorf("IsForceDelete() = %v, want %v", got, tt.want)
+			if got := v1.IsForceDelete(tt.annotations); got != tt.want {
+				t.Errorf("v1.IsForceDelete() = %v, want %v", got, tt.want)
 			}
 		})
 	}

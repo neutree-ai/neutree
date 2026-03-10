@@ -98,7 +98,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 
 func (c *EndpointController) handleDeletion(obj *v1.Endpoint) error {
 	var err error
-	isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+	isForceDelete := v1.IsForceDelete(obj.Metadata.Annotations)
 
 	if obj.Status != nil && obj.Status.Phase == v1.EndpointPhaseDELETED {
 		klog.Infof("Endpoint %s already marked as deleted, removing from DB", obj.Metadata.WorkspaceName())
@@ -142,7 +142,7 @@ func (c *EndpointController) performDeletion(obj *v1.Endpoint) error {
 }
 
 func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, err error) {
-	isForceDelete := IsForceDelete(obj.GetAnnotations())
+	isForceDelete := v1.IsForceDelete(obj.GetAnnotations())
 	isDelete := obj.GetDeletionTimestamp() != ""
 
 	// If it's a force delete, mark as deleted immediately

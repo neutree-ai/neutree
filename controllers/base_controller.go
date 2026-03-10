@@ -12,10 +12,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-const (
-	forceDeleteAnnotationValue = "true"
-)
-
 type HookFunc func(obj interface{}) error
 
 type Reconciler interface {
@@ -129,14 +125,6 @@ func FormatErrorForStatus(err error) string {
 // FormatStatusTime returns the current time in the standard format for status timestamps.
 func FormatStatusTime() string {
 	return time.Now().Format(time.RFC3339Nano)
-}
-
-func IsForceDelete(annotations map[string]string) bool {
-	if annotations == nil {
-		return false
-	}
-
-	return annotations["neutree.ai/force-delete"] == forceDeleteAnnotationValue
 }
 
 func LogForceDeletionWarning(isForceDelete bool, resourceType, workspace, name string, deleteErr error) {

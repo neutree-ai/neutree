@@ -10,13 +10,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/semver"
 )
 
-func setClusterStatus(cluster *v1.Cluster, status *v1.RayClusterStatus) {
-	cluster.Status.DesiredNodes = status.DesireNodes
-	cluster.Status.ReadyNodes = status.ReadyNodes
-	cluster.Status.RayVersion = status.RayVersion
-	cluster.Status.Version = status.NeutreeServeVersion
-}
-
 func getRayClusterStatus(dashboardService dashboard.DashboardService) (*v1.RayClusterStatus, error) {
 	clusterStatus := &v1.RayClusterStatus{}
 

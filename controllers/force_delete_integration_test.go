@@ -46,7 +46,7 @@ func TestForceDelete_ModelRegistryController(t *testing.T) {
 
 			annotations := map[string]string{}
 			if tt.forceDelete {
-				annotations["neutree.ai/force-delete"] = forceDeleteAnnotationValue
+				annotations["neutree.ai/force-delete"] = "true"
 			}
 
 			obj := &v1.ModelRegistry{
@@ -119,7 +119,7 @@ func TestForceDelete_ClusterController(t *testing.T) {
 
 			annotations := map[string]string{}
 			if tt.forceDelete {
-				annotations["neutree.ai/force-delete"] = forceDeleteAnnotationValue
+				annotations["neutree.ai/force-delete"] = "true"
 			}
 
 			obj := &v1.Cluster{
@@ -217,7 +217,7 @@ func TestForceDelete_UserProfileController(t *testing.T) {
 
 			annotations := map[string]string{}
 			if tt.forceDelete {
-				annotations["neutree.ai/force-delete"] = forceDeleteAnnotationValue
+				annotations["neutree.ai/force-delete"] = "true"
 			}
 
 			obj := &v1.UserProfile{
@@ -284,7 +284,7 @@ func TestForceDelete_ApiKeyController(t *testing.T) {
 
 			annotations := map[string]string{}
 			if tt.forceDelete {
-				annotations["neutree.ai/force-delete"] = forceDeleteAnnotationValue
+				annotations["neutree.ai/force-delete"] = "true"
 			}
 
 			obj := &v1.ApiKey{
@@ -392,7 +392,7 @@ func TestForceDelete_EndpointController(t *testing.T) {
 
 			annotations := map[string]string{}
 			if tt.forceDelete {
-				annotations["neutree.ai/force-delete"] = forceDeleteAnnotationValue
+				annotations["neutree.ai/force-delete"] = "true"
 			}
 
 			obj := &v1.Endpoint{
@@ -487,7 +487,7 @@ func TestForceDelete_WorkspaceController(t *testing.T) {
 
 			annotations := map[string]string{}
 			if tt.forceDelete {
-				annotations["neutree.ai/force-delete"] = forceDeleteAnnotationValue
+				annotations["neutree.ai/force-delete"] = "true"
 			}
 
 			obj := &v1.Workspace{

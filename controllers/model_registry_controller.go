@@ -49,7 +49,7 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 
 	// Handle deletion early - bypass defer block for already-deleted resources
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
-		isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+		isForceDelete := v1.IsForceDelete(obj.Metadata.Annotations)
 
 		if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
 			klog.Info("Model registry " + obj.Metadata.Name + " is already deleted, delete resource from storage")

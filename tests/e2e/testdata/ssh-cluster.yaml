@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Cluster
+metadata:
+  name: ${CLUSTER_NAME}
+  workspace: ${CLUSTER_WORKSPACE}
+spec:
+  type: ssh
+  image_registry: ${CLUSTER_IMAGE_REGISTRY}
+  version: "${CLUSTER_VERSION}"
+  config:
+    ssh_config:
+      provider:
+        type: ssh
+        head_ip: "${CLUSTER_SSH_HEAD_IP}"
+${CLUSTER_WORKER_IPS_YAML}      auth:
+        ssh_user: "${CLUSTER_SSH_USER}"
+        ssh_private_key: ${CLUSTER_SSH_PRIVATE_KEY}

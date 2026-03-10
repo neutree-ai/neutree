@@ -223,7 +223,7 @@ func Test_UpdateStatusOnError(t *testing.T) {
 	}
 
 	forceDeleteAnnotations := map[string]string{
-		"neutree.ai/force-delete": forceDeleteAnnotationValue,
+		"neutree.ai/force-delete": "true",
 	}
 
 	testErr := errors.New("test error")
