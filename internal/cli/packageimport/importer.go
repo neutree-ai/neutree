@@ -123,7 +123,11 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 		return []string{}, nil
 	}
 
-	mirrorRegistry := opts.MirrorRegistry
+	mirrorRegistry, err := util.NormalizeRegistryHost(opts.MirrorRegistry)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to normalize mirror registry address")
+	}
+
 	user, token := opts.RegistryUser, opts.RegistryPassword
 
 	authConfig := registry.AuthConfig{

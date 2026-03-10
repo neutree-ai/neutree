@@ -77,6 +77,13 @@ func parseRegistryHost(rawURL string) (string, error) {
 	return parsed.Host, nil
 }
 
+// NormalizeRegistryHost strips any scheme from a registry address and returns
+// the bare host:port. Use this to sanitize user-provided registry addresses
+// before passing them to Docker commands or image name construction.
+func NormalizeRegistryHost(rawURL string) (string, error) {
+	return parseRegistryHost(rawURL)
+}
+
 func GetImageRegistryHost(r *v1.ImageRegistry) (string, error) {
 	return parseRegistryHost(r.Spec.URL)
 }
