@@ -314,7 +314,7 @@ func isManagedAIRoutePlugin(plugin *kong.Plugin) bool {
 	}
 
 	switch *plugin.Name {
-	case "neutree-ai-gateway", "neutree-ai-statistics", "neutree-ai-format-anthropic", "neutree-model-router":
+	case "neutree-ai-gateway", "neutree-ai-statistics":
 		return true
 	default:
 		return false

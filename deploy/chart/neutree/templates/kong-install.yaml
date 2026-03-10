@@ -511,7 +511,7 @@ spec:
         - name: LUA_PATH
           value: "/neutree-kong-plugin/?.lua;;"
         - name: KONG_PLUGINS
-          value: "bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-format-anthropic,neutree-model-router"
+          value: "bundled,neutree-ai-gateway,neutree-ai-statistics"
         args: [ "/bin/bash", "-c", "export KONG_NGINX_DAEMON=on KONG_PREFIX=`mktemp -d` KONG_KEYRING_ENABLED=off; until kong start; do echo 'waiting for db'; sleep 1; done; kong stop"]
         volumeMounts:
           - name: kong-kong-prefix-dir
@@ -522,10 +522,6 @@ spec:
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-gateway
           - name: neutree-ai-statistics
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-statistics
-          - name: neutree-ai-format-anthropic
-            mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-format-anthropic
-          - name: neutree-model-router
-            mountPath: /neutree-kong-plugin/kong/plugins/neutree-model-router
         resources:
           {}
       containers:
@@ -607,7 +603,7 @@ spec:
         - name: LUA_PATH
           value: "/neutree-kong-plugin/?.lua;;"
         - name: KONG_PLUGINS
-          value: "bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-format-anthropic,neutree-model-router"
+          value: "bundled,neutree-ai-gateway,neutree-ai-statistics"
         lifecycle:
           preStop:
             exec:
@@ -640,10 +636,6 @@ spec:
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-gateway
           - name: neutree-ai-statistics
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-statistics
-          - name: neutree-ai-format-anthropic
-            mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-format-anthropic
-          - name: neutree-model-router
-            mountPath: /neutree-kong-plugin/kong/plugins/neutree-model-router
         readinessProbe:
           failureThreshold: 3
           httpGet:
@@ -685,12 +677,6 @@ spec:
         - name: neutree-ai-statistics
           configMap:
             name: neutree-ai-statistics
-        - name: neutree-ai-format-anthropic
-          configMap:
-            name: neutree-ai-format-anthropic
-        - name: neutree-model-router
-          configMap:
-            name: neutree-model-router
 ---
 apiVersion: batch/v1
 kind: Job
