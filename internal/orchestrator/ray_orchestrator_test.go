@@ -1107,7 +1107,7 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 	}
 }
 
-func TestBuildEngineContainerConfig(t *testing.T) {
+func TestBuildEngineContainerConfigs(t *testing.T) {
 	defaultImageRegistry := &v1.ImageRegistry{
 		Spec: &v1.ImageRegistrySpec{
 			URL: "http://registry.example.com",
@@ -1158,33 +1158,37 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		endpoint        *v1.Endpoint
-		cluster         *v1.Cluster
-		engine          *v1.Engine
-		imageRegistry   *v1.ImageRegistry
-		modelCaches     []v1.ModelCache
-		modelRegistry   *v1.ModelRegistry
-		expectErr       bool
-		expectedImage   string
-		expectedOptions []string
+		name                   string
+		endpoint               *v1.Endpoint
+		cluster                *v1.Cluster
+		engine                 *v1.Engine
+		imageRegistry          *v1.ImageRegistry
+		modelCaches            []v1.ModelCache
+		modelRegistry          *v1.ModelRegistry
+		expectErr              bool
+		expectedImage          string
+		expectedBaseOptions    []string
+		expectedBackendOptions []string
 	}{
 		{
-			name:     "SSH cluster with engine image generates container config",
-			endpoint: gpuEndpoint("v0.12.0"),
+			name:          "SSH cluster with engine image generates split container configs",
+			endpoint:      gpuEndpoint("v0.12.0"),
 			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
 			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
-			expectedOptions: []string{
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
 				"--runtime=nvidia",
 				"--gpus all",
 				"--rm",
 			},
 		},
 		{
-			name:     "SSH cluster with model caches includes host path volume mounts",
-			endpoint: gpuEndpoint("v0.12.0"),
+			name:          "SSH cluster with model caches includes volume mounts only in backend config",
+			endpoint:      gpuEndpoint("v0.12.0"),
 			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
@@ -1195,7 +1199,10 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 				},
 			},
 			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
-			expectedOptions: []string{
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
 				"--runtime=nvidia",
 				"--gpus all",
 				"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),
@@ -1218,8 +1225,8 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 			expectErr:     true,
 		},
 		{
-			name:     "model cache without HostPath is skipped",
-			endpoint: gpuEndpoint("v0.12.0"),
+			name:          "model cache without HostPath is skipped",
+			endpoint:      gpuEndpoint("v0.12.0"),
 			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
@@ -1227,7 +1234,10 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 				{Name: "nfs-cache"},
 			},
 			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
-			expectedOptions: []string{
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
 				"--runtime=nvidia",
 				"--gpus all",
 				"--rm",
@@ -1245,7 +1255,10 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 				},
 			},
 			expectedImage: "registry.example.com/custom-repo/neutree/engine-vllm:v0.12.0-ray2.53.0",
-			expectedOptions: []string{
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
 				"--runtime=nvidia",
 				"--gpus all",
 				"--rm",
@@ -1378,23 +1391,30 @@ func TestBuildEngineContainerConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mgr := newMockMgr(t)
-			result, err := buildEngineContainerConfig(tt.endpoint, tt.cluster, tt.engine, tt.imageRegistry, mgr, tt.modelCaches, tt.modelRegistry)
+			baseConfig, backendConfig, err := buildEngineContainerConfigs(tt.endpoint, tt.cluster, tt.engine, tt.imageRegistry, mgr, tt.modelCaches, tt.modelRegistry)
 
 			if tt.expectErr {
 				assert.Error(t, err)
-				assert.Nil(t, result)
+				assert.Nil(t, baseConfig)
+				assert.Nil(t, backendConfig)
 				return
 			}
 
 			assert.NoError(t, err)
-			assert.NotNil(t, result)
-			assert.Equal(t, tt.expectedImage, result["image"])
 
-			if tt.expectedOptions != nil {
-				runOptions, ok := result["run_options"].([]string)
-				assert.True(t, ok)
-				assert.Equal(t, tt.expectedOptions, runOptions)
-			}
+			// Verify base config (app_builder + Controller): image + --rm only
+			assert.NotNil(t, baseConfig)
+			assert.Equal(t, tt.expectedImage, baseConfig["image"])
+			baseOptions, ok := baseConfig["run_options"].([]string)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedBaseOptions, baseOptions)
+
+			// Verify backend config: image + GPU options + volumes + --rm
+			assert.NotNil(t, backendConfig)
+			assert.Equal(t, tt.expectedImage, backendConfig["image"])
+			backendOptions, ok := backendConfig["run_options"].([]string)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedBackendOptions, backendOptions)
 		})
 	}
 }
@@ -1481,20 +1501,34 @@ func TestEndpointToApplication_SSHClusterContainerConfig(t *testing.T) {
 	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, engine, imageRegistry, mgr)
 	assert.NoError(t, err)
 
-	// Verify container config is present
+	expectedImage := "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0"
+
+	// Verify base container config (app-level): image + --rm only
 	containerRaw, ok := app.RuntimeEnv["container"]
 	assert.True(t, ok, "runtime_env should have 'container' key for SSH cluster with version > v1.0.0")
 
 	container, ok := containerRaw.(map[string]interface{})
 	assert.True(t, ok)
-	assert.Equal(t, "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0", container["image"])
+	assert.Equal(t, expectedImage, container["image"])
 
-	runOptions, ok := container["run_options"].([]string)
+	baseOptions, ok := container["run_options"].([]string)
 	assert.True(t, ok)
-	assert.Contains(t, runOptions, "--runtime=nvidia")
-	assert.Contains(t, runOptions, "--gpus all")
-	assert.Contains(t, runOptions, "-v /data/models:"+filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"))
-	assert.Contains(t, runOptions, "--rm")
+	assert.Equal(t, []string{"--rm"}, baseOptions)
+
+	// Verify backend container config (in args): image + GPU options + volumes + --rm
+	backendContainerRaw, ok := app.Args["backend_container"]
+	assert.True(t, ok, "args should have 'backend_container' key for SSH cluster with version > v1.0.0")
+
+	backendContainer, ok := backendContainerRaw.(map[string]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, expectedImage, backendContainer["image"])
+
+	backendOptions, ok := backendContainer["run_options"].([]string)
+	assert.True(t, ok)
+	assert.Contains(t, backendOptions, "--runtime=nvidia")
+	assert.Contains(t, backendOptions, "--gpus all")
+	assert.Contains(t, backendOptions, "-v /data/models:"+filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"))
+	assert.Contains(t, backendOptions, "--rm")
 }
 
 func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {

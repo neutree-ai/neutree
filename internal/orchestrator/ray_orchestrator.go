@@ -551,32 +551,47 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	// Generate runtime_env.container for engine version isolation (SSH clusters > v1.0.0).
 	// The engine image runs as a sibling container on the host via docker.sock.
 	// Clusters <= v1.0.0 run the engine inside ray_container directly.
+	//
+	// Two container configs are produced:
+	//   - baseConfig → app.RuntimeEnv["container"]: engine image + --rm only,
+	//     inherited by app_builder and Controller (no GPU required).
+	//   - backendConfig → app.Args["backend_container"]: full config with GPU
+	//     options, volume mounts, and NFS. The Python app_builder sets this on
+	//     Backend's ray_actor_options.runtime_env.container to override the
+	//     app-level config.
 	if isNewClusterVersion(deployedCluster) {
-		containerConfig, err := buildEngineContainerConfig(endpoint, deployedCluster, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
+		baseConfig, backendConfig, err := buildEngineContainerConfigs(endpoint, deployedCluster, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
 		if err != nil {
 			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build engine container config for endpoint %s", endpoint.Metadata.WorkspaceName())
 		}
 
-		if containerConfig != nil {
-			app.RuntimeEnv["container"] = containerConfig
+		if baseConfig != nil {
+			app.RuntimeEnv["container"] = baseConfig
+		}
+		if backendConfig != nil {
+			app.Args["backend_container"] = backendConfig
 		}
 	}
 
 	return app, nil
 }
 
-// buildEngineContainerConfig constructs the runtime_env.container config for
-// running the engine in an isolated container via runtime_env.container.
-// The caller must ensure this is only called for SSH clusters with version > v1.0.0.
-// Returns an error if the SSH engine image is not found or accelerator runtime config fails.
-// For BentoML NFS model registries, a Docker NFS volume mount option is appended to run_options
-// so the engine container can access the model registry directly.
-func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
+// buildEngineContainerConfigs constructs two runtime_env.container configs for
+// engine version isolation on SSH clusters (version > v1.0.0):
+//
+//   - baseConfig:    engine image + --rm only. Used as the application-level
+//     runtime_env.container so the app_builder and Controller can run on any
+//     node (no GPU required).
+//   - backendConfig: engine image + --rm + GPU options + volume mounts + NFS.
+//     Set on Backend deployment's ray_actor_options.runtime_env.container to
+//     override the app-level config. Ray replaces "container" per-key (no deep
+//     merge), so this must be self-contained.
+func buildEngineContainerConfigs(endpoint *v1.Endpoint, cluster *v1.Cluster,
 	engine *v1.Engine, imageRegistry *v1.ImageRegistry,
 	acceleratorMgr accelerator.Manager,
-	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry) (map[string]interface{}, error) {
+	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry) (baseConfig, backendConfig map[string]interface{}, err error) {
 	if engine == nil || engine.Spec == nil {
-		return nil, errors.New("engine is required for SSH cluster")
+		return nil, nil, errors.New("engine is required for SSH cluster")
 	}
 
 	// Find the matching engine version
@@ -589,7 +604,7 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 	}
 
 	if targetVersion == nil {
-		return nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
+		return nil, nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
 	}
 
 	// Get accelerator type from endpoint resources (consistent with K8s orchestrator).
@@ -606,7 +621,7 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 	engineImage := targetVersion.GetImageForAccelerator(acceleratorType)
 
 	if engineImage == nil {
-		return nil, errors.Errorf("no engine image configured for accelerator %q in engine %s version %s",
+		return nil, nil, errors.Errorf("no engine image configured for accelerator %q in engine %s version %s",
 			acceleratorType, engine.Metadata.Name, endpoint.Spec.Engine.Version)
 	}
 
@@ -619,22 +634,30 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 		}
 	}
 
+	// Base config: engine image + --rm only (for app_builder and Controller).
+	baseConfig = map[string]interface{}{
+		"image":       imageRef,
+		"run_options": []string{"--rm"},
+	}
+
+	// Backend config: starts with the same base, then adds GPU options, volumes, and NFS.
+	var backendRunOptions []string
+
 	// Get accelerator-specific run_options from plugin (skip for CPU — no special runtime needed)
-	var runOptions []string
 	if acceleratorMgr != nil && acceleratorType != "" && acceleratorType != "cpu" {
 		opts, err := acceleratorMgr.GetEngineContainerRunOptions(acceleratorType)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get engine container run options for accelerator %s", acceleratorType)
+			return nil, nil, errors.Wrapf(err, "failed to get engine container run options for accelerator %s", acceleratorType)
 		}
 
-		runOptions = append(runOptions, opts...)
+		backendRunOptions = append(backendRunOptions, opts...)
 	}
 
 	// Mount model caches using HOST paths (docker.sock creates containers on host)
 	for _, mc := range modelCaches {
 		if mc.HostPath != nil {
 			containerMountPath := filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, mc.Name)
-			runOptions = append(runOptions, fmt.Sprintf("-v %s:%s", mc.HostPath.Path, containerMountPath))
+			backendRunOptions = append(backendRunOptions, fmt.Sprintf("-v %s:%s", mc.HostPath.Path, containerMountPath))
 		}
 	}
 
@@ -642,26 +665,26 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 	if modelRegistry != nil && modelRegistry.Spec != nil && modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
 		registryURL, err := url.Parse(modelRegistry.Spec.Url)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse model registry URL %s", modelRegistry.Spec.Url)
+			return nil, nil, errors.Wrapf(err, "failed to parse model registry URL %s", modelRegistry.Spec.Url)
 		}
 
 		if registryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
 			registry, err := model_registry.NewModelRegistry(modelRegistry)
 			if err != nil {
-				return nil, errors.Wrap(err, "failed to create model registry for NFS type detection")
+				return nil, nil, errors.Wrap(err, "failed to create model registry for NFS type detection")
 			}
 
 			nfsType, err := registry.GetNFSType()
 			if err != nil {
-				return nil, errors.Wrap(err, "failed to detect NFS type from control-plane mount")
+				return nil, nil, errors.Wrap(err, "failed to detect NFS type from control-plane mount")
 			}
 
 			if nfsType == "" {
-				return nil, errors.New("NFS mount not found on control-plane, cannot determine NFS type for engine container")
+				return nil, nil, errors.New("NFS mount not found on control-plane, cannot determine NFS type for engine container")
 			}
 
 			nfsMountPath := filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
-			runOptions = append(runOptions, fmt.Sprintf(
+			backendRunOptions = append(backendRunOptions, fmt.Sprintf(
 				"--mount type=volume,dst=%s,volume-opt=type=%s,volume-opt=o=addr=%s,volume-opt=device=:%s",
 				nfsMountPath, nfsType, registryURL.Hostname(), registryURL.Path))
 		}
@@ -693,14 +716,14 @@ func buildEngineContainerConfig(endpoint *v1.Endpoint, cluster *v1.Cluster,
 	}
 
 	// Auto-remove engine container when it exits to prevent residual containers on the host.
-	// Engine containers run in foreground (no -d), so Ray collects exit codes and logs via
-	// the docker run process pipe before --rm triggers cleanup.
-	runOptions = append(runOptions, "--rm")
+	backendRunOptions = append(backendRunOptions, "--rm")
 
-	return map[string]interface{}{
+	backendConfig = map[string]interface{}{
 		"image":       imageRef,
-		"run_options": runOptions,
-	}, nil
+		"run_options": backendRunOptions,
+	}
+
+	return baseConfig, backendConfig, nil
 }
 
 func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, applicationEnv map[string]string) {
