@@ -77,6 +77,7 @@ func runClusterImport(opts *ClusterImportOptions) error {
 	// if not importLocal, set registry info
 	if !opts.importLocal {
 		importOpts.MirrorRegistry = mirrorRegistry
+		importOpts.RegistryProject = registryProject
 		importOpts.RegistryUser = registryUsername
 		importOpts.RegistryPassword = registryPassword
 	} else {
