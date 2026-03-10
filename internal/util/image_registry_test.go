@@ -138,6 +138,58 @@ func TestGetImagePrefix(t *testing.T) {
 	}
 }
 
+func TestStripRegistryScheme(t *testing.T) {
+	tests := []struct {
+		name   string
+		rawURL string
+		want   string
+	}{
+		{
+			name:   "https scheme",
+			rawURL: "https://registry.example.com",
+			want:   "registry.example.com",
+		},
+		{
+			name:   "http scheme",
+			rawURL: "http://registry.example.com:5000",
+			want:   "registry.example.com:5000",
+		},
+		{
+			name:   "no scheme",
+			rawURL: "registry.example.com:5000",
+			want:   "registry.example.com:5000",
+		},
+		{
+			name:   "https scheme with project path",
+			rawURL: "https://registry.example.com:5000/my-project",
+			want:   "registry.example.com:5000/my-project",
+		},
+		{
+			name:   "no scheme with project path",
+			rawURL: "registry.example.com:5000/my-project",
+			want:   "registry.example.com:5000/my-project",
+		},
+		{
+			name:   "trailing slash stripped",
+			rawURL: "https://registry.example.com:5000/",
+			want:   "registry.example.com:5000",
+		},
+		{
+			name:   "empty string",
+			rawURL: "",
+			want:   "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripRegistryScheme(tt.rawURL)
+			if got != tt.want {
+				t.Errorf("StripRegistryScheme() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGetImageRegistryHost(t *testing.T) {
 	tests := []struct {
 		name          string

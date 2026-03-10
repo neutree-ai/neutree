@@ -50,15 +50,8 @@ func GetImageRegistryAuthInfo(r *v1.ImageRegistry) (string, string, error) {
 // returning only the host (with optional port). It handles both formats:
 // "registry.example.com:5000" and "https://registry.example.com:5000".
 func parseRegistryHost(rawURL string) (string, error) {
-	// Strip scheme if present
-	stripped := rawURL
-	if strings.HasPrefix(rawURL, "https://") || strings.HasPrefix(rawURL, "http://") {
-		stripped = strings.TrimPrefix(rawURL, "https://")
-		stripped = strings.TrimPrefix(stripped, "http://")
-	}
-
-	// Remove any trailing path/slash
-	stripped = strings.TrimRight(stripped, "/")
+	// Normalize by stripping scheme and trailing slash, preserving any path component.
+	stripped := StripRegistryScheme(rawURL)
 
 	if stripped == "" {
 		return "", errors.New("empty registry host")
