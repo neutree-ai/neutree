@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/resource"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
@@ -74,7 +75,7 @@ func TestSortByReversePriority(t *testing.T) {
 		&fakeObject{kind: "Endpoint", name: "ep2"},
 	}
 
-	sortByReversePriority(resources)
+	resource.SortByReversePriority(resources)
 
 	// Endpoints (priority 3) should come first, then Cluster (2), then Engine (1), then Workspace (0)
 	kinds := make([]string, len(resources))
@@ -92,7 +93,7 @@ func TestSortByReversePriority_StableOrder(t *testing.T) {
 		&fakeObject{kind: "Cluster", name: "cl1"},
 	}
 
-	sortByReversePriority(resources)
+	resource.SortByReversePriority(resources)
 
 	// Same-priority items should preserve original order (stable sort)
 	assert.Equal(t, "ep-b", resources[0].GetName())
@@ -107,7 +108,7 @@ func TestSortByReversePriority_UnknownKinds(t *testing.T) {
 		&fakeObject{kind: "Endpoint", name: "ep1"},
 	}
 
-	sortByReversePriority(resources)
+	resource.SortByReversePriority(resources)
 
 	// Unknown kinds get priority 99, so they come first in reverse order
 	kinds := make([]string, len(resources))
@@ -144,7 +145,7 @@ func TestResourceLabel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, resourceLabel(tt.kind, tt.workspace, tt.resName))
+			assert.Equal(t, tt.want, resource.Label(tt.kind, tt.workspace, tt.resName))
 		})
 	}
 }
@@ -156,18 +157,18 @@ type fakeObject struct {
 	workspace string
 }
 
-func (f *fakeObject) GetKind() string                          { return f.kind }
-func (f *fakeObject) SetKind(string)                           {}
-func (f *fakeObject) GetName() string                          { return f.name }
-func (f *fakeObject) GetWorkspace() string                     { return f.workspace }
-func (f *fakeObject) GetLabels() map[string]string             { return nil }
-func (f *fakeObject) SetLabels(map[string]string)              {}
-func (f *fakeObject) GetAnnotations() map[string]string        { return nil }
-func (f *fakeObject) SetAnnotations(map[string]string)         {}
-func (f *fakeObject) GetCreationTimestamp() string              { return "" }
-func (f *fakeObject) GetUpdateTimestamp() string                { return "" }
-func (f *fakeObject) GetDeletionTimestamp() string              { return "" }
-func (f *fakeObject) GetMetadata() interface{}                  { return nil }
-func (f *fakeObject) GetSpec() interface{}                      { return nil }
-func (f *fakeObject) GetStatus() interface{}                    { return nil }
-func (f *fakeObject) GetID() string                             { return "" }
+func (f *fakeObject) GetKind() string                     { return f.kind }
+func (f *fakeObject) SetKind(string)                      {}
+func (f *fakeObject) GetName() string                     { return f.name }
+func (f *fakeObject) GetWorkspace() string                { return f.workspace }
+func (f *fakeObject) GetLabels() map[string]string        { return nil }
+func (f *fakeObject) SetLabels(map[string]string)         {}
+func (f *fakeObject) GetAnnotations() map[string]string   { return nil }
+func (f *fakeObject) SetAnnotations(map[string]string)    {}
+func (f *fakeObject) GetCreationTimestamp() string         { return "" }
+func (f *fakeObject) GetUpdateTimestamp() string           { return "" }
+func (f *fakeObject) GetDeletionTimestamp() string         { return "" }
+func (f *fakeObject) GetMetadata() interface{}             { return nil }
+func (f *fakeObject) GetSpec() interface{}                 { return nil }
+func (f *fakeObject) GetStatus() interface{}               { return nil }
+func (f *fakeObject) GetID() string                        { return "" }

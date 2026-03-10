@@ -51,19 +51,20 @@ func NewBuilder() *Builder {
 		// Auth middleware is applied to:
 		// - Validate and pass-through JWT tokens to PostgREST
 		// - Convert API keys (sk_*) to PostgREST-compatible JWT tokens
-		"rest/api-keys":         ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
-		"rest/workspaces":       ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
-		"rest/roles":            ProxiesRouteFactory(proxies.RegisterRoleRoutes),
-		"rest/role-assignments": ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),
-		"rest/user-profiles":    ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
-		"rest/clusters":         ProxiesRouteFactory(proxies.RegisterClusterRoutes),
-		"rest/image-registries": ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
-		"rest/model-registries": ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
-		"rest/endpoints":        ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
-		"rest/engines":          ProxiesRouteFactory(proxies.RegisterEngineRoutes),
-		"rest/model-catalogs":   ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
-		"rest/oem-configs":      ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
-		"rest/rpc":              ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
+		"rest/api-keys":           ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
+		"rest/workspaces":         ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
+		"rest/roles":              ProxiesRouteFactory(proxies.RegisterRoleRoutes),
+		"rest/role-assignments":   ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),
+		"rest/user-profiles":      ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
+		"rest/clusters":           ProxiesRouteFactory(proxies.RegisterClusterRoutes),
+		"rest/image-registries":   ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
+		"rest/model-registries":   ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
+		"rest/endpoints":          ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
+		"rest/engines":            ProxiesRouteFactory(proxies.RegisterEngineRoutes),
+		"rest/model-catalogs":     ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
+		"rest/oem-configs":        ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
+		"rest/rpc":                ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
+		"rest/external-endpoints": ProxiesRouteFactory(proxies.RegisterExternalEndpointRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {
@@ -88,20 +89,21 @@ func NewBuilder() *Builder {
 		// PostgREST proxy routes now require auth middleware to:
 		// 1. Validate JWT tokens (pass-through to PostgREST)
 		// 2. Convert API keys to PostgREST-compatible JWT tokens
-		"rest/api-keys":         {"auth"},
-		"rest/workspaces":       {"auth"},
-		"rest/roles":            {"auth"},
-		"rest/role-assignments": {"auth"},
-		"rest/user-profiles":    {"auth"},
-		"rest/clusters":         {"auth"},
-		"rest/image-registries": {"auth"},
-		"rest/model-registries": {"auth"},
-		"rest/endpoints":        {"auth"},
-		"rest/engines":          {"auth"},
-		"rest/model-catalogs":   {"auth"},
-		"rest/oem-configs":      {"auth"},
-		"rest/rpc":              {"auth"},
-		"credentials":           {"auth"},
+		"rest/api-keys":           {"auth"},
+		"rest/workspaces":         {"auth"},
+		"rest/roles":              {"auth"},
+		"rest/role-assignments":   {"auth"},
+		"rest/user-profiles":      {"auth"},
+		"rest/clusters":           {"auth"},
+		"rest/image-registries":   {"auth"},
+		"rest/model-registries":   {"auth"},
+		"rest/endpoints":          {"auth"},
+		"rest/engines":            {"auth"},
+		"rest/model-catalogs":     {"auth"},
+		"rest/oem-configs":        {"auth"},
+		"rest/rpc":                {"auth"},
+		"rest/external-endpoints": {"auth"},
+		"credentials":             {"auth"},
 	}
 
 	for route, middlewares := range defaultRoutesToMiddlewares {

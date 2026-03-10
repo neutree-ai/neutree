@@ -37,6 +37,12 @@ type Gateway interface {
 	DeleteCluster(cluster *v1.Cluster) error
 	// GetServeUrl returns the endpoint serving url of the gateway
 	GetEndpointServeUrl(ep *v1.Endpoint) (string, error)
+	// SyncExternalEndpoint synchronizes an external endpoint configuration to the gateway
+	SyncExternalEndpoint(ee *v1.ExternalEndpoint) error
+	// DeleteExternalEndpoint removes an external endpoint configuration from the gateway
+	DeleteExternalEndpoint(ee *v1.ExternalEndpoint) error
+	// GetExternalEndpointServeUrl returns the external endpoint serving url of the gateway
+	GetExternalEndpointServeUrl(ee *v1.ExternalEndpoint) (string, error)
 }
 
 type newGateway func(opts GatewayOptions) (Gateway, error)

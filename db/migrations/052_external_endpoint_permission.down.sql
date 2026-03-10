@@ -1,0 +1,2 @@
+-- PostgreSQL does not support removing enum values
+-- The external_endpoint:* values will remain in the enum
