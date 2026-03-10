@@ -23,7 +23,7 @@ def resolve_allow_pattern(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
     if not metadata:
         return None
     allow_pattern = metadata.get("file")
-    if not allow_pattern:
+    if not allow_pattern or not isinstance(allow_pattern, str):
         return None
     if ".gguf" not in allow_pattern.lower():
         return None
