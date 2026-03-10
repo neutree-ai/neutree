@@ -1208,7 +1208,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			},
 			imageRegistry: &v1.ImageRegistry{
 				Spec: &v1.ImageRegistrySpec{
-					URL:        "://invalid-url",
+					URL:        "",
 					Repository: "neutree",
 					AuthConfig: v1.ImageRegistryAuthConfig{
 						Username: "user",
