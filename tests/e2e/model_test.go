@@ -252,6 +252,31 @@ var _ = Describe("Model", Ordered, func() {
 			Expect(ParseKV(r.Stdout)["Version"]).To(Equal(version))
 		})
 
+		It("should update name and version in model.yaml when pushing with --name/--version", func() {
+			name := "e2e-push-yaml-override"
+			version := "v3.0"
+			DeferCleanup(Model.EnsureDeleted, name, version)
+
+			// Create a model dir with a pre-existing model.yaml containing different name/version.
+			modelDir := GinkgoT().TempDir()
+			Expect(os.WriteFile(filepath.Join(modelDir, "model.bin"), []byte("data"), 0644)).To(Succeed())
+			originalYAML := "name: original-name\nversion: original-version\nmodule: test\napi_version: v1\n"
+			Expect(os.WriteFile(filepath.Join(modelDir, "model.yaml"), []byte(originalYAML), 0644)).To(Succeed())
+
+			// Push with overridden name and version.
+			r := Model.Push(modelDir, name, version)
+			ExpectSuccess(r)
+			ExpectStdoutContains(r, "pushed successfully")
+
+			// Verify server-side model.yaml reflects the overridden name/version
+			// (GetModelDetail reads model.yaml from disk).
+			r = Model.Get(name + ":" + version)
+			ExpectSuccess(r)
+			kv := ParseKV(r.Stdout)
+			Expect(kv["Name"]).To(Equal(name), "model.yaml Name should match the pushed --name flag, not 'original-name'")
+			Expect(kv["Version"]).To(Equal(version), "model.yaml Version should match the pushed --version flag, not 'original-version'")
+		})
+
 		It("should reject 'latest' as version", Label("C2622808"), func() {
 			r := pushModel("e2e-push-latest-reject", "latest", 64)
 			ExpectFailed(r)
@@ -400,3 +425,4 @@ var _ = Describe("Model", Ordered, func() {
 		})
 	})
 })
+

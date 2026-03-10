@@ -1408,6 +1408,103 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:    false,
 		},
 		{
+			name: "return Failed when application is DEPLOYING but a deployment is UNHEALTHY",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {
+									Name:    "BACKEND",
+									Status:  dashboard.DeploymentStatusUnhealthy,
+									Message: "replica failed to start",
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Deployment BACKEND: replica failed to start",
+			expectError:    false,
+		},
+		{
+			name: "return Failed when application is NOT_STARTED but a deployment is UNHEALTHY",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "NOT_STARTED",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {
+									Name:    "BACKEND",
+									Status:  dashboard.DeploymentStatusUnhealthy,
+									Message: "image pull failed",
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Deployment BACKEND: image pull failed",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying when application is DEPLOYING and deployment is HEALTHY",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {
+									Name:   "BACKEND",
+									Status: dashboard.DeploymentStatusHealthy,
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
 			name: "should merge errormsgs from different checks when ray serve application is not in Running status",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
