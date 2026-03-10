@@ -51,7 +51,7 @@ func TestModelCatalogController_Reconcile(t *testing.T) {
 
 	mockStorage.On("UpdateModelCatalog", "1", mock.AnythingOfType("*v1.ModelCatalog")).Return(nil)
 
-	err := controller.Reconcile(modelCatalog)
+	_, err := controller.Reconcile(modelCatalog)
 
 	assert.NoError(t, err)
 	mockStorage.AssertExpectations(t)

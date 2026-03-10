@@ -7,6 +7,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -29,10 +30,10 @@ func NewRoleAssignmentController(option *RoleAssignmentControllerOption) (*RoleA
 	return c, nil
 }
 
-func (c *RoleAssignmentController) Reconcile(obj interface{}) error {
+func (c *RoleAssignmentController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	roleAssignment, ok := obj.(*v1.RoleAssignment)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.RoleAssignment")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.RoleAssignment")
 	}
 
 	// Use a consistent name if Metadata is guaranteed to exist
@@ -43,7 +44,7 @@ func (c *RoleAssignmentController) Reconcile(obj interface{}) error {
 
 	klog.V(4).Infof("Reconcile role assignment %s (ID: %s)", objName, roleAssignment.GetID())
 
-	return c.syncHandler(roleAssignment)
+	return reconcile.Result{}, c.syncHandler(roleAssignment)
 }
 
 func (c *RoleAssignmentController) sync(obj *v1.RoleAssignment) error {

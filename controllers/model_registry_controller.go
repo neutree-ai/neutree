@@ -7,6 +7,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/pkg/model_registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -31,15 +32,15 @@ func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRe
 	return c, nil
 }
 
-func (c *ModelRegistryController) Reconcile(obj interface{}) error {
+func (c *ModelRegistryController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	modelRegistry, ok := obj.(*v1.ModelRegistry)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.ModelRegistry")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.ModelRegistry")
 	}
 
 	klog.V(4).Info("Reconcile model registry " + modelRegistry.Metadata.Name)
 
-	return c.syncHandler(modelRegistry)
+	return reconcile.Result{}, c.syncHandler(modelRegistry)
 }
 
 func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {

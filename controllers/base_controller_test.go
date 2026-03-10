@@ -9,6 +9,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/controllers/mocks"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -30,7 +31,7 @@ func TestBaseController_processNextWorkItem(t *testing.T) {
 				m.On("Get", "1").Return(&v1.Cluster{ID: 1}, nil)
 			},
 			mockReconciler: func(m *mocks.MockReconciler) {
-				m.On("Reconcile", &v1.Cluster{ID: 1}).Return(nil)
+				m.On("Reconcile", &v1.Cluster{ID: 1}).Return(reconcile.Result{}, nil)
 			},
 			expected: true,
 		},
@@ -43,7 +44,7 @@ func TestBaseController_processNextWorkItem(t *testing.T) {
 				m.On("Get", "1").Return(&v1.Cluster{ID: 1}, nil)
 			},
 			mockReconciler: func(m *mocks.MockReconciler) {
-				m.On("Reconcile", &v1.Cluster{ID: 1}).Return(errors.New("test error"))
+				m.On("Reconcile", &v1.Cluster{ID: 1}).Return(reconcile.Result{}, errors.New("test error"))
 			},
 			expected: true,
 		},
@@ -130,7 +131,7 @@ func TestBaseController_processNextWorkItem(t *testing.T) {
 				m.On("Get", "1").Return(&v1.Cluster{ID: 1}, nil)
 			},
 			mockReconciler: func(m *mocks.MockReconciler) {
-				m.On("Reconcile", &v1.Cluster{ID: 1}).Return(nil)
+				m.On("Reconcile", &v1.Cluster{ID: 1}).Return(reconcile.Result{}, nil)
 			},
 			expected: true,
 		},

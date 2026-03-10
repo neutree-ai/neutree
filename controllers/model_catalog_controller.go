@@ -8,6 +8,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/controllers/reconcile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -31,15 +32,15 @@ func NewModelCatalogController(opt *ModelCatalogControllerOption) (*ModelCatalog
 	return c, nil
 }
 
-func (c *ModelCatalogController) Reconcile(obj interface{}) error {
+func (c *ModelCatalogController) Reconcile(obj interface{}) (reconcile.Result, error) {
 	modelCatalog, ok := obj.(*v1.ModelCatalog)
 	if !ok {
-		return errors.New("failed to assert obj to *v1.ModelCatalog")
+		return reconcile.Result{}, errors.New("failed to assert obj to *v1.ModelCatalog")
 	}
 
 	klog.V(4).Info("Reconciling model catalog " + modelCatalog.Metadata.Name)
 
-	return c.syncHandler(modelCatalog)
+	return reconcile.Result{}, c.syncHandler(modelCatalog)
 }
 
 func (c *ModelCatalogController) sync(modelCatalog *v1.ModelCatalog) error {

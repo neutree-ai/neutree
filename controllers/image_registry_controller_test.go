@@ -449,7 +449,7 @@ func TestImageRegistryController_Reconcile(t *testing.T) {
 			}
 
 			c := &ImageRegistryController{storage: mockStorage, syncHandler: func(obj *v1.ImageRegistry) error { return nil }}
-			err := c.Reconcile(tt.input)
+			_, err := c.Reconcile(tt.input)
 
 			if tt.wantErr {
 				assert.Error(t, err)
