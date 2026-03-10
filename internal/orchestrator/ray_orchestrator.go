@@ -703,7 +703,7 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint, cluster *v1.Cluster,
 
 			if group, ok := cluster.Status.ResourceInfo.Allocatable.AcceleratorGroups[acceleratorType]; ok && group.MemoryPerDeviceMiB > 0 {
 				memLimitMiB := int64(float64(group.MemoryPerDeviceMiB) * gpuCount)
-				runOptions = append(runOptions,
+				backendRunOptions = append(backendRunOptions,
 					fmt.Sprintf("-v %s:%s:ro", v1.HamiCoreHostLibPath, v1.HamiCoreLibPath),
 					fmt.Sprintf("-e LD_PRELOAD=%s", v1.HamiCoreLibPath),
 					fmt.Sprintf("-e CUDA_DEVICE_MEMORY_LIMIT=%dm", memLimitMiB),
