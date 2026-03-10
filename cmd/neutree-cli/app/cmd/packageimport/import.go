@@ -30,7 +30,8 @@ Use the appropriate subcommand based on the package type you want to import.
 
 	// import-specific flags
 	importCmd.PersistentFlags().StringVar(&workspace, "workspace", "default", "Workspace")
-	importCmd.PersistentFlags().StringVar(&mirrorRegistry, "mirror-registry", "", "Container image registry host (optionally with port) to push images to; use --registry-project for namespace/project (if required)")
+	importCmd.PersistentFlags().StringVar(&mirrorRegistry, "mirror-registry", "",
+		"Registry host[:port] to push images to (if required)")
 	importCmd.PersistentFlags().StringVar(&registryProject, "registry-project", "", "Project/namespace in the registry to push images to (e.g., 'neutree-ai')")
 	importCmd.PersistentFlags().StringVar(&registryUsername, "registry-username", "", "Username for the container image registry (if required)")
 	importCmd.PersistentFlags().StringVar(&registryPassword, "registry-password", "", "Password for the container image registry (if required)")
