@@ -15,7 +15,7 @@ import (
 func WriteEarlyStatus(cluster *v1.Cluster, s storage.Storage) {
 	phase := DetermineClusterPhase(false, cluster)
 
-	if phase != v1.ClusterPhaseInitializing && phase != v1.ClusterPhaseUpdating {
+	if phase != v1.ClusterPhaseInitializing && phase != v1.ClusterPhaseUpdating && phase != v1.ClusterPhaseUpgrading {
 		return
 	}
 

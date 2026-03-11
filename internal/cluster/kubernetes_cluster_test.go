@@ -6,6 +6,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -281,6 +282,85 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 			equal, diff, err := util.JsonEqual(resources, tt.expectedResources)
 			require.NoError(t, err)
 			require.True(t, equal, "expected resources do not match actual resources: %s", diff)
+		})
+	}
+}
+
+func TestGetDeployedVersion(t *testing.T) {
+	tests := []struct {
+		name            string
+		objects         []client.Object
+		expectedVersion string
+		wantErr         bool
+	}{
+		{
+			name: "router deployment with version label",
+			objects: []client.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "router",
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							v1.NeutreeServingVersionLabel: "v1.2.0",
+						},
+					},
+				},
+			},
+			expectedVersion: "v1.2.0",
+		},
+		{
+			name: "router deployment without version label",
+			objects: []client.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "router",
+						Namespace: "test-ns",
+						Labels:    map[string]string{},
+					},
+				},
+			},
+			expectedVersion: "",
+		},
+		{
+			name: "router deployment with nil labels",
+			objects: []client.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "router",
+						Namespace: "test-ns",
+					},
+				},
+			},
+			expectedVersion: "",
+		},
+		{
+			name:    "router deployment not found",
+			objects: []client.Object{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(tt.objects...).
+				Build()
+
+			c := &NativeKubernetesClusterReconciler{}
+			reconcileCtx := &ReconcileContext{
+				Ctx:              context.TODO(),
+				ctrClient:        fakeClient,
+				clusterNamespace: "test-ns",
+			}
+
+			version, err := c.getDeployedVersion(reconcileCtx)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tt.expectedVersion, version)
+			}
 		})
 	}
 }

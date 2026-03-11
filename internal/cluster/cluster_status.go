@@ -20,6 +20,12 @@ func DetermineClusterPhase(isResourceReady bool, cluster *v1.Cluster) v1.Cluster
 		return v1.ClusterPhaseInitializing
 	}
 
+	if cluster.Status != nil && cluster.Status.Version != "" &&
+		cluster.Spec != nil && cluster.Spec.Version != "" &&
+		cluster.Status.Version != cluster.Spec.Version {
+		return v1.ClusterPhaseUpgrading
+	}
+
 	if cluster.Status != nil && cluster.Status.ObservedSpecHash != "" {
 		currentHash := ComputeClusterSpecHash(cluster.Spec)
 		if cluster.Status.ObservedSpecHash != currentHash {

@@ -317,7 +317,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		return nil, errors.Wrap(err, "failed to get image prefix")
 	}
 
-	rayClusterConfig.Docker.Image = imagePrefix + "/neutree/neutree-serve:" + cluster.Spec.Version
+	rayClusterConfig.Docker.Image = imagePrefix + "/" + v1.NeutreeServeImageName + ":" + cluster.Spec.Version
 	rayClusterConfig.Docker.PullBeforeRun = true
 	// Determine cluster generation: > v1.0.0 uses DOOD engine isolation,
 	// <= v1.0.0 mounts NFS inside ray_container and needs elevated privileges.
@@ -451,6 +451,45 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	mutateModelCaches(rayClusterConfig, reconcileContext.Cluster.Spec.Config.ModelCaches)
 
 	return rayClusterConfig, nil
+}
+
+func needsVersionUpgrade(cluster *v1.Cluster) bool {
+	return cluster.Status != nil && cluster.Status.Version != "" &&
+		cluster.Spec != nil && cluster.Spec.Version != "" &&
+		cluster.Status.Version != cluster.Spec.Version
+}
+
+func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext) error {
+	klog.Infof("Upgrading cluster %s from version %s to %s",
+		reconcileCtx.Cluster.Metadata.WorkspaceName(),
+		reconcileCtx.Cluster.Status.Version,
+		reconcileCtx.Cluster.Spec.Version)
+
+	// Step 1: Force stop all workers and ray down
+	err := c.downCluster(reconcileCtx)
+	if err != nil {
+		return errors.Wrap(err, "failed to down cluster during upgrade")
+	}
+
+	// Step 2: Ray up with new image (restart=true)
+	headIP, err := c.upCluster(reconcileCtx, true)
+	if err != nil {
+		return errors.Wrap(err, "failed to up cluster during upgrade")
+	}
+
+	// Step 3: Set head provision status
+	err = setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true)
+	if err != nil {
+		klog.Warningf("Failed to set head node provision status during upgrade: %v", err)
+	}
+
+	// Step 4: Reconcile worker nodes with new image
+	err = c.reconcileWorkerNode(reconcileCtx)
+	if err != nil {
+		return errors.Wrap(err, "failed to reconcile worker nodes during upgrade")
+	}
+
+	return nil
 }
 
 func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v1.ModelCache) {

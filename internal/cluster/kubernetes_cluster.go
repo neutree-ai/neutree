@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -137,6 +138,12 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 
 	cluster.Status.Initialized = true
 
+	// Read version from router deployment label
+	routerVersion, err := c.getDeployedVersion(reconcileCtx)
+	if err == nil && routerVersion != "" {
+		cluster.Status.Version = routerVersion
+	}
+
 	// Calculate resources (best-effort)
 	resources, err := c.calculateResources(reconcileCtx)
 	if err != nil {
@@ -146,6 +153,25 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 	}
 
 	return nil
+}
+
+// getDeployedVersion reads the NeutreeServingVersionLabel from the router Deployment.
+func (c *NativeKubernetesClusterReconciler) getDeployedVersion(reconcileCtx *ReconcileContext) (string, error) {
+	deployment := &appsv1.Deployment{}
+
+	err := reconcileCtx.ctrClient.Get(reconcileCtx.Ctx, client.ObjectKey{
+		Name:      "router",
+		Namespace: reconcileCtx.clusterNamespace,
+	}, deployment)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get router deployment")
+	}
+
+	if deployment.Labels == nil {
+		return "", nil
+	}
+
+	return deployment.Labels[v1.NeutreeServingVersionLabel], nil
 }
 
 func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *ReconcileContext) error {
