@@ -138,7 +138,10 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 
 	registryAuth := base64.URLEncoding.EncodeToString(authConfigBytes)
 
-	imagePrefix := util.BuildImagePrefix(opts.MirrorRegistry, opts.RegistryProject)
+	imagePrefix, err := util.BuildImagePrefix(opts.MirrorRegistry, opts.RegistryProject)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build image prefix")
+	}
 
 	pushedImages, err := imagePusher.PushImagesToMirrorRegistry(ctx, imagePrefix, registryAuth, manifest)
 	if err != nil {

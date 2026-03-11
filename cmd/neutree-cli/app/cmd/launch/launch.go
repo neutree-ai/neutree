@@ -95,7 +95,10 @@ func replaceComposeImageRegistry(composeFile, mirrorRegistry, registryProject st
 		return nil
 	}
 
-	imageRegistry := internalutil.BuildImagePrefix(mirrorRegistry, registryProject)
+	imageRegistry, err := internalutil.BuildImagePrefix(mirrorRegistry, registryProject)
+	if err != nil {
+		return errors.Wrap(err, "invalid registry configuration")
+	}
 
 	options, err := cli.NewProjectOptions([]string{composeFile}, cli.WithLoadOptions(func(o *loader.Options) {
 		// disable interpolation to avoid character escapes

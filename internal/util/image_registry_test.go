@@ -144,6 +144,7 @@ func TestBuildImagePrefix(t *testing.T) {
 		host     string
 		project  string
 		expected string
+		wantErr  bool
 	}{
 		{
 			name:     "host only without project",
@@ -205,11 +206,45 @@ func TestBuildImagePrefix(t *testing.T) {
 			project:  "neutree-ai",
 			expected: "registry.example.com/neutree-ai",
 		},
+		{
+			name:     "legacy registry with path and no project",
+			host:     "registry.example.com/legacy-project",
+			project:  "",
+			expected: "registry.example.com/legacy-project",
+		},
+		{
+			name:     "legacy registry with scheme path and no project",
+			host:     "https://registry.example.com/legacy-project",
+			project:  "",
+			expected: "registry.example.com/legacy-project",
+		},
+		{
+			name:    "reject registry with path and project both set",
+			host:    "registry.example.com/old-project",
+			project: "new-project",
+			wantErr: true,
+		},
+		{
+			name:    "reject registry with scheme path and project both set",
+			host:    "https://registry.example.com/old-project",
+			project: "new-project",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := BuildImagePrefix(tt.host, tt.project)
+			result, err := BuildImagePrefix(tt.host, tt.project)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("BuildImagePrefix() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("BuildImagePrefix() unexpected error: %v", err)
+				return
+			}
 			if result != tt.expected {
 				t.Errorf("BuildImagePrefix() = %v, want %v", result, tt.expected)
 			}
