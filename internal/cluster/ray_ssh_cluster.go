@@ -117,6 +117,11 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 			reconcileCtx.processMessages = append(reconcileCtx.processMessages, formatMessageWithTimestamp("Cluster initialization failed: "+err.Error()))
 			return errors.New(strings.Join(reconcileCtx.processMessages, "\n"))
 		}
+	} else if needsVersionUpgrade(reconcileCtx.Cluster) {
+		err = c.upgradeCluster(reconcileCtx)
+		if err != nil {
+			return errors.Wrap(err, "failed to upgrade cluster")
+		}
 	} else {
 		err = c.reconcileHeadNode(reconcileCtx)
 		if err != nil {

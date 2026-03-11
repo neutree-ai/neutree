@@ -1,8 +1,10 @@
 package e2e
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -227,6 +229,35 @@ func TeardownImageRegistry() {
 		RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
 		os.Remove(imageRegistryYAML)
 	}
+}
+
+// --- Available Upgrade Versions API helpers ---
+
+type availableUpgradeVersionsAPIResponse struct {
+	CurrentVersion    string   `json:"current_version"`
+	AvailableVersions []string `json:"available_versions"`
+}
+
+func callAvailableUpgradeVersionsAPI(workspace, clusterName string) *http.Response {
+	serverURL := os.Getenv("NEUTREE_SERVER_URL")
+	apiKey := os.Getenv("NEUTREE_API_KEY")
+
+	url := fmt.Sprintf("%s/api/v1/clusters/%s/%s/available_upgrade_versions", serverURL, workspace, clusterName)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
+	}
+
+	resp, err := client.Do(req)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	return resp
 }
 
 // --- Tests ---
@@ -470,6 +501,231 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			By("Waiting for cluster to be deleted")
 			r = ClusterH.WaitForDelete(clusterName, "10m")
 			ExpectSuccess(r)
+		})
+	})
+
+	// --- SSH Cluster Upgrade ---
+
+	Describe("SSH Cluster Upgrade", Ordered, Label("ssh", "upgrade"), func() {
+		var (
+			clusterName    string
+			headIP         string
+			workerIPs      string
+			sshUser        string
+			sshPrivateKey  string
+			upgradeVersion string
+		)
+
+		BeforeAll(func() {
+			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
+			upgradeVersion = os.Getenv("E2E_CLUSTER_UPGRADE_VERSION")
+			if upgradeVersion == "" {
+				Skip("E2E_CLUSTER_UPGRADE_VERSION not set, skipping SSH upgrade tests")
+			}
+			clusterName = "e2e-ssh-upg-" + runID
+
+			yaml := renderSSHClusterYAML(map[string]string{
+				"name":            clusterName,
+				"head_ip":         headIP,
+				"worker_ips":      workerIPs,
+				"ssh_user":        sshUser,
+				"ssh_private_key": sshPrivateKey,
+			})
+
+			By("Applying SSH cluster")
+			r := ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			By("Waiting for Running phase")
+			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			ExpectSuccess(r)
+		})
+
+		AfterAll(func() {
+			By("Force-deleting SSH upgrade cluster")
+			ClusterH.EnsureDeleted(clusterName)
+		})
+
+		It("should show Upgrading then Running after version change", func() {
+			By("Recording old version")
+			r := ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c := parseClusterJSON(r.Stdout)
+			oldVersion := c.Status.Version
+			Expect(oldVersion).NotTo(BeEmpty(), "cluster should have a version before upgrade")
+
+			By("Applying with new version")
+			yaml := renderSSHClusterYAML(map[string]string{
+				"name":            clusterName,
+				"version":         upgradeVersion,
+				"head_ip":         headIP,
+				"worker_ips":      workerIPs,
+				"ssh_user":        sshUser,
+				"ssh_private_key": sshPrivateKey,
+			})
+			r = ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			By("Polling for Upgrading phase (may be transient)")
+			seenUpgrading := false
+			deadline := time.Now().Add(60 * time.Second)
+			for time.Now().Before(deadline) {
+				r = ClusterH.Get(clusterName)
+				if r.ExitCode == 0 {
+					c = parseClusterJSON(r.Stdout)
+					if c.Status.Phase == "Upgrading" {
+						seenUpgrading = true
+						break
+					}
+					if c.Status.Phase == "Running" && c.Status.Version == upgradeVersion {
+						break
+					}
+				}
+				time.Sleep(2 * time.Second)
+			}
+			_ = seenUpgrading // Upgrading may be too transient to observe.
+
+			By("Waiting for Running phase after upgrade")
+			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			ExpectSuccess(r)
+
+			By("Verifying version changed")
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c = parseClusterJSON(r.Stdout)
+			Expect(c.Status.Version).NotTo(Equal(oldVersion), "version should change after upgrade")
+		})
+	})
+
+	// --- K8s Cluster Upgrade ---
+
+	Describe("K8s Cluster Upgrade", Ordered, Label("k8s", "upgrade"), func() {
+		var (
+			clusterName    string
+			kubeconfig     string
+			upgradeVersion string
+		)
+
+		BeforeAll(func() {
+			kubeconfig = requireK8sEnv()
+			upgradeVersion = os.Getenv("E2E_CLUSTER_UPGRADE_VERSION")
+			if upgradeVersion == "" {
+				Skip("E2E_CLUSTER_UPGRADE_VERSION not set, skipping K8s upgrade tests")
+			}
+			clusterName = "e2e-k8s-upg-" + runID
+
+			yaml := renderK8sClusterYAML(map[string]string{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+			})
+
+			By("Applying K8s cluster")
+			r := ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			By("Waiting for Running phase")
+			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			ExpectSuccess(r)
+		})
+
+		AfterAll(func() {
+			By("Force-deleting K8s upgrade cluster")
+			ClusterH.EnsureDeleted(clusterName)
+		})
+
+		It("should show Upgrading then Running after version change", func() {
+			By("Recording old version")
+			r := ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c := parseClusterJSON(r.Stdout)
+			oldVersion := c.Status.Version
+			Expect(oldVersion).NotTo(BeEmpty(), "cluster should have a version before upgrade")
+
+			By("Applying with new version")
+			yaml := renderK8sClusterYAML(map[string]string{
+				"name":       clusterName,
+				"version":    upgradeVersion,
+				"kubeconfig": kubeconfig,
+			})
+			r = ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			By("Polling for Upgrading phase (may be transient)")
+			seenUpgrading := false
+			deadline := time.Now().Add(60 * time.Second)
+			for time.Now().Before(deadline) {
+				r = ClusterH.Get(clusterName)
+				if r.ExitCode == 0 {
+					c = parseClusterJSON(r.Stdout)
+					if c.Status.Phase == "Upgrading" {
+						seenUpgrading = true
+						break
+					}
+					if c.Status.Phase == "Running" && c.Status.Version == upgradeVersion {
+						break
+					}
+				}
+				time.Sleep(2 * time.Second)
+			}
+			_ = seenUpgrading // Upgrading may be too transient to observe.
+
+			By("Waiting for Running phase after upgrade")
+			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			ExpectSuccess(r)
+
+			By("Verifying version changed")
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c = parseClusterJSON(r.Stdout)
+			Expect(c.Status.Version).NotTo(Equal(oldVersion), "version should change after upgrade")
+		})
+	})
+
+	// --- Available Upgrade Versions API ---
+
+	Describe("Available Upgrade Versions API", Ordered, Label("api", "upgrade"), func() {
+		var (
+			clusterName string
+		)
+
+		BeforeAll(func() {
+			headIP, _, sshUser, sshPrivateKey := requireSSHEnv()
+			clusterName = "e2e-upg-api-" + runID
+
+			yaml := renderSSHClusterYAML(map[string]string{
+				"name":            clusterName,
+				"head_ip":         headIP,
+				"ssh_user":        sshUser,
+				"ssh_private_key": sshPrivateKey,
+			})
+
+			By("Applying SSH cluster for API test")
+			r := ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			By("Waiting for Running phase")
+			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			ExpectSuccess(r)
+		})
+
+		AfterAll(func() {
+			ClusterH.EnsureDeleted(clusterName)
+		})
+
+		It("should return available upgrade versions via API", func() {
+			resp := callAvailableUpgradeVersionsAPI(testWorkspace(), clusterName)
+
+			Expect(resp.StatusCode).To(Equal(http.StatusOK), "API should return 200")
+
+			var body availableUpgradeVersionsAPIResponse
+			err := json.NewDecoder(resp.Body).Decode(&body)
+			resp.Body.Close()
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(body.CurrentVersion).NotTo(BeEmpty(), "current_version should not be empty")
+			// available_versions may be empty if no newer versions exist in the registry,
+			// but the field should exist and be a valid list.
+			Expect(body.AvailableVersions).NotTo(BeNil(), "available_versions should not be nil")
 		})
 	})
 

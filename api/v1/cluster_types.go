@@ -177,7 +177,14 @@ const (
 	ClusterPhaseDeleted      ClusterPhase = "Deleted"
 	ClusterPhaseInitializing ClusterPhase = "Initializing"
 	ClusterPhaseUpdating     ClusterPhase = "Updating"
+	ClusterPhaseUpgrading    ClusterPhase = "Upgrading"
 	ClusterPhaseDeleting     ClusterPhase = "Deleting"
+)
+
+// Image name constants for Neutree components.
+const (
+	NeutreeServeImageName  = "neutree/neutree-serve"
+	NeutreeRouterImageName = "neutree/router"
 )
 
 func (obj *Cluster) GetName() string {

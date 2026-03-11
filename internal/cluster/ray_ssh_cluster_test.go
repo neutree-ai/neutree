@@ -3,6 +3,7 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -839,6 +840,155 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 				assert.NoError(t, err)
 				require.True(t, equal, "expected resources do not match actual resources: %s", diff)
 			}
+		})
+	}
+}
+
+func TestNeedsVersionUpgrade(t *testing.T) {
+	tests := []struct {
+		name     string
+		cluster  *v1.Cluster
+		expected bool
+	}{
+		{
+			name:     "nil status",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v2.0.0"}},
+			expected: false,
+		},
+		{
+			name:     "empty status version",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v2.0.0"}, Status: &v1.ClusterStatus{Version: ""}},
+			expected: false,
+		},
+		{
+			name:     "nil spec",
+			cluster:  &v1.Cluster{Status: &v1.ClusterStatus{Version: "v1.0.0"}},
+			expected: false,
+		},
+		{
+			name:     "empty spec version",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: ""}, Status: &v1.ClusterStatus{Version: "v1.0.0"}},
+			expected: false,
+		},
+		{
+			name:     "same version",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}, Status: &v1.ClusterStatus{Version: "v1.0.0"}},
+			expected: false,
+		},
+		{
+			name:     "version mismatch - upgrade needed",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v2.0.0"}, Status: &v1.ClusterStatus{Version: "v1.0.0"}},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, needsVersionUpgrade(tt.cluster))
+		})
+	}
+}
+
+func TestUpgradeCluster(t *testing.T) {
+	tests := []struct {
+		name      string
+		setupMock func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService)
+		wantErr   bool
+	}{
+		{
+			name: "upgrade cluster success",
+			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// downCluster: stop workers (no workers in this test) + ray down
+				e.On("Execute", mock.Anything, mock.Anything, mock.MatchedBy(func(args []string) bool {
+					return len(args) > 1 && strings.Contains(args[1], "ray down")
+				})).Return([]byte(""), nil).Once()
+				// upCluster: mutate accelerator config + ray up
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil).Once()
+				e.On("Execute", mock.Anything, mock.Anything, mock.MatchedBy(func(args []string) bool {
+					return len(args) > 1 && strings.Contains(args[1], "ray up")
+				})).Return([]byte(""), nil).Once()
+				// reconcileWorkerNode: list nodes (no workers to start)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{}, nil)
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
+			},
+		},
+		{
+			name: "upgrade cluster fails on downCluster",
+			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// downCluster fails: ray down fails
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError).Once()
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
+			},
+			wantErr: true,
+		},
+		{
+			name: "upgrade cluster fails on upCluster",
+			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// downCluster succeeds
+				e.On("Execute", mock.Anything, mock.Anything, mock.MatchedBy(func(args []string) bool {
+					return len(args) > 1 && strings.Contains(args[1], "ray down")
+				})).Return([]byte(""), nil).Once()
+				// upCluster: mutate accelerator config fails
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, assert.AnError).Once()
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			acceleratorManager := &acceleratormocks.MockManager{}
+			e := &commandmocks.MockExecutor{}
+			dashboardSvc := &dashboardmocks.MockDashboardService{}
+			storage := &storagemocks.MockStorage{}
+			tt.setupMock(storage, acceleratorManager, e, dashboardSvc)
+
+			r := &sshRayClusterReconciler{
+				acceleratorManager: acceleratorManager,
+				storage:            storage,
+				executor:           e,
+			}
+
+			err := r.upgradeCluster(&ReconcileContext{
+				Cluster: &v1.Cluster{
+					ID: 1,
+					Metadata: &v1.Metadata{
+						Name:      "test-cluster",
+						Workspace: "default",
+					},
+					Spec: &v1.ClusterSpec{
+						Type:    "ssh",
+						Version: "v2.0.0",
+					},
+					Status: &v1.ClusterStatus{
+						Initialized:     true,
+						Version:         "v1.0.0",
+						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+					},
+				},
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{
+						HeadIP: "127.0.0.1",
+					},
+				},
+				sshRayClusterConfig: &v1.RayClusterConfig{
+					Docker: v1.Docker{},
+				},
+				sshConfigGenerator: newRaySSHLocalConfigGenerator("test-cluster"),
+				rayService:         dashboardSvc,
+			})
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			storage.AssertExpectations(t)
+			acceleratorManager.AssertExpectations(t)
+			e.AssertExpectations(t)
+			dashboardSvc.AssertExpectations(t)
 		})
 	}
 }
