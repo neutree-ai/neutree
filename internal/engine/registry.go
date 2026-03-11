@@ -61,6 +61,11 @@ func (r *registry) registerHandler(c *gin.Context) {
 	}
 
 	for _, eng := range req.Engines {
+		if eng == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine entry must not be nil"})
+			return
+		}
+
 		if err := r.Register(eng); err != nil {
 			klog.Warningf("failed to register external engine %s: %s", eng.GetName(), err.Error())
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -78,8 +83,16 @@ func (r *registry) Register(engine *v1.Engine) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if engine == nil {
+		return errors.New("engine must not be nil")
+	}
+
 	if engine.Metadata == nil || engine.Metadata.Name == "" {
 		return errors.New("engine name is required")
+	}
+
+	if engine.Spec == nil {
+		return errors.New("engine spec is required")
 	}
 
 	if _, existed := r.engines[engine.Metadata.Name]; !existed {

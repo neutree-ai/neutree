@@ -142,12 +142,13 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 
 	// Create a test engine registry with a test engine pre-registered
 	testEngineRegistry := engine.NewTestRegistry()
-	_ = testEngineRegistry.Register(&v1.Engine{
+	err := testEngineRegistry.Register(&v1.Engine{
 		Metadata: &v1.Metadata{
 			Name: "test-engine",
 		},
 		Spec: &v1.EngineSpec{},
 	})
+	assert.NoError(t, err)
 
 	tests := []struct {
 		name           string
@@ -246,12 +247,13 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 
 	// Create a test engine registry with a test engine pre-registered
 	testEngineRegistry := engine.NewTestRegistry()
-	_ = testEngineRegistry.Register(&v1.Engine{
+	err := testEngineRegistry.Register(&v1.Engine{
 		Metadata: &v1.Metadata{
 			Name: "test-engine",
 		},
 		Spec: &v1.EngineSpec{},
 	})
+	assert.NoError(t, err)
 
 	tests := []struct {
 		name           string
