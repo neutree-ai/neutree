@@ -1,0 +1,250 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "SGLang v0.5.9 Engine Configuration",
+  "description": "Configuration schema for SGLang v0.5.9 engine parameters",
+  "properties": {
+    "tokenizer_path": {
+      "type": "string",
+      "description": "The path of the tokenizer"
+    },
+    "tokenizer_mode": {
+      "type": "string",
+      "enum": ["auto", "slow"],
+      "default": "auto",
+      "description": "Tokenizer mode"
+    },
+    "load_format": {
+      "type": "string",
+      "enum": ["auto", "pt", "safetensors", "npcache", "dummy", "gguf", "bitsandbytes", "layered"],
+      "default": "auto",
+      "description": "The format of the model weights to load"
+    },
+    "dtype": {
+      "type": "string",
+      "enum": ["auto", "half", "float16", "bfloat16", "float", "float32"],
+      "default": "auto",
+      "description": "Data type for model weights and activations"
+    },
+    "kv_cache_dtype": {
+      "type": "string",
+      "enum": ["auto", "fp8_e5m2"],
+      "default": "auto",
+      "description": "Data type for KV cache storage"
+    },
+    "trust_remote_code": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to trust remote code from Hugging Face"
+    },
+    "context_length": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The model's maximum context length. Defaults to None (will use the value from the model config)"
+    },
+    "quantization": {
+      "type": "string",
+      "enum": ["awq", "fp8", "gptq", "marlin", "gptq_marlin", "awq_marlin", "bitsandbytes", "gguf"],
+      "description": "The quantization method"
+    },
+    "random_seed": {
+      "type": "integer",
+      "description": "Random seed for reproducibility"
+    },
+    "stream_interval": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "The interval (or buffer size) for streaming in terms of the token length"
+    },
+    "tensor_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "The number of tensor parallel replicas"
+    },
+    "data_parallel_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "The number of data parallel replicas"
+    },
+    "mem_fraction_static": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1.0,
+      "description": "The fraction of the memory used for static allocation (model weights and KV cache memory pool). Use a smaller value if you see out-of-memory errors"
+    },
+    "max_running_requests": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The maximum number of running requests"
+    },
+    "max_total_tokens": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The maximum number of tokens in the memory pool. If not specified, it will be automatically calculated based on the memory usage fraction"
+    },
+    "chunked_prefill_size": {
+      "type": "integer",
+      "minimum": -1,
+      "default": 8192,
+      "description": "The maximum number of tokens in a chunk for chunked prefill. Setting this to -1 means disabling chunked prefill"
+    },
+    "max_prefill_tokens": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The maximum number of tokens in a prefill batch"
+    },
+    "schedule_policy": {
+      "type": "string",
+      "enum": ["lpm", "random", "fcfs", "dfs-weight"],
+      "default": "lpm",
+      "description": "The schedule policy for requests"
+    },
+    "schedule_conservativeness": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.0,
+      "description": "How conservative the schedule policy is. A larger value means more conservative scheduling"
+    },
+    "attention_backend": {
+      "type": "string",
+      "enum": ["flashinfer", "triton"],
+      "description": "The attention backend to use"
+    },
+    "sampling_backend": {
+      "type": "string",
+      "enum": ["flashinfer", "pytorch"],
+      "description": "The sampling backend to use"
+    },
+    "grammar_backend": {
+      "type": "string",
+      "enum": ["outlines", "xgrammar"],
+      "default": "xgrammar",
+      "description": "Choose the backend for constrained decoding"
+    },
+    "disable_flashinfer": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable flashinfer attention kernels"
+    },
+    "disable_flashinfer_sampling": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable flashinfer sampling kernels"
+    },
+    "disable_radix_cache": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable RadixAttention for prefix caching"
+    },
+    "disable_cuda_graph": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable CUDA graph for model forward. Fall back to eager mode"
+    },
+    "disable_cuda_graph_padding": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable CUDA graph when padding is detected"
+    },
+    "enable_torch_compile": {
+      "type": "boolean",
+      "default": false,
+      "description": "Optimize the model with torch.compile (experimental, only works for small models)"
+    },
+    "enable_p2p_check": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable P2P check for GPU access"
+    },
+    "enable_mla": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable Multi-head Latent Attention (MLA) for DeepSeek-V2"
+    },
+    "log_level": {
+      "type": "string",
+      "enum": ["debug", "info", "warning", "error"],
+      "default": "info",
+      "description": "The logging level of all loggers"
+    },
+    "log_level_http": {
+      "type": "string",
+      "description": "The logging level of HTTP server. If not set, reuse log_level"
+    },
+    "log_requests": {
+      "type": "boolean",
+      "default": false,
+      "description": "Log the inputs and outputs of all requests"
+    },
+    "show_time_cost": {
+      "type": "boolean",
+      "default": false,
+      "description": "Show time cost of custom marks in the log"
+    },
+    "chat_template": {
+      "type": "string",
+      "description": "The bultin chat template name or the path of the chat template file"
+    },
+    "is_embedding": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to use a CausalLM as an embedding model"
+    },
+    "revision": {
+      "type": "string",
+      "description": "The specific model version to use. It can be a branch name, a tag name, or a commit id"
+    },
+    "skip_tokenizer_init": {
+      "type": "boolean",
+      "default": false,
+      "description": "Skip tokenizer and detokenizer initialization"
+    },
+    "enable_metrics": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable Prometheus metrics endpoint"
+    },
+    "decode_log_interval": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 40,
+      "description": "The log interval of decode batch"
+    },
+    "enable_cache_report": {
+      "type": "boolean",
+      "default": false,
+      "description": "Return number of cached tokens in usage.prompt_tokens_details"
+    },
+    "watchdog_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Set watchdog timeout in seconds"
+    },
+    "dp_size": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Alias for data_parallel_size"
+    },
+    "tp_size": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Alias for tensor_parallel_size"
+    },
+    "lora_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The list of LoRA adapter paths"
+    },
+    "max_loras_per_batch": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum number of LoRA adapters in a running batch"
+    }
+  },
+  "additionalProperties": false
+}

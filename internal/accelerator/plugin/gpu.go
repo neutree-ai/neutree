@@ -208,10 +208,44 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 		},
 	}
 
+	sglangV0_5_9EngineSchema, err := GetSGLangV0_5_9EngineSchema()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load SGLang V0.5.9 engine schema")
+	}
+
+	sglangV1Engine := &v1.Engine{
+		APIVersion: "v1",
+		Kind:       "Engine",
+		Metadata: &v1.Metadata{
+			Name: "sglang",
+		},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{
+				{
+					Version:      "v0.5.9",
+					ValuesSchema: sglangV0_5_9EngineSchema,
+					Images: map[string]*v1.EngineImage{
+						"nvidia_gpu": {
+							ImageName: "lmsysorg/sglang",
+							Tag:       "v0.5.9-cu124",
+						},
+					},
+					DeployTemplate: map[string]map[string]string{
+						"kubernetes": {
+							"default": GetSGLangDefaultDeployTemplate(),
+						},
+					},
+				},
+			},
+			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask},
+		},
+	}
+
 	return &v1.GetSupportEnginesResponse{
 		Engines: []*v1.Engine{
 			llamaCppV1Engine,
 			vllmV1Engine,
+			sglangV1Engine,
 		},
 	}, nil
 }

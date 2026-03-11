@@ -42,7 +42,7 @@ func TestGPUAcceleratorPlugin_GetSupportEngines(t *testing.T) {
 	response, err := plugin.GetSupportEngines(context.Background())
 	assert.NoError(t, err)
 	assert.NotNil(t, response)
-	assert.Len(t, response.Engines, 2)
+	assert.Len(t, response.Engines, 3)
 
 	// Check that we have expected engines
 	engineNames := make(map[string]*v1.Engine)
@@ -61,6 +61,13 @@ func TestGPUAcceleratorPlugin_GetSupportEngines(t *testing.T) {
 	assert.True(t, exists)
 	assert.NotNil(t, llamaCppEngine.Spec.Versions[0].ValuesSchema)
 	assert.Contains(t, llamaCppEngine.Spec.SupportedTasks, v1.TextGenerationModelTask)
+
+	// Verify SGLang engine
+	sglangEngine, exists := engineNames["sglang"]
+	assert.True(t, exists)
+	assert.NotNil(t, sglangEngine.Spec.Versions[0].ValuesSchema)
+	assert.Contains(t, sglangEngine.Spec.SupportedTasks, v1.TextGenerationModelTask)
+	assert.Contains(t, sglangEngine.Spec.SupportedTasks, v1.TextEmbeddingModelTask)
 }
 
 func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {

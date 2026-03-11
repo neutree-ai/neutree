@@ -12,6 +12,9 @@ var vllmDefaultDeployTemplate string
 //go:embed deploy_templates/llama_cpp_v0.3.7_default.yaml
 var llamaCppDefaultDeployTemplate string
 
+//go:embed deploy_templates/sglang_v0.5.9_default.yaml
+var sglangDefaultDeployTemplate string
+
 // GetVLLMDefaultDeployTemplate returns the default deployment template for vLLM V0.11.2 engine
 func GetVLLMDefaultDeployTemplate() string {
 	return base64.StdEncoding.EncodeToString([]byte(vllmDefaultDeployTemplate))
@@ -22,10 +25,16 @@ func GetLlamaCppDefaultDeployTemplate() string {
 	return base64.StdEncoding.EncodeToString([]byte(llamaCppDefaultDeployTemplate))
 }
 
+// GetSGLangDefaultDeployTemplate returns the default deployment template for SGLang V0.5.9 engine
+func GetSGLangDefaultDeployTemplate() string {
+	return base64.StdEncoding.EncodeToString([]byte(sglangDefaultDeployTemplate))
+}
+
 // DeployTemplates contains all available deployment templates
 var DeployTemplates = map[string]func() string{
 	"vllm-v0.11.2":     GetVLLMDefaultDeployTemplate,
 	"llama-cpp-v0.3.7": GetLlamaCppDefaultDeployTemplate,
+	"sglang-v0.5.9":    GetSGLangDefaultDeployTemplate,
 }
 
 // GetDeployTemplate returns the deployment template for a specific engine
