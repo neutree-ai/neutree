@@ -92,9 +92,16 @@ func GetImagePrefix(imageRegistry *v1.ImageRegistry) (string, error) {
 		return "", errors.Wrap(err, "failed to parse image registry url "+imageRegistry.Spec.URL)
 	}
 
-	if imageRegistry.Spec.Repository == "" {
-		return host, nil
+	return BuildImagePrefix(host, imageRegistry.Spec.Repository), nil
+}
+
+// BuildImagePrefix composes an image prefix from a registry host and an optional
+// project/namespace. The project is normalized by trimming whitespace and slashes.
+func BuildImagePrefix(registryHost, project string) string {
+	project = strings.Trim(strings.TrimSpace(project), "/")
+	if project != "" {
+		return registryHost + "/" + project
 	}
 
-	return host + "/" + imageRegistry.Spec.Repository, nil
+	return registryHost
 }

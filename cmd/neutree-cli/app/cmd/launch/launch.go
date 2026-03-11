@@ -3,7 +3,6 @@ package launch
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/compose-spec/compose-go/cli"
 	"github.com/compose-spec/compose-go/loader"
@@ -11,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
+	internalutil "github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
 )
 
@@ -95,10 +95,7 @@ func replaceComposeImageRegistry(composeFile, mirrorRegistry, registryProject st
 		return nil
 	}
 
-	imageRegistry := mirrorRegistry
-	if project := strings.Trim(strings.TrimSpace(registryProject), "/"); project != "" {
-		imageRegistry = mirrorRegistry + "/" + project
-	}
+	imageRegistry := internalutil.BuildImagePrefix(mirrorRegistry, registryProject)
 
 	options, err := cli.NewProjectOptions([]string{composeFile}, cli.WithLoadOptions(func(o *loader.Options) {
 		// disable interpolation to avoid character escapes

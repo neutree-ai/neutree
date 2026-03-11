@@ -138,6 +138,61 @@ func TestGetImagePrefix(t *testing.T) {
 	}
 }
 
+func TestBuildImagePrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     string
+		project  string
+		expected string
+	}{
+		{
+			name:     "host only without project",
+			host:     "registry.example.com",
+			project:  "",
+			expected: "registry.example.com",
+		},
+		{
+			name:     "host with project",
+			host:     "registry.example.com",
+			project:  "neutree-ai",
+			expected: "registry.example.com/neutree-ai",
+		},
+		{
+			name:     "project with leading and trailing slashes",
+			host:     "registry.example.com",
+			project:  "/neutree-ai/",
+			expected: "registry.example.com/neutree-ai",
+		},
+		{
+			name:     "project with whitespace",
+			host:     "registry.example.com",
+			project:  "  neutree-ai  ",
+			expected: "registry.example.com/neutree-ai",
+		},
+		{
+			name:     "project with only slashes",
+			host:     "registry.example.com",
+			project:  "///",
+			expected: "registry.example.com",
+		},
+		{
+			name:     "host with port and project",
+			host:     "registry.example.com:5000",
+			project:  "my-project",
+			expected: "registry.example.com:5000/my-project",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildImagePrefix(tt.host, tt.project)
+			if result != tt.expected {
+				t.Errorf("BuildImagePrefix() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestStripRegistryScheme(t *testing.T) {
 	tests := []struct {
 		name   string
