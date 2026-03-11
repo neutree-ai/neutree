@@ -2,9 +2,12 @@ package engine
 
 import (
 	"context"
+	"net/http"
 	"sync"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -23,12 +26,52 @@ type registry struct {
 	engines map[string]*v1.Engine // key: engine name
 }
 
-func NewRegistry() Registry {
+func NewRegistry(e *gin.Engine) (Registry, error) {
 	r := &registry{
 		engines: make(map[string]*v1.Engine),
 	}
 
-	return r
+	// register built-in engines
+	builtinEngines, err := GetBuiltinEngines()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load built-in engines")
+	}
+
+	for _, eng := range builtinEngines {
+		if err := r.Register(eng); err != nil {
+			return nil, errors.Wrapf(err, "failed to register built-in engine %s", eng.Metadata.Name)
+		}
+
+		klog.Infof("Registered built-in engine: %s", eng.Metadata.Name)
+	}
+
+	// register external engine registration API
+	engineGroup := e.Group("/v1/engine")
+	engineGroup.POST("/register", r.registerHandler)
+
+	return r, nil
+}
+
+func (r *registry) registerHandler(c *gin.Context) {
+	var req v1.RegisterEngineRequest
+
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	for _, eng := range req.Engines {
+		if err := r.Register(eng); err != nil {
+			klog.Warningf("failed to register external engine %s: %s", eng.GetName(), err.Error())
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+
+			return
+		}
+
+		klog.Infof("Registered external engine: %s", eng.GetName())
+	}
+
+	c.JSON(http.StatusOK, "ok")
 }
 
 func (r *registry) Register(engine *v1.Engine) error {

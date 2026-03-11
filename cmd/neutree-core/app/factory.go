@@ -152,8 +152,8 @@ func NewRoleAssignmentControllerFactory() ControllerFactory {
 func NewWorkspaceControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		workspaceController, err := controllers.NewWorkspaceController(&controllers.WorkspaceControllerOption{
-			Storage:            opts.config.Storage,
-			AcceleratorManager: opts.config.AcceleratorManager,
+			Storage:        opts.config.Storage,
+			EngineRegistry: opts.config.EngineRegistry,
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create workspace controller")

@@ -13,15 +13,12 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
-	"github.com/neutree-ai/neutree/internal/engine"
 )
 
 type Manager interface {
 	Start(ctx context.Context)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
-
-	GetAllAcceleratorSupportEngines(ctx context.Context) ([]*v1.Engine, error)
 
 	// GetAllConverters returns all registered resource converters
 	GetAllConverters() map[string]plugin.ResourceConverter
@@ -44,13 +41,11 @@ type registerPlugin struct {
 
 type manager struct {
 	acceleratorsMap sync.Map
-	engineRegistry  engine.Registry
 }
 
 func NewManager(e *gin.Engine) *manager {
 	manager := &manager{
 		acceleratorsMap: sync.Map{},
-		engineRegistry:  engine.NewRegistry(),
 	}
 
 	for _, p := range plugin.GetLocalAcceleratorPlugins() {
@@ -59,10 +54,6 @@ func NewManager(e *gin.Engine) *manager {
 			plugin:           p,
 			lastRegisterTime: time.Now(),
 		})
-
-		// It is critical to refresh supported engines during local plugin registration.
-		// Without this call, local accelerator plugins' supported engines are never initialized.
-		manager.refreshAcceleratorPluginSupportEngines(p)
 
 		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
@@ -106,9 +97,6 @@ func (a *manager) registerAcceleratorPlugin(req v1.RegisterRequest) {
 		}
 
 		a.acceleratorsMap.Store(req.ResourceName, updatedPlugin)
-		// refresh engine cache when plugin register.
-		// todo: we can determine whether an update is needed by checking the plugin version.
-		a.refreshAcceleratorPluginSupportEngines(updatedPlugin.plugin)
 	} else {
 		p := registerPlugin{
 			resource:         req.ResourceName,
@@ -116,7 +104,6 @@ func (a *manager) registerAcceleratorPlugin(req v1.RegisterRequest) {
 			lastRegisterTime: time.Now(),
 		}
 		a.acceleratorsMap.Store(req.ResourceName, p)
-		a.refreshAcceleratorPluginSupportEngines(p.plugin)
 
 		klog.Infof("Register accelerator plugin: %s", req.ResourceName)
 	}
@@ -166,8 +153,6 @@ func (a *manager) getUnhealthyPlugins() []string {
 }
 
 func (a *manager) Start(ctx context.Context) {
-	notifyEngineUpdate := make(chan struct{}, 1)
-
 	go wait.UntilWithContext(ctx, func(ctx context.Context) {
 		select {
 		case <-ctx.Done():
@@ -175,26 +160,8 @@ func (a *manager) Start(ctx context.Context) {
 		default:
 		}
 
-		removePlugins := a.syncPlugins()
-
-		if len(removePlugins) > 0 {
-			notifyEngineUpdate <- struct{}{}
-		}
+		a.syncPlugins()
 	}, time.Minute)
-
-	go func() {
-		// refresh engine cache in first start.
-		a.refreshAllAcceleratorPluginSupportEngines()
-
-		for {
-			select {
-			case <-notifyEngineUpdate:
-				a.refreshAllAcceleratorPluginSupportEngines()
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 }
 
 func (a *manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {
@@ -265,48 +232,6 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 	}
 
 	return runtimeConfigResp.RuntimeConfig, nil
-}
-
-func (a *manager) GetAllAcceleratorSupportEngines(ctx context.Context) ([]*v1.Engine, error) {
-	return a.engineRegistry.ListAll(context.Background())
-}
-
-func (a *manager) refreshAcceleratorPluginSupportEngines(p plugin.AcceleratorPlugin) {
-	resp, err := p.Handle().GetSupportEngines(context.Background())
-	if err != nil {
-		klog.Warningf("get support engines from plugin %s failed, err: %s", p.Resource(), err.Error())
-		return
-	}
-
-	for _, e := range resp.Engines {
-		// store or update engine info
-		err = a.engineRegistry.Register(e)
-		if err != nil {
-			klog.Warningf("register engine %s from plugin %s failed, err: %s", e.Metadata.Name, p.Resource(), err.Error())
-		}
-	}
-}
-
-func (a *manager) refreshAllAcceleratorPluginSupportEngines() {
-	// reset support engines map
-	err := a.engineRegistry.Cleanup()
-	if err != nil {
-		klog.Warningf("cleanup engine registry failed, err: %s", err.Error())
-		return
-	}
-
-	// refresh all plugin support engines
-	a.acceleratorsMap.Range(func(key, value any) bool {
-		p, ok := value.(registerPlugin)
-		if !ok {
-			klog.Warning("assert register plugin type failed")
-			return true
-		}
-
-		a.refreshAcceleratorPluginSupportEngines(p.plugin)
-
-		return true
-	})
 }
 
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {

@@ -48,22 +48,6 @@ func TestAMDGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	assert.Equal(t, InternalPluginType, p.Type())
 }
 
-func TestAMDGPUAcceleratorPlugin_GetSupportEngines(t *testing.T) {
-	p := &AMDGPUAcceleratorPlugin{}
-	// Test GetSupportEngines method
-	response, err := p.GetSupportEngines(context.Background())
-	assert.NoError(t, err)
-	assert.NotNil(t, response)
-	assert.Len(t, response.Engines, 2)
-
-	var engines []string
-	for _, engine := range response.Engines {
-		engines = append(engines, engine.Metadata.Name)
-	}
-	assert.Contains(t, engines, "vllm")
-	assert.Contains(t, engines, "llama-cpp")
-}
-
 func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 	tests := []struct {
 		name                    string
