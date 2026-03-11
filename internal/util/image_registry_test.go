@@ -181,6 +181,18 @@ func TestBuildImagePrefix(t *testing.T) {
 			project:  "my-project",
 			expected: "registry.example.com:5000/my-project",
 		},
+		{
+			name:     "registry with https scheme",
+			host:     "https://registry.example.com",
+			project:  "neutree-ai",
+			expected: "registry.example.com/neutree-ai",
+		},
+		{
+			name:     "registry with https scheme and no project",
+			host:     "https://registry.example.com:5000",
+			project:  "",
+			expected: "registry.example.com:5000",
+		},
 	}
 
 	for _, tt := range tests {

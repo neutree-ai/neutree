@@ -95,13 +95,16 @@ func GetImagePrefix(imageRegistry *v1.ImageRegistry) (string, error) {
 	return BuildImagePrefix(host, imageRegistry.Spec.Repository), nil
 }
 
-// BuildImagePrefix composes an image prefix from a registry host and an optional
-// project/namespace. The project is normalized by trimming whitespace and slashes.
-func BuildImagePrefix(registryHost, project string) string {
+// BuildImagePrefix composes an image prefix from a registry address and an optional
+// project/namespace. The registry is normalized by stripping scheme and trailing slashes.
+// The project is normalized by trimming whitespace and slashes.
+func BuildImagePrefix(registry, project string) string {
+	host := StripRegistryScheme(registry)
 	project = strings.Trim(strings.TrimSpace(project), "/")
+
 	if project != "" {
-		return registryHost + "/" + project
+		return host + "/" + project
 	}
 
-	return registryHost
+	return host
 }

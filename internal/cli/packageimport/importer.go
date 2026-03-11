@@ -123,13 +123,12 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 		return []string{}, nil
 	}
 
-	mirrorRegistry := util.StripRegistryScheme(opts.MirrorRegistry)
 	user, token := opts.RegistryUser, opts.RegistryPassword
 
 	authConfig := registry.AuthConfig{
 		Username:      user,
 		Password:      token,
-		ServerAddress: mirrorRegistry,
+		ServerAddress: util.StripRegistryScheme(opts.MirrorRegistry),
 	}
 
 	authConfigBytes, err := json.Marshal(authConfig)
@@ -139,7 +138,7 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 
 	registryAuth := base64.URLEncoding.EncodeToString(authConfigBytes)
 
-	imagePrefix := util.BuildImagePrefix(mirrorRegistry, opts.RegistryProject)
+	imagePrefix := util.BuildImagePrefix(opts.MirrorRegistry, opts.RegistryProject)
 
 	pushedImages, err := imagePusher.PushImagesToMirrorRegistry(ctx, imagePrefix, registryAuth, manifest)
 	if err != nil {
