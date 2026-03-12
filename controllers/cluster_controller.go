@@ -8,7 +8,6 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/gateway"
@@ -60,14 +59,14 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 }
 
 func (c *ClusterController) Reconcile(obj interface{}) error {
-	cluster, ok := obj.(*v1.Cluster)
+	cl, ok := obj.(*v1.Cluster)
 	if !ok {
 		return errors.New("failed to assert obj to *v1.Cluster")
 	}
 
-	klog.V(4).Info("Reconciling cluster " + cluster.Metadata.WorkspaceName())
+	klog.V(4).Info("Reconciling cluster " + cl.Metadata.WorkspaceName())
 
-	return c.syncHandler(cluster)
+	return c.syncHandler(cl)
 }
 
 func (controller *ClusterController) sync(obj *v1.Cluster) error {
@@ -84,41 +83,30 @@ func (controller *ClusterController) sync(obj *v1.Cluster) error {
 }
 
 func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
-	var (
-		err   error
-		phase v1.ClusterPhase
-	)
+	var reconcileErr error
 
 	defer func() {
-		phase = v1.ClusterPhaseRunning
-		if err != nil {
-			phase = v1.ClusterPhaseFailed
-			if c.Status != nil && !c.Status.Initialized {
-				phase = v1.ClusterPhaseInitializing
-			}
-		}
-
-		updateStatusErr := controller.updateStatus(c, phase, err)
-		if updateStatusErr != nil {
-			klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateStatusErr)
-		}
+		controller.updateClusterStatus(c, reconcileErr)
 	}()
 
 	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
+		reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
+		return reconcileErr
 	}
 
-	err = r.Reconcile(context.Background(), c)
-	if err != nil {
-		return errors.Wrapf(err, "failed to reconcile cluster %s", c.Metadata.WorkspaceName())
+	reconcileErr = r.Reconcile(context.Background(), c)
+	if reconcileErr != nil {
+		reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile cluster %s", c.Metadata.WorkspaceName())
+		return reconcileErr
 	}
 
 	klog.V(4).Info("Cluster " + c.Metadata.WorkspaceName() + " reconcile succeeded, syncing to gateway")
 
-	err = controller.gw.SyncCluster(c)
-	if err != nil {
-		return errors.Wrapf(err, "failed to sync cluster %s to gateway", c.Metadata.WorkspaceName())
+	reconcileErr = controller.gw.SyncCluster(c)
+	if reconcileErr != nil {
+		reconcileErr = errors.Wrapf(reconcileErr, "failed to sync cluster %s to gateway", c.Metadata.WorkspaceName())
+		return reconcileErr
 	}
 
 	if c.Spec.Type == v1.SSHClusterType {
@@ -129,7 +117,7 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 }
 
 func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
-	isForceDelete := IsForceDelete(c.Metadata.Annotations)
+	isForceDelete := v1.IsForceDelete(c.Metadata.Annotations)
 
 	if c.Status != nil && c.Status.Phase == v1.ClusterPhaseDeleted {
 		klog.Info("Cluster " + c.Metadata.WorkspaceName() + " already deleted, delete resource from storage")
@@ -144,7 +132,13 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 
 	klog.Infof("Deleting cluster %s (force=%v)", c.Metadata.WorkspaceName(), isForceDelete)
 
-	deleteErr := func() error {
+	var reconcileErr error
+
+	defer func() {
+		controller.updateClusterStatus(c, reconcileErr)
+	}()
+
+	reconcileErr = func() error {
 		if err := controller.gw.DeleteCluster(c); err != nil {
 			return errors.Wrap(err, "failed to delete cluster backend service "+c.Metadata.WorkspaceName())
 		}
@@ -165,30 +159,48 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 		return nil
 	}()
 
-	// For non-force delete, return error immediately without updating status
-	if deleteErr != nil && !isForceDelete {
-		return deleteErr
+	if reconcileErr != nil && !isForceDelete {
+		return reconcileErr
 	}
 
-	// Update status for successful delete or force delete
-	phase := v1.ClusterPhaseDeleted
-
-	updateErr := controller.updateStatus(c, phase, deleteErr)
-	if updateErr != nil {
-		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
-		return errors.Wrapf(updateErr, "failed to update cluster %s status", c.Metadata.WorkspaceName())
-	}
-
-	LogForceDeletionWarning(isForceDelete, "cluster", c.Metadata.Workspace, c.Metadata.Name, deleteErr)
+	LogForceDeletionWarning(isForceDelete, "cluster", c.Metadata.Workspace, c.Metadata.Name, reconcileErr)
 
 	return nil
 }
 
-func (c *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {
+// updateClusterStatus determines cluster phase and updates storage.
+// reconcileErr == nil means resources are ready (Reconcile includes status checks).
+func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcileErr error) {
+	if c.Metadata.DeletionTimestamp != "" {
+		phase := cluster.DetermineClusterDeletePhase(reconcileErr == nil, c)
+
+		if updateErr := controller.updateStatus(c, phase, reconcileErr); updateErr != nil {
+			klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
+		}
+
+		return
+	}
+
+	phase := cluster.DetermineClusterPhase(reconcileErr == nil, c)
+
+	// Set ObservedSpecHash when Running
+	if phase == v1.ClusterPhaseRunning {
+		if c.Status == nil {
+			c.Status = &v1.ClusterStatus{}
+		}
+
+		c.Status.ObservedSpecHash = cluster.ComputeClusterSpecHash(c.Spec)
+	}
+
+	if updateErr := controller.updateStatus(c, phase, reconcileErr); updateErr != nil {
+		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
+	}
+}
+
+func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {
 	newStatus := &v1.ClusterStatus{
 		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
-		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
 	if obj.Status != nil {
@@ -199,14 +211,14 @@ func (c *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase,
 		newStatus.DesiredNodes = obj.Status.DesiredNodes
 		newStatus.Version = obj.Status.Version
 		newStatus.RayVersion = obj.Status.RayVersion
-		// Preserve existing ResourceInfo - it will be updated by cluster reconcilers
 		newStatus.ResourceInfo = obj.Status.ResourceInfo
 		newStatus.AcceleratorType = obj.Status.AcceleratorType
+		newStatus.ObservedSpecHash = obj.Status.ObservedSpecHash
 	}
 
 	if err != nil {
 		newStatus.ErrorMessage = err.Error()
 	}
 
-	return c.storage.UpdateCluster(strconv.Itoa(obj.ID), &v1.Cluster{Status: newStatus})
+	return controller.storage.UpdateCluster(strconv.Itoa(obj.ID), &v1.Cluster{Status: newStatus})
 }

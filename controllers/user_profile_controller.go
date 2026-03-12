@@ -51,7 +51,7 @@ func (c *UserProfileController) sync(obj *v1.UserProfile) error {
 
 	// Handle deletion
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
-		isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+		isForceDelete := v1.IsForceDelete(obj.Metadata.Annotations)
 
 		// Phase 2: Already marked as DELETED, remove from DB
 		if obj.Status != nil && obj.Status.Phase == v1.UserProfilePhaseDELETED {

@@ -47,7 +47,7 @@ func (c *ApiKeyController) sync(obj *v1.ApiKey) error {
 	var err error
 
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
-		isForceDelete := IsForceDelete(obj.Metadata.Annotations)
+		isForceDelete := v1.IsForceDelete(obj.Metadata.Annotations)
 
 		if obj.Status != nil && obj.Status.Phase == v1.ApiKeyPhaseDELETED {
 			klog.Infof("ApiKey %s already marked as deleted, removing from DB", obj.Metadata.Name)

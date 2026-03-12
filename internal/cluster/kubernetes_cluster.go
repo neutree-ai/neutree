@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -47,6 +46,8 @@ func NewNativeKubernetesClusterReconciler(
 }
 
 func (c *NativeKubernetesClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Cluster) (err error) {
+	WriteEarlyStatus(cluster, c.storage)
+
 	reconcileCtx := &ReconcileContext{
 		Cluster: cluster,
 		Ctx:     ctx,
@@ -89,21 +90,6 @@ func (c *NativeKubernetesClusterReconciler) generateConfig(reconcileCtx *Reconci
 }
 
 func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileContext) error {
-	if reconcileCtx.Cluster.Status == nil {
-		reconcileCtx.Cluster.Status = &v1.ClusterStatus{}
-	}
-
-	if !reconcileCtx.Cluster.Status.Initialized {
-		reconcileCtx.Cluster.Status.Phase = v1.ClusterPhaseInitializing
-
-		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
-			Status: reconcileCtx.Cluster.Status,
-		})
-		if err != nil {
-			return errors.Wrap(err, "failed to update cluster status")
-		}
-	}
-
 	ns := generateInstallNs(reconcileCtx.Cluster)
 
 	imagePullSecret, err := generateImagePullSecret(ns.Name, reconcileCtx.ImageRegistry)
@@ -143,19 +129,20 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 		return utilerrors.NewAggregate(errs)
 	}
 
-	// Note: Component configurations are now stored in ConfigMaps,
-	// no need to update cluster annotations in database
+	// Update status fields after successful reconcile
+	cluster := reconcileCtx.Cluster
+	if cluster.Status == nil {
+		cluster.Status = &v1.ClusterStatus{}
+	}
 
-	reconcileCtx.Cluster.Status.Initialized = true
+	cluster.Status.Initialized = true
 
-	// Collect cluster resources if cluster is running
-	if reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseRunning {
-		resources, err := c.calculateResources(reconcileCtx)
-		if err != nil {
-			return errors.Wrap(err, "failed to calculate cluster resources")
-		}
-
-		reconcileCtx.Cluster.Status.ResourceInfo = resources
+	// Calculate resources (best-effort)
+	resources, err := c.calculateResources(reconcileCtx)
+	if err != nil {
+		klog.Warningf("failed to calculate cluster resources for %s: %v", cluster.Metadata.WorkspaceName(), err)
+	} else {
+		cluster.Status.ResourceInfo = resources
 	}
 
 	return nil
@@ -199,13 +186,16 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 		return utilerrors.NewAggregate(errs)
 	}
 
-	// Get the router service endpoint
-	endpoint, err := routerComp.GetRouteEndpoint(reconcileCtx.Ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to get router service endpoint")
-	}
+	// Update DashboardURL after successful reconcile
+	if endpoint, routerErr := routerComp.GetRouteEndpoint(reconcileCtx.Ctx); routerErr != nil {
+		klog.Warningf("failed to get route endpoint for cluster %s: %v", reconcileCtx.Cluster.Metadata.WorkspaceName(), routerErr)
+	} else {
+		if reconcileCtx.Cluster.Status == nil {
+			reconcileCtx.Cluster.Status = &v1.ClusterStatus{}
+		}
 
-	reconcileCtx.Cluster.Status.DashboardURL = endpoint
+		reconcileCtx.Cluster.Status.DashboardURL = endpoint
+	}
 
 	return nil
 }
@@ -229,6 +219,8 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 }
 
 func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {
+	WriteEarlyDeleting(cluster, c.storage)
+
 	reconcileCtx := &ReconcileContext{
 		Cluster: cluster,
 		Ctx:     ctx,
