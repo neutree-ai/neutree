@@ -18,7 +18,7 @@ from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
 from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.v1.engine.async_llm import AsyncLLM
+from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionRequest, ChatCompletionResponse, ErrorResponse,
     EmbeddingRequest, EmbeddingResponse,
@@ -30,9 +30,36 @@ from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
 from vllm.entrypoints.openai.serving_embedding import OpenAIServingEmbedding
 from vllm.entrypoints.openai.serving_score import ServingScores
 from vllm.entrypoints.openai.serving_models import BaseModelPath, OpenAIServingModels
+from vllm.engine.metrics import RayPrometheusStatLogger
 
 from downloader import get_downloader, build_request_from_model_args
-from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
+
+
+def _sanitize_metric_cls(base_cls):
+    """Wrap a Ray metric class to replace ':' with '_' in names.
+
+    Ray 2.53+ no longer allows ':' in metric names (FutureWarning, will
+    become an error).  vLLM v0.8.5 still registers names like
+    ``vllm:num_requests_running``; this wrapper transparently sanitises
+    them before they reach Ray.
+    """
+    class _Sanitized(base_cls):
+        def __init__(self, name, *args, **kwargs):
+            super().__init__(name.replace(":", "_"), *args, **kwargs)
+    return _Sanitized
+
+
+_BaseRayMetrics = RayPrometheusStatLogger._metrics_cls
+
+
+class _SanitizedRayMetrics(_BaseRayMetrics):
+    _gauge_cls = _sanitize_metric_cls(_BaseRayMetrics._gauge_cls)
+    _counter_cls = _sanitize_metric_cls(_BaseRayMetrics._counter_cls)
+    _histogram_cls = _sanitize_metric_cls(_BaseRayMetrics._histogram_cls)
+
+
+class _SanitizedRayStatLogger(RayPrometheusStatLogger):
+    _metrics_cls = _SanitizedRayMetrics
 
 
 class SchedulerType(str, enum.Enum):
@@ -100,6 +127,7 @@ class Backend:
             self.enable_auto_tools = True
 
         # Reasoning configuration (read but don't pop - engine needs these too)
+        self.enable_reasoning = engine_kwargs.get("enable_reasoning", False)
         self.reasoning_parser = engine_kwargs.get("reasoning_parser", None)
 
         # Extract chat template parameters
@@ -134,45 +162,63 @@ class Backend:
             **args
         )
 
-        self.engine = AsyncLLM.from_engine_args(
-            engine_args,
-            stat_loggers=[NeutreeRayStatLogger],
-        )
+        self.engine = AsyncLLMEngine.from_engine_args(engine_args)
         self.model_config = None
         self.openai_serving_chat = None
         self.openai_serving_embedding = None
         self.openai_serving_score = None
         self.openai_serving_models = None
 
-    def _ensure_model_config(self):
+        ctx = serve.get_replica_context()
+        labels = {
+            "deployment":  ctx.deployment,
+            "replica":     ctx.replica_tag,
+            "model_name":  self.engine.engine.model_config.served_model_name,
+            "engine":      os.environ.get("ENGINE_NAME", "unknown"),
+            "engine_version": os.environ.get("ENGINE_VERSION", "unknown"),
+        }
+
+        if hasattr(ctx, "app_name"):
+            labels["application"] = ctx.app_name
+
+        stat_logger = _SanitizedRayStatLogger(
+            local_interval=0.5,
+            labels=labels,
+            vllm_config=self.engine.engine.vllm_config)
+        self.engine.add_logger("ray", stat_logger)
+
+    async def _ensure_model_config(self):
         if self.model_config is None:
-            self.model_config = self.engine.model_config
+            self.model_config = await self.engine.get_model_config()
         return self.model_config
 
     async def _ensure_models(self):
         if self.openai_serving_models is None:
-            self._ensure_model_config()
+            model_config = await self._ensure_model_config()
             self.openai_serving_models = OpenAIServingModels(
                 self.engine,
-                [BaseModelPath(name=self.engine.model_config.served_model_name,
-                               model_path=self.engine.model_config.served_model_name)]
+                model_config,
+                [BaseModelPath(name=self.engine.engine.model_config.served_model_name,
+                               model_path=self.engine.engine.model_config.served_model_name)]
             )
         return self.openai_serving_models
 
     async def _ensure_chat(self):
         if self.openai_serving_chat is None:
-            self._ensure_model_config()
+            model_config = await self._ensure_model_config()
             models = await self._ensure_models()
 
             self.openai_serving_chat = OpenAIServingChat(
                 self.engine,
+                model_config,
                 models,
-                self.response_role,
+                response_role=self.response_role,
                 request_logger=None,
                 chat_template=self.chat_template,
                 chat_template_content_format=self.chat_template_content_format,
                 enable_auto_tools=self.enable_auto_tools,
                 tool_parser=self.tool_parser,
+                enable_reasoning=self.enable_reasoning,
                 reasoning_parser=self.reasoning_parser,
                 enable_prompt_tokens_details=self.enable_prompt_tokens_details,
             )
@@ -180,10 +226,11 @@ class Backend:
 
     async def _ensure_embedding(self):
         if self.openai_serving_embedding is None:
-            self._ensure_model_config()
+            model_config = await self._ensure_model_config()
             models = await self._ensure_models()
             self.openai_serving_embedding = OpenAIServingEmbedding(
                 self.engine,
+                model_config,
                 models,
                 request_logger=None,
                 chat_template=self.chat_template,
@@ -193,10 +240,11 @@ class Backend:
 
     async def _ensure_score(self):
         if self.openai_serving_score is None:
-            self._ensure_model_config()
+            model_config = await self._ensure_model_config()
             models = await self._ensure_models()
             self.openai_serving_score = ServingScores(
                 self.engine,
+                model_config,
                 models,
                 request_logger=None,
             )

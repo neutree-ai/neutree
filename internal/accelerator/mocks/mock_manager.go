@@ -234,6 +234,64 @@ func (_c *MockManager_GetConverter_Call) RunAndReturn(run func(string) (plugin.R
 	return _c
 }
 
+// GetEngineContainerRunOptions provides a mock function with given fields: acceleratorType
+func (_m *MockManager) GetEngineContainerRunOptions(acceleratorType string) ([]string, error) {
+	ret := _m.Called(acceleratorType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEngineContainerRunOptions")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]string, error)); ok {
+		return rf(acceleratorType)
+	}
+	if rf, ok := ret.Get(0).(func(string) []string); ok {
+		r0 = rf(acceleratorType)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(acceleratorType)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockManager_GetEngineContainerRunOptions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEngineContainerRunOptions'
+type MockManager_GetEngineContainerRunOptions_Call struct {
+	*mock.Call
+}
+
+// GetEngineContainerRunOptions is a helper method to define mock.On call
+//   - acceleratorType string
+func (_e *MockManager_Expecter) GetEngineContainerRunOptions(acceleratorType interface{}) *MockManager_GetEngineContainerRunOptions_Call {
+	return &MockManager_GetEngineContainerRunOptions_Call{Call: _e.mock.On("GetEngineContainerRunOptions", acceleratorType)}
+}
+
+func (_c *MockManager_GetEngineContainerRunOptions_Call) Run(run func(acceleratorType string)) *MockManager_GetEngineContainerRunOptions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockManager_GetEngineContainerRunOptions_Call) Return(_a0 []string, _a1 error) *MockManager_GetEngineContainerRunOptions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManager_GetEngineContainerRunOptions_Call) RunAndReturn(run func(string) ([]string, error)) *MockManager_GetEngineContainerRunOptions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetNodeAcceleratorType provides a mock function with given fields: ctx, nodeIp, sshAuth
 func (_m *MockManager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {
 	ret := _m.Called(ctx, nodeIp, sshAuth)

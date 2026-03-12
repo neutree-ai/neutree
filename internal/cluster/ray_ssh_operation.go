@@ -17,18 +17,22 @@ import (
 )
 
 func (c *sshRayClusterReconciler) upCluster(reconcileCtx *ReconcileContext, restart bool) (string, error) {
-	changed, err := c.mutateAcceleratorRuntimeConfig(reconcileCtx, reconcileCtx.sshClusterConfig.Provider.HeadIP)
+	dockerConfig, changed, err := c.buildAcceleratorDockerConfig(reconcileCtx, reconcileCtx.sshClusterConfig.Provider.HeadIP)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to mutate accelerator runtime config")
+		return "", errors.Wrap(err, "failed to build accelerator docker config")
 	}
 
 	if changed {
+		// Build a temporary config copy with accelerator-specific Docker settings for ray up.
+		upConfig := *reconcileCtx.sshRayClusterConfig
+		upConfig.Docker = dockerConfig
+
 		err = reconcileCtx.sshConfigGenerator.Cleanup()
 		if err != nil {
 			return "", errors.Wrap(err, "failed to cleanup config")
 		}
 
-		err = reconcileCtx.sshConfigGenerator.Generate(reconcileCtx.sshRayClusterConfig)
+		err = reconcileCtx.sshConfigGenerator.Generate(&upConfig)
 		if err != nil {
 			return "", errors.Wrap(err, "failed to generate config")
 		}
@@ -59,13 +63,13 @@ func (c *sshRayClusterReconciler) upCluster(reconcileCtx *ReconcileContext, rest
 }
 
 func (c *sshRayClusterReconciler) startNode(reconcileCtx *ReconcileContext, nodeIP string) error {
-	_, err := c.mutateAcceleratorRuntimeConfig(reconcileCtx, nodeIP)
+	dockerConfig, _, err := c.buildAcceleratorDockerConfig(reconcileCtx, nodeIP)
 	if err != nil {
-		return errors.Wrap(err, "failed to mutate accelerator runtime config")
+		return errors.Wrap(err, "failed to build accelerator docker config")
 	}
 
 	sshCommandArgs := c.buildSSHCommandArgs(reconcileCtx, nodeIP)
-	dockerCommandRunner := command_runner.NewDockerCommandRunner(&reconcileCtx.sshRayClusterConfig.Docker, sshCommandArgs)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&dockerConfig, sshCommandArgs)
 
 	env := map[string]interface{}{
 		"RAY_HEAD_IP": reconcileCtx.sshRayClusterConfig.Provider.HeadIP,
@@ -236,45 +240,58 @@ func (c *sshRayClusterReconciler) downCluster(reconcileCtx *ReconcileContext) er
 	return nil
 }
 
-func (c *sshRayClusterReconciler) mutateAcceleratorRuntimeConfig(reconcileCtx *ReconcileContext, nodeIP string) (bool, error) {
+// buildAcceleratorDockerConfig returns a copy of the base Docker config with
+// accelerator runtime options (--runtime, -e, custom options) appended for the
+// given node. The original reconcileCtx.sshRayClusterConfig is never modified,
+// so this function is safe to call multiple times for different nodes.
+func (c *sshRayClusterReconciler) buildAcceleratorDockerConfig(reconcileCtx *ReconcileContext, nodeIP string) (v1.Docker, bool, error) {
 	if reconcileCtx.Cluster.Status == nil || reconcileCtx.Cluster.Status.AcceleratorType == nil {
-		return false, errors.New("cluster status or accelerator type is not set")
+		return v1.Docker{}, false, errors.New("cluster status or accelerator type is not set")
 	}
+
+	base := reconcileCtx.sshRayClusterConfig.Docker
+
+	// Deep copy RunOptions slice to avoid mutating the original.
+	runOptions := make([]string, len(base.RunOptions))
+	copy(runOptions, base.RunOptions)
 
 	runtimeConfig, err := c.acceleratorManager.GetNodeRuntimeConfig(reconcileCtx.Ctx,
 		*reconcileCtx.Cluster.Status.AcceleratorType, nodeIP, reconcileCtx.sshClusterConfig.Auth)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to get node runtime config")
+		return v1.Docker{}, false, errors.Wrap(err, "failed to get node runtime config")
 	}
 
 	changed := false
+	image := base.Image
 
 	if runtimeConfig.ImageSuffix != "" {
 		changed = true
-		reconcileCtx.sshRayClusterConfig.Docker.Image = reconcileCtx.sshRayClusterConfig.Docker.Image + "-" + runtimeConfig.ImageSuffix
+		image = image + "-" + runtimeConfig.ImageSuffix
 	}
 
 	if runtimeConfig.Runtime != "" {
 		changed = true
-
-		reconcileCtx.sshRayClusterConfig.Docker.RunOptions = append(reconcileCtx.sshRayClusterConfig.Docker.RunOptions, "--runtime="+runtimeConfig.Runtime)
+		runOptions = append(runOptions, "--runtime="+runtimeConfig.Runtime)
 	}
 
 	if runtimeConfig.Env != nil {
 		changed = true
 
 		for k, v := range runtimeConfig.Env {
-			reconcileCtx.sshRayClusterConfig.Docker.RunOptions = append(reconcileCtx.sshRayClusterConfig.Docker.RunOptions, fmt.Sprintf("-e %s=%s", k, v))
+			runOptions = append(runOptions, fmt.Sprintf("-e %s=%s", k, v))
 		}
 	}
 
 	if runtimeConfig.Options != nil {
 		changed = true
-
-		reconcileCtx.sshRayClusterConfig.Docker.RunOptions = append(reconcileCtx.sshRayClusterConfig.Docker.RunOptions, runtimeConfig.Options...)
+		runOptions = append(runOptions, runtimeConfig.Options...)
 	}
 
-	return changed, nil
+	dockerConfig := base
+	dockerConfig.Image = image
+	dockerConfig.RunOptions = runOptions
+
+	return dockerConfig, changed, nil
 }
 
 // setDefaultRayClusterConfig set default ray cluster config.
@@ -300,24 +317,24 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 
 	rayClusterConfig.Docker.Image = imagePrefix + "/neutree/neutree-serve:" + cluster.Spec.Version
 	rayClusterConfig.Docker.PullBeforeRun = true
+	// Determine cluster generation: > v1.0.0 uses DOOD engine isolation,
+	// <= v1.0.0 mounts NFS inside ray_container and needs elevated privileges.
+	isNewCluster, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
+	if err != nil {
+		klog.Warningf("Failed to parse cluster version %s, assuming new version: %v", cluster.Spec.Version, err)
+		isNewCluster = true
+	}
+
 	// RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper causes parent processes to lose
 	// child exit codes. Ray 2.53.0+ (serving version > v1.0.0) provides RAY_process_group_cleanup_enabled
 	// which doesn't have this issue.
 	rayProcessCleanupEnv := "-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true"
-
-	isNewForCleanup, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
-	if err != nil {
-		klog.Warningf("Failed to parse cluster version %s for process cleanup env, assuming new version: %v", cluster.Spec.Version, err)
-
-		rayProcessCleanupEnv = "-e RAY_process_group_cleanup_enabled=true"
-	} else if isNewForCleanup {
+	if isNewCluster {
 		rayProcessCleanupEnv = "-e RAY_process_group_cleanup_enabled=true"
 	}
 
+	// Common options shared by old and new clusters.
 	rayClusterConfig.Docker.RunOptions = []string{
-		"--privileged",
-		"--cap-add=SYS_ADMIN",
-		"--security-opt=seccomp=unconfined",
 		rayProcessCleanupEnv,
 		// Reduce Ray object store memory from default 30% to 10%, freeing memory for inference engines
 		"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
@@ -325,6 +342,35 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		"-e RAY_enable_open_telemetry=false",
 		// Increase nofile ulimit to avoid "Too many open files" error in Ray workers
 		"--ulimit nofile=65536:65536",
+	}
+
+	if isNewCluster {
+		// New clusters (> v1.0.0): DOOD architecture — engine containers run as
+		// sibling containers on the host via docker.sock. NFS is mounted by the host
+		// Docker daemon (volume-opt), so ray_container does NOT need --privileged.
+		rayClusterConfig.Docker.RunOptions = append(rayClusterConfig.Docker.RunOptions,
+			// Tell Ray to use Docker as the container runtime for runtime_env.container
+			"-e RAY_EXPERIMENTAL_RUNTIME_ENV_CONTAINER_RUNTIME=docker",
+			// Mount Docker socket for runtime_env.container support (engine version isolation)
+			"--volume /var/run/docker.sock:/var/run/docker.sock",
+			// Share host /tmp with Ray container so that temp directories created by Ray's
+			// container plugin are visible to sibling engine containers via docker.sock.
+			"--volume /tmp:/tmp",
+			// Share host PID namespace so that engine containers (which also use --pid=host)
+			// can see the raylet process and verify it's alive via RAY_RAYLET_PID.
+			"--pid=host",
+			// Share host IPC namespace so that Ray container and engine containers can
+			// communicate via shared memory (used by Ray Object Store).
+			"--ipc=host",
+		)
+	} else {
+		// Old clusters (<= v1.0.0): NFS is mounted inside ray_container via SSH,
+		// which requires SYS_ADMIN capability and elevated privileges.
+		rayClusterConfig.Docker.RunOptions = append(rayClusterConfig.Docker.RunOptions,
+			"--privileged",
+			"--cap-add=SYS_ADMIN",
+			"--security-opt=seccomp=unconfined",
+		)
 	}
 
 	headLabel := fmt.Sprintf(`--labels='{"%s":"%s"}'`,
@@ -337,14 +383,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		v1.NeutreeServingVersionLabel, cluster.Spec.Version)
 
 	// --dashboard-agent-grpc-port and --dashboard-grpc-port are deprecated in Ray 2.53.0 (serving version > v1.0.0)
-	includeDeprecatedGrpcFlags := false
-
-	isNewForGrpc, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
-	if err != nil {
-		klog.Warningf("Failed to parse cluster version %s, assuming new version: %v", cluster.Spec.Version, err)
-	} else if !isNewForGrpc {
-		includeDeprecatedGrpcFlags = true
-	}
+	includeDeprecatedGrpcFlags := !isNewCluster
 
 	commonArgs := `--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 ` +
 		"--min-worker-port=10002 --max-worker-port=20000 " +
@@ -407,6 +446,16 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 
 	// ModelCaches is now in ClusterConfig level
 	mutateModelCaches(rayClusterConfig, reconcileContext.Cluster.Spec.Config.ModelCaches)
+
+	// For new clusters: grant the ray user access to docker.sock for runtime_env.container support.
+	// The mounted docker.sock is typically owned by root:docker with 660 permissions,
+	// so the ray user needs explicit permission to use it.
+	if isNewCluster {
+		dockerSockPermCmd := "sudo chmod 666 /var/run/docker.sock"
+		rayClusterConfig.HeadStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.HeadStartRayCommands...)
+		rayClusterConfig.WorkerStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.WorkerStartRayCommands...)
+		rayClusterConfig.StaticWorkerStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.StaticWorkerStartRayCommands...)
+	}
 
 	return rayClusterConfig, nil
 }

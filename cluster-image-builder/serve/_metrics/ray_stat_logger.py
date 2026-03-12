@@ -1,4 +1,5 @@
 import logging
+import os
 
 from ray import serve
 from vllm.v1.metrics.ray_wrappers import (
@@ -66,6 +67,8 @@ class NeutreeRayStatLogger(RayPrometheusStatLogger):
             extra_labels = {
                 "deployment": ctx.deployment,
                 "replica": ctx.replica_tag,
+                "engine": os.environ.get("ENGINE_NAME", "unknown"),
+                "engine_version": os.environ.get("ENGINE_VERSION", "unknown"),
             }
             if hasattr(ctx, "app_name"):
                 extra_labels["application"] = ctx.app_name

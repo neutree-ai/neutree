@@ -339,7 +339,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Inter token latency in seconds.",
+      "description": "Inter token latency in seconds. Uses inter_token_latency_seconds (v0.11.2+) with fallback to time_per_output_token_seconds (v0.8.5).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -423,7 +423,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "histogram_quantile(0.99, sum by(le) (rate(vllm:time_per_output_token_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by(le) (rate(vllm:inter_token_latency_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
           "fullMetaSearch": false,
           "includeNullMetadata": false,
           "instant": false,
@@ -439,7 +439,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "histogram_quantile(0.95, sum by(le) (rate(vllm:time_per_output_token_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by(le) (rate(vllm:inter_token_latency_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -456,7 +456,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "histogram_quantile(0.9, sum by(le) (rate(vllm:time_per_output_token_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.9, sum by(le) (rate(vllm:inter_token_latency_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -473,7 +473,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "histogram_quantile(0.5, sum by(le) (rate(vllm:time_per_output_token_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by(le) (rate(vllm:inter_token_latency_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_bucket{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -489,7 +489,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(vllm:time_per_output_token_seconds_sum{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])\n/\nrate(vllm:time_per_output_token_seconds_count{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval])",
+          "expr": "(rate(vllm:inter_token_latency_seconds_sum{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_sum{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval]))\n/\n(rate(vllm:inter_token_latency_seconds_count{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_count{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}[$__rate_interval]))",
           "hide": false,
           "instant": false,
           "legendFormat": "Mean",
@@ -505,7 +505,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Number of requests in RUNNING, WAITING, and SWAPPED state",
+      "description": "Number of requests in RUNNING, WAITING, and SWAPPED state. Note: vLLM v1 engine (v0.11.2+) has no swap mechanism, so Num Swapped will show no data.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -807,7 +807,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Percentage of used cache blocks by vLLM.",
+      "description": "Percentage of used cache blocks by vLLM. Note: vLLM v1 engine (v0.11.2+) has no CPU cache, so CPU Cache Usage will show no data.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -890,9 +890,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "vllm:gpu_cache_usage_perc{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}",
+          "expr": "vllm:kv_cache_usage_perc{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"} or vllm:gpu_cache_usage_perc{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}",
           "instant": false,
-          "legendFormat": "GPU Cache Usage",
+          "legendFormat": "KV Cache Usage",
           "range": true,
           "refId": "A"
         },

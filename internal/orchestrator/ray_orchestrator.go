@@ -15,8 +15,25 @@ import (
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/model_registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+// isNewClusterVersion returns true if the cluster version is > v1.0.0.
+// Returns an error if the cluster version cannot be parsed as semver.
+func isNewClusterVersion(cluster *v1.Cluster) (bool, error) {
+	if cluster == nil || cluster.Spec == nil || cluster.Spec.Version == "" {
+		klog.Warningf("cluster version is empty, treating as old cluster (<= v1.0.0)")
+		return false, nil
+	}
+
+	isNew, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
+	if err != nil {
+		return false, errors.Errorf("failed to parse cluster version %q: %v", cluster.Spec.Version, err)
+	}
+
+	return isNew, nil
+}
 
 var _ Orchestrator = &RayOrchestrator{}
 
@@ -65,6 +82,11 @@ func (o *RayOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoint) (*Or
 		return nil, errors.Wrap(err, "failed to get model registry")
 	}
 
+	imageRegistry, err := getUsedImageRegistries(deployedCluster, o.storage)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get used image registry")
+	}
+
 	dashboardService, err := o.getDashboardService()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get dashboard service")
@@ -74,6 +96,7 @@ func (o *RayOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoint) (*Or
 		Cluster:       deployedCluster,
 		Engine:        engine,
 		ModelRegistry: modelRegistry,
+		ImageRegistry: imageRegistry,
 		Endpoint:      endpoint,
 		rayService:    dashboardService,
 		logger:        klog.LoggerWithValues(klog.Background(), "endpoint", endpoint.Metadata.WorkspaceName()),
@@ -100,6 +123,11 @@ func (o *RayOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
 		return errors.Errorf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
 	}
 
+	// validate image registry status
+	if ctx.ImageRegistry.Status == nil || ctx.ImageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
+		return errors.Errorf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
+	}
+
 	return nil
 }
 
@@ -116,11 +144,20 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 	}
 
 	ctx.logger.V(4).Info("Creating or updating endpoint in Ray Serve")
-	// always exec connect model to cluster, for cluster may dynamic scale, we need ensure model exists on all cluster nodes.
-	// todo: In order to reduce model connection actions, a new controller may be created in the future to uniformly manage model connections on the cluster.
-	err = o.connectSSHClusterEndpointModel(*ctx.ModelRegistry, *ctx.Endpoint, connect)
+	// For clusters <= v1.0.0, NFS is mounted inside ray_container via SSH.
+	// For clusters > v1.0.0, NFS is mounted via engine container run_options, so skip connect.
+	isNew, err := isNewClusterVersion(ctx.Cluster)
 	if err != nil {
-		return errors.Wrapf(err, "failed to connect model registry before creating endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+		return err
+	}
+
+	if !isNew {
+		// always exec connect model to cluster, for cluster may dynamic scale, we need ensure model exists on all cluster nodes.
+		// todo: In order to reduce model connection actions, a new controller may be created in the future to uniformly manage model connections on the cluster.
+		err = o.connectSSHClusterEndpointModel(*ctx.ModelRegistry, *ctx.Endpoint, connect)
+		if err != nil {
+			return errors.Wrapf(err, "failed to connect model registry before creating endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+		}
 	}
 
 	return o.createOrUpdate(ctx)
@@ -148,7 +185,7 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 		return errors.Wrapf(err, "failed to get current serve applications for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
-	newApp, err := EndpointToApplication(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, o.acceleratorMgr)
+	newApp, err := EndpointToApplication(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, ctx.Engine, ctx.ImageRegistry, o.acceleratorMgr)
 	if err != nil {
 		return errors.Wrapf(err, "failed to convert endpoint to application for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
@@ -208,9 +245,18 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 		return errors.Wrapf(err, "failed to prepare context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
-	err = o.connectSSHClusterEndpointModel(*ctx.ModelRegistry, *ctx.Endpoint, disconnect)
+	// For clusters <= v1.0.0, NFS is mounted inside ray_container via SSH — need to disconnect.
+	// For clusters > v1.0.0, NFS is mounted via engine container run_options, so skip disconnect.
+	isNew, err := isNewClusterVersion(ctx.Cluster)
 	if err != nil {
-		return errors.Wrapf(err, "failed to disconnect model registry before deleting endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+		return err
+	}
+
+	if !isNew {
+		err = o.connectSSHClusterEndpointModel(*ctx.ModelRegistry, *ctx.Endpoint, disconnect)
+		if err != nil {
+			return errors.Wrapf(err, "failed to disconnect model registry before deleting endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+		}
 	}
 
 	ctx.logger.V(4).Info("Deleting endpoint from Ray Serve")
@@ -401,7 +447,8 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
 func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
-	modelRegistry *v1.ModelRegistry, acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
+	modelRegistry *v1.ModelRegistry, engine *v1.Engine, imageRegistry *v1.ImageRegistry,
+	acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
 	app := dashboard.RayServeApplication{
 		Name:        EndpointToServeApplicationName(endpoint),
 		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
@@ -481,17 +528,19 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	switch modelRegistry.Spec.Type {
 	case v1.BentoMLModelRegistryType:
-		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
-		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+		registryURL, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
+		if registryURL != nil && registryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
 			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 			if err != nil {
 				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get real model version for model %s", endpoint.Spec.Model.Name)
 			}
 
+			nfsMountPath := filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
+
 			modelArgs["version"] = modelRealVersion
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
-			modelArgs["registry_path"] = filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name, "models", endpoint.Spec.Model.Name, modelRealVersion)
+			modelArgs["registry_path"] = filepath.Join(nfsMountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
 			modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 		}
 	case v1.HuggingFaceModelRegistryType:
@@ -516,11 +565,184 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
+	// Inject engine identity for metrics labeling (used by NeutreeRayStatLogger / _SanitizedRayStatLogger)
+	if endpoint.Spec.Engine != nil {
+		applicationEnv["ENGINE_NAME"] = endpoint.Spec.Engine.Engine
+		applicationEnv["ENGINE_VERSION"] = endpoint.Spec.Engine.Version
+	}
+
 	app.RuntimeEnv = map[string]interface{}{
 		"env_vars": applicationEnv,
 	}
 
+	// Generate runtime_env.container for engine version isolation (SSH clusters > v1.0.0).
+	// The engine image runs as a sibling container on the host via docker.sock.
+	// Clusters <= v1.0.0 run the engine inside ray_container directly.
+	//
+	// Two container configs are produced:
+	//   - baseConfig → app.RuntimeEnv["container"]: engine image + --rm only,
+	//     inherited by app_builder and Controller (no GPU required).
+	//   - backendConfig → app.Args["backend_container"]: full config with GPU
+	//     options, volume mounts, and NFS. The Python app_builder sets this on
+	//     Backend's ray_actor_options.runtime_env.container to override the
+	//     app-level config.
+	isNewCluster, err := isNewClusterVersion(deployedCluster)
+	if err != nil {
+		return dashboard.RayServeApplication{}, err
+	}
+
+	if isNewCluster {
+		baseConfig, backendConfig, err := buildEngineContainerConfigs(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
+		if err != nil {
+			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build engine container config for endpoint %s", endpoint.Metadata.WorkspaceName())
+		}
+
+		if baseConfig != nil {
+			app.RuntimeEnv["container"] = baseConfig
+		}
+
+		if backendConfig != nil {
+			app.Args["backend_container"] = backendConfig
+		}
+	}
+
 	return app, nil
+}
+
+// buildEngineContainerConfigs constructs two runtime_env.container configs for
+// engine version isolation on SSH clusters (version > v1.0.0):
+//
+//   - baseConfig:    engine image + --rm only. Used as the application-level
+//     runtime_env.container so the app_builder and Controller can run on any
+//     node (no GPU required).
+//   - backendConfig: engine image + --rm + GPU options + volume mounts + NFS.
+//     Set on Backend deployment's ray_actor_options.runtime_env.container to
+//     override the app-level config. Ray replaces "container" per-key (no deep
+//     merge), so this must be self-contained.
+func buildEngineContainerConfigs(endpoint *v1.Endpoint,
+	engine *v1.Engine, imageRegistry *v1.ImageRegistry,
+	acceleratorMgr accelerator.Manager,
+	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry) (baseConfig, backendConfig map[string]interface{}, err error) {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Engine == nil {
+		return nil, nil, errors.New("endpoint with engine spec is required for SSH cluster")
+	}
+
+	if engine == nil || engine.Spec == nil {
+		return nil, nil, errors.New("engine is required for SSH cluster")
+	}
+
+	// Find the matching engine version
+	var targetVersion *v1.EngineVersion
+
+	for _, ev := range engine.Spec.Versions {
+		if ev.Version == endpoint.Spec.Engine.Version {
+			targetVersion = ev
+			break
+		}
+	}
+
+	if targetVersion == nil {
+		return nil, nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
+	}
+
+	// Get accelerator type from endpoint resources (consistent with K8s orchestrator).
+	// Default to "cpu" when no accelerator type is specified.
+	acceleratorType := ""
+
+	if endpoint.Spec.Resources != nil {
+		acceleratorType = endpoint.Spec.Resources.GetAcceleratorType()
+	}
+
+	if acceleratorType == "" {
+		acceleratorType = acceleratorTypeCPU
+	}
+
+	// Look up engine image using the determined accelerator type key
+	engineImage := targetVersion.GetImageForAccelerator(acceleratorType)
+	if engineImage == nil {
+		return nil, nil, errors.Errorf("no engine image configured for accelerator %q in engine %s version %s",
+			acceleratorType, engine.Metadata.Name, endpoint.Spec.Engine.Version)
+	}
+
+	// Build image reference with registry prefix
+	imageRef := engineImage.ImageName + ":" + engineImage.Tag
+
+	if imageRegistry != nil {
+		imagePrefix, err := util.GetImagePrefix(imageRegistry)
+		if err != nil {
+			return nil, nil, errors.Wrapf(err, "failed to get image prefix from registry")
+		}
+
+		if imagePrefix != "" {
+			imageRef = imagePrefix + "/" + engineImage.ImageName + ":" + engineImage.Tag
+		}
+	}
+
+	// Base config: engine image + --rm only (for app_builder and Controller).
+	baseConfig = map[string]interface{}{
+		"image":       imageRef,
+		"run_options": []string{"--rm"},
+	}
+
+	// Backend config: starts with the same base, then adds GPU options, volumes, and NFS.
+	var backendRunOptions []string
+
+	// Get accelerator-specific run_options from plugin (skip for CPU — no special runtime needed)
+	if acceleratorMgr != nil && acceleratorType != "" && acceleratorType != acceleratorTypeCPU {
+		opts, err := acceleratorMgr.GetEngineContainerRunOptions(acceleratorType)
+		if err != nil {
+			return nil, nil, errors.Wrapf(err, "failed to get engine container run options for accelerator %s", acceleratorType)
+		}
+
+		backendRunOptions = append(backendRunOptions, opts...)
+	}
+
+	// Mount model caches using HOST paths (docker.sock creates containers on host)
+	for _, mc := range modelCaches {
+		if mc.HostPath != nil {
+			containerMountPath := filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, mc.Name)
+			backendRunOptions = append(backendRunOptions, fmt.Sprintf("-v %s:%s", mc.HostPath.Path, containerMountPath))
+		}
+	}
+
+	// Mount NFS model registry directly into the engine container via Docker NFS volume.
+	if modelRegistry != nil && modelRegistry.Spec != nil && modelRegistry.Spec.Type == v1.BentoMLModelRegistryType {
+		registryURL, err := url.Parse(modelRegistry.Spec.Url)
+		if err != nil {
+			return nil, nil, errors.Wrapf(err, "failed to parse model registry URL %s", modelRegistry.Spec.Url)
+		}
+
+		if registryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
+			registry, err := model_registry.NewModelRegistry(modelRegistry)
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "failed to create model registry for NFS type detection")
+			}
+
+			nfsType, err := registry.GetNFSType()
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "failed to detect NFS type from control-plane mount")
+			}
+
+			if nfsType == "" {
+				return nil, nil, errors.New("NFS mount not found on control-plane, cannot determine NFS type for engine container")
+			}
+
+			nfsMountPath := filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
+			backendRunOptions = append(backendRunOptions, fmt.Sprintf(
+				"--mount type=volume,dst=%s,volume-opt=type=%s,volume-opt=o=addr=%s,volume-opt=device=:%s",
+				nfsMountPath, nfsType, registryURL.Hostname(), registryURL.Path))
+		}
+	}
+
+	// Auto-remove engine container when it exits to prevent residual containers on the host.
+	backendRunOptions = append(backendRunOptions, "--rm")
+
+	backendConfig = map[string]interface{}{
+		"image":       imageRef,
+		"run_options": backendRunOptions,
+	}
+
+	return baseConfig, backendConfig, nil
 }
 
 func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, applicationEnv map[string]string) {

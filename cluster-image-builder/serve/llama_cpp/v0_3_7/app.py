@@ -13,7 +13,6 @@ from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, StreamingResponse
-import bentoml
 import llama_cpp
 from llama_cpp import Llama, LlamaGrammar
 from llama_cpp.server.settings import ModelSettings
@@ -287,6 +286,15 @@ def app_builder(args: Dict[str, Any]) -> Application:
     # Add request_router_config if custom scheduler is specified
     if request_router_config is not None:
         backend_deploy_options["request_router_config"] = request_router_config
+
+    # Override Backend's runtime_env.container with the full config (GPU options,
+    # volume mounts, NFS) so only Backend replicas require GPU nodes.
+    # Ray replaces "container" per-key, so this must be self-contained.
+    backend_container = args.get('backend_container')
+    if backend_container:
+        backend_deploy_options["ray_actor_options"]["runtime_env"] = {
+            "container": backend_container
+        }
 
     # Configure backend deployment
     backend_deployment = Backend.options(**backend_deploy_options).bind(

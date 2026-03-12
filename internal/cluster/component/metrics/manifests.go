@@ -107,6 +107,9 @@ data:
       - source_labels: [__meta_kubernetes_pod_label_engine]
         action: replace
         target_label: engine
+      - source_labels: [__meta_kubernetes_pod_label_engine_version]
+        action: replace
+        target_label: engine_version
     # Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
     - job_name: 'node-exporter-http'
       kubernetes_sd_configs:
