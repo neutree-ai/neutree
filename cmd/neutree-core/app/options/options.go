@@ -9,6 +9,7 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
@@ -89,6 +90,13 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 
 	acceleratorManager := accelerator.NewManager(e)
 	c.AcceleratorManager = acceleratorManager
+
+	engineRegistry, err := engine.NewRegistry(e)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to init engine registry")
+	}
+
+	c.EngineRegistry = engineRegistry
 
 	s, err := storage.New(storage.Options{
 		AccessURL: o.Storage.AccessURL,

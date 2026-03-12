@@ -101,6 +101,10 @@ type RegisterRequest struct {
 	Version      string `json:"version"`
 }
 
+type RegisterEngineRequest struct {
+	Engines []*Engine `json:"engines"`
+}
+
 type ParseFromKubernetesRequest struct {
 	Resource map[corev1.ResourceName]resource.Quantity `json:"resource"`
 	Labels   map[string]string                         `json:"labels"`
