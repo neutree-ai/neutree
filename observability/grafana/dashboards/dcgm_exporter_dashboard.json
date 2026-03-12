@@ -80,7 +80,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "avg (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=\"$Cluster\"})",
+          "expr": "avg(max by (gpu, node) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=\"$Cluster\"}))",
           "format": "time_series",
           "instant": true,
           "intervalFactor": 2,
@@ -164,7 +164,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"})   / sum(DCGM_FI_DEV_FB_FREE{neutree_cluster=\"$Cluster\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"})",
+          "expr": "sum(max by (gpu, node) (DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"})) / sum(max by (gpu, node) (DCGM_FI_DEV_FB_FREE{neutree_cluster=\"$Cluster\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"}))",
           "format": "time_series",
           "instant": true,
           "intervalFactor": 2,
@@ -248,7 +248,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(DCGM_FI_DEV_FB_FREE{neutree_cluster=\"$Cluster\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"})",
+          "expr": "sum(max by (gpu, node) (DCGM_FI_DEV_FB_FREE{neutree_cluster=\"$Cluster\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\"}))",
           "format": "time_series",
           "instant": true,
           "intervalFactor": 2,
@@ -332,7 +332,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "count(DCGM_FI_DEV_GPU_UTIL{neutree_cluster=\"$Cluster\", exported_pod!=\"\"})",
+          "expr": "count(max by (gpu, node) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=\"$Cluster\", exported_pod!=\"\"}))",
           "format": "time_series",
           "instant": true,
           "intervalFactor": 2,
@@ -416,7 +416,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "count (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=\"$Cluster\"})",
+          "expr": "count(max by (gpu, node) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=\"$Cluster\"}))",
           "format": "time_series",
           "instant": true,
           "intervalFactor": 2,
@@ -642,7 +642,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_UTIL{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}",
+          "expr": "max by (gpu, modelName, node) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
           "interval": "",
           "legendFormat": "GPU {{gpu}}({{modelName}}) - {{node}}",
           "range": true,
@@ -743,7 +743,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}",
+          "expr": "max by (gpu, modelName, node) (DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
           "interval": "",
           "legendFormat": "GPU {{gpu}}({{modelName}}) - {{node}}",
           "range": true,
@@ -844,7 +844,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}",
+          "expr": "max by (gpu, modelName, node) (DCGM_FI_DEV_GPU_TEMP{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
           "instant": false,
           "interval": "",
           "legendFormat": "GPU {{gpu}}({{modelName}}) - {{node}}",
@@ -947,7 +947,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"} / (DCGM_FI_DEV_FB_FREE{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
+          "expr": "max by (gpu, modelName, node) (DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}) / max by (gpu, modelName, node) (DCGM_FI_DEV_FB_FREE{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"} + DCGM_FI_DEV_FB_USED{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
           "interval": "",
           "legendFormat": "GPU {{gpu}}({{modelName}}) - {{node}}",
           "range": true,
@@ -1050,7 +1050,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}",
+          "expr": "max by (gpu, modelName, node) (DCGM_FI_PROF_PIPE_TENSOR_ACTIVE{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
           "interval": "",
           "legendFormat": "GPU {{gpu}}({{modelName}}) - {{node}}",
           "range": true,
@@ -1151,7 +1151,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_SM_CLOCK{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"} * 1000000",
+          "expr": "max by (gpu, modelName, node) (DCGM_FI_DEV_SM_CLOCK{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}) * 1000000",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1226,7 +1226,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(DCGM_FI_DEV_GPU_TEMP{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
+          "expr": "avg(max by (gpu, node) (DCGM_FI_DEV_GPU_TEMP{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}))",
           "interval": "",
           "legendFormat": "",
           "range": true,
@@ -1299,7 +1299,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(DCGM_FI_DEV_POWER_USAGE{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
+          "expr": "sum(max by (gpu, node) (DCGM_FI_DEV_POWER_USAGE{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}))",
           "instant": true,
           "interval": "",
           "legendFormat": "",
@@ -1401,7 +1401,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}[1h]) / 3600000)",
+          "expr": "sum(max by (gpu, node) (increase(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}[1h]) / 3600000))",
           "instant": false,
           "interval": "",
           "legendFormat": "Last 1h",
@@ -1414,7 +1414,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(increase(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}[24h]) / 3600000)",
+          "expr": "sum(max by (gpu, node) (increase(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}[24h]) / 3600000))",
           "hide": false,
           "instant": false,
           "legendFormat": "Last 24h",
@@ -1516,7 +1516,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"}",
+          "expr": "max by (gpu, modelName, node) (DCGM_FI_DEV_POWER_USAGE{neutree_cluster=\"$Cluster\",node=~\"$node\", gpu=~\"$gpu\"})",
           "interval": "",
           "legendFormat": "GPU {{gpu}}({{modelName}}) - {{node}}",
           "range": true,
