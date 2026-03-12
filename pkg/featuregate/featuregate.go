@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/spf13/pflag"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // Feature is a string type for feature names.
@@ -24,7 +24,7 @@ const (
 	Beta PreRelease = "BETA"
 	// GA indicates that a feature is generally available, always enabled, and cannot be disabled.
 	GA PreRelease = ""
-	// Deprecated indicates that a feature is deprecated and disabled by default.
+	// Deprecated: feature is deprecated and disabled by default.
 	Deprecated PreRelease = "DEPRECATED"
 )
 
@@ -41,7 +41,7 @@ type FeatureGate interface {
 	// Enabled returns true if the feature is enabled.
 	Enabled(key Feature) bool
 	// KnownFeatures returns a slice of strings describing known features.
-	// Each entry has the format "FeatureName=true|false (ALPHA|BETA|DEPRECATED)".
+	// Each entry has the format "FeatureName=true|false (ALPHA|BETA|GA|DEPRECATED - default=true|false)".
 	KnownFeatures() []string
 }
 
@@ -109,11 +109,23 @@ func (f *featureGate) KnownFeatures() []string {
 	return known
 }
 
+// validPreRelease contains the set of accepted PreRelease values.
+var validPreRelease = map[PreRelease]bool{
+	Alpha:      true,
+	Beta:       true,
+	GA:         true,
+	Deprecated: true,
+}
+
 func (f *featureGate) Add(features map[Feature]FeatureSpec) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	for k, v := range features {
+		if !validPreRelease[v.PreRelease] {
+			return fmt.Errorf("feature gate %q has invalid PreRelease value %q (valid: Alpha, Beta, GA, Deprecated)", k, v.PreRelease)
+		}
+
 		if existing, ok := f.known[k]; ok {
 			if existing != v {
 				return fmt.Errorf("feature gate %q already registered with different spec", k)

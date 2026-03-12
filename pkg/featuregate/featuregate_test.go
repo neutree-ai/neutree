@@ -92,6 +92,16 @@ func TestAddDuplicateDifferentSpec(t *testing.T) {
 	assert.Contains(t, err.Error(), "already registered")
 }
 
+func TestAddInvalidPreRelease(t *testing.T) {
+	fg := NewFeatureGate()
+
+	err := fg.Add(map[Feature]FeatureSpec{
+		"BadFeature": {Default: true, PreRelease: PreRelease("INVALID")},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid PreRelease value")
+}
+
 func TestEnabledUnknownFeature(t *testing.T) {
 	fg := NewFeatureGate()
 	assert.False(t, fg.Enabled("NonExistent"), "unknown feature should return false")
