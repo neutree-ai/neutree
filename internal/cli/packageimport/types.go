@@ -73,6 +73,10 @@ type ImportOptions struct {
 	// This field is required when SkipImagePush is false (i.e., when pushing images).
 	MirrorRegistry string
 
+	// RegistryProject is the project/namespace in the registry to push images to.
+	// When set, images are pushed to MirrorRegistry/RegistryProject/imageName.
+	RegistryProject string
+
 	// RegistryUser is the username for the mirror image registry
 	RegistryUser string
 

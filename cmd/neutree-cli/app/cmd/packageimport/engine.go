@@ -111,6 +111,7 @@ func runEngineImport(opts *EngineImportOptions) error {
 	importOpts := &engine.ImportOptions{
 		PackagePath:      opts.packagePath,
 		MirrorRegistry:   mirrorRegistry,
+		RegistryProject:  registryProject,
 		RegistryUser:     registryUsername,
 		RegistryPassword: registryPassword,
 		Workspace:        workspace,

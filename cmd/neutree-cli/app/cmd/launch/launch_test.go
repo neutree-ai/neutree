@@ -16,11 +16,12 @@ func TestReplaceComposeImageRegistry(t *testing.T) {
 	tempDir := t.TempDir()
 
 	tests := []struct {
-		name           string
-		composeContent string            // Input docker-compose content
-		mirrorRegistry string            // Mirror registry to use
-		expectedImages map[string]string // Expected images after replacement
-		wantErr        bool              // Whether error is expected
+		name            string
+		composeContent  string            // Input docker-compose content
+		mirrorRegistry  string            // Mirror registry to use
+		registryProject string            // Registry project/namespace
+		expectedImages  map[string]string // Expected images after replacement
+		wantErr         bool              // Whether error is expected
 	}{
 		{
 			name: "empty mirror registry",
@@ -47,6 +48,19 @@ services:
 			wantErr:        false,
 		},
 		{
+			name: "registry with project",
+			composeContent: `
+version: '3.8'
+services:
+  web:
+    image: nginx:latest
+`,
+			mirrorRegistry:  "my.registry.com",
+			registryProject: "neutree-ai",
+			expectedImages:  map[string]string{"web": "my.registry.com/neutree-ai/library/nginx:latest"},
+			wantErr:         false,
+		},
+		{
 			name:           "invalid compose file",
 			composeContent: `invalid yaml content`,
 			mirrorRegistry: "my.registry.com",
@@ -63,7 +77,7 @@ services:
 			defer os.Remove(composeFile)
 
 			// Run function
-			err = replaceComposeImageRegistry(composeFile, tt.mirrorRegistry)
+			err = replaceComposeImageRegistry(composeFile, tt.mirrorRegistry, tt.registryProject)
 
 			if tt.wantErr {
 				assert.Error(t, err)

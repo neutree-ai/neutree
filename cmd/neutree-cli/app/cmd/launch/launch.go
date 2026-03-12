@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
+	internalutil "github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
 )
 
@@ -21,7 +22,8 @@ type commonOptions struct {
 	deployIps  []string
 	nodeIP     string
 
-	mirrorRegistry string
+	mirrorRegistry  string
+	registryProject string
 
 	dryRun bool
 }
@@ -65,7 +67,10 @@ Examples:
 	launchCmd.PersistentFlags().StringSliceVar(&commonOptions.deployIps, "deploy-ips", []string{}, "deploy ips")
 	launchCmd.PersistentFlags().StringVar(&commonOptions.nodeIP, "node-ip", "", "current deploy node ip")
 
-	launchCmd.PersistentFlags().StringVar(&commonOptions.mirrorRegistry, "mirror-registry", "", "mirror registry")
+	launchCmd.PersistentFlags().StringVar(&commonOptions.mirrorRegistry, "mirror-registry", "",
+		"Registry host[:port] to pull images from")
+	launchCmd.PersistentFlags().StringVar(&commonOptions.registryProject, "registry-project", "",
+		"Project/namespace in the registry (e.g., 'neutree-ai')")
 	launchCmd.PersistentFlags().BoolVar(&commonOptions.dryRun, "dry-run", false, "dry run")
 
 	exector := &command.OSExecutor{}
@@ -85,9 +90,14 @@ func LaunchWorkDir() string {
 	return filepath.Join(currentDir, "neutree-deploy")
 }
 
-func replaceComposeImageRegistry(composeFile string, mirrorRegistry string) error {
+func replaceComposeImageRegistry(composeFile, mirrorRegistry, registryProject string) error {
 	if mirrorRegistry == "" {
 		return nil
+	}
+
+	imageRegistry, err := internalutil.BuildImagePrefix(mirrorRegistry, registryProject)
+	if err != nil {
+		return errors.Wrap(err, "invalid registry configuration")
 	}
 
 	options, err := cli.NewProjectOptions([]string{composeFile}, cli.WithLoadOptions(func(o *loader.Options) {
@@ -104,7 +114,7 @@ func replaceComposeImageRegistry(composeFile string, mirrorRegistry string) erro
 	}
 
 	for serviceName, service := range project.Services {
-		newImage, err := util.ReplaceImageRegistry(service.Image, mirrorRegistry)
+		newImage, err := util.ReplaceImageRegistry(service.Image, imageRegistry)
 		if err != nil {
 			return errors.Wrapf(err, "replace image registry %s error", service.Image)
 		}

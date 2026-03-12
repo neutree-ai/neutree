@@ -148,7 +148,7 @@ func prepareObsStackDeployConfig(options *obsStackInstallOptions) error {
 	}
 
 	composeFilePath := filepath.Join(options.workDir, "obs-stack", "docker-compose.yml")
-	err = replaceComposeImageRegistry(composeFilePath, options.mirrorRegistry)
+	err = replaceComposeImageRegistry(composeFilePath, options.mirrorRegistry, options.registryProject)
 
 	if err != nil {
 		return errors.Wrapf(err, "replace compose image registry failed, file path: %s", composeFilePath)
