@@ -64,8 +64,10 @@ class LocalDownloader(Downloader):
                 for f in files:
                     if allow_pattern:
                         # Always copy .neutree/ metadata regardless of allow_pattern
-                        if not rel.startswith(".neutree") and not fnmatch.fnmatch(f, allow_pattern):
-                            continue
+                        if not rel.startswith(".neutree"):
+                            file_relpath = os.path.join(rel, f) if rel != os.curdir else f
+                            if not fnmatch.fnmatch(f, allow_pattern) and not fnmatch.fnmatch(file_relpath, allow_pattern):
+                                continue
                     s = os.path.join(root, f)
                     t = os.path.join(target_root, f)
                     if os.path.exists(t) and not overwrite:

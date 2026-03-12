@@ -126,11 +126,17 @@ class Backend:
 
         matched_file = False
         file_pattern = model_file
-        for file in os.listdir(model_path):
-            if fnmatch.fnmatch(file, file_pattern):
-                model_path = os.path.join(model_path, file)
-                matched_file = True
-                break
+        search_root = model_path
+        if file_pattern:
+            for root, _, files in os.walk(search_root):
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), search_root)
+                    if fnmatch.fnmatch(file, file_pattern) or fnmatch.fnmatch(rel_path, file_pattern):
+                        model_path = os.path.join(root, file)
+                        matched_file = True
+                        break
+                if matched_file:
+                    break
 
         if model_file and not matched_file:
             raise FileNotFoundError(f"Model file matching pattern '{model_file}' not found in path '{model_path}'")

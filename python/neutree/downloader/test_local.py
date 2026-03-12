@@ -186,6 +186,33 @@ class TestLocalDownloaderVerification(unittest.TestCase):
         # checksums should still be present
         self.assertTrue(os.path.isdir(os.path.join(self.dest_dir, ".neutree", "checksums")))
 
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    def test_allow_pattern_matches_files_in_subdirectory(self, _mock_skip):
+        """Files in subdirectories should be matched by both glob and path-qualified patterns."""
+        # Create subdirectory with a GGUF file
+        subdir = os.path.join(self.src_dir, "subfolder")
+        os.makedirs(subdir)
+        with open(os.path.join(subdir, "model-Q4_K_M.gguf"), "wb") as f:
+            f.write(b"fake gguf data in subdir")
+
+        dl = LocalDownloader()
+
+        # Test 1: glob pattern should match file in subdirectory
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": "*Q4_K_M.gguf"})
+        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "subfolder", "model-Q4_K_M.gguf")))
+        # Non-matching files should be filtered out
+        self.assertFalse(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
+
+        # Clean dest for next test
+        shutil.rmtree(self.dest_dir)
+        self.dest_dir = tempfile.mkdtemp()
+
+        # Test 2: path-qualified pattern should also work
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": "subfolder/model-Q4_K_M.gguf"})
+        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "subfolder", "model-Q4_K_M.gguf")))
+        # Non-matching files should be filtered out
+        self.assertFalse(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
+
 
 if __name__ == "__main__":
     unittest.main()
