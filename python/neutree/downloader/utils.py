@@ -12,6 +12,23 @@ from huggingface_hub.utils.sha import git_hash, sha_fileobj
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
+
+def resolve_allow_pattern(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Extract and normalize the file filter pattern from metadata.
+
+    Only GGUF patterns are applied as filters because GGUF files are
+    self-contained. Non-GGUF models need the full directory (config,
+    tokenizer, weights, etc.), so non-GGUF patterns are ignored.
+    """
+    if not metadata:
+        return None
+    allow_pattern = metadata.get("file")
+    if not allow_pattern or not isinstance(allow_pattern, str):
+        return None
+    if ".gguf" not in allow_pattern.lower():
+        return None
+    return allow_pattern
+
 def copy_tree(src: str, dest: str, *, on_progress: Callable[[str], None] | None = None) -> None:
     """Recursively copy src to dest. Calls on_progress for each file copied."""
     ensure_dir(dest)

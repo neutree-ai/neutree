@@ -171,19 +171,23 @@ class TestLocalDownloaderVerification(unittest.TestCase):
             mock_hash.assert_not_called()
 
     @mock.patch("neutree.downloader.local.should_skip_verification", return_value=False)
-    def test_checksums_copied_with_allow_pattern(self, _mock_skip):
-        """Checksums should be copied even when allow_pattern filters model files."""
+    def test_checksums_copied_with_gguf_allow_pattern(self, _mock_skip):
+        """Checksums should be copied even when GGUF allow_pattern filters model files."""
         self._add_correct_checksums()
+        # Add a GGUF file to source
+        with open(os.path.join(self.src_dir, "model-q4_0.gguf"), "wb") as f:
+            f.write(b"fake gguf data")
 
         dl = LocalDownloader()
-        # Only allow *.bin files — but .neutree/ should still be copied
-        dl.download(self.src_dir, self.dest_dir, metadata={"file": "*.bin"})
+        # GGUF pattern — filter should be applied
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": "*.gguf"})
 
-        # model.bin should be copied (matches pattern)
-        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
-        # config.json should NOT be copied (filtered)
+        # GGUF file should be copied (matches pattern)
+        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "model-q4_0.gguf")))
+        # Non-GGUF files should NOT be copied (filtered out)
+        self.assertFalse(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
         self.assertFalse(os.path.exists(os.path.join(self.dest_dir, "config.json")))
-        # checksums should still be present
+        # checksums should still be present (.neutree/ always copied)
         self.assertTrue(os.path.isdir(os.path.join(self.dest_dir, ".neutree", "checksums")))
 
     @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
@@ -212,6 +216,44 @@ class TestLocalDownloaderVerification(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "subfolder", "model-Q4_K_M.gguf")))
         # Non-matching files should be filtered out
         self.assertFalse(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    def test_gguf_filter_applied(self, _mock_skip):
+        """GGUF pattern should filter files — only matching GGUF files downloaded."""
+        # Add a GGUF file to source
+        with open(os.path.join(self.src_dir, "model-q4_0.gguf"), "wb") as f:
+            f.write(b"fake gguf q4 data")
+        with open(os.path.join(self.src_dir, "model-q8_0.gguf"), "wb") as f:
+            f.write(b"fake gguf q8 data")
+
+        dl = LocalDownloader()
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": "*q4_0.gguf"})
+
+        # Only matching GGUF file should be copied
+        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "model-q4_0.gguf")))
+        self.assertFalse(os.path.exists(os.path.join(self.dest_dir, "model-q8_0.gguf")))
+        # Non-GGUF files should also be filtered out
+        self.assertFalse(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
+        self.assertFalse(os.path.exists(os.path.join(self.dest_dir, "config.json")))
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    def test_non_gguf_filter_ignored(self, _mock_skip):
+        """Non-GGUF pattern (e.g. *.safetensors) should be ignored — all files downloaded."""
+        dl = LocalDownloader()
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": "*.safetensors"})
+
+        # All files should be copied (filter ignored for non-GGUF)
+        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
+        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "config.json")))
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    def test_empty_file_filter_downloads_all(self, _mock_skip):
+        """Empty file pattern should download all files."""
+        dl = LocalDownloader()
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": ""})
+
+        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
+        self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "config.json")))
 
 
 if __name__ == "__main__":
