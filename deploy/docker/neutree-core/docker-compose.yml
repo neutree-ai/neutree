@@ -184,6 +184,9 @@ services:
       - --core-server-port=3001
       - --core-server-host=0.0.0.0
       - --auth-endpoint=http://auth:9999
+{{ if .FeatureGates }}
+      - --feature-gates={{ .FeatureGates }}
+{{ end }}
     volumes:
       - {{ .NeutreeCoreWorkDir }}/collect:/etc/neutree/collect
     ports:
@@ -217,6 +220,9 @@ services:
       - --gin-mode=release
       - --auth-endpoint=http://auth:9999
       - --grafana-url={{ .GrafanaURL }}
+{{ if .FeatureGates }}
+      - --feature-gates={{ .FeatureGates }}
+{{ end }}
     ports:
       - 3000:3000
     networks:
