@@ -271,6 +271,7 @@ func (c *sshRayClusterReconciler) buildAcceleratorDockerConfig(reconcileCtx *Rec
 
 	if runtimeConfig.Runtime != "" {
 		changed = true
+
 		runOptions = append(runOptions, "--runtime="+runtimeConfig.Runtime)
 	}
 
@@ -284,6 +285,7 @@ func (c *sshRayClusterReconciler) buildAcceleratorDockerConfig(reconcileCtx *Rec
 
 	if runtimeConfig.Options != nil {
 		changed = true
+
 		runOptions = append(runOptions, runtimeConfig.Options...)
 	}
 
@@ -322,6 +324,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	isNewCluster, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
 	if err != nil {
 		klog.Warningf("Failed to parse cluster version %s, assuming new version: %v", cluster.Spec.Version, err)
+
 		isNewCluster = true
 	}
 
