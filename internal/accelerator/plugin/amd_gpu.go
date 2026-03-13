@@ -246,12 +246,12 @@ func (p *AMDGPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.Ge
 	}, nil
 }
 
-func (p *AMDGPUAcceleratorPlugin) GetContainerRuntimeConfig() v1.RuntimeConfig {
+func (p *AMDGPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
 	return v1.RuntimeConfig{
 		Env: map[string]string{
 			"AMD_VISIBLE_DEVICES": "all",
 		},
-	}
+	}, nil
 }
 
 func (p *AMDGPUAcceleratorPlugin) Ping(ctx context.Context) error {

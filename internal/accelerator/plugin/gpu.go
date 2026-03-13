@@ -232,11 +232,11 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 	}, nil
 }
 
-func (p *GPUAcceleratorPlugin) GetContainerRuntimeConfig() v1.RuntimeConfig {
+func (p *GPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
 	return v1.RuntimeConfig{
 		Runtime: "nvidia",
 		Options: []string{"--gpus all"},
-	}
+	}, nil
 }
 
 func (p *GPUAcceleratorPlugin) Ping(ctx context.Context) error {

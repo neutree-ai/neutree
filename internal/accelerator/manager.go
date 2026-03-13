@@ -401,7 +401,10 @@ func (a *manager) GetEngineContainerRunOptions(acceleratorType string) ([]string
 		return nil, errors.Errorf("accelerator plugin %s not found", acceleratorType)
 	}
 
-	rc := p.Handle().GetContainerRuntimeConfig()
+	rc, err := p.Handle().GetContainerRuntimeConfig()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get container runtime config")
+	}
 
 	var opts []string
 
