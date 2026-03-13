@@ -26,7 +26,7 @@ var clusterLocks sync.Map
 
 func getClusterLock(clusterKey string) *sync.Mutex {
 	actual, _ := clusterLocks.LoadOrStore(clusterKey, &sync.Mutex{})
-	return actual.(*sync.Mutex)
+	return actual.(*sync.Mutex) //nolint:errcheck // type is guaranteed by LoadOrStore
 }
 
 var _ Orchestrator = &RayOrchestrator{}
