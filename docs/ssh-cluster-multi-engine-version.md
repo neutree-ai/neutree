@@ -115,7 +115,7 @@ Ray container additional run_options for DOOD:
 
 ### Engine Images
 
-Built on top of community engine images (e.g., `vllm/vllm-openai:v0.12.0`) + Ray neutree wheel + serve layer code. No source compilation needed.
+Built on top of community engine images (e.g., `vllm/vllm-openai:v0.12.0`) + Ray neutree fork (compiled from source) + serve layer code.
 
 Naming: `{registry}/neutree/engine-{name}:{version}-ray{ray_version}`
 
