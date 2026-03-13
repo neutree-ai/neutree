@@ -451,13 +451,14 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	mutateModelCaches(rayClusterConfig, reconcileContext.Cluster.Spec.Config.ModelCaches)
 
 	// For new clusters: grant the ray user access to docker.sock for runtime_env.container support.
-	// The mounted docker.sock is typically owned by root:docker with 660 permissions,
-	// so the ray user needs explicit permission to use it.
+	// The mounted docker.sock is owned by root:docker with 660 permissions.
+	// Add the ray user to the docker group instead of chmod 666, so only docker group
+	// members can access the socket.
 	if isNewCluster {
-		dockerSockPermCmd := "sudo chmod 666 /var/run/docker.sock"
-		rayClusterConfig.HeadStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.HeadStartRayCommands...)
-		rayClusterConfig.WorkerStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.WorkerStartRayCommands...)
-		rayClusterConfig.StaticWorkerStartRayCommands = append([]string{dockerSockPermCmd}, rayClusterConfig.StaticWorkerStartRayCommands...)
+		dockerGroupCmd := "sudo usermod -aG docker ray"
+		rayClusterConfig.HeadStartRayCommands = append([]string{dockerGroupCmd}, rayClusterConfig.HeadStartRayCommands...)
+		rayClusterConfig.WorkerStartRayCommands = append([]string{dockerGroupCmd}, rayClusterConfig.WorkerStartRayCommands...)
+		rayClusterConfig.StaticWorkerStartRayCommands = append([]string{dockerGroupCmd}, rayClusterConfig.StaticWorkerStartRayCommands...)
 	}
 
 	return rayClusterConfig, nil

@@ -1171,7 +1171,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						},
 					},
 					HeadStartRayCommands: []string{
-						"sudo chmod 666 /var/run/docker.sock",
+						"sudo usermod -aG docker ray",
 						"ray stop",
 						strings.Join([]string{
 							`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
@@ -1182,7 +1182,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						}, " "),
 					},
 					WorkerStartRayCommands: []string{
-						"sudo chmod 666 /var/run/docker.sock",
+						"sudo usermod -aG docker ray",
 						"ray stop",
 						strings.Join([]string{
 							`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,
@@ -1191,7 +1191,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						}, " "),
 					},
 					StaticWorkerStartRayCommands: []string{
-						"sudo chmod 666 /var/run/docker.sock",
+						"sudo usermod -aG docker ray",
 						"ray stop",
 						strings.Join([]string{
 							`ulimit -n 65536; python /home/ray/start.py --address=$RAY_HEAD_IP:6379`,

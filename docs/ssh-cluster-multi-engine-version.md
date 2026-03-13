@@ -236,17 +236,17 @@ The Ray container needs additional Docker run_options beyond the existing `--pri
 Additionally, a startup command is prepended to each node's start command:
 
 ```
-sudo chmod 666 /var/run/docker.sock
+sudo usermod -aG docker ray
 ```
 
-This grants the `ray` user (non-root inside the container) access to the Docker socket.
+This adds the `ray` user to the `docker` group, granting access to the Docker socket without opening it to all users.
 
 These options are set in `generateRayClusterConfig()`:
 
 ```go
 rayClusterConfig.Docker.RunOptions = []string{
-    "--privileged",
-    // ... existing options ...
+    // ... common options ...
+    "-e RAY_EXPERIMENTAL_RUNTIME_ENV_CONTAINER_RUNTIME=docker",
     "--volume /var/run/docker.sock:/var/run/docker.sock",
     "--volume /tmp:/tmp",
     "--pid=host",
@@ -609,7 +609,7 @@ Of 23 metrics in the dashboard, only 2 metrics (~5 panels) need PromQL updates. 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | `container` field removed from upstream Ray | Fork must self-maintain | Pin behavior in fork; track `image_uri` GPU fix ([PR #60485](https://github.com/ray-project/ray/pull/60485)) |
-| docker.sock security (host Docker access) | Container escape risk | Ray container already runs with `--privileged`; same trust boundary |
+| docker.sock security (host Docker access) | Container escape risk | New clusters do not use `--privileged`; ray user accesses docker.sock via docker group membership only |
 | Engine image pull latency (first deploy) | Slow Endpoint startup | Pre-pull engine images on nodes; add image pull progress to Endpoint status |
 
 ## References
