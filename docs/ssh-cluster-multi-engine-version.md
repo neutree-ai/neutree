@@ -233,13 +233,7 @@ The Ray container needs additional Docker run_options beyond the existing `--pri
 | `--pid=host` | Engine containers need to see Raylet process (parent PID) for process lifecycle management |
 | `--ipc=host` | Shared memory for Ray Object Store communication between Ray container and Engine containers |
 
-Additionally, a startup command is prepended to each node's start command:
-
-```
-sudo usermod -aG docker ray
-```
-
-This adds the `ray` user to the `docker` group, granting access to the Docker socket without opening it to all users.
+The serve container runs as root, which already has access to the Docker socket. No additional permission changes are needed.
 
 These options are set in `generateRayClusterConfig()`:
 

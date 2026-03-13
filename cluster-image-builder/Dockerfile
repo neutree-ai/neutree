@@ -61,7 +61,7 @@ RUN apt-get update -y \
     && python3 -m pip install uv \
     && python3 --version && python3 -m pip --version
 
-RUN mkdir -p ${HOME}
+RUN mkdir -p ${HOME} && touch ${HOME}/.bashrc
 WORKDIR ${HOME}
 
 # Install Ray from source
