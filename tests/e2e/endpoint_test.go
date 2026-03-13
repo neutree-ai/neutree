@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -15,17 +16,36 @@ import (
 
 // --- Environment helpers ---
 
-func sshCluster() string    { return os.Getenv("E2E_SSH_CLUSTER") }
-func engineName() string    { return envOrDefault("E2E_ENGINE_NAME", "vllm") }
-func engineVersionA() string { return envOrDefault("E2E_ENGINE_VERSION_A", "v0.8.5") }
-func engineVersionB() string { return envOrDefault("E2E_ENGINE_VERSION_B", "v0.11.2") }
-func modelName() string     { return os.Getenv("E2E_MODEL_NAME") }
-func modelVersion() string  { return envOrDefault("E2E_MODEL_VERSION", "latest") }
-func modelTask() string     { return envOrDefault("E2E_MODEL_TASK", "text-generation") }
-func acceleratorType() string   { return envOrDefault("E2E_ACCELERATOR_TYPE", "nvidia-gpu") }
-func acceleratorProduct() string { return envOrDefault("E2E_ACCELERATOR_PRODUCT", "") }
+func clusterName() string     { return os.Getenv("E2E_CLUSTER_NAME") }
+func engineName() string          { return envOrDefault("E2E_ENGINE_NAME", "vllm") }
+func engineVersionA() string      { return envOrDefault("E2E_ENGINE_VERSION_A", "v0.8.5") }
+func engineVersionB() string      { return envOrDefault("E2E_ENGINE_VERSION_B", "v0.11.2") }
+func modelName() string           { return os.Getenv("E2E_MODEL_NAME") }
+func modelVersion() string        { return envOrDefault("E2E_MODEL_VERSION", "latest") }
+func modelTask() string           { return envOrDefault("E2E_MODEL_TASK", "text-generation") }
+func acceleratorType() string     { return envOrDefault("E2E_ACCELERATOR_TYPE", "nvidia_gpu") }
+func acceleratorProduct() string  { return envOrDefault("E2E_ACCELERATOR_PRODUCT", "") }
+func endpointTimeout() string     { return envOrDefault("E2E_ENDPOINT_TIMEOUT", "10m") }
 
-func endpointTimeout() string { return envOrDefault("E2E_ENDPOINT_TIMEOUT", "10m") }
+// engineArgsYAML parses E2E_ENDPOINT_ENGINE_ARGS (comma-separated key=value pairs,
+// default "dtype=half") and returns a YAML snippet for spec.variables.engine_args.
+func engineArgsYAML() string {
+	raw := envOrDefault("E2E_ENDPOINT_ENGINE_ARGS", "dtype=half")
+	if raw == "" {
+		return ""
+	}
+
+	var lines []string
+	for _, pair := range strings.Split(raw, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if !ok || k == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("      %s: %s", strings.TrimSpace(k), strings.TrimSpace(v)))
+	}
+
+	return "\n" + strings.Join(lines, "\n")
+}
 
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -42,7 +62,7 @@ func applyEndpoint(name, engineVersion string) (yamlPath string) {
 	defaults := map[string]string{
 		"E2E_ENDPOINT_NAME":       name,
 		"E2E_WORKSPACE":           testWorkspace(),
-		"E2E_SSH_CLUSTER":         sshCluster(),
+		"E2E_CLUSTER_NAME":    clusterName(),
 		"E2E_ENGINE_NAME":         engineName(),
 		"E2E_ENGINE_VERSION":      engineVersion,
 		"E2E_MODEL_REGISTRY":      testRegistry(),
@@ -51,6 +71,7 @@ func applyEndpoint(name, engineVersion string) (yamlPath string) {
 		"E2E_MODEL_TASK":          modelTask(),
 		"E2E_ACCELERATOR_TYPE":    acceleratorType(),
 		"E2E_ACCELERATOR_PRODUCT": acceleratorProduct(),
+		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
 	}
 
 	yamlPath, err := renderTemplateToTempFile(
@@ -115,8 +136,9 @@ func parseEndpointJSON(stdout string) endpointJSON {
 	return ep
 }
 
-// sshClusterJSON extends the cluster response with fields needed for SSH cluster E2E tests.
-type sshClusterJSON struct {
+// --- Cluster pre-check helper ---
+
+type clusterPreCheckJSON struct {
 	Spec struct {
 		Type    string `json:"type"`
 		Version string `json:"version"`
@@ -127,8 +149,8 @@ type sshClusterJSON struct {
 	} `json:"status"`
 }
 
-func parseSSHClusterJSON(stdout string) sshClusterJSON {
-	var c sshClusterJSON
+func parseEndpointClusterJSON(stdout string) clusterPreCheckJSON {
+	var c clusterPreCheckJSON
 	ExpectWithOffset(1, json.Unmarshal([]byte(stdout), &c)).To(Succeed())
 	return c
 }
@@ -137,7 +159,7 @@ func parseSSHClusterJSON(stdout string) sshClusterJSON {
 
 // inferChat sends a chat completion request and returns (status_code, body).
 func inferChat(serviceURL, prompt string) (int, string) {
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model": modelName(),
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
@@ -150,11 +172,15 @@ func inferChat(serviceURL, prompt string) (int, string) {
 
 	client := &http.Client{Timeout: 60 * time.Second}
 
-	resp, err := client.Post(
+	req, err := http.NewRequest(http.MethodPost,
 		strings.TrimRight(serviceURL, "/")+"/v1/chat/completions",
-		"application/json",
 		strings.NewReader(payload),
 	)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to create inference request")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("NEUTREE_API_KEY"))
+
+	resp, err := client.Do(req)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "inference request failed")
 	defer resp.Body.Close()
 
@@ -166,22 +192,21 @@ func inferChat(serviceURL, prompt string) (int, string) {
 
 // --- Tests ---
 
-var _ = Describe("SSH Cluster Multi-Engine", Ordered, Label("ssh-cluster", "multi-engine"), func() {
+var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 	BeforeAll(func() {
-		if sshCluster() == "" {
-			Skip("E2E_SSH_CLUSTER not set, skipping SSH cluster tests")
+		if clusterName() == "" {
+			Skip("E2E_CLUSTER_NAME not set, skipping endpoint tests")
 		}
 		if modelName() == "" {
-			Skip("E2E_MODEL_NAME not set, skipping SSH cluster tests")
+			Skip("E2E_MODEL_NAME not set, skipping endpoint tests")
 		}
 
 		By("Verifying cluster is ready")
-		r := RunCLI("get", "cluster", sshCluster(), "-w", testWorkspace(), "-o", "json")
+		r := RunCLI("get", "cluster", clusterName(), "-w", testWorkspace(), "-o", "json")
 		ExpectSuccess(r)
-		c := parseSSHClusterJSON(r.Stdout)
+		c := parseEndpointClusterJSON(r.Stdout)
 		Expect(c.Status.Phase).To(Equal("Running"), "cluster must be Running")
-		Expect(c.Spec.Type).To(Equal("ssh"), "cluster must be SSH type")
 		Expect(c.Status.AcceleratorType).NotTo(BeNil(), "cluster must have accelerator type")
 
 		By("Setting up model registry")
@@ -189,14 +214,14 @@ var _ = Describe("SSH Cluster Multi-Engine", Ordered, Label("ssh-cluster", "mult
 	})
 
 	AfterAll(func() {
-		if sshCluster() == "" {
+		if clusterName() == "" {
 			return
 		}
 
 		TeardownModelRegistry()
 	})
 
-	Describe("Single Endpoint", Label("endpoint"), func() {
+	Describe("Deploy and Inference", Label("deploy"), func() {
 		var epName string
 
 		BeforeAll(func() {
