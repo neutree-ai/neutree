@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -33,6 +34,16 @@ func isNewClusterVersion(cluster *v1.Cluster) (bool, error) {
 	}
 
 	return isNew, nil
+}
+
+// clusterLocks provides per-cluster mutexes to serialize Ray Serve application
+// updates (read-modify-write on PUT /api/serve/applications/) and prevent
+// concurrent workers from overwriting each other's changes.
+var clusterLocks sync.Map
+
+func getClusterLock(clusterKey string) *sync.Mutex {
+	actual, _ := clusterLocks.LoadOrStore(clusterKey, &sync.Mutex{})
+	return actual.(*sync.Mutex)
 }
 
 var _ Orchestrator = &RayOrchestrator{}
@@ -180,6 +191,10 @@ func (o *RayOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
 }
 
 func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
+	mu := getClusterLock(ctx.Cluster.Metadata.WorkspaceName())
+	mu.Lock()
+	defer mu.Unlock()
+
 	currentAppsResp, err := ctx.rayService.GetServeApplications()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get current serve applications for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
@@ -265,6 +280,10 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 }
 
 func (o *RayOrchestrator) deleteEndpoint(ctx *OrchestratorContext) error {
+	mu := getClusterLock(ctx.Cluster.Metadata.WorkspaceName())
+	mu.Lock()
+	defer mu.Unlock()
+
 	currentAppsResp, err := ctx.rayService.GetServeApplications()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get current serve applications before deletion of endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
