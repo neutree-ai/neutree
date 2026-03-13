@@ -1128,15 +1128,18 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 		},
 	}
 
-	sshClusterWithAccelerator := &v1.Cluster{
-		Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"},
-		Status: &v1.ClusterStatus{AcceleratorType: &nvidiaGPU},
-	}
-
-	newMockMgr := func(t *testing.T) *acceleratormocks.MockManager {
-		mgr := acceleratormocks.NewMockManager(t)
-		mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
-		return mgr
+	cpuEngine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "llama-cpp"},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{
+				{
+					Version: "v0.3.7",
+					Images: map[string]*v1.EngineImage{
+						"cpu": {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
+					},
+				},
+			},
+		},
 	}
 
 	gpuEndpoint := func(engineVersion string) *v1.Endpoint {
@@ -1152,23 +1155,30 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 		}
 	}
 
+	cpuEndpoint := &v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Engine:    &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "v0.3.7"},
+			Resources: &v1.ResourceSpec{},
+		},
+	}
+
 	tests := []struct {
 		name                   string
 		endpoint               *v1.Endpoint
-		cluster                *v1.Cluster
 		engine                 *v1.Engine
 		imageRegistry          *v1.ImageRegistry
 		modelCaches            []v1.ModelCache
 		modelRegistry          *v1.ModelRegistry
+		setupMgr               func(t *testing.T) *acceleratormocks.MockManager
 		expectErr              bool
+		expectErrMsg           string
 		expectedImage          string
 		expectedBaseOptions    []string
 		expectedBackendOptions []string
 	}{
 		{
-			name:          "SSH cluster with engine image generates split container configs",
+			name:          "GPU endpoint with registry generates split container configs",
 			endpoint:      gpuEndpoint("v0.12.0"),
-			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
 			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
@@ -1182,9 +1192,8 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 		},
 		{
-			name:          "SSH cluster with model caches includes volume mounts only in backend config",
+			name:          "model caches included only in backend config",
 			endpoint:      gpuEndpoint("v0.12.0"),
-			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
 			modelCaches: []v1.ModelCache{
@@ -1205,24 +1214,8 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 		},
 		{
-			name:     "engine version without image returns error",
-			endpoint: gpuEndpoint("v0.8.5"),
-			cluster: sshClusterWithAccelerator,
-			engine: &v1.Engine{
-				Metadata: &v1.Metadata{Name: "vllm"},
-				Spec: &v1.EngineSpec{
-					Versions: []*v1.EngineVersion{
-						{Version: "v0.8.5"},
-					},
-				},
-			},
-			imageRegistry: defaultImageRegistry,
-			expectErr:     true,
-		},
-		{
 			name:          "model cache without HostPath is skipped",
 			endpoint:      gpuEndpoint("v0.12.0"),
-			cluster:       sshClusterWithAccelerator,
 			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
 			modelCaches: []v1.ModelCache{
@@ -1241,8 +1234,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 		{
 			name:     "registry with custom repository",
 			endpoint: gpuEndpoint("v0.12.0"),
-			cluster: sshClusterWithAccelerator,
-			engine:  defaultEngine,
+			engine:   defaultEngine,
 			imageRegistry: &v1.ImageRegistry{
 				Spec: &v1.ImageRegistrySpec{
 					URL:        "http://registry.example.com",
@@ -1259,347 +1251,68 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 				"--rm",
 			},
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mgr := newMockMgr(t)
-			baseConfig, backendConfig, err := buildEngineContainerConfigs(tt.endpoint, tt.engine, tt.imageRegistry, mgr, tt.modelCaches, tt.modelRegistry)
-
-			if tt.expectErr {
-				assert.Error(t, err)
-				assert.Nil(t, baseConfig)
-				assert.Nil(t, backendConfig)
-				return
-			}
-
-			assert.NoError(t, err)
-
-			// Verify base config (app_builder + Controller): image + --rm only
-			assert.NotNil(t, baseConfig)
-			assert.Equal(t, tt.expectedImage, baseConfig["image"])
-			baseOptions, ok := baseConfig["run_options"].([]string)
-			assert.True(t, ok)
-			assert.Equal(t, tt.expectedBaseOptions, baseOptions)
-
-			// Verify backend config: image + GPU options + volumes + --rm
-			assert.NotNil(t, backendConfig)
-			assert.Equal(t, tt.expectedImage, backendConfig["image"])
-			backendOptions, ok := backendConfig["run_options"].([]string)
-			assert.True(t, ok)
-			assert.Equal(t, tt.expectedBackendOptions, backendOptions)
-		})
-	}
-}
-
-func TestEndpointToApplication_SSHClusterContainerConfig(t *testing.T) {
-	acceleratorType := string(v1.AcceleratorTypeNVIDIAGPU)
-
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-endpoint",
-		},
-		Spec: &v1.EndpointSpec{
-			Engine: &v1.EndpointEngineSpec{
-				Engine:  "vllm",
-				Version: "v0.12.0",
-			},
-			Model: &v1.ModelSpec{
-				Name: "test-model",
-				Task: v1.TextGenerationModelTask,
-			},
-			Resources: &v1.ResourceSpec{
-				Accelerator: map[string]string{
-					v1.AcceleratorTypeKey: acceleratorType,
-				},
-			},
-			DeploymentOptions: map[string]interface{}{},
-			Variables:         map[string]interface{}{},
-		},
-	}
-
-	cluster := &v1.Cluster{
-		Spec: &v1.ClusterSpec{
-			Type:    v1.SSHClusterType,
-			Version: "v1.0.1",
-			Config: &v1.ClusterConfig{
-				ModelCaches: []v1.ModelCache{
-					{
-						Name:     "default",
-						HostPath: &corev1.HostPathVolumeSource{Path: "/data/models"},
-					},
-				},
-			},
-		},
-		Status: &v1.ClusterStatus{
-			AcceleratorType: &acceleratorType,
-		},
-	}
-
-	engine := &v1.Engine{
-		Metadata: &v1.Metadata{Name: "vllm"},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version: "v0.12.0",
-					Images: map[string]*v1.EngineImage{
-						"nvidia_gpu": {
-							ImageName: "neutree/engine-vllm",
-							Tag:       "v0.12.0-ray2.53.0",
-						},
-					},
-				},
-			},
-		},
-	}
-
-	modelRegistry := &v1.ModelRegistry{
-		Spec: &v1.ModelRegistrySpec{
-			Type: v1.HuggingFaceModelRegistryType,
-			Url:  "https://huggingface.co",
-		},
-	}
-
-	imageRegistry := &v1.ImageRegistry{
-		Spec: &v1.ImageRegistrySpec{
-			URL: "http://registry.example.com",
-		},
-	}
-
-	mgr := acceleratormocks.NewMockManager(t)
-	mgr.EXPECT().GetConverter(acceleratorType).Return(plugin.NewGPUConverter(), true)
-	mgr.EXPECT().GetEngineContainerRunOptions(acceleratorType).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
-
-	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, engine, imageRegistry, mgr)
-	assert.NoError(t, err)
-
-	expectedImage := "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0"
-
-	// Verify base container config (app-level): image + --rm only
-	containerRaw, ok := app.RuntimeEnv["container"]
-	assert.True(t, ok, "runtime_env should have 'container' key for SSH cluster with version > v1.0.0")
-
-	container, ok := containerRaw.(map[string]interface{})
-	assert.True(t, ok)
-	assert.Equal(t, expectedImage, container["image"])
-
-	baseOptions, ok := container["run_options"].([]string)
-	assert.True(t, ok)
-	assert.Equal(t, []string{"--rm"}, baseOptions)
-
-	// Verify backend container config (in args): image + GPU options + volumes + --rm
-	backendContainerRaw, ok := app.Args["backend_container"]
-	assert.True(t, ok, "args should have 'backend_container' key for SSH cluster with version > v1.0.0")
-
-	backendContainer, ok := backendContainerRaw.(map[string]interface{})
-	assert.True(t, ok)
-	assert.Equal(t, expectedImage, backendContainer["image"])
-
-	backendOptions, ok := backendContainer["run_options"].([]string)
-	assert.True(t, ok)
-	assert.Contains(t, backendOptions, "--runtime=nvidia")
-	assert.Contains(t, backendOptions, "--gpus all")
-	assert.Contains(t, backendOptions, "-v /data/models:"+filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"))
-	assert.Contains(t, backendOptions, "--rm")
-}
-
-func TestEndpointToApplication_OldClusterNoContainerConfig(t *testing.T) {
-	acceleratorType := string(v1.AcceleratorTypeNVIDIAGPU)
-
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-endpoint",
-		},
-		Spec: &v1.EndpointSpec{
-			Engine: &v1.EndpointEngineSpec{
-				Engine:  "vllm",
-				Version: "v0.12.0",
-			},
-			Model: &v1.ModelSpec{
-				Name: "test-model",
-				Task: v1.TextGenerationModelTask,
-			},
-			Resources: &v1.ResourceSpec{
-				Accelerator: map[string]string{
-					v1.AcceleratorTypeKey: acceleratorType,
-				},
-			},
-			DeploymentOptions: map[string]interface{}{},
-		},
-	}
-
-	// Old cluster (v1.0.0) should NOT produce container config
-	cluster := &v1.Cluster{
-		Spec: &v1.ClusterSpec{
-			Type:    v1.SSHClusterType,
-			Version: "v1.0.0",
-		},
-		Status: &v1.ClusterStatus{
-			AcceleratorType: &acceleratorType,
-		},
-	}
-
-	modelRegistry := &v1.ModelRegistry{
-		Spec: &v1.ModelRegistrySpec{
-			Type: v1.HuggingFaceModelRegistryType,
-			Url:  "https://huggingface.co",
-		},
-	}
-
-	engine := &v1.Engine{
-		Metadata: &v1.Metadata{Name: "vllm"},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version: "v0.12.0",
-					Images: map[string]*v1.EngineImage{
-						"nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.12.0-ray2.53.0"},
-					},
-				},
-			},
-		},
-	}
-
-	mgr := acceleratormocks.NewMockManager(t)
-	mgr.EXPECT().GetConverter(acceleratorType).Return(plugin.NewGPUConverter(), true)
-
-	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, engine, nil, mgr)
-	assert.NoError(t, err)
-
-	// Old cluster should NOT have container or backend_container
-	_, hasContainer := app.RuntimeEnv["container"]
-	assert.False(t, hasContainer, "old cluster should not have runtime_env.container")
-
-	_, hasBackendContainer := app.Args["backend_container"]
-	assert.False(t, hasBackendContainer, "old cluster should not have backend_container in args")
-}
-
-func TestEndpointToApplication_EngineNameVersionEnv(t *testing.T) {
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "ws",
-			Name:      "ep",
-		},
-		Spec: &v1.EndpointSpec{
-			Engine: &v1.EndpointEngineSpec{
-				Engine:  "vllm",
-				Version: "v0.12.0",
-			},
-			Model: &v1.ModelSpec{
-				Name: "test-model",
-				Task: v1.TextGenerationModelTask,
-			},
-			Resources:         &v1.ResourceSpec{},
-			DeploymentOptions: map[string]interface{}{},
-		},
-	}
-
-	modelRegistry := &v1.ModelRegistry{
-		Spec: &v1.ModelRegistrySpec{
-			Type: v1.HuggingFaceModelRegistryType,
-			Url:  "https://huggingface.co",
-		},
-	}
-
-	app, err := EndpointToApplication(endpoint, &v1.Cluster{}, modelRegistry, nil, nil, nil)
-	assert.NoError(t, err)
-
-	envs := app.RuntimeEnv["env_vars"].(map[string]string)
-	assert.Equal(t, "vllm", envs["ENGINE_NAME"])
-	assert.Equal(t, "v0.12.0", envs["ENGINE_VERSION"])
-}
-
-func TestEndpointToApplication_CPUEndpointOnNewCluster(t *testing.T) {
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "cpu-endpoint",
-		},
-		Spec: &v1.EndpointSpec{
-			Engine: &v1.EndpointEngineSpec{
-				Engine:  "llama-cpp",
-				Version: "v0.3.7",
-			},
-			Model: &v1.ModelSpec{
-				Name: "test-model",
-				Task: v1.TextGenerationModelTask,
-			},
-			Resources:         &v1.ResourceSpec{},
-			DeploymentOptions: map[string]interface{}{},
-		},
-	}
-
-	cluster := &v1.Cluster{
-		Spec: &v1.ClusterSpec{
-			Version: "v1.0.1",
-		},
-	}
-
-	engine := &v1.Engine{
-		Metadata: &v1.Metadata{Name: "llama-cpp"},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version: "v0.3.7",
-					Images: map[string]*v1.EngineImage{
-						"cpu": {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
-					},
-				},
-			},
-		},
-	}
-
-	modelRegistry := &v1.ModelRegistry{
-		Spec: &v1.ModelRegistrySpec{
-			Type: v1.HuggingFaceModelRegistryType,
-			Url:  "https://huggingface.co",
-		},
-	}
-
-	imageRegistry := &v1.ImageRegistry{
-		Spec: &v1.ImageRegistrySpec{
-			URL: "http://registry.example.com",
-		},
-	}
-
-	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, engine, imageRegistry, nil)
-	assert.NoError(t, err)
-
-	// CPU endpoint on new cluster should still generate container configs
-	container, ok := app.RuntimeEnv["container"].(map[string]interface{})
-	assert.True(t, ok)
-	assert.Equal(t, "registry.example.com/neutree/engine-llama-cpp:v0.3.7-ray2.53.0", container["image"])
-
-	// Backend config should have --rm but no GPU options
-	backendContainer, ok := app.Args["backend_container"].(map[string]interface{})
-	assert.True(t, ok)
-	backendOptions, ok := backendContainer["run_options"].([]string)
-	assert.True(t, ok)
-	assert.Equal(t, []string{"--rm"}, backendOptions, "CPU endpoint should only have --rm, no GPU options")
-}
-
-func TestBuildEngineContainerConfigs_ErrorCases(t *testing.T) {
-	tests := []struct {
-		name      string
-		endpoint  *v1.Endpoint
-		engine    *v1.Engine
-		expectMsg string
-	}{
 		{
-			name:      "nil endpoint",
-			endpoint:  nil,
-			engine:    &v1.Engine{Metadata: &v1.Metadata{Name: "vllm"}, Spec: &v1.EngineSpec{}},
-			expectMsg: "endpoint with engine spec is required",
+			name:          "CPU endpoint produces only --rm in backend",
+			endpoint:      cpuEndpoint,
+			engine:        cpuEngine,
+			expectedImage: "neutree/engine-llama-cpp:v0.3.7-ray2.53.0",
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
+				"--rm",
+			},
+		},
+		{
+			name:          "nil imageRegistry omits registry prefix",
+			endpoint:      gpuEndpoint("v0.12.0"),
+			engine:        defaultEngine,
+			imageRegistry: nil,
+			expectedImage: "neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				"--rm",
+			},
+		},
+		{
+			name:     "multiple model caches with mixed HostPath",
+			endpoint: cpuEndpoint,
+			engine:   cpuEngine,
+			modelCaches: []v1.ModelCache{
+				{Name: "cache-1", HostPath: &corev1.HostPathVolumeSource{Path: "/data/cache1"}},
+				{Name: "cache-2", HostPath: &corev1.HostPathVolumeSource{Path: "/data/cache2"}},
+				{Name: "nfs-cache"}, // No HostPath, should be skipped
+			},
+			expectedImage: "neutree/engine-llama-cpp:v0.3.7-ray2.53.0",
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
+				"-v /data/cache1:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "cache-1"),
+				"-v /data/cache2:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "cache-2"),
+				"--rm",
+			},
+		},
+		// Error cases
+		{
+			name:         "nil endpoint",
+			endpoint:     nil,
+			engine:       &v1.Engine{Metadata: &v1.Metadata{Name: "vllm"}, Spec: &v1.EngineSpec{}},
+			expectErr:    true,
+			expectErrMsg: "endpoint with engine spec is required",
 		},
 		{
 			name: "endpoint without engine spec",
 			endpoint: &v1.Endpoint{
 				Spec: &v1.EndpointSpec{},
 			},
-			engine:    &v1.Engine{Metadata: &v1.Metadata{Name: "vllm"}, Spec: &v1.EngineSpec{}},
-			expectMsg: "endpoint with engine spec is required",
+			engine:       &v1.Engine{Metadata: &v1.Metadata{Name: "vllm"}, Spec: &v1.EngineSpec{}},
+			expectErr:    true,
+			expectErrMsg: "endpoint with engine spec is required",
 		},
 		{
 			name: "nil engine",
@@ -1608,8 +1321,9 @@ func TestBuildEngineContainerConfigs_ErrorCases(t *testing.T) {
 					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
 				},
 			},
-			engine:    nil,
-			expectMsg: "engine is required",
+			engine:       nil,
+			expectErr:    true,
+			expectErrMsg: "engine is required",
 		},
 		{
 			name: "version not found in engine",
@@ -1627,70 +1341,94 @@ func TestBuildEngineContainerConfigs_ErrorCases(t *testing.T) {
 					},
 				},
 			},
-			expectMsg: "engine version v99.0.0 not found",
+			expectErr:    true,
+			expectErrMsg: "engine version v99.0.0 not found",
+		},
+		{
+			name:     "engine version without image returns error",
+			endpoint: gpuEndpoint("v0.8.5"),
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{Name: "vllm"},
+				Spec: &v1.EngineSpec{
+					Versions: []*v1.EngineVersion{
+						{Version: "v0.8.5"},
+					},
+				},
+			},
+			imageRegistry: defaultImageRegistry,
+			expectErr:     true,
+			expectErrMsg:  "no engine image configured for accelerator",
+		},
+		{
+			name:     "accelerator manager error propagates",
+			endpoint: gpuEndpoint("v0.12.0"),
+			engine:   defaultEngine,
+			setupMgr: func(t *testing.T) *acceleratormocks.MockManager {
+				mgr := acceleratormocks.NewMockManager(t)
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return(nil, assert.AnError)
+				return mgr
+			},
+			expectErr:    true,
+			expectErrMsg: "failed to get engine container run options",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			base, backend, err := buildEngineContainerConfigs(tt.endpoint, tt.engine, nil, nil, nil, nil)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tt.expectMsg)
-			assert.Nil(t, base)
-			assert.Nil(t, backend)
+			var mgr *acceleratormocks.MockManager
+			if tt.setupMgr != nil {
+				mgr = tt.setupMgr(t)
+			} else {
+				mgr = acceleratormocks.NewMockManager(t)
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
+			}
+
+			baseConfig, backendConfig, err := buildEngineContainerConfigs(tt.endpoint, tt.engine, tt.imageRegistry, mgr, tt.modelCaches, tt.modelRegistry)
+
+			if tt.expectErr {
+				assert.Error(t, err)
+				if tt.expectErrMsg != "" {
+					assert.Contains(t, err.Error(), tt.expectErrMsg)
+				}
+				assert.Nil(t, baseConfig)
+				assert.Nil(t, backendConfig)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.NotNil(t, baseConfig)
+			assert.NotNil(t, backendConfig)
+
+			assert.Equal(t, tt.expectedImage, baseConfig["image"])
+			baseOptions, ok := baseConfig["run_options"].([]string)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedBaseOptions, baseOptions)
+
+			assert.Equal(t, tt.expectedImage, backendConfig["image"])
+			backendOptions, ok := backendConfig["run_options"].([]string)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedBackendOptions, backendOptions)
 		})
 	}
 }
 
-func TestBuildEngineContainerConfigs_CPUEndpoint(t *testing.T) {
-	endpoint := &v1.Endpoint{
-		Spec: &v1.EndpointSpec{
-			Engine:    &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "v0.3.7"},
-			Resources: &v1.ResourceSpec{},
-		},
-	}
-
-	engine := &v1.Engine{
-		Metadata: &v1.Metadata{Name: "llama-cpp"},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version: "v0.3.7",
-					Images: map[string]*v1.EngineImage{
-						"cpu": {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
-					},
-				},
-			},
-		},
-	}
-
-	base, backend, err := buildEngineContainerConfigs(endpoint, engine, nil, nil, nil, nil)
-	assert.NoError(t, err)
-
-	// Base: image + --rm
-	assert.Equal(t, "neutree/engine-llama-cpp:v0.3.7-ray2.53.0", base["image"])
-	assert.Equal(t, []string{"--rm"}, base["run_options"])
-
-	// Backend: only --rm (no GPU options for CPU)
-	assert.Equal(t, "neutree/engine-llama-cpp:v0.3.7-ray2.53.0", backend["image"])
-	assert.Equal(t, []string{"--rm"}, backend["run_options"].([]string))
-}
-
-func TestBuildEngineContainerConfigs_NilImageRegistry(t *testing.T) {
+func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
 
-	endpoint := &v1.Endpoint{
-		Spec: &v1.EndpointSpec{
-			Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
-			Resources: &v1.ResourceSpec{
-				Accelerator: map[string]string{
-					v1.AcceleratorTypeKey: nvidiaGPU,
-				},
-			},
+	hfModelRegistry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.HuggingFaceModelRegistryType,
+			Url:  "https://huggingface.co",
 		},
 	}
 
-	engine := &v1.Engine{
+	defaultImageRegistry := &v1.ImageRegistry{
+		Spec: &v1.ImageRegistrySpec{
+			URL: "http://registry.example.com",
+		},
+	}
+
+	vllmEngine := &v1.Engine{
 		Metadata: &v1.Metadata{Name: "vllm"},
 		Spec: &v1.EngineSpec{
 			Versions: []*v1.EngineVersion{
@@ -1704,64 +1442,7 @@ func TestBuildEngineContainerConfigs_NilImageRegistry(t *testing.T) {
 		},
 	}
 
-	mgr := acceleratormocks.NewMockManager(t)
-	mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
-
-	base, backend, err := buildEngineContainerConfigs(endpoint, engine, nil, mgr, nil, nil)
-	assert.NoError(t, err)
-
-	// Without image registry, image should not have registry prefix
-	assert.Equal(t, "neutree/engine-vllm:v0.12.0-ray2.53.0", base["image"])
-	assert.Equal(t, "neutree/engine-vllm:v0.12.0-ray2.53.0", backend["image"])
-}
-
-func TestBuildEngineContainerConfigs_AcceleratorManagerError(t *testing.T) {
-	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
-
-	endpoint := &v1.Endpoint{
-		Spec: &v1.EndpointSpec{
-			Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
-			Resources: &v1.ResourceSpec{
-				Accelerator: map[string]string{
-					v1.AcceleratorTypeKey: nvidiaGPU,
-				},
-			},
-		},
-	}
-
-	engine := &v1.Engine{
-		Metadata: &v1.Metadata{Name: "vllm"},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version: "v0.12.0",
-					Images: map[string]*v1.EngineImage{
-						"nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.12.0-ray2.53.0"},
-					},
-				},
-			},
-		},
-	}
-
-	mgr := acceleratormocks.NewMockManager(t)
-	mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return(nil, assert.AnError)
-
-	base, backend, err := buildEngineContainerConfigs(endpoint, engine, nil, mgr, nil, nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get engine container run options")
-	assert.Nil(t, base)
-	assert.Nil(t, backend)
-}
-
-func TestBuildEngineContainerConfigs_MultipleModelCaches(t *testing.T) {
-	endpoint := &v1.Endpoint{
-		Spec: &v1.EndpointSpec{
-			Engine:    &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "v0.3.7"},
-			Resources: &v1.ResourceSpec{},
-		},
-	}
-
-	engine := &v1.Engine{
+	cpuEngine := &v1.Engine{
 		Metadata: &v1.Metadata{Name: "llama-cpp"},
 		Spec: &v1.EngineSpec{
 			Versions: []*v1.EngineVersion{
@@ -1775,21 +1456,170 @@ func TestBuildEngineContainerConfigs_MultipleModelCaches(t *testing.T) {
 		},
 	}
 
-	modelCaches := []v1.ModelCache{
-		{Name: "cache-1", HostPath: &corev1.HostPathVolumeSource{Path: "/data/cache1"}},
-		{Name: "cache-2", HostPath: &corev1.HostPathVolumeSource{Path: "/data/cache2"}},
-		{Name: "nfs-cache"}, // No HostPath, should be skipped
+	tests := []struct {
+		name                       string
+		endpoint                   *v1.Endpoint
+		cluster                    *v1.Cluster
+		engine                     *v1.Engine
+		imageRegistry              *v1.ImageRegistry
+		setupMgr                   func(t *testing.T) *acceleratormocks.MockManager
+		expectContainer            bool
+		expectedContainerImage     string
+		expectedBaseRunOptions     []string
+		expectedBackendRunOptions  []string
+		expectedEngineName         string
+		expectedEngineVersion      string
+	}{
+		{
+			name: "new GPU cluster generates container and backend_container",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "test-ep"},
+				Spec: &v1.EndpointSpec{
+					Engine:  &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Model:   &v1.ModelSpec{Name: "test-model", Task: v1.TextGenerationModelTask},
+					Resources: &v1.ResourceSpec{
+						Accelerator: map[string]string{v1.AcceleratorTypeKey: nvidiaGPU},
+					},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{
+					Version: "v1.0.1",
+					Config: &v1.ClusterConfig{
+						ModelCaches: []v1.ModelCache{
+							{Name: "default", HostPath: &corev1.HostPathVolumeSource{Path: "/data/models"}},
+						},
+					},
+				},
+				Status: &v1.ClusterStatus{AcceleratorType: &nvidiaGPU},
+			},
+			engine:        vllmEngine,
+			imageRegistry: defaultImageRegistry,
+			setupMgr: func(t *testing.T) *acceleratormocks.MockManager {
+				mgr := acceleratormocks.NewMockManager(t)
+				mgr.EXPECT().GetConverter(nvidiaGPU).Return(plugin.NewGPUConverter(), true)
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
+				return mgr
+			},
+			expectContainer:        true,
+			expectedContainerImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedBaseRunOptions: []string{"--rm"},
+			expectedBackendRunOptions: []string{
+				"--runtime=nvidia", "--gpus all",
+				"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),
+				"--rm",
+			},
+			expectedEngineName:    "vllm",
+			expectedEngineVersion: "v0.12.0",
+		},
+		{
+			name: "old cluster (v1.0.0) does not generate container config",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "test-ep"},
+				Spec: &v1.EndpointSpec{
+					Engine:            &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Model:             &v1.ModelSpec{Name: "test-model", Task: v1.TextGenerationModelTask},
+					Resources:         &v1.ResourceSpec{Accelerator: map[string]string{v1.AcceleratorTypeKey: nvidiaGPU}},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec:   &v1.ClusterSpec{Version: "v1.0.0"},
+				Status: &v1.ClusterStatus{AcceleratorType: &nvidiaGPU},
+			},
+			engine: vllmEngine,
+			setupMgr: func(t *testing.T) *acceleratormocks.MockManager {
+				mgr := acceleratormocks.NewMockManager(t)
+				mgr.EXPECT().GetConverter(nvidiaGPU).Return(plugin.NewGPUConverter(), true)
+				return mgr
+			},
+			expectContainer:       false,
+			expectedEngineName:    "vllm",
+			expectedEngineVersion: "v0.12.0",
+		},
+		{
+			name: "empty cluster version treated as old cluster",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "test-ep"},
+				Spec: &v1.EndpointSpec{
+					Engine:            &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Model:             &v1.ModelSpec{Name: "test-model", Task: v1.TextGenerationModelTask},
+					Resources:         &v1.ResourceSpec{},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster:               &v1.Cluster{},
+			expectContainer:       false,
+			expectedEngineName:    "vllm",
+			expectedEngineVersion: "v0.12.0",
+		},
+		{
+			name: "CPU endpoint on new cluster generates container without GPU options",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "cpu-ep"},
+				Spec: &v1.EndpointSpec{
+					Engine:            &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "v0.3.7"},
+					Model:             &v1.ModelSpec{Name: "test-model", Task: v1.TextGenerationModelTask},
+					Resources:         &v1.ResourceSpec{},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{Version: "v1.0.1"},
+			},
+			engine:                 cpuEngine,
+			imageRegistry:          defaultImageRegistry,
+			expectContainer:        true,
+			expectedContainerImage: "registry.example.com/neutree/engine-llama-cpp:v0.3.7-ray2.53.0",
+			expectedBaseRunOptions: []string{"--rm"},
+			expectedBackendRunOptions: []string{"--rm"},
+			expectedEngineName:     "llama-cpp",
+			expectedEngineVersion:  "v0.3.7",
+		},
 	}
 
-	_, backend, err := buildEngineContainerConfigs(endpoint, engine, nil, nil, modelCaches, nil)
-	assert.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mgr *acceleratormocks.MockManager
+			if tt.setupMgr != nil {
+				mgr = tt.setupMgr(t)
+			}
 
-	backendOpts := backend["run_options"].([]string)
-	assert.Contains(t, backendOpts, "-v /data/cache1:"+filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "cache-1"))
-	assert.Contains(t, backendOpts, "-v /data/cache2:"+filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "cache-2"))
-	// NFS cache without HostPath should NOT appear
-	for _, opt := range backendOpts {
-		assert.NotContains(t, opt, "nfs-cache")
+			app, err := EndpointToApplication(tt.endpoint, tt.cluster, hfModelRegistry, tt.engine, tt.imageRegistry, mgr)
+			assert.NoError(t, err)
+
+			// Verify ENGINE_NAME / ENGINE_VERSION env vars
+			envs := app.RuntimeEnv["env_vars"].(map[string]string)
+			assert.Equal(t, tt.expectedEngineName, envs["ENGINE_NAME"])
+			assert.Equal(t, tt.expectedEngineVersion, envs["ENGINE_VERSION"])
+
+			if !tt.expectContainer {
+				_, hasContainer := app.RuntimeEnv["container"]
+				assert.False(t, hasContainer, "should not have runtime_env.container")
+				_, hasBackend := app.Args["backend_container"]
+				assert.False(t, hasBackend, "should not have backend_container")
+				return
+			}
+
+			// Verify base container config
+			container, ok := app.RuntimeEnv["container"].(map[string]interface{})
+			assert.True(t, ok, "runtime_env should have 'container'")
+			assert.Equal(t, tt.expectedContainerImage, container["image"])
+
+			baseOpts, ok := container["run_options"].([]string)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedBaseRunOptions, baseOpts)
+
+			// Verify backend container config
+			backendContainer, ok := app.Args["backend_container"].(map[string]interface{})
+			assert.True(t, ok, "args should have 'backend_container'")
+			assert.Equal(t, tt.expectedContainerImage, backendContainer["image"])
+
+			backendOpts, ok := backendContainer["run_options"].([]string)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedBackendRunOptions, backendOpts)
+		})
 	}
 }
 
