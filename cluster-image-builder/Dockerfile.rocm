@@ -3,7 +3,7 @@ ARG COMMON_WORKDIR=/app
 ARG RAY_REPO
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
 ARG PYTHON_VERSION=3.12
-ARG ROCM_VERSION=6.3
+ARG ROCM_VERSION=6.3.0
 
 # --- Ray source fetch ---
 FROM alpine/git:v2.47.2 AS ray_fetch
@@ -35,6 +35,9 @@ ENV HOME=/home/ray
 ARG PYTHON_VERSION
 ARG ROCM_VERSION
 
+ENV PATH=$PATH:/opt/rocm-${ROCM_VERSION}/bin
+ENV LD_LIBRARY_PATH=/opt/rocm-${ROCM_VERSION}/lib:$LD_LIBRARY_PATH
+
 # System packages + Python 3.12 (via deadsnakes PPA)
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends \
@@ -61,8 +64,10 @@ RUN apt-get update -y \
     && python3 --version && python3 -m pip --version
 
 # Install ROCm SMI packages for GPU detection (rocm-smi-lib provides librocm_smi64.so, rocminfo for Neutree accelerator detection)
-RUN curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
-    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} jammy main" > /etc/apt/sources.list.d/rocm.list \
+RUN ROCM_APT_VERSION=$(echo ${ROCM_VERSION} | cut -d. -f1,2) \
+    && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_APT_VERSION} jammy main" > /etc/apt/sources.list.d/rocm.list \
+    && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' > /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update && apt-get install -y --no-install-recommends \
     rocm-smi-lib rocminfo kmod \
     && rm -rf /var/lib/apt/lists/*

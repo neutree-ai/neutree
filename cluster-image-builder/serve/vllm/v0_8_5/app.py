@@ -20,11 +20,9 @@ from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.entrypoints.openai.protocol import (
-    ChatCompletionRequest, ChatCompletionResponse, ErrorResponse,
-    EmbeddingRequest, EmbeddingResponse,
-    ScoreRequest, ScoreResponse,
-    RerankRequest, RerankResponse,
-    EmbeddingCompletionRequest
+    ChatCompletionRequest, ErrorResponse,
+    RerankRequest,
+    EmbeddingCompletionRequest,
 )
 from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
 from vllm.entrypoints.openai.serving_embedding import OpenAIServingEmbedding

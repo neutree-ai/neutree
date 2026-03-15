@@ -1,7 +1,7 @@
 ARG RAY_COMMIT
 ARG COMMON_WORKDIR=/app
 ARG RAY_REPO
-ARG ENGINE_BASE_IMAGE=vllm/vllm-openai:v0.12.0
+ARG ENGINE_BASE_IMAGE=vllm/vllm-openai:v0.11.2
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
 
 # --- Ray source fetch ---
