@@ -67,6 +67,7 @@ RUN apt-get update -y \
 RUN ROCM_APT_VERSION=$(echo ${ROCM_VERSION} | cut -d. -f1,2) \
     && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_APT_VERSION} jammy main" > /etc/apt/sources.list.d/rocm.list \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/${ROCM_APT_VERSION}/ubuntu jammy main" >> /etc/apt/sources.list.d/rocm.list \
     && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' > /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update && apt-get install -y --no-install-recommends \
     rocm-smi-lib rocminfo kmod \
