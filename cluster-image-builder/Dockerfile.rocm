@@ -64,7 +64,7 @@ RUN apt-get update -y \
 RUN curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} jammy main" > /etc/apt/sources.list.d/rocm.list \
     && apt-get update && apt-get install -y --no-install-recommends \
-    rocm-smi-lib rocminfo \
+    rocm-smi-lib rocminfo kmod \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p ${HOME}
