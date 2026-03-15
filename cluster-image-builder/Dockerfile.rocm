@@ -3,7 +3,7 @@ ARG COMMON_WORKDIR=/app
 ARG RAY_REPO
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
 ARG PYTHON_VERSION=3.12
-ARG ROCM_VERSION=6.3.0
+ARG ROCM_VERSION=7.2.0
 
 # --- Ray source fetch ---
 FROM alpine/git:v2.47.2 AS ray_fetch
