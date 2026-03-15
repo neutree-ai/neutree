@@ -39,6 +39,11 @@ type AcceleratorPluginHandle interface {
 
 	// GetResourceParser returns the resource parser
 	GetResourceParser() ResourceParser
+
+	// GetContainerRuntimeConfig returns the static RuntimeConfig for engine containers.
+	// Unlike GetNodeRuntimeConfig, this does NOT require SSH access to a node.
+	// Used to generate Docker run_options for engine containers (runtime_env.container).
+	GetContainerRuntimeConfig() (v1.RuntimeConfig, error)
 }
 
 // ResourceConverter is the interface for resource converters

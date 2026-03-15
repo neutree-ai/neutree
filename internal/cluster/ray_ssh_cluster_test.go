@@ -196,9 +196,10 @@ func TestReconcileHeadNode(t *testing.T) {
 			}
 
 			err := r.reconcileHeadNode(&ReconcileContext{
-				rayService:         dashboardSvc,
-				sshClusterConfig:   &v1.RaySSHProvisionClusterConfig{},
-				sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
+				rayService:          dashboardSvc,
+				sshClusterConfig:    &v1.RaySSHProvisionClusterConfig{},
+				sshRayClusterConfig: &v1.RayClusterConfig{},
+				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
 				Cluster: &v1.Cluster{
 					ID: *pointer.Int(1),
 					Metadata: &v1.Metadata{

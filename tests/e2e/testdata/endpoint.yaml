@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Endpoint
+metadata:
+  name: ${E2E_ENDPOINT_NAME}
+  workspace: ${E2E_WORKSPACE}
+spec:
+  cluster: ${E2E_CLUSTER_NAME}
+  engine:
+    engine: ${E2E_ENGINE_NAME}
+    version: ${E2E_ENGINE_VERSION}
+  model:
+    registry: ${E2E_MODEL_REGISTRY}
+    name: ${E2E_MODEL_NAME}
+    version: ${E2E_MODEL_VERSION}
+    task: ${E2E_MODEL_TASK}
+  resources:
+    gpu: "1"
+    accelerator:
+      type: ${E2E_ACCELERATOR_TYPE}
+      product: ${E2E_ACCELERATOR_PRODUCT}
+  variables:
+    engine_args:${E2E_ENGINE_ARGS_YAML}
+  replicas:
+    num: 1

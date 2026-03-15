@@ -20,7 +20,7 @@ import (
 
 //
 
-func TestMutateAcceleratorRuntimeConfig(t *testing.T) {
+func TestBuildAcceleratorDockerConfig(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       *v1.RayClusterConfig
@@ -108,7 +108,7 @@ func TestMutateAcceleratorRuntimeConfig(t *testing.T) {
 				acceleratorManager: mockAcceleratorManager,
 			}
 
-			changed, err := sshRayClusterReconciler.mutateAcceleratorRuntimeConfig(&ReconcileContext{
+			reconcileCtx := &ReconcileContext{
 				sshClusterConfig:    &v1.RaySSHProvisionClusterConfig{},
 				sshRayClusterConfig: tt.input,
 				Cluster: &v1.Cluster{
@@ -116,39 +116,49 @@ func TestMutateAcceleratorRuntimeConfig(t *testing.T) {
 						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 					},
 				},
-			}, "127.0.0.1")
+			}
+
+			dockerConfig, changed, err := sshRayClusterReconciler.buildAcceleratorDockerConfig(reconcileCtx, "127.0.0.1")
 			if (err != nil) != tt.wantErr {
-				t.Errorf("MutateAcceleratorRuntimeConfig() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("buildAcceleratorDockerConfig() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if changed != tt.wantChanged {
-				t.Errorf("MutateAcceleratorRuntimeConfig() changed = %v, want %v", changed, tt.wantChanged)
+				t.Errorf("buildAcceleratorDockerConfig() changed = %v, want %v", changed, tt.wantChanged)
 			}
 
 			if changed {
-				if tt.input.Docker.Image != tt.want.Docker.Image {
-					t.Errorf("MutateAcceleratorRuntimeConfig() Image = %v, want %v",
-						tt.input.Docker.Image, tt.want.Docker.Image)
+				// Verify the returned config has the expected values
+				if dockerConfig.Image != tt.want.Docker.Image {
+					t.Errorf("buildAcceleratorDockerConfig() Image = %v, want %v",
+						dockerConfig.Image, tt.want.Docker.Image)
 				}
 
-				if tt.input.Docker.RunOptions == nil || len(tt.input.Docker.RunOptions) != len(tt.want.Docker.RunOptions) {
-					t.Errorf("MutateAcceleratorRuntimeConfig() RunOptions = %v, want %v",
-						tt.input.Docker.RunOptions, tt.want.Docker.RunOptions)
+				if len(dockerConfig.RunOptions) != len(tt.want.Docker.RunOptions) {
+					t.Errorf("buildAcceleratorDockerConfig() RunOptions = %v, want %v",
+						dockerConfig.RunOptions, tt.want.Docker.RunOptions)
 				}
 
 				for _, option := range tt.want.Docker.RunOptions {
 					found := false
-					for _, gotOption := range tt.input.Docker.RunOptions {
+
+					for _, gotOption := range dockerConfig.RunOptions {
 						if option == gotOption {
 							found = true
 							break
 						}
 					}
+
 					if !found {
-						t.Errorf("MutateAcceleratorRuntimeConfig() RunOption = %v, want %v",
-							tt.input.Docker.RunOptions, tt.want.Docker.RunOptions)
+						t.Errorf("buildAcceleratorDockerConfig() RunOption = %v, want %v",
+							dockerConfig.RunOptions, tt.want.Docker.RunOptions)
 					}
+				}
+
+				// Verify the original config was NOT mutated
+				if tt.input.Docker.Image != "rayproject/ray:latest" {
+					t.Errorf("original config was mutated: Image = %v, want rayproject/ray:latest", tt.input.Docker.Image)
 				}
 			}
 
@@ -912,13 +922,13 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				PullBeforeRun: true,
 				Image:         "registry.example.com/neutree/neutree-serve:v1.0.0",
 				RunOptions: []string{
-					"--privileged",
-					"--cap-add=SYS_ADMIN",
-					"--security-opt=seccomp=unconfined",
 					"-e RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper=true",
 					"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 					"-e RAY_enable_open_telemetry=false",
 					"--ulimit nofile=65536:65536",
+					"--privileged",
+					"--cap-add=SYS_ADMIN",
+					"--security-opt=seccomp=unconfined",
 				},
 			},
 			HeadStartRayCommands: []string{
@@ -1149,13 +1159,15 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						PullBeforeRun: true,
 						Image:         "registry.example.com/neutree/neutree-serve:v1.0.1",
 						RunOptions: []string{
-							"--privileged",
-							"--cap-add=SYS_ADMIN",
-							"--security-opt=seccomp=unconfined",
 							"-e RAY_process_group_cleanup_enabled=true",
 							"-e RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
 							"-e RAY_enable_open_telemetry=false",
 							"--ulimit nofile=65536:65536",
+							"-e RAY_EXPERIMENTAL_RUNTIME_ENV_CONTAINER_RUNTIME=docker",
+							"--volume /var/run/docker.sock:/var/run/docker.sock",
+							"--volume /tmp:/tmp",
+							"--pid=host",
+							"--ipc=host",
 						},
 					},
 					HeadStartRayCommands: []string{

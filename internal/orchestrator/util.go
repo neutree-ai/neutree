@@ -15,6 +15,8 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
+const acceleratorTypeCPU = "cpu"
+
 func getEndpointDeployCluster(s storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, error) { //nolint:unparam
 	clusterFilter := []storage.Filter{
 		{

@@ -48,6 +48,24 @@ func IsMountExist(device string, mountPoint string) (bool, error) {
 	return false, nil
 }
 
+// GetMountType returns the filesystem type (e.g. "nfs", "nfs4") for the
+// given device mounted at mountPoint by reading /proc/mounts.
+// Returns an error if the mount is not found.
+func GetMountType(device string, mountPoint string) (string, error) {
+	mountPoints, err := mountInterface.List()
+	if err != nil {
+		return "", err
+	}
+
+	for _, mp := range mountPoints {
+		if mp.Path == mountPoint && mp.Device == device {
+			return mp.Type, nil
+		}
+	}
+
+	return "", errors.Errorf("mount %s at %s not found", device, mountPoint)
+}
+
 func MountNFS(device string, mountPoint string) error {
 	existed, err := IsMountExist(device, mountPoint)
 	if err != nil {

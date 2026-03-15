@@ -151,8 +151,8 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 					ValuesSchema: llamaCppDefaultEngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"cpu": {
-							ImageName: "neutree/llama-cpp-python", // no official llama-cpp-python image, so use neutree image
-							Tag:       "v0.3.7",
+							ImageName: "neutree/engine-llama-cpp",
+							Tag:       "v0.3.7-ray2.53.0",
 						},
 					},
 					DeployTemplate: map[string]map[string]string{
@@ -187,19 +187,35 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 				{
 					Version:      "v0.8.5",
 					ValuesSchema: vllmDefaultEngineSchema,
+					Images: map[string]*v1.EngineImage{
+						"nvidia_gpu": {
+							ImageName: "neutree/engine-vllm",
+							Tag:       "v0.8.5-ray2.53.0",
+						},
+					},
 				},
 				{
 					Version:      "v0.11.2",
 					ValuesSchema: vllmV0_11_2EngineSchema,
 					Images: map[string]*v1.EngineImage{
 						"nvidia_gpu": {
-							ImageName: "vllm/vllm-openai", // use official vllm image with nvidia gpu support
-							Tag:       "v0.11.2",
+							ImageName: "neutree/engine-vllm",
+							Tag:       "v0.11.2-ray2.53.0",
 						},
 					},
 					DeployTemplate: map[string]map[string]string{
 						"kubernetes": {
 							"default": GetVLLMDefaultDeployTemplate(),
+						},
+					},
+				},
+				{
+					Version:      "v0.12.0",
+					ValuesSchema: vllmDefaultEngineSchema,
+					Images: map[string]*v1.EngineImage{
+						"nvidia_gpu": {
+							ImageName: "neutree/engine-vllm",
+							Tag:       "v0.12.0-ray2.53.0",
 						},
 					},
 				},
@@ -213,6 +229,13 @@ func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSu
 			llamaCppV1Engine,
 			vllmV1Engine,
 		},
+	}, nil
+}
+
+func (p *GPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	return v1.RuntimeConfig{
+		Runtime: "nvidia",
+		Options: []string{"--gpus all"},
 	}, nil
 }
 

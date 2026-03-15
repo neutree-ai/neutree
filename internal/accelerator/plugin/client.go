@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -77,6 +78,17 @@ func (u *acceleratorPluginClient) GetNodeRuntimeConfig(ctx context.Context,
 	}
 
 	return response, nil
+}
+
+func (u *acceleratorPluginClient) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	response := &v1.GetContainerRuntimeConfigResponse{}
+
+	err := u.doGet(context.Background(), v1.GetContainerRuntimeConfigPath, response)
+	if err != nil {
+		return v1.RuntimeConfig{}, errors.Wrap(err, "failed to get container runtime config from accelerator plugin")
+	}
+
+	return response.RuntimeConfig, nil
 }
 
 func (u *acceleratorPluginClient) GetResourceConverter() ResourceConverter {

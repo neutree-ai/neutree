@@ -1,0 +1,56 @@
+ARG RAY_COMMIT
+ARG COMMON_WORKDIR=/app
+ARG RAY_REPO
+ARG ENGINE_BASE_IMAGE=vllm/vllm-openai:v0.11.2
+ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
+
+# --- Ray source fetch ---
+FROM alpine/git:v2.47.2 AS ray_fetch
+ARG RAY_REPO
+ARG RAY_COMMIT
+ARG COMMON_WORKDIR
+WORKDIR ${COMMON_WORKDIR}
+RUN git clone ${RAY_REPO} \
+	    && cd ray \
+	    && git checkout ${RAY_COMMIT}
+
+# --- Ray wheel build ---
+FROM ${RAY_BUILD_BASE_IMAGE} AS build_ray
+ARG COMMON_WORKDIR
+ARG RAY_COMMIT
+ENV BUILDKITE_COMMIT=${RAY_COMMIT}
+ENV TRAVIS_COMMIT=${BUILDKITE_COMMIT}
+ENV BUILD_ONE_PYTHON_ONLY=py312
+ENV RAY_DISABLE_EXTRA_CPP=1
+WORKDIR /ray
+COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
+RUN /ray/python/build-wheel-manylinux2014.sh
+
+# --- Engine image ---
+FROM ${ENGINE_BASE_IMAGE}
+
+ENV HOME=/home/ray
+WORKDIR ${HOME}
+
+# Install Ray neutree fork (same version as cluster image)
+RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
+    cd /install \
+    && whl=$(ls .whl/*.whl) \
+    && uv pip install --system "${whl}[serve]"
+
+# Install common serve-layer dependencies
+RUN --mount=type=bind,src=requirements,target=requirements \
+    uv pip install --system -r requirements/common.txt
+
+# Copy Neutree serve layer code and install downloader dependencies
+COPY serve ./serve
+COPY downloader ./downloader
+RUN uv pip install --system -r downloader/requirements.txt
+
+# Ensure "python" is in PATH (some base images only provide "python3")
+RUN ln -sf $(which python3) /usr/bin/python 2>/dev/null || true
+
+# Reset ENTRYPOINT from base image (vllm/vllm-openai sets "vllm serve")
+# so that Ray can execute its own commands in this container.
+ENTRYPOINT []
+CMD ["/bin/bash"]
