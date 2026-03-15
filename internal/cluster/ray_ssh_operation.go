@@ -362,6 +362,10 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 			// Share host PID namespace so that engine containers (which also use --pid=host)
 			// can see the raylet process and verify it's alive via RAY_RAYLET_PID.
 			"--pid=host",
+			// Allow Ray to read /proc/<pid>/ for process monitoring with --pid=host.
+			// Without this, AppArmor's docker-default profile denies ptrace across profiles.
+			"--cap-add=SYS_PTRACE",
+			"--security-opt=apparmor=unconfined",
 			// Share host IPC namespace so that Ray container and engine containers can
 			// communicate via shared memory (used by Ray Object Store).
 			"--ipc=host",
