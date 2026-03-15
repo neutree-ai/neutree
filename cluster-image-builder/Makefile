@@ -18,7 +18,7 @@ RAY_COMMIT ?= $(shell git ls-remote $(RAY_REPO) $(RAY_VERSION) | cut -f1 | head 
 # Engine image build args
 ENGINE_VLLM_BASE_IMAGE_REPO ?= vllm/vllm-openai
 ENGINE_VLLM_ROCM_BASE_IMAGE_REPO ?= vllm/vllm-openai-rocm
-ENGINE_VLLM_VERSION ?= v0.12.0
+ENGINE_VLLM_VERSION ?= v0.11.2
 ENGINE_LLAMA_CPP_VERSION ?= 0.3.7
 RAY_SHORT_VERSION ?= ray2.53.0
 
