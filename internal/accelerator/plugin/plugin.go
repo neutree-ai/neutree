@@ -32,7 +32,6 @@ type AcceleratorPlugin interface {
 type AcceleratorPluginHandle interface {
 	GetNodeAccelerator(ctx context.Context, request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
 	GetNodeRuntimeConfig(ctx context.Context, request *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
-	GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error)
 	Ping(ctx context.Context) error
 	// GetResourceConverter returns the resource converter
 	GetResourceConverter() ResourceConverter

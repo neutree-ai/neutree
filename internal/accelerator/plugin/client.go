@@ -45,17 +45,6 @@ func (u *acceleratorPluginClient) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (u *acceleratorPluginClient) GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error) {
-	response := &v1.GetSupportEnginesResponse{}
-
-	err := u.doGet(ctx, v1.GetSupportEnginesPath, response)
-	if err != nil {
-		return nil, err
-	}
-
-	return response, nil
-}
-
 func (u *acceleratorPluginClient) GetNodeAccelerator(ctx context.Context,
 	request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error) {
 	response := &v1.GetNodeAcceleratorResponse{}

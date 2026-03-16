@@ -1,4 +1,4 @@
-package plugin
+package engine
 
 import (
 	_ "embed"
@@ -6,10 +6,10 @@ import (
 	"fmt"
 )
 
-//go:embed deploy_templates/vllm_v0.11.2_default.yaml
+//go:embed vllm/v0.11.2/templates/kubernetes/default.yaml
 var vllmDefaultDeployTemplate string
 
-//go:embed deploy_templates/llama_cpp_v0.3.7_default.yaml
+//go:embed llama-cpp/v0.3.7/templates/kubernetes/default.yaml
 var llamaCppDefaultDeployTemplate string
 
 // GetVLLMDefaultDeployTemplate returns the default deployment template for vLLM V0.11.2 engine

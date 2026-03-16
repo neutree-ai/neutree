@@ -132,113 +132,12 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 	return accelerators, nil
 }
 
-func (p *GPUAcceleratorPlugin) GetSupportEngines(ctx context.Context) (*v1.GetSupportEnginesResponse, error) {
-	llamaCppDefaultEngineSchema, err := GetLlamaCppDefaultEngineSchema()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load Llama.cpp default engine schema")
-	}
-
-	llamaCppV1Engine := &v1.Engine{
-		APIVersion: "v1",
-		Kind:       "Engine",
-		Metadata: &v1.Metadata{
-			Name: "llama-cpp",
-		},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version:      "v0.3.7",
-					ValuesSchema: llamaCppDefaultEngineSchema,
-					Images: map[string]*v1.EngineImage{
-						"cpu": {
-							ImageName: "neutree/engine-llama-cpp",
-							Tag:       "v0.3.7-ray2.53.0",
-						},
-					},
-					DeployTemplate: map[string]map[string]string{
-						"kubernetes": {
-							"default": GetLlamaCppDefaultDeployTemplate(),
-						},
-					},
-				},
-			},
-			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask},
-		},
-	}
-
-	vllmDefaultEngineSchema, err := GetVLLMDefaultEngineSchema()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load vLLM V1 engine schema")
-	}
-
-	vllmV0_11_2EngineSchema, err := GetVLLMV0_11_2EngineSchema()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load vLLM V0.11.2 engine schema")
-	}
-
-	vllmV1Engine := &v1.Engine{
-		APIVersion: "v1",
-		Kind:       "Engine",
-		Metadata: &v1.Metadata{
-			Name: "vllm",
-		},
-		Spec: &v1.EngineSpec{
-			Versions: []*v1.EngineVersion{
-				{
-					Version:      "v0.8.5",
-					ValuesSchema: vllmDefaultEngineSchema,
-					Images: map[string]*v1.EngineImage{
-						"nvidia_gpu": {
-							ImageName: "neutree/engine-vllm",
-							Tag:       "v0.8.5-ray2.53.0",
-						},
-					},
-				},
-				{
-					Version:      "v0.11.2",
-					ValuesSchema: vllmV0_11_2EngineSchema,
-					Images: map[string]*v1.EngineImage{
-						"nvidia_gpu": {
-							ImageName: "neutree/engine-vllm",
-							Tag:       "v0.11.2-ray2.53.0",
-						},
-					},
-					DeployTemplate: map[string]map[string]string{
-						"kubernetes": {
-							"default": GetVLLMDefaultDeployTemplate(),
-						},
-					},
-				},
-				{
-					Version:      "v0.12.0",
-					ValuesSchema: vllmDefaultEngineSchema,
-					Images: map[string]*v1.EngineImage{
-						"nvidia_gpu": {
-							ImageName: "neutree/engine-vllm",
-							Tag:       "v0.12.0-ray2.53.0",
-						},
-					},
-				},
-			},
-			SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
-		},
-	}
-
-	return &v1.GetSupportEnginesResponse{
-		Engines: []*v1.Engine{
-			llamaCppV1Engine,
-			vllmV1Engine,
-		},
-	}, nil
-}
-
 func (p *GPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
 	return v1.RuntimeConfig{
 		Runtime: "nvidia",
 		Options: []string{"--gpus all"},
 	}, nil
 }
-
 func (p *GPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
 }

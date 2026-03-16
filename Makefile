@@ -317,6 +317,30 @@ sync-deploy-manifests: vendir ## Sync third-party dependencies using vendir
 sync-grafana-dashboards: vendir ## Sync grafana dashboards using vendir
 	cd scripts/dashboard  && $(VENDIR) sync && bash sync-grafana-dashboards.sh
 
+##@ Engine Package
+
+ENGINE_PACKAGE_SCRIPT := scripts/builder/build-engine-package.sh
+ENGINE_PACKAGE_OUTPUT_DIR ?= dist
+ENGINE_BASE_DIR := internal/engine
+ENGINE_NAME ?= vllm
+ENGINE_VERSION ?= v0.11.2
+ENGINE_IMAGES ?= nvidia_gpu:vllm/vllm-openai:v0.11.2,amd_gpu:rocm/vllm:rocm7.0.0_vllm_0.11.2_20251210
+ENGINE_TASKS ?= text-generation,text-embedding,text-rerank
+ENGINE_DESCRIPTION ?= $(ENGINE_NAME) inference engine
+
+.PHONY: build-engine-package
+build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION)
+	@mkdir -p $(ENGINE_PACKAGE_OUTPUT_DIR)
+	bash $(ENGINE_PACKAGE_SCRIPT) \
+		-n $(ENGINE_NAME) \
+		-v $(ENGINE_VERSION) \
+		-i "$(ENGINE_IMAGES)" \
+		-s "$(ENGINE_TASKS)" \
+		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/schema.json) \
+		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/templates) \
+		-o $(ENGINE_NAME)-$(ENGINE_VERSION).tar.gz \
+		-d "$(ENGINE_DESCRIPTION)"
+
 .PHONY: sync-images-list
 sync-images-list: ## Sync images list for building package
 	helm template neutree ./deploy/chart/neutree \
