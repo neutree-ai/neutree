@@ -56,9 +56,7 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 
 // newImageService is a factory function for creating image services.
 // It can be overridden in tests to inject mocks.
-var newImageService = func() registry.ImageService {
-	return registry.NewImageService()
-}
+var newImageService = registry.NewImageService
 
 type availableUpgradeVersionsResponse struct {
 	CurrentVersion    string   `json:"current_version"`

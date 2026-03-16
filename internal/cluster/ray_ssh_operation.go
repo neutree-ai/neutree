@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 func (c *sshRayClusterReconciler) upCluster(reconcileCtx *ReconcileContext, restart bool) (string, error) {
@@ -453,6 +454,22 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	return rayClusterConfig, nil
 }
 
+// getHeadNodeVersion returns the NeutreeServingVersionLabel from the alive head node.
+func (c *sshRayClusterReconciler) getHeadNodeVersion(reconcileCtx *ReconcileContext) (string, error) {
+	nodes, err := reconcileCtx.rayService.ListNodes()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to list ray nodes")
+	}
+
+	for _, node := range nodes {
+		if node.Raylet.IsHeadNode && node.Raylet.State == v1.AliveNodeState {
+			return node.Raylet.Labels[v1.NeutreeServingVersionLabel], nil
+		}
+	}
+
+	return "", nil
+}
+
 func needsVersionUpgrade(cluster *v1.Cluster) bool {
 	return cluster.Status != nil && cluster.Status.Version != "" &&
 		cluster.Spec != nil && cluster.Spec.Version != "" &&
@@ -465,28 +482,223 @@ func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext)
 		reconcileCtx.Cluster.Status.Version,
 		reconcileCtx.Cluster.Spec.Version)
 
-	// Step 1: Force stop all workers and ray down
-	err := c.downCluster(reconcileCtx)
+	// Step 1: Pre-pull images on all nodes before stopping the cluster.
+	// This includes:
+	// - The new cluster image (neutree-serve:<new_version>) so upCluster/startNode is fast
+	// - Engine images used by running endpoints (new versions need separate engine images)
+	// Pre-pulling is blocking to ensure all images are cached before downCluster,
+	// minimizing actual downtime during upgrade.
+	err := c.prePullImages(reconcileCtx)
+	if err != nil {
+		return errors.Wrap(err, "failed to pre-pull images")
+	}
+
+	// Step 2: Force stop all workers and ray down
+	err = c.downCluster(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to down cluster during upgrade")
 	}
 
-	// Step 2: Ray up with new image (restart=true)
+	// Step 3: Ray up with new image (restart=true)
 	headIP, err := c.upCluster(reconcileCtx, true)
 	if err != nil {
 		return errors.Wrap(err, "failed to up cluster during upgrade")
 	}
 
-	// Step 3: Set head provision status
+	// Step 4: Set head provision status
 	err = setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true)
 	if err != nil {
 		klog.Warningf("Failed to set head node provision status during upgrade: %v", err)
 	}
 
-	// Step 4: Reconcile worker nodes with new image
+	// Step 5: Reconcile worker nodes with new image
 	err = c.reconcileWorkerNode(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to reconcile worker nodes during upgrade")
+	}
+
+	return nil
+}
+
+// prePullImages pre-pulls the new cluster image and engine images on all cluster nodes.
+// The cluster image (neutree-serve:<new_version>) is pre-pulled so upCluster/startNode
+// can start instantly. Engine images used by running endpoints are pre-pulled so inference
+// instances recover quickly after upgrade.
+func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) error {
+	// Collect engine images from running endpoints
+	engineImages, err := c.collectEngineImages(reconcileCtx)
+	if err != nil {
+		return errors.Wrap(err, "failed to collect engine images")
+	}
+
+	// Add the new cluster image (neutree-serve with new version)
+	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
+	if err != nil {
+		return errors.Wrap(err, "failed to get image prefix")
+	}
+
+	clusterImage := imagePrefix + "/" + v1.NeutreeServeImageName + ":" + reconcileCtx.Cluster.Spec.Version
+
+	imageSet := map[string]struct{}{clusterImage: {}}
+	for _, img := range engineImages {
+		imageSet[img] = struct{}{}
+	}
+
+	images := make([]string, 0, len(imageSet))
+	for img := range imageSet {
+		images = append(images, img)
+	}
+
+	klog.Infof("Pre-pulling %d image(s) on cluster %s: %v",
+		len(images), reconcileCtx.Cluster.Metadata.WorkspaceName(), images)
+
+	// Collect all node IPs (head + workers)
+	nodeIPs := []string{reconcileCtx.sshClusterConfig.Provider.HeadIP}
+	nodeIPs = append(nodeIPs, reconcileCtx.sshClusterConfig.Provider.WorkerIPs...)
+
+	// Pull images on all nodes concurrently
+	eg := &errgroup.Group{}
+
+	for _, nodeIP := range nodeIPs {
+		ip := nodeIP
+
+		eg.Go(func() error {
+			return c.pullImagesOnNode(reconcileCtx, ip, images)
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return errors.Wrap(err, "failed to pull engine images on nodes")
+	}
+
+	klog.Infof("Successfully pre-pulled engine images on cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
+
+	return nil
+}
+
+// collectEngineImages determines the unique set of engine images that need to be pre-pulled.
+// It looks at all running/deploying endpoints on this cluster, resolves their engine images,
+// and returns deduplicated full image paths.
+func (c *sshRayClusterReconciler) collectEngineImages(reconcileCtx *ReconcileContext) ([]string, error) {
+	cluster := reconcileCtx.Cluster
+
+	// List endpoints running on this cluster
+	endpoints, err := c.storage.ListEndpoint(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "spec->cluster", Operator: "eq", Value: fmt.Sprintf(`"%s"`, cluster.Metadata.Name)},
+			{Column: "metadata->workspace", Operator: "eq", Value: fmt.Sprintf(`"%s"`, cluster.Metadata.Workspace)},
+		},
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list endpoints")
+	}
+
+	// Get image prefix from image registry
+	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get image prefix")
+	}
+
+	// Get cluster accelerator type
+	acceleratorType := ""
+	if cluster.Status != nil && cluster.Status.AcceleratorType != nil {
+		acceleratorType = *cluster.Status.AcceleratorType
+	}
+
+	// Collect unique engine images
+	imageSet := map[string]struct{}{}
+
+	for i := range endpoints {
+		ep := &endpoints[i]
+
+		// Only consider active endpoints
+		if ep.Status != nil &&
+			ep.Status.Phase != v1.EndpointPhaseRUNNING &&
+			ep.Status.Phase != v1.EndpointPhaseDEPLOYING {
+			continue
+		}
+
+		if ep.Spec == nil || ep.Spec.Engine == nil {
+			continue
+		}
+
+		image, err := c.resolveEngineImage(ep, imagePrefix, acceleratorType)
+		if err != nil {
+			klog.Warningf("Failed to resolve engine image for endpoint %s: %v", ep.Metadata.WorkspaceName(), err)
+			continue
+		}
+
+		if image != "" {
+			imageSet[image] = struct{}{}
+		}
+	}
+
+	images := make([]string, 0, len(imageSet))
+	for img := range imageSet {
+		images = append(images, img)
+	}
+
+	return images, nil
+}
+
+// resolveEngineImage looks up the engine for an endpoint and returns the full image path
+// for the cluster's accelerator type.
+func (c *sshRayClusterReconciler) resolveEngineImage(endpoint *v1.Endpoint, imagePrefix, acceleratorType string) (string, error) {
+	// Look up engine from storage
+	engines, err := c.storage.ListEngine(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "metadata->name", Operator: "eq", Value: fmt.Sprintf(`"%s"`, endpoint.Spec.Engine.Engine)},
+			{Column: "metadata->workspace", Operator: "eq", Value: fmt.Sprintf(`"%s"`, endpoint.Metadata.Workspace)},
+		},
+	})
+	if err != nil {
+		return "", errors.Wrap(err, "failed to list engine")
+	}
+
+	if len(engines) == 0 {
+		return "", fmt.Errorf("engine %s not found", endpoint.Spec.Engine.Engine)
+	}
+
+	engine := &engines[0]
+
+	// Find the matching engine version
+	for _, version := range engine.Spec.Versions {
+		if version.Version != endpoint.Spec.Engine.Version {
+			continue
+		}
+
+		engineImage := version.GetImageForAccelerator(acceleratorType)
+		if engineImage == nil {
+			return "", nil
+		}
+
+		imageName, tag := engineImage.GetFullImagePath()
+		if imageName == "" {
+			return "", nil
+		}
+
+		fullImage := imagePrefix + "/" + imageName + ":" + tag
+
+		return fullImage, nil
+	}
+
+	return "", nil
+}
+
+// pullImagesOnNode pulls the given images on a single node via SSH.
+func (c *sshRayClusterReconciler) pullImagesOnNode(reconcileCtx *ReconcileContext, nodeIP string, images []string) error {
+	sshCommandArgs := c.buildSSHCommandArgs(reconcileCtx, nodeIP)
+	dockerCommandRunner := command_runner.NewDockerCommandRunner(&reconcileCtx.sshRayClusterConfig.Docker, sshCommandArgs)
+
+	for _, image := range images {
+		klog.Infof("Pre-pulling engine image %s on node %s", image, nodeIP)
+
+		pullCmd := fmt.Sprintf("docker pull %s", image)
+
+		_, err := dockerCommandRunner.Run(reconcileCtx.Ctx, pullCmd, true, nil, false, nil, "host", "", false)
+		if err != nil {
+			return errors.Wrapf(err, "failed to pull image %s on node %s", image, nodeIP)
+		}
 	}
 
 	return nil

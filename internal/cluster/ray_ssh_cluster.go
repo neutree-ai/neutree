@@ -111,18 +111,19 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 
 	defer c.cleanupConfig(reconcileCtx) //nolint:errcheck
 
-	if reconcileCtx.Cluster.Status == nil || !reconcileCtx.Cluster.Status.Initialized {
+	switch {
+	case reconcileCtx.Cluster.Status == nil || !reconcileCtx.Cluster.Status.Initialized:
 		err = c.initialize(reconcileCtx)
 		if err != nil {
 			reconcileCtx.processMessages = append(reconcileCtx.processMessages, formatMessageWithTimestamp("Cluster initialization failed: "+err.Error()))
 			return errors.New(strings.Join(reconcileCtx.processMessages, "\n"))
 		}
-	} else if needsVersionUpgrade(reconcileCtx.Cluster) {
+	case needsVersionUpgrade(reconcileCtx.Cluster):
 		err = c.upgradeCluster(reconcileCtx)
 		if err != nil {
 			return errors.Wrap(err, "failed to upgrade cluster")
 		}
-	} else {
+	default:
 		err = c.reconcileHeadNode(reconcileCtx)
 		if err != nil {
 			return errors.Wrap(err, "failed to reconcile head node")
@@ -247,6 +248,34 @@ func (c *sshRayClusterReconciler) cleanupConfig(reconcileCtx *ReconcileContext) 
 func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileContext) error {
 	_, err := reconcileCtx.rayService.GetClusterMetadata()
 	if err == nil {
+		// Head is reachable. Check version consistency to handle rollback scenarios
+		// where Head was upgraded but user rolled spec.Version back.
+		if reconcileCtx.Cluster.Spec != nil && reconcileCtx.Cluster.Spec.Version != "" {
+			headVersion, verErr := c.getHeadNodeVersion(reconcileCtx)
+			if verErr != nil {
+				klog.Warningf("Failed to get head node version for %s: %v",
+					reconcileCtx.Cluster.Metadata.WorkspaceName(), verErr)
+			} else if headVersion != "" && headVersion != reconcileCtx.Cluster.Spec.Version {
+				klog.Infof("Head node version %s does not match spec version %s for cluster %s, rebuilding",
+					headVersion, reconcileCtx.Cluster.Spec.Version, reconcileCtx.Cluster.Metadata.WorkspaceName())
+
+				if err := c.downCluster(reconcileCtx); err != nil {
+					return errors.Wrap(err, "failed to down cluster for version consistency")
+				}
+
+				headIP, err := c.upCluster(reconcileCtx, true)
+				if err != nil {
+					return errors.Wrap(err, "failed to up cluster for version consistency")
+				}
+
+				if err := setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true); err != nil {
+					klog.Warningf("Failed to set head node provision status: %v", err)
+				}
+
+				return nil
+			}
+		}
+
 		return nil
 	}
 
