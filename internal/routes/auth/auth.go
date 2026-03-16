@@ -1,15 +1,20 @@
 package auth
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/supabase-community/gotrue-go/types"
+	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
+	"github.com/neutree-ai/neutree/internal/utils/request"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -42,7 +47,7 @@ func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 
 	// Public GoTrue proxy routes - no authentication required
 	// Only expose endpoints actually used by the client
-	authGroup.POST("/token", handleAuthProxy(deps))    // signInWithPassword, token refresh
+	authGroup.POST("/token", handleTokenProxy(deps))   // signInWithPassword, token refresh
 	authGroup.POST("/signup", handleAuthProxy(deps))   // signUp
 	authGroup.POST("/recover", handleAuthProxy(deps))  // resetPasswordForEmail
 	authGroup.GET("/user", handleAuthProxy(deps))      // getUser
@@ -117,6 +122,75 @@ func createUser(client auth.Client, req CreateUserRequest) (*CreateUserResponse,
 	}
 
 	return resp, nil
+}
+
+// handleTokenProxy handles /token requests, resolving username to email before proxying to GoTrue
+func handleTokenProxy(deps *Dependencies) gin.HandlerFunc {
+	proxyHandler := proxies.CreateProxyHandler(deps.AuthEndpoint, "token", nil)
+
+	return func(c *gin.Context) {
+		grantType := c.Query("grant_type")
+		if grantType != "password" {
+			proxyHandler(c)
+			return
+		}
+
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		c.Request.Body.Close()
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+			return
+		}
+
+		bodyBytes = resolveEmailByUsername(deps.Storage, bodyBytes)
+
+		request.RestoreBody(c, bodyBytes)
+
+		proxyHandler(c)
+	}
+}
+
+// resolveEmailByUsername tries to resolve the email field by looking up the username in user profiles.
+// It is only called for password grant requests.
+func resolveEmailByUsername(store storage.Storage, body []byte) []byte {
+	var reqBody map[string]interface{}
+	if err := json.Unmarshal(body, &reqBody); err != nil {
+		return body
+	}
+
+	identifier, _ := reqBody["email"].(string)
+	if identifier == "" {
+		return body
+	}
+
+	profiles, err := store.ListUserProfile(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(identifier),
+			},
+		},
+	})
+	if err != nil {
+		klog.Warningf("Failed to resolve username %q to email: %v", identifier, err)
+		return body
+	}
+
+	if len(profiles) == 0 {
+		return body
+	}
+
+	if profiles[0].Spec != nil && profiles[0].Spec.Email != "" {
+		reqBody["email"] = profiles[0].Spec.Email
+
+		if modified, err := json.Marshal(reqBody); err == nil {
+			return modified
+		}
+	}
+
+	return body
 }
 
 // handleAuthProxy proxies requests to the GoTrue backend
