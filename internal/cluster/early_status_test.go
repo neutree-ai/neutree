@@ -125,6 +125,51 @@ func TestWriteEarlyDeleting_SkipsWhenAlreadyDeleting(t *testing.T) {
 	WriteEarlyDeleting(cluster, s)
 }
 
+func TestWriteRecoveryStatus_WritesFailedWhenRunning(t *testing.T) {
+	s := storagemocks.NewMockStorage(t)
+	cluster := &v1.Cluster{
+		ID:       10,
+		Metadata: &v1.Metadata{Workspace: "ws", Name: "c10"},
+		Status:   &v1.ClusterStatus{Phase: v1.ClusterPhaseRunning},
+	}
+
+	s.EXPECT().UpdateCluster("10", mock.MatchedBy(func(c *v1.Cluster) bool {
+		return c.Status != nil && c.Status.Phase == v1.ClusterPhaseFailed && c.Status.ErrorMessage == "head node down"
+	})).Return(nil)
+
+	WriteRecoveryStatus(cluster, s, "head node down")
+	assert.Equal(t, v1.ClusterPhaseFailed, cluster.Status.Phase)
+	assert.Equal(t, "head node down", cluster.Status.ErrorMessage)
+}
+
+func TestWriteRecoveryStatus_SkipsWhenNotRunning(t *testing.T) {
+	s := storagemocks.NewMockStorage(t)
+
+	for _, phase := range []v1.ClusterPhase{v1.ClusterPhaseFailed, v1.ClusterPhaseInitializing, v1.ClusterPhaseUpdating, v1.ClusterPhaseDeleting} {
+		cluster := &v1.Cluster{
+			ID:       11,
+			Metadata: &v1.Metadata{Workspace: "ws", Name: "c11"},
+			Status:   &v1.ClusterStatus{Phase: phase},
+		}
+
+		// No UpdateCluster call expected
+		WriteRecoveryStatus(cluster, s, "some reason")
+		assert.Equal(t, phase, cluster.Status.Phase)
+	}
+}
+
+func TestWriteRecoveryStatus_SkipsWhenNilStatus(t *testing.T) {
+	s := storagemocks.NewMockStorage(t)
+	cluster := &v1.Cluster{
+		ID:       12,
+		Metadata: &v1.Metadata{Workspace: "ws", Name: "c12"},
+	}
+
+	// No UpdateCluster call expected
+	WriteRecoveryStatus(cluster, s, "some reason")
+	assert.Nil(t, cluster.Status)
+}
+
 func TestWriteEarlyDeleting_WritesWhenNilStatus(t *testing.T) {
 	s := storagemocks.NewMockStorage(t)
 	cluster := &v1.Cluster{

@@ -245,6 +245,10 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		return nil
 	}
 
+	// Head is down - write recovery status for user feedback
+	WriteRecoveryStatus(reconcileCtx.Cluster, c.storage,
+		fmt.Sprintf("head node %s not responding, attempting recovery", reconcileCtx.sshClusterConfig.Provider.HeadIP))
+
 	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.Phase != v1.ClusterPhaseInitializing {
 		klog.Infof("Head node not ready, try to up cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
 	}
@@ -380,6 +384,11 @@ func (c *sshRayClusterReconciler) reconcileWorkerNode(reconcileCtx *ReconcileCon
 		if checkNeedStart(nodeIp) {
 			nodeIpToStart = append(nodeIpToStart, nodeIp)
 		}
+	}
+
+	if len(nodeIpToStart) > 0 {
+		WriteRecoveryStatus(reconcileCtx.Cluster, c.storage,
+			fmt.Sprintf("%d worker node(s) need recovery", len(nodeIpToStart)))
 	}
 
 	nodeOpErrors := make([]error, len(nodeIpToStart)+len(nodeIpToStop))
