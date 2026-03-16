@@ -1006,7 +1006,7 @@ func TestCheckHeadNodeMetricsHealth(t *testing.T) {
 		{
 			name: "single port fails",
 			mockEndpoint: func(url string) error {
-				if url == fmt.Sprintf("http://10.0.0.1:%d/metrics", v1.AutoScaleMetricsPort) {
+				if url == fmt.Sprintf("http://10.0.0.1:%d", v1.AutoScaleMetricsPort) {
 					return fmt.Errorf("connection refused")
 				}
 				return nil
@@ -1087,7 +1087,7 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 				}, nil)
 			},
 			mockCheck: func(url string) error {
-				if url == fmt.Sprintf("http://10.0.0.1:%d/metrics", v1.AutoScaleMetricsPort) {
+				if url == fmt.Sprintf("http://10.0.0.1:%d", v1.AutoScaleMetricsPort) {
 					return fmt.Errorf("connection refused")
 				}
 				return nil

@@ -161,7 +161,7 @@ func (c *sshRayClusterReconciler) checkHeadNodeMetricsHealth(headIP string) erro
 	var errs []error
 
 	for _, port := range headMetricsPorts {
-		url := fmt.Sprintf("http://%s:%d/metrics", headIP, port)
+		url := fmt.Sprintf("http://%s:%d", headIP, port)
 		if err := checkMetricsEndpoint(url); err != nil {
 			errs = append(errs, fmt.Errorf("metrics endpoint %s is not healthy: %w", url, err))
 		}
