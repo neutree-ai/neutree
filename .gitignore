@@ -46,3 +46,4 @@ claude.md
 # local agents
 .agents/
 .claude/
+skills-lock.json

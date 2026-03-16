@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -10,7 +11,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/supabase-community/gotrue-go/types"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	authmocks "github.com/neutree-ai/neutree/internal/auth/mocks"
+	"github.com/neutree-ai/neutree/pkg/storage"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 func TestCreateUserSuccess(t *testing.T) {
@@ -180,4 +184,119 @@ func TestCreateUserInvalidUsernameType(t *testing.T) {
 	assert.Equal(t, "", resp.Username)
 
 	mockClient.AssertExpectations(t)
+}
+
+func TestResolveEmailByUsername_UsernameFound(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"grant_type": "password",
+		"email":      "admin",
+		"password":   "secret",
+	})
+
+	mockStorage.On("ListUserProfile", mock.MatchedBy(func(opt storage.ListOption) bool {
+		return len(opt.Filters) == 1 &&
+			opt.Filters[0].Column == "metadata->name" &&
+			opt.Filters[0].Value == `"admin"`
+	})).Return([]v1.UserProfile{
+		{
+			Spec: &v1.UserProfileSpec{Email: "admin@example.com"},
+		},
+	}, nil)
+
+	result := resolveEmailByUsername(mockStorage, body)
+
+	var resultBody map[string]interface{}
+	err := json.Unmarshal(result, &resultBody)
+	assert.NoError(t, err)
+	assert.Equal(t, "admin@example.com", resultBody["email"])
+	assert.Equal(t, "password", resultBody["grant_type"])
+	assert.Equal(t, "secret", resultBody["password"])
+}
+
+func TestResolveEmailByUsername_UsernameNotFound(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"grant_type": "password",
+		"email":      "nonexistent",
+		"password":   "secret",
+	})
+
+	mockStorage.On("ListUserProfile", mock.Anything).Return([]v1.UserProfile{}, nil)
+
+	result := resolveEmailByUsername(mockStorage, body)
+
+	var resultBody map[string]interface{}
+	err := json.Unmarshal(result, &resultBody)
+	assert.NoError(t, err)
+	assert.Equal(t, "nonexistent", resultBody["email"])
+}
+
+func TestResolveEmailByUsername_RefreshTokenGrant(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"grant_type":    "refresh_token",
+		"refresh_token": "some-token",
+	})
+
+	result := resolveEmailByUsername(mockStorage, body)
+	assert.Equal(t, body, result)
+
+	mockStorage.AssertNotCalled(t, "ListUserProfile")
+}
+
+func TestResolveEmailByUsername_InvalidJSON(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+
+	body := []byte("not json")
+
+	result := resolveEmailByUsername(mockStorage, body)
+	assert.Equal(t, body, result)
+}
+
+func TestResolveEmailByUsername_StorageError(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"grant_type": "password",
+		"email":      "admin",
+		"password":   "secret",
+	})
+
+	mockStorage.On("ListUserProfile", mock.Anything).Return(nil, errors.New("db error"))
+
+	result := resolveEmailByUsername(mockStorage, body)
+
+	var resultBody map[string]interface{}
+	err := json.Unmarshal(result, &resultBody)
+	assert.NoError(t, err)
+	assert.Equal(t, "admin", resultBody["email"])
+}
+
+func TestResolveEmailByUsername_EmailInputAlsoResolved(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"grant_type": "password",
+		"email":      "user@old-domain.com",
+		"password":   "secret",
+	})
+
+	mockStorage.On("ListUserProfile", mock.MatchedBy(func(opt storage.ListOption) bool {
+		return opt.Filters[0].Value == `"user@old-domain.com"`
+	})).Return([]v1.UserProfile{
+		{
+			Spec: &v1.UserProfileSpec{Email: "user@new-domain.com"},
+		},
+	}, nil)
+
+	result := resolveEmailByUsername(mockStorage, body)
+
+	var resultBody map[string]interface{}
+	err := json.Unmarshal(result, &resultBody)
+	assert.NoError(t, err)
+	assert.Equal(t, "user@new-domain.com", resultBody["email"])
 }
