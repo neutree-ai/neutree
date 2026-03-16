@@ -1152,6 +1152,8 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errMsg)
+				assert.False(t, reconcileCtx.Cluster.Status.Initialized)
+				assert.Empty(t, reconcileCtx.Cluster.Status.DashboardURL)
 			} else {
 				assert.NoError(t, err)
 				assert.True(t, reconcileCtx.Cluster.Status.Initialized)

@@ -188,13 +188,13 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 		return fmt.Errorf("cluster not ready: %d/%d nodes ready", readyNodes, desiredNodes)
 	}
 
-	cluster.Status.Initialized = true
-	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
-
 	// Check head node metrics ports are healthy before declaring the cluster fully ready
 	if err := c.checkHeadNodeMetricsHealth(reconcileCtx.sshClusterConfig.Provider.HeadIP); err != nil {
 		return fmt.Errorf("head node metrics health check failed: %w", err)
 	}
+
+	cluster.Status.Initialized = true
+	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
 
 	// Calculate resources only when cluster is ready (avoids unnecessary Ray dashboard calls during init/update)
 	resources, err := c.calculateClusterResources(reconcileCtx)
