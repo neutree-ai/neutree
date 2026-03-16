@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -27,7 +27,7 @@ import (
 var (
 	ProvisioningWaitTime = 30 * time.Second
 
-	// checkMetricsEndpoint is a package-level function variable for TCP-dialing a metrics endpoint.
+	// checkMetricsEndpoint checks whether a metrics HTTP endpoint is healthy.
 	// It is injectable for testing.
 	checkMetricsEndpoint = defaultCheckMetricsEndpoint
 
@@ -140,13 +140,19 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 	return c.checkAndUpdateStatus(reconcileCtx)
 }
 
-func defaultCheckMetricsEndpoint(address string) error {
-	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+var metricsHTTPClient = &http.Client{Timeout: 5 * time.Second}
+
+func defaultCheckMetricsEndpoint(url string) error {
+	resp, err := metricsHTTPClient.Get(url) //nolint:noctx
 	if err != nil {
 		return err
 	}
 
-	conn.Close()
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code %d", resp.StatusCode)
+	}
 
 	return nil
 }
@@ -155,9 +161,9 @@ func (c *sshRayClusterReconciler) checkHeadNodeMetricsHealth(headIP string) erro
 	var errs []error
 
 	for _, port := range headMetricsPorts {
-		addr := fmt.Sprintf("%s:%d", headIP, port)
-		if err := checkMetricsEndpoint(addr); err != nil {
-			errs = append(errs, fmt.Errorf("metrics endpoint %s is not healthy: %w", addr, err))
+		url := fmt.Sprintf("http://%s:%d/metrics", headIP, port)
+		if err := checkMetricsEndpoint(url); err != nil {
+			errs = append(errs, fmt.Errorf("metrics endpoint %s is not healthy: %w", url, err))
 		}
 	}
 

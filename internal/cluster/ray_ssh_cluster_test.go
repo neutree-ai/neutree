@@ -3,7 +3,6 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"testing"
 	"time"
 
@@ -993,22 +992,22 @@ func TestDetectClusterAcceleratorType(t *testing.T) {
 func TestCheckHeadNodeMetricsHealth(t *testing.T) {
 	tests := []struct {
 		name           string
-		mockEndpoint   func(address string) error
+		mockEndpoint   func(url string) error
 		wantErr        bool
 		errMsgContains string
 	}{
 		{
 			name: "all healthy",
-			mockEndpoint: func(address string) error {
+			mockEndpoint: func(url string) error {
 				return nil
 			},
 			wantErr: false,
 		},
 		{
 			name: "single port fails",
-			mockEndpoint: func(address string) error {
-				if address == fmt.Sprintf("10.0.0.1:%d", v1.AutoScaleMetricsPort) {
-					return &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}
+			mockEndpoint: func(url string) error {
+				if url == fmt.Sprintf("http://10.0.0.1:%d/metrics", v1.AutoScaleMetricsPort) {
+					return fmt.Errorf("connection refused")
 				}
 				return nil
 			},
@@ -1017,8 +1016,8 @@ func TestCheckHeadNodeMetricsHealth(t *testing.T) {
 		},
 		{
 			name: "all ports fail",
-			mockEndpoint: func(address string) error {
-				return &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}
+			mockEndpoint: func(url string) error {
+				return fmt.Errorf("connection refused")
 			},
 			wantErr:        true,
 			errMsgContains: "connection refused",
@@ -1087,8 +1086,8 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 					Data: v1.RayClusterMetadataData{RayVersion: "2.9.0"},
 				}, nil)
 			},
-			mockCheck: func(address string) error {
-				if address == fmt.Sprintf("10.0.0.1:%d", v1.AutoScaleMetricsPort) {
+			mockCheck: func(url string) error {
+				if url == fmt.Sprintf("http://10.0.0.1:%d/metrics", v1.AutoScaleMetricsPort) {
 					return fmt.Errorf("connection refused")
 				}
 				return nil
