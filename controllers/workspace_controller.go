@@ -8,7 +8,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -17,18 +17,18 @@ type WorkspaceController struct {
 	storage     storage.Storage
 	syncHandler func(workspace *v1.Workspace) error // Added syncHandler field
 
-	acceleratorManager accelerator.Manager
+	engineRegistry engine.Registry
 }
 
 type WorkspaceControllerOption struct {
-	Storage            storage.Storage
-	AcceleratorManager accelerator.Manager
+	Storage        storage.Storage
+	EngineRegistry engine.Registry
 }
 
 func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceController, error) {
 	c := &WorkspaceController{
-		storage:            option.Storage,
-		acceleratorManager: option.AcceleratorManager,
+		storage:        option.Storage,
+		engineRegistry: option.EngineRegistry,
 	}
 
 	c.syncHandler = c.sync
@@ -148,9 +148,9 @@ func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.Workspace
 }
 
 func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error {
-	engines, err := c.acceleratorManager.GetAllAcceleratorSupportEngines(context.Background())
+	engines, err := c.engineRegistry.ListAll(context.Background())
 	if err != nil {
-		return errors.Wrapf(err, "failed to get accelerator supported engines for workspace %s", workspace.Metadata.Name)
+		return errors.Wrapf(err, "failed to get engines for workspace %s", workspace.Metadata.Name)
 	}
 
 	// set workspace name to engine metadata
