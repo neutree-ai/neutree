@@ -2,6 +2,7 @@ ARG RAY_COMMIT
 ARG COMMON_WORKDIR=/app
 ARG RAY_REPO
 ARG ENGINE_BASE_IMAGE=vllm/vllm-openai:v0.11.2
+ARG ENGINE_VERSION_DIR=v0_11_2
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
 
 # --- Ray source fetch ---
@@ -42,8 +43,11 @@ RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
 RUN --mount=type=bind,src=requirements,target=requirements \
     uv pip install --system -r requirements/common.txt
 
-# Copy Neutree serve layer code and install downloader dependencies
-COPY serve ./serve
+# Copy Neutree serve layer code (shared + specified engine version only)
+ARG ENGINE_VERSION_DIR
+COPY serve/_metrics ./serve/_metrics
+COPY serve/_replica_scheduler ./serve/_replica_scheduler
+COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
 COPY downloader ./downloader
 RUN uv pip install --system -r downloader/requirements.txt
 

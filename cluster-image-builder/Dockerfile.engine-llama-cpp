@@ -2,6 +2,7 @@ ARG RAY_COMMIT
 ARG COMMON_WORKDIR=/app
 ARG RAY_REPO
 ARG LLAMA_CPP_VERSION=0.3.7
+ARG ENGINE_VERSION_DIR=v0_3_7
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
 
 # --- Ray source fetch ---
@@ -53,8 +54,11 @@ RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
 RUN --mount=type=bind,src=requirements,target=requirements \
     pip install --no-cache-dir -r requirements/common.txt
 
-# Copy Neutree serve layer code and install downloader dependencies
-COPY serve ./serve
+# Copy Neutree serve layer code (shared + specified engine version only)
+ARG ENGINE_VERSION_DIR
+COPY serve/_metrics ./serve/_metrics
+COPY serve/_replica_scheduler ./serve/_replica_scheduler
+COPY serve/llama_cpp/${ENGINE_VERSION_DIR} ./serve/llama_cpp/${ENGINE_VERSION_DIR}
 COPY downloader ./downloader
 RUN pip install --no-cache-dir -r downloader/requirements.txt
 
