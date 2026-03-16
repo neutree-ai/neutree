@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -25,6 +26,13 @@ import (
 
 var (
 	ProvisioningWaitTime = 30 * time.Second
+
+	// checkMetricsEndpoint is a package-level function variable for TCP-dialing a metrics endpoint.
+	// It is injectable for testing.
+	checkMetricsEndpoint = defaultCheckMetricsEndpoint
+
+	// headMetricsPorts lists the metrics ports that must be healthy on the head node.
+	headMetricsPorts = []int{v1.AutoScaleMetricsPort, v1.DashboardMetricsPort, v1.RayletMetricsPort}
 )
 
 func init() { //nolint:gochecknoinits
@@ -132,6 +140,30 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 	return c.checkAndUpdateStatus(reconcileCtx)
 }
 
+func defaultCheckMetricsEndpoint(address string) error {
+	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+	if err != nil {
+		return err
+	}
+
+	conn.Close()
+
+	return nil
+}
+
+func (c *sshRayClusterReconciler) checkHeadNodeMetricsHealth(headIP string) error {
+	var errs []error
+
+	for _, port := range headMetricsPorts {
+		addr := fmt.Sprintf("%s:%d", headIP, port)
+		if err := checkMetricsEndpoint(addr); err != nil {
+			errs = append(errs, fmt.Errorf("metrics endpoint %s is not healthy: %w", addr, err))
+		}
+	}
+
+	return apierrors.NewAggregate(errs)
+}
+
 func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileContext) error {
 	cluster := reconcileCtx.Cluster
 
@@ -158,6 +190,11 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 
 	cluster.Status.Initialized = true
 	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
+
+	// Check head node metrics ports are healthy before declaring the cluster fully ready
+	if err := c.checkHeadNodeMetricsHealth(reconcileCtx.sshClusterConfig.Provider.HeadIP); err != nil {
+		return fmt.Errorf("head node metrics health check failed: %w", err)
+	}
 
 	// Calculate resources only when cluster is ready (avoids unnecessary Ray dashboard calls during init/update)
 	resources, err := c.calculateClusterResources(reconcileCtx)

@@ -3,6 +3,7 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
@@ -985,6 +986,178 @@ func TestDetectClusterAcceleratorType(t *testing.T) {
 			}
 
 			acceleratorMgr.AssertExpectations(t)
+		})
+	}
+}
+
+func TestCheckHeadNodeMetricsHealth(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockEndpoint   func(address string) error
+		wantErr        bool
+		errMsgContains string
+	}{
+		{
+			name: "all healthy",
+			mockEndpoint: func(address string) error {
+				return nil
+			},
+			wantErr: false,
+		},
+		{
+			name: "single port fails",
+			mockEndpoint: func(address string) error {
+				if address == fmt.Sprintf("10.0.0.1:%d", v1.AutoScaleMetricsPort) {
+					return &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}
+				}
+				return nil
+			},
+			wantErr:        true,
+			errMsgContains: fmt.Sprintf("10.0.0.1:%d", v1.AutoScaleMetricsPort),
+		},
+		{
+			name: "all ports fail",
+			mockEndpoint: func(address string) error {
+				return &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}
+			},
+			wantErr:        true,
+			errMsgContains: "connection refused",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := checkMetricsEndpoint
+			checkMetricsEndpoint = tt.mockEndpoint
+			defer func() { checkMetricsEndpoint = original }()
+
+			r := &sshRayClusterReconciler{}
+			err := r.checkHeadNodeMetricsHealth("10.0.0.1")
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsgContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCheckAndUpdateStatus(t *testing.T) {
+	tests := []struct {
+		name      string
+		setupMock func(*dashboardmocks.MockDashboardService, *acceleratormocks.MockManager)
+		mockCheck func(string) error
+		headIP    string
+		workerIPs []string
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name: "nodes ready and metrics healthy",
+			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorMgr *acceleratormocks.MockManager) {
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{IP: "10.0.0.1", Raylet: v1.Raylet{State: v1.AliveNodeState, IsHeadNode: true}},
+				}, nil)
+				dashboardSvc.On("GetClusterStatus").Return(v1.RayAPIClusterStatus{
+					AutoscalerReport: v1.AutoscalerReport{ActiveNodes: map[string]int{"head": 1}},
+				}, nil)
+				dashboardSvc.On("GetClusterMetadata").Return(&dashboard.ClusterMetadataResponse{
+					Data: v1.RayClusterMetadataData{RayVersion: "2.9.0"},
+				}, nil)
+				acceleratorMgr.On("GetAllParsers").Return(map[string]plugin.ResourceParser{})
+			},
+			mockCheck: func(address string) error {
+				return nil
+			},
+			headIP:  "10.0.0.1",
+			wantErr: false,
+		},
+		{
+			name: "metrics port unhealthy prevents Running status",
+			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorMgr *acceleratormocks.MockManager) {
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{IP: "10.0.0.1", Raylet: v1.Raylet{State: v1.AliveNodeState, IsHeadNode: true}},
+				}, nil)
+				dashboardSvc.On("GetClusterStatus").Return(v1.RayAPIClusterStatus{
+					AutoscalerReport: v1.AutoscalerReport{ActiveNodes: map[string]int{"head": 1}},
+				}, nil)
+				dashboardSvc.On("GetClusterMetadata").Return(&dashboard.ClusterMetadataResponse{
+					Data: v1.RayClusterMetadataData{RayVersion: "2.9.0"},
+				}, nil)
+			},
+			mockCheck: func(address string) error {
+				if address == fmt.Sprintf("10.0.0.1:%d", v1.AutoScaleMetricsPort) {
+					return fmt.Errorf("connection refused")
+				}
+				return nil
+			},
+			headIP:  "10.0.0.1",
+			wantErr: true,
+			errMsg:  "head node metrics health check failed",
+		},
+		{
+			name: "nodes not ready returns error before metrics check",
+			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorMgr *acceleratormocks.MockManager) {
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{}, nil)
+				dashboardSvc.On("GetClusterStatus").Return(v1.RayAPIClusterStatus{}, nil)
+				dashboardSvc.On("GetClusterMetadata").Return(&dashboard.ClusterMetadataResponse{
+					Data: v1.RayClusterMetadataData{RayVersion: "2.9.0"},
+				}, nil)
+			},
+			mockCheck: func(address string) error {
+				t.Fatal("metrics check should not be called when nodes are not ready")
+				return nil
+			},
+			headIP:    "10.0.0.1",
+			workerIPs: []string{"10.0.0.2"},
+			wantErr:   true,
+			errMsg:    "cluster not ready",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := checkMetricsEndpoint
+			checkMetricsEndpoint = tt.mockCheck
+			defer func() { checkMetricsEndpoint = original }()
+
+			dashboardSvc := &dashboardmocks.MockDashboardService{}
+			acceleratorMgr := acceleratormocks.NewMockManager(t)
+			tt.setupMock(dashboardSvc, acceleratorMgr)
+
+			r := &sshRayClusterReconciler{
+				acceleratorManager: acceleratorMgr,
+			}
+
+			reconcileCtx := &ReconcileContext{
+				Cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{
+						Name: "test",
+					},
+					Status: &v1.ClusterStatus{},
+				},
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{
+						HeadIP:    tt.headIP,
+						WorkerIPs: tt.workerIPs,
+					},
+				},
+				rayService: dashboardSvc,
+			}
+
+			err := r.checkAndUpdateStatus(reconcileCtx)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				assert.NoError(t, err)
+				assert.True(t, reconcileCtx.Cluster.Status.Initialized)
+			}
+
+			dashboardSvc.AssertExpectations(t)
 		})
 	}
 }
