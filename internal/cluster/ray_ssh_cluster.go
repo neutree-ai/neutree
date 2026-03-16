@@ -142,8 +142,13 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 
 var metricsHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
-func defaultCheckMetricsEndpoint(url string) error {
-	resp, err := metricsHTTPClient.Get(url) //nolint:noctx
+func defaultCheckMetricsEndpoint(ctx context.Context, url string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := metricsHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -157,12 +162,12 @@ func defaultCheckMetricsEndpoint(url string) error {
 	return nil
 }
 
-func (c *sshRayClusterReconciler) checkHeadNodeMetricsHealth(headIP string) error {
+func (c *sshRayClusterReconciler) checkHeadNodeMetricsHealth(ctx context.Context, headIP string) error {
 	var errs []error
 
 	for _, port := range headMetricsPorts {
 		url := fmt.Sprintf("http://%s:%d", headIP, port)
-		if err := checkMetricsEndpoint(url); err != nil {
+		if err := checkMetricsEndpoint(ctx, url); err != nil {
 			errs = append(errs, fmt.Errorf("metrics endpoint %s is not healthy: %w", url, err))
 		}
 	}
@@ -195,7 +200,7 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 	}
 
 	// Check head node metrics ports are healthy before declaring the cluster fully ready
-	if err := c.checkHeadNodeMetricsHealth(reconcileCtx.sshClusterConfig.Provider.HeadIP); err != nil {
+	if err := c.checkHeadNodeMetricsHealth(reconcileCtx.Ctx, reconcileCtx.sshClusterConfig.Provider.HeadIP); err != nil {
 		return fmt.Errorf("head node metrics health check failed: %w", err)
 	}
 

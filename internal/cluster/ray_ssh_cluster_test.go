@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -992,20 +993,20 @@ func TestDetectClusterAcceleratorType(t *testing.T) {
 func TestCheckHeadNodeMetricsHealth(t *testing.T) {
 	tests := []struct {
 		name           string
-		mockEndpoint   func(url string) error
+		mockEndpoint   func(ctx context.Context, url string) error
 		wantErr        bool
 		errMsgContains string
 	}{
 		{
 			name: "all healthy",
-			mockEndpoint: func(url string) error {
+			mockEndpoint: func(ctx context.Context, url string) error {
 				return nil
 			},
 			wantErr: false,
 		},
 		{
 			name: "single port fails",
-			mockEndpoint: func(url string) error {
+			mockEndpoint: func(ctx context.Context, url string) error {
 				if url == fmt.Sprintf("http://10.0.0.1:%d", v1.AutoScaleMetricsPort) {
 					return fmt.Errorf("connection refused")
 				}
@@ -1016,7 +1017,7 @@ func TestCheckHeadNodeMetricsHealth(t *testing.T) {
 		},
 		{
 			name: "all ports fail",
-			mockEndpoint: func(url string) error {
+			mockEndpoint: func(ctx context.Context, url string) error {
 				return fmt.Errorf("connection refused")
 			},
 			wantErr:        true,
@@ -1031,7 +1032,7 @@ func TestCheckHeadNodeMetricsHealth(t *testing.T) {
 			defer func() { checkMetricsEndpoint = original }()
 
 			r := &sshRayClusterReconciler{}
-			err := r.checkHeadNodeMetricsHealth("10.0.0.1")
+			err := r.checkHeadNodeMetricsHealth(context.Background(), "10.0.0.1")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -1047,7 +1048,7 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 	tests := []struct {
 		name      string
 		setupMock func(*dashboardmocks.MockDashboardService, *acceleratormocks.MockManager)
-		mockCheck func(string) error
+		mockCheck func(context.Context, string) error
 		headIP    string
 		workerIPs []string
 		wantErr   bool
@@ -1067,7 +1068,7 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 				}, nil)
 				acceleratorMgr.On("GetAllParsers").Return(map[string]plugin.ResourceParser{})
 			},
-			mockCheck: func(address string) error {
+			mockCheck: func(ctx context.Context, url string) error {
 				return nil
 			},
 			headIP:  "10.0.0.1",
@@ -1086,7 +1087,7 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 					Data: v1.RayClusterMetadataData{RayVersion: "2.9.0"},
 				}, nil)
 			},
-			mockCheck: func(url string) error {
+			mockCheck: func(ctx context.Context, url string) error {
 				if url == fmt.Sprintf("http://10.0.0.1:%d", v1.AutoScaleMetricsPort) {
 					return fmt.Errorf("connection refused")
 				}
@@ -1105,7 +1106,7 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 					Data: v1.RayClusterMetadataData{RayVersion: "2.9.0"},
 				}, nil)
 			},
-			mockCheck: func(address string) error {
+			mockCheck: func(ctx context.Context, url string) error {
 				t.Fatal("metrics check should not be called when nodes are not ready")
 				return nil
 			},
@@ -1131,6 +1132,7 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 			}
 
 			reconcileCtx := &ReconcileContext{
+				Ctx: context.Background(),
 				Cluster: &v1.Cluster{
 					Metadata: &v1.Metadata{
 						Name: "test",
