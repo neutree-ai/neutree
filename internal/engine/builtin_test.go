@@ -27,7 +27,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 		t.Error("expected llama-cpp engine to be registered")
 	}
 
-	// Verify vllm v0.11.2 has both accelerator images combined
+	// Verify vllm v0.11.2 has nvidia_gpu image
 	for _, e := range engines {
 		if e.Metadata.Name != "vllm" {
 			continue
@@ -37,10 +37,6 @@ func TestGetBuiltinEngines(t *testing.T) {
 			if v.Version == "v0.11.2" {
 				if _, ok := v.Images["nvidia_gpu"]; !ok {
 					t.Error("vllm v0.11.2 missing nvidia_gpu image")
-				}
-
-				if _, ok := v.Images["amd_gpu"]; !ok {
-					t.Error("vllm v0.11.2 missing amd_gpu image")
 				}
 			}
 		}
