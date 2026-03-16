@@ -129,6 +129,12 @@ func handleTokenProxy(deps *Dependencies) gin.HandlerFunc {
 	proxyHandler := proxies.CreateProxyHandler(deps.AuthEndpoint, "token", nil)
 
 	return func(c *gin.Context) {
+		grantType := c.Query("grant_type")
+		if grantType != "password" {
+			proxyHandler(c)
+			return
+		}
+
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		c.Request.Body.Close()
 
@@ -145,16 +151,11 @@ func handleTokenProxy(deps *Dependencies) gin.HandlerFunc {
 	}
 }
 
-// resolveEmailByUsername checks if the request is a password grant and tries to resolve
-// the email field by looking up the username in user profiles.
+// resolveEmailByUsername tries to resolve the email field by looking up the username in user profiles.
+// It is only called for password grant requests.
 func resolveEmailByUsername(store storage.Storage, body []byte) []byte {
 	var reqBody map[string]interface{}
 	if err := json.Unmarshal(body, &reqBody); err != nil {
-		return body
-	}
-
-	grantType, _ := reqBody["grant_type"].(string)
-	if grantType != "password" {
 		return body
 	}
 

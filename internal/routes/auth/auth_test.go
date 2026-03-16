@@ -190,9 +190,8 @@ func TestResolveEmailByUsername_UsernameFound(t *testing.T) {
 	mockStorage := storagemocks.NewMockStorage(t)
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"grant_type": "password",
-		"email":      "admin",
-		"password":   "secret",
+		"email":    "admin",
+		"password": "secret",
 	})
 
 	mockStorage.On("ListUserProfile", mock.MatchedBy(func(opt storage.ListOption) bool {
@@ -211,7 +210,6 @@ func TestResolveEmailByUsername_UsernameFound(t *testing.T) {
 	err := json.Unmarshal(result, &resultBody)
 	assert.NoError(t, err)
 	assert.Equal(t, "admin@example.com", resultBody["email"])
-	assert.Equal(t, "password", resultBody["grant_type"])
 	assert.Equal(t, "secret", resultBody["password"])
 }
 
@@ -219,9 +217,8 @@ func TestResolveEmailByUsername_UsernameNotFound(t *testing.T) {
 	mockStorage := storagemocks.NewMockStorage(t)
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"grant_type": "password",
-		"email":      "nonexistent",
-		"password":   "secret",
+		"email":    "nonexistent",
+		"password": "secret",
 	})
 
 	mockStorage.On("ListUserProfile", mock.Anything).Return([]v1.UserProfile{}, nil)
@@ -232,20 +229,6 @@ func TestResolveEmailByUsername_UsernameNotFound(t *testing.T) {
 	err := json.Unmarshal(result, &resultBody)
 	assert.NoError(t, err)
 	assert.Equal(t, "nonexistent", resultBody["email"])
-}
-
-func TestResolveEmailByUsername_RefreshTokenGrant(t *testing.T) {
-	mockStorage := storagemocks.NewMockStorage(t)
-
-	body, _ := json.Marshal(map[string]interface{}{
-		"grant_type":    "refresh_token",
-		"refresh_token": "some-token",
-	})
-
-	result := resolveEmailByUsername(mockStorage, body)
-	assert.Equal(t, body, result)
-
-	mockStorage.AssertNotCalled(t, "ListUserProfile")
 }
 
 func TestResolveEmailByUsername_InvalidJSON(t *testing.T) {
@@ -261,9 +244,8 @@ func TestResolveEmailByUsername_StorageError(t *testing.T) {
 	mockStorage := storagemocks.NewMockStorage(t)
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"grant_type": "password",
-		"email":      "admin",
-		"password":   "secret",
+		"email":    "admin",
+		"password": "secret",
 	})
 
 	mockStorage.On("ListUserProfile", mock.Anything).Return(nil, errors.New("db error"))
@@ -280,9 +262,8 @@ func TestResolveEmailByUsername_EmailInputAlsoResolved(t *testing.T) {
 	mockStorage := storagemocks.NewMockStorage(t)
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"grant_type": "password",
-		"email":      "user@old-domain.com",
-		"password":   "secret",
+		"email":    "user@old-domain.com",
+		"password": "secret",
 	})
 
 	mockStorage.On("ListUserProfile", mock.MatchedBy(func(opt storage.ListOption) bool {
