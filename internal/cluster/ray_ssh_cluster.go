@@ -388,7 +388,7 @@ func (c *sshRayClusterReconciler) reconcileWorkerNode(reconcileCtx *ReconcileCon
 
 	if len(nodeIpToStart) > 0 {
 		WriteRecoveryStatus(reconcileCtx.Cluster, c.storage,
-			fmt.Sprintf("%d worker node(s) need recovery", len(nodeIpToStart)))
+			fmt.Sprintf("%d worker node(s) need recovery: %s", len(nodeIpToStart), strings.Join(nodeIpToStart, ", ")))
 	}
 
 	nodeOpErrors := make([]error, len(nodeIpToStart)+len(nodeIpToStop))
