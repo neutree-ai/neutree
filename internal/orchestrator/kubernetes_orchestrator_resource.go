@@ -385,7 +385,7 @@ func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, versi
 
 	// Default to "cpu" if no accelerator type is specified
 	if acceleratorType == "" {
-		acceleratorType = "cpu"
+		acceleratorType = acceleratorTypeCPU
 	}
 
 	// Get image for the specific accelerator type

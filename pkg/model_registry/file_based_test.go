@@ -73,6 +73,21 @@ func Test_newFileTypeModelRegistry(t *testing.T) {
 	}
 }
 
+func Test_localFileGetNFSType(t *testing.T) {
+	r := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.BentoMLModelRegistryType,
+			Url:  "file://localhost/path/to/models",
+		},
+	}
+	registry, err := newFileBased(r)
+	assert.NoError(t, err)
+
+	nfsType, err := registry.GetNFSType()
+	assert.NoError(t, err)
+	assert.Empty(t, nfsType, "localFile should return empty NFS type")
+}
+
 func Test_newNFSTypeModelRegistry(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -132,6 +132,12 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 	return accelerators, nil
 }
 
+func (p *GPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	return v1.RuntimeConfig{
+		Runtime: "nvidia",
+		Options: []string{"--gpus all"},
+	}, nil
+}
 func (p *GPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
 }

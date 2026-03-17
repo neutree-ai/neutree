@@ -146,6 +146,14 @@ func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, no
 	return accelerators, nil
 }
 
+func (p *AMDGPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	return v1.RuntimeConfig{
+		Runtime: "amd",
+		Env: map[string]string{
+			"AMD_VISIBLE_DEVICES": "all",
+		},
+	}, nil
+}
 func (p *AMDGPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
 }

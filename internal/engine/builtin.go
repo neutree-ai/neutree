@@ -35,8 +35,8 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						ValuesSchema: llamaCppDefaultEngineSchema,
 						Images: map[string]*v1.EngineImage{
 							"cpu": {
-								ImageName: "neutree/llama-cpp-python",
-								Tag:       "v0.3.7",
+								ImageName: "neutree/engine-llama-cpp",
+								Tag:       "v0.3.7-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{
@@ -60,18 +60,20 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 					{
 						Version:      "v0.8.5",
 						ValuesSchema: vllmV0_8_5EngineSchema,
+						Images: map[string]*v1.EngineImage{
+							"nvidia_gpu": {
+								ImageName: "neutree/engine-vllm",
+								Tag:       "v0.8.5-ray2.53.0",
+							},
+						},
 					},
 					{
 						Version:      "v0.11.2",
 						ValuesSchema: vllmV0_11_2EngineSchema,
 						Images: map[string]*v1.EngineImage{
 							"nvidia_gpu": {
-								ImageName: "vllm/vllm-openai",
-								Tag:       "v0.11.2",
-							},
-							"amd_gpu": {
-								ImageName: "rocm/vllm",
-								Tag:       "rocm7.0.0_vllm_0.11.2_20251210",
+								ImageName: "neutree/engine-vllm",
+								Tag:       "v0.11.2-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{
