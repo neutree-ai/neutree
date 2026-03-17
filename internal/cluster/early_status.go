@@ -34,6 +34,23 @@ func WriteEarlyStatus(cluster *v1.Cluster, s storage.Storage) {
 	}
 }
 
+// WriteRecoveryStatus transitions a Running cluster to Failed with a reason message.
+// This provides immediate user feedback when SSH node recovery is in progress.
+// Only writes when current phase is Running to avoid noise for already-Failed clusters.
+// This is best-effort: failures are logged but do not block reconciliation.
+func WriteRecoveryStatus(cluster *v1.Cluster, s storage.Storage, reason string) {
+	if cluster.Status == nil || cluster.Status.Phase != v1.ClusterPhaseRunning {
+		return
+	}
+
+	cluster.Status.Phase = v1.ClusterPhaseFailed
+	cluster.Status.ErrorMessage = reason
+
+	if err := s.UpdateCluster(strconv.Itoa(cluster.ID), &v1.Cluster{Status: cluster.Status}); err != nil {
+		klog.Warningf("failed to write recovery status for cluster %s: %v", cluster.Metadata.WorkspaceName(), err)
+	}
+}
+
 // WriteEarlyDeleting writes Deleting phase to storage if not already Deleting.
 // This provides immediate user feedback that deletion is in progress.
 // This is best-effort: failures are logged but do not block reconciliation.
