@@ -32,7 +32,9 @@ var (
 	checkMetricsEndpoint = defaultCheckMetricsEndpoint
 
 	// headMetricsPorts lists the metrics ports that must be healthy on the head node.
-	headMetricsPorts = []int{v1.AutoScaleMetricsPort, v1.DashboardMetricsPort, v1.RayletMetricsPort}
+	// RayletMetricsPort is excluded because raylet exits immediately if the port is occupied,
+	// so the node would already be detected as unhealthy.
+	headMetricsPorts = []int{v1.AutoScaleMetricsPort, v1.DashboardMetricsPort}
 )
 
 func init() { //nolint:gochecknoinits
@@ -202,14 +204,6 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 	// Check head node metrics ports are healthy before declaring the cluster fully ready
 	if err := c.checkHeadNodeMetricsHealth(reconcileCtx.Ctx, reconcileCtx.sshClusterConfig.Provider.HeadIP); err != nil {
 		return fmt.Errorf("head node metrics health check failed: %w", err)
-	}
-
-	// Check worker node metrics ports (RayletMetricsPort only) are healthy
-	for _, workerIP := range reconcileCtx.sshClusterConfig.Provider.WorkerIPs {
-		url := fmt.Sprintf("http://%s:%d", workerIP, v1.RayletMetricsPort)
-		if err := checkMetricsEndpoint(reconcileCtx.Ctx, url); err != nil {
-			return fmt.Errorf("worker node %s metrics health check failed: %w", workerIP, err)
-		}
 	}
 
 	cluster.Status.Initialized = true

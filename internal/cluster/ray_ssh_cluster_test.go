@@ -1098,53 +1098,6 @@ func TestCheckAndUpdateStatus(t *testing.T) {
 			errMsg:  "head node metrics health check failed",
 		},
 		{
-			name: "head and worker nodes metrics healthy",
-			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorMgr *acceleratormocks.MockManager) {
-				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
-					{IP: "10.0.0.1", Raylet: v1.Raylet{State: v1.AliveNodeState, IsHeadNode: true}},
-					{IP: "10.0.0.2", Raylet: v1.Raylet{State: v1.AliveNodeState}},
-				}, nil)
-				dashboardSvc.On("GetClusterStatus").Return(v1.RayAPIClusterStatus{
-					AutoscalerReport: v1.AutoscalerReport{ActiveNodes: map[string]int{"head": 1, "worker": 1}},
-				}, nil)
-				dashboardSvc.On("GetClusterMetadata").Return(&dashboard.ClusterMetadataResponse{
-					Data: v1.RayClusterMetadataData{RayVersion: "2.9.0"},
-				}, nil)
-				acceleratorMgr.On("GetAllParsers").Return(map[string]plugin.ResourceParser{})
-			},
-			mockCheck: func(ctx context.Context, url string) error {
-				return nil
-			},
-			headIP:    "10.0.0.1",
-			workerIPs: []string{"10.0.0.2"},
-			wantErr:   false,
-		},
-		{
-			name: "worker node metrics unhealthy prevents Running status",
-			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorMgr *acceleratormocks.MockManager) {
-				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
-					{IP: "10.0.0.1", Raylet: v1.Raylet{State: v1.AliveNodeState, IsHeadNode: true}},
-					{IP: "10.0.0.2", Raylet: v1.Raylet{State: v1.AliveNodeState}},
-				}, nil)
-				dashboardSvc.On("GetClusterStatus").Return(v1.RayAPIClusterStatus{
-					AutoscalerReport: v1.AutoscalerReport{ActiveNodes: map[string]int{"head": 1, "worker": 1}},
-				}, nil)
-				dashboardSvc.On("GetClusterMetadata").Return(&dashboard.ClusterMetadataResponse{
-					Data: v1.RayClusterMetadataData{RayVersion: "2.9.0"},
-				}, nil)
-			},
-			mockCheck: func(ctx context.Context, url string) error {
-				if url == fmt.Sprintf("http://10.0.0.2:%d", v1.RayletMetricsPort) {
-					return fmt.Errorf("connection refused")
-				}
-				return nil
-			},
-			headIP:    "10.0.0.1",
-			workerIPs: []string{"10.0.0.2"},
-			wantErr:   true,
-			errMsg:    "worker node 10.0.0.2 metrics health check failed",
-		},
-		{
 			name: "nodes not ready returns error before metrics check",
 			setupMock: func(dashboardSvc *dashboardmocks.MockDashboardService, acceleratorMgr *acceleratormocks.MockManager) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{}, nil)
