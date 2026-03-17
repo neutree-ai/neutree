@@ -204,6 +204,14 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 		return fmt.Errorf("head node metrics health check failed: %w", err)
 	}
 
+	// Check worker node metrics ports (RayletMetricsPort only) are healthy
+	for _, workerIP := range reconcileCtx.sshClusterConfig.Provider.WorkerIPs {
+		url := fmt.Sprintf("http://%s:%d", workerIP, v1.RayletMetricsPort)
+		if err := checkMetricsEndpoint(reconcileCtx.Ctx, url); err != nil {
+			return fmt.Errorf("worker node %s metrics health check failed: %w", workerIP, err)
+		}
+	}
+
 	cluster.Status.Initialized = true
 	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
 
