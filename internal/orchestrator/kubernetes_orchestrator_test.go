@@ -1302,6 +1302,28 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				"n_ctx":              "2048",
 			},
 		},
+		{
+			name: "map values are YAML-escaped for template rendering",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"speculative-config": map[string]interface{}{"method": "mtp"},
+							"max-model-len":      "4096",
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"speculative-config": `{\"method\":\"mtp\"}`,
+				"max-model-len":      "4096",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -1309,6 +1331,91 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 			data := newDeploymentManifestVariables()
 			k.setEngineArgs(&data, tt.endpoint, tt.engine)
 			assert.Equal(t, tt.expectedArgs, data.EngineArgs)
+		})
+	}
+}
+
+func TestEscapeEngineArgsForTemplate(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     map[string]interface{}
+		expected map[string]interface{}
+	}{
+		{
+			name: "native map is JSON-serialized and YAML-escaped",
+			args: map[string]interface{}{
+				"speculative-config": map[string]interface{}{"method": "mtp"},
+			},
+			expected: map[string]interface{}{
+				"speculative-config": `{\"method\":\"mtp\"}`,
+			},
+		},
+		{
+			name: "native slice is JSON-serialized and YAML-escaped",
+			args: map[string]interface{}{
+				"allowed-origins": []interface{}{"http://localhost", "https://example.com"},
+			},
+			expected: map[string]interface{}{
+				"allowed-origins": `[\"http://localhost\",\"https://example.com\"]`,
+			},
+		},
+		{
+			name: "unescaped JSON string is YAML-escaped",
+			args: map[string]interface{}{
+				"speculative-config": `{"method":"mtp"}`,
+			},
+			expected: map[string]interface{}{
+				"speculative-config": `{\"method\":\"mtp\"}`,
+			},
+		},
+		{
+			name: "pre-escaped string is left as-is",
+			args: map[string]interface{}{
+				"speculative-config": `{\"method\":\"mtp\"}`,
+			},
+			expected: map[string]interface{}{
+				"speculative-config": `{\"method\":\"mtp\"}`,
+			},
+		},
+		{
+			name: "simple string is unchanged",
+			args: map[string]interface{}{
+				"dtype": "float16",
+			},
+			expected: map[string]interface{}{
+				"dtype": "float16",
+			},
+		},
+		{
+			name: "numeric string is unchanged",
+			args: map[string]interface{}{
+				"max-model-len": "4096",
+			},
+			expected: map[string]interface{}{
+				"max-model-len": "4096",
+			},
+		},
+		{
+			name: "mixed values",
+			args: map[string]interface{}{
+				"speculative-config": map[string]interface{}{"method": "mtp"},
+				"max-model-len":      "4096",
+				"override-config":    `{"temperature":0.5}`,
+				"dtype":              "float16",
+			},
+			expected: map[string]interface{}{
+				"speculative-config": `{\"method\":\"mtp\"}`,
+				"max-model-len":      "4096",
+				"override-config":    `{\"temperature\":0.5}`,
+				"dtype":              "float16",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			escapeEngineArgsForTemplate(tt.args)
+			assert.Equal(t, tt.expected, tt.args)
 		})
 	}
 }
