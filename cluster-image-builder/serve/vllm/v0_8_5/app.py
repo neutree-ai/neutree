@@ -31,6 +31,7 @@ from vllm.entrypoints.openai.serving_models import BaseModelPath, OpenAIServingM
 from vllm.engine.metrics import RayPrometheusStatLogger
 
 from downloader import get_downloader, build_request_from_model_args
+from serve._utils import coerce_args
 
 
 def _sanitize_metric_cls(base_cls):
@@ -155,6 +156,12 @@ class Backend:
         )
 
         args.update(engine_kwargs)
+
+        # Coerce JSON string values to native types based on AsyncEngineArgs field
+        # annotations. This handles the SSH/Ray path where users may provide JSON
+        # values as strings (e.g. '{"temperature": 0.5}' instead of a native dict),
+        # since unlike the K8s CLI path there is no argparse layer to do json.loads.
+        coerce_args(args, AsyncEngineArgs)
 
         engine_args = AsyncEngineArgs(
             **args
