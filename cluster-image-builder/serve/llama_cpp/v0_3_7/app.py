@@ -24,7 +24,7 @@ from starlette_context.plugins import RequestIdPlugin
 from starlette_context.middleware import RawContextMiddleware
 
 from downloader import get_downloader, build_request_from_model_args
-from serve._utils import coerce_pydantic_args
+from serve._utils import coerce_args
 
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
@@ -152,7 +152,7 @@ class Backend:
 
         # Coerce JSON string values to native types based on ModelSettings field
         # annotations (same rationale as vLLM — SSH/Ray path has no argparse layer).
-        coerce_pydantic_args(model_settings, ModelSettings)
+        coerce_args(model_settings, ModelSettings)
 
         # Create model settings and model instance
         self.model_settings = ModelSettings(**model_settings)
