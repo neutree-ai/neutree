@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"encoding/json"
 	"maps"
 	"net/url"
 	"path"
@@ -114,6 +115,47 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 			maps.Copy(data.EngineArgs, v)
 		}
 	}
+
+	// Prepare engine arg values for YAML double-quoted template rendering.
+	// Handles native maps, unescaped JSON strings, and pre-escaped strings.
+	escapeEngineArgsForTemplate(data.EngineArgs)
+}
+
+// escapeEngineArgsForTemplate prepares engine arg values for use in YAML
+// double-quoted template contexts (e.g. "{{ $value }}"). It handles:
+//   - Native map/slice: serialized to JSON, then YAML-escaped
+//   - Unescaped JSON string '{"method":"mtp"}': YAML-escaped so inner quotes
+//     don't break the YAML double-quoted scalar
+//   - Pre-escaped string '{\"method\":\"mtp\"}': left as-is (already YAML-safe,
+//     json.Unmarshal fails on the backslashes)
+//   - Simple string "float16", number 4096: left as-is
+func escapeEngineArgsForTemplate(args map[string]interface{}) {
+	for k, v := range args {
+		switch val := v.(type) {
+		case map[string]interface{}, []interface{}:
+			b, err := json.Marshal(v)
+			if err == nil {
+				args[k] = escapeForYAMLDoubleQuote(string(b))
+			}
+		case string:
+			var parsed interface{}
+			if err := json.Unmarshal([]byte(val), &parsed); err == nil {
+				switch parsed.(type) {
+				case map[string]interface{}, []interface{}:
+					args[k] = escapeForYAMLDoubleQuote(val)
+				}
+			}
+		}
+	}
+}
+
+// escapeForYAMLDoubleQuote escapes a string for use inside a YAML double-quoted
+// scalar. Backslashes must be escaped first to avoid double-escaping quotes.
+func escapeForYAMLDoubleQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+
+	return s
 }
 
 // setResourceVariables sets resource specifications and node selector

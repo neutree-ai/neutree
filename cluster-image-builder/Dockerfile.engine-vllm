@@ -47,6 +47,7 @@ RUN --mount=type=bind,src=requirements,target=requirements \
 ARG ENGINE_VERSION_DIR
 COPY serve/_metrics ./serve/_metrics
 COPY serve/_replica_scheduler ./serve/_replica_scheduler
+COPY serve/_utils ./serve/_utils
 COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
 COPY downloader ./downloader
 RUN uv pip install --system -r downloader/requirements.txt
