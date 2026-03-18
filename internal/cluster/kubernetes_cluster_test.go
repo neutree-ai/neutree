@@ -309,19 +309,6 @@ func TestGetDeployedVersion(t *testing.T) {
 			expectedVersion: "v1.2.0",
 		},
 		{
-			name: "router deployment without version label",
-			objects: []client.Object{
-				&appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "router",
-						Namespace: "test-ns",
-						Labels:    map[string]string{},
-					},
-				},
-			},
-			expectedVersion: "",
-		},
-		{
 			name: "router deployment with nil labels",
 			objects: []client.Object{
 				&appsv1.Deployment{

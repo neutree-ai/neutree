@@ -6,8 +6,10 @@ import (
 
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -43,7 +45,7 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 	return status, nil
 }
 
-// checkDeploymentStatus checks if the deployment is ready
+// checkDeploymentStatus checks if the deployment is ready and running the expected cluster version.
 func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int, int, error) {
 	deployment := &appsv1.Deployment{}
 
@@ -58,5 +60,34 @@ func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int
 	podsReady := int(deployment.Status.ReadyReplicas)
 	totalPods := int(deployment.Status.Replicas)
 
-	return util.IsDeploymentUpdatedAndReady(deployment), podsReady, totalPods, nil
+	if !util.IsDeploymentUpdatedAndReady(deployment) {
+		return false, podsReady, totalPods, nil
+	}
+
+	// Check that all running Pods have the expected cluster version label
+	expectedVersion := m.cluster.Spec.Version
+	if expectedVersion != "" {
+		podList := &corev1.PodList{}
+
+		err = m.ctrlClient.List(ctx, podList,
+			client.InNamespace(m.namespace),
+			client.MatchingLabels{"app": "vmagent", "cluster": m.cluster.GetName(), "workspace": m.cluster.GetWorkspace()},
+		)
+		if err != nil {
+			return false, podsReady, totalPods, errors.Wrap(err, "failed to list vmagent pods")
+		}
+
+		for i := range podList.Items {
+			pod := &podList.Items[i]
+			if pod.Status.Phase != corev1.PodRunning {
+				continue
+			}
+
+			if v1.GetVersionFromLabels(pod.Labels) != expectedVersion {
+				return false, podsReady, totalPods, nil
+			}
+		}
+	}
+
+	return true, podsReady, totalPods, nil
 }

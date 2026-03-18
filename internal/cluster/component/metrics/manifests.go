@@ -1,9 +1,18 @@
 package metrics
 
 import (
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/internal/util"
 )
+
+func getClusterVersion(cluster *v1.Cluster) string {
+	if cluster != nil && cluster.Spec != nil {
+		return cluster.Spec.Version
+	}
+
+	return ""
+}
 
 var metricsManifestTemplate = `
 apiVersion: v1
@@ -294,6 +303,7 @@ spec:
         app: vmagent
         cluster: {{ .ClusterName }}
         workspace: {{ .Workspace }}
+        neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
       affinity:
         podAntiAffinity:
@@ -343,6 +353,7 @@ type MetricsManifestVariables struct {
 	ImagePrefix           string
 	ImagePullSecret       string
 	Version               string
+	ClusterVersion        string
 	MetricsRemoteWriteURL string
 	Replicas              int
 	Resources             map[string]string
@@ -366,6 +377,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		ImagePrefix:           m.imagePrefix,
 		ImagePullSecret:       m.imagePullSecret,
 		Version:               version,
+		ClusterVersion:        getClusterVersion(m.cluster),
 		MetricsRemoteWriteURL: m.metricsRemoteWriteURL,
 		Replicas:              replicas,
 		Resources:             resources,

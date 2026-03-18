@@ -51,22 +51,23 @@ func getRayClusterStatus(dashboardService dashboard.DashboardService) (*v1.RayCl
 
 		addNodeResource(node.Raylet)
 
-		if _, ok := node.Raylet.Labels[v1.NeutreeServingVersionLabel]; !ok {
+		nodeVersion := v1.GetVersionFromLabels(node.Raylet.Labels)
+		if nodeVersion == "" {
 			continue
 		}
 
 		if neutreeServingVersion == "" {
-			neutreeServingVersion = node.Raylet.Labels[v1.NeutreeServingVersionLabel]
+			neutreeServingVersion = nodeVersion
 		} else {
 			var less bool
 
-			less, err = semver.LessThan(neutreeServingVersion, node.Raylet.Labels[v1.NeutreeServingVersionLabel])
+			less, err = semver.LessThan(neutreeServingVersion, nodeVersion)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to compare neutree serving version")
 			}
 
 			if less {
-				neutreeServingVersion = node.Raylet.Labels[v1.NeutreeServingVersionLabel]
+				neutreeServingVersion = nodeVersion
 			}
 		}
 	}

@@ -144,6 +144,11 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 		cluster.Status.Version = routerVersion
 	}
 
+	// Default status.version to spec.version when empty (e.g. first reconcile)
+	if cluster.Status.Version == "" && cluster.Spec.Version != "" {
+		cluster.Status.Version = cluster.Spec.Version
+	}
+
 	// Calculate resources (best-effort)
 	resources, err := c.calculateResources(reconcileCtx)
 	if err != nil {
@@ -171,7 +176,7 @@ func (c *NativeKubernetesClusterReconciler) getDeployedVersion(reconcileCtx *Rec
 		return "", nil
 	}
 
-	return deployment.Labels[v1.NeutreeServingVersionLabel], nil
+	return v1.GetVersionFromLabels(deployment.Labels), nil
 }
 
 func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *ReconcileContext) error {

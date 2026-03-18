@@ -52,46 +52,45 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
 	proxyGroup.PATCH("", deletionValidation, handler)
-	proxyGroup.GET("/:workspace/:name/available_upgrade_versions", getAvailableUpgradeVersions(deps))
+	proxyGroup.GET("/available_versions", getAvailableClusterVersions(deps))
 }
 
 // newImageService is a factory function for creating image services.
 // It can be overridden in tests to inject mocks.
 var newImageService = registry.NewImageService
 
-type availableUpgradeVersionsResponse struct {
-	CurrentVersion    string   `json:"current_version"`
+type availableClusterVersionsResponse struct {
 	AvailableVersions []string `json:"available_versions"`
 }
 
-func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
+// getAvailableClusterVersions handles GET /clusters/available_versions
+// Query params: image_registry (required), workspace (required), cluster_type (required), accelerator_type (optional)
+func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		workspace := c.Param("workspace")
-		name := c.Param("name")
-
-		// Get cluster by workspace+name
-		clusters, err := deps.Storage.ListCluster(storage.ListOption{
-			Filters: []storage.Filter{
-				{Column: "metadata->>name", Operator: "eq", Value: name},
-				{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
-			},
-		})
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get cluster: %v", err)})
+		workspace := c.Query("workspace")
+		if workspace == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace is required"})
 			return
 		}
 
-		if len(clusters) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cluster %s/%s not found", workspace, name)})
+		imageRegistryName := c.Query("image_registry")
+		if imageRegistryName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image_registry is required"})
 			return
 		}
 
-		cluster := clusters[0]
+		clusterType := c.Query("cluster_type")
+		if clusterType == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cluster_type is required"})
+			return
+		}
+
+		acceleratorType := c.Query("accelerator_type")
 
 		// Get image registry
 		imageRegistries, err := deps.Storage.ListImageRegistry(storage.ListOption{
 			Filters: []storage.Filter{
-				{Column: "metadata->name", Operator: "eq", Value: fmt.Sprintf(`"%s"`, cluster.Spec.ImageRegistry)},
+				{Column: "metadata->name", Operator: "eq", Value: fmt.Sprintf(`"%s"`, imageRegistryName)},
 				{Column: "metadata->workspace", Operator: "eq", Value: fmt.Sprintf(`"%s"`, workspace)},
 			},
 		})
@@ -101,7 +100,7 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		if len(imageRegistries) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("image registry %s not found", cluster.Spec.ImageRegistry)})
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("image registry %s/%s not found", workspace, imageRegistryName)})
 			return
 		}
 
@@ -115,7 +114,7 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 
 		// Build image repo based on cluster type
 		var imageName string
-		if cluster.Spec.Type == v1.SSHClusterType {
+		if clusterType == string(v1.SSHClusterType) {
 			imageName = v1.NeutreeServeImageName
 		} else {
 			imageName = v1.NeutreeRouterImageName
@@ -147,12 +146,6 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Determine the cluster's accelerator type; default to nvidia_gpu when empty.
-		clusterAcceleratorType := string(v1.AcceleratorTypeNVIDIAGPU)
-		if cluster.Status != nil && cluster.Status.AcceleratorType != nil && *cluster.Status.AcceleratorType != "" {
-			clusterAcceleratorType = *cluster.Status.AcceleratorType
-		}
-
 		seen := make(map[string]struct{})
 		var versions []*semver.Version
 
@@ -166,15 +159,17 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 			}
 
 			versionStr := labels[v1.ImageLabelVersion]
-			if versionStr != "" {
-				// Labeled image: filter by accelerator type, use label version
+			if versionStr == "" {
+				// No version label — skip
+				continue
+			}
+
+			// Filter by accelerator type if specified
+			if acceleratorType != "" {
 				imageAcceleratorType := labels[v1.ImageLabelAcceleratorType]
-				if imageAcceleratorType != clusterAcceleratorType {
+				if imageAcceleratorType != acceleratorType {
 					continue
 				}
-			} else {
-				// Unlabeled image: use the tag itself as version
-				versionStr = tag
 			}
 
 			v, err := semver.NewVersion(versionStr)
@@ -198,8 +193,7 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 			availableVersions = append(availableVersions, "v"+v.String())
 		}
 
-		c.JSON(http.StatusOK, availableUpgradeVersionsResponse{
-			CurrentVersion:    cluster.Spec.Version,
+		c.JSON(http.StatusOK, availableClusterVersionsResponse{
 			AvailableVersions: availableVersions,
 		})
 	}

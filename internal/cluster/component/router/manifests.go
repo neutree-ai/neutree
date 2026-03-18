@@ -64,6 +64,7 @@ spec:
         app: router
         cluster: {{ .ClusterName }}
         workspace: {{ .Workspace }}
+        neutree.ai/cluster-version: {{ .Version }}
     spec:
       affinity:
         podAntiAffinity:

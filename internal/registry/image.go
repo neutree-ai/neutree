@@ -93,6 +93,10 @@ func (svc *imageService) GetImageLabels(image string, auth authn.Authenticator) 
 		return nil, errors.Wrap(err, "failed to get config for image "+image)
 	}
 
+	if cfg == nil || cfg.Config.Labels == nil {
+		return map[string]string{}, nil
+	}
+
 	return cfg.Config.Labels, nil
 }
 

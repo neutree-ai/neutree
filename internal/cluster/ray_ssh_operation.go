@@ -463,7 +463,7 @@ func (c *sshRayClusterReconciler) getHeadNodeVersion(reconcileCtx *ReconcileCont
 
 	for _, node := range nodes {
 		if node.Raylet.IsHeadNode && node.Raylet.State == v1.AliveNodeState {
-			return node.Raylet.Labels[v1.NeutreeServingVersionLabel], nil
+			return v1.GetVersionFromLabels(node.Raylet.Labels), nil
 		}
 	}
 

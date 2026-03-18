@@ -42,6 +42,7 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 			v1.NeutreeClusterLabelKey:          m.cluster.Metadata.Name,
 			v1.NeutreeClusterWorkspaceLabelKey: m.cluster.Metadata.Workspace,
 			v1.LabelManagedBy:                  v1.LabelManagedByValue,
+			v1.NeutreeServingVersionLabel:      m.cluster.Spec.Version,
 		}).
 		WithLogger(m.logger)
 
