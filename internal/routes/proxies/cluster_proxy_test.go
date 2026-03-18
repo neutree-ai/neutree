@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -114,7 +113,61 @@ func TestGetAvailableUpgradeVersions(t *testing.T) {
 		expectedError      string
 	}{
 		{
-			name:        "success - deduplicates accelerator variants and sorts versions",
+			name:        "success - filters by nvidia accelerator type and ignores unlabeled tags",
+			workspace:   "default",
+			clusterName: "test-cluster",
+			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
+				nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{
+					{
+						Spec: &v1.ClusterSpec{
+							Type:          v1.SSHClusterType,
+							Version:       "v1.0.0",
+							ImageRegistry: "my-registry",
+						},
+						Status: &v1.ClusterStatus{
+							AcceleratorType: &nvidiaGPU,
+						},
+					},
+				}, nil)
+				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
+					{
+						Spec: &v1.ImageRegistrySpec{
+							URL: "registry.example.com",
+						},
+					},
+				}, nil)
+				imgSvc.On("ListImageTags", mock.Anything, mock.Anything).Return([]string{
+					"v1.0.0", "v1.0.0-rocm", "v1.0.1-rc.1", "v1.1.0", "v1.1.0-rocm",
+					"v1.0.1-nightly-20260313", "latest",
+				}, nil)
+				// NVIDIA images
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.1-rc.1" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.0.1-rc.1", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.1.0" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
+				// AMD images — should be filtered out for nvidia cluster
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0-rocm" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "amd_gpu"}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.1.0-rocm" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "amd_gpu"}, nil)
+				// Nightly/dev — no version label, tag used as version
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.1-nightly-20260313" }), mock.Anything).
+					Return(map[string]string{}, nil)
+				// "latest" is not valid semver, will be skipped
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:latest" }), mock.Anything).
+					Return(map[string]string{}, nil)
+			},
+			expectedStatusCode: http.StatusOK,
+			expectedResponse: &availableUpgradeVersionsResponse{
+				CurrentVersion:    "v1.0.0",
+				AvailableVersions: []string{"v1.0.0", "v1.0.1-nightly-20260313", "v1.0.1-rc.1", "v1.1.0"},
+			},
+		},
+		{
+			name:        "success - defaults to nvidia_gpu when accelerator type is empty",
 			workspace:   "default",
 			clusterName: "test-cluster",
 			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
@@ -125,6 +178,7 @@ func TestGetAvailableUpgradeVersions(t *testing.T) {
 							Version:       "v1.0.0",
 							ImageRegistry: "my-registry",
 						},
+						// No status / no accelerator type → defaults to nvidia_gpu
 					},
 				}, nil)
 				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
@@ -135,26 +189,34 @@ func TestGetAvailableUpgradeVersions(t *testing.T) {
 					},
 				}, nil)
 				imgSvc.On("ListImageTags", mock.Anything, mock.Anything).Return([]string{
-					"v0.9.0", "v1.0.0", "v1.0.0-rocm", "v1.0.1-rc.1", "v1.0.1-rc.1-rocm", "v1.1.0", "v1.1.0-rocm", "v2.0.0", "latest", "invalid",
+					"v1.0.0", "v1.0.0-rocm",
 				}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0-rocm" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "amd_gpu"}, nil)
 			},
 			expectedStatusCode: http.StatusOK,
 			expectedResponse: &availableUpgradeVersionsResponse{
 				CurrentVersion:    "v1.0.0",
-				AvailableVersions: []string{"v0.9.0", "v1.0.0", "v1.0.1-rc.1", "v1.1.0", "v2.0.0"},
+				AvailableVersions: []string{"v1.0.0"},
 			},
 		},
 		{
-			name:        "success - returns all versions even when current is latest",
+			name:        "success - amd_gpu cluster only sees rocm versions",
 			workspace:   "default",
 			clusterName: "test-cluster",
 			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
+				amdGPU := string(v1.AcceleratorTypeAMDGPU)
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{
 					{
 						Spec: &v1.ClusterSpec{
 							Type:          v1.SSHClusterType,
-							Version:       "v2.0.0",
+							Version:       "v1.0.0",
 							ImageRegistry: "my-registry",
+						},
+						Status: &v1.ClusterStatus{
+							AcceleratorType: &amdGPU,
 						},
 					},
 				}, nil)
@@ -166,17 +228,25 @@ func TestGetAvailableUpgradeVersions(t *testing.T) {
 					},
 				}, nil)
 				imgSvc.On("ListImageTags", mock.Anything, mock.Anything).Return([]string{
-					"v1.0.0", "v1.5.0", "v2.0.0",
+					"v1.0.0", "v1.0.0-rocm", "v1.1.0", "v1.1.0-rocm",
 				}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0-rocm" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "amd_gpu"}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.1.0" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.1.0-rocm" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "amd_gpu"}, nil)
 			},
 			expectedStatusCode: http.StatusOK,
 			expectedResponse: &availableUpgradeVersionsResponse{
-				CurrentVersion:    "v2.0.0",
-				AvailableVersions: []string{"v1.0.0", "v1.5.0", "v2.0.0"},
+				CurrentVersion:    "v1.0.0",
+				AvailableVersions: []string{"v1.0.0", "v1.1.0"},
 			},
 		},
 		{
-			name:        "success - k8s cluster uses router image",
+			name:        "success - k8s cluster uses router image with nvidia default",
 			workspace:   "default",
 			clusterName: "test-cluster",
 			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
@@ -199,6 +269,10 @@ func TestGetAvailableUpgradeVersions(t *testing.T) {
 				imgSvc.On("ListImageTags", "registry.example.com/"+v1.NeutreeRouterImageName, mock.Anything).Return([]string{
 					"v1.0.0", "v1.1.0",
 				}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/router:v1.0.0" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
+				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/router:v1.1.0" }), mock.Anything).
+					Return(map[string]string{v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
 			},
 			expectedStatusCode: http.StatusOK,
 			expectedResponse: &availableUpgradeVersionsResponse{
@@ -321,34 +395,3 @@ func TestGetAvailableUpgradeVersions(t *testing.T) {
 	}
 }
 
-func TestStripAcceleratorSuffix(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		// No prerelease — unchanged
-		{"1.0.0", "1.0.0"},
-		// Purely alphabetic prerelease — accelerator suffix, stripped
-		{"1.0.0-rocm", "1.0.0"},
-		{"1.0.0-ROCm", "1.0.0"},
-		// Semantic prerelease (contains non-alpha chars) — kept
-		{"1.0.1-rc.1", "1.0.1-rc.1"},
-		{"1.0.0-alpha.1", "1.0.0-alpha.1"},
-		{"1.0.0-beta.2", "1.0.0-beta.2"},
-		// Prerelease + accelerator suffix (last hyphen-segment is alphabetic) — suffix stripped
-		{"1.0.1-rc.1-rocm", "1.0.1-rc.1"},
-		{"1.0.0-alpha.1-rocm", "1.0.0-alpha.1"},
-		// Numeric-only prerelease — kept (not alphabetic)
-		{"1.0.0-1", "1.0.0-1"},
-		// Mixed alphanumeric last segment — kept (not purely alphabetic)
-		{"1.0.0-build123", "1.0.0-build123"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			v := semver.MustParse(tt.input)
-			result := stripAcceleratorSuffix(v)
-			assert.Equal(t, tt.expected, result.String())
-		})
-	}
-}

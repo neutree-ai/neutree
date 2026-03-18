@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-containerregistry/pkg/authn"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/middleware"
@@ -135,7 +135,10 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 			Password: password,
 		})
 
-		// List tags
+		// List tags, then read image labels to discover available versions.
+		// Images with the "neutree.ai/cluster-version" label are deduplicated by
+		// version and filtered by accelerator type. Images without the label
+		// fall back to using the tag itself as the version (if valid semver).
 		imageSvc := newImageService()
 
 		tags, err := imageSvc.ListImageTags(imageRepo, auth)
@@ -144,26 +147,48 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Collect all valid semver tags, dedup after stripping accelerator suffixes.
-		// Accelerator variants like "v1.0.0-rocm" are merged into "v1.0.0",
-		// but release candidates like "v1.0.1-rc.1" are kept as distinct versions.
+		// Determine the cluster's accelerator type; default to nvidia_gpu when empty.
+		clusterAcceleratorType := string(v1.AcceleratorTypeNVIDIAGPU)
+		if cluster.Status != nil && cluster.Status.AcceleratorType != nil && *cluster.Status.AcceleratorType != "" {
+			clusterAcceleratorType = *cluster.Status.AcceleratorType
+		}
+
 		seen := make(map[string]struct{})
 		var versions []*semver.Version
 
 		for _, tag := range tags {
-			v, err := semver.NewVersion(tag)
+			imageRef := imageRepo + ":" + tag
+
+			labels, err := imageSvc.GetImageLabels(imageRef, auth)
+			if err != nil {
+				klog.V(4).Infof("skipping tag %s: failed to get labels: %v", tag, err)
+				continue
+			}
+
+			versionStr := labels[v1.ImageLabelVersion]
+			if versionStr != "" {
+				// Labeled image: filter by accelerator type, use label version
+				imageAcceleratorType := labels[v1.ImageLabelAcceleratorType]
+				if imageAcceleratorType != clusterAcceleratorType {
+					continue
+				}
+			} else {
+				// Unlabeled image: use the tag itself as version
+				versionStr = tag
+			}
+
+			v, err := semver.NewVersion(versionStr)
 			if err != nil {
 				continue
 			}
 
-			normalized := stripAcceleratorSuffix(v)
-			key := normalized.String()
+			key := v.String()
 			if _, ok := seen[key]; ok {
 				continue
 			}
 
 			seen[key] = struct{}{}
-			versions = append(versions, normalized)
+			versions = append(versions, v)
 		}
 
 		sort.Sort(semver.Collection(versions))
@@ -178,52 +203,4 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 			AvailableVersions: availableVersions,
 		})
 	}
-}
-
-// stripAcceleratorSuffix extracts the logical version by removing the accelerator
-// suffix from the semver prerelease, based on the tag naming convention:
-//
-//	v1.0.0                → v1.0.0           (no prerelease)
-//	v1.0.0-rocm           → v1.0.0           (prerelease "rocm" is purely alphabetic → accelerator suffix)
-//	v1.0.1-rc.1           → v1.0.1-rc.1      (last segment "rc.1" is not purely alphabetic → kept)
-//	v1.0.1-rc.1-rocm      → v1.0.1-rc.1      (last segment "rocm" is purely alphabetic → stripped)
-//
-// Convention: the accelerator suffix is appended with "-" (e.g. "v1.0.0-rocm").
-// The prerelease is split by "-" and the last segment is treated as an accelerator
-// suffix if it is purely alphabetic. Semantic prerelease segments always contain
-// non-alpha characters (e.g. "rc.1", "alpha.2", "beta.3").
-func stripAcceleratorSuffix(v *semver.Version) *semver.Version {
-	pre := v.Prerelease()
-	if pre == "" {
-		return v
-	}
-
-	segments := strings.Split(pre, "-")
-	last := segments[len(segments)-1]
-
-	if !isAlpha(last) {
-		return v
-	}
-
-	base := fmt.Sprintf("%d.%d.%d", v.Major(), v.Minor(), v.Patch())
-	if len(segments) > 1 {
-		base += "-" + strings.Join(segments[:len(segments)-1], "-")
-	}
-
-	return semver.MustParse(base)
-}
-
-// isAlpha returns true if s is non-empty and contains only ASCII letters.
-func isAlpha(s string) bool {
-	if s == "" {
-		return false
-	}
-
-	for _, c := range s {
-		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
-			return false
-		}
-	}
-
-	return true
 }

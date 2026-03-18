@@ -187,6 +187,17 @@ const (
 	NeutreeRouterImageName = "neutree/router"
 )
 
+// Image label keys used to identify version metadata in container images.
+// These labels are set at build time via `docker build --label`.
+const (
+	// ImageLabelVersion is the logical version of the image (e.g. "v1.0.0", "v1.0.1-rc.1").
+	// Accelerator variants share the same version label as the base image.
+	ImageLabelVersion = "neutree.ai/cluster-version"
+	// ImageLabelAcceleratorType is the accelerator type of the image (e.g. "nvidia_gpu", "amd_gpu").
+	// Empty or absent for the default (NVIDIA) variant.
+	ImageLabelAcceleratorType = "neutree.ai/accelerator-type"
+)
+
 func (obj *Cluster) GetName() string {
 	if obj.Metadata == nil {
 		return ""

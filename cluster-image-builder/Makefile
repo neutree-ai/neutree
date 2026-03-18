@@ -30,11 +30,17 @@ docker-build: ## Run docker-build-* targets for all the images
 
 .PHONY: docker-build-gpu
 docker-build-gpu: prepare ## Build the GPU cluster image
-	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) -f Dockerfile -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG) .
+	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		--label neutree.ai/cluster-version=$(IMAGE_TAG) \
+		--label neutree.ai/accelerator-type=nvidia_gpu \
+		-f Dockerfile -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG) .
 
 .PHONY: docker-build-amd-gpu
 docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
-	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) -f Dockerfile.rocm -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG)-rocm .
+	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		--label neutree.ai/cluster-version=$(IMAGE_TAG) \
+		--label neutree.ai/accelerator-type=amd_gpu \
+		-f Dockerfile.rocm -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG)-rocm .
 
 .PHONY: docker-build-engine-vllm
 docker-build-engine-vllm: prepare ## Build the vLLM engine image (NVIDIA)
