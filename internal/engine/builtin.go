@@ -26,7 +26,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 			APIVersion: "v1",
 			Kind:       "Engine",
 			Metadata: &v1.Metadata{
-				Name: "llama-cpp",
+				Name: v1.EngineNameLlamaCpp,
 			},
 			Spec: &v1.EngineSpec{
 				Versions: []*v1.EngineVersion{
@@ -53,7 +53,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 			APIVersion: "v1",
 			Kind:       "Engine",
 			Metadata: &v1.Metadata{
-				Name: "vllm",
+				Name: v1.EngineNameVLLM,
 			},
 			Spec: &v1.EngineSpec{
 				Versions: []*v1.EngineVersion{

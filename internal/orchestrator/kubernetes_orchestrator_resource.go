@@ -97,12 +97,12 @@ func (k *kubernetesOrchestrator) setRoutingLogic(data *DeploymentManifestVariabl
 // setEngineDefaultArgs sets default arguments for specific engines
 func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
 	switch engine.Metadata.Name {
-	case "llama-cpp":
+	case v1.EngineNameLlamaCpp:
 		// Set default parameters for llama-cpp engine
 		if _, exists := data.EngineArgs["interrupt_requests"]; !exists {
 			data.EngineArgs["interrupt_requests"] = "false"
 		}
-	case engineNameVLLM:
+	case v1.EngineNameVLLM:
 		// Auto-set tensor-parallel-size = GPU count when GPU > 1 and is a whole number
 		if endpoint.Spec.Resources != nil {
 			gpuCount := endpoint.Spec.Resources.GetGPUCount()

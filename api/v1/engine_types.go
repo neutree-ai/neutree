@@ -12,6 +12,10 @@ const (
 	TextGenerationModelTask = "text-generation"
 	TextEmbeddingModelTask  = "text-embedding"
 	TextRerankModelTask     = "text-rerank"
+
+	// Engine name constants
+	EngineNameVLLM     = "vllm"
+	EngineNameLlamaCpp = "llama-cpp"
 )
 
 // EngineVersion represents a specific version of an engine with its configuration schema,
