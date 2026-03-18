@@ -20,6 +20,8 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
+const engineNameVLLM = "vllm"
+
 // isNewClusterVersion returns true if the cluster version is > v1.0.0.
 // Returns an error if the cluster version cannot be parsed as semver.
 func isNewClusterVersion(cluster *v1.Cluster) (bool, error) {
@@ -582,6 +584,20 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
+	// For vLLM engine, auto-set tensor_parallel_size = GPU count when GPU > 1.
+	// Only set if user has not already configured it in engine_args.
+	if endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == engineNameVLLM && rayResource.NumGPUs > 1 {
+		engineArgs, ok := app.Args["engine_args"].(map[string]interface{})
+		if !ok {
+			engineArgs = make(map[string]interface{})
+		}
+
+		if _, exists := engineArgs["tensor_parallel_size"]; !exists {
+			engineArgs["tensor_parallel_size"] = int(rayResource.NumGPUs)
+			app.Args["engine_args"] = engineArgs
+		}
+	}
+
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
 	// Inject engine identity for metrics labeling (used by NeutreeRayStatLogger / _SanitizedRayStatLogger)
@@ -768,7 +784,7 @@ func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, app
 	// Old clusters (<= v1.0.0) use RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper which causes
 	// parent processes to lose child exit codes, breaking vLLM's P2P check. For those clusters, skip the check.
 	// New clusters (> v1.0.0) use RAY_process_group_cleanup_enabled which doesn't have this issue.
-	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == "vllm" {
+	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == engineNameVLLM {
 		if deployedCluster.Spec != nil && deployedCluster.Spec.Version != "" {
 			isNew, err := semver.LessThan("v1.0.0", deployedCluster.Spec.Version)
 			if err == nil && !isNew {

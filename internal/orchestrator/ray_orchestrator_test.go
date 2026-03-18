@@ -1623,6 +1623,106 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 	}
 }
 
+func TestEndpointToApplication_VLLMTensorParallelSize(t *testing.T) {
+	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
+
+	modelRegistry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.HuggingFaceModelRegistryType,
+		},
+	}
+	deployedCluster := &v1.Cluster{}
+
+	makeEndpoint := func(gpu string, variables map[string]interface{}) *v1.Endpoint {
+		ep := &v1.Endpoint{
+			Metadata: &v1.Metadata{
+				Workspace: "test",
+				Name:      "test-endpoint",
+			},
+			Spec: &v1.EndpointSpec{
+				Engine: &v1.EndpointEngineSpec{
+					Engine:  "vllm",
+					Version: "v0.11.2",
+				},
+				Resources: &v1.ResourceSpec{
+					GPU: &gpu,
+				},
+				Replicas: v1.ReplicaSpec{
+					Num: pointy.Int(1),
+				},
+				Variables: variables,
+				Model: &v1.ModelSpec{
+					Name: "test-model",
+				},
+			},
+		}
+		ep.Spec.Resources.SetAcceleratorType(nvidiaGPU)
+		return ep
+	}
+
+	tests := []struct {
+		name                    string
+		gpu                     string
+		variables               map[string]interface{}
+		expectedTensorParallel  interface{}
+		expectEngineArgsPresent bool
+	}{
+		{
+			name:                    "GPU=4 should auto-set tensor_parallel_size=4",
+			gpu:                     "4",
+			variables:               nil,
+			expectedTensorParallel:  4,
+			expectEngineArgsPresent: true,
+		},
+		{
+			name:                    "GPU=2 should auto-set tensor_parallel_size=2",
+			gpu:                     "2",
+			variables:               nil,
+			expectedTensorParallel:  2,
+			expectEngineArgsPresent: true,
+		},
+		{
+			name:                    "GPU=1 should not set tensor_parallel_size",
+			gpu:                     "1",
+			variables:               nil,
+			expectEngineArgsPresent: false,
+		},
+		{
+			name: "user-provided tensor_parallel_size should not be overridden",
+			gpu:  "4",
+			variables: map[string]interface{}{
+				"engine_args": map[string]interface{}{
+					"tensor_parallel_size": 2,
+				},
+			},
+			expectedTensorParallel:  2,
+			expectEngineArgsPresent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := acceleratormocks.NewMockManager(t)
+			mgr.EXPECT().GetConverter(nvidiaGPU).
+				Return(plugin.NewGPUConverter(), true)
+
+			app, err := EndpointToApplication(makeEndpoint(tt.gpu, tt.variables), deployedCluster, modelRegistry, nil, nil, mgr)
+			assert.NoError(t, err)
+
+			engineArgs, hasEngineArgs := app.Args["engine_args"].(map[string]interface{})
+			if tt.expectEngineArgsPresent {
+				assert.True(t, hasEngineArgs, "engine_args should be present")
+				assert.Equal(t, tt.expectedTensorParallel, engineArgs["tensor_parallel_size"])
+			} else {
+				if hasEngineArgs {
+					_, hasTensorParallel := engineArgs["tensor_parallel_size"]
+					assert.False(t, hasTensorParallel, "tensor_parallel_size should not be set")
+				}
+			}
+		})
+	}
+}
+
 func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 	tests := []struct {
 		name            string
