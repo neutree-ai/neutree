@@ -85,6 +85,34 @@ func applyEndpoint(name, engineVersion string) (yamlPath string) {
 	return yamlPath
 }
 
+// applyEndpointOnCluster renders and applies an endpoint on a specific cluster.
+func applyEndpointOnCluster(name, cluster, engineVersion string) (yamlPath string) {
+	defaults := map[string]string{
+		"E2E_ENDPOINT_NAME":       name,
+		"E2E_WORKSPACE":           testWorkspace(),
+		"E2E_CLUSTER_NAME":        cluster,
+		"E2E_ENGINE_NAME":         engineName(),
+		"E2E_ENGINE_VERSION":      engineVersion,
+		"E2E_MODEL_REGISTRY":      testRegistry(),
+		"E2E_MODEL_NAME":          modelName(),
+		"E2E_MODEL_VERSION":       modelVersion(),
+		"E2E_MODEL_TASK":          modelTask(),
+		"E2E_ACCELERATOR_TYPE":    acceleratorType(),
+		"E2E_ACCELERATOR_PRODUCT": acceleratorProduct(),
+		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
+	}
+
+	yamlPath, err := renderTemplateToTempFile(
+		filepath.Join("testdata", "endpoint.yaml"), defaults,
+	)
+	Expect(err).NotTo(HaveOccurred(), "failed to render endpoint template")
+
+	r := RunCLI("apply", "-f", yamlPath, "--force-update")
+	ExpectSuccess(r)
+
+	return yamlPath
+}
+
 // waitEndpointRunning waits for an endpoint to reach Running phase.
 func waitEndpointRunning(name string) {
 	r := RunCLI("wait", "endpoint", name,

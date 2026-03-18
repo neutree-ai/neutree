@@ -78,7 +78,7 @@ func (r *RouterComponent) checkDeploymentStatus(ctx context.Context) (bool, int,
 		return false, readyReplicas, curReplicas, nil
 	}
 
-	// Check that all running Pods have the expected version label
+	// Check that all running Pods have the expected cluster version label
 	expectedVersion := r.cluster.Spec.Version
 	if expectedVersion != "" {
 		podList := &corev1.PodList{}

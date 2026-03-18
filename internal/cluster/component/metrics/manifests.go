@@ -290,6 +290,7 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: vmagent
+    neutree.ai/cluster-version: {{ .ClusterVersion }}
 spec:
   replicas: {{ .Replicas }}
   selector:
