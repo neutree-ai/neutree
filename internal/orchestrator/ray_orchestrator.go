@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"maps"
+	"math"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -584,19 +585,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
-	// For vLLM engine, auto-set tensor_parallel_size = GPU count when GPU > 1.
-	// Only set if user has not already configured it in engine_args.
-	if endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == engineNameVLLM && rayResource.NumGPUs > 1 {
-		engineArgs, ok := app.Args["engine_args"].(map[string]interface{})
-		if !ok {
-			engineArgs = make(map[string]interface{})
-		}
-
-		if _, exists := engineArgs["tensor_parallel_size"]; !exists {
-			engineArgs["tensor_parallel_size"] = int(rayResource.NumGPUs)
-			app.Args["engine_args"] = engineArgs
-		}
-	}
+	setVLLMDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
 
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
@@ -642,6 +631,28 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	}
 
 	return app, nil
+}
+
+// setVLLMDefaultTensorParallelSize auto-sets tensor_parallel_size = GPU count in engine_args
+// for vLLM engine when GPU > 1 and is a whole number. Skips if user already configured it.
+func setVLLMDefaultTensorParallelSize(endpoint *v1.Endpoint, app *dashboard.RayServeApplication, numGPUs float64) {
+	if endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != engineNameVLLM {
+		return
+	}
+
+	if numGPUs <= 1 || math.Trunc(numGPUs) != numGPUs {
+		return
+	}
+
+	engineArgs, ok := app.Args["engine_args"].(map[string]interface{})
+	if !ok {
+		engineArgs = make(map[string]interface{})
+	}
+
+	if _, exists := engineArgs["tensor_parallel_size"]; !exists {
+		engineArgs["tensor_parallel_size"] = int(numGPUs)
+		app.Args["engine_args"] = engineArgs
+	}
 }
 
 // buildEngineContainerConfigs constructs two runtime_env.container configs for

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"maps"
+	"math"
 	"net/url"
 	"path"
 	"path/filepath"
@@ -102,10 +103,10 @@ func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVa
 			data.EngineArgs["interrupt_requests"] = "false"
 		}
 	case engineNameVLLM:
-		// Auto-set tensor_parallel_size = GPU count when GPU > 1
+		// Auto-set tensor-parallel-size = GPU count when GPU > 1 and is a whole number
 		if endpoint.Spec.Resources != nil {
 			gpuCount := endpoint.Spec.Resources.GetGPUCount()
-			if gpuCount > 1 {
+			if gpuCount > 1 && math.Trunc(gpuCount) == gpuCount {
 				data.EngineArgs["tensor-parallel-size"] = int(gpuCount)
 			}
 		}
