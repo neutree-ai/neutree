@@ -19,9 +19,9 @@ import (
 func renderSSHClusterYAML(overrides map[string]string) string {
 	defaults := map[string]string{
 		"CLUSTER_NAME":            overrides["name"],
-		"CLUSTER_WORKSPACE":      testWorkspace(),
-		"CLUSTER_IMAGE_REGISTRY": valueOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":        valueOr(overrides, "version", testClusterVersion()),
+		"CLUSTER_WORKSPACE":      Cfg.Workspace,
+		"CLUSTER_IMAGE_REGISTRY": valueOr(overrides, "image_registry", Cfg.ImageRegistryName),
+		"CLUSTER_VERSION":        valueOr(overrides, "version", Cfg.ClusterVersion),
 		"CLUSTER_SSH_HEAD_IP":    overrides["head_ip"],
 		"CLUSTER_SSH_USER":       overrides["ssh_user"],
 		"CLUSTER_SSH_PRIVATE_KEY": overrides["ssh_private_key"],
@@ -50,9 +50,9 @@ func renderSSHClusterYAML(overrides map[string]string) string {
 func renderK8sClusterYAML(overrides map[string]string) string {
 	defaults := map[string]string{
 		"CLUSTER_NAME":            overrides["name"],
-		"CLUSTER_WORKSPACE":      testWorkspace(),
-		"CLUSTER_IMAGE_REGISTRY": valueOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":        valueOr(overrides, "version", testClusterVersion()),
+		"CLUSTER_WORKSPACE":      Cfg.Workspace,
+		"CLUSTER_IMAGE_REGISTRY": valueOr(overrides, "image_registry", Cfg.ImageRegistryName),
+		"CLUSTER_VERSION":        valueOr(overrides, "version", Cfg.ClusterVersion),
 		"CLUSTER_KUBECONFIG":     overrides["kubeconfig"],
 		"CLUSTER_ROUTER_REPLICAS": valueOr(overrides, "router_replicas", "1"),
 	}
@@ -79,7 +79,7 @@ type ClusterHelper struct {
 // NewClusterHelper creates a ClusterHelper with the test workspace.
 func NewClusterHelper() *ClusterHelper {
 	return &ClusterHelper{
-		workspace: testWorkspace(),
+		workspace: Cfg.Workspace,
 	}
 }
 
@@ -152,48 +152,26 @@ func parseClusterJSON(stdout string) clusterJSON {
 
 // --- Environment helpers ---
 
-func testImageRegistry() string {
-	if r := os.Getenv("E2E_IMAGE_REGISTRY"); r != "" {
-		return r
-	}
-	return "e2e-image-registry-" + runID
-}
-
-func testClusterVersion() string {
-	if v := os.Getenv("E2E_CLUSTER_VERSION"); v != "" {
-		return v
-	}
-	return "v1.0.0"
-}
-
 // requireSSHEnv returns SSH cluster env vars. ssh_private_key is returned as base64.
 func requireSSHEnv() (headIP, workerIPs, sshUser, sshPrivateKey string) {
-	headIP = os.Getenv("E2E_SSH_HEAD_IP")
-	if headIP == "" {
+	if Cfg.SSHHeadIP == "" {
 		Skip("E2E_SSH_HEAD_IP not set, skipping SSH cluster tests")
 	}
 
-	workerIPs = os.Getenv("E2E_SSH_WORKER_IPS")
-	sshUser = os.Getenv("E2E_SSH_USER")
-	if sshUser == "" {
-		sshUser = "root"
-	}
-
-	sshPrivateKey = os.Getenv("E2E_SSH_PRIVATE_KEY")
-	if sshPrivateKey == "" {
+	if Cfg.SSHPrivateKey == "" {
 		Skip("E2E_SSH_PRIVATE_KEY not set, skipping SSH cluster tests")
 	}
 
-	return
+	return Cfg.SSHHeadIP, Cfg.SSHWorkerIPs, Cfg.SSHUser, Cfg.SSHPrivateKey
 }
 
-// requireK8sEnv returns the base64-encoded kubeconfig from env.
+// requireK8sEnv returns the base64-encoded kubeconfig from Cfg.
 func requireK8sEnv() string {
-	kubeconfig := os.Getenv("E2E_KUBECONFIG")
-	if kubeconfig == "" {
+	if Cfg.Kubeconfig == "" {
 		Skip("E2E_KUBECONFIG not set, skipping K8s cluster tests")
 	}
-	return kubeconfig
+
+	return Cfg.Kubeconfig
 }
 
 // --- Image registry setup/teardown for cluster tests ---
@@ -202,8 +180,8 @@ var imageRegistryYAML string
 
 func SetupImageRegistry() {
 	defaults := map[string]string{
-		"E2E_IMAGE_REGISTRY": testImageRegistry(),
-		"E2E_WORKSPACE":      testWorkspace(),
+		"E2E_IMAGE_REGISTRY": Cfg.ImageRegistryName,
+		"E2E_WORKSPACE":      Cfg.Workspace,
 	}
 	var err error
 	imageRegistryYAML, err = renderTemplateToTempFile(
@@ -214,8 +192,8 @@ func SetupImageRegistry() {
 	r := RunCLI("apply", "-f", imageRegistryYAML)
 	ExpectSuccess(r)
 
-	r = RunCLI("wait", "imageregistry", testImageRegistry(),
-		"-w", testWorkspace(),
+	r = RunCLI("wait", "imageregistry", Cfg.ImageRegistryName,
+		"-w", Cfg.Workspace,
 		"--for", "jsonpath=.status.phase=Connected",
 		"--timeout", "2m",
 	)
@@ -236,10 +214,10 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 
 	BeforeAll(func() {
 		// Require image registry env vars for all cluster tests.
-		if os.Getenv("E2E_IMAGE_REGISTRY_URL") == "" {
+		if Cfg.ImageRegistryURL == "" {
 			Skip("E2E_IMAGE_REGISTRY_URL not set, skipping cluster tests")
 		}
-		if os.Getenv("E2E_IMAGE_REGISTRY_REPO") == "" {
+		if Cfg.ImageRegistryRepo == "" {
 			Skip("E2E_IMAGE_REGISTRY_REPO not set, skipping cluster tests")
 		}
 
@@ -266,7 +244,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 
 		BeforeAll(func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
-			clusterName = "e2e-ssh-" + runID
+			clusterName = "e2e-ssh-" + Cfg.RunID
 
 			yaml := renderSSHClusterYAML(map[string]string{
 				"name":            clusterName,
@@ -324,7 +302,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 				"head_ip":         headIP,
 				"ssh_user":        sshUser,
 				"ssh_private_key": sshPrivateKey,
-				"image_registry":  testImageRegistry(),
+				"image_registry":  Cfg.ImageRegistryName,
 				// No worker_ips — changes spec from head+workers to head-only.
 			})
 			r = ClusterH.Apply(yaml)
@@ -381,7 +359,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 
 		BeforeAll(func() {
 			kubeconfig = requireK8sEnv()
-			clusterName = "e2e-k8s-" + runID
+			clusterName = "e2e-k8s-" + Cfg.RunID
 
 			yaml := renderK8sClusterYAML(map[string]string{
 				"name":       clusterName,
@@ -426,7 +404,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 			yaml := renderK8sClusterYAML(map[string]string{
 				"name":             clusterName,
 				"kubeconfig":       kubeconfig,
-				"image_registry":   testImageRegistry(),
+				"image_registry":   Cfg.ImageRegistryName,
 				"router_replicas":  "2",
 			})
 			r = ClusterH.Apply(yaml)
@@ -479,7 +457,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 
 		It("should stay Initializing when image registry is invalid", func() {
 			headIP, workerIPs, sshUser, sshPrivateKey := requireSSHEnv()
-			clusterName := "e2e-bad-dep-" + runID
+			clusterName := "e2e-bad-dep-" + Cfg.RunID
 			DeferCleanup(func() {
 				ClusterH.EnsureDeleted(clusterName)
 			})
@@ -491,7 +469,7 @@ var _ = Describe("Cluster Status", Ordered, Label("cluster"), func() {
 				"worker_ips":      workerIPs,
 				"ssh_user":        sshUser,
 				"ssh_private_key": sshPrivateKey,
-				"image_registry":  "non-existent-registry-" + runID,
+				"image_registry":  "non-existent-registry-" + Cfg.RunID,
 			})
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)

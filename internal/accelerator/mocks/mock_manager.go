@@ -234,6 +234,52 @@ func (_c *MockManager_GetEngineContainerRunOptions_Call) RunAndReturn(run func(s
 	return _c
 }
 
+// GetImageSuffix provides a mock function with given fields: acceleratorType
+func (_m *MockManager) GetImageSuffix(acceleratorType string) string {
+	ret := _m.Called(acceleratorType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetImageSuffix")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(acceleratorType)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockManager_GetImageSuffix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImageSuffix'
+type MockManager_GetImageSuffix_Call struct {
+	*mock.Call
+}
+
+// GetImageSuffix is a helper method to define mock.On call
+//   - acceleratorType string
+func (_e *MockManager_Expecter) GetImageSuffix(acceleratorType interface{}) *MockManager_GetImageSuffix_Call {
+	return &MockManager_GetImageSuffix_Call{Call: _e.mock.On("GetImageSuffix", acceleratorType)}
+}
+
+func (_c *MockManager_GetImageSuffix_Call) Run(run func(acceleratorType string)) *MockManager_GetImageSuffix_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockManager_GetImageSuffix_Call) Return(_a0 string) *MockManager_GetImageSuffix_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockManager_GetImageSuffix_Call) RunAndReturn(run func(string) string) *MockManager_GetImageSuffix_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetNodeAcceleratorType provides a mock function with given fields: ctx, nodeIp, sshAuth
 func (_m *MockManager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {
 	ret := _m.Called(ctx, nodeIp, sshAuth)

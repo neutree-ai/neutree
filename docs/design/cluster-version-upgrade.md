@@ -1,178 +1,135 @@
-# 集群版本升级设计文档
+# Cluster Version Upgrade
 
-## 1. 背景
+## 1. Background
 
-Neutree v1.0.1 版本对集群基础镜像进行了两项重要改进：
+Neutree v1.0.1 introduces two key improvements to cluster base images:
 
-1. **升级 Ray 版本**：为适配 vLLM 版本升级的要求，将 Ray 运行时从旧版本升级到 Ray 2.53.0，以支持新版 vLLM 推理引擎的依赖。
-2. **集群镜像轻量化**：对 `neutree-serve` 集群镜像进行了瘦身优化，移除了不必要的组件和依赖，减小镜像体积，加快部署速度。
+1. **Ray upgrade**: Ray runtime upgraded to 2.53.0 to support newer vLLM inference engine versions.
+2. **Lighter cluster images**: The `neutree-serve` image has been slimmed down by removing unnecessary components.
 
-然而，当前 Neutree 仅支持集群的创建和配置更新（如节点增减、参数变更），缺少对集群 serving 版本的升级能力。已创建的 v1.0.0 集群无法升级到 v1.0.1 及后续版本，用户只能通过删除重建的方式更新集群版本，这会导致服务中断和 Endpoint 丢失。
+Currently, Neutree only supports cluster creation and configuration updates (node scaling, parameter changes) but lacks the ability to upgrade the cluster serving version. Existing v1.0.0 clusters cannot be upgraded to v1.0.1+; users must delete and recreate, causing service disruption and endpoint loss.
 
-因此，需要为 Neutree 增加集群版本原地升级能力，支持用户在不销毁集群的前提下，将 SSH 和 Kubernetes 两种类型的集群平滑升级到新版本。
+This feature adds in-place cluster version upgrade for both SSH and Kubernetes cluster types.
 
-## 2. 目标
+## 2. Goals
 
-1. **支持集群原地版本升级**：用户通过修改 `spec.version` 即可触发升级，无需删除重建集群，保留现有 Endpoint 配置
-2. **最小化业务中断时间**：SSH 集群通过阻塞式预拉取镜像（集群镜像 + 引擎镜像），将中断窗口压缩到集群重建的纯操作耗时；Kubernetes 集群利用 Rolling Update 实现零中断或近零中断
-3. **升级状态可观测**：新增 `Upgrading` 阶段，与配置变更（`Updating`）明确区分，用户可实时感知升级进度
-4. **支持手动回滚**：升级失败或不符合预期时，用户将 `spec.version` 改回原版本即可触发自动回滚，所有中间状态均可恢复
-5. **提供版本查询能力**：提供 API 从镜像仓库查询可用的集群版本，辅助用户决策
+1. **In-place version upgrade**: Users change `spec.version` to trigger an upgrade without recreating the cluster. Existing endpoints are preserved.
+2. **Minimize downtime**: SSH clusters pre-pull images before shutdown. Kubernetes clusters use rolling updates for zero or near-zero downtime.
+3. **Observable upgrade status**: A new `Upgrading` phase is distinct from configuration `Updating`, giving users real-time upgrade visibility.
+4. **Manual rollback**: Users revert `spec.version` to the previous version to trigger automatic rollback from any intermediate state.
+5. **Version discovery**: An API queries the image registry for available cluster versions, usable for both cluster creation and upgrade.
 
 ## 3. User Story
 
-**作为** Neutree 平台用户，
+**As a** Neutree platform user,
 
-**我希望** 能够将已有集群从当前版本升级到更高版本，
+**I want to** upgrade an existing cluster to a newer version,
 
-**以便** 在不销毁集群、不丢失 Endpoint 配置的前提下，获得新版本的功能改进和性能优化。
+**So that** I can get new features and performance improvements without destroying the cluster or losing endpoint configurations.
 
-### 验收标准
+### Acceptance Criteria
 
-1. 用户可以查询可用的集群版本列表（支持按镜像仓库、集群类型、加速器类型过滤）
-2. 用户可以通过修改集群的 `spec.version` 字段触发版本升级
-3. 升级过程中集群状态显示为 `Upgrading`，与配置变更（`Updating`）明确区分
-4. SSH 集群升级前自动预拉取新版本镜像（包括集群镜像和引擎镜像），最大限度减少业务中断时间
-5. Kubernetes 集群利用 Deployment 滚动更新机制，在 replicas > 1 时实现零中断或近零中断升级
-6. 升级失败时，用户可以通过将 `spec.version` 改回原版本触发自动回滚，集群恢复到升级前状态
-7. 升级完成后，集群状态自动恢复为 `Running`，`status.version` 更新为新版本
+1. Users can query available cluster versions (filtered by image registry, cluster type, and accelerator type)
+2. Changing `spec.version` triggers a version upgrade
+3. Cluster phase shows `Upgrading` during the upgrade process
+4. SSH clusters automatically pre-pull images (cluster + engine) to minimize downtime
+5. Kubernetes clusters use Deployment rolling updates; zero downtime when replicas > 1
+6. Rollback is triggered by reverting `spec.version` to the previous value
+7. After upgrade completes, cluster returns to `Running` with `status.version` updated
 
-## 4. 整体设计
+## 4. Design Overview
 
-### 4.1 版本字段定义
+### 4.1 Version Fields
 
-| 字段 | 位置 | 说明 |
-|------|------|------|
-| `spec.version` | `ClusterSpec.Version` | 期望版本（用户设置） |
-| `status.version` | `ClusterStatus.Version` | 实际运行版本（系统检测）；首次 reconcile 时默认为 `spec.version` |
+| Field | Location | Description |
+|-------|----------|-------------|
+| `spec.version` | `ClusterSpec.Version` | Desired version (user-set) |
+| `status.version` | `ClusterStatus.Version` | Actual running version (system-detected); defaults to `spec.version` on first reconcile |
 
-### 4.2 集群阶段（Phase）
+### 4.2 Version Label System
 
-新增 `Upgrading` 阶段，`DetermineClusterPhase()` 判断优先级：
+All version tracking uses the label key `neutree.ai/cluster-version`, applied to:
 
-| 优先级 | 条件 | Phase |
-|--------|------|-------|
-| 1 | 资源就绪 | Running |
-| 2 | 未初始化 | Initializing |
-| 3 | `status.version != spec.version`（两者非空） | **Upgrading** |
-| 4 | `observedSpecHash != currentHash` | Updating |
-| 5 | 兜底 | Failed |
+- **Docker image labels** (set at build time via `--label`)
+- **K8s Deployment / Pod labels**
+- **Ray node labels**
 
-> 对于 K8s 集群，component（Router、Metrics）在检查状态时会额外验证所有 Pod 的版本 label 是否匹配 `spec.version`。版本不匹配时 component 报 not ready → reconcile 返回 error → `isResourceReady=false` → 进入 Upgrading 阶段。
+For backward compatibility, `GetVersionFromLabels()` reads the new key first, falling back to the legacy key `neutree.ai/neutree-serving-version`.
 
-### 4.3 版本 Label 体系
+#### Image Labels
 
-统一使用 `neutree.ai/cluster-version` 作为版本 label key，覆盖：
+Set at build time via `docker build --label`:
 
-- **Docker 镜像 label**（构建时通过 `--label` 设置）
-- **K8s Deployment / Pod label**
-- **Ray 节点 label**
+| Label Key | Description | Example |
+|-----------|-------------|---------|
+| `neutree.ai/cluster-version` | Logical version | `v1.0.0`, `v1.0.1-rc.1` |
+| `neutree.ai/accelerator-type` | Accelerator type | `nvidia_gpu`, `amd_gpu` |
 
-为兼容已有的 Ray 节点和 K8s 资源，读取版本时通过 `GetVersionFromLabels()` 函数优先读取新 key `neutree.ai/cluster-version`，fallback 到旧 key `neutree.ai/neutree-serving-version`。
+Accelerator variants of the same version share the same `cluster-version` label. Images without labels (dev/nightly builds) are excluded from the version query API.
 
-#### 4.3.1 镜像 Label
+### 4.3 SSH Cluster Upgrade Flow
 
-构建镜像时通过 `docker build --label` 注入：
-
-| Label Key | 说明 | 示例 |
-|-----------|------|------|
-| `neutree.ai/cluster-version` | 逻辑版本号 | `v1.0.0`、`v1.0.1-rc.1` |
-| `neutree.ai/accelerator-type` | 加速器类型 | `nvidia_gpu`、`amd_gpu` |
-
-同一版本的不同加速器变体共享相同的 `cluster-version` label：
-- `neutree-serve:v1.0.0` → `cluster-version=v1.0.0, accelerator-type=nvidia_gpu`
-- `neutree-serve:v1.0.0-rocm` → `cluster-version=v1.0.0, accelerator-type=amd_gpu`
-
-无 label 的镜像（dev/nightly 构建）在版本查询 API 中不返回。
-
-#### 4.3.2 版本写入与读取
-
-**SSH 集群**
-
-- **写入**：`spec.version` 注入到 Docker 镜像 tag（`neutree-serve:<version>`）和 Ray 节点 label（`neutree.ai/cluster-version`）
-- **读取**：通过 Ray Dashboard `ListNodes()` 获取所有 ALIVE 节点的版本 label（兼容新旧 key），取最高版本写入 `status.version`
-
-**Kubernetes 集群**
-
-- **写入**：`spec.version` 注入到 Router/Metrics Deployment 的镜像 tag、Deployment label 和 Pod template label（`neutree.ai/cluster-version`）
-- **读取**：从 Router Deployment 的 label 读取版本写入 `status.version`
-- **就绪判断**：Component 检查所有 running Pod 的版本 label 是否全部匹配 `spec.version`，不匹配则报 not ready
-
-### 4.4 SSH 集群升级流程
-
-**为什么需要重建升级？**
-
-SSH 类型的集群以 Ray 作为底座，Head 和 Worker 节点通过 Ray 集群协议通信。Ray 不支持跨版本兼容，也就是同一集群内不能混用不同 Ray 版本。由于集群版本升级涉及 Ray 版本变更（如 v1.0.0 → v1.0.1 包含 Ray 版本升级），无法对单个节点进行滚动替换，必须将整个集群先停止（`downCluster`），再以新版本统一拉起（`upCluster`），确保所有节点运行相同版本的 Ray。
+Ray does not support mixed versions within a cluster. SSH upgrades require a full cluster rebuild:
 
 ```
-prePullImages（阻塞：集群镜像 + 引擎镜像，所有节点并发拉取）  ← 业务正常运行
-  ↓
-downCluster（force stop all workers + ray down）               ← ⚠️ 业务中断开始
-  ↓
-upCluster(restart=true)（新版本镜像 ray up）
-  ↓
-reconcileWorkerNode（新版本镜像启动所有 worker）
-  ↓
-checkAndUpdateStatus（从 Ray Dashboard 读取 status.version）   ← ✅ 集群就绪
-  ↓
-Endpoint Reconcile → 推理实例重建（Ray Serve Application 重新部署） ← ⚠️ 业务中断持续
-  ↓
-推理实例就绪（模型加载完成，开始接受请求）                         ← ✅ 业务中断结束
+prePullImages (blocking: cluster + engine images, all nodes concurrent)  <- services running
+  |
+downCluster (force stop workers + ray down)                              <- downtime starts
+  |
+upCluster (restart=true, new image)
+  |
+reconcileWorkerNode (start workers with new image)
+  |
+checkAndUpdateStatus (read status.version from Ray Dashboard)            <- cluster ready
+  |
+Endpoint reconcile -> redeploy Ray Serve applications                    <- downtime continues
+  |
+Endpoints ready (models loaded)                                          <- downtime ends
 ```
 
-**业务中断区间**：`downCluster` → 推理实例就绪。集群升级完成后，Endpoint 控制器会检测到推理实例不存在并触发重建，推理实例需要重新部署 Ray Serve Application 并加载模型，这一阶段的耗时取决于模型大小和加载速度。通过阻塞式预拉取镜像（集群镜像 + 引擎镜像），将集群自身的中断时间压缩到 down + up + startWorkers 的纯操作耗时，但完整的业务恢复还需加上推理实例重建时间。
-
-### 4.5 Kubernetes 集群升级流程
+### 4.4 Kubernetes Cluster Upgrade Flow
 
 ```
-reconcile → Router/Metrics Deployment 更新镜像 + label（包括 Pod template label）
-  ↓
-K8s Rolling Update（旧 Pod 逐步替换为新 Pod）  ← ⚠️ 短暂中断或零中断
-  ↓
-Component 检查 Pod 版本 label 全部匹配 spec.version → ready
-  ↓
-getDeployedVersion → 写入 status.version → Upgrading → Running
+reconcile -> update Router/Metrics Deployment image + Pod template labels
+  |
+K8s Rolling Update (old pods replaced by new pods)
+  |
+Component checks all Pod version labels match spec.version -> ready
+  |
+getDeployedVersion -> write status.version -> Running
 ```
 
-依赖 Deployment 的 Rolling Update 策略，replicas > 1 且 `maxUnavailable=0` 时可实现零中断。
+Components (Router, Metrics) verify all running Pod version labels match `spec.version` during status checks. Mismatched pods cause the component to report not-ready, keeping the phase as `Upgrading` until rollout completes.
 
-**Upgrading 状态持续机制**：Component（Router、Metrics）在 `checkDeploymentStatus` 时，除检查 Deployment ready 外，还会 list 所有 running Pod 验证其 `neutree.ai/cluster-version` label 是否匹配 `spec.version`。Rolling Update 期间存在旧版本 Pod → component 报 not ready → reconcile 返回 error → phase 为 Upgrading。直到所有 Pod 版本统一后才 ready → Running。
+### 4.5 Manual Rollback
 
-### 4.6 手动回滚
+Reverting `spec.version` to the previous value triggers automatic rollback. All intermediate states are recoverable:
 
-用户通过将 `spec.version` 改回原版本触发回滚。所有升级中间状态均可自动恢复：
+- **prePullImages failed**: Nodes still on old version, auto-recover
+- **downCluster failed**: Nodes partially stopped, reconcile restores them
+- **upCluster(v2) failed**: Head not started, reconcile rebuilds with v1
+- **reconcileWorkerNode failed**: Head on v2, workers partial; reconcile detects version mismatch, rebuilds cluster
 
-| 失败步骤 | 失败时集群状态 | 回滚恢复方式 |
-|----------|--------------|-------------|
-| prePullImages | Head=v1, Workers=v1 | 所有节点仍为 v1，自动恢复 |
-| downCluster | 部分/全部节点停止，都是 v1 | reconcileHeadNode + reconcileWorkerNode 自动恢复 |
-| upCluster(v2) | Head 未启动，Workers 已停止 | upCluster(v1) + reconcileWorkerNode 自动恢复 |
-| reconcileWorkerNode | Head=v2, Workers 部分/未启动 | reconcileHeadNode 版本检查 → down+up(v1) + startWorkers(v1) 自动恢复 |
-
-回滚状态流转：**Upgrading → Running**
-
-关键机制：`reconcileHeadNode` 在检测到 Head 实际版本与 `spec.version` 不一致时，自动执行 `downCluster` + `upCluster` 重建集群。
-
-### 4.7 可用集群版本查询 API
+### 4.6 Available Cluster Versions API
 
 ```
 GET /clusters/available_versions?workspace=default&image_registry=my-registry&cluster_type=ssh&accelerator_type=nvidia_gpu
 ```
 
-| 参数 | 必填 | 说明 |
-|------|------|------|
-| `workspace` | 是 | 工作空间 |
-| `image_registry` | 是 | 镜像仓库名称 |
-| `cluster_type` | 是 | `ssh` → 查 `neutree-serve`，`kubernetes` → 查 `router` |
-| `accelerator_type` | 否 | 过滤加速器类型（如 `nvidia_gpu`、`amd_gpu`），不传返回所有有 label 的版本 |
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `workspace` | yes | Workspace name |
+| `image_registry` | yes | Image registry name |
+| `cluster_type` | yes | `ssh` -> queries `neutree-serve`, `kubernetes` -> queries `router` |
+| `accelerator_type` | no | Filter by accelerator type; omit to return all labeled versions |
 
-**版本发现机制**：
+**Version discovery**:
 
-1. 从 Image Registry 列出所有镜像 tags
-2. 对每个 tag 读取镜像 config 中的 labels（`GetImageLabels`）
-3. 无 `neutree.ai/cluster-version` label 的 tag 跳过（dev/nightly 构建不返回）
-4. 有 label 的 tag 按 `accelerator_type` 过滤（如果指定），按 `cluster-version` label 去重
-5. 按 semver 升序排列返回
+1. List all image tags from the registry
+2. Read `neutree.ai/cluster-version` label from each image config
+3. Skip tags without the label (dev/nightly builds)
+4. Filter by `accelerator_type` if specified, deduplicate by version label
+5. Return sorted by semver
 
 ```json
 {
@@ -180,172 +137,4 @@ GET /clusters/available_versions?workspace=default&image_registry=my-registry&cl
 }
 ```
 
-该 API 不依赖具体集群，可同时用于**集群创建**（选择版本）和**集群升级**（选择目标版本）。
-
-## 5. UX 设计
-
-前端代码仓库：[neutree-ai/ui](https://github.com/neutree-ai/ui)
-
-### 5.1 集群创建页 — 版本选择
-
-**位置**：集群创建表单（`src/pages/clusters/create.tsx`），在 Image Registry 选择器之后添加 Version 选择器。
-
-**交互流程**：
-
-1. 用户选择 Image Registry 和 Cluster Type 后，Version 下拉框自动加载可用版本
-2. 调用 `GET /clusters/available_versions?workspace=<当前workspace>&image_registry=<选中的registry>&cluster_type=<选中的type>` 获取版本列表
-3. 默认选中最新版本（列表最后一项）
-4. 如果 Image Registry 或 Cluster Type 变更，重新加载版本列表
-
-**表单布局**：
-
-```
-┌─────────────────────────────────────────┐
-│  Create Cluster                         │
-│─────────────────────────────────────────│
-│                                         │
-│  Name:           [my-cluster        ]   │
-│  Cluster Type:   [SSH            ▾]     │
-│  Image Registry: [my-registry    ▾]     │
-│  Version:        [v1.0.1         ▾]     │  ← 新增
-│  ...                                    │
-│                                         │
-│              [Cancel]  [Create]          │
-└─────────────────────────────────────────┘
-```
-
-**实现要点**：
-
-- Version 选择器依赖 Image Registry 和 Cluster Type，任一变更时重新请求
-- 使用 `useCustom()` 调用 `available_versions` API，query params 动态绑定表单值
-- 创建时不传 `accelerator_type`（SSH 集群在创建时尚未检测加速器类型），返回所有版本
-- 选中的版本写入 `spec.version` 字段提交
-
-### 5.2 类型与状态补充（Upgrading Phase）
-
-**ClusterPhase 枚举补充**（`src/domains/cluster/types.ts`）：
-
-```typescript
-enum ClusterPhase {
-  PENDING = "Pending",
-  RUNNING = "Running",
-  PAUSED = "Paused",
-  FAILED = "Failed",
-  DELETED = "Deleted",
-  INITIALIZING = "Initializing",
-  UPDATING = "Updating",
-  UPGRADING = "Upgrading",   // 新增
-  DELETING = "Deleting",
-}
-```
-
-**ClusterStatus 组件补充**（`src/domains/cluster/components/ClusterStatus.tsx`）：
-
-为 `Upgrading` 阶段添加样式映射，建议使用蓝色（`bg-blue-100 text-blue-800`）区分于 Updating 的黄色。
-
-### 5.3 集群详情页 — 升级入口
-
-**位置**：集群详情页（`src/pages/clusters/show.tsx`）的右上角操作菜单（三点按钮），通过 `ShowPage` 的 `extraActions` prop 注入升级操作项。
-
-**交互流程**：
-
-1. 用户点击三点菜单，显示操作列表：**Upgrade** | Edit | Delete
-2. Upgrade 按钮默认显示，无前置条件。可用版本由 `available_versions` API 返回，无可用版本时在 Dialog 中提示
-3. 点击 Upgrade 弹出升级对话框（Dialog）
-
-**升级对话框（Upgrade Dialog）**：
-
-```
-┌─────────────────────────────────────────┐
-│  Upgrade Cluster                     [×]│
-│─────────────────────────────────────────│
-│                                         │
-│  Current Version:  v1.0.0               │
-│                                         │
-│  Target Version:   [v1.0.1        ▾]    │
-│                                         │
-│  ⚠ SSH clusters will experience         │
-│    downtime during upgrade.             │
-│                                         │
-│              [Cancel]  [Upgrade]         │
-└─────────────────────────────────────────┘
-```
-
-- **Current Version**：显示 `status.version`（当前运行版本）
-- **Target Version**：下拉选择框，选项来自 `GET /clusters/available_versions` 接口返回的 `available_versions`（传入集群的 `image_registry`、`cluster_type`、`accelerator_type`），**前端过滤掉与 `spec.version` 相同的版本**（当前期望版本无需出现在升级目标中），默认选中最新版本。过滤后无可用版本时显示提示信息
-- **警告提示**：SSH 类型集群显示中断提示；K8s 类型集群显示滚动更新提示
-- **Upgrade 按钮**：确认后通过 `useUpdate()` 更新集群的 `spec.version` 字段触发升级
-
-**实现参考**：
-
-新建组件 `src/domains/cluster/components/ClusterUpgradeAction.tsx`，参考 `EndpointPauseAction` 模式：
-
-- 使用 `useCustom()` 调用 `available_versions` API 获取可用版本
-- 使用 `useUpdate()` 更新 `spec.version` 触发升级
-- 使用 `useInvalidate()` 刷新详情页数据
-- 使用 `sonner` toast 显示成功/失败通知
-
-在 `show.tsx` 中注入：
-
-```tsx
-<ShowPage
-  record={record}
-  extraActions={(record) => (
-    <ClusterUpgradeAction cluster={record as Cluster} />
-  )}
->
-```
-
-### 5.4 集群列表页 — 版本列
-
-**位置**：集群列表页（`src/pages/clusters/list.tsx`），在 Status 列之后添加 Version 列。
-
-```tsx
-<Table.Column
-  header={t("common.fields.version")}
-  accessorKey="status.version"
-  id="version"
-  enableHiding
-  cell={({ row }) => {
-    const { spec, status } = row.original;
-    // 显示 status.version（实际版本），如果正在升级则显示升级箭头
-    // e.g. "v1.0.0" 或 "v1.0.0 → v1.0.1"
-  }}
-/>
-```
-
-**显示逻辑**：
-- 正常状态：显示 `status.version`（如 `v1.0.0`）
-- 升级中（`status.phase === "Upgrading"`）：显示 `status.version → spec.version`（如 `v1.0.0 → v1.0.1`）
-
-### 5.5 集群详情页 — 版本信息展示
-
-在详情页 Basic 标签的基本信息卡片中，Status 行下方添加 Version 行：
-
-```tsx
-<ShowPage.Row title={t("common.fields.version")}>
-  {record.status?.version ?? "-"}
-  {record.status?.phase === "Upgrading" && (
-    <span className="text-muted-foreground"> → {record.spec.version}</span>
-  )}
-</ShowPage.Row>
-```
-
-### 5.6 国际化（i18n）
-
-在 `src/locales/en-US.json` 和 `src/locales/zh-CN.json` 中添加：
-
-```json
-{
-  "clusters.actions.upgrade": "Upgrade",
-  "clusters.actions.upgradeTitle": "Upgrade Cluster",
-  "clusters.fields.currentVersion": "Current Version",
-  "clusters.fields.targetVersion": "Target Version",
-  "clusters.messages.upgradeSuccess": "Cluster upgrade initiated successfully",
-  "clusters.messages.upgradeFailed": "Failed to initiate cluster upgrade",
-  "clusters.messages.noUpgradeVersions": "No upgrade versions available",
-  "clusters.messages.upgradeWarningSSH": "SSH clusters will experience downtime during upgrade. All running endpoints will be temporarily interrupted.",
-  "clusters.messages.upgradeWarningK8s": "Kubernetes clusters use rolling updates with zero downtime.",
-  "status.phases.cluster.Upgrading": "Upgrading"
-}
-```
+This API is cluster-independent and serves both **cluster creation** (version selection) and **cluster upgrade** (target version selection).

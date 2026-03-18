@@ -65,7 +65,7 @@ func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int
 	}
 
 	// Check that all running Pods have the expected cluster version label
-	expectedVersion := m.cluster.Spec.Version
+	expectedVersion := m.cluster.GetVersion()
 	if expectedVersion != "" {
 		podList := &corev1.PodList{}
 

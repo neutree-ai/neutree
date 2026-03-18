@@ -318,7 +318,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		return nil, errors.Wrap(err, "failed to get image prefix")
 	}
 
-	rayClusterConfig.Docker.Image = imagePrefix + "/" + v1.NeutreeServeImageName + ":" + cluster.Spec.Version
+	rayClusterConfig.Docker.Image = util.BuildClusterImageRef(imagePrefix, cluster.Spec.Version, "")
 	rayClusterConfig.Docker.PullBeforeRun = true
 	// Determine cluster generation: > v1.0.0 uses DOOD engine isolation,
 	// <= v1.0.0 mounts NFS inside ray_container and needs elevated privileges.
@@ -537,7 +537,13 @@ func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) 
 		return errors.Wrap(err, "failed to get image prefix")
 	}
 
-	clusterImage := imagePrefix + "/" + v1.NeutreeServeImageName + ":" + reconcileCtx.Cluster.Spec.Version
+	// Resolve accelerator image suffix for the cluster image (e.g. "rocm" for AMD GPU).
+	imageSuffix := ""
+	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.AcceleratorType != nil {
+		imageSuffix = c.acceleratorManager.GetImageSuffix(*reconcileCtx.Cluster.Status.AcceleratorType)
+	}
+
+	clusterImage := util.BuildClusterImageRef(imagePrefix, reconcileCtx.Cluster.Spec.Version, imageSuffix)
 
 	imageSet := map[string]struct{}{clusterImage: {}}
 	for _, img := range engineImages {
@@ -599,12 +605,6 @@ func (c *sshRayClusterReconciler) collectEngineImages(reconcileCtx *ReconcileCon
 		return nil, errors.Wrap(err, "failed to get image prefix")
 	}
 
-	// Get cluster accelerator type
-	acceleratorType := ""
-	if cluster.Status != nil && cluster.Status.AcceleratorType != nil {
-		acceleratorType = *cluster.Status.AcceleratorType
-	}
-
 	// Collect unique engine images
 	imageSet := map[string]struct{}{}
 
@@ -620,6 +620,12 @@ func (c *sshRayClusterReconciler) collectEngineImages(reconcileCtx *ReconcileCon
 
 		if ep.Spec == nil || ep.Spec.Engine == nil {
 			continue
+		}
+
+		// Use the endpoint's own accelerator type, not the cluster's
+		acceleratorType := ""
+		if ep.Spec.Resources != nil {
+			acceleratorType = ep.Spec.Resources.GetAcceleratorType()
 		}
 
 		image, err := c.resolveEngineImage(ep, imagePrefix, acceleratorType)
@@ -661,25 +667,13 @@ func (c *sshRayClusterReconciler) resolveEngineImage(endpoint *v1.Endpoint, imag
 
 	engine := &engines[0]
 
-	// Find the matching engine version
+	// Find the matching engine version and resolve image
 	for _, version := range engine.Spec.Versions {
 		if version.Version != endpoint.Spec.Engine.Version {
 			continue
 		}
 
-		engineImage := version.GetImageForAccelerator(acceleratorType)
-		if engineImage == nil {
-			return "", nil
-		}
-
-		imageName, tag := engineImage.GetFullImagePath()
-		if imageName == "" {
-			return "", nil
-		}
-
-		fullImage := imagePrefix + "/" + imageName + ":" + tag
-
-		return fullImage, nil
+		return util.ResolveEngineImage(version, acceleratorType, imagePrefix)
 	}
 
 	return "", nil

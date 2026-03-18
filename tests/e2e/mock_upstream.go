@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"sync"
 )
 
@@ -58,11 +57,7 @@ func (m *MockUpstream) Port() int {
 // to reach this server. Configurable via E2E_MOCK_UPSTREAM_HOST env var;
 // defaults to "host.docker.internal" (works on macOS Docker Desktop).
 func (m *MockUpstream) ExternalHost() string {
-	if h := os.Getenv("E2E_MOCK_UPSTREAM_HOST"); h != "" {
-		return h
-	}
-
-	return "host.docker.internal"
+	return Cfg.MockUpstreamHost
 }
 
 // ExternalURL returns the full URL reachable from Docker containers.

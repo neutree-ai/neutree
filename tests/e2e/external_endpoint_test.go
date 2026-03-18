@@ -24,7 +24,7 @@ var (
 )
 
 func testEEName() string {
-	return "e2e-ee-" + runID
+	return "e2e-ee-" + Cfg.RunID
 }
 
 const mockAuthToken = "e2e-test-token-secret"
@@ -45,7 +45,7 @@ func TeardownMockUpstream() {
 func SetupExternalEndpoint() {
 	defaults := map[string]string{
 		"E2E_EE_NAME":           testEEName(),
-		"E2E_WORKSPACE":         testWorkspace(),
+		"E2E_WORKSPACE":         Cfg.Workspace,
 		"E2E_MOCK_UPSTREAM_URL": mockUpstream.ExternalURL(),
 		"E2E_MOCK_AUTH_TOKEN":   mockAuthToken,
 	}
@@ -60,7 +60,7 @@ func SetupExternalEndpoint() {
 	ExpectSuccess(r)
 
 	r = RunCLI("wait", "ExternalEndpoint", testEEName(),
-		"-w", testWorkspace(),
+		"-w", Cfg.Workspace,
 		"--for", "jsonpath=.status.phase=Running",
 		"--timeout", "2m",
 	)
@@ -79,7 +79,7 @@ func TeardownExternalEndpoint() {
 
 // getEEServiceURL retrieves the service_url from ExternalEndpoint status via CLI.
 func getEEServiceURL() string {
-	r := RunCLI("get", "ExternalEndpoint", testEEName(), "-w", testWorkspace(), "-o", "json")
+	r := RunCLI("get", "ExternalEndpoint", testEEName(), "-w", Cfg.Workspace, "-o", "json")
 	ExpectSuccess(r)
 
 	var ee map[string]any
@@ -125,11 +125,11 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 
 		serviceURL = getEEServiceURL()
 		oaiClient = openai.NewClient(
-			openaioption.WithAPIKey(os.Getenv("NEUTREE_API_KEY")),
+			openaioption.WithAPIKey(Cfg.APIKey),
 			openaioption.WithBaseURL(serviceURL+"/v1"),
 		)
 		anthropicClient = anthropic.NewClient(
-			anthropicoption.WithAPIKey(os.Getenv("NEUTREE_API_KEY")),
+			anthropicoption.WithAPIKey(Cfg.APIKey),
 			// SDK sends to {baseURL}/v1/messages; our gateway path is .../anthropic/v1/messages
 			anthropicoption.WithBaseURL(serviceURL+"/anthropic"),
 		)
@@ -150,7 +150,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 		It("should reach Running phase and generate service_url", Label("C2635095"), func() {
 			Expect(serviceURL).NotTo(BeEmpty())
 
-			expectedPath := fmt.Sprintf("/workspace/%s/external-endpoint/%s", testWorkspace(), testEEName())
+			expectedPath := fmt.Sprintf("/workspace/%s/external-endpoint/%s", Cfg.Workspace, testEEName())
 			Expect(serviceURL).To(ContainSubstring(expectedPath))
 		})
 	})

@@ -199,6 +199,15 @@ const (
 	ImageLabelAcceleratorType = "neutree.ai/accelerator-type"
 )
 
+// GetVersion returns the cluster's desired version from spec, or empty string if nil.
+func (obj *Cluster) GetVersion() string {
+	if obj == nil || obj.Spec == nil {
+		return ""
+	}
+
+	return obj.Spec.Version
+}
+
 func (obj *Cluster) GetName() string {
 	if obj.Metadata == nil {
 		return ""

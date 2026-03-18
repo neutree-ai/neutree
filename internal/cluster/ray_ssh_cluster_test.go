@@ -1009,7 +1009,10 @@ func TestUpgradeCluster(t *testing.T) {
 		{
 			name: "upgrade cluster success",
 			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
-				// prePullImages: no endpoints, but cluster image is pre-pulled via SSH
+				// prePullImages: resolve image suffix
+				acceleratorManager.On("GetImageSuffix", mock.Anything).Return("")
+				// upCluster: mutate accelerator config
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
 				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
 				// SSH calls for pre-pulling cluster image on head node (uptime check + docker pull)
 				e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Twice()
@@ -1017,8 +1020,7 @@ func TestUpgradeCluster(t *testing.T) {
 				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
 					return len(args) > 1 && strings.Contains(args[1], "ray down")
 				})).Return([]byte(""), nil).Once()
-				// upCluster: mutate accelerator config + ray up
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil).Once()
+				// upCluster: mutate accelerator config + ray up (reuses GetNodeRuntimeConfig mock above)
 				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
 					return len(args) > 1 && strings.Contains(args[1], "ray up")
 				})).Return([]byte(""), nil).Once()
@@ -1038,7 +1040,8 @@ func TestUpgradeCluster(t *testing.T) {
 		{
 			name: "upgrade cluster fails on downCluster",
 			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
-				// prePullImages: no endpoints, pull cluster image
+				// prePullImages: resolve image suffix
+				acceleratorManager.On("GetImageSuffix", mock.Anything).Return("")
 				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
 				e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Twice()
 				// downCluster fails: ray down fails
@@ -1050,14 +1053,15 @@ func TestUpgradeCluster(t *testing.T) {
 		{
 			name: "upgrade cluster fails on upCluster",
 			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
-				// prePullImages: no endpoints, pull cluster image
+				// prePullImages: resolve image suffix
+				acceleratorManager.On("GetImageSuffix", mock.Anything).Return("")
 				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
 				e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Twice()
 				// downCluster succeeds
 				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
 					return len(args) > 1 && strings.Contains(args[1], "ray down")
 				})).Return([]byte(""), nil).Once()
-				// upCluster: mutate accelerator config fails
+				// upCluster: mutate accelerator config fails (second call)
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, assert.AnError).Once()
 				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
 			},
@@ -1142,16 +1146,18 @@ func TestCollectEngineImages(t *testing.T) {
 					{
 						Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
 						Spec: &v1.EndpointSpec{
-							Cluster: "test-cluster",
-							Engine:  &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Cluster:   "test-cluster",
+							Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Resources: &v1.ResourceSpec{Accelerator: map[string]string{"type": "nvidia_gpu"}},
 						},
 						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
 					},
 					{
 						Metadata: &v1.Metadata{Name: "ep2", Workspace: "default"},
 						Spec: &v1.EndpointSpec{
-							Cluster: "test-cluster",
-							Engine:  &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Cluster:   "test-cluster",
+							Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Resources: &v1.ResourceSpec{Accelerator: map[string]string{"type": "nvidia_gpu"}},
 						},
 						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING},
 					},
@@ -1207,16 +1213,18 @@ func TestCollectEngineImages(t *testing.T) {
 					{
 						Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
 						Spec: &v1.EndpointSpec{
-							Cluster: "test-cluster",
-							Engine:  &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Cluster:   "test-cluster",
+							Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Resources: &v1.ResourceSpec{Accelerator: map[string]string{"type": "nvidia_gpu"}},
 						},
 						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
 					},
 					{
 						Metadata: &v1.Metadata{Name: "ep2", Workspace: "default"},
 						Spec: &v1.EndpointSpec{
-							Cluster: "test-cluster",
-							Engine:  &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "v0.3.0"},
+							Cluster:   "test-cluster",
+							Engine:    &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "v0.3.0"},
+							Resources: &v1.ResourceSpec{Accelerator: map[string]string{"type": "nvidia_gpu"}},
 						},
 						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
 					},

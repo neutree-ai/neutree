@@ -9,22 +9,21 @@ import (
 )
 
 func requireUpgradeVersion() string {
-	v := os.Getenv("E2E_CLUSTER_UPGRADE_VERSION")
-	if v == "" {
+	if Cfg.ClusterUpgradeVersion == "" {
 		Skip("E2E_CLUSTER_UPGRADE_VERSION not set, skipping upgrade tests")
 	}
 
-	return v
+	return Cfg.ClusterUpgradeVersion
 }
 
 var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 	var ClusterH *ClusterHelper
 
 	BeforeAll(func() {
-		if os.Getenv("E2E_IMAGE_REGISTRY_URL") == "" {
+		if Cfg.ImageRegistryURL == "" {
 			Skip("E2E_IMAGE_REGISTRY_URL not set, skipping cluster upgrade tests")
 		}
-		if os.Getenv("E2E_IMAGE_REGISTRY_REPO") == "" {
+		if Cfg.ImageRegistryRepo == "" {
 			Skip("E2E_IMAGE_REGISTRY_REPO not set, skipping cluster upgrade tests")
 		}
 
@@ -53,7 +52,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 		BeforeAll(func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
 			upgradeVersion = requireUpgradeVersion()
-			clusterName = "e2e-ssh-upg-" + runID
+			clusterName = "e2e-ssh-upg-" + Cfg.RunID
 
 			yaml := renderSSHClusterYAML(map[string]string{
 				"name":            clusterName,
@@ -144,12 +143,12 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 		BeforeAll(func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
 			upgradeVersion = requireUpgradeVersion()
-			if modelName() == "" {
+			if Cfg.ModelName == "" {
 				Skip("E2E_MODEL_NAME not set, skipping upgrade endpoint compat tests")
 			}
 
-			clusterName = "e2e-ssh-upg-ep-" + runID
-			epName = "e2e-upg-ep-" + runID
+			clusterName = "e2e-ssh-upg-ep-" + Cfg.RunID
+			epName = "e2e-upg-ep-" + Cfg.RunID
 
 			By("Setting up model registry")
 			SetupModelRegistry()
@@ -183,7 +182,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 		It("should deploy endpoint with engine vllm v0.8.5 on initial cluster", func() {
 			By("Creating endpoint with default engine version")
-			yamlPath := applyEndpointOnCluster(epName, clusterName, engineVersionA())
+			yamlPath := applyEndpointOnCluster(epName, clusterName, Cfg.EngineVersionA)
 			defer os.Remove(yamlPath)
 
 			By("Waiting for endpoint Running")
@@ -191,7 +190,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(Equal("Running"))
-			Expect(ep.Spec.Engine.Version).To(Equal(engineVersionA()))
+			Expect(ep.Spec.Engine.Version).To(Equal(Cfg.EngineVersionA))
 		})
 
 		It("should serve inference before upgrade", func() {
@@ -276,7 +275,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 		BeforeAll(func() {
 			kubeconfig = requireK8sEnv()
 			upgradeVersion = requireUpgradeVersion()
-			clusterName = "e2e-k8s-upg-" + runID
+			clusterName = "e2e-k8s-upg-" + Cfg.RunID
 
 			yaml := renderK8sClusterYAML(map[string]string{
 				"name":       clusterName,

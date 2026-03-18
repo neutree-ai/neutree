@@ -183,6 +183,7 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 			}
 
 			seen[key] = struct{}{}
+
 			versions = append(versions, v)
 		}
 

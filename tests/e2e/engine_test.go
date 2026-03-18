@@ -48,7 +48,7 @@ var EngineH *EngineHelper
 // NewEngineHelper creates an EngineHelper with the test workspace and mirror registry.
 func NewEngineHelper(mirrorRegistry string) *EngineHelper {
 	return &EngineHelper{
-		workspace:      testWorkspace(),
+		workspace:      Cfg.Workspace,
 		mirrorRegistry: mirrorRegistry,
 	}
 }

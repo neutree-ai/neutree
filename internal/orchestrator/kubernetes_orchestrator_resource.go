@@ -458,7 +458,6 @@ func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, versi
 	// Get image for the specific accelerator type
 	engineImage := targetVersion.GetImageForAccelerator(acceleratorType)
 	if engineImage == nil {
-		// If accelerator type not found, try to use a default or return error
 		supportedAccelerators := targetVersion.GetSupportedAccelerators()
 
 		return "", "", errors.Errorf(
@@ -467,10 +466,7 @@ func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, versi
 		)
 	}
 
-	// Construct full image name
-	imageName := engineImage.ImageName
-
-	imageTag := engineImage.Tag
+	imageName, imageTag := engineImage.GetFullImagePath()
 	if imageTag == "" {
 		imageTag = version // Fallback to engine version if tag is not specified
 	}

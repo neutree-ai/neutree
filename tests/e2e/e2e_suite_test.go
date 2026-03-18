@@ -11,7 +11,7 @@ import (
 )
 
 func TestE2E(t *testing.T) {
-	if os.Getenv("NEUTREE_SERVER_URL") == "" || os.Getenv("NEUTREE_API_KEY") == "" {
+	if Cfg.ServerURL == "" || Cfg.APIKey == "" {
 		t.Skip("Skipping E2E tests: NEUTREE_SERVER_URL and NEUTREE_API_KEY must be set")
 	}
 	RegisterFailHandler(Fail)
@@ -28,8 +28,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = ReportAfterSuite("TestRail Reporter", func(report Report) {
-	runID := os.Getenv("TESTRAIL_RUN_ID")
-	if runID == "" {
+	if Cfg.TestRailRunID == "" {
 		return
 	}
 
@@ -47,7 +46,7 @@ var _ = ReportAfterSuite("TestRail Reporter", func(report Report) {
 	}
 
 	if len(results) > 0 {
-		if err := ReportToTestRail(runID, results); err != nil {
+		if err := ReportToTestRail(Cfg.TestRailRunID, results); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to report to TestRail: %v\n", err)
 		}
 	}
