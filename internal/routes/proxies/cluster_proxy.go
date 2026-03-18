@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
@@ -87,17 +88,6 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 
 		cluster := clusters[0]
 
-		if cluster.Spec == nil || cluster.Spec.Version == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "cluster has no version specified"})
-			return
-		}
-
-		currentVersion, err := semver.NewVersion(cluster.Spec.Version)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid cluster version: %v", err)})
-			return
-		}
-
 		// Get image registry
 		imageRegistries, err := deps.Storage.ListImageRegistry(storage.ListOption{
 			Filters: []storage.Filter{
@@ -154,7 +144,10 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Filter and sort: keep only tags > current version
+		// Collect all valid semver tags, dedup after stripping accelerator suffixes.
+		// Accelerator variants like "v1.0.0-rocm" are merged into "v1.0.0",
+		// but release candidates like "v1.0.1-rc.1" are kept as distinct versions.
+		seen := make(map[string]struct{})
 		var versions []*semver.Version
 
 		for _, tag := range tags {
@@ -163,9 +156,14 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 				continue
 			}
 
-			if v.GreaterThan(currentVersion) {
-				versions = append(versions, v)
+			normalized := stripAcceleratorSuffix(v)
+			key := normalized.String()
+			if _, ok := seen[key]; ok {
+				continue
 			}
+
+			seen[key] = struct{}{}
+			versions = append(versions, normalized)
 		}
 
 		sort.Sort(semver.Collection(versions))
@@ -180,4 +178,52 @@ func getAvailableUpgradeVersions(deps *Dependencies) gin.HandlerFunc {
 			AvailableVersions: availableVersions,
 		})
 	}
+}
+
+// stripAcceleratorSuffix extracts the logical version by removing the accelerator
+// suffix from the semver prerelease, based on the tag naming convention:
+//
+//	v1.0.0                → v1.0.0           (no prerelease)
+//	v1.0.0-rocm           → v1.0.0           (prerelease "rocm" is purely alphabetic → accelerator suffix)
+//	v1.0.1-rc.1           → v1.0.1-rc.1      (last segment "rc.1" is not purely alphabetic → kept)
+//	v1.0.1-rc.1-rocm      → v1.0.1-rc.1      (last segment "rocm" is purely alphabetic → stripped)
+//
+// Convention: the accelerator suffix is appended with "-" (e.g. "v1.0.0-rocm").
+// The prerelease is split by "-" and the last segment is treated as an accelerator
+// suffix if it is purely alphabetic. Semantic prerelease segments always contain
+// non-alpha characters (e.g. "rc.1", "alpha.2", "beta.3").
+func stripAcceleratorSuffix(v *semver.Version) *semver.Version {
+	pre := v.Prerelease()
+	if pre == "" {
+		return v
+	}
+
+	segments := strings.Split(pre, "-")
+	last := segments[len(segments)-1]
+
+	if !isAlpha(last) {
+		return v
+	}
+
+	base := fmt.Sprintf("%d.%d.%d", v.Major(), v.Minor(), v.Patch())
+	if len(segments) > 1 {
+		base += "-" + strings.Join(segments[:len(segments)-1], "-")
+	}
+
+	return semver.MustParse(base)
+}
+
+// isAlpha returns true if s is non-empty and contains only ASCII letters.
+func isAlpha(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for _, c := range s {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
+		}
+	}
+
+	return true
 }
