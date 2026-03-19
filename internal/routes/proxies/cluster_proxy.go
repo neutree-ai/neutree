@@ -112,12 +112,16 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Build image repo based on cluster type
 		var imageName string
-		if clusterType == string(v1.SSHClusterType) {
+
+		switch clusterType {
+		case string(v1.SSHClusterType):
 			imageName = v1.NeutreeServeImageName
-		} else {
+		case string(v1.KubernetesClusterType):
 			imageName = v1.NeutreeRouterImageName
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("unsupported cluster_type: %s, must be 'ssh' or 'kubernetes'", clusterType)})
+			return
 		}
 
 		imageRepo := imagePrefix + "/" + imageName
@@ -129,15 +133,20 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		auth := authn.FromConfig(authn.AuthConfig{
-			Username: username,
-			Password: password,
-		})
+		var auth authn.Authenticator
+		if username != "" || password != "" {
+			auth = authn.FromConfig(authn.AuthConfig{
+				Username: username,
+				Password: password,
+			})
+		} else {
+			auth = authn.Anonymous
+		}
 
 		// List tags, then read image labels to discover available versions.
-		// Images with the "neutree.ai/cluster-version" label are deduplicated by
-		// version and filtered by accelerator type. Images without the label
-		// fall back to using the tag itself as the version (if valid semver).
+		// Only images with the "neutree.ai/cluster-version" label are included;
+		// images without the label (dev/nightly builds) are skipped.
+		// Labeled images are deduplicated by version and filtered by accelerator type.
 		imageSvc := newImageService()
 
 		tags, err := imageSvc.ListImageTags(imageRepo, auth)
