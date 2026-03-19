@@ -74,6 +74,7 @@ func runRemoveVersion(opts *removeVersionOptions) error {
 
 	// Find the version index
 	versionIdx := -1
+
 	for i, v := range engine.Spec.Versions {
 		if v.Version == opts.version {
 			versionIdx = i
