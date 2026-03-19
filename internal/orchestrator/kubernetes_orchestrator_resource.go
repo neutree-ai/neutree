@@ -95,28 +95,42 @@ func (k *kubernetesOrchestrator) setRoutingLogic(data *DeploymentManifestVariabl
 }
 
 // setEngineDefaultArgs sets default arguments for specific engines
-func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
-	switch engine.Metadata.Name {
+func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVariables, engine *v1.Engine) {
+	switch engine.Metadata.Name { //nolint:gocritic
 	case v1.EngineNameLlamaCpp:
 		// Set default parameters for llama-cpp engine
 		if _, exists := data.EngineArgs["interrupt_requests"]; !exists {
 			data.EngineArgs["interrupt_requests"] = "false"
 		}
-	case v1.EngineNameVLLM:
-		// Auto-set tensor-parallel-size = GPU count when GPU > 1 and is a whole number
-		if endpoint.Spec.Resources != nil {
-			gpuCount := endpoint.Spec.Resources.GetGPUCount()
-			if gpuCount > 1 && math.Trunc(gpuCount) == gpuCount {
-				data.EngineArgs["tensor-parallel-size"] = int(gpuCount)
-			}
-		}
+	}
+}
+
+// setK8sVLLMDefaultTensorParallelSize auto-sets tensor-parallel-size = GPU count for vLLM
+// when GPU > 1 and is a whole number. Must be called after user engine_args are merged,
+// because users may provide the key in either format (hyphen or underscore).
+func setK8sVLLMDefaultTensorParallelSize(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
+	if engine.Metadata.Name != v1.EngineNameVLLM || endpoint.Spec.Resources == nil {
+		return
+	}
+
+	gpuCount := endpoint.Spec.Resources.GetGPUCount()
+	if gpuCount <= 1 || math.Trunc(gpuCount) != gpuCount {
+		return
+	}
+
+	// Check both key formats: CLI flag style (hyphen) and Python kwarg style (underscore)
+	_, hasDash := data.EngineArgs["tensor-parallel-size"]
+	_, hasUnderscore := data.EngineArgs["tensor_parallel_size"]
+
+	if !hasDash && !hasUnderscore {
+		data.EngineArgs["tensor-parallel-size"] = int(gpuCount)
 	}
 }
 
 // setEngineArgs sets engine arguments from endpoint variables
 func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
 	// Set engine-specific default arguments first
-	k.setEngineDefaultArgs(data, endpoint, engine)
+	k.setEngineDefaultArgs(data, engine)
 
 	// Then apply user-provided arguments (can override defaults)
 	if endpoint.Spec.Variables != nil {
@@ -124,6 +138,10 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 			maps.Copy(data.EngineArgs, v)
 		}
 	}
+
+	// Auto-set vLLM tensor-parallel-size after user args are merged,
+	// so we can detect user-provided values in either key format.
+	setK8sVLLMDefaultTensorParallelSize(data, endpoint, engine)
 
 	// Prepare engine arg values for YAML double-quoted template rendering.
 	// Handles native maps, unescaped JSON strings, and pre-escaped strings.

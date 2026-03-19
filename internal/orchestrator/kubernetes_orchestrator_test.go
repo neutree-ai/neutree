@@ -1382,6 +1382,29 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 			},
 		},
 		{
+			name: "vllm engine user-provided underscore key prevents default",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("4"),
+					},
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"tensor_parallel_size": "1",
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"tensor_parallel_size": "1",
+			},
+		},
+		{
 			name: "vllm engine with nil resources should not set tensor-parallel-size",
 			engine: &v1.Engine{
 				Metadata: &v1.Metadata{
