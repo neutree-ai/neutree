@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/delete"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
@@ -104,10 +106,15 @@ func runRemoveVersion(opts *removeVersionOptions) error {
 		return fmt.Errorf("cannot remove version %q of engine %q: in use by endpoint(s): %s", opts.version, opts.engineName, strings.Join(endpoints, ", "))
 	}
 
-	// If this is the last version, delete the entire engine
+	// If this is the last version, soft-delete the entire engine and wait for it to be removed
 	if len(engine.Spec.Versions) == 1 {
-		if err := apiClient.Engines.Delete(engine.GetID()); err != nil {
+		if err := apiClient.Generic.Delete("Engine", engine.GetID(), workspace, opts.engineName, client.DeleteOptions{}); err != nil {
 			return fmt.Errorf("failed to delete engine %q: %w", opts.engineName, err)
+		}
+
+		// Wait for the controller to fully remove the engine
+		if err := delete.WaitForDeletion(apiClient, "Engine", workspace, opts.engineName, 2*time.Minute, 3*time.Second); err != nil {
+			return fmt.Errorf("engine %q deletion initiated but did not complete: %w", opts.engineName, err)
 		}
 
 		fmt.Printf("Successfully removed version %q and deleted engine %q (was the last version)\n", opts.version, opts.engineName)
