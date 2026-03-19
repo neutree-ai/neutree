@@ -95,53 +95,47 @@ func (k *kubernetesOrchestrator) setRoutingLogic(data *DeploymentManifestVariabl
 }
 
 // setEngineDefaultArgs sets default arguments for specific engines
-func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVariables, engine *v1.Engine) {
-	switch engine.Metadata.Name { //nolint:gocritic
+func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
+	switch engine.Metadata.Name {
 	case v1.EngineNameLlamaCpp:
-		// Set default parameters for llama-cpp engine
-		if _, exists := data.EngineArgs["interrupt_requests"]; !exists {
-			data.EngineArgs["interrupt_requests"] = "false"
+		if _, exists := data.EngineArgs["interrupt-requests"]; !exists {
+			data.EngineArgs["interrupt-requests"] = "false"
+		}
+	case v1.EngineNameVLLM:
+		// Auto-set tensor-parallel-size = GPU count when GPU > 1 and is a whole number
+		if endpoint.Spec.Resources != nil {
+			gpuCount := endpoint.Spec.Resources.GetGPUCount()
+			if gpuCount > 1 && math.Trunc(gpuCount) == gpuCount {
+				data.EngineArgs["tensor-parallel-size"] = int(gpuCount)
+			}
 		}
 	}
 }
 
-// setK8sVLLMDefaultTensorParallelSize auto-sets tensor-parallel-size = GPU count for vLLM
-// when GPU > 1 and is a whole number. Must be called after user engine_args are merged,
-// because users may provide the key in either format (hyphen or underscore).
-func setK8sVLLMDefaultTensorParallelSize(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
-	if engine.Metadata.Name != v1.EngineNameVLLM || endpoint.Spec.Resources == nil {
-		return
+// normalizeEngineArgKeys converts underscore keys to hyphen keys in engine args
+// so that user-provided keys (e.g. tensor_parallel_size) are normalized to
+// CLI flag format (tensor-parallel-size) before merging into defaults.
+func normalizeEngineArgKeys(args map[string]interface{}) map[string]interface{} {
+	normalized := make(map[string]interface{}, len(args))
+	for k, v := range args {
+		normalized[strings.ReplaceAll(k, "_", "-")] = v
 	}
 
-	gpuCount := endpoint.Spec.Resources.GetGPUCount()
-	if gpuCount <= 1 || math.Trunc(gpuCount) != gpuCount {
-		return
-	}
-
-	// Check both key formats: CLI flag style (hyphen) and Python kwarg style (underscore)
-	_, hasDash := data.EngineArgs["tensor-parallel-size"]
-	_, hasUnderscore := data.EngineArgs["tensor_parallel_size"]
-
-	if !hasDash && !hasUnderscore {
-		data.EngineArgs["tensor-parallel-size"] = int(gpuCount)
-	}
+	return normalized
 }
 
 // setEngineArgs sets engine arguments from endpoint variables
 func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
 	// Set engine-specific default arguments first
-	k.setEngineDefaultArgs(data, engine)
+	k.setEngineDefaultArgs(data, endpoint, engine)
 
-	// Then apply user-provided arguments (can override defaults)
+	// Apply user-provided arguments (can override defaults).
+	// Keys are normalized from underscore to hyphen (CLI flag format) before merging.
 	if endpoint.Spec.Variables != nil {
 		if v, ok := endpoint.Spec.Variables["engine_args"].(map[string]interface{}); ok {
-			maps.Copy(data.EngineArgs, v)
+			maps.Copy(data.EngineArgs, normalizeEngineArgKeys(v))
 		}
 	}
-
-	// Auto-set vLLM tensor-parallel-size after user args are merged,
-	// so we can detect user-provided values in either key format.
-	setK8sVLLMDefaultTensorParallelSize(data, endpoint, engine)
 
 	// Prepare engine arg values for YAML double-quoted template rendering.
 	// Handles native maps, unescaped JSON strings, and pre-escaped strings.
