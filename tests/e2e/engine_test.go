@@ -92,6 +92,18 @@ func (e *EngineHelper) Delete(name string) CLIResult {
 	return RunCLI("delete", "engine", name, "-w", e.workspace, "--force")
 }
 
+// RemoveVersion removes a specific version from an engine.
+func (e *EngineHelper) RemoveVersion(name, version string, extra ...string) CLIResult {
+	args := []string{"engine", "remove-version",
+		"--name", name,
+		"--version", version,
+		"-w", e.workspace,
+	}
+	args = append(args, extra...)
+
+	return RunCLI(args...)
+}
+
 // EnsureDeleted deletes an engine, ignoring errors (for cleanup).
 func (e *EngineHelper) EnsureDeleted(name string) {
 	e.Delete(name)
@@ -730,6 +742,159 @@ var _ = Describe("Engine", Ordered, func() {
 			e := parseEngineJSON(r.Stdout)
 			Expect(e.Spec.Versions).To(HaveLen(1))
 			Expect(e.Spec.Versions[0].ValuesSchema).To(HaveKey("properties"))
+		})
+	})
+
+	// --- Remove Version ---
+
+	Describe("RemoveVersion", Label("engine", "remove-version"), func() {
+
+		It("should remove a version from a multi-version engine", func() {
+			name := "e2e-engine-rmver"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			// Import v1 and v2
+			pkg1 := buildEnginePackage(engineManifest{
+				Name:           name,
+				Version:        "v1.0.0",
+				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
+				SupportedTasks: []string{"text-generation"},
+			})
+			defer os.Remove(pkg1)
+
+			r := EngineH.ImportSkipImage(pkg1)
+			ExpectSuccess(r)
+
+			pkg2 := buildEnginePackage(engineManifest{
+				Name:           name,
+				Version:        "v2.0.0",
+				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v2.0.0"}},
+				SupportedTasks: []string{"text-generation", "text-embedding"},
+			})
+			defer os.Remove(pkg2)
+
+			r = EngineH.ImportSkipImage(pkg2)
+			ExpectSuccess(r)
+
+			// Verify 2 versions exist
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(2))
+
+			// Remove v1.0.0
+			r = EngineH.RemoveVersion(name, "v1.0.0")
+			ExpectSuccess(r)
+			ExpectStdoutContains(r, "Successfully removed")
+
+			// Verify only v2.0.0 remains
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e = parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(1))
+			Expect(e.Spec.Versions[0].Version).To(Equal("v2.0.0"))
+		})
+
+		It("should reject removing the last version without --force", func() {
+			name := "e2e-engine-rmver-last"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			pkg := buildEnginePackage(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images:  map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
+			})
+			defer os.Remove(pkg)
+
+			r := EngineH.ImportSkipImage(pkg)
+			ExpectSuccess(r)
+
+			// Try to remove the only version without --force
+			r = EngineH.RemoveVersion(name, "v1.0.0")
+			ExpectFailed(r)
+		})
+
+		It("should delete engine when force-removing the last version", func() {
+			name := "e2e-engine-rmver-force"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			pkg := buildEnginePackage(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images:  map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
+			})
+			defer os.Remove(pkg)
+
+			r := EngineH.ImportSkipImage(pkg)
+			ExpectSuccess(r)
+
+			// Force remove the last version — should delete the engine
+			r = EngineH.RemoveVersion(name, "v1.0.0", "--force")
+			ExpectSuccess(r)
+			ExpectStdoutContains(r, "deleted engine")
+
+			// Verify engine no longer exists
+			r = EngineH.Get(name)
+			ExpectFailed(r)
+		})
+
+		It("should fail when removing a non-existent version", func() {
+			name := "e2e-engine-rmver-noexist"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			pkg := buildEnginePackage(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images:  map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
+			})
+			defer os.Remove(pkg)
+
+			r := EngineH.ImportSkipImage(pkg)
+			ExpectSuccess(r)
+
+			r = EngineH.RemoveVersion(name, "v9.9.9")
+			ExpectFailed(r)
+		})
+
+		It("should recalculate SupportedTasks after version removal", func() {
+			name := "e2e-engine-rmver-tasks"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			// Import v1 with text-generation
+			pkg1 := buildEnginePackage(engineManifest{
+				Name:           name,
+				Version:        "v1.0.0",
+				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
+				SupportedTasks: []string{"text-generation"},
+			})
+			defer os.Remove(pkg1)
+
+			r := EngineH.ImportSkipImage(pkg1)
+			ExpectSuccess(r)
+
+			// Import v2 with text-embedding
+			pkg2 := buildEnginePackage(engineManifest{
+				Name:           name,
+				Version:        "v2.0.0",
+				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v2.0.0"}},
+				SupportedTasks: []string{"text-embedding"},
+			})
+			defer os.Remove(pkg2)
+
+			r = EngineH.ImportSkipImage(pkg2)
+			ExpectSuccess(r)
+
+			// Remove v2.0.0 (which has the unique text-embedding task)
+			r = EngineH.RemoveVersion(name, "v2.0.0")
+			ExpectSuccess(r)
+
+			// Verify SupportedTasks no longer contains text-embedding
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(1))
+			Expect(e.Spec.SupportedTasks).To(ContainElement("text-generation"))
+			Expect(e.Spec.SupportedTasks).NotTo(ContainElement("text-embedding"))
 		})
 	})
 })
