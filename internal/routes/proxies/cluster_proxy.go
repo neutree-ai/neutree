@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"sync"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
@@ -155,45 +156,68 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Fetch labels concurrently for all tags
+		type tagResult struct {
+			version *semver.Version
+		}
+
+		results := make([]tagResult, len(tags))
+
+		var wg sync.WaitGroup
+
+		for i, tag := range tags {
+			wg.Add(1)
+
+			go func(idx int, t string) {
+				defer wg.Done()
+
+				imageRef := imageRepo + ":" + t
+
+				labels, labelErr := imageSvc.GetImageLabels(imageRef, auth)
+				if labelErr != nil {
+					klog.V(4).Infof("skipping tag %s: failed to get labels: %v", t, labelErr)
+					return
+				}
+
+				versionStr := labels[v1.ImageLabelVersion]
+				if versionStr == "" {
+					return
+				}
+
+				if acceleratorType != "" {
+					if labels[v1.ImageLabelAcceleratorType] != acceleratorType {
+						return
+					}
+				}
+
+				v, parseErr := semver.NewVersion(versionStr)
+				if parseErr != nil {
+					return
+				}
+
+				results[idx] = tagResult{version: v}
+			}(i, tag)
+		}
+
+		wg.Wait()
+
+		// Deduplicate and collect versions
 		seen := make(map[string]struct{})
 		var versions []*semver.Version
 
-		for _, tag := range tags {
-			imageRef := imageRepo + ":" + tag
-
-			labels, err := imageSvc.GetImageLabels(imageRef, auth)
-			if err != nil {
-				klog.V(4).Infof("skipping tag %s: failed to get labels: %v", tag, err)
+		for _, r := range results {
+			if r.version == nil {
 				continue
 			}
 
-			versionStr := labels[v1.ImageLabelVersion]
-			if versionStr == "" {
-				// No version label — skip
-				continue
-			}
-
-			// Filter by accelerator type if specified
-			if acceleratorType != "" {
-				imageAcceleratorType := labels[v1.ImageLabelAcceleratorType]
-				if imageAcceleratorType != acceleratorType {
-					continue
-				}
-			}
-
-			v, err := semver.NewVersion(versionStr)
-			if err != nil {
-				continue
-			}
-
-			key := v.String()
+			key := r.version.String()
 			if _, ok := seen[key]; ok {
 				continue
 			}
 
 			seen[key] = struct{}{}
 
-			versions = append(versions, v)
+			versions = append(versions, r.version)
 		}
 
 		sort.Sort(semver.Collection(versions))

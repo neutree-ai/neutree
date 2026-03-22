@@ -75,6 +75,15 @@ func (controller *ClusterController) sync(obj *v1.Cluster) error {
 		obj.Spec.Version = controller.defaultClusterVersion
 	}
 
+	// Backfill status.version for legacy clusters that were created before
+	// version tracking was introduced. Without this, changing spec.version
+	// on a legacy cluster would show as Updating instead of Upgrading.
+	// We set it to the current spec.version so the cluster starts in a
+	// consistent state; the next spec.version change will trigger Upgrading.
+	if obj.IsInitialized() && obj.Status != nil && obj.Status.Version == "" {
+		obj.Status.Version = obj.Spec.Version
+	}
+
 	if obj.Metadata.DeletionTimestamp != "" {
 		return controller.reconcileDelete(obj)
 	}

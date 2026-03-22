@@ -10,7 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -79,31 +79,14 @@ func (r *RouterComponent) checkDeploymentStatus(ctx context.Context) (bool, int,
 	}
 
 	// Check that all running Pods have the expected cluster version label
-	expectedVersion := r.cluster.GetVersion()
-	if expectedVersion != "" {
-		podList := &corev1.PodList{}
-
-		err = r.ctrlClient.List(ctx, podList,
-			client.InNamespace(r.namespace),
-			client.MatchingLabels{"app": "router", "cluster": r.cluster.GetName(), "workspace": r.cluster.GetWorkspace()},
-		)
-		if err != nil {
-			return false, readyReplicas, curReplicas, errors.Wrap(err, "failed to list router pods")
-		}
-
-		for i := range podList.Items {
-			pod := &podList.Items[i]
-			if pod.Status.Phase != corev1.PodRunning {
-				continue
-			}
-
-			if v1.GetVersionFromLabels(pod.Labels) != expectedVersion {
-				return false, readyReplicas, curReplicas, nil
-			}
-		}
+	match, err := component.AllPodsMatchVersion(ctx, r.ctrlClient, r.namespace,
+		map[string]string{"app": "router", "cluster": r.cluster.GetName(), "workspace": r.cluster.GetWorkspace()},
+		r.cluster.GetVersion())
+	if err != nil {
+		return false, readyReplicas, curReplicas, err
 	}
 
-	return true, readyReplicas, curReplicas, nil
+	return match, readyReplicas, curReplicas, nil
 }
 
 // checkServiceStatus checks if the service is ready and has LoadBalancer IP

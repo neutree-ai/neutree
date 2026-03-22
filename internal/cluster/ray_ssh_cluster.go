@@ -165,6 +165,12 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 	cluster.Status.Initialized = true
 	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
 
+	// Default status.version to spec.version when not reported by Ray nodes
+	// (e.g. legacy nodes without version labels, or first initialization).
+	if cluster.Status.Version == "" && cluster.GetVersion() != "" {
+		cluster.Status.Version = cluster.GetVersion()
+	}
+
 	// Calculate resources only when cluster is ready (avoids unnecessary Ray dashboard calls during init/update)
 	resources, err := c.calculateClusterResources(reconcileCtx)
 	if err != nil {
