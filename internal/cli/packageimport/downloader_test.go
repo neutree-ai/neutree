@@ -1,6 +1,9 @@
 package packageimport
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -34,25 +37,48 @@ func TestFormatBytes(t *testing.T) {
 	}
 }
 
-func TestDownloadPackage(t *testing.T) {
-	t.Run("successful download", func(t *testing.T) {
-		content := []byte("fake-package-content")
+// buildTestTarGz creates a minimal tar.gz in memory with a manifest.yaml file.
+func buildTestTarGz(t *testing.T) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	content := []byte(`manifest_version: "1.0"`)
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: "manifest.yaml",
+		Size: int64(len(content)),
+		Mode: 0644,
+	}))
+
+	_, err := tw.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gw.Close())
+
+	return buf.Bytes()
+}
+
+func TestStreamExtractPackage(t *testing.T) {
+	extractor := NewExtractor()
+
+	t.Run("successful stream extract", func(t *testing.T) {
+		archive := buildTestTarGz(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Length", "20")
 			w.WriteHeader(http.StatusOK)
-			w.Write(content)
+			w.Write(archive)
 		}))
 		defer server.Close()
 
 		destDir := t.TempDir()
-		destPath := filepath.Join(destDir, "package.tar.gz")
 
-		err := downloadPackage(context.Background(), server.URL, destPath)
+		err := streamExtractPackage(context.Background(), server.URL, extractor, destDir)
 		require.NoError(t, err)
 
-		data, err := os.ReadFile(destPath)
+		data, err := os.ReadFile(filepath.Join(destDir, "manifest.yaml"))
 		require.NoError(t, err)
-		assert.Equal(t, content, data)
+		assert.Contains(t, string(data), "manifest_version")
 	})
 
 	t.Run("HTTP 404 error", func(t *testing.T) {
@@ -61,10 +87,7 @@ func TestDownloadPackage(t *testing.T) {
 		}))
 		defer server.Close()
 
-		destDir := t.TempDir()
-		destPath := filepath.Join(destDir, "package.tar.gz")
-
-		err := downloadPackage(context.Background(), server.URL, destPath)
+		err := streamExtractPackage(context.Background(), server.URL, extractor, t.TempDir())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "404")
 	})
@@ -75,10 +98,7 @@ func TestDownloadPackage(t *testing.T) {
 		}))
 		defer server.Close()
 
-		destDir := t.TempDir()
-		destPath := filepath.Join(destDir, "package.tar.gz")
-
-		err := downloadPackage(context.Background(), server.URL, destPath)
+		err := streamExtractPackage(context.Background(), server.URL, extractor, t.TempDir())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "500")
 	})
@@ -92,10 +112,7 @@ func TestDownloadPackage(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		destDir := t.TempDir()
-		destPath := filepath.Join(destDir, "package.tar.gz")
-
-		err := downloadPackage(ctx, server.URL, destPath)
+		err := streamExtractPackage(ctx, server.URL, extractor, t.TempDir())
 		assert.Error(t, err)
 	})
 }
