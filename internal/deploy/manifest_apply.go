@@ -28,6 +28,7 @@ type ManifestApply struct {
 	// Optional configurations that can be set once and reused
 	lastAppliedConfigJSON string
 	newObjects            *unstructured.UnstructuredList
+	applyObjects          *unstructured.UnstructuredList // Optional: objects to actually apply when diff/apply objects differ
 	mutates               []Mutate
 	logger                klog.Logger
 }
@@ -50,6 +51,16 @@ func (m *ManifestApply) WithLastAppliedConfig(configJSON string) *ManifestApply 
 // WithNewObjects sets the new desired state objects
 func (m *ManifestApply) WithNewObjects(objects *unstructured.UnstructuredList) *ManifestApply {
 	m.newObjects = objects
+	return m
+}
+
+// WithApplyObjects sets separate objects to apply to Kubernetes when they differ
+// from the objects used for diff comparison. When set, diff is computed using
+// newObjects, but the actual K8s apply uses applyObjects (matched by object key).
+// This enables infrastructure injection: diff compares template-only objects while
+// applying full objects with injected infrastructure.
+func (m *ManifestApply) WithApplyObjects(objects *unstructured.UnstructuredList) *ManifestApply {
+	m.applyObjects = objects
 	return m
 }
 
@@ -194,6 +205,29 @@ func (m *ManifestApply) ApplyManifests(
 	}
 
 	objects := diff.ChangedObjects
+
+	// When applyObjects is set, resolve changed objects from applyObjects (by key)
+	// so we apply the full objects (e.g., with injected infrastructure) while
+	// having computed the diff from the template-only objects.
+	if m.applyObjects != nil {
+		applyMap := make(map[string]unstructured.Unstructured, len(m.applyObjects.Items))
+		for _, obj := range m.applyObjects.Items {
+			applyMap[objectKey(&obj)] = obj
+		}
+
+		resolved := make([]unstructured.Unstructured, 0, len(objects))
+
+		for i := range objects {
+			key := objectKey(&objects[i])
+			if full, ok := applyMap[key]; ok {
+				resolved = append(resolved, full)
+			} else {
+				resolved = append(resolved, objects[i])
+			}
+		}
+
+		objects = resolved
+	}
 
 	for i := range objects {
 		obj := objects[i].DeepCopy()

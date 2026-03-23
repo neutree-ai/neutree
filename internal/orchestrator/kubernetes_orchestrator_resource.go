@@ -2,16 +2,20 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"math"
 	"net/url"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/pkg/errors"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster"
@@ -558,4 +562,102 @@ func newDeploymentManifestVariables() DeploymentManifestVariables {
 		Volumes:      []corev1.Volume{},
 		VolumeMounts: []corev1.VolumeMount{},
 	}
+}
+
+// injectInfrastructure injects cluster-managed infrastructure into rendered Deployment objects.
+// This includes initContainers, imagePullSecrets, volumes, and volumeMounts.
+// These injected fields are NOT part of the diff comparison, so changes to them
+// (e.g., cluster version upgrade) won't trigger endpoint rolling updates.
+func injectInfrastructure(objects *unstructured.UnstructuredList, vars DeploymentManifestVariables) error {
+	for i := range objects.Items {
+		obj := &objects.Items[i]
+		if obj.GetKind() != "Deployment" {
+			continue
+		}
+
+		// Convert to typed Deployment for easier manipulation
+		deployment := &appsv1.Deployment{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, deployment); err != nil {
+			return errors.Wrapf(err, "failed to convert unstructured to Deployment for %s", obj.GetName())
+		}
+
+		podSpec := &deployment.Spec.Template.Spec
+
+		// Inject imagePullSecrets
+		if vars.ImagePullSecret != "" {
+			podSpec.ImagePullSecrets = []corev1.LocalObjectReference{
+				{Name: vars.ImagePullSecret},
+			}
+		}
+
+		// Inject volumes
+		if len(vars.Volumes) > 0 {
+			podSpec.Volumes = append(podSpec.Volumes, vars.Volumes...)
+		}
+
+		// Inject volumeMounts into the engine container
+		if len(vars.VolumeMounts) > 0 {
+			for j := range podSpec.Containers {
+				if podSpec.Containers[j].Name == vars.EngineName {
+					podSpec.Containers[j].VolumeMounts = append(
+						podSpec.Containers[j].VolumeMounts, vars.VolumeMounts...)
+					break
+				}
+			}
+		}
+
+		// Build and inject model-downloader initContainer
+		initContainer := buildModelDownloaderInitContainer(vars)
+		podSpec.InitContainers = append([]corev1.Container{initContainer}, podSpec.InitContainers...)
+
+		// Convert back to unstructured
+		unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(deployment)
+		if err != nil {
+			return errors.Wrapf(err, "failed to convert Deployment back to unstructured for %s", obj.GetName())
+		}
+
+		obj.Object = unstructuredObj
+	}
+
+	return nil
+}
+
+// buildModelDownloaderInitContainer builds the model-downloader initContainer
+// that downloads model files before the engine container starts.
+func buildModelDownloaderInitContainer(vars DeploymentManifestVariables) corev1.Container {
+	modelArgs := vars.ModelArgs
+
+	downloaderArgs := fmt.Sprintf(
+		`python3 -m neutree.downloader --name="%v" --registry_type="%v" --registry_path="%v" --path="%v" --version="%v" --file="%v" --task="%v"`,
+		modelArgs["name"], modelArgs["registry_type"], modelArgs["registry_path"],
+		modelArgs["path"], modelArgs["version"], modelArgs["file"], modelArgs["task"],
+	)
+
+	container := corev1.Container{
+		Name:    "model-downloader",
+		Image:   fmt.Sprintf("%s/neutree/neutree-runtime:%s", vars.ImagePrefix, vars.NeutreeVersion),
+		Command: []string{"bash", "-c"},
+		Args:    []string{downloaderArgs},
+	}
+
+	// Add env vars
+	for key, value := range vars.Env {
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name:  key,
+			Value: value,
+		})
+	}
+
+	// Sort env vars for deterministic output
+	slices.SortFunc(container.Env, func(a, b corev1.EnvVar) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	// Add volume mounts
+	if len(vars.VolumeMounts) > 0 {
+		container.VolumeMounts = make([]corev1.VolumeMount, len(vars.VolumeMounts))
+		copy(container.VolumeMounts, vars.VolumeMounts)
+	}
+
+	return container
 }

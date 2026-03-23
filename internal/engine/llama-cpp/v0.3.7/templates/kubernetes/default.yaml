@@ -51,39 +51,6 @@ spec:
         {{ $key }}: {{ $value }}
         {{- end }}
       {{- end }}
-      {{- if .ImagePullSecret }}
-      imagePullSecrets:
-        - name: {{ .ImagePullSecret }}
-      {{- end }}
-      {{- if .Volumes }}
-      volumes:
-{{ .Volumes | toYaml | indent 6 }}
-      {{- end }}
-      initContainers:
-        - name: model-downloader
-          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
-          command:
-            - bash
-            - -c
-          args:
-            - >-
-              python3 -m neutree.downloader
-              --name="{{ .ModelArgs.name }}"
-              --registry_type="{{ .ModelArgs.registry_type }}"
-              --registry_path="{{ .ModelArgs.registry_path }}"
-              --path="{{ .ModelArgs.path }}"
-              --version="{{ .ModelArgs.version }}"
-              --file="{{ .ModelArgs.file }}"
-              --task="{{ .ModelArgs.task }}"
-          env:
-            {{ range $key, $value := .Env }}
-            - name: {{ $key }}
-              value: "{{ $value }}"
-            {{ end }}
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}
       containers:
         - name: {{ .EngineName }}
           image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
@@ -131,7 +98,3 @@ spec:
             periodSeconds: 10
             successThreshold: 1
             failureThreshold: 3
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}

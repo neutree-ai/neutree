@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -324,9 +327,6 @@ metadata:
   labels:
     engine: {{ .EngineName }}
     engine_version: {{ .EngineVersion }}
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
-    endpoint: {{ .EndpointName }}
     routing_logic: {{ .RoutingLogic }}
     app: inference
 spec:
@@ -372,40 +372,6 @@ spec:
         {{ $key }}: {{ $value }}
         {{- end }}
       {{- end }}
-      {{- if .ImagePullSecret }}
-      imagePullSecrets:
-        - name: {{ .ImagePullSecret }}
-      {{- end }}
-
-      {{- if .Volumes }}
-      volumes:
-{{ .Volumes | toYaml | indent 6 }}
-      {{- end }}
-      initContainers:
-        - name: model-downloader
-          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
-          command:
-            - bash
-            - -c
-          args:
-            - >-
-              python3 -m neutree.downloader
-              --name="{{ .ModelArgs.name }}"
-              --registry_type="{{ .ModelArgs.registry_type }}"
-              --registry_path="{{ .ModelArgs.registry_path }}"
-              --version="{{ .ModelArgs.version }}"
-              --file="{{ .ModelArgs.file }}"
-              --task="{{ .ModelArgs.task }}"
-          env:
-           {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
-           {{ end }}
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}
-
       containers:
         - name: {{ .EngineName }}
           image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
@@ -470,11 +436,7 @@ spec:
             timeoutSeconds: 5
             periodSeconds: 10
             successThreshold: 1
-            failureThreshold: 3
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}`
+            failureThreshold: 3`
 
 // TestBuildVllmDeployment only tests the building of a VLLM default deployment manifest.
 func TestBuildVllmDeployment(t *testing.T) {
@@ -549,9 +511,6 @@ metadata:
   labels:
     engine: {{ .EngineName }}
     engine_version: {{ .EngineVersion }}
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
-    endpoint: {{ .EndpointName }}
     routing_logic: {{ .RoutingLogic }}
     app: inference
 spec:
@@ -597,38 +556,6 @@ spec:
         {{ $key }}: {{ $value }}
         {{- end }}
       {{- end }}
-      {{- if .ImagePullSecret }}
-      imagePullSecrets:
-        - name: {{ .ImagePullSecret }}
-      {{- end }}
-      {{- if .Volumes }}
-      volumes:
-{{ .Volumes | toYaml | indent 6 }}
-      {{- end }}
-      initContainers:
-        - name: model-downloader
-          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
-          command:
-            - bash
-            - -c
-          args:
-            - >-
-              python3 -m neutree.downloader
-              --name="{{ .ModelArgs.name }}"
-              --registry_type="{{ .ModelArgs.registry_type }}"
-              --registry_path="{{ .ModelArgs.registry_path }}"
-              --version="{{ .ModelArgs.version }}"
-              --file="{{ .ModelArgs.file }}"
-              --task="{{ .ModelArgs.task }}"
-          env:
-            {{ range $key, $value := .Env }}
-            - name: {{ $key }}
-              value: "{{ $value }}"
-            {{ end }}
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}
       containers:
         - name: {{ .EngineName }}
           image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
@@ -675,11 +602,7 @@ spec:
             timeoutSeconds: 5
             periodSeconds: 10
             successThreshold: 1
-            failureThreshold: 3
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}`
+            failureThreshold: 3`
 
 // TestBuildLlamacppDeployment only tests the building of a Llamacpp default deployment manifest.
 func TestBuildLlamacppDeployment(t *testing.T) {
@@ -999,7 +922,7 @@ func TestKubernetesOrchestrator_getImageForAccelerator_MultipleAccelerators(t *t
 	}
 }
 
-var testBase64DeploymentTemplate = `YXBpVmVyc2lvbjogYXBwcy92MQpraW5kOiBEZXBsb3ltZW50Cm1ldGFkYXRhOgogIG5hbWU6IHt7IC5FbmRwb2ludE5hbWUgfX0KICBuYW1lc3BhY2U6IHt7IC5OYW1lc3BhY2UgfX0KICBsYWJlbHM6CiAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICBlbmdpbmVfdmVyc2lvbjoge3sgLkVuZ2luZVZlcnNpb24gfX0KICAgIGNsdXN0ZXI6IHt7IC5DbHVzdGVyTmFtZSB9fQogICAgd29ya3NwYWNlOiB7eyAuV29ya3NwYWNlIH19CiAgICBlbmRwb2ludDoge3sgLkVuZHBvaW50TmFtZSB9fQogICAgcm91dGluZ19sb2dpYzoge3sgLlJvdXRpbmdMb2dpYyB9fQogICAgYXBwOiBpbmZlcmVuY2UKc3BlYzoKICByZXBsaWNhczoge3sgLlJlcGxpY2FzIH19CiAgcHJvZ3Jlc3NEZWFkbGluZVNlY29uZHM6IDEyMDAKICBzdHJhdGVneToKICAgIHR5cGU6IFJvbGxpbmdVcGRhdGUKICAgIHJvbGxpbmdVcGRhdGU6CiAgICAgIG1heFVuYXZhaWxhYmxlOiAxCiAgICAgIG1heFN1cmdlOiAwCiAgc2VsZWN0b3I6CiAgICBtYXRjaExhYmVsczoKICAgICAgY2x1c3Rlcjoge3sgLkNsdXN0ZXJOYW1lIH19CiAgICAgIHdvcmtzcGFjZToge3sgLldvcmtzcGFjZSB9fQogICAgICBlbmRwb2ludDoge3sgLkVuZHBvaW50TmFtZSB9fQogICAgICBhcHA6IGluZmVyZW5jZQogIHRlbXBsYXRlOgogICAgbWV0YWRhdGE6CiAgICAgIGxhYmVsczoKICAgICAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICAgICAgZW5naW5lX3ZlcnNpb246IHt7IC5FbmdpbmVWZXJzaW9uIH19CiAgICAgICAgY2x1c3Rlcjoge3sgLkNsdXN0ZXJOYW1lIH19CiAgICAgICAgd29ya3NwYWNlOiB7eyAuV29ya3NwYWNlIH19CiAgICAgICAgZW5kcG9pbnQ6IHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgICByb3V0aW5nX2xvZ2ljOiB7eyAuUm91dGluZ0xvZ2ljIH19CiAgICAgICAgYXBwOiBpbmZlcmVuY2UKICAgIHNwZWM6CiAgICAgIGFmZmluaXR5OgogICAgICAgIHBvZEFudGlBZmZpbml0eToKICAgICAgICAgIHByZWZlcnJlZER1cmluZ1NjaGVkdWxpbmdJZ25vcmVkRHVyaW5nRXhlY3V0aW9uOgogICAgICAgICAgICAtIHdlaWdodDogMTAwCiAgICAgICAgICAgICAgcG9kQWZmaW5pdHlUZXJtOgogICAgICAgICAgICAgICAgbGFiZWxTZWxlY3RvcjoKICAgICAgICAgICAgICAgICAgbWF0Y2hFeHByZXNzaW9uczoKICAgICAgICAgICAgICAgICAgICAtIGtleTogZW5kcG9pbnQKICAgICAgICAgICAgICAgICAgICAgIG9wZXJhdG9yOiBJbgogICAgICAgICAgICAgICAgICAgICAgdmFsdWVzOgogICAgICAgICAgICAgICAgICAgICAgICAtIHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgICAgICAgICAgIHRvcG9sb2d5S2V5OiAia3ViZXJuZXRlcy5pby9ob3N0bmFtZSIKICAgICAge3stIGlmIC5Ob2RlU2VsZWN0b3IgfX0KICAgICAgbm9kZVNlbGVjdG9yOgogICAgICAgIHt7LSByYW5nZSAka2V5LCAkdmFsdWUgOj0gLk5vZGVTZWxlY3RvciB9fQogICAgICAgIHt7ICRrZXkgfX06IHt7ICR2YWx1ZSB9fQogICAgICAgIHt7LSBlbmQgfX0KICAgICAge3stIGVuZCB9fQogICAgICB7ey0gaWYgLkltYWdlUHVsbFNlY3JldCB9fQogICAgICBpbWFnZVB1bGxTZWNyZXRzOgogICAgICAgIC0gbmFtZToge3sgLkltYWdlUHVsbFNlY3JldCB9fQogICAgICB7ey0gZW5kIH19CgogICAgICB7ey0gaWYgLlZvbHVtZXMgfX0KICAgICAgdm9sdW1lczoKe3sgLlZvbHVtZXMgfCB0b1lhbWwgfCBpbmRlbnQgNiB9fQogICAgICB7ey0gZW5kIH19CiAgICAgIGluaXRDb250YWluZXJzOgogICAgICAgIC0gbmFtZTogbW9kZWwtZG93bmxvYWRlcgogICAgICAgICAgaW1hZ2U6IHt7IC5JbWFnZVByZWZpeCB9fS9uZXV0cmVlL25ldXRyZWUtcnVudGltZTp7eyAuTmV1dHJlZVZlcnNpb24gfX0KICAgICAgICAgIGNvbW1hbmQ6CiAgICAgICAgICAgIC0gYmFzaAogICAgICAgICAgICAtIC1jCiAgICAgICAgICBhcmdzOgogICAgICAgICAgICAtID4tCiAgICAgICAgICAgICAgcHl0aG9uMyAtbSBuZXV0cmVlLmRvd25sb2FkZXIKICAgICAgICAgICAgICAtLW5hbWU9Int7IC5Nb2RlbEFyZ3MubmFtZSB9fSIKICAgICAgICAgICAgICAtLXJlZ2lzdHJ5X3R5cGU9Int7IC5Nb2RlbEFyZ3MucmVnaXN0cnlfdHlwZSB9fSIKICAgICAgICAgICAgICAtLXJlZ2lzdHJ5X3BhdGg9Int7IC5Nb2RlbEFyZ3MucmVnaXN0cnlfcGF0aCB9fSIKICAgICAgICAgICAgICAtLXZlcnNpb249Int7IC5Nb2RlbEFyZ3MudmVyc2lvbiB9fSIKICAgICAgICAgICAgICAtLWZpbGU9Int7IC5Nb2RlbEFyZ3MuZmlsZSB9fSIKICAgICAgICAgICAgICAtLXRhc2s9Int7IC5Nb2RlbEFyZ3MudGFzayB9fSIKICAgICAgICAgIGVudjoKICAgICAgICAgICB7eyByYW5nZSAka2V5LCAkdmFsdWUgOj0gLkVudiB9fQogICAgICAgICAgIC0gbmFtZToge3sgJGtleSB9fQogICAgICAgICAgICAgdmFsdWU6ICJ7eyAkdmFsdWUgfX0iCiAgICAgICAgICAge3sgZW5kIH19CiAgICAgICAgICB7ey0gaWYgLlZvbHVtZU1vdW50cyB9fQogICAgICAgICAgdm9sdW1lTW91bnRzOgp7eyAuVm9sdW1lTW91bnRzIHwgdG9ZYW1sIHwgaW5kZW50IDEwIH19CiAgICAgICAgICB7ey0gZW5kIH19CgogICAgICBjb250YWluZXJzOgogICAgICAgIC0gbmFtZToge3sgLkVuZ2luZU5hbWUgfX0KICAgICAgICAgIGltYWdlOiB7eyAuSW1hZ2VQcmVmaXggfX0ve3sgLkltYWdlUmVwbyB9fTp7eyAuSW1hZ2VUYWcgfX0KICAgICAgICAgIGNvbW1hbmQ6CiAgICAgICAgICAtIHZsbG0KICAgICAgICAgIC0gc2VydmUKICAgICAgICAgIC0ge3sgLk1vZGVsQXJncy5wYXRoIH19CiAgICAgICAgICAtIC0taG9zdAogICAgICAgICAgLSAiMC4wLjAuMCIKICAgICAgICAgIC0gIi0tcG9ydCIKICAgICAgICAgIC0gIjgwMDAiCiAgICAgICAgICAtIC0tc2VydmVkLW1vZGVsLW5hbWUKICAgICAgICAgIC0ge3sgLk1vZGVsQXJncy5zZXJ2ZV9uYW1lIH19CiAgICAgICAgICAtIC0tdGFzawogICAgICAgICAge3stIGlmIGVxIC5Nb2RlbEFyZ3MudGFzayAidGV4dC1lbWJlZGRpbmciIH19CiAgICAgICAgICAtIGVtYmVkZGluZwogICAgICAgICAge3stIGVsc2UgaWYgZXEgLk1vZGVsQXJncy50YXNrICJ0ZXh0LWdlbmVyYXRpb24iIH19CiAgICAgICAgICAtIGdlbmVyYXRlCiAgICAgICAgICB7ey0gZWxzZSBpZiBlcSAuTW9kZWxBcmdzLnRhc2sgInRleHQtcmVyYW5rIiB9fQogICAgICAgICAgLSByZXJhbmsKICAgICAgICAgIHt7LSBlbHNlIH19CiAgICAgICAgICAtIHt7IC5Nb2RlbEFyZ3MudGFzayB9fQogICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAge3stIGlmIC5FbmdpbmVBcmdzIH19CiAgICAgICAgICB7ey0gcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5FbmdpbmVBcmdzIH19CiAgICAgICAgICAtIC0te3sgJGtleSB9fQogICAgICB7ey0gaWYgbmUgKHByaW50ZiAiJXYiICR2YWx1ZSkgInRydWUifX0KICAgICAgICAgIC0gInt7ICR2YWx1ZSB9fSIKICAgICAge3stIGVuZCB9fQogICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAgcmVzb3VyY2VzOgogICAgICAgICAgICBsaW1pdHM6CiAgICAgICAgICAgICAge3stIHJhbmdlICRrZXksICR2YWx1ZSA6PSAuUmVzb3VyY2VzIH19CiAgICAgICAgICAgICAge3sgJGtleSB9fToge3sgJHZhbHVlIH19CiAgICAgICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAgICByZXF1ZXN0czoKICAgICAgICAgICAgICB7ey0gcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5SZXNvdXJjZXMgfX0KICAgICAgICAgICAgICB7eyAka2V5IH19OiB7eyAkdmFsdWUgfX0KICAgICAgICAgICAgICB7ey0gZW5kIH19CiAgICAgICAgICBlbnY6CiAgICAgICAgICAge3sgcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5FbnYgfX0KICAgICAgICAgICAtIG5hbWU6IHt7ICRrZXkgfX0KICAgICAgICAgICAgIHZhbHVlOiAie3sgJHZhbHVlIH19IgogICAgICAgICAgIHt7IGVuZCB9fQogICAgICAgICAgcG9ydHM6CiAgICAgICAgICAgIC0gY29udGFpbmVyUG9ydDogODAwMAogICAgICAgICAgc3RhcnR1cFByb2JlOgogICAgICAgICAgICBodHRwR2V0OgogICAgICAgICAgICAgIHBhdGg6IC9oZWFsdGgKICAgICAgICAgICAgICBwb3J0OiA4MDAwCiAgICAgICAgICAgIGluaXRpYWxEZWxheVNlY29uZHM6IDUKICAgICAgICAgICAgdGltZW91dFNlY29uZHM6IDUKICAgICAgICAgICAgcGVyaW9kU2Vjb25kczogMTAKICAgICAgICAgICAgc3VjY2Vzc1RocmVzaG9sZDogMQogICAgICAgICAgICBmYWlsdXJlVGhyZXNob2xkOiAxMjAKICAgICAgICAgIHJlYWRpbmVzc1Byb2JlOgogICAgICAgICAgICBodHRwR2V0OgogICAgICAgICAgICAgIHBhdGg6IC9oZWFsdGgKICAgICAgICAgICAgICBwb3J0OiA4MDAwCiAgICAgICAgICAgIGluaXRpYWxEZWxheVNlY29uZHM6IDUKICAgICAgICAgICAgdGltZW91dFNlY29uZHM6IDUKICAgICAgICAgICAgcGVyaW9kU2Vjb25kczogMTAKICAgICAgICAgICAgc3VjY2Vzc1RocmVzaG9sZDogMQogICAgICAgICAgICBmYWlsdXJlVGhyZXNob2xkOiAzCiAgICAgICAgICB7ey0gaWYgLlZvbHVtZU1vdW50cyB9fQogICAgICAgICAgdm9sdW1lTW91bnRzOgp7eyAuVm9sdW1lTW91bnRzIHwgdG9ZYW1sIHwgaW5kZW50IDEwIH19CiAgICAgICAgICB7ey0gZW5kIH19`
+var testBase64DeploymentTemplate = `YXBpVmVyc2lvbjogYXBwcy92MQpraW5kOiBEZXBsb3ltZW50Cm1ldGFkYXRhOgogIG5hbWU6IHt7IC5FbmRwb2ludE5hbWUgfX0KICBuYW1lc3BhY2U6IHt7IC5OYW1lc3BhY2UgfX0KICBsYWJlbHM6CiAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICBlbmdpbmVfdmVyc2lvbjoge3sgLkVuZ2luZVZlcnNpb24gfX0KICAgIHJvdXRpbmdfbG9naWM6IHt7IC5Sb3V0aW5nTG9naWMgfX0KICAgIGFwcDogaW5mZXJlbmNlCnNwZWM6CiAgcmVwbGljYXM6IHt7IC5SZXBsaWNhcyB9fQogIHByb2dyZXNzRGVhZGxpbmVTZWNvbmRzOiAxMjAwCiAgc3RyYXRlZ3k6CiAgICB0eXBlOiBSb2xsaW5nVXBkYXRlCiAgICByb2xsaW5nVXBkYXRlOgogICAgICBtYXhVbmF2YWlsYWJsZTogMQogICAgICBtYXhTdXJnZTogMAogIHNlbGVjdG9yOgogICAgbWF0Y2hMYWJlbHM6CiAgICAgIGNsdXN0ZXI6IHt7IC5DbHVzdGVyTmFtZSB9fQogICAgICB3b3Jrc3BhY2U6IHt7IC5Xb3Jrc3BhY2UgfX0KICAgICAgZW5kcG9pbnQ6IHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgYXBwOiBpbmZlcmVuY2UKICB0ZW1wbGF0ZToKICAgIG1ldGFkYXRhOgogICAgICBsYWJlbHM6CiAgICAgICAgZW5naW5lOiB7eyAuRW5naW5lTmFtZSB9fQogICAgICAgIGVuZ2luZV92ZXJzaW9uOiB7eyAuRW5naW5lVmVyc2lvbiB9fQogICAgICAgIGNsdXN0ZXI6IHt7IC5DbHVzdGVyTmFtZSB9fQogICAgICAgIHdvcmtzcGFjZToge3sgLldvcmtzcGFjZSB9fQogICAgICAgIGVuZHBvaW50OiB7eyAuRW5kcG9pbnROYW1lIH19CiAgICAgICAgcm91dGluZ19sb2dpYzoge3sgLlJvdXRpbmdMb2dpYyB9fQogICAgICAgIGFwcDogaW5mZXJlbmNlCiAgICBzcGVjOgogICAgICBhZmZpbml0eToKICAgICAgICBwb2RBbnRpQWZmaW5pdHk6CiAgICAgICAgICBwcmVmZXJyZWREdXJpbmdTY2hlZHVsaW5nSWdub3JlZER1cmluZ0V4ZWN1dGlvbjoKICAgICAgICAgICAgLSB3ZWlnaHQ6IDEwMAogICAgICAgICAgICAgIHBvZEFmZmluaXR5VGVybToKICAgICAgICAgICAgICAgIGxhYmVsU2VsZWN0b3I6CiAgICAgICAgICAgICAgICAgIG1hdGNoRXhwcmVzc2lvbnM6CiAgICAgICAgICAgICAgICAgICAgLSBrZXk6IGVuZHBvaW50CiAgICAgICAgICAgICAgICAgICAgICBvcGVyYXRvcjogSW4KICAgICAgICAgICAgICAgICAgICAgIHZhbHVlczoKICAgICAgICAgICAgICAgICAgICAgICAgLSB7eyAuRW5kcG9pbnROYW1lIH19CiAgICAgICAgICAgICAgICB0b3BvbG9neUtleTogImt1YmVybmV0ZXMuaW8vaG9zdG5hbWUiCiAgICAgIHt7LSBpZiAuTm9kZVNlbGVjdG9yIH19CiAgICAgIG5vZGVTZWxlY3RvcjoKICAgICAgICB7ey0gcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5Ob2RlU2VsZWN0b3IgfX0KICAgICAgICB7eyAka2V5IH19OiB7eyAkdmFsdWUgfX0KICAgICAgICB7ey0gZW5kIH19CiAgICAgIHt7LSBlbmQgfX0KICAgICAgY29udGFpbmVyczoKICAgICAgICAtIG5hbWU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICAgICAgICBpbWFnZToge3sgLkltYWdlUHJlZml4IH19L3t7IC5JbWFnZVJlcG8gfX06e3sgLkltYWdlVGFnIH19CiAgICAgICAgICBjb21tYW5kOgogICAgICAgICAgLSB2bGxtCiAgICAgICAgICAtIHNlcnZlCiAgICAgICAgICAtIHt7IC5Nb2RlbEFyZ3MucGF0aCB9fQogICAgICAgICAgLSAtLWhvc3QKICAgICAgICAgIC0gIjAuMC4wLjAiCiAgICAgICAgICAtICItLXBvcnQiCiAgICAgICAgICAtICI4MDAwIgogICAgICAgICAgLSAtLXNlcnZlZC1tb2RlbC1uYW1lCiAgICAgICAgICAtIHt7IC5Nb2RlbEFyZ3Muc2VydmVfbmFtZSB9fQogICAgICAgICAgLSAtLXRhc2sKICAgICAgICAgIHt7LSBpZiBlcSAuTW9kZWxBcmdzLnRhc2sgInRleHQtZW1iZWRkaW5nIiB9fQogICAgICAgICAgLSBlbWJlZGRpbmcKICAgICAgICAgIHt7LSBlbHNlIGlmIGVxIC5Nb2RlbEFyZ3MudGFzayAidGV4dC1nZW5lcmF0aW9uIiB9fQogICAgICAgICAgLSBnZW5lcmF0ZQogICAgICAgICAge3stIGVsc2UgaWYgZXEgLk1vZGVsQXJncy50YXNrICJ0ZXh0LXJlcmFuayIgfX0KICAgICAgICAgIC0gcmVyYW5rCiAgICAgICAgICB7ey0gZWxzZSB9fQogICAgICAgICAgLSB7eyAuTW9kZWxBcmdzLnRhc2sgfX0KICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIHt7LSBpZiAuRW5naW5lQXJncyB9fQogICAgICAgICAge3stIHJhbmdlICRrZXksICR2YWx1ZSA6PSAuRW5naW5lQXJncyB9fQogICAgICAgICAgLSAtLXt7ICRrZXkgfX0KICAgICAge3stIGlmIG5lIChwcmludGYgIiV2IiAkdmFsdWUpICJ0cnVlIn19CiAgICAgICAgICAtICJ7eyAkdmFsdWUgfX0iCiAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgIHJlc291cmNlczoKICAgICAgICAgICAgbGltaXRzOgogICAgICAgICAgICAgIHt7LSByYW5nZSAka2V5LCAkdmFsdWUgOj0gLlJlc291cmNlcyB9fQogICAgICAgICAgICAgIHt7ICRrZXkgfX06IHt7ICR2YWx1ZSB9fQogICAgICAgICAgICAgIHt7LSBlbmQgfX0KICAgICAgICAgICAgcmVxdWVzdHM6CiAgICAgICAgICAgICAge3stIHJhbmdlICRrZXksICR2YWx1ZSA6PSAuUmVzb3VyY2VzIH19CiAgICAgICAgICAgICAge3sgJGtleSB9fToge3sgJHZhbHVlIH19CiAgICAgICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAgZW52OgogICAgICAgICAgIHt7IHJhbmdlICRrZXksICR2YWx1ZSA6PSAuRW52IH19CiAgICAgICAgICAgLSBuYW1lOiB7eyAka2V5IH19CiAgICAgICAgICAgICB2YWx1ZTogInt7ICR2YWx1ZSB9fSIKICAgICAgICAgICB7eyBlbmQgfX0KICAgICAgICAgIHBvcnRzOgogICAgICAgICAgICAtIGNvbnRhaW5lclBvcnQ6IDgwMDAKICAgICAgICAgIHN0YXJ0dXBQcm9iZToKICAgICAgICAgICAgaHR0cEdldDoKICAgICAgICAgICAgICBwYXRoOiAvaGVhbHRoCiAgICAgICAgICAgICAgcG9ydDogODAwMAogICAgICAgICAgICBpbml0aWFsRGVsYXlTZWNvbmRzOiA1CiAgICAgICAgICAgIHRpbWVvdXRTZWNvbmRzOiA1CiAgICAgICAgICAgIHBlcmlvZFNlY29uZHM6IDEwCiAgICAgICAgICAgIHN1Y2Nlc3NUaHJlc2hvbGQ6IDEKICAgICAgICAgICAgZmFpbHVyZVRocmVzaG9sZDogMTIwCiAgICAgICAgICByZWFkaW5lc3NQcm9iZToKICAgICAgICAgICAgaHR0cEdldDoKICAgICAgICAgICAgICBwYXRoOiAvaGVhbHRoCiAgICAgICAgICAgICAgcG9ydDogODAwMAogICAgICAgICAgICBpbml0aWFsRGVsYXlTZWNvbmRzOiA1CiAgICAgICAgICAgIHRpbWVvdXRTZWNvbmRzOiA1CiAgICAgICAgICAgIHBlcmlvZFNlY29uZHM6IDEwCiAgICAgICAgICAgIHN1Y2Nlc3NUaHJlc2hvbGQ6IDEKICAgICAgICAgICAgZmFpbHVyZVRocmVzaG9sZDogMw==`
 
 func Test_getDeployTemplate(t *testing.T) {
 	k := &kubernetesOrchestrator{}
@@ -2712,4 +2635,228 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			fakeClient.AssertExpectations()
 		})
 	}
+}
+
+func TestInjectInfrastructure(t *testing.T) {
+	// Build template objects (engine-only, no infra)
+	data := DeploymentManifestVariables{
+		ClusterName:     "test-cluster",
+		Workspace:       "test-workspace",
+		Namespace:       "default",
+		ImagePrefix:     "registry.example.com",
+		ImageRepo:       "vllm",
+		ImageTag:        "v0.11.2",
+		ImagePullSecret: "my-secret",
+		EngineName:      "vllm",
+		EngineVersion:   "v0.11.2",
+		EndpointName:    "test-endpoint",
+		NeutreeVersion:  "v1.0.0",
+		ModelArgs: map[string]interface{}{
+			"name":          "gpt-4",
+			"task":          "text-generation",
+			"path":          "/mnt/models/gpt-4",
+			"registry_type": "huggingface",
+			"registry_path": "gpt-4",
+			"serve_name":    "gpt-4",
+			"version":       "latest",
+			"file":          "",
+		},
+		EngineArgs: map[string]interface{}{},
+		Resources: map[string]string{
+			"nvidia.com/gpu": "1",
+		},
+		Env: map[string]string{
+			"HF_TOKEN": "test-token",
+		},
+		RoutingLogic: "roundrobin",
+		Replicas:     1,
+		Volumes: []corev1.Volume{
+			{
+				Name: "model-cache",
+				VolumeSource: corev1.VolumeSource{
+					NFS: &corev1.NFSVolumeSource{
+						Server: "10.0.0.1",
+						Path:   "/models",
+					},
+				},
+			},
+			{
+				Name: "dshm",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium: corev1.StorageMediumMemory,
+					},
+				},
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "model-cache", MountPath: "/mnt/models"},
+			{Name: "dshm", MountPath: "/dev/shm"},
+		},
+	}
+
+	// Render template (engine-only)
+	templateObjects, err := buildDeploymentObjects(testVllmDeploymentTemplate, data)
+	require.NoError(t, err)
+	require.Len(t, templateObjects.Items, 1)
+
+	// Verify template has NO infra
+	templateDep := &appsv1.Deployment{}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(templateObjects.Items[0].Object, templateDep)
+	require.NoError(t, err)
+	assert.Empty(t, templateDep.Spec.Template.Spec.InitContainers, "template should have no initContainers")
+	assert.Empty(t, templateDep.Spec.Template.Spec.ImagePullSecrets, "template should have no imagePullSecrets")
+	assert.Empty(t, templateDep.Spec.Template.Spec.Volumes, "template should have no volumes")
+	assert.Empty(t, templateDep.Spec.Template.Spec.Containers[0].VolumeMounts, "template engine container should have no volumeMounts")
+
+	// Deep copy and inject infrastructure
+	fullObjects := templateObjects.DeepCopy()
+	err = injectInfrastructure(fullObjects, data)
+	require.NoError(t, err)
+
+	// Verify full objects have infra injected
+	fullDep := &appsv1.Deployment{}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(fullObjects.Items[0].Object, fullDep)
+	require.NoError(t, err)
+
+	// Check imagePullSecrets
+	require.Len(t, fullDep.Spec.Template.Spec.ImagePullSecrets, 1)
+	assert.Equal(t, "my-secret", fullDep.Spec.Template.Spec.ImagePullSecrets[0].Name)
+
+	// Check volumes
+	assert.Len(t, fullDep.Spec.Template.Spec.Volumes, 2)
+	assert.Equal(t, "model-cache", fullDep.Spec.Template.Spec.Volumes[0].Name)
+	assert.Equal(t, "dshm", fullDep.Spec.Template.Spec.Volumes[1].Name)
+
+	// Check initContainers
+	require.Len(t, fullDep.Spec.Template.Spec.InitContainers, 1)
+	initContainer := fullDep.Spec.Template.Spec.InitContainers[0]
+	assert.Equal(t, "model-downloader", initContainer.Name)
+	assert.Equal(t, "registry.example.com/neutree/neutree-runtime:v1.0.0", initContainer.Image)
+	assert.Contains(t, initContainer.Args[0], "python3 -m neutree.downloader")
+	assert.Contains(t, initContainer.Args[0], `--name="gpt-4"`)
+
+	// Check initContainer env
+	assert.Len(t, initContainer.Env, 1)
+	assert.Equal(t, "HF_TOKEN", initContainer.Env[0].Name)
+	assert.Equal(t, "test-token", initContainer.Env[0].Value)
+
+	// Check initContainer volumeMounts
+	assert.Len(t, initContainer.VolumeMounts, 2)
+
+	// Check engine container volumeMounts
+	engineContainer := fullDep.Spec.Template.Spec.Containers[0]
+	assert.Equal(t, "vllm", engineContainer.Name)
+	assert.Len(t, engineContainer.VolumeMounts, 2)
+	assert.Equal(t, "model-cache", engineContainer.VolumeMounts[0].Name)
+	assert.Equal(t, "dshm", engineContainer.VolumeMounts[1].Name)
+
+	// Verify template objects are NOT modified (deep copy isolation)
+	templateDep2 := &appsv1.Deployment{}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(templateObjects.Items[0].Object, templateDep2)
+	require.NoError(t, err)
+	assert.Empty(t, templateDep2.Spec.Template.Spec.InitContainers, "template should still have no initContainers after injection")
+	assert.Empty(t, templateDep2.Spec.Template.Spec.Volumes, "template should still have no volumes after injection")
+}
+
+func TestInfraChangesDoNotCauseDiff(t *testing.T) {
+	// Build template objects with NeutreeVersion v1.0.0
+	data := DeploymentManifestVariables{
+		ClusterName:     "test-cluster",
+		Workspace:       "test-workspace",
+		Namespace:       "default",
+		ImagePrefix:     "registry.example.com",
+		ImageRepo:       "vllm",
+		ImageTag:        "v0.11.2",
+		ImagePullSecret: "my-secret",
+		EngineName:      "vllm",
+		EngineVersion:   "v0.11.2",
+		EndpointName:    "test-endpoint",
+		NeutreeVersion:  "v1.0.0",
+		ModelArgs: map[string]interface{}{
+			"name": "gpt-4", "task": "text-generation", "path": "/mnt/models/gpt-4",
+			"registry_type": "huggingface", "registry_path": "gpt-4",
+			"serve_name": "gpt-4", "version": "latest", "file": "",
+		},
+		EngineArgs:   map[string]interface{}{},
+		Resources:    map[string]string{"nvidia.com/gpu": "1"},
+		Env:          map[string]string{},
+		RoutingLogic: "roundrobin",
+		Replicas:     1,
+		Volumes:      []corev1.Volume{},
+		VolumeMounts: []corev1.VolumeMount{},
+	}
+
+	// Render template objects (used for diff baseline)
+	templateV1, err := buildDeploymentObjects(testVllmDeploymentTemplate, data)
+	require.NoError(t, err)
+
+	// Simulate cluster version upgrade: NeutreeVersion changes to v2.0.0
+	data.NeutreeVersion = "v2.0.0"
+
+	// Re-render template — since template doesn't use NeutreeVersion, output is identical
+	templateV2, err := buildDeploymentObjects(testVllmDeploymentTemplate, data)
+	require.NoError(t, err)
+
+	// Verify spec hashes are identical (no diff)
+	hash1 := specHash(t, &templateV1.Items[0])
+	hash2 := specHash(t, &templateV2.Items[0])
+	assert.Equal(t, hash1, hash2, "template objects should be identical regardless of NeutreeVersion")
+}
+
+func TestUserChangeDoesCauseDiff(t *testing.T) {
+	baseData := DeploymentManifestVariables{
+		ClusterName:     "test-cluster",
+		Workspace:       "test-workspace",
+		Namespace:       "default",
+		ImagePrefix:     "registry.example.com",
+		ImageRepo:       "vllm",
+		ImageTag:        "v0.11.2",
+		ImagePullSecret: "my-secret",
+		EngineName:      "vllm",
+		EngineVersion:   "v0.11.2",
+		EndpointName:    "test-endpoint",
+		NeutreeVersion:  "v1.0.0",
+		ModelArgs: map[string]interface{}{
+			"name": "gpt-4", "task": "text-generation", "path": "/mnt/models/gpt-4",
+			"registry_type": "huggingface", "registry_path": "gpt-4",
+			"serve_name": "gpt-4", "version": "latest", "file": "",
+		},
+		EngineArgs:   map[string]interface{}{},
+		Resources:    map[string]string{"nvidia.com/gpu": "1"},
+		Env:          map[string]string{},
+		RoutingLogic: "roundrobin",
+		Replicas:     1,
+		Volumes:      []corev1.Volume{},
+		VolumeMounts: []corev1.VolumeMount{},
+	}
+
+	templateBefore, err := buildDeploymentObjects(testVllmDeploymentTemplate, baseData)
+	require.NoError(t, err)
+
+	// User changes replicas
+	baseData.Replicas = 3
+	templateAfter, err := buildDeploymentObjects(testVllmDeploymentTemplate, baseData)
+	require.NoError(t, err)
+
+	hashBefore := specHash(t, &templateBefore.Items[0])
+	hashAfter := specHash(t, &templateAfter.Items[0])
+	assert.NotEqual(t, hashBefore, hashAfter, "user changes (replicas) should cause diff")
+}
+
+// specHash computes a SHA256 hash of the spec field, mirroring deploy.computeSpecHash.
+func specHash(t *testing.T, obj *unstructured.Unstructured) string {
+	t.Helper()
+
+	spec, found := obj.Object["spec"]
+	if !found {
+		spec = obj.Object
+	}
+
+	specJSON, err := json.Marshal(spec)
+	require.NoError(t, err)
+
+	hash := sha256.Sum256(specJSON)
+
+	return fmt.Sprintf("%x", hash)
 }
