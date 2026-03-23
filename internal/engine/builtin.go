@@ -72,6 +72,10 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						ValuesSchema: vllmV0_11_2EngineSchema,
 						Images: map[string]*v1.EngineImage{
 							"nvidia_gpu": {
+								ImageName: "vllm/vllm-openai",
+								Tag:       "v0.11.2",
+							},
+							v1.SSHImageKeyPrefix + "nvidia_gpu": {
 								ImageName: "neutree/engine-vllm",
 								Tag:       "v0.11.2-ray2.53.0",
 							},

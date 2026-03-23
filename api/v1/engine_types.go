@@ -295,6 +295,11 @@ func (in *EngineList) SetItems(objs []scheme.Object) {
 	in.Items = items
 }
 
+// SSHImageKeyPrefix is the prefix for SSH-compatible engine images in the Images map.
+// SSH clusters use images with this prefix (e.g., "ssh_nvidia_gpu") which contain
+// Ray wheel + Neutree serve layer code, enabling containerized engine isolation.
+const SSHImageKeyPrefix = "ssh_"
+
 // GetImageForAccelerator returns the image information for a specific accelerator type
 // If the accelerator type is not found, it returns nil
 func (ev *EngineVersion) GetImageForAccelerator(acceleratorType string) *EngineImage {
@@ -303,6 +308,19 @@ func (ev *EngineVersion) GetImageForAccelerator(acceleratorType string) *EngineI
 	}
 
 	return ev.Images[acceleratorType]
+}
+
+// GetImageForSSHAccelerator returns the engine image for SSH clusters.
+// It first looks for an SSH-specific image (e.g., "ssh_nvidia_gpu"), then
+// falls back to the generic accelerator key (e.g., "nvidia_gpu").
+// This allows SSH-compatible images to coexist with K8s-only images in the same
+// EngineVersion registration.
+func (ev *EngineVersion) GetImageForSSHAccelerator(acceleratorType string) *EngineImage {
+	if img := ev.GetImageForAccelerator(SSHImageKeyPrefix + acceleratorType); img != nil {
+		return img
+	}
+
+	return ev.GetImageForAccelerator(acceleratorType)
 }
 
 // GetSupportedAccelerators returns a list of supported accelerator types
