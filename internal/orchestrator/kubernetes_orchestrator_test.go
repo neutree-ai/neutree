@@ -1277,7 +1277,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				Spec: &v1.EndpointSpec{},
 			},
 			expectedArgs: map[string]interface{}{
-				"interrupt-requests": "false",
+				"interrupt_requests": "false",
 			},
 		},
 		{
@@ -1298,8 +1298,8 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"interrupt-requests": "true",
-				"n-ctx":              "2048",
+				"interrupt_requests": "true",
+				"n_ctx":              "2048",
 			},
 		},
 		{
@@ -1339,7 +1339,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"tensor-parallel-size": 4,
+				"tensor_parallel_size": 4,
 			},
 		},
 		{
@@ -1382,7 +1382,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "vllm engine user-provided underscore key normalized to hyphen and overrides default",
+			name: "vllm engine user-provided underscore key prevents default",
 			engine: &v1.Engine{
 				Metadata: &v1.Metadata{
 					Name: "vllm",
@@ -1401,7 +1401,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"tensor-parallel-size": "1",
+				"tensor_parallel_size": "1",
 			},
 		},
 		{

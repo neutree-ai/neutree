@@ -644,6 +644,11 @@ func setVLLMDefaultTensorParallelSize(endpoint *v1.Endpoint, app *dashboard.RayS
 
 	engineArgs, ok := app.Args["engine_args"].(map[string]interface{})
 	if !ok {
+		// engine_args is absent or not a map (e.g. JSON string from user config) — skip auto-setting
+		if _, exists := app.Args["engine_args"]; exists {
+			return
+		}
+
 		engineArgs = make(map[string]interface{})
 	}
 

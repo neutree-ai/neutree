@@ -1688,6 +1688,12 @@ func TestEndpointToApplication_VLLMTensorParallelSize(t *testing.T) {
 			expectEngineArgsPresent: false,
 		},
 		{
+			name:                    "fractional GPU should not set tensor_parallel_size",
+			gpu:                     "2.5",
+			variables:               nil,
+			expectEngineArgsPresent: false,
+		},
+		{
 			name: "user-provided tensor_parallel_size should not be overridden",
 			gpu:  "4",
 			variables: map[string]interface{}{
