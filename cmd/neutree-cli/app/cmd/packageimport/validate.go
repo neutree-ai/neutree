@@ -41,7 +41,7 @@ The command does not:
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.PackagePath, "package", "p", "", "Path to engine package (.tar.gz) or manifest file (.yaml) (required)")
+	cmd.Flags().StringVarP(&opts.PackagePath, "package", "p", "", "Path to Neutree package (.tar.gz) or engine manifest (.yaml/.yml) (required)")
 	_ = cmd.MarkFlagRequired("package")
 
 	return cmd

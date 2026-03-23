@@ -329,6 +329,38 @@ engines:
 		assert.Contains(t, err.Error(), "failed to parse YAML manifest")
 	})
 
+	t.Run("missing manifest_version", func(t *testing.T) {
+		content := `
+engines:
+- name: vllm
+  engine_versions:
+  - version: "v0.10.2"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(content), 0644)
+		require.NoError(t, err)
+
+		_, err = parser.ParseManifestFile(manifestPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "manifest_version is required")
+	})
+
+	t.Run("no engines", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+engines: []
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(content), 0644)
+		require.NoError(t, err)
+
+		_, err = parser.ParseManifestFile(manifestPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "at least one engine entry is required")
+	})
+
 	t.Run("file not found", func(t *testing.T) {
 		_, err := parser.ParseManifestFile("/nonexistent/manifest.yaml")
 		assert.Error(t, err)

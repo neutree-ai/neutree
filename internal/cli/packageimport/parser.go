@@ -104,6 +104,14 @@ func (p *Parser) ParseManifestFile(path string) (*PackageManifest, error) {
 		return nil, errors.Wrap(err, "failed to parse YAML manifest")
 	}
 
+	if manifest.ManifestVersion == "" {
+		return nil, errors.New("manifest_version is required")
+	}
+
+	if len(manifest.Engines) == 0 {
+		return nil, errors.New("at least one engine entry is required in manifest")
+	}
+
 	for idx := range manifest.Engines {
 		if err := p.validateEngineConfig(manifest.Engines[idx]); err != nil {
 			return nil, errors.Wrap(err, "invalid engine configuration in manifest")
