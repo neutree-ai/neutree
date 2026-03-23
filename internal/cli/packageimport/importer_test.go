@@ -146,42 +146,6 @@ func TestImportOptionsValidation(t *testing.T) {
 			},
 			expectError: false,
 		},
-		{
-			name: "manifest file with skip image load does not require registry",
-			setupFunc: func() string {
-				tmpFile, err := os.CreateTemp("", "test-*.yaml")
-				require.NoError(t, err)
-				tmpFile.Close()
-				return tmpFile.Name()
-			},
-			cleanupFunc: func(path string) {
-				os.Remove(path)
-			},
-			opts: &ImportOptions{
-				PackagePath:   "", // Will be set by setupFunc
-				SkipImagePush: true,
-				SkipImageLoad: true,
-			},
-			expectError: false,
-		},
-		{
-			name: "manifest file without skip image push requires registry",
-			setupFunc: func() string {
-				tmpFile, err := os.CreateTemp("", "test-*.yaml")
-				require.NoError(t, err)
-				tmpFile.Close()
-				return tmpFile.Name()
-			},
-			cleanupFunc: func(path string) {
-				os.Remove(path)
-			},
-			opts: &ImportOptions{
-				PackagePath:   "", // Will be set by setupFunc
-				SkipImagePush: false,
-			},
-			expectError: true,
-			errorMsg:    "image registry config is required",
-		},
 	}
 
 	for _, tt := range tests {

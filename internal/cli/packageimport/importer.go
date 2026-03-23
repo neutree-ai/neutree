@@ -256,11 +256,6 @@ func (i *Importer) validateOptions(opts *ImportOptions) error {
 		return errors.New("cannot skip image load when image push is enabled")
 	}
 
-	// For manifest-only mode with skip image load, registry config is not required
-	if isManifestFile(opts.PackagePath) && opts.SkipImageLoad {
-		return nil
-	}
-
 	if !opts.SkipImagePush {
 		if opts.MirrorRegistry == "" || opts.RegistryUser == "" || opts.RegistryPassword == "" {
 			return errors.New("image registry config is required when not skipping image push")
