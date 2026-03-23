@@ -66,7 +66,7 @@ func TestDownloadPackage(t *testing.T) {
 
 		err := downloadPackage(context.Background(), server.URL, destPath)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "HTTP 404")
+		assert.Contains(t, err.Error(), "404")
 	})
 
 	t.Run("HTTP 500 error", func(t *testing.T) {
@@ -80,7 +80,7 @@ func TestDownloadPackage(t *testing.T) {
 
 		err := downloadPackage(context.Background(), server.URL, destPath)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "HTTP 500")
+		assert.Contains(t, err.Error(), "500")
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {

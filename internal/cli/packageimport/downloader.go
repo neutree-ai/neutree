@@ -29,7 +29,7 @@ func downloadPackage(ctx context.Context, url string, destPath string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return errors.Errorf("failed to download package: HTTP %d %s", resp.StatusCode, resp.Status)
+		return errors.Errorf("failed to download package: HTTP %s", resp.Status)
 	}
 
 	// Write to a temp file in the same directory for atomic rename
@@ -41,9 +41,13 @@ func downloadPackage(ctx context.Context, url string, destPath string) error {
 	}
 
 	tmpPath := tmpFile.Name()
+	closed := false
 
 	defer func() {
-		tmpFile.Close()
+		if !closed {
+			tmpFile.Close()
+		}
+
 		os.Remove(tmpPath) //nolint:errcheck // cleanup best-effort
 	}()
 
@@ -61,6 +65,8 @@ func downloadPackage(ctx context.Context, url string, destPath string) error {
 	if err := tmpFile.Close(); err != nil {
 		return errors.Wrap(err, "failed to close temporary file")
 	}
+
+	closed = true
 
 	klog.Infof("Downloaded %s", formatBytes(written))
 
