@@ -333,10 +333,12 @@ func (ev *EngineVersion) GetSupportedAccelerators() []string {
 	}
 
 	accelerators := make([]string, 0, len(ev.Images))
+
 	for acceleratorType := range ev.Images {
 		if strings.HasPrefix(acceleratorType, SSHImageKeyPrefix) {
 			continue
 		}
+
 		accelerators = append(accelerators, acceleratorType)
 	}
 
