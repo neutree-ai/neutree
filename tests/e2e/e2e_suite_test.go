@@ -19,6 +19,10 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	By("Loading profile from E2E_PROFILE_PATH (if set)")
+	err := LoadProfileFromEnv()
+	Expect(err).NotTo(HaveOccurred())
+
 	By("Building neutree-cli binary")
 	BuildCLI()
 })
