@@ -8,6 +8,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsManifestFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		expected bool
+	}{
+		{"yaml extension", "manifest.yaml", true},
+		{"yml extension", "manifest.yml", true},
+		{"uppercase YAML", "manifest.YAML", true},
+		{"uppercase YML", "manifest.YML", true},
+		{"mixed case Yaml", "manifest.Yaml", true},
+		{"tar.gz extension", "package.tar.gz", false},
+		{"json extension", "config.json", false},
+		{"empty string", "", false},
+		{"no extension", "manifest", false},
+		{"yaml in path not extension", "/path/to/yaml/file.tar.gz", false},
+		{"full path yaml", "/path/to/manifest.yaml", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isManifestFile(tt.path))
+		})
+	}
+}
+
 func TestExtractorValidation(t *testing.T) {
 	extractor := NewExtractor()
 
@@ -120,6 +146,42 @@ func TestImportOptionsValidation(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name: "manifest file with skip image load does not require registry",
+			setupFunc: func() string {
+				tmpFile, err := os.CreateTemp("", "test-*.yaml")
+				require.NoError(t, err)
+				tmpFile.Close()
+				return tmpFile.Name()
+			},
+			cleanupFunc: func(path string) {
+				os.Remove(path)
+			},
+			opts: &ImportOptions{
+				PackagePath:   "", // Will be set by setupFunc
+				SkipImagePush: true,
+				SkipImageLoad: true,
+			},
+			expectError: false,
+		},
+		{
+			name: "manifest file without skip image push requires registry",
+			setupFunc: func() string {
+				tmpFile, err := os.CreateTemp("", "test-*.yaml")
+				require.NoError(t, err)
+				tmpFile.Close()
+				return tmpFile.Name()
+			},
+			cleanupFunc: func(path string) {
+				os.Remove(path)
+			},
+			opts: &ImportOptions{
+				PackagePath:   "", // Will be set by setupFunc
+				SkipImagePush: false,
+			},
+			expectError: true,
+			errorMsg:    "image registry config is required",
+		},
 	}
 
 	for _, tt := range tests {
@@ -143,4 +205,74 @@ func TestImportOptionsValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidatePackageWithManifest(t *testing.T) {
+	validManifest := `
+manifest_version: "1.0"
+
+engines:
+- name: vllm
+  engine_versions:
+  - version: "v0.10.2"
+    supported_tasks:
+      - "text-generation"
+    images:
+      nvidia_gpu:
+        image_name: "vllm"
+        tag: "v0.10.2"
+`
+
+	t.Run("valid manifest file", func(t *testing.T) {
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(validManifest), 0644)
+		require.NoError(t, err)
+
+		validator := NewValidator()
+		err = validator.ValidatePackage(manifestPath)
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid manifest with yml extension", func(t *testing.T) {
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yml"
+		err := os.WriteFile(manifestPath, []byte(validManifest), 0644)
+		require.NoError(t, err)
+
+		validator := NewValidator()
+		err = validator.ValidatePackage(manifestPath)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid manifest content", func(t *testing.T) {
+		dir := t.TempDir()
+		manifestPath := dir + "/invalid.yaml"
+		err := os.WriteFile(manifestPath, []byte("invalid: [unclosed"), 0644)
+		require.NoError(t, err)
+
+		validator := NewValidator()
+		err = validator.ValidatePackage(manifestPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse manifest file")
+	})
+
+	t.Run("manifest missing engine name", func(t *testing.T) {
+		manifest := `
+manifest_version: "1.0"
+engines:
+- name: ""
+  engine_versions:
+  - version: "v1.0.0"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(manifest), 0644)
+		require.NoError(t, err)
+
+		validator := NewValidator()
+		err = validator.ValidatePackage(manifestPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "engine name is empty")
+	})
 }

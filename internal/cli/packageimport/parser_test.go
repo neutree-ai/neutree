@@ -6,6 +6,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParserParseManifest(t *testing.T) {
@@ -197,6 +198,141 @@ engines:
 			}
 		})
 	}
+}
+
+func TestParseManifestFile(t *testing.T) {
+	parser := NewParser()
+
+	t.Run("valid manifest with engines", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+
+engines:
+- name: vllm
+  engine_versions:
+  - version: "v0.10.2"
+    supported_tasks:
+      - "text-generation"
+    images:
+      nvidia_gpu:
+        image_name: "vllm"
+        tag: "v0.10.2"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(content), 0644)
+		require.NoError(t, err)
+
+		manifest, err := parser.ParseManifestFile(manifestPath)
+		require.NoError(t, err)
+		assert.Equal(t, "1.0", manifest.ManifestVersion)
+		assert.Len(t, manifest.Engines, 1)
+		assert.Equal(t, "vllm", manifest.Engines[0].Name)
+		assert.Len(t, manifest.Engines[0].EngineVersions, 1)
+		assert.Equal(t, "v0.10.2", manifest.Engines[0].EngineVersions[0].Version)
+	})
+
+	t.Run("valid manifest with package_url", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+
+metadata:
+  package_url: "https://example.com/package.tar.gz"
+
+engines:
+- name: vllm
+  engine_versions:
+  - version: "v0.10.2"
+    images:
+      nvidia_gpu:
+        image_name: "vllm"
+        tag: "v0.10.2"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(content), 0644)
+		require.NoError(t, err)
+
+		manifest, err := parser.ParseManifestFile(manifestPath)
+		require.NoError(t, err)
+		assert.NotNil(t, manifest.Metadata)
+		assert.Equal(t, "https://example.com/package.tar.gz", manifest.Metadata.PackageURL)
+	})
+
+	t.Run("invalid YAML", func(t *testing.T) {
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte("invalid: [unclosed"), 0644)
+		require.NoError(t, err)
+
+		_, err = parser.ParseManifestFile(manifestPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse YAML manifest")
+	})
+
+	t.Run("missing engine name", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+engines:
+- name: ""
+  engine_versions:
+  - version: "v1.0.0"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(content), 0644)
+		require.NoError(t, err)
+
+		_, err = parser.ParseManifestFile(manifestPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "engine name is empty")
+	})
+
+	t.Run("no engine versions", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+engines:
+- name: "vllm"
+  engine_versions: []
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(content), 0644)
+		require.NoError(t, err)
+
+		_, err = parser.ParseManifestFile(manifestPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no engine versions defined")
+	})
+
+	t.Run("invalid values_schema_base64", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+engines:
+- name: vllm
+  engine_versions:
+  - version: "v0.10.2"
+    values_schema:
+      values_schema_base64: "not-valid-base64!!!"
+    images:
+      nvidia_gpu:
+        image_name: "vllm"
+        tag: "v0.10.2"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		err := os.WriteFile(manifestPath, []byte(content), 0644)
+		require.NoError(t, err)
+
+		_, err = parser.ParseManifestFile(manifestPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse YAML manifest")
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		_, err := parser.ParseManifestFile("/nonexistent/manifest.yaml")
+		assert.Error(t, err)
+	})
 }
 
 func TestParserValidateManifest(t *testing.T) {
