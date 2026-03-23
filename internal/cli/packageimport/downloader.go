@@ -78,6 +78,33 @@ func downloadPackage(ctx context.Context, url string, destPath string) error {
 	return nil
 }
 
+// streamExtractPackage downloads a tar.gz package from url and extracts it
+// directly to destPath without writing the archive to disk first.
+func streamExtractPackage(ctx context.Context, url string, extractor *Extractor, destPath string) error {
+	klog.Infof("Downloading package from %s", url)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create HTTP request")
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to download package")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return errors.Errorf("failed to download package: HTTP %s", resp.Status)
+	}
+
+	if resp.ContentLength > 0 {
+		klog.Infof("Package size: %s", formatBytes(resp.ContentLength))
+	}
+
+	return extractor.ExtractFromReader(resp.Body, destPath)
+}
+
 func formatBytes(b int64) string {
 	const unit = 1024
 	if b < unit {

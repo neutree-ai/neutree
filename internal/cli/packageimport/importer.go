@@ -75,7 +75,7 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 		return i.registerEngines(ctx, opts, manifest, result)
 	}
 
-	// If package_url is present, download and extract, then push images
+	// If package_url is present, stream-extract and push images
 	if manifest.Metadata != nil && manifest.Metadata.PackageURL != "" {
 		klog.Infof("Package URL found: %s", manifest.Metadata.PackageURL)
 
@@ -91,17 +91,11 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 			defer os.RemoveAll(tempDir)
 		}
 
-		// Download the package archive
-		archivePath := filepath.Join(opts.ExtractPath, "package.tar.gz")
-		if err := downloadPackage(ctx, manifest.Metadata.PackageURL, archivePath); err != nil {
-			return nil, errors.Wrap(err, "failed to download package from URL")
-		}
+		// Stream-extract the package directly from HTTP response
+		klog.Infof("Downloading and extracting package to %s", opts.ExtractPath)
 
-		// Extract the downloaded archive
-		klog.Infof("Extracting downloaded package to %s", opts.ExtractPath)
-
-		if err := i.extractor.Extract(archivePath, opts.ExtractPath); err != nil {
-			return nil, errors.Wrap(err, "failed to extract downloaded package")
+		if err := streamExtractPackage(ctx, manifest.Metadata.PackageURL, i.extractor, opts.ExtractPath); err != nil {
+			return nil, errors.Wrap(err, "failed to download and extract package from URL")
 		}
 
 		// Re-parse manifest from extracted content to get validated image references

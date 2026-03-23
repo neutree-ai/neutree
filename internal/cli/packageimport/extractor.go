@@ -54,6 +54,21 @@ func (e *Extractor) extractTarGz(packagePath, destPath string) error {
 	return e.extractTarReader(tar.NewReader(gzr), destPath)
 }
 
+// ExtractFromReader extracts a gzipped tar stream directly from an io.Reader.
+func (e *Extractor) ExtractFromReader(r io.Reader, destPath string) error {
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return errors.Wrap(err, "failed to create destination directory")
+	}
+
+	gzr, err := pgzip.NewReader(r)
+	if err != nil {
+		return errors.Wrap(err, "failed to create gzip reader")
+	}
+	defer gzr.Close()
+
+	return e.extractTarReader(tar.NewReader(gzr), destPath)
+}
+
 // extractTarReader extracts files from a tar reader
 func (e *Extractor) extractTarReader(tr *tar.Reader, destPath string) error {
 	// Create a reusable buffer for better performance
