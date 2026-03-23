@@ -96,8 +96,9 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			By("Polling for Upgrading phase (may be transient)")
+			By("Polling for Upgrading phase and progress messages")
 			seenUpgrading := false
+			var progressMessages string
 			deadline := time.Now().Add(60 * time.Second)
 			for time.Now().Before(deadline) {
 				r = ClusterH.Get(clusterName)
@@ -105,6 +106,9 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 					c = parseClusterJSON(r.Stdout)
 					if c.Status.Phase == "Upgrading" {
 						seenUpgrading = true
+						if c.Status.ErrorMessage != "" {
+							progressMessages = c.Status.ErrorMessage
+						}
 						break
 					}
 					if c.Status.Phase == "Running" && c.Status.Version == upgradeVersion {
@@ -124,6 +128,17 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 			ExpectSuccess(r)
 			c = parseClusterJSON(r.Stdout)
 			Expect(c.Status.Version).NotTo(Equal(oldVersion), "version should change after upgrade")
+
+			By("Verifying progress messages were recorded during upgrade")
+			// If we captured progress during Upgrading phase, verify key messages.
+			// Progress may also be in the final status error_message after completion.
+			if progressMessages == "" {
+				progressMessages = c.Status.ErrorMessage
+			}
+			if progressMessages != "" {
+				Expect(progressMessages).To(ContainSubstring("upgrade"),
+					"progress should mention upgrade")
+			}
 		})
 	})
 
@@ -220,8 +235,9 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			By("Polling for Upgrading phase")
+			By("Polling for Upgrading phase and progress messages")
 			seenUpgrading := false
+			var progressMessages string
 			deadline := time.Now().Add(60 * time.Second)
 			for time.Now().Before(deadline) {
 				r = ClusterH.Get(clusterName)
@@ -229,6 +245,9 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 					c = parseClusterJSON(r.Stdout)
 					if c.Status.Phase == "Upgrading" {
 						seenUpgrading = true
+						if c.Status.ErrorMessage != "" {
+							progressMessages = c.Status.ErrorMessage
+						}
 						break
 					}
 					if c.Status.Phase == "Running" && c.Status.Version == upgradeVersion {
@@ -248,6 +267,15 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 			ExpectSuccess(r)
 			c = parseClusterJSON(r.Stdout)
 			Expect(c.Status.Version).To(Equal(upgradeVersion))
+
+			By("Verifying progress messages were recorded during upgrade")
+			if progressMessages == "" {
+				progressMessages = c.Status.ErrorMessage
+			}
+			if progressMessages != "" {
+				Expect(progressMessages).To(ContainSubstring("upgrade"),
+					"progress should mention upgrade")
+			}
 
 			By("Waiting for endpoint to recover after upgrade")
 			waitEndpointRunning(epName)

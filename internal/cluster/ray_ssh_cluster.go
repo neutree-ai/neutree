@@ -56,8 +56,8 @@ func newRaySSHClusterReconcile(storage storage.Storage, acceleratorManager accel
 	return r
 }
 
-// logWithProcessMessage logs the process messages and updates the cluster status error message
-// now only used during cluster initialization
+// logWithProcessMessage logs the process messages and updates the cluster status error message.
+// Progress messages are written during initialization and upgrade to provide user-visible feedback.
 func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileContext, messages ...string) {
 	for _, message := range messages {
 		klog.Info(message + ": " + reconcileCtx.Cluster.Metadata.WorkspaceName())
@@ -70,7 +70,15 @@ func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileC
 		reconcileCtx.processMessages = append(reconcileCtx.processMessages, formatMessageWithTimestamp(message))
 	}
 
-	if reconcileCtx.Cluster.Status != nil && !reconcileCtx.Cluster.Status.Initialized {
+	if reconcileCtx.Cluster.Status == nil {
+		return
+	}
+
+	// Write progress messages during initialization or upgrade
+	isInitializing := !reconcileCtx.Cluster.Status.Initialized
+	isUpgrading := reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseUpgrading
+
+	if isInitializing || isUpgrading {
 		reconcileCtx.Cluster.Status.ErrorMessage = strings.Join(reconcileCtx.processMessages, "\n")
 		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
 			Status: reconcileCtx.Cluster.Status,

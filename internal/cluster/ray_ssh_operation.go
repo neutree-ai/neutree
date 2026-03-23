@@ -477,33 +477,42 @@ func needsVersionUpgrade(cluster *v1.Cluster) bool {
 }
 
 func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext) error {
-	klog.Infof("Upgrading cluster %s from version %s to %s",
-		reconcileCtx.Cluster.Metadata.WorkspaceName(),
-		reconcileCtx.Cluster.Status.Version,
-		reconcileCtx.Cluster.Spec.Version)
+	oldVersion := reconcileCtx.Cluster.Status.Version
+	newVersion := reconcileCtx.Cluster.Spec.Version
+
+	c.logWithProcessMessage(reconcileCtx,
+		fmt.Sprintf("Start to upgrade cluster from %s to %s", oldVersion, newVersion))
 
 	// Step 1: Pre-pull images on all nodes before stopping the cluster.
-	// This includes:
-	// - The new cluster image (neutree-serve:<new_version>) so upCluster/startNode is fast
-	// - Engine images used by running endpoints (new versions need separate engine images)
-	// Pre-pulling is blocking to ensure all images are cached before downCluster,
-	// minimizing actual downtime during upgrade.
+	c.logWithProcessMessage(reconcileCtx, "Pre-pulling images on all nodes")
+
 	err := c.prePullImages(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to pre-pull images")
 	}
 
+	c.logWithProcessMessage(reconcileCtx, "Pre-pull completed")
+
 	// Step 2: Force stop all workers and ray down
+	c.logWithProcessMessage(reconcileCtx, "Stopping cluster")
+
 	err = c.downCluster(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to down cluster during upgrade")
 	}
 
+	c.logWithProcessMessage(reconcileCtx, "Cluster stopped")
+
 	// Step 3: Ray up with new image (restart=true)
+	c.logWithProcessMessage(reconcileCtx,
+		fmt.Sprintf("Starting head node with new version %s", newVersion))
+
 	headIP, err := c.upCluster(reconcileCtx, true)
 	if err != nil {
 		return errors.Wrap(err, "failed to up cluster during upgrade")
 	}
+
+	c.logWithProcessMessage(reconcileCtx, "Head node started successfully")
 
 	// Step 4: Set head provision status
 	err = setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true)
@@ -512,10 +521,14 @@ func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext)
 	}
 
 	// Step 5: Reconcile worker nodes with new image
+	c.logWithProcessMessage(reconcileCtx, "Starting worker nodes")
+
 	err = c.reconcileWorkerNode(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to reconcile worker nodes during upgrade")
 	}
+
+	c.logWithProcessMessage(reconcileCtx, "Cluster upgrade completed")
 
 	return nil
 }
