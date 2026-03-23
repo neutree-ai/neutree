@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"maps"
+	"math"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -582,6 +583,8 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
+	setVLLMDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
+
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
 	// Inject engine identity for metrics labeling (used by NeutreeRayStatLogger / _SanitizedRayStatLogger)
@@ -626,6 +629,28 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	}
 
 	return app, nil
+}
+
+// setVLLMDefaultTensorParallelSize auto-sets tensor_parallel_size = GPU count in engine_args
+// for vLLM engine when GPU > 1 and is a whole number. Skips if user already configured it.
+func setVLLMDefaultTensorParallelSize(endpoint *v1.Endpoint, app *dashboard.RayServeApplication, numGPUs float64) {
+	if endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != v1.EngineNameVLLM {
+		return
+	}
+
+	if numGPUs <= 1 || math.Trunc(numGPUs) != numGPUs {
+		return
+	}
+
+	engineArgs, ok := app.Args["engine_args"].(map[string]interface{})
+	if !ok {
+		engineArgs = make(map[string]interface{})
+	}
+
+	if _, exists := engineArgs["tensor_parallel_size"]; !exists {
+		engineArgs["tensor_parallel_size"] = int(numGPUs)
+		app.Args["engine_args"] = engineArgs
+	}
 }
 
 // buildEngineContainerConfigs constructs two runtime_env.container configs for
@@ -768,7 +793,7 @@ func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, app
 	// Old clusters (<= v1.0.0) use RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper which causes
 	// parent processes to lose child exit codes, breaking vLLM's P2P check. For those clusters, skip the check.
 	// New clusters (> v1.0.0) use RAY_process_group_cleanup_enabled which doesn't have this issue.
-	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == "vllm" {
+	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameVLLM {
 		if deployedCluster.Spec != nil && deployedCluster.Spec.Version != "" {
 			isNew, err := semver.LessThan("v1.0.0", deployedCluster.Spec.Version)
 			if err == nil && !isNew {

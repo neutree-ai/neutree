@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"maps"
+	"math"
 	"net/url"
 	"path"
 	"path/filepath"
@@ -96,11 +97,31 @@ func (k *kubernetesOrchestrator) setRoutingLogic(data *DeploymentManifestVariabl
 // setEngineDefaultArgs sets default arguments for specific engines
 func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVariables, engine *v1.Engine) {
 	switch engine.Metadata.Name { //nolint:gocritic
-	case "llama-cpp":
-		// Set default parameters for llama-cpp engine
+	case v1.EngineNameLlamaCpp:
 		if _, exists := data.EngineArgs["interrupt_requests"]; !exists {
 			data.EngineArgs["interrupt_requests"] = "false"
 		}
+	}
+}
+
+// setVLLMTensorParallelDefault auto-sets tensor-parallel-size = GPU count for vLLM
+// when GPU > 1 and is a whole number. Must be called after user engine_args are merged,
+// because users may provide the key in either hyphen or underscore format.
+func setVLLMTensorParallelDefault(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
+	if engine.Metadata.Name != v1.EngineNameVLLM || endpoint.Spec.Resources == nil {
+		return
+	}
+
+	gpuCount := endpoint.Spec.Resources.GetGPUCount()
+	if gpuCount <= 1 || math.Trunc(gpuCount) != gpuCount {
+		return
+	}
+
+	_, hasDash := data.EngineArgs["tensor-parallel-size"]
+	_, hasUnderscore := data.EngineArgs["tensor_parallel_size"]
+
+	if !hasDash && !hasUnderscore {
+		data.EngineArgs["tensor_parallel_size"] = int(gpuCount)
 	}
 }
 
@@ -115,6 +136,10 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 			maps.Copy(data.EngineArgs, v)
 		}
 	}
+
+	// Auto-set vLLM tensor-parallel-size after user args are merged,
+	// so we can detect user-provided values in either key format.
+	setVLLMTensorParallelDefault(data, endpoint, engine)
 
 	// Prepare engine arg values for YAML double-quoted template rendering.
 	// Handles native maps, unescaped JSON strings, and pre-escaped strings.

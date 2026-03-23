@@ -1324,6 +1324,98 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				"max-model-len":      "4096",
 			},
 		},
+		{
+			name: "vllm engine with GPU > 1 should auto-set tensor-parallel-size",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("4"),
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"tensor_parallel_size": 4,
+			},
+		},
+		{
+			name: "vllm engine with GPU <= 1 should not set tensor-parallel-size",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("1"),
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{},
+		},
+		{
+			name: "vllm engine user-provided tensor-parallel-size overrides default",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("4"),
+					},
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"tensor-parallel-size": "2",
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"tensor-parallel-size": "2",
+			},
+		},
+		{
+			name: "vllm engine user-provided underscore key prevents default",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("4"),
+					},
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"tensor_parallel_size": "1",
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"tensor_parallel_size": "1",
+			},
+		},
+		{
+			name: "vllm engine with nil resources should not set tensor-parallel-size",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "vllm",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{},
+			},
+			expectedArgs: map[string]interface{}{},
+		},
 	}
 
 	for _, tt := range tests {
