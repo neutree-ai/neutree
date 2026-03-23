@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
@@ -295,9 +296,9 @@ func (in *EngineList) SetItems(objs []scheme.Object) {
 	in.Items = items
 }
 
-// SSHImageKeyPrefix is the prefix for SSH-compatible engine images in the Images map.
-// SSH clusters use images with this prefix (e.g., "ssh_nvidia_gpu") which contain
-// Ray wheel + Neutree serve layer code, enabling containerized engine isolation.
+// SSHImageKeyPrefix is the key prefix used to select SSH-compatible engine images
+// in the Images map (e.g., "ssh_nvidia_gpu" as the SSH-specific variant of "nvidia_gpu").
+// It defines a naming convention only and does not prescribe specific image contents.
 const SSHImageKeyPrefix = "ssh_"
 
 // GetImageForAccelerator returns the image information for a specific accelerator type
@@ -323,8 +324,9 @@ func (ev *EngineVersion) GetImageForSSHAccelerator(acceleratorType string) *Engi
 	return ev.GetImageForAccelerator(acceleratorType)
 }
 
-// GetSupportedAccelerators returns a list of supported accelerator types
-// The list is derived from the keys of the Images map
+// GetSupportedAccelerators returns a list of supported accelerator types.
+// The list is derived from the keys of the Images map, excluding SSH-prefixed
+// keys (e.g., "ssh_nvidia_gpu") which are internal variants, not distinct accelerator types.
 func (ev *EngineVersion) GetSupportedAccelerators() []string {
 	if ev.Images == nil {
 		return []string{}
@@ -332,6 +334,9 @@ func (ev *EngineVersion) GetSupportedAccelerators() []string {
 
 	accelerators := make([]string, 0, len(ev.Images))
 	for acceleratorType := range ev.Images {
+		if strings.HasPrefix(acceleratorType, SSHImageKeyPrefix) {
+			continue
+		}
 		accelerators = append(accelerators, acceleratorType)
 	}
 
