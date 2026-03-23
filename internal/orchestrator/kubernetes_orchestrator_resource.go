@@ -597,12 +597,21 @@ func injectInfrastructure(objects *unstructured.UnstructuredList, vars Deploymen
 
 		// Inject volumeMounts into the engine container
 		if len(vars.VolumeMounts) > 0 {
+			foundEngineContainer := false
+
 			for j := range podSpec.Containers {
 				if podSpec.Containers[j].Name == vars.EngineName {
 					podSpec.Containers[j].VolumeMounts = append(
 						podSpec.Containers[j].VolumeMounts, vars.VolumeMounts...)
+					foundEngineContainer = true
+
 					break
 				}
+			}
+
+			if !foundEngineContainer {
+				return errors.Errorf("requested volumeMounts for engine container %q, but no such container exists in deployment %q",
+					vars.EngineName, obj.GetName())
 			}
 		}
 
@@ -624,20 +633,26 @@ func injectInfrastructure(objects *unstructured.UnstructuredList, vars Deploymen
 
 // buildModelDownloaderInitContainer builds the model-downloader initContainer
 // that downloads model files before the engine container starts.
+// Uses direct python invocation with separate args to avoid shell injection.
 func buildModelDownloaderInitContainer(vars DeploymentManifestVariables) corev1.Container {
 	modelArgs := vars.ModelArgs
 
-	downloaderArgs := fmt.Sprintf(
-		`python3 -m neutree.downloader --name="%v" --registry_type="%v" --registry_path="%v" --path="%v" --version="%v" --file="%v" --task="%v"`,
-		modelArgs["name"], modelArgs["registry_type"], modelArgs["registry_path"],
-		modelArgs["path"], modelArgs["version"], modelArgs["file"], modelArgs["task"],
-	)
+	args := []string{
+		"-m", "neutree.downloader",
+		"--name", fmt.Sprint(modelArgs["name"]),
+		"--registry_type", fmt.Sprint(modelArgs["registry_type"]),
+		"--registry_path", fmt.Sprint(modelArgs["registry_path"]),
+		"--path", fmt.Sprint(modelArgs["path"]),
+		"--version", fmt.Sprint(modelArgs["version"]),
+		"--file", fmt.Sprint(modelArgs["file"]),
+		"--task", fmt.Sprint(modelArgs["task"]),
+	}
 
 	container := corev1.Container{
 		Name:    "model-downloader",
 		Image:   fmt.Sprintf("%s/neutree/neutree-runtime:%s", vars.ImagePrefix, vars.NeutreeVersion),
-		Command: []string{"bash", "-c"},
-		Args:    []string{downloaderArgs},
+		Command: []string{"python3"},
+		Args:    args,
 	}
 
 	// Add env vars

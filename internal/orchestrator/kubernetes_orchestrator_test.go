@@ -2733,8 +2733,11 @@ func TestInjectInfrastructure(t *testing.T) {
 	initContainer := fullDep.Spec.Template.Spec.InitContainers[0]
 	assert.Equal(t, "model-downloader", initContainer.Name)
 	assert.Equal(t, "registry.example.com/neutree/neutree-runtime:v1.0.0", initContainer.Image)
-	assert.Contains(t, initContainer.Args[0], "python3 -m neutree.downloader")
-	assert.Contains(t, initContainer.Args[0], `--name="gpt-4"`)
+	assert.Equal(t, []string{"python3"}, initContainer.Command)
+	assert.Contains(t, initContainer.Args, "-m")
+	assert.Contains(t, initContainer.Args, "neutree.downloader")
+	assert.Contains(t, initContainer.Args, "--name")
+	assert.Contains(t, initContainer.Args, "gpt-4")
 
 	// Check initContainer env
 	assert.Len(t, initContainer.Env, 1)
