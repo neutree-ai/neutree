@@ -58,6 +58,7 @@ type EndpointStatus struct {
 	ServiceURL         string        `json:"service_url,omitempty"`
 	LastTransitionTime string        `json:"last_transition_time,omitempty"`
 	ErrorMessage       string        `json:"error_message,omitempty"`
+	ObservedSpecHash   string        `json:"observed_spec_hash,omitempty"`
 }
 
 type Endpoint struct {

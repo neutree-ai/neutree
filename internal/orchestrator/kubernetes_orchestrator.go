@@ -132,17 +132,9 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		return errors.Wrapf(err, "failed to get deploy template for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
-	// Render template → templateObjects (engine-only, no infrastructure)
-	templateObjects, err := buildDeploymentObjects(deployTemplate, renderVars)
+	deploymentObjects, err := buildDeploymentObjects(deployTemplate, renderVars)
 	if err != nil {
 		return errors.Wrapf(err, "failed to build deployment for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
-	}
-
-	// Deep copy and inject infrastructure (initContainer, volumes, imagePullSecrets)
-	// into fullObjects for actual K8s apply.
-	fullObjects := templateObjects.DeepCopy()
-	if err := injectInfrastructure(fullObjects, renderVars); err != nil {
-		return errors.Wrapf(err, "failed to inject infrastructure for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
 	applier := deploy.NewKubernetesDeployer(
@@ -151,8 +143,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		ctx.Endpoint.Metadata.Name, // resourceName
 		"deployment",               // componentName
 	).
-		WithNewObjects(fullObjects).          // what to apply to K8s (with infrastructure)
-		WithDiffBaseObjects(templateObjects). // what to compare & store (without infrastructure)
+		WithNewObjects(deploymentObjects).
 		WithLabels(map[string]string{
 			"endpoint":                         ctx.Endpoint.Metadata.Name,
 			v1.NeutreeClusterLabelKey:          ctx.Cluster.Metadata.Name,

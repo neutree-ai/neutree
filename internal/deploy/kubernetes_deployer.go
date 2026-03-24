@@ -18,12 +18,11 @@ type KubernetesDeployer struct {
 	resourceName  string // resource name (cluster name, endpoint name, etc.)
 	componentName string // component name (router, metrics, deployment, etc.)
 
-	configStore     *ConfigStore
-	newObjects      *unstructured.UnstructuredList
-	diffBaseObjects *unstructured.UnstructuredList // Optional: objects used for diff comparison and config storage
-	mutates         []Mutate
-	labels          map[string]string
-	logger          klog.Logger
+	configStore *ConfigStore
+	newObjects  *unstructured.UnstructuredList
+	mutates     []Mutate
+	labels      map[string]string
+	logger      klog.Logger
 }
 
 // NewKubernetesDeployer creates a new KubernetesDeployer instance
@@ -43,16 +42,6 @@ func NewKubernetesDeployer(ctrlClient client.Client, namespace, resourceName, co
 // WithNewObjects sets the desired state objects to apply
 func (a *KubernetesDeployer) WithNewObjects(objects *unstructured.UnstructuredList) *KubernetesDeployer {
 	a.newObjects = objects
-	return a
-}
-
-// WithDiffBaseObjects sets separate objects for diff comparison and config storage.
-// When set, newObjects is used for the actual K8s apply, while diffBaseObjects
-// is used for change detection and last-applied-config storage.
-// This enables infrastructure injection: template-only objects for diff,
-// full objects (with injected infra) for apply.
-func (a *KubernetesDeployer) WithDiffBaseObjects(objects *unstructured.UnstructuredList) *KubernetesDeployer {
-	a.diffBaseObjects = objects
 	return a
 }
 
@@ -112,23 +101,11 @@ func (a *KubernetesDeployer) Apply(ctx context.Context) (int, error) {
 		lastAppliedConfig = ""
 	}
 
-	// 2. Determine which objects to use for diff comparison
-	// When diffBaseObjects is set, use them for diff/config and newObjects for apply.
-	compareObjects := a.newObjects
-	if a.diffBaseObjects != nil {
-		compareObjects = a.diffBaseObjects
-	}
-
-	// 3. Apply manifests using ManifestApply
+	// 2. Apply manifests using ManifestApply
 	manifestApply := NewManifestApply(a.ctrlClient, a.namespace).
 		WithLastAppliedConfig(lastAppliedConfig).
-		WithNewObjects(compareObjects).
+		WithNewObjects(a.newObjects).
 		WithLogger(a.logger)
-
-	// When diff base is separate, tell ManifestApply to apply from newObjects
-	if a.diffBaseObjects != nil {
-		manifestApply = manifestApply.WithApplyObjects(a.newObjects)
-	}
 
 	for _, mutate := range a.mutates {
 		manifestApply = manifestApply.WithMutate(mutate)
@@ -139,10 +116,9 @@ func (a *KubernetesDeployer) Apply(ctx context.Context) (int, error) {
 		return 0, errors.Wrap(err, "failed to apply manifests")
 	}
 
-	// 4. Save compareObjects (not newObjects) as config, so future diffs
-	// compare against the same template-only baseline.
+	// 3. Save new config to ConfigMap if there were changes
 	if changedCount > 0 {
-		newConfigJSON, err := json.Marshal(compareObjects.Items)
+		newConfigJSON, err := json.Marshal(a.newObjects.Items)
 		if err != nil {
 			a.logger.Error(err, "Failed to marshal new config")
 			// Don't return error as resources were successfully applied

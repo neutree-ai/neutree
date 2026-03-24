@@ -138,12 +138,14 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 			wantErr: false, // Changed: defer block logs error but doesn't return it
 		},
 		{
-			name: "always create even if already running",
+			name: "create when running but no observed spec hash (first reconcile after upgrade)",
 			in:   ep(id, v1.EndpointPhaseRUNNING),
 			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
 				o.On("CreateEndpoint", mock.Anything).Return(nil)
 				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
+				// updateObservedSpecHash + updateStatus calls
+				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(nil)
 			},
 			wantErr: false,
 		},
@@ -428,3 +430,84 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestComputeEndpointSpecHash(t *testing.T) {
+	numReplicas := 1
+	baseEndpoint := &v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Engine:   &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.11.2"},
+			Model:    &v1.ModelSpec{Name: "llama-3", Version: "latest"},
+			Replicas: v1.ReplicaSpec{Num: &numReplicas},
+			Resources: &v1.ResourceSpec{
+				GPU: strPtr("1"),
+			},
+			Env:       map[string]string{"HF_TOKEN": "test"},
+			Variables: map[string]interface{}{"engine_args": map[string]interface{}{"dtype": "half"}},
+		},
+	}
+
+	t.Run("same spec produces same hash", func(t *testing.T) {
+		hash1 := ComputeEndpointSpecHash(baseEndpoint)
+		hash2 := ComputeEndpointSpecHash(baseEndpoint)
+		assert.Equal(t, hash1, hash2)
+		assert.NotEmpty(t, hash1)
+	})
+
+	t.Run("different replicas produces different hash", func(t *testing.T) {
+		numReplicas2 := 2
+		modified := &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Engine:    baseEndpoint.Spec.Engine,
+				Model:     baseEndpoint.Spec.Model,
+				Replicas:  v1.ReplicaSpec{Num: &numReplicas2},
+				Resources: baseEndpoint.Spec.Resources,
+				Env:       baseEndpoint.Spec.Env,
+				Variables: baseEndpoint.Spec.Variables,
+			},
+		}
+		assert.NotEqual(t, ComputeEndpointSpecHash(baseEndpoint), ComputeEndpointSpecHash(modified))
+	})
+
+	t.Run("different engine_args produces different hash", func(t *testing.T) {
+		modified := &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Engine:    baseEndpoint.Spec.Engine,
+				Model:     baseEndpoint.Spec.Model,
+				Replicas:  baseEndpoint.Spec.Replicas,
+				Resources: baseEndpoint.Spec.Resources,
+				Env:       baseEndpoint.Spec.Env,
+				Variables: map[string]interface{}{"engine_args": map[string]interface{}{"dtype": "float16"}},
+			},
+		}
+		assert.NotEqual(t, ComputeEndpointSpecHash(baseEndpoint), ComputeEndpointSpecHash(modified))
+	})
+
+	t.Run("cluster field is excluded from hash", func(t *testing.T) {
+		ep1 := &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Cluster:   "cluster-v1",
+				Engine:    baseEndpoint.Spec.Engine,
+				Model:     baseEndpoint.Spec.Model,
+				Replicas:  baseEndpoint.Spec.Replicas,
+				Resources: baseEndpoint.Spec.Resources,
+			},
+		}
+		ep2 := &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Cluster:   "cluster-v2",
+				Engine:    baseEndpoint.Spec.Engine,
+				Model:     baseEndpoint.Spec.Model,
+				Replicas:  baseEndpoint.Spec.Replicas,
+				Resources: baseEndpoint.Spec.Resources,
+			},
+		}
+		assert.Equal(t, ComputeEndpointSpecHash(ep1), ComputeEndpointSpecHash(ep2),
+			"cluster name should not affect hash")
+	})
+
+	t.Run("nil spec returns empty hash", func(t *testing.T) {
+		assert.Empty(t, ComputeEndpointSpecHash(&v1.Endpoint{}))
+	})
+}
+
+func strPtr(s string) *string { return &s }

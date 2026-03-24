@@ -1,6 +1,9 @@
 package controllers
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -71,20 +74,45 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			obj.Metadata.WorkspaceName())
 	}
 
-	if orchestrator.IsEndpointPaused(obj) {
-		err = o.PauseEndpoint(obj)
+	// Compute spec hash from user-controlled fields only.
+	// If the hash hasn't changed and the endpoint is already Running, skip
+	// orchestration. This prevents cluster version upgrades (or other infra-only
+	// changes) from triggering unnecessary endpoint rolling updates.
+	// Infrastructure changes take effect on the next user-initiated spec change.
+	specHash := ComputeEndpointSpecHash(obj)
+	specChanged := obj.Status == nil ||
+		obj.Status.ObservedSpecHash == "" ||
+		obj.Status.ObservedSpecHash != specHash
+
+	if !specChanged && obj.Status.Phase == v1.EndpointPhaseRUNNING {
+		klog.V(4).Infof("Endpoint %s spec unchanged (hash=%s), skipping orchestration",
+			obj.Metadata.WorkspaceName(), specHash)
+
+		err = c.gw.SyncEndpoint(obj)
 		if err != nil {
-			return errors.Wrapf(err, "failed to pause endpoint %s",
+			return errors.Wrapf(err, "failed to sync gateway configuration for endpoint %s",
 				obj.Metadata.WorkspaceName())
 		}
 
 		return nil
 	}
 
-	err = o.CreateEndpoint(obj)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create or update endpoint %s",
-			obj.Metadata.WorkspaceName())
+	if orchestrator.IsEndpointPaused(obj) {
+		err = o.PauseEndpoint(obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to pause endpoint %s",
+				obj.Metadata.WorkspaceName())
+		}
+	} else {
+		err = o.CreateEndpoint(obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create or update endpoint %s",
+				obj.Metadata.WorkspaceName())
+		}
+	}
+
+	if err == nil && specChanged {
+		c.updateObservedSpecHash(obj, specHash)
 	}
 
 	err = c.gw.SyncEndpoint(obj)
@@ -322,4 +350,59 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	}
 
 	return orchestrator, nil
+}
+
+// ComputeEndpointSpecHash computes a hash from user-controlled endpoint spec fields.
+// Only fields that the user directly controls are included. Cluster-managed fields
+// (NeutreeVersion, volumes, initContainers, imagePullSecrets, container run_options)
+// are excluded so that infrastructure changes don't trigger endpoint updates.
+func ComputeEndpointSpecHash(endpoint *v1.Endpoint) string {
+	if endpoint.Spec == nil {
+		return ""
+	}
+
+	// Hash only user-controlled fields from the endpoint spec
+	hashInput := struct {
+		Engine            *v1.EndpointEngineSpec `json:"engine,omitempty"`
+		Model             *v1.ModelSpec          `json:"model,omitempty"`
+		Replicas          v1.ReplicaSpec         `json:"replicas,omitempty"`
+		Resources         *v1.ResourceSpec       `json:"resources,omitempty"`
+		Env               map[string]string      `json:"env,omitempty"`
+		Variables         map[string]interface{} `json:"variables,omitempty"`
+		DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
+	}{
+		Engine:            endpoint.Spec.Engine,
+		Model:             endpoint.Spec.Model,
+		Replicas:          endpoint.Spec.Replicas,
+		Resources:         endpoint.Spec.Resources,
+		Env:               endpoint.Spec.Env,
+		Variables:         endpoint.Spec.Variables,
+		DeploymentOptions: endpoint.Spec.DeploymentOptions,
+	}
+
+	data, err := json.Marshal(hashInput)
+	if err != nil {
+		klog.Warningf("Failed to marshal endpoint spec for hashing: %v", err)
+		return ""
+	}
+
+	hash := sha256.Sum256(data)
+
+	return fmt.Sprintf("%x", hash[:8])
+}
+
+// updateObservedSpecHash persists the spec hash to endpoint status.
+func (c *EndpointController) updateObservedSpecHash(obj *v1.Endpoint, specHash string) {
+	status := &v1.EndpointStatus{}
+	if obj.Status != nil {
+		status = obj.Status
+	}
+
+	status.ObservedSpecHash = specHash
+
+	err := c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Status: status})
+	if err != nil {
+		klog.Errorf("failed to update observed spec hash for endpoint %s: %v",
+			obj.Metadata.WorkspaceName(), err)
+	}
 }
