@@ -22,11 +22,11 @@ type Dependencies struct {
 	ImageService registry.ImageService
 }
 
-func RegisterClusterVersionsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
-	versionsGroup := group.Group("/clusters")
-	versionsGroup.Use(middlewares...)
+func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	clusterGroup := group.Group("/clusters")
+	clusterGroup.Use(middlewares...)
 
-	versionsGroup.GET("/available_versions", getAvailableClusterVersions(deps))
+	clusterGroup.GET("/available_versions", getAvailableClusterVersions(deps))
 }
 
 type availableClusterVersionsResponse struct {
