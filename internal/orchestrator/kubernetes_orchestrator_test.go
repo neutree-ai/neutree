@@ -2847,6 +2847,304 @@ func TestUserChangeDoesCauseDiff(t *testing.T) {
 	assert.NotEqual(t, hashBefore, hashAfter, "user changes (replicas) should cause diff")
 }
 
+// legacyVllmTemplate is the old template that included infrastructure (initContainers,
+// imagePullSecrets, volumes, volumeMounts) directly in the template. Used to verify
+// that new template + injection produces equivalent final objects.
+var legacyVllmTemplate = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .EndpointName }}
+  namespace: {{ .Namespace }}
+  labels:
+    engine: {{ .EngineName }}
+    engine_version: {{ .EngineVersion }}
+    routing_logic: {{ .RoutingLogic }}
+    app: inference
+spec:
+  replicas: {{ .Replicas }}
+  progressDeadlineSeconds: 1200
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      cluster: {{ .ClusterName }}
+      workspace: {{ .Workspace }}
+      endpoint: {{ .EndpointName }}
+      app: inference
+  template:
+    metadata:
+      labels:
+        engine: {{ .EngineName }}
+        engine_version: {{ .EngineVersion }}
+        cluster: {{ .ClusterName }}
+        workspace: {{ .Workspace }}
+        endpoint: {{ .EndpointName }}
+        routing_logic: {{ .RoutingLogic }}
+        app: inference
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: endpoint
+                      operator: In
+                      values:
+                        - {{ .EndpointName }}
+                topologyKey: "kubernetes.io/hostname"
+      {{- if .NodeSelector }}
+      nodeSelector:
+        {{- range $key, $value := .NodeSelector }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
+      {{- if .ImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .ImagePullSecret }}
+      {{- end }}
+      {{- if .Volumes }}
+      volumes:
+{{ .Volumes | toYaml | indent 6 }}
+      {{- end }}
+      initContainers:
+        - name: model-downloader
+          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
+          command:
+            - python3
+          args:
+            - -m
+            - neutree.downloader
+            - --name
+            - "{{ .ModelArgs.name }}"
+            - --registry_type
+            - "{{ .ModelArgs.registry_type }}"
+            - --registry_path
+            - "{{ .ModelArgs.registry_path }}"
+            - --path
+            - "{{ .ModelArgs.path }}"
+            - --version
+            - "{{ .ModelArgs.version }}"
+            - --file
+            - "{{ .ModelArgs.file }}"
+            - --task
+            - "{{ .ModelArgs.task }}"
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
+      containers:
+        - name: {{ .EngineName }}
+          image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
+          command:
+          - vllm
+          - serve
+          - {{ .ModelArgs.path }}
+          - --host
+          - "0.0.0.0"
+          - "--port"
+          - "8000"
+          - --served-model-name
+          - {{ .ModelArgs.serve_name }}
+          - --task
+          {{- if eq .ModelArgs.task "text-embedding" }}
+          - embedding
+          {{- else if eq .ModelArgs.task "text-generation" }}
+          - generate
+          {{- else if eq .ModelArgs.task "text-rerank" }}
+          - rerank
+          {{- else }}
+          - {{ .ModelArgs.task }}
+          {{- end }}
+          {{- if .EngineArgs }}
+          {{- range $key, $value := .EngineArgs }}
+          - --{{ $key }}
+      {{- if ne (printf "%v" $value) "true"}}
+          - "{{ $value }}"
+      {{- end }}
+          {{- end }}
+          {{- end }}
+          resources:
+            limits:
+              {{- range $key, $value := .Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+            requests:
+              {{- range $key, $value := .Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          ports:
+            - containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}`
+
+// TestNewTemplateWithInjectionMatchesLegacy verifies that the new approach
+// (stripped template + injectInfrastructure) produces an equivalent final
+// Deployment as the old approach (everything-in-template).
+func TestNewTemplateWithInjectionMatchesLegacy(t *testing.T) {
+	data := DeploymentManifestVariables{
+		NeutreeVersion:  "v1.0.0",
+		ClusterName:     "test-cluster",
+		Workspace:       "test-workspace",
+		Namespace:       "default",
+		ImagePrefix:     "registry.example.com",
+		ImageRepo:       "vllm",
+		ImageTag:        "v0.11.2",
+		ImagePullSecret: "neutree-image-pull-secret",
+		EngineName:      "vllm",
+		EngineVersion:   "v0.11.2",
+		EndpointName:    "my-endpoint",
+		ModelArgs: map[string]interface{}{
+			"name":          "llama-3",
+			"task":          "text-generation",
+			"path":          "/mnt/models/default/llama-3/latest",
+			"registry_type": "huggingface",
+			"registry_path": "meta-llama/Llama-3-8B",
+			"serve_name":    "llama-3",
+			"version":       "latest",
+			"file":          "",
+		},
+		EngineArgs: map[string]interface{}{
+			"max-model-len": "4096",
+		},
+		Resources: map[string]string{
+			"nvidia.com/gpu": "1",
+		},
+		Env: map[string]string{
+			"HF_TOKEN": "hf_test_token",
+		},
+		RoutingLogic: "roundrobin",
+		Replicas:     2,
+		Volumes: []corev1.Volume{
+			{
+				Name: "models-cache-tmp",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumDefault},
+				},
+			},
+			{
+				Name: "model-cache-nfs",
+				VolumeSource: corev1.VolumeSource{
+					NFS: &corev1.NFSVolumeSource{Server: "10.0.0.1", Path: "/models"},
+				},
+			},
+			{
+				Name: "dshm",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory},
+				},
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "models-cache-tmp", MountPath: "/mnt/models"},
+			{Name: "model-cache-nfs", MountPath: "/mnt/models/default"},
+			{Name: "dshm", MountPath: "/dev/shm"},
+		},
+	}
+
+	// 1. Legacy approach: render with old template (infra in template)
+	legacyObjects, err := buildDeploymentObjects(legacyVllmTemplate, data)
+	require.NoError(t, err)
+	require.Len(t, legacyObjects.Items, 1)
+
+	legacyDep := &appsv1.Deployment{}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(legacyObjects.Items[0].Object, legacyDep)
+	require.NoError(t, err)
+
+	// 2. New approach: render with stripped template + inject infrastructure
+	newObjects, err := buildDeploymentObjects(testVllmDeploymentTemplate, data)
+	require.NoError(t, err)
+
+	fullObjects := newObjects.DeepCopy()
+	err = injectInfrastructure(fullObjects, data)
+	require.NoError(t, err)
+
+	newDep := &appsv1.Deployment{}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(fullObjects.Items[0].Object, newDep)
+	require.NoError(t, err)
+
+	legacyPodSpec := legacyDep.Spec.Template.Spec
+	newPodSpec := newDep.Spec.Template.Spec
+
+	// 3. Compare: Deployment-level fields
+	assert.Equal(t, legacyDep.Name, newDep.Name, "deployment name")
+	assert.Equal(t, legacyDep.Namespace, newDep.Namespace, "deployment namespace")
+	assert.Equal(t, legacyDep.Spec.Replicas, newDep.Spec.Replicas, "replicas")
+	assert.Equal(t, legacyDep.Spec.Selector, newDep.Spec.Selector, "selector")
+	assert.Equal(t, legacyDep.Spec.Template.Labels, newDep.Spec.Template.Labels, "pod template labels")
+
+	// 4. Compare: imagePullSecrets
+	assert.Equal(t, legacyPodSpec.ImagePullSecrets, newPodSpec.ImagePullSecrets, "imagePullSecrets")
+
+	// 5. Compare: volumes
+	assert.Equal(t, legacyPodSpec.Volumes, newPodSpec.Volumes, "volumes")
+
+	// 6. Compare: initContainers
+	require.Len(t, legacyPodSpec.InitContainers, 1, "legacy should have 1 initContainer")
+	require.Len(t, newPodSpec.InitContainers, 1, "new should have 1 initContainer")
+
+	legacyInit := legacyPodSpec.InitContainers[0]
+	newInit := newPodSpec.InitContainers[0]
+	assert.Equal(t, legacyInit.Name, newInit.Name, "initContainer name")
+	assert.Equal(t, legacyInit.Image, newInit.Image, "initContainer image")
+	assert.Equal(t, legacyInit.Command, newInit.Command, "initContainer command")
+	assert.Equal(t, legacyInit.Args, newInit.Args, "initContainer args")
+	assert.Equal(t, legacyInit.VolumeMounts, newInit.VolumeMounts, "initContainer volumeMounts")
+	// Env: both have same keys/values; sort both for comparison since map iteration order varies
+	assert.ElementsMatch(t, legacyInit.Env, newInit.Env, "initContainer env")
+
+	// 7. Compare: engine container
+	require.Len(t, legacyPodSpec.Containers, 1, "legacy should have 1 container")
+	require.Len(t, newPodSpec.Containers, 1, "new should have 1 container")
+
+	legacyEngine := legacyPodSpec.Containers[0]
+	newEngine := newPodSpec.Containers[0]
+	assert.Equal(t, legacyEngine.Name, newEngine.Name, "engine container name")
+	assert.Equal(t, legacyEngine.Image, newEngine.Image, "engine container image")
+	assert.Equal(t, legacyEngine.Command, newEngine.Command, "engine container command")
+	assert.Equal(t, legacyEngine.Args, newEngine.Args, "engine container args")
+	assert.Equal(t, legacyEngine.Resources, newEngine.Resources, "engine container resources")
+	assert.ElementsMatch(t, legacyEngine.Env, newEngine.Env, "engine container env")
+	assert.Equal(t, legacyEngine.Ports, newEngine.Ports, "engine container ports")
+	assert.Equal(t, legacyEngine.StartupProbe, newEngine.StartupProbe, "engine container startupProbe")
+	assert.Equal(t, legacyEngine.ReadinessProbe, newEngine.ReadinessProbe, "engine container readinessProbe")
+	assert.Equal(t, legacyEngine.VolumeMounts, newEngine.VolumeMounts, "engine container volumeMounts")
+}
+
 // specHash computes a SHA256 hash of the spec field, mirroring deploy.computeSpecHash.
 func specHash(t *testing.T, obj *unstructured.Unstructured) string {
 	t.Helper()
