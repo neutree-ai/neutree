@@ -473,32 +473,19 @@ func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileCon
 	}
 
 	// Ray can keep multiple records for the same head node across restarts
-	// (old DEAD entry + new ALIVE entry). Scan all nodes and return alive
-	// if any head node record is in AliveNodeState.
-	foundHead := false
-
+	// (old DEAD entry + new ALIVE entry). Return alive only if at least one
+	// head node record is in AliveNodeState.
 	for _, node := range nodes {
-		if !node.Raylet.IsHeadNode {
-			continue
-		}
-
-		foundHead = true
-
-		if node.Raylet.State == v1.AliveNodeState {
+		if node.Raylet.IsHeadNode && node.Raylet.State == v1.AliveNodeState {
 			return true, v1.GetVersionFromLabels(node.Raylet.Labels), nil
 		}
 	}
 
-	if foundHead {
-		// At least one head-node record exists, but none are alive.
-		return false, "", nil
-	}
-
-	// No head node found in node list — this can happen during initial startup
-	// before the node registers with GCS. Since the dashboard is reachable,
-	// treat as alive. When a raylet crashes, Ray still reports it with State=DEAD
-	// rather than removing it from the list.
-	return true, "", nil
+	// No alive head node found. This covers:
+	// - Head raylet exited and Ray lost the isHeadNode flag
+	// - Head node exists but state is DEAD
+	// - No head node in list yet (initial startup; ProvisioningWaitTime prevents rebuild loops)
+	return false, "", nil
 }
 
 func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext) error {

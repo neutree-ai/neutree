@@ -49,7 +49,14 @@ func TestInitializeCluster(t *testing.T) {
 					assert.Equal(t, v1.ClusterPhaseInitializing, cluster.Status.Phase)
 				}).Return(nil).Once()
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
-				dashboardSvc.On("ListNodes").Return(nil, nil)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+						},
+					},
+				}, nil)
 				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {}).Return(nil).Maybe()
 			},
 		},
@@ -98,7 +105,14 @@ func TestInitializeCluster(t *testing.T) {
 					assert.Equal(t, v1.ClusterPhaseInitializing, cluster.Status.Phase)
 				}).Return(nil).Once()
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
-				dashboardSvc.On("ListNodes").Return(nil, nil)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+						},
+					},
+				}, nil)
 				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {}).Return(nil).Maybe()
 			},
 		},
