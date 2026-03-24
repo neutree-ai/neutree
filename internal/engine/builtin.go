@@ -38,6 +38,10 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 								ImageName: "neutree/llama-cpp-python",
 								Tag:       "v0.3.7",
 							},
+							v1.SSHImageKeyPrefix + "cpu": {
+								ImageName: "neutree/engine-llama-cpp",
+								Tag:       "v0.3.7-ray2.53.0",
+							},
 						},
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
