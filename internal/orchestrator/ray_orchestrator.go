@@ -37,6 +37,18 @@ func isNewClusterVersion(cluster *v1.Cluster) (bool, error) {
 	return isNew, nil
 }
 
+const (
+	// frameworkImageName is the image name for the decoupled serve framework container.
+	// The framework image contains only the Controller and app_builder code,
+	// enabling independent updates without rebuilding engine images.
+	frameworkImageName = "neutree-serve-framework"
+	// frameworkImageTag must match the Ray version used by clusters.
+	frameworkImageTag = "ray2.53.0"
+
+	// frameworkImportPath is the Ray Serve import_path for the generic framework app_builder.
+	frameworkImportPath = "serve.framework.app_builder:app_builder"
+)
+
 // clusterLocks provides per-cluster mutexes to serialize Ray Serve application
 // updates (read-modify-write on PUT /api/serve/applications/) and prevent
 // concurrent workers from overwriting each other's changes.
@@ -619,13 +631,31 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build engine container config for endpoint %s", endpoint.Metadata.WorkspaceName())
 		}
 
+		// Override the app-level container to use the lightweight framework image
+		// instead of the heavy engine image.  The framework image contains only
+		// the Controller and app_builder code — no engine-specific packages.
+		frameworkRef, err := buildFrameworkImageRef(imageRegistry)
+		if err != nil {
+			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build framework image ref for endpoint %s", endpoint.Metadata.WorkspaceName())
+		}
+
 		if baseConfig != nil {
+			baseConfig["image"] = frameworkRef
 			app.RuntimeEnv["container"] = baseConfig
 		}
 
 		if backendConfig != nil {
 			app.Args["backend_container"] = backendConfig
 		}
+
+		// Switch import path to the generic framework app_builder.
+		app.ImportPath = frameworkImportPath
+
+		// Tell the framework which engine-specific Backend class to load
+		// at init time via importlib inside the engine container.
+		engineName := strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_")
+		engineVersion := strings.ReplaceAll(endpoint.Spec.Engine.Version, ".", "_")
+		app.Args["backend_class"] = fmt.Sprintf("serve.engines.%s_%s.backend:Backend", engineName, engineVersion)
 	}
 
 	return app, nil
@@ -787,6 +817,25 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 	}
 
 	return baseConfig, backendConfig, nil
+}
+
+// buildFrameworkImageRef constructs the framework image reference with an
+// optional registry prefix (same logic as engine images).
+func buildFrameworkImageRef(imageRegistry *v1.ImageRegistry) (string, error) {
+	imageRef := frameworkImageName + ":" + frameworkImageTag
+
+	if imageRegistry != nil {
+		imagePrefix, err := util.GetImagePrefix(imageRegistry)
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to get image prefix from registry")
+		}
+
+		if imagePrefix != "" {
+			imageRef = imagePrefix + "/" + imageRef
+		}
+	}
+
+	return imageRef, nil
 }
 
 func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, applicationEnv map[string]string) {
