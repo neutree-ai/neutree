@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
+	"github.com/neutree-ai/neutree/internal/routes/clusters"
 	"github.com/neutree-ai/neutree/internal/routes/credentials"
 	"github.com/neutree-ai/neutree/internal/routes/logs"
 	"github.com/neutree-ai/neutree/internal/routes/models"
@@ -57,6 +58,7 @@ func NewBuilder() *Builder {
 		"rest/role-assignments":   ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),
 		"rest/user-profiles":      ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
 		"rest/clusters":           ProxiesRouteFactory(proxies.RegisterClusterRoutes),
+		"rest/cluster-versions":   ClustersRouteFactory(clusters.RegisterClusterVersionsRoutes),
 		"rest/image-registries":   ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
 		"rest/model-registries":   ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
 		"rest/endpoints":          ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
@@ -95,6 +97,7 @@ func NewBuilder() *Builder {
 		"rest/role-assignments":   {"auth"},
 		"rest/user-profiles":      {"auth"},
 		"rest/clusters":           {"auth"},
+		"rest/cluster-versions":   {"auth"},
 		"rest/image-registries":   {"auth"},
 		"rest/model-registries":   {"auth"},
 		"rest/endpoints":          {"auth"},
