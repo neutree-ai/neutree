@@ -1,9 +1,6 @@
 package controllers
 
 import (
-	"crypto/sha256"
-	"encoding/json"
-	"fmt"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -11,6 +8,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/endpoint"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -79,7 +77,7 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	// orchestration. This prevents cluster version upgrades (or other infra-only
 	// changes) from triggering unnecessary endpoint rolling updates.
 	// Infrastructure changes take effect on the next user-initiated spec change.
-	specHash := ComputeEndpointSpecHash(obj)
+	specHash := endpoint.ComputeEndpointSpecHash(obj.Spec)
 	specChanged := obj.Status == nil ||
 		obj.Status.ObservedSpecHash == "" ||
 		obj.Status.ObservedSpecHash != specHash
@@ -350,45 +348,6 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	}
 
 	return orchestrator, nil
-}
-
-// ComputeEndpointSpecHash computes a hash from user-controlled endpoint spec fields.
-// Only fields that the user directly controls are included. Cluster-managed fields
-// (NeutreeVersion, volumes, initContainers, imagePullSecrets, container run_options)
-// are excluded so that infrastructure changes don't trigger endpoint updates.
-func ComputeEndpointSpecHash(endpoint *v1.Endpoint) string {
-	if endpoint.Spec == nil {
-		return ""
-	}
-
-	// Hash only user-controlled fields from the endpoint spec
-	hashInput := struct {
-		Engine            *v1.EndpointEngineSpec `json:"engine,omitempty"`
-		Model             *v1.ModelSpec          `json:"model,omitempty"`
-		Replicas          v1.ReplicaSpec         `json:"replicas,omitempty"`
-		Resources         *v1.ResourceSpec       `json:"resources,omitempty"`
-		Env               map[string]string      `json:"env,omitempty"`
-		Variables         map[string]interface{} `json:"variables,omitempty"`
-		DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
-	}{
-		Engine:            endpoint.Spec.Engine,
-		Model:             endpoint.Spec.Model,
-		Replicas:          endpoint.Spec.Replicas,
-		Resources:         endpoint.Spec.Resources,
-		Env:               endpoint.Spec.Env,
-		Variables:         endpoint.Spec.Variables,
-		DeploymentOptions: endpoint.Spec.DeploymentOptions,
-	}
-
-	data, err := json.Marshal(hashInput)
-	if err != nil {
-		klog.Warningf("Failed to marshal endpoint spec for hashing: %v", err)
-		return ""
-	}
-
-	hash := sha256.Sum256(data)
-
-	return fmt.Sprintf("%x", hash[:8])
 }
 
 // updateObservedSpecHash persists the spec hash to endpoint status.
