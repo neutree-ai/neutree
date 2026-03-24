@@ -20,6 +20,7 @@ import (
 // --- K8s client helpers ---
 
 // newK8sClientFromBase64Kubeconfig creates a kubernetes clientset from a base64-encoded kubeconfig.
+// Reuses the same E2E_KUBECONFIG value that is passed to neutree for cluster creation.
 func newK8sClientFromBase64Kubeconfig(b64Kubeconfig string) kubernetes.Interface {
 	decoded, err := base64.StdEncoding.DecodeString(b64Kubeconfig)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to decode kubeconfig")
@@ -463,15 +464,24 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			By("Waiting for cluster Running after upgrade")
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
-			ExpectSuccess(r)
+			By("Polling for cluster version update")
+			// K8s cluster upgrade is handled asynchronously by the controller.
+			// Poll until status.version matches the upgrade version.
+			deadline := time.Now().Add(5 * time.Minute)
+			for time.Now().Before(deadline) {
+				r = ClusterH.Get(clusterName)
+				if r.ExitCode == 0 {
+					c = parseClusterJSON(r.Stdout)
+					if c.Status.Version == upgradeVersion {
+						break
+					}
+				}
+				time.Sleep(5 * time.Second)
+			}
 
 			By("Verifying cluster version updated")
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			c = parseClusterJSON(r.Stdout)
-			Expect(c.Status.Version).To(Equal(upgradeVersion))
+			Expect(c.Status.Version).To(Equal(upgradeVersion),
+				"cluster version should update to %s", upgradeVersion)
 
 			By("Waiting for controller reconcile to settle")
 			// Give the endpoint controller time to reconcile with the new cluster version.
@@ -522,8 +532,17 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 			By("Waiting for endpoint Running with updated replicas")
 			waitEndpointRunning(epName)
 
-			By("Verifying Deployment generation increased")
-			newGeneration := getDeploymentGeneration(k8sClient, epName)
+			By("Polling for Deployment generation to increase")
+			var newGeneration int64
+			genDeadline := time.Now().Add(2 * time.Minute)
+			for time.Now().Before(genDeadline) {
+				newGeneration = getDeploymentGeneration(k8sClient, epName)
+				if newGeneration > baselineGeneration {
+					break
+				}
+				time.Sleep(5 * time.Second)
+			}
+
 			Expect(newGeneration).To(BeNumerically(">", baselineGeneration),
 				"Deployment generation should increase after user changes replicas")
 
