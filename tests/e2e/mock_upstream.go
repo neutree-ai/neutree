@@ -54,10 +54,10 @@ func (m *MockUpstream) Port() int {
 }
 
 // ExternalHost returns the hostname that Docker containers (Kong) should use
-// to reach this server. Configurable via E2E_MOCK_UPSTREAM_HOST env var;
+// to reach this server. Configured via profile mock_upstream_host field;
 // defaults to "host.docker.internal" (works on macOS Docker Desktop).
 func (m *MockUpstream) ExternalHost() string {
-	return Cfg.MockUpstreamHost
+	return profileMockUpstreamHost()
 }
 
 // ExternalURL returns the full URL reachable from Docker containers.

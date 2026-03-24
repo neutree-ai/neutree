@@ -1,0 +1,64 @@
+# E2E test profile
+# Copy to profile.yaml and fill in values, then set E2E_PROFILE_PATH=./tests/e2e/profile.yaml
+
+auth:
+  email: admin@neutree.local
+  password: "111111"
+
+testrail:
+  run_id: ""
+  url: ""
+  user: ""
+  password: ""
+
+ssh_nodes:
+  - host: 192.168.1.100
+    user: root
+    key_file: ~/.ssh/id_rsa
+
+kubernetes:
+  kubeconfig: ~/.kube/config
+  router_access_mode: LoadBalancer
+
+image_registry:
+  url: ""
+  repository: ""
+  username: ""
+  password: ""
+
+model_registry:
+  type: hugging-face
+  url: https://huggingface.co
+  credentials: ""
+
+workspace: default
+
+cluster:
+  version: v1.0.0
+  upgrade_version: ""
+
+engine:
+  name: vllm
+  version: v0.8.5
+  version_b: v0.11.2
+
+model:
+  name: test-model
+  version: "1.0"
+  file: model.safetensors
+  task: text-generation
+
+endpoint:
+  cluster: ""
+  accelerator_type: nvidia_gpu
+  accelerator_product: ""
+  engine_args: "dtype=half"
+  timeout: "10m"
+
+mock_upstream_host: host.docker.internal
+
+model_cache:
+  host_path: /data/models
+  nfs_server: ""
+  nfs_path: ""
+  pvc_storage_class: ""

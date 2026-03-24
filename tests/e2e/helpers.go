@@ -270,23 +270,80 @@ func StopLocalRegistry(containerID string) {
 	DockerRemove(containerID)
 }
 
+// --- Environment helpers ---
+
+// testRegistry returns the model registry name for tests.
+func testRegistry() string {
+	return "e2e-registry-" + Cfg.RunID
+}
+
 // --- Template rendering ---
 
+// profileVarMap builds a mapping from template variable names to profile values.
+// This replaces the old approach of reading env vars for template expansion.
+func profileVarMap() map[string]string {
+	return map[string]string{
+		// SSH
+		"E2E_SSH_HEAD_IP":     profileSSHHeadIP(),
+		"E2E_SSH_USER":        profileSSHUser(),
+		"E2E_SSH_PRIVATE_KEY": profileSSHPrivateKey(),
+		"E2E_SSH_WORKER_IPS":  profileSSHWorkerIPs(),
+
+		// Kubernetes
+		"E2E_KUBECONFIG": profileKubeconfig(),
+
+		// Image registry
+		"E2E_IMAGE_REGISTRY_URL":  profile.ImageRegistry.URL,
+		"E2E_IMAGE_REGISTRY_REPO": profile.ImageRegistry.Repository,
+
+		// Model registry
+		"E2E_MODEL_REGISTRY_URL": profile.ModelRegistry.URL,
+
+		// Engine
+		"E2E_ENGINE_NAME":    profileEngineName(),
+		"E2E_ENGINE_VERSION": profileEngineVersion(),
+
+		// Model
+		"E2E_MODEL_NAME":    profileModelName(),
+		"E2E_MODEL_VERSION": profileModelVersion(),
+		"E2E_MODEL_TASK":    profileModelTask(),
+
+		// TestRail (URL/user/password from profile; RUN_ID stays as env var)
+		"TESTRAIL_URL":      profile.Testrail.URL,
+		"TESTRAIL_USER":     profile.Testrail.User,
+		"TESTRAIL_PASSWORD": profile.Testrail.Password,
+	}
+}
+
 // renderTemplate reads a template file and expands ${VAR} references
-// using environment variables, with optional defaults map as fallback.
+// using the provided defaults map as primary source, then falling back
+// to the profile variable map, then to infrastructure env vars
+// (NEUTREE_SERVER_URL, NEUTREE_API_KEY, TESTRAIL_RUN_ID).
 func renderTemplate(templatePath string, defaults map[string]string) (string, error) {
 	content, err := os.ReadFile(templatePath)
 	if err != nil {
 		return "", err
 	}
 
+	pvm := profileVarMap()
+
 	result := os.Expand(string(content), func(key string) string {
-		if v := os.Getenv(key); v != "" {
+		// 1. Caller-provided defaults take highest priority.
+		if defaults != nil {
+			if v, ok := defaults[key]; ok && v != "" {
+				return v
+			}
+		}
+
+		// 2. Profile-derived values.
+		if v, ok := pvm[key]; ok && v != "" {
 			return v
 		}
 
-		if defaults != nil {
-			return defaults[key]
+		// 3. For infrastructure env vars (server URL, API key), fall back to os env.
+		switch key {
+		case "NEUTREE_SERVER_URL", "NEUTREE_API_KEY", "TESTRAIL_RUN_ID":
+			return os.Getenv(key)
 		}
 
 		return ""
