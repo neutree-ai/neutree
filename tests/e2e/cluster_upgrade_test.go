@@ -63,6 +63,17 @@ func getDeploymentGeneration(clientset kubernetes.Interface, endpointName string
 	return deploy.Generation
 }
 
+// getInitContainerImage returns the image of the first initContainer in the endpoint's Deployment.
+func getInitContainerImage(clientset kubernetes.Interface, endpointName string) string {
+	deploy := findEndpointDeployment(clientset, endpointName)
+
+	initContainers := deploy.Spec.Template.Spec.InitContainers
+	ExpectWithOffset(1, initContainers).NotTo(BeEmpty(),
+		"deployment for endpoint %s should have initContainers after infra injection", endpointName)
+
+	return initContainers[0].Image
+}
+
 // getEndpointPodNames returns sorted pod names for an endpoint's Deployment.
 func getEndpointPodNames(clientset kubernetes.Interface, endpointName string) []string {
 	deploy := findEndpointDeployment(clientset, endpointName)
@@ -546,7 +557,14 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 			Expect(newGeneration).To(BeNumerically(">", baselineGeneration),
 				"Deployment generation should increase after user changes replicas")
 
-			GinkgoWriter.Printf("After user change: generation=%d (was %d)\n", newGeneration, baselineGeneration)
+			By("Verifying initContainer image updated to new cluster version")
+			initImage := getInitContainerImage(k8sClient, epName)
+			Expect(initImage).To(ContainSubstring(upgradeVersion),
+				"initContainer neutree-runtime image should contain upgrade version %s, got %s",
+				upgradeVersion, initImage)
+
+			GinkgoWriter.Printf("After user change: generation=%d (was %d), initContainer image=%s\n",
+				newGeneration, baselineGeneration, initImage)
 		})
 
 		It("should serve inference after user-triggered update", func() {
