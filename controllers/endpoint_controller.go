@@ -302,6 +302,11 @@ func (c *EndpointController) updateStatus(obj *v1.Endpoint, status *v1.EndpointS
 		status.ServiceURL = obj.Status.ServiceURL
 	}
 
+	// Preserve ObservedSpecHash — it is managed by sync(), not by status updates.
+	if status.ObservedSpecHash == "" && obj.Status != nil && obj.Status.ObservedSpecHash != "" {
+		status.ObservedSpecHash = obj.Status.ObservedSpecHash
+	}
+
 	return c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Status: status})
 }
 
