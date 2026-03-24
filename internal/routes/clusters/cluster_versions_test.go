@@ -77,7 +77,7 @@ func TestGetAvailableClusterVersions(t *testing.T) {
 			},
 		},
 		{
-			name: "success - no accelerator_type returns all versions",
+			name: "success - no accelerator_type deduplicates shared versions",
 			queryParams: map[string]string{
 				"workspace":      "default",
 				"image_registry": "my-registry",
