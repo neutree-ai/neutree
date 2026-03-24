@@ -314,6 +314,13 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		}
 	}
 
+	// Down the cluster first to ensure a clean restart. This is necessary because
+	// ray up uses --no-restart, so it won't restart the raylet if GCS/dashboard
+	// are still running.
+	if err := c.downCluster(reconcileCtx); err != nil {
+		klog.Warningf("Failed to down cluster before recovery: %v", err)
+	}
+
 	headIP, err := c.upCluster(reconcileCtx, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to up cluster")

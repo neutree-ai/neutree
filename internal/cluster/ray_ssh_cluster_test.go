@@ -283,7 +283,7 @@ func TestReconcileHeadNode(t *testing.T) {
 			name: "head raylet dead but dashboard reachable - rebuild",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				// Dashboard is reachable but head raylet is dead
-				// GetClusterMetadata called twice: once in isHeadNodeAlive, once after upCluster
+				// GetClusterMetadata called twice: once in checkHeadNodeHealth, once after upCluster
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Times(2)
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
 					{
@@ -293,6 +293,9 @@ func TestReconcileHeadNode(t *testing.T) {
 						},
 					},
 				}, nil)
+				// downCluster first (ray stop), then upCluster (ray up)
+				// downCluster: ray down
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
 				// upCluster: mutateAcceleratorRuntimeConfig + ray up
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
