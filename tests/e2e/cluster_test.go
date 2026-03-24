@@ -19,9 +19,9 @@ import (
 func renderSSHClusterYAML(overrides map[string]string) string {
 	defaults := map[string]string{
 		"CLUSTER_NAME":            overrides["name"],
-		"CLUSTER_WORKSPACE":      Cfg.Workspace,
+		"CLUSTER_WORKSPACE":      profileWorkspace(),
 		"CLUSTER_IMAGE_REGISTRY": valueOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":        valueOr(overrides, "version", testClusterVersion()),
+		"CLUSTER_VERSION":        valueOr(overrides, "version", profileClusterVersion()),
 		"CLUSTER_SSH_HEAD_IP":    overrides["head_ip"],
 		"CLUSTER_SSH_USER":       overrides["ssh_user"],
 		"CLUSTER_SSH_PRIVATE_KEY": overrides["ssh_private_key"],
@@ -50,9 +50,9 @@ func renderSSHClusterYAML(overrides map[string]string) string {
 func renderK8sClusterYAML(overrides map[string]string) string {
 	defaults := map[string]string{
 		"CLUSTER_NAME":            overrides["name"],
-		"CLUSTER_WORKSPACE":      Cfg.Workspace,
+		"CLUSTER_WORKSPACE":      profileWorkspace(),
 		"CLUSTER_IMAGE_REGISTRY": valueOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":        valueOr(overrides, "version", testClusterVersion()),
+		"CLUSTER_VERSION":        valueOr(overrides, "version", profileClusterVersion()),
 		"CLUSTER_KUBECONFIG":     overrides["kubeconfig"],
 		"CLUSTER_ROUTER_REPLICAS": valueOr(overrides, "router_replicas", "1"),
 	}
@@ -79,7 +79,7 @@ type ClusterHelper struct {
 // NewClusterHelper creates a ClusterHelper with the test workspace.
 func NewClusterHelper() *ClusterHelper {
 	return &ClusterHelper{
-		workspace: Cfg.Workspace,
+		workspace: profileWorkspace(),
 	}
 }
 
@@ -156,10 +156,6 @@ func testImageRegistry() string {
 	return "e2e-image-registry-" + Cfg.RunID
 }
 
-func testClusterVersion() string {
-	return "v1.0.0"
-}
-
 // requireSSHEnv returns SSH cluster params from profile. ssh_private_key is returned as base64.
 func requireSSHEnv() (headIP, workerIPs, sshUser, sshPrivateKey string) {
 	headIP = profileSSHHeadIP()
@@ -199,7 +195,7 @@ var imageRegistryYAML string
 func SetupImageRegistry() {
 	defaults := map[string]string{
 		"E2E_IMAGE_REGISTRY":      testImageRegistry(),
-		"E2E_WORKSPACE":           testWorkspace(),
+		"E2E_WORKSPACE":           profileWorkspace(),
 		"E2E_IMAGE_REGISTRY_URL":  profile.ImageRegistry.URL,
 		"E2E_IMAGE_REGISTRY_REPO": profile.ImageRegistry.Repository,
 	}
@@ -213,7 +209,7 @@ func SetupImageRegistry() {
 	ExpectSuccess(r)
 
 	r = RunCLI("wait", "imageregistry", testImageRegistry(),
-		"-w", Cfg.Workspace,
+		"-w", profileWorkspace(),
 		"--for", "jsonpath=.status.phase=Connected",
 		"--timeout", "2m",
 	)

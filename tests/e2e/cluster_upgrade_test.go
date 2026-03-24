@@ -9,11 +9,12 @@ import (
 )
 
 func requireUpgradeVersion() string {
-	if os.Getenv("E2E_CLUSTER_UPGRADE_VERSION") == "" {
-		Skip("E2E_CLUSTER_UPGRADE_VERSION not set, skipping upgrade tests")
+	v := profileClusterUpgradeVersion()
+	if v == "" {
+		Skip("cluster.upgrade_version not configured in profile, skipping upgrade tests")
 	}
 
-	return os.Getenv("E2E_CLUSTER_UPGRADE_VERSION")
+	return v
 }
 
 var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
@@ -158,7 +159,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 		BeforeAll(func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
 			upgradeVersion = requireUpgradeVersion()
-			if modelName() == "" {
+			if profileModelName() == "" {
 				Skip("Model name not configured in profile, skipping upgrade endpoint compat tests")
 			}
 
@@ -197,7 +198,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 		It("should deploy endpoint with engine vllm v0.8.5 on initial cluster", func() {
 			By("Creating endpoint with default engine version")
-			yamlPath := applyEndpointOnCluster(epName, clusterName, engineVersionA())
+			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
 			defer os.Remove(yamlPath)
 
 			By("Waiting for endpoint Running")
@@ -205,7 +206,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(Equal("Running"))
-			Expect(ep.Spec.Engine.Version).To(Equal(engineVersionA()))
+			Expect(ep.Spec.Engine.Version).To(Equal(profileEngineVersion()))
 		})
 
 		It("should serve inference before upgrade", func() {

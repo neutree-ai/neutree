@@ -39,6 +39,10 @@ var _ = ReportAfterSuite("TestRail Reporter", func(report Report) {
 
 	var results []CaseResult
 	for _, spec := range report.SpecReports {
+		// Only report tests that actually ran (passed or failed)
+		if !spec.State.Is(types.SpecStatePassed) && !spec.State.Is(types.SpecStateFailed) {
+			continue
+		}
 		for _, label := range spec.Labels() {
 			if len(label) > 1 && label[0] == 'C' && label[1] >= '0' && label[1] <= '9' {
 				results = append(results, CaseResult{

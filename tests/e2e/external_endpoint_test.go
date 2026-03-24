@@ -45,7 +45,7 @@ func TeardownMockUpstream() {
 func SetupExternalEndpoint() {
 	defaults := map[string]string{
 		"E2E_EE_NAME":           testEEName(),
-		"E2E_WORKSPACE":         Cfg.Workspace,
+		"E2E_WORKSPACE":         profileWorkspace(),
 		"E2E_MOCK_UPSTREAM_URL": mockUpstream.ExternalURL(),
 		"E2E_MOCK_AUTH_TOKEN":   mockAuthToken,
 	}
@@ -60,7 +60,7 @@ func SetupExternalEndpoint() {
 	ExpectSuccess(r)
 
 	r = RunCLI("wait", "ExternalEndpoint", testEEName(),
-		"-w", Cfg.Workspace,
+		"-w", profileWorkspace(),
 		"--for", "jsonpath=.status.phase=Running",
 		"--timeout", "2m",
 	)
@@ -79,7 +79,7 @@ func TeardownExternalEndpoint() {
 
 // getEEServiceURL retrieves the service_url from ExternalEndpoint status via CLI.
 func getEEServiceURL() string {
-	r := RunCLI("get", "ExternalEndpoint", testEEName(), "-w", Cfg.Workspace, "-o", "json")
+	r := RunCLI("get", "ExternalEndpoint", testEEName(), "-w", profileWorkspace(), "-o", "json")
 	ExpectSuccess(r)
 
 	var ee map[string]any
@@ -150,7 +150,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 		It("should reach Running phase and generate service_url", Label("C2635095"), func() {
 			Expect(serviceURL).NotTo(BeEmpty())
 
-			expectedPath := fmt.Sprintf("/workspace/%s/external-endpoint/%s", Cfg.Workspace, testEEName())
+			expectedPath := fmt.Sprintf("/workspace/%s/external-endpoint/%s", profileWorkspace(), testEEName())
 			Expect(serviceURL).To(ContainSubstring(expectedPath))
 		})
 	})

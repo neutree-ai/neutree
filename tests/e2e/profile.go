@@ -47,9 +47,17 @@ type Profile struct {
 		Credentials string `yaml:"credentials"`
 	} `yaml:"model_registry"`
 
+	Workspace string `yaml:"workspace"`
+
+	Cluster struct {
+		Version        string `yaml:"version"`
+		UpgradeVersion string `yaml:"upgrade_version"`
+	} `yaml:"cluster"`
+
 	Engine struct {
-		Name    string `yaml:"name"`
-		Version string `yaml:"version"`
+		Name     string `yaml:"name"`
+		Version  string `yaml:"version"`
+		VersionB string `yaml:"version_b"`
 	} `yaml:"engine"`
 
 	Model struct {
@@ -58,6 +66,16 @@ type Profile struct {
 		File    string `yaml:"file"`
 		Task    string `yaml:"task"`
 	} `yaml:"model"`
+
+	Endpoint struct {
+		Cluster            string `yaml:"cluster"`
+		AcceleratorType    string `yaml:"accelerator_type"`
+		AcceleratorProduct string `yaml:"accelerator_product"`
+		EngineArgs         string `yaml:"engine_args"`
+		Timeout            string `yaml:"timeout"`
+	} `yaml:"endpoint"`
+
+	MockUpstreamHost string `yaml:"mock_upstream_host"`
 
 	ModelCache struct {
 		HostPath        string `yaml:"host_path"`
@@ -100,9 +118,13 @@ func LoadProfile() error {
 		head := profile.SSHNodes[0]
 		if head.KeyFile != "" {
 			keyFile := expandHome(head.KeyFile)
-			if keyData, err := os.ReadFile(keyFile); err == nil {
-				profile.sshHeadPrivateKeyBase64 = base64.StdEncoding.EncodeToString(keyData)
+
+			keyData, err := os.ReadFile(keyFile)
+			if err != nil {
+				return fmt.Errorf("failed to read SSH key file %s: %w", keyFile, err)
 			}
+
+			profile.sshHeadPrivateKeyBase64 = base64.StdEncoding.EncodeToString(keyData)
 		}
 
 		if len(profile.SSHNodes) > 1 {
@@ -118,9 +140,13 @@ func LoadProfile() error {
 	// Kubernetes: read kubeconfig file and base64-encode.
 	if profile.Kubernetes.Kubeconfig != "" {
 		kcPath := expandHome(profile.Kubernetes.Kubeconfig)
-		if kcData, err := os.ReadFile(kcPath); err == nil {
-			profile.kubeconfigBase64 = base64.StdEncoding.EncodeToString(kcData)
+
+		kcData, err := os.ReadFile(kcPath)
+		if err != nil {
+			return fmt.Errorf("failed to read kubeconfig %s: %w", kcPath, err)
 		}
+
+		profile.kubeconfigBase64 = base64.StdEncoding.EncodeToString(kcData)
 	}
 
 	return nil
@@ -173,6 +199,104 @@ func profileTestrailRunID() string {
 	}
 
 	return ""
+}
+
+// --- Workspace / Cluster / Engine / Model / Endpoint accessors ---
+
+func profileWorkspace() string {
+	if profile.Workspace != "" {
+		return profile.Workspace
+	}
+
+	return "default"
+}
+
+func profileClusterVersion() string {
+	if profile.Cluster.Version != "" {
+		return profile.Cluster.Version
+	}
+
+	return "v1.0.0"
+}
+
+func profileClusterUpgradeVersion() string { return profile.Cluster.UpgradeVersion }
+
+func profileEngineName() string {
+	if profile.Engine.Name != "" {
+		return profile.Engine.Name
+	}
+
+	return "vllm"
+}
+
+func profileEngineVersion() string {
+	if profile.Engine.Version != "" {
+		return profile.Engine.Version
+	}
+
+	return "v0.8.5"
+}
+
+func profileEngineVersionB() string {
+	if profile.Engine.VersionB != "" {
+		return profile.Engine.VersionB
+	}
+
+	return "v0.11.2"
+}
+
+func profileModelName() string { return profile.Model.Name }
+
+func profileModelVersion() string {
+	if profile.Model.Version != "" {
+		return profile.Model.Version
+	}
+
+	return "latest"
+}
+
+func profileModelTask() string {
+	if profile.Model.Task != "" {
+		return profile.Model.Task
+	}
+
+	return "text-generation"
+}
+
+func profileEndpointCluster() string { return profile.Endpoint.Cluster }
+
+func profileAcceleratorType() string {
+	if profile.Endpoint.AcceleratorType != "" {
+		return profile.Endpoint.AcceleratorType
+	}
+
+	return "nvidia_gpu"
+}
+
+func profileAcceleratorProduct() string { return profile.Endpoint.AcceleratorProduct }
+
+func profileEngineArgs() string {
+	if profile.Endpoint.EngineArgs != "" {
+		return profile.Endpoint.EngineArgs
+	}
+
+	return "dtype=half"
+}
+
+func profileEndpointTimeout() string {
+	if profile.Endpoint.Timeout != "" {
+		return profile.Endpoint.Timeout
+	}
+
+	return "10m"
+}
+
+func profileMockUpstreamHost() string {
+	if profile.MockUpstreamHost != "" {
+		return profile.MockUpstreamHost
+	}
+
+	return "host.docker.internal"
 }
 
 // expandHome replaces leading ~ with $HOME.

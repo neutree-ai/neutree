@@ -20,7 +20,7 @@ var registryYAML string
 func SetupModelRegistry() {
 	defaults := map[string]string{
 		"E2E_MODEL_REGISTRY":     testRegistry(),
-		"E2E_WORKSPACE":          testWorkspace(),
+		"E2E_WORKSPACE":          profileWorkspace(),
 		"E2E_MODEL_REGISTRY_URL": profile.ModelRegistry.URL,
 	}
 	var err error
@@ -33,7 +33,7 @@ func SetupModelRegistry() {
 	ExpectSuccess(r)
 
 	r = RunCLI("wait", "modelregistry", testRegistry(),
-		"-w", Cfg.Workspace,
+		"-w", profileWorkspace(),
 		"--for", "jsonpath=.status.phase=Connected",
 		"--timeout", "2m",
 	)
@@ -63,7 +63,7 @@ var Model *ModelHelper
 func NewModelHelper() *ModelHelper {
 	return &ModelHelper{
 		registry:  testRegistry(),
-		workspace: Cfg.Workspace,
+		workspace: profileWorkspace(),
 	}
 }
 

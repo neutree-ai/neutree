@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // TestRail status IDs
@@ -22,8 +24,9 @@ type CaseResult struct {
 }
 
 // ReportToTestRail sends test results to a TestRail run.
-// It reads connection info from the profile struct.
-// TESTRAIL_RUN_ID is passed as a parameter (sourced from env var by caller).
+// It reads connection info (URL, user, password) from the profile struct.
+// runID is resolved by the caller via profileTestrailRunID(), which checks
+// the TESTRAIL_RUN_ID env var first, then falls back to the profile value.
 // If any credentials are missing, it silently skips reporting.
 func ReportToTestRail(runID string, caseResults []CaseResult) error {
 	url := profile.Testrail.URL
@@ -84,14 +87,17 @@ func ReportToTestRail(runID string, caseResults []CaseResult) error {
 	req.SetBasicAuth(user, password)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send TestRail results: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("TestRail API returned status %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("TestRail API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	fmt.Printf("Successfully reported %d results to TestRail run %s\n", len(caseResults), runID)

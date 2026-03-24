@@ -277,11 +277,6 @@ func testRegistry() string {
 	return "e2e-registry-" + Cfg.RunID
 }
 
-// testWorkspace returns the workspace name for tests.
-func testWorkspace() string {
-	return "default"
-}
-
 // --- Template rendering ---
 
 // profileVarMap builds a mapping from template variable names to profile values.
@@ -305,13 +300,13 @@ func profileVarMap() map[string]string {
 		"E2E_MODEL_REGISTRY_URL": profile.ModelRegistry.URL,
 
 		// Engine
-		"E2E_ENGINE_NAME":      profile.Engine.Name,
-		"E2E_ENGINE_VERSION_A": profile.Engine.Version,
+		"E2E_ENGINE_NAME":    profileEngineName(),
+		"E2E_ENGINE_VERSION": profileEngineVersion(),
 
 		// Model
-		"E2E_MODEL_NAME":    profile.Model.Name,
-		"E2E_MODEL_VERSION": profile.Model.Version,
-		"E2E_MODEL_TASK":    profile.Model.Task,
+		"E2E_MODEL_NAME":    profileModelName(),
+		"E2E_MODEL_VERSION": profileModelVersion(),
+		"E2E_MODEL_TASK":    profileModelTask(),
 
 		// TestRail (URL/user/password from profile; RUN_ID stays as env var)
 		"TESTRAIL_URL":      profile.Testrail.URL,
@@ -322,8 +317,8 @@ func profileVarMap() map[string]string {
 
 // renderTemplate reads a template file and expands ${VAR} references
 // using the provided defaults map as primary source, then falling back
-// to the profile variable map, then to select env vars (NEUTREE_SERVER_URL,
-// NEUTREE_API_KEY) that are managed externally.
+// to the profile variable map, then to infrastructure env vars
+// (NEUTREE_SERVER_URL, NEUTREE_API_KEY, TESTRAIL_RUN_ID).
 func renderTemplate(templatePath string, defaults map[string]string) (string, error) {
 	content, err := os.ReadFile(templatePath)
 	if err != nil {
