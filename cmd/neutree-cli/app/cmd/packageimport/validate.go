@@ -21,31 +21,27 @@ func NewValidateCmd() *cobra.Command {
 		Short: "Validate a Neutree package structure without importing it",
 		Long: `Validate a Neutree package without performing the actual import.
 
-This command performs validation checks on a Neutree package to ensure it can be imported successfully:
-  1. Extracts the package to a temporary directory
-  2. Parses and validates the manifest.yaml structure
-  3. Verifies that all referenced image files exist in the package
-  4. Checks manifest schema and required fields
+This command supports two input formats:
+  • .tar.gz archive: Extracts and validates the full package including image file references
+  • .yaml/.yml manifest: Validates manifest structure and engine configuration only
 
-This is useful for:
-  • Testing package integrity before importing
-  • Debugging package creation issues
-  • Verifying package format compliance
+Validation checks:
+  1. Parses and validates the manifest.yaml structure
+  2. Checks manifest schema and required fields
+  3. For archives: verifies that all referenced image files exist in the package
 
 The command does not:
   • Load Docker images
   • Push images to registries
   • Create or modify engine definitions
   • Require API connectivity
-
-This command can be used with engine, cluster, and control plane packages, but performs only generic manifest validation (not type-specific checks).
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runValidate(opts)
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.PackagePath, "package", "p", "", "Path to the neutree package file (required)")
+	cmd.Flags().StringVarP(&opts.PackagePath, "package", "p", "", "Path to Neutree package (.tar.gz) or engine manifest (.yaml/.yml) (required)")
 	_ = cmd.MarkFlagRequired("package")
 
 	return cmd

@@ -27,46 +27,22 @@ func NewEngineImportCmd() *cobra.Command {
 		Short: "Import an engine version package with model serving images and engine definitions",
 		Long: `Import an engine version package into Neutree.
 
-This command imports engine versions that define model serving capabilities. It performs:
+This command supports two input formats:
+
+1. Archive mode (.tar.gz): Traditional full package with images
+   - Extracts the archive, loads and pushes container images, registers engine metadata
+
+2. Manifest mode (.yaml/.yml): Standalone manifest file for fast engine registration
+   - With --skip-image-push: Registers engine metadata only (no image handling)
+   - With package_url in manifest: Downloads the full archive, extracts, pushes images
+   - Without package_url: Registers engine metadata only
+
+Import steps (archive mode):
   1. Extracts the engine version package archive
   2. Parses and validates the manifest.yaml structure
   3. Loads container images for different accelerators (CUDA, ROCm, CPU)
   4. Pushes images to the configured image registry in the workspace
   5. Creates or updates the engine definition with the new version
-
-Package Requirements:
-The package must be a tar.gz archive containing:
-  • manifest.yaml - Engine metadata, version definitions, and container images
-  • images/*.tar  - Container image tar files for different accelerators
-
-Example manifest.yaml:
----
-manifest_version: "1.0"
-
-metadata:
-  description: "vLLM engine package for LLM inference"
-  version: "v0.6.0"
-
-engines:
-  - name: "vllm"
-    supported_tasks: ["text-generation"]
-    engine_versions:
-      - version: "v0.6.0"
-        images:
-          - image_name: "neutree/vllm-cuda"
-            tag: "v0.6.0"
-            accelerator: "nvidia.com/gpu"
-          - image_name: "neutree/vllm-rocm"
-            tag: "v0.6.0"
-            accelerator: "amd.com/gpu"
-
-images:
-  - image_name: "neutree/vllm-cuda"
-    tag: "v0.6.0"
-    image_file: "images/vllm-cuda.tar"
-  - image_name: "neutree/vllm-rocm"
-    tag: "v0.6.0"
-    image_file: "images/vllm-rocm.tar"
 
 Use --force to overwrite existing engine versions.
 Use --skip-image-push to only update engine definitions without pushing images.
@@ -76,8 +52,8 @@ Use --skip-image-push to only update engine definitions without pushing images.
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.packagePath, "package", "p", "", "Path to the engine version package file (required)")
-	cmd.Flags().BoolVar(&opts.skipImagePush, "skip-image-push", false, "Skip pushing images to registry")
+	cmd.Flags().StringVarP(&opts.packagePath, "package", "p", "", "Path to engine package (.tar.gz) or manifest file (.yaml/.yml) (required)")
+	cmd.Flags().BoolVar(&opts.skipImagePush, "skip-image-push", false, "Skip loading and pushing images (metadata-only import)")
 	cmd.Flags().BoolVarP(&opts.force, "force", "f", false, "Force overwrite if engine version already exists")
 	cmd.Flags().StringVar(&opts.extractPath, "extract-path", "", "Path to extract package to (default: temporary directory)")
 

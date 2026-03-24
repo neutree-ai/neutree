@@ -4,8 +4,12 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -67,6 +71,17 @@ func (e *EngineHelper) ImportSkipImage(packagePath string, extra ...string) CLIR
 	return e.Import(packagePath, append([]string{"--skip-image-push"}, extra...)...)
 }
 
+// ImportManifest imports a standalone manifest file without registry config.
+func (e *EngineHelper) ImportManifest(manifestPath string, extra ...string) CLIResult {
+	args := []string{"import", "engine",
+		"-p", manifestPath,
+		"--workspace", e.workspace,
+		"--skip-image-push",
+	}
+	args = append(args, extra...)
+	return RunCLI(args...)
+}
+
 // Get retrieves engine details as JSON.
 func (e *EngineHelper) Get(name string) CLIResult {
 	return RunCLI("get", "engine", name, "-w", e.workspace, "-o", "json")
@@ -118,7 +133,8 @@ type engineManifest struct {
 	ValuesSchema   map[string]any
 	DeployTemplate map[string]map[string]string // clusterType -> mode -> content
 	SupportedTasks []string
-	RealImages     bool // if true, create real Docker images via docker import/save
+	RealImages     bool   // if true, create real Docker images via docker import/save
+	PackageURL     string // if set, include package_url in metadata (for manifest-only mode)
 }
 
 // buildEnginePackage creates a tar.gz engine package in a temp file and returns its path.
@@ -288,6 +304,59 @@ func buildDockerImageTar(ref string) []byte {
 	return saveOut
 }
 
+// buildEngineManifestFile creates a standalone manifest YAML file and returns its path.
+func buildEngineManifestFile(m engineManifest) string {
+	engineImages := map[string]map[string]string{}
+	for accel, img := range m.Images {
+		engineImages[accel] = map[string]string{
+			"image_name": img[0],
+			"tag":        img[1],
+		}
+	}
+
+	engineVersion := map[string]any{
+		"version": m.Version,
+		"images":  engineImages,
+	}
+	if m.ValuesSchema != nil {
+		engineVersion["values_schema"] = m.ValuesSchema
+	}
+	if m.DeployTemplate != nil {
+		engineVersion["deploy_template"] = m.DeployTemplate
+	}
+	if m.SupportedTasks != nil {
+		engineVersion["supported_tasks"] = m.SupportedTasks
+	}
+
+	metadata := map[string]any{"version": m.Version}
+	if m.PackageURL != "" {
+		metadata["package_url"] = m.PackageURL
+	}
+
+	manifest := map[string]any{
+		"manifest_version": "1.0",
+		"metadata":         metadata,
+		"engines": []map[string]any{
+			{
+				"name":            m.Name,
+				"engine_versions": []any{engineVersion},
+			},
+		},
+	}
+
+	manifestBytes, err := json.Marshal(manifest)
+	Expect(err).NotTo(HaveOccurred())
+
+	tmpFile, err := os.CreateTemp("", "e2e-engine-*.yaml")
+	Expect(err).NotTo(HaveOccurred())
+	defer tmpFile.Close()
+
+	_, err = tmpFile.Write(manifestBytes)
+	Expect(err).NotTo(HaveOccurred())
+
+	return tmpFile.Name()
+}
+
 // --- Tests ---
 
 var _ = Describe("Engine", Ordered, func() {
@@ -452,6 +521,171 @@ var _ = Describe("Engine", Ordered, func() {
 			Expect(e.Spec.Versions[0].DeployTempl["kubernetes"]).To(HaveKey("default"))
 		})
 
+		It("should create engine from standalone manifest YAML", Label("manifest"), func() {
+			name := "e2e-engine-manifest-create"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			manifest := buildEngineManifestFile(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"},
+				},
+				SupportedTasks: []string{"text-generation"},
+			})
+			defer os.Remove(manifest)
+
+			r := EngineH.ImportManifest(manifest)
+			ExpectSuccess(r)
+			ExpectStdoutContains(r, "Successfully imported")
+
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(1))
+			Expect(e.Spec.Versions[0].Version).To(Equal("v1.0.0"))
+			Expect(e.Spec.Versions[0].Images).To(HaveKey("nvidia_gpu"))
+			Expect(e.Spec.Versions[0].SupportedTasks).To(ContainElement("text-generation"))
+		})
+
+		It("should add version to existing engine via manifest import", Label("manifest"), func() {
+			name := "e2e-engine-manifest-addver"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			m1 := buildEngineManifestFile(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"},
+				},
+			})
+			defer os.Remove(m1)
+
+			r := EngineH.ImportManifest(m1)
+			ExpectSuccess(r)
+
+			m2 := buildEngineManifestFile(engineManifest{
+				Name:    name,
+				Version: "v2.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda", "v2.0.0"},
+				},
+			})
+			defer os.Remove(m2)
+
+			r = EngineH.ImportManifest(m2)
+			ExpectSuccess(r)
+
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(2))
+
+			versions := []string{e.Spec.Versions[0].Version, e.Spec.Versions[1].Version}
+			Expect(versions).To(ConsistOf("v1.0.0", "v2.0.0"))
+		})
+
+		It("should merge accelerator via manifest import with --force", Label("manifest"), func() {
+			name := "e2e-engine-manifest-accel"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			m1 := buildEngineManifestFile(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"},
+				},
+			})
+			defer os.Remove(m1)
+
+			r := EngineH.ImportManifest(m1)
+			ExpectSuccess(r)
+
+			m2 := buildEngineManifestFile(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"amd_gpu": {"e2e/engine-rocm", "v1.0.0"},
+				},
+			})
+			defer os.Remove(m2)
+
+			r = EngineH.ImportManifest(m2, "--force")
+			ExpectSuccess(r)
+
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(1))
+			Expect(e.Spec.Versions[0].Images).To(HaveKey("nvidia_gpu"))
+			Expect(e.Spec.Versions[0].Images).To(HaveKey("amd_gpu"))
+		})
+
+		It("should validate standalone manifest YAML via validate command", Label("manifest"), func() {
+			manifest := buildEngineManifestFile(engineManifest{
+				Name:    "e2e-engine-validate-manifest",
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"},
+				},
+			})
+			defer os.Remove(manifest)
+
+			r := RunCLI("import", "validate", "-p", manifest)
+			ExpectSuccess(r)
+		})
+
+		It("should download and import images via manifest with package_url", Label("manifest", "docker"), func() {
+
+			name := "e2e-engine-manifest-pkgurl"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			// Build a real engine package archive to serve via HTTP
+			pkg := buildEnginePackage(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda-pkgurl", "v1.0.0"},
+				},
+				RealImages: true,
+			})
+			defer os.Remove(pkg)
+
+			// Start a local HTTP file server to serve the package
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			Expect(err).NotTo(HaveOccurred())
+
+			pkgDir := filepath.Dir(pkg)
+			pkgFile := filepath.Base(pkg)
+			server := &http.Server{Handler: http.FileServer(http.Dir(pkgDir))}
+
+			go server.Serve(listener) //nolint:errcheck
+			defer server.Close()
+
+			packageURL := fmt.Sprintf("http://%s/%s", listener.Addr().String(), pkgFile)
+
+			// Create manifest with package_url pointing to local server
+			manifest := buildEngineManifestFile(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda-pkgurl", "v1.0.0"},
+				},
+				PackageURL: packageURL,
+			})
+			defer os.Remove(manifest)
+
+			r := EngineH.Import(manifest)
+			ExpectSuccess(r)
+			ExpectStdoutContains(r, "Successfully imported")
+
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(1))
+			Expect(e.Spec.Versions[0].Images).To(HaveKey("nvidia_gpu"))
+		})
+
 		It("should update values schema via CLI import", Label("C2613219"), func() {
 			name := "e2e-engine-schema"
 			DeferCleanup(EngineH.EnsureDeleted, name)
@@ -499,3 +733,4 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 	})
 })
+
