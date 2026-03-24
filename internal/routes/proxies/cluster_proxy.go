@@ -13,7 +13,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -55,10 +54,6 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup.PATCH("", deletionValidation, handler)
 	proxyGroup.GET("/available_versions", getAvailableClusterVersions(deps))
 }
-
-// newImageService is a factory function for creating image services.
-// It can be overridden in tests to inject mocks.
-var newImageService = registry.NewImageService
 
 type availableClusterVersionsResponse struct {
 	AvailableVersions []string `json:"available_versions"`
@@ -148,7 +143,7 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 		// Only images with the "neutree.ai/cluster-version" label are included;
 		// images without the label (dev/nightly builds) are skipped.
 		// Labeled images are deduplicated by version and filtered by accelerator type.
-		imageSvc := newImageService()
+		imageSvc := deps.ImageService
 
 		tags, err := imageSvc.ListImageTags(imageRepo, auth)
 		if err != nil {

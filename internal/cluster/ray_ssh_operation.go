@@ -470,12 +470,6 @@ func (c *sshRayClusterReconciler) getHeadNodeVersion(reconcileCtx *ReconcileCont
 	return "", nil
 }
 
-func needsVersionUpgrade(cluster *v1.Cluster) bool {
-	return cluster.Status != nil && cluster.Status.Version != "" &&
-		cluster.Spec != nil && cluster.Spec.Version != "" &&
-		cluster.Status.Version != cluster.Spec.Version
-}
-
 func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext) error {
 	oldVersion := reconcileCtx.Cluster.Status.Version
 	newVersion := reconcileCtx.Cluster.Spec.Version

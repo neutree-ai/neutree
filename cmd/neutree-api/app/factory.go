@@ -6,6 +6,7 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
 	"github.com/neutree-ai/neutree/internal/routes/credentials"
 	"github.com/neutree-ai/neutree/internal/routes/logs"
@@ -48,6 +49,7 @@ func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 			StorageAccessURL: deps.Config.StorageAccessURL,
 			AuthEndpoint:     deps.Config.AuthEndpoint,
 			AuthConfig:       deps.Config.AuthConfig,
+			ImageService:     registry.NewImageService(),
 		})
 
 		return nil

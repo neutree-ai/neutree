@@ -13,7 +13,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/internal/registry"
 	registryMocks "github.com/neutree-ai/neutree/internal/registry/mocks"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
@@ -256,13 +255,7 @@ func TestGetAvailableClusterVersions(t *testing.T) {
 			mockImgSvc := registryMocks.NewMockImageService(t)
 			tt.setupMock(mockStorage, mockImgSvc)
 
-			origFactory := newImageService
-			newImageService = func() registry.ImageService {
-				return mockImgSvc
-			}
-			defer func() { newImageService = origFactory }()
-
-			deps := &Dependencies{Storage: mockStorage}
+			deps := &Dependencies{Storage: mockStorage, ImageService: mockImgSvc}
 			c, w := createTestContextWithQuery(tt.queryParams)
 
 			handler := getAvailableClusterVersions(deps)
