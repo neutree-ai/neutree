@@ -65,15 +65,23 @@ type Profile struct {
 		NFSPath         string `yaml:"nfs_path"`
 		PVCStorageClass string `yaml:"pvc_storage_class"`
 	} `yaml:"model_cache"`
+
+	// Computed fields (populated by LoadProfile, not from YAML directly)
+	sshHeadPrivateKeyBase64 string // base64-encoded content of SSHNodes[0].KeyFile
+	sshWorkerIPs            string // comma-separated worker IPs
+	kubeconfigBase64        string // base64-encoded content of Kubernetes.Kubeconfig
 }
 
-// LoadProfileFromEnv loads a profile from E2E_PROFILE_PATH and sets
-// environment variables that tests expect. Only sets vars that are
-// not already set (env vars take precedence).
-func LoadProfileFromEnv() error {
+// profile is the package-level profile instance, populated by LoadProfile().
+var profile Profile
+
+// LoadProfile loads a profile from E2E_PROFILE_PATH and populates the
+// package-level profile variable. If E2E_PROFILE_PATH is not set, the
+// profile remains zero-valued (tests use defaults).
+func LoadProfile() error {
 	path := os.Getenv("E2E_PROFILE_PATH")
 	if path == "" {
-		return nil // no profile, rely on env vars
+		return nil // no profile, use defaults
 	}
 
 	data, err := os.ReadFile(path)
@@ -81,78 +89,90 @@ func LoadProfileFromEnv() error {
 		return fmt.Errorf("failed to read profile %s: %w", path, err)
 	}
 
-	var p Profile
-	if err := yaml.Unmarshal(data, &p); err != nil {
+	if err := yaml.Unmarshal(data, &profile); err != nil {
 		return fmt.Errorf("failed to parse profile %s: %w", path, err)
 	}
 
-	// SSH nodes → E2E_SSH_*
-	if len(p.SSHNodes) > 0 {
-		head := p.SSHNodes[0]
-		setDefault("E2E_SSH_HEAD_IP", head.Host)
-		setDefault("E2E_SSH_USER", head.User)
+	// Compute derived fields.
 
-		// Read key file and base64 encode
+	// SSH: read key file and base64-encode; compute worker IPs.
+	if len(profile.SSHNodes) > 0 {
+		head := profile.SSHNodes[0]
 		if head.KeyFile != "" {
 			keyFile := expandHome(head.KeyFile)
 			if keyData, err := os.ReadFile(keyFile); err == nil {
-				setDefault("E2E_SSH_PRIVATE_KEY", base64.StdEncoding.EncodeToString(keyData))
+				profile.sshHeadPrivateKeyBase64 = base64.StdEncoding.EncodeToString(keyData)
 			}
 		}
 
-		// Worker IPs
-		if len(p.SSHNodes) > 1 {
+		if len(profile.SSHNodes) > 1 {
 			var workerIPs []string
-			for _, n := range p.SSHNodes[1:] {
+			for _, n := range profile.SSHNodes[1:] {
 				workerIPs = append(workerIPs, n.Host)
 			}
-			setDefault("E2E_SSH_WORKER_IPS", strings.Join(workerIPs, ","))
+
+			profile.sshWorkerIPs = strings.Join(workerIPs, ",")
 		}
 	}
 
-	// Kubernetes → E2E_KUBECONFIG (base64)
-	if p.Kubernetes.Kubeconfig != "" {
-		kcPath := expandHome(p.Kubernetes.Kubeconfig)
+	// Kubernetes: read kubeconfig file and base64-encode.
+	if profile.Kubernetes.Kubeconfig != "" {
+		kcPath := expandHome(profile.Kubernetes.Kubeconfig)
 		if kcData, err := os.ReadFile(kcPath); err == nil {
-			setDefault("E2E_KUBECONFIG", base64.StdEncoding.EncodeToString(kcData))
+			profile.kubeconfigBase64 = base64.StdEncoding.EncodeToString(kcData)
 		}
 	}
-
-	// Image registry
-	setDefault("E2E_IMAGE_REGISTRY_URL", p.ImageRegistry.URL)
-	setDefault("E2E_IMAGE_REGISTRY_REPO", p.ImageRegistry.Repository)
-
-	// Model registry
-	setDefault("E2E_MODEL_REGISTRY_URL", p.ModelRegistry.URL)
-
-	// Engine
-	setDefault("E2E_ENGINE_NAME", p.Engine.Name)
-	setDefault("E2E_ENGINE_VERSION_A", p.Engine.Version)
-
-	// Model
-	setDefault("E2E_MODEL_NAME", p.Model.Name)
-	setDefault("E2E_MODEL_VERSION", p.Model.Version)
-	setDefault("E2E_MODEL_TASK", p.Model.Task)
-
-	// TestRail
-	if p.Testrail.RunID != nil {
-		setDefault("TESTRAIL_RUN_ID", fmt.Sprintf("%v", p.Testrail.RunID))
-	}
-	setDefault("TESTRAIL_URL", p.Testrail.URL)
-	setDefault("TESTRAIL_USER", p.Testrail.User)
-	setDefault("TESTRAIL_PASSWORD", p.Testrail.Password)
 
 	return nil
 }
 
-// setDefault sets an environment variable only if it's not already set.
-func setDefault(key, value string) {
-	if value == "" {
-		return
+// --- Profile accessor helpers ---
+
+// profileSSHHeadIP returns the SSH head node IP, or empty string if not configured.
+func profileSSHHeadIP() string {
+	if len(profile.SSHNodes) > 0 {
+		return profile.SSHNodes[0].Host
 	}
-	if os.Getenv(key) == "" {
-		os.Setenv(key, value)
+
+	return ""
+}
+
+// profileSSHUser returns the SSH user, or empty string if not configured.
+func profileSSHUser() string {
+	if len(profile.SSHNodes) > 0 {
+		return profile.SSHNodes[0].User
 	}
+
+	return ""
+}
+
+// profileSSHPrivateKey returns the base64-encoded SSH private key.
+func profileSSHPrivateKey() string {
+	return profile.sshHeadPrivateKeyBase64
+}
+
+// profileSSHWorkerIPs returns comma-separated worker IPs.
+func profileSSHWorkerIPs() string {
+	return profile.sshWorkerIPs
+}
+
+// profileKubeconfig returns the base64-encoded kubeconfig.
+func profileKubeconfig() string {
+	return profile.kubeconfigBase64
+}
+
+// profileTestrailRunID returns the TestRail run ID.
+// TESTRAIL_RUN_ID env var (from test-infra) takes precedence, then profile value.
+func profileTestrailRunID() string {
+	if v := os.Getenv("TESTRAIL_RUN_ID"); v != "" {
+		return v
+	}
+
+	if profile.Testrail.RunID != nil {
+		return fmt.Sprintf("%v", profile.Testrail.RunID)
+	}
+
+	return ""
 }
 
 // expandHome replaces leading ~ with $HOME.
@@ -161,5 +181,6 @@ func expandHome(path string) string {
 		home, _ := os.UserHomeDir()
 		return home + path[1:]
 	}
+
 	return path
 }

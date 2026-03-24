@@ -9,22 +9,22 @@ import (
 )
 
 func requireUpgradeVersion() string {
-	if Cfg.ClusterUpgradeVersion == "" {
+	if os.Getenv("E2E_CLUSTER_UPGRADE_VERSION") == "" {
 		Skip("E2E_CLUSTER_UPGRADE_VERSION not set, skipping upgrade tests")
 	}
 
-	return Cfg.ClusterUpgradeVersion
+	return os.Getenv("E2E_CLUSTER_UPGRADE_VERSION")
 }
 
 var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 	var ClusterH *ClusterHelper
 
 	BeforeAll(func() {
-		if Cfg.ImageRegistryURL == "" {
-			Skip("E2E_IMAGE_REGISTRY_URL not set, skipping cluster upgrade tests")
+		if profile.ImageRegistry.URL == "" {
+			Skip("ImageRegistry.URL not configured in profile, skipping cluster upgrade tests")
 		}
-		if Cfg.ImageRegistryRepo == "" {
-			Skip("E2E_IMAGE_REGISTRY_REPO not set, skipping cluster upgrade tests")
+		if profile.ImageRegistry.Repository == "" {
+			Skip("ImageRegistry.Repository not configured in profile, skipping cluster upgrade tests")
 		}
 
 		By("Setting up image registry")
@@ -158,8 +158,8 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 		BeforeAll(func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
 			upgradeVersion = requireUpgradeVersion()
-			if Cfg.ModelName == "" {
-				Skip("E2E_MODEL_NAME not set, skipping upgrade endpoint compat tests")
+			if modelName() == "" {
+				Skip("Model name not configured in profile, skipping upgrade endpoint compat tests")
 			}
 
 			clusterName = "e2e-ssh-upg-ep-" + Cfg.RunID
@@ -197,7 +197,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 		It("should deploy endpoint with engine vllm v0.8.5 on initial cluster", func() {
 			By("Creating endpoint with default engine version")
-			yamlPath := applyEndpointOnCluster(epName, clusterName, Cfg.EngineVersionA)
+			yamlPath := applyEndpointOnCluster(epName, clusterName, engineVersionA())
 			defer os.Remove(yamlPath)
 
 			By("Waiting for endpoint Running")
@@ -205,7 +205,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(Equal("Running"))
-			Expect(ep.Spec.Engine.Version).To(Equal(Cfg.EngineVersionA))
+			Expect(ep.Spec.Engine.Version).To(Equal(engineVersionA()))
 		})
 
 		It("should serve inference before upgrade", func() {

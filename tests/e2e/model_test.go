@@ -19,8 +19,9 @@ var registryYAML string
 // and waits for it to reach Connected phase.
 func SetupModelRegistry() {
 	defaults := map[string]string{
-		"E2E_MODEL_REGISTRY": Cfg.ModelRegistryName,
-		"E2E_WORKSPACE":      Cfg.Workspace,
+		"E2E_MODEL_REGISTRY":     testRegistry(),
+		"E2E_WORKSPACE":          testWorkspace(),
+		"E2E_MODEL_REGISTRY_URL": profile.ModelRegistry.URL,
 	}
 	var err error
 	registryYAML, err = renderTemplateToTempFile(
@@ -31,7 +32,7 @@ func SetupModelRegistry() {
 	r := RunCLI("apply", "-f", registryYAML)
 	ExpectSuccess(r)
 
-	r = RunCLI("wait", "modelregistry", Cfg.ModelRegistryName,
+	r = RunCLI("wait", "modelregistry", testRegistry(),
 		"-w", Cfg.Workspace,
 		"--for", "jsonpath=.status.phase=Connected",
 		"--timeout", "2m",
@@ -61,7 +62,7 @@ var Model *ModelHelper
 // NewModelHelper creates a ModelHelper with the test registry and workspace.
 func NewModelHelper() *ModelHelper {
 	return &ModelHelper{
-		registry:  Cfg.ModelRegistryName,
+		registry:  testRegistry(),
 		workspace: Cfg.Workspace,
 	}
 }

@@ -20,7 +20,7 @@ func TestE2E(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	By("Loading profile from E2E_PROFILE_PATH (if set)")
-	err := LoadProfileFromEnv()
+	err := LoadProfile()
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Building neutree-cli binary")
@@ -32,7 +32,8 @@ var _ = AfterSuite(func() {
 })
 
 var _ = ReportAfterSuite("TestRail Reporter", func(report Report) {
-	if Cfg.TestRailRunID == "" {
+	trRunID := profileTestrailRunID()
+	if trRunID == "" {
 		return
 	}
 
@@ -50,7 +51,7 @@ var _ = ReportAfterSuite("TestRail Reporter", func(report Report) {
 	}
 
 	if len(results) > 0 {
-		if err := ReportToTestRail(Cfg.TestRailRunID, results); err != nil {
+		if err := ReportToTestRail(trRunID, results); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to report to TestRail: %v\n", err)
 		}
 	}

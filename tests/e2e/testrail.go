@@ -22,16 +22,13 @@ type CaseResult struct {
 }
 
 // ReportToTestRail sends test results to a TestRail run.
-// It reads connection info from environment variables:
-//   - TESTRAIL_URL
-//   - TESTRAIL_USER
-//   - TESTRAIL_PASSWORD
-//
-// If any are missing, it silently skips reporting.
+// It reads connection info from the profile struct.
+// TESTRAIL_RUN_ID is passed as a parameter (sourced from env var by caller).
+// If any credentials are missing, it silently skips reporting.
 func ReportToTestRail(runID string, caseResults []CaseResult) error {
-	url := Cfg.TestRailURL
-	user := Cfg.TestRailUser
-	password := Cfg.TestRailPassword
+	url := profile.Testrail.URL
+	user := profile.Testrail.User
+	password := profile.Testrail.Password
 
 	if url == "" || user == "" || password == "" {
 		fmt.Println("TestRail credentials not fully configured, skipping report")

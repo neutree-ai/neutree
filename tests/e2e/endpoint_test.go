@@ -14,13 +14,51 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// engineArgsYAML parses EndpointEngineArgs (comma-separated key=value pairs)
-// and returns a YAML snippet for spec.variables.engine_args.
-func engineArgsYAML() string {
-	raw := Cfg.EndpointEngineArgs
-	if raw == "" {
-		return ""
+// --- Environment helpers ---
+
+func clusterName() string { return os.Getenv("E2E_CLUSTER_NAME") }
+
+func engineName() string {
+	if profile.Engine.Name != "" {
+		return profile.Engine.Name
 	}
+
+	return "vllm"
+}
+
+func engineVersionA() string {
+	if profile.Engine.Version != "" {
+		return profile.Engine.Version
+	}
+	return "v0.8.5"
+}
+
+func engineVersionB() string { return "v0.11.2" }
+
+func modelName() string { return profile.Model.Name }
+
+func modelVersion() string {
+	if profile.Model.Version != "" {
+		return profile.Model.Version
+	}
+	return "latest"
+}
+
+func modelTask() string {
+	if profile.Model.Task != "" {
+		return profile.Model.Task
+	}
+	return "text-generation"
+}
+
+func acceleratorType() string { return "nvidia_gpu" }
+func acceleratorProduct() string { return "" }
+func endpointTimeout() string { return "10m" }
+
+// engineArgsYAML returns a YAML snippet for spec.variables.engine_args.
+// Default: "dtype=half".
+func engineArgsYAML() string {
+	raw := "dtype=half"
 
 	var lines []string
 	for _, pair := range strings.Split(raw, ",") {
@@ -41,15 +79,15 @@ func applyEndpoint(name, engineVersion string) (yamlPath string) {
 	defaults := map[string]string{
 		"E2E_ENDPOINT_NAME":       name,
 		"E2E_WORKSPACE":           Cfg.Workspace,
-		"E2E_CLUSTER_NAME":    Cfg.ClusterName,
-		"E2E_ENGINE_NAME":         Cfg.EngineName,
+		"E2E_CLUSTER_NAME":    clusterName(),
+		"E2E_ENGINE_NAME":         engineName(),
 		"E2E_ENGINE_VERSION":      engineVersion,
-		"E2E_MODEL_REGISTRY":      Cfg.ModelRegistryName,
-		"E2E_MODEL_NAME":          Cfg.ModelName,
-		"E2E_MODEL_VERSION":       Cfg.ModelVersion,
-		"E2E_MODEL_TASK":          Cfg.ModelTask,
-		"E2E_ACCELERATOR_TYPE":    Cfg.AcceleratorType,
-		"E2E_ACCELERATOR_PRODUCT": Cfg.AcceleratorProduct,
+		"E2E_MODEL_REGISTRY":      testRegistry(),
+		"E2E_MODEL_NAME":          modelName(),
+		"E2E_MODEL_VERSION":       modelVersion(),
+		"E2E_MODEL_TASK":          modelTask(),
+		"E2E_ACCELERATOR_TYPE":    acceleratorType(),
+		"E2E_ACCELERATOR_PRODUCT": acceleratorProduct(),
 		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
 	}
 
@@ -70,14 +108,14 @@ func applyEndpointOnCluster(name, cluster, engineVersion string) (yamlPath strin
 		"E2E_ENDPOINT_NAME":       name,
 		"E2E_WORKSPACE":           Cfg.Workspace,
 		"E2E_CLUSTER_NAME":        cluster,
-		"E2E_ENGINE_NAME":         Cfg.EngineName,
+		"E2E_ENGINE_NAME":         engineName(),
 		"E2E_ENGINE_VERSION":      engineVersion,
-		"E2E_MODEL_REGISTRY":      Cfg.ModelRegistryName,
-		"E2E_MODEL_NAME":          Cfg.ModelName,
-		"E2E_MODEL_VERSION":       Cfg.ModelVersion,
-		"E2E_MODEL_TASK":          Cfg.ModelTask,
-		"E2E_ACCELERATOR_TYPE":    Cfg.AcceleratorType,
-		"E2E_ACCELERATOR_PRODUCT": Cfg.AcceleratorProduct,
+		"E2E_MODEL_REGISTRY":      testRegistry(),
+		"E2E_MODEL_NAME":          modelName(),
+		"E2E_MODEL_VERSION":       modelVersion(),
+		"E2E_MODEL_TASK":          modelTask(),
+		"E2E_ACCELERATOR_TYPE":    acceleratorType(),
+		"E2E_ACCELERATOR_PRODUCT": acceleratorProduct(),
 		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
 	}
 
@@ -97,7 +135,7 @@ func waitEndpointRunning(name string) {
 	r := RunCLI("wait", "endpoint", name,
 		"-w", Cfg.Workspace,
 		"--for", "jsonpath=.status.phase=Running",
-		"--timeout", Cfg.EndpointTimeout,
+		"--timeout", endpointTimeout(),
 	)
 	ExpectSuccess(r)
 }
@@ -167,7 +205,7 @@ func parseEndpointClusterJSON(stdout string) clusterPreCheckJSON {
 // inferChat sends a chat completion request and returns (status_code, body).
 func inferChat(serviceURL, prompt string) (int, string) {
 	reqBody := map[string]any{
-		"model": Cfg.ModelName,
+		"model": modelName(),
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -202,15 +240,15 @@ func inferChat(serviceURL, prompt string) (int, string) {
 var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 	BeforeAll(func() {
-		if Cfg.ClusterName == "" {
-			Skip("E2E_CLUSTER_NAME not set, skipping endpoint tests")
+		if clusterName() == "" {
+			Skip("E2E_CLUSTER_NAME not set (env var), skipping endpoint tests")
 		}
-		if Cfg.ModelName == "" {
-			Skip("E2E_MODEL_NAME not set, skipping endpoint tests")
+		if modelName() == "" {
+			Skip("Model name not configured in profile, skipping endpoint tests")
 		}
 
 		By("Verifying cluster is ready")
-		r := RunCLI("get", "cluster", Cfg.ClusterName, "-w", Cfg.Workspace, "-o", "json")
+		r := RunCLI("get", "cluster", clusterName(), "-w", Cfg.Workspace, "-o", "json")
 		ExpectSuccess(r)
 		c := parseEndpointClusterJSON(r.Stdout)
 		Expect(c.Status.Phase).To(Equal("Running"), "cluster must be Running")
@@ -221,7 +259,7 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 	})
 
 	AfterAll(func() {
-		if Cfg.ClusterName == "" {
+		if clusterName() == "" {
 			return
 		}
 
@@ -240,14 +278,14 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 		})
 
 		It("should deploy with engine container and reach Running", func() {
-			yamlPath := applyEndpoint(epName, Cfg.EngineVersionB)
+			yamlPath := applyEndpoint(epName, engineVersionB())
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(Equal("Running"))
-			Expect(ep.Spec.Engine.Version).To(Equal(Cfg.EngineVersionB))
+			Expect(ep.Spec.Engine.Version).To(Equal(engineVersionB()))
 			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
 		})
 
@@ -273,9 +311,9 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 		})
 
 		It("should run two endpoints with different engine versions", func() {
-			yamlA := applyEndpoint(epNameA, Cfg.EngineVersionA)
+			yamlA := applyEndpoint(epNameA, engineVersionA())
 			defer os.Remove(yamlA)
-			yamlB := applyEndpoint(epNameB, Cfg.EngineVersionB)
+			yamlB := applyEndpoint(epNameB, engineVersionB())
 			defer os.Remove(yamlB)
 
 			waitEndpointRunning(epNameA)
@@ -285,8 +323,8 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 			epB := getEndpoint(epNameB)
 			Expect(epA.Status.Phase).To(Equal("Running"))
 			Expect(epB.Status.Phase).To(Equal("Running"))
-			Expect(epA.Spec.Engine.Version).To(Equal(Cfg.EngineVersionA))
-			Expect(epB.Spec.Engine.Version).To(Equal(Cfg.EngineVersionB))
+			Expect(epA.Spec.Engine.Version).To(Equal(engineVersionA()))
+			Expect(epB.Spec.Engine.Version).To(Equal(engineVersionB()))
 		})
 
 		It("should serve inference from both endpoints", func() {
