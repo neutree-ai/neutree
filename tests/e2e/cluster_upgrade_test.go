@@ -1,12 +1,85 @@
 package e2e
 
 import (
+	"context"
+	"encoding/base64"
+	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
+
+// --- K8s client helpers ---
+
+// newK8sClientFromBase64Kubeconfig creates a kubernetes clientset from a base64-encoded kubeconfig.
+func newK8sClientFromBase64Kubeconfig(b64Kubeconfig string) kubernetes.Interface {
+	decoded, err := base64.StdEncoding.DecodeString(b64Kubeconfig)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to decode kubeconfig")
+
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(decoded)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to create REST config from kubeconfig")
+
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to create kubernetes clientset")
+
+	return clientset
+}
+
+// findEndpointDeployment finds the Deployment for an endpoint across all namespaces using the "endpoint" label.
+func findEndpointDeployment(clientset kubernetes.Interface, endpointName string) *appsv1.Deployment {
+	// List all namespaces matching neutree cluster pattern
+	nsList, err := clientset.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to list namespaces")
+
+	for _, ns := range nsList.Items {
+		deployList, err := clientset.AppsV1().Deployments(ns.Name).List(context.Background(), metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("endpoint=%s", endpointName),
+		})
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to list deployments in ns %s", ns.Name)
+
+		if len(deployList.Items) > 0 {
+			return &deployList.Items[0]
+		}
+	}
+
+	Fail(fmt.Sprintf("deployment with label endpoint=%s not found in any namespace", endpointName))
+
+	return nil
+}
+
+// getDeploymentGeneration returns the metadata.generation of the Deployment for the given endpoint.
+func getDeploymentGeneration(clientset kubernetes.Interface, endpointName string) int64 {
+	deploy := findEndpointDeployment(clientset, endpointName)
+
+	return deploy.Generation
+}
+
+// getEndpointPodNames returns sorted pod names for an endpoint's Deployment.
+func getEndpointPodNames(clientset kubernetes.Interface, endpointName string) []string {
+	deploy := findEndpointDeployment(clientset, endpointName)
+
+	podList, err := clientset.CoreV1().Pods(deploy.Namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("endpoint=%s", endpointName),
+	})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to list pods for endpoint %s", endpointName)
+
+	names := make([]string, 0, len(podList.Items))
+	for _, pod := range podList.Items {
+		names = append(names, pod.Name)
+	}
+
+	sort.Strings(names)
+
+	return names
+}
 
 func requireUpgradeVersion() string {
 	v := profileClusterUpgradeVersion()
@@ -288,6 +361,179 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 			code, body := inferChat(ep.Status.ServiceURL, "Hello after upgrade")
 			Expect(code).To(Equal(200), "inference after upgrade failed: %s", body)
+			Expect(body).To(ContainSubstring("choices"))
+		})
+	})
+
+	// --- K8s Cluster Upgrade: Endpoint No-Rollout ---
+
+	Describe("K8s Cluster Upgrade Endpoint No-Rollout", Ordered, Label("k8s", "endpoint-no-rollout"), func() {
+		var (
+			clusterName    string
+			epName         string
+			kubeconfig     string
+			k8sClient      kubernetes.Interface
+			upgradeVersion string
+
+			baselineGeneration int64
+			baselinePodNames   []string
+		)
+
+		BeforeAll(func() {
+			kubeconfig = requireK8sEnv()
+			upgradeVersion = requireUpgradeVersion()
+			if Cfg.ModelName == "" {
+				Skip("E2E_MODEL_NAME not set, skipping K8s endpoint no-rollout tests")
+			}
+
+			clusterName = "e2e-k8s-upg-ep-" + Cfg.RunID
+			epName = "e2e-k8s-noroll-" + Cfg.RunID
+
+			By("Creating K8s client from kubeconfig")
+			k8sClient = newK8sClientFromBase64Kubeconfig(kubeconfig)
+
+			By("Setting up model registry")
+			SetupModelRegistry()
+
+			By("Creating K8s cluster with initial version")
+			yaml := renderK8sClusterYAML(map[string]string{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+			})
+			r := ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			By("Waiting for cluster Running")
+			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			ExpectSuccess(r)
+		})
+
+		AfterAll(func() {
+			By("Cleaning up endpoint")
+			deleteEndpoint(epName)
+
+			By("Force-deleting cluster")
+			ClusterH.EnsureDeleted(clusterName)
+
+			By("Tearing down model registry")
+			TeardownModelRegistry()
+		})
+
+		It("should deploy endpoint and record baseline", func() {
+			By("Creating endpoint")
+			yamlPath := applyEndpointOnCluster(epName, clusterName, Cfg.EngineVersionB)
+			defer os.Remove(yamlPath)
+
+			By("Waiting for endpoint Running")
+			waitEndpointRunning(epName)
+
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(Equal("Running"))
+
+			By("Recording baseline Deployment generation and Pod names")
+			baselineGeneration = getDeploymentGeneration(k8sClient, epName)
+			baselinePodNames = getEndpointPodNames(k8sClient, epName)
+			Expect(baselineGeneration).To(BeNumerically(">", 0), "should have a deployment generation")
+			Expect(baselinePodNames).NotTo(BeEmpty(), "should have running pods")
+
+			GinkgoWriter.Printf("Baseline: generation=%d, pods=%v\n", baselineGeneration, baselinePodNames)
+		})
+
+		It("should serve inference before upgrade", func() {
+			ep := getEndpoint(epName)
+			code, body := inferChat(ep.Status.ServiceURL, "Hello before K8s upgrade")
+			Expect(code).To(Equal(200), "inference before upgrade failed: %s", body)
+			Expect(body).To(ContainSubstring("choices"))
+		})
+
+		It("should NOT trigger endpoint rolling update after cluster version upgrade", func() {
+			By("Recording old cluster version")
+			r := ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c := parseClusterJSON(r.Stdout)
+			oldVersion := c.Status.Version
+			Expect(oldVersion).NotTo(BeEmpty())
+
+			By("Applying cluster with upgrade version")
+			yaml := renderK8sClusterYAML(map[string]string{
+				"name":       clusterName,
+				"version":    upgradeVersion,
+				"kubeconfig": kubeconfig,
+			})
+			r = ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			By("Waiting for cluster Running after upgrade")
+			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			ExpectSuccess(r)
+
+			By("Verifying cluster version updated")
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c = parseClusterJSON(r.Stdout)
+			Expect(c.Status.Version).To(Equal(upgradeVersion))
+
+			By("Waiting for controller reconcile to settle")
+			// Give the endpoint controller time to reconcile with the new cluster version.
+			// If infra injection works correctly, this reconcile should be a no-op.
+			time.Sleep(30 * time.Second)
+
+			By("Verifying endpoint is still Running (no transient Deploying phase)")
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(Equal("Running"),
+				"endpoint should remain Running after cluster version upgrade")
+
+			By("Verifying Deployment generation unchanged (no spec update)")
+			currentGeneration := getDeploymentGeneration(k8sClient, epName)
+			Expect(currentGeneration).To(Equal(baselineGeneration),
+				"Deployment generation should not change after cluster version upgrade "+
+					"(baseline=%d, current=%d)", baselineGeneration, currentGeneration)
+
+			By("Verifying Pod names unchanged (no pod recreation)")
+			currentPodNames := getEndpointPodNames(k8sClient, epName)
+			Expect(currentPodNames).To(Equal(baselinePodNames),
+				"Pod names should not change after cluster version upgrade "+
+					"(baseline=%v, current=%v)", baselinePodNames, currentPodNames)
+		})
+
+		It("should serve inference after upgrade without rolling update", func() {
+			ep := getEndpoint(epName)
+			code, body := inferChat(ep.Status.ServiceURL, "Hello after K8s upgrade")
+			Expect(code).To(Equal(200), "inference after upgrade failed: %s", body)
+			Expect(body).To(ContainSubstring("choices"))
+		})
+
+		It("should trigger rolling update when user changes endpoint", func() {
+			By("Rendering endpoint template and modifying replicas to 2")
+			yamlPath := applyEndpointOnCluster(epName, clusterName, Cfg.EngineVersionB)
+			defer os.Remove(yamlPath)
+
+			// Read rendered YAML, change replicas from 1 to 2, re-apply
+			content, err := os.ReadFile(yamlPath)
+			Expect(err).NotTo(HaveOccurred())
+			modified := strings.Replace(string(content), "num: 1", "num: 2", 1)
+			Expect(modified).To(ContainSubstring("num: 2"), "replicas should be modified to 2")
+			Expect(os.WriteFile(yamlPath, []byte(modified), 0o644)).To(Succeed())
+
+			By("Applying endpoint with replicas=2")
+			r := RunCLI("apply", "-f", yamlPath, "--force-update")
+			ExpectSuccess(r)
+
+			By("Waiting for endpoint Running with updated replicas")
+			waitEndpointRunning(epName)
+
+			By("Verifying Deployment generation increased")
+			newGeneration := getDeploymentGeneration(k8sClient, epName)
+			Expect(newGeneration).To(BeNumerically(">", baselineGeneration),
+				"Deployment generation should increase after user changes replicas")
+
+			GinkgoWriter.Printf("After user change: generation=%d (was %d)\n", newGeneration, baselineGeneration)
+		})
+
+		It("should serve inference after user-triggered update", func() {
+			ep := getEndpoint(epName)
+			code, body := inferChat(ep.Status.ServiceURL, "Hello after user update")
+			Expect(code).To(Equal(200), "inference after user update failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
 	})
