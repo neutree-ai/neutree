@@ -260,7 +260,7 @@ func (c *sshRayClusterReconciler) cleanupConfig(reconcileCtx *ReconcileContext) 
 }
 
 func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileContext) error {
-	alive, err := c.isHeadNodeAlive(reconcileCtx)
+	alive, headVersion, err := c.checkHeadNodeHealth(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to check head node health")
 	}
@@ -270,11 +270,7 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		// Check version consistency to handle rollback scenarios
 		// where Head was upgraded but user rolled spec.Version back.
 		if reconcileCtx.Cluster.Spec != nil && reconcileCtx.Cluster.Spec.Version != "" {
-			headVersion, verErr := c.getHeadNodeVersion(reconcileCtx)
-			if verErr != nil {
-				klog.Warningf("Failed to get head node version for %s: %v",
-					reconcileCtx.Cluster.Metadata.WorkspaceName(), verErr)
-			} else if headVersion != "" && headVersion != reconcileCtx.Cluster.Spec.Version {
+			if headVersion != "" && headVersion != reconcileCtx.Cluster.Spec.Version {
 				klog.Infof("Head node version %s does not match spec version %s for cluster %s, rebuilding",
 					headVersion, reconcileCtx.Cluster.Spec.Version, reconcileCtx.Cluster.Metadata.WorkspaceName())
 
@@ -300,7 +296,7 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 
 	// Head is down (dashboard unreachable or raylet dead) - write recovery status for user feedback
 	WriteRecoveryStatus(reconcileCtx.Cluster, c.storage,
-		fmt.Sprintf("head node %s not responding, attempting recovery", reconcileCtx.sshClusterConfig.Provider.HeadIP))
+		fmt.Sprintf("head node %s unhealthy (raylet not alive), attempting recovery", reconcileCtx.sshClusterConfig.Provider.HeadIP))
 
 	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.Phase != v1.ClusterPhaseInitializing {
 		klog.Infof("Head node not ready, try to up cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
