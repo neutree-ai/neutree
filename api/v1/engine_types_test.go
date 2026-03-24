@@ -260,6 +260,20 @@ func TestEngineVersion_GetSupportedAccelerators(t *testing.T) {
 			expectedCount: 0,
 			contains:      []string{},
 		},
+		{
+			name: "ssh_ prefixed keys are excluded",
+			engineVersion: &EngineVersion{
+				Version: "v0.11.2",
+				Images: map[string]*EngineImage{
+					"nvidia_gpu":                         {ImageName: "vllm/vllm-openai", Tag: "v0.11.2"},
+					SSHImageKeyPrefix + "nvidia_gpu":     {ImageName: "neutree/engine-vllm", Tag: "v0.11.2-ray2.53.0"},
+					"cpu":                                {ImageName: "neutree/llama-cpp-python", Tag: "v0.3.7"},
+					SSHImageKeyPrefix + "cpu":            {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
+				},
+			},
+			expectedCount: 2,
+			contains:      []string{"nvidia_gpu", "cpu"},
+		},
 	}
 
 	for _, tt := range tests {
