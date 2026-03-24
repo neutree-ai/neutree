@@ -260,9 +260,14 @@ func (c *sshRayClusterReconciler) cleanupConfig(reconcileCtx *ReconcileContext) 
 }
 
 func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileContext) error {
-	_, err := reconcileCtx.rayService.GetClusterMetadata()
-	if err == nil {
-		// Head is reachable. Check version consistency to handle rollback scenarios
+	alive, err := c.isHeadNodeAlive(reconcileCtx)
+	if err != nil {
+		return errors.Wrap(err, "failed to check head node health")
+	}
+
+	if alive {
+		// Head is fully healthy (dashboard reachable + raylet alive).
+		// Check version consistency to handle rollback scenarios
 		// where Head was upgraded but user rolled spec.Version back.
 		if reconcileCtx.Cluster.Spec != nil && reconcileCtx.Cluster.Spec.Version != "" {
 			headVersion, verErr := c.getHeadNodeVersion(reconcileCtx)
@@ -293,7 +298,7 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		return nil
 	}
 
-	// Head is down - write recovery status for user feedback
+	// Head is down (dashboard unreachable or raylet dead) - write recovery status for user feedback
 	WriteRecoveryStatus(reconcileCtx.Cluster, c.storage,
 		fmt.Sprintf("head node %s not responding, attempting recovery", reconcileCtx.sshClusterConfig.Provider.HeadIP))
 

@@ -454,6 +454,34 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	return rayClusterConfig, nil
 }
 
+// isHeadNodeAlive checks whether the head node is fully healthy by verifying both
+// dashboard API reachability (GCS) and the head node's raylet state.
+// Returns (false, nil) when the dashboard is unreachable or the raylet is not alive,
+// indicating the head node needs to be rebuilt.
+func (c *sshRayClusterReconciler) isHeadNodeAlive(reconcileCtx *ReconcileContext) (bool, error) {
+	_, err := reconcileCtx.rayService.GetClusterMetadata()
+	if err != nil {
+		return false, nil // dashboard unreachable
+	}
+
+	nodes, err := reconcileCtx.rayService.ListNodes()
+	if err != nil {
+		return false, errors.Wrap(err, "failed to list ray nodes")
+	}
+
+	for _, node := range nodes {
+		if node.Raylet.IsHeadNode {
+			return node.Raylet.State == v1.AliveNodeState, nil
+		}
+	}
+
+	// No head node found in node list — this can happen during initial startup
+	// before the node registers with GCS. Since the dashboard is reachable,
+	// treat as alive. When a raylet crashes, Ray still reports it with State=DEAD
+	// rather than removing it from the list.
+	return true, nil
+}
+
 // getHeadNodeVersion returns the NeutreeServingVersionLabel from the alive head node.
 func (c *sshRayClusterReconciler) getHeadNodeVersion(reconcileCtx *ReconcileContext) (string, error) {
 	nodes, err := reconcileCtx.rayService.ListNodes()
