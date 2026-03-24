@@ -1360,6 +1360,87 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			expectErrMsg:  "no engine image configured for accelerator",
 		},
 		{
+			name:     "SSH image key takes priority over generic key",
+			endpoint: gpuEndpoint("v0.11.2"),
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{Name: "vllm"},
+				Spec: &v1.EngineSpec{
+					Versions: []*v1.EngineVersion{
+						{
+							Version: "v0.11.2",
+							Images: map[string]*v1.EngineImage{
+								"nvidia_gpu": {
+									ImageName: "vllm/vllm-openai",
+									Tag:       "v0.11.2",
+								},
+								v1.SSHImageKeyPrefix + "nvidia_gpu": {
+									ImageName: "neutree/engine-vllm",
+									Tag:       "v0.11.2-ray2.53.0",
+								},
+							},
+						},
+					},
+				},
+			},
+			imageRegistry: defaultImageRegistry,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.11.2-ray2.53.0",
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				"--rm",
+			},
+		},
+		{
+			name:     "SSH CPU image key takes priority over generic CPU key",
+			endpoint: cpuEndpoint,
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{Name: "llama-cpp"},
+				Spec: &v1.EngineSpec{
+					Versions: []*v1.EngineVersion{
+						{
+							Version: "v0.3.7",
+							Images: map[string]*v1.EngineImage{
+								"cpu": {
+									ImageName: "neutree/llama-cpp-python",
+									Tag:       "v0.3.7",
+								},
+								v1.SSHImageKeyPrefix + "cpu": {
+									ImageName: "neutree/engine-llama-cpp",
+									Tag:       "v0.3.7-ray2.53.0",
+								},
+							},
+						},
+					},
+				},
+			},
+			imageRegistry: defaultImageRegistry,
+			expectedImage: "registry.example.com/neutree/engine-llama-cpp:v0.3.7-ray2.53.0",
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
+				"--rm",
+			},
+		},
+		{
+			name:     "falls back to generic key when SSH key missing",
+			endpoint: gpuEndpoint("v0.12.0"),
+			engine:   defaultEngine,
+			imageRegistry: defaultImageRegistry,
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				"--rm",
+			},
+		},
+		{
 			name:     "accelerator manager error propagates",
 			endpoint: gpuEndpoint("v0.12.0"),
 			engine:   defaultEngine,

@@ -701,8 +701,9 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 		acceleratorType = acceleratorTypeCPU
 	}
 
-	// Look up engine image using the determined accelerator type key
-	engineImage := targetVersion.GetImageForAccelerator(acceleratorType)
+	// Look up engine image: try SSH-specific image first (e.g., "ssh_nvidia_gpu"),
+	// then fall back to generic accelerator key (e.g., "nvidia_gpu").
+	engineImage := targetVersion.GetImageForSSHAccelerator(acceleratorType)
 	if engineImage == nil {
 		return nil, nil, errors.Errorf("no engine image configured for accelerator %q in engine %s version %s",
 			acceleratorType, engine.Metadata.Name, endpoint.Spec.Engine.Version)

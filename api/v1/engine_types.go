@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
@@ -295,6 +296,11 @@ func (in *EngineList) SetItems(objs []scheme.Object) {
 	in.Items = items
 }
 
+// SSHImageKeyPrefix is the key prefix used to select SSH-compatible engine images
+// in the Images map (e.g., "ssh_nvidia_gpu" as the SSH-specific variant of "nvidia_gpu").
+// It defines a naming convention only and does not prescribe specific image contents.
+const SSHImageKeyPrefix = "ssh_"
+
 // GetImageForAccelerator returns the image information for a specific accelerator type
 // If the accelerator type is not found, it returns nil
 func (ev *EngineVersion) GetImageForAccelerator(acceleratorType string) *EngineImage {
@@ -305,15 +311,34 @@ func (ev *EngineVersion) GetImageForAccelerator(acceleratorType string) *EngineI
 	return ev.Images[acceleratorType]
 }
 
-// GetSupportedAccelerators returns a list of supported accelerator types
-// The list is derived from the keys of the Images map
+// GetImageForSSHAccelerator returns the engine image for SSH clusters.
+// It first looks for an SSH-specific image (e.g., "ssh_nvidia_gpu"), then
+// falls back to the generic accelerator key (e.g., "nvidia_gpu").
+// This allows SSH-compatible images to coexist with K8s-only images in the same
+// EngineVersion registration.
+func (ev *EngineVersion) GetImageForSSHAccelerator(acceleratorType string) *EngineImage {
+	if img := ev.GetImageForAccelerator(SSHImageKeyPrefix + acceleratorType); img != nil {
+		return img
+	}
+
+	return ev.GetImageForAccelerator(acceleratorType)
+}
+
+// GetSupportedAccelerators returns a list of supported accelerator types.
+// The list is derived from the keys of the Images map, excluding SSH-prefixed
+// keys (e.g., "ssh_nvidia_gpu") which are internal variants, not distinct accelerator types.
 func (ev *EngineVersion) GetSupportedAccelerators() []string {
 	if ev.Images == nil {
 		return []string{}
 	}
 
 	accelerators := make([]string, 0, len(ev.Images))
+
 	for acceleratorType := range ev.Images {
+		if strings.HasPrefix(acceleratorType, SSHImageKeyPrefix) {
+			continue
+		}
+
 		accelerators = append(accelerators, acceleratorType)
 	}
 

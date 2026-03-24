@@ -79,6 +79,71 @@ func TestEngineVersion_GetImageForAccelerator(t *testing.T) {
 	}
 }
 
+func TestEngineVersion_GetImageForSSHAccelerator(t *testing.T) {
+	sshImage := &EngineImage{
+		ImageName: "neutree/engine-vllm",
+		Tag:       "v0.11.2-ray2.53.0",
+	}
+	genericImage := &EngineImage{
+		ImageName: "vllm/vllm-openai",
+		Tag:       "v0.11.2",
+	}
+
+	tests := []struct {
+		name            string
+		engineVersion   *EngineVersion
+		acceleratorType string
+		expected        *EngineImage
+	}{
+		{
+			name: "SSH-specific image exists, returns SSH image",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					"nvidia_gpu":              genericImage,
+					SSHImageKeyPrefix + "nvidia_gpu": sshImage,
+				},
+			},
+			acceleratorType: "nvidia_gpu",
+			expected:        sshImage,
+		},
+		{
+			name: "SSH-specific image missing, falls back to generic",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					"nvidia_gpu": genericImage,
+				},
+			},
+			acceleratorType: "nvidia_gpu",
+			expected:        genericImage,
+		},
+		{
+			name: "both SSH and generic missing, returns nil",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					"nvidia_gpu": genericImage,
+				},
+			},
+			acceleratorType: "amd_gpu",
+			expected:        nil,
+		},
+		{
+			name: "nil Images map, returns nil",
+			engineVersion: &EngineVersion{
+				Version: "v0.5.0",
+			},
+			acceleratorType: "nvidia_gpu",
+			expected:        nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.engineVersion.GetImageForSSHAccelerator(tt.acceleratorType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestEngineVersion_SetImage(t *testing.T) {
 	ev := &EngineVersion{
 		Version: "v0.5.0",
@@ -194,6 +259,20 @@ func TestEngineVersion_GetSupportedAccelerators(t *testing.T) {
 			},
 			expectedCount: 0,
 			contains:      []string{},
+		},
+		{
+			name: "ssh_ prefixed keys are excluded",
+			engineVersion: &EngineVersion{
+				Version: "v0.11.2",
+				Images: map[string]*EngineImage{
+					"nvidia_gpu":                         {ImageName: "vllm/vllm-openai", Tag: "v0.11.2"},
+					SSHImageKeyPrefix + "nvidia_gpu":     {ImageName: "neutree/engine-vllm", Tag: "v0.11.2-ray2.53.0"},
+					"cpu":                                {ImageName: "neutree/llama-cpp-python", Tag: "v0.3.7"},
+					SSHImageKeyPrefix + "cpu":            {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
+				},
+			},
+			expectedCount: 2,
+			contains:      []string{"nvidia_gpu", "cpu"},
 		},
 	}
 
