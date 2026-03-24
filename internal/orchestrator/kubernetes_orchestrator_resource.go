@@ -633,26 +633,23 @@ func injectInfrastructure(objects *unstructured.UnstructuredList, vars Deploymen
 
 // buildModelDownloaderInitContainer builds the model-downloader initContainer
 // that downloads model files before the engine container starts.
-// Uses direct python invocation with separate args to avoid shell injection.
+// NOTE: Uses bash -c with string interpolation to match the legacy template output exactly,
+// so that the first reconcile after control plane upgrade does not trigger a rolling update
+// (SSA sees no change). Shell injection hardening is tracked as a follow-up.
 func buildModelDownloaderInitContainer(vars DeploymentManifestVariables) corev1.Container {
 	modelArgs := vars.ModelArgs
 
-	args := []string{
-		"-m", "neutree.downloader",
-		"--name", fmt.Sprint(modelArgs["name"]),
-		"--registry_type", fmt.Sprint(modelArgs["registry_type"]),
-		"--registry_path", fmt.Sprint(modelArgs["registry_path"]),
-		"--path", fmt.Sprint(modelArgs["path"]),
-		"--version", fmt.Sprint(modelArgs["version"]),
-		"--file", fmt.Sprint(modelArgs["file"]),
-		"--task", fmt.Sprint(modelArgs["task"]),
-	}
+	downloaderCmd := fmt.Sprintf(
+		`python3 -m neutree.downloader --name="%v" --registry_type="%v" --registry_path="%v" --path="%v" --version="%v" --file="%v" --task="%v"`,
+		modelArgs["name"], modelArgs["registry_type"], modelArgs["registry_path"],
+		modelArgs["path"], modelArgs["version"], modelArgs["file"], modelArgs["task"],
+	)
 
 	container := corev1.Container{
 		Name:    "model-downloader",
 		Image:   fmt.Sprintf("%s/neutree/neutree-runtime:%s", vars.ImagePrefix, vars.NeutreeVersion),
-		Command: []string{"python3"},
-		Args:    args,
+		Command: []string{"bash", "-c"},
+		Args:    []string{downloaderCmd},
 	}
 
 	// Add env vars

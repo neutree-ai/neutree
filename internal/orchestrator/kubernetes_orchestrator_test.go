@@ -2733,11 +2733,10 @@ func TestInjectInfrastructure(t *testing.T) {
 	initContainer := fullDep.Spec.Template.Spec.InitContainers[0]
 	assert.Equal(t, "model-downloader", initContainer.Name)
 	assert.Equal(t, "registry.example.com/neutree/neutree-runtime:v1.0.0", initContainer.Image)
-	assert.Equal(t, []string{"python3"}, initContainer.Command)
-	assert.Contains(t, initContainer.Args, "-m")
-	assert.Contains(t, initContainer.Args, "neutree.downloader")
-	assert.Contains(t, initContainer.Args, "--name")
-	assert.Contains(t, initContainer.Args, "gpt-4")
+	assert.Equal(t, []string{"bash", "-c"}, initContainer.Command)
+	require.Len(t, initContainer.Args, 1)
+	assert.Contains(t, initContainer.Args[0], "python3 -m neutree.downloader")
+	assert.Contains(t, initContainer.Args[0], `--name="gpt-4"`)
 
 	// Check initContainer env
 	assert.Len(t, initContainer.Env, 1)
@@ -2915,24 +2914,18 @@ spec:
         - name: model-downloader
           image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
           command:
-            - python3
+            - bash
+            - -c
           args:
-            - -m
-            - neutree.downloader
-            - --name
-            - "{{ .ModelArgs.name }}"
-            - --registry_type
-            - "{{ .ModelArgs.registry_type }}"
-            - --registry_path
-            - "{{ .ModelArgs.registry_path }}"
-            - --path
-            - "{{ .ModelArgs.path }}"
-            - --version
-            - "{{ .ModelArgs.version }}"
-            - --file
-            - "{{ .ModelArgs.file }}"
-            - --task
-            - "{{ .ModelArgs.task }}"
+            - >-
+              python3 -m neutree.downloader
+              --name="{{ .ModelArgs.name }}"
+              --registry_type="{{ .ModelArgs.registry_type }}"
+              --registry_path="{{ .ModelArgs.registry_path }}"
+              --path="{{ .ModelArgs.path }}"
+              --version="{{ .ModelArgs.version }}"
+              --file="{{ .ModelArgs.file }}"
+              --task="{{ .ModelArgs.task }}"
           env:
            {{ range $key, $value := .Env }}
            - name: {{ $key }}
