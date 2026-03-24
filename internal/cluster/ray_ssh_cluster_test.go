@@ -3,6 +3,7 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,8 +144,22 @@ func TestInitializeCluster(t *testing.T) {
 }
 
 func TestReconcileHeadNode(t *testing.T) {
+	defaultCluster := func() *v1.Cluster {
+		return &v1.Cluster{
+			ID: *pointer.Int(1),
+			Metadata: &v1.Metadata{
+				Name: "test",
+			},
+			Status: &v1.ClusterStatus{
+				Initialized:     true,
+				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			},
+		}
+	}
+
 	tests := []struct {
 		name      string
+		cluster   *v1.Cluster
 		setupMock func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService)
 		wantErr   bool
 	}{
@@ -175,6 +190,106 @@ func TestReconcileHeadNode(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "head version matches spec - no rebuild needed",
+			cluster: &v1.Cluster{
+				ID: *pointer.Int(1),
+				Metadata: &v1.Metadata{
+					Name: "test",
+				},
+				Spec: &v1.ClusterSpec{
+					Version: "v1.0.0",
+				},
+				Status: &v1.ClusterStatus{
+					Initialized:     true,
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+				},
+			},
+			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				dashboardSvc.On("GetClusterMetadata").Return(nil, nil)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+							Labels: map[string]string{
+								v1.NeutreeServingVersionLabel: "v1.0.0",
+							},
+						},
+					},
+				}, nil)
+			},
+			wantErr: false,
+		},
+		{
+			name: "head version mismatch - rebuild success",
+			cluster: &v1.Cluster{
+				ID: *pointer.Int(1),
+				Metadata: &v1.Metadata{
+					Name: "test",
+				},
+				Spec: &v1.ClusterSpec{
+					Version: "v1.0.0",
+				},
+				Status: &v1.ClusterStatus{
+					Initialized:     true,
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+				},
+			},
+			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				dashboardSvc.On("GetClusterMetadata").Return(nil, nil)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+							Labels: map[string]string{
+								v1.NeutreeServingVersionLabel: "v2.0.0",
+							},
+						},
+					},
+				}, nil)
+				// downCluster: ray down (no workers)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// upCluster: mutateAcceleratorRuntimeConfig + ray up
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name: "head version mismatch - down cluster fails",
+			cluster: &v1.Cluster{
+				ID: *pointer.Int(1),
+				Metadata: &v1.Metadata{
+					Name: "test",
+				},
+				Spec: &v1.ClusterSpec{
+					Version: "v1.0.0",
+				},
+				Status: &v1.ClusterStatus{
+					Initialized:     true,
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+				},
+			},
+			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				dashboardSvc.On("GetClusterMetadata").Return(nil, nil)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+							Labels: map[string]string{
+								v1.NeutreeServingVersionLabel: "v2.0.0",
+							},
+						},
+					},
+				}, nil)
+				// downCluster: ray down fails
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError).Once()
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -195,21 +310,17 @@ func TestReconcileHeadNode(t *testing.T) {
 				storage:            &s,
 			}
 
+			cluster := tt.cluster
+			if cluster == nil {
+				cluster = defaultCluster()
+			}
+
 			err := r.reconcileHeadNode(&ReconcileContext{
 				rayService:          dashboardSvc,
 				sshClusterConfig:    &v1.RaySSHProvisionClusterConfig{},
 				sshRayClusterConfig: &v1.RayClusterConfig{},
 				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
-				Cluster: &v1.Cluster{
-					ID: *pointer.Int(1),
-					Metadata: &v1.Metadata{
-						Name: "test",
-					},
-					Status: &v1.ClusterStatus{
-						Initialized:     true,
-						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
-					},
-				},
+				Cluster:             cluster,
 			})
 			if tt.wantErr {
 				assert.NotNil(t, err)
@@ -840,6 +951,535 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 				assert.NoError(t, err)
 				require.True(t, equal, "expected resources do not match actual resources: %s", diff)
 			}
+		})
+	}
+}
+
+func TestNeedsVersionUpgrade(t *testing.T) {
+	tests := []struct {
+		name     string
+		cluster  *v1.Cluster
+		expected bool
+	}{
+		{
+			name:     "nil status",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v2.0.0"}},
+			expected: false,
+		},
+		{
+			name:     "empty status version",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v2.0.0"}, Status: &v1.ClusterStatus{Version: ""}},
+			expected: false,
+		},
+		{
+			name:     "nil spec",
+			cluster:  &v1.Cluster{Status: &v1.ClusterStatus{Version: "v1.0.0"}},
+			expected: false,
+		},
+		{
+			name:     "empty spec version",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: ""}, Status: &v1.ClusterStatus{Version: "v1.0.0"}},
+			expected: false,
+		},
+		{
+			name:     "same version",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}, Status: &v1.ClusterStatus{Version: "v1.0.0"}},
+			expected: false,
+		},
+		{
+			name:     "version mismatch - upgrade needed",
+			cluster:  &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v2.0.0"}, Status: &v1.ClusterStatus{Version: "v1.0.0"}},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, needsVersionUpgrade(tt.cluster))
+		})
+	}
+}
+
+func TestUpgradeCluster(t *testing.T) {
+	tests := []struct {
+		name      string
+		setupMock func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService)
+		wantErr   bool
+	}{
+		{
+			name: "upgrade cluster success",
+			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// prePullImages: resolve image suffix
+				acceleratorManager.On("GetImageSuffix", mock.Anything).Return("")
+				// upCluster: mutate accelerator config
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
+				// SSH calls for pre-pulling cluster image on head node (uptime check + docker pull)
+				e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Twice()
+				// downCluster: stop workers (no workers in this test) + ray down
+				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
+					return len(args) > 1 && strings.Contains(args[1], "ray down")
+				})).Return([]byte(""), nil).Once()
+				// upCluster: mutate accelerator config + ray up (reuses GetNodeRuntimeConfig mock above)
+				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
+					return len(args) > 1 && strings.Contains(args[1], "ray up")
+				})).Return([]byte(""), nil).Once()
+				// reconcileWorkerNode: list nodes (no workers to start)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{}, nil)
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
+			},
+		},
+		{
+			name: "upgrade cluster fails on prePull",
+			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// prePullImages: ListEndpoint fails -> prePull blocks upgrade
+				s.On("ListEndpoint", mock.Anything).Return(nil, assert.AnError).Once()
+			},
+			wantErr: true,
+		},
+		{
+			name: "upgrade cluster fails on downCluster",
+			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// prePullImages: resolve image suffix
+				acceleratorManager.On("GetImageSuffix", mock.Anything).Return("")
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
+				e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Twice()
+				// downCluster fails: ray down fails
+				e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), assert.AnError).Once()
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
+			},
+			wantErr: true,
+		},
+		{
+			name: "upgrade cluster fails on upCluster",
+			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// prePullImages: resolve image suffix
+				acceleratorManager.On("GetImageSuffix", mock.Anything).Return("")
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
+				e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Twice()
+				// downCluster succeeds
+				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
+					return len(args) > 1 && strings.Contains(args[1], "ray down")
+				})).Return([]byte(""), nil).Once()
+				// upCluster: mutate accelerator config fails (second call)
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, assert.AnError).Once()
+				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			acceleratorManager := &acceleratormocks.MockManager{}
+			e := &commandmocks.MockExecutor{}
+			dashboardSvc := &dashboardmocks.MockDashboardService{}
+			storage := &storagemocks.MockStorage{}
+			tt.setupMock(storage, acceleratorManager, e, dashboardSvc)
+
+			r := &sshRayClusterReconciler{
+				acceleratorManager: acceleratorManager,
+				storage:            storage,
+				executor:           e,
+			}
+
+			err := r.upgradeCluster(&ReconcileContext{
+				Cluster: &v1.Cluster{
+					ID: 1,
+					Metadata: &v1.Metadata{
+						Name:      "test-cluster",
+						Workspace: "default",
+					},
+					Spec: &v1.ClusterSpec{
+						Type:    "ssh",
+						Version: "v2.0.0",
+					},
+					Status: &v1.ClusterStatus{
+						Initialized:     true,
+						Version:         "v1.0.0",
+						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+					},
+				},
+				ImageRegistry: &v1.ImageRegistry{
+					Spec: &v1.ImageRegistrySpec{
+						URL: "registry.example.com",
+					},
+				},
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{
+						HeadIP: "127.0.0.1",
+					},
+				},
+				sshRayClusterConfig: &v1.RayClusterConfig{
+					Docker: v1.Docker{},
+				},
+				sshConfigGenerator: newRaySSHLocalConfigGenerator("test-cluster"),
+				rayService:         dashboardSvc,
+			})
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			storage.AssertExpectations(t)
+			acceleratorManager.AssertExpectations(t)
+			e.AssertExpectations(t)
+			dashboardSvc.AssertExpectations(t)
+		})
+	}
+}
+
+func TestCollectEngineImages(t *testing.T) {
+	tests := []struct {
+		name           string
+		setupMock      func(s *storagemocks.MockStorage)
+		acceleratorTyp *string
+		expectedImages []string
+		wantErr        bool
+	}{
+		{
+			name: "collects images from running endpoints",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{
+					{
+						Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+						Spec: &v1.EndpointSpec{
+							Cluster:   "test-cluster",
+							Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Resources: &v1.ResourceSpec{Accelerator: map[string]string{"type": "nvidia_gpu"}},
+						},
+						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+					},
+					{
+						Metadata: &v1.Metadata{Name: "ep2", Workspace: "default"},
+						Spec: &v1.EndpointSpec{
+							Cluster:   "test-cluster",
+							Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Resources: &v1.ResourceSpec{Accelerator: map[string]string{"type": "nvidia_gpu"}},
+						},
+						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING},
+					},
+				}, nil)
+				// Both endpoints use same engine - only one ListEngine call needed per unique engine
+				s.On("ListEngine", mock.Anything).Return([]v1.Engine{
+					{
+						Spec: &v1.EngineSpec{
+							Versions: []*v1.EngineVersion{
+								{
+									Version: "v0.5.0",
+									Images: map[string]*v1.EngineImage{
+										"nvidia_gpu": {ImageName: "neutree/vllm-cuda", Tag: "v0.5.0"},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			acceleratorTyp: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			expectedImages: []string{"registry.example.com/neutree/vllm-cuda:v0.5.0"},
+		},
+		{
+			name: "skips paused and deleted endpoints",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{
+					{
+						Metadata: &v1.Metadata{Name: "ep-paused", Workspace: "default"},
+						Spec: &v1.EndpointSpec{
+							Cluster: "test-cluster",
+							Engine:  &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+						},
+						Status: &v1.EndpointStatus{Phase: v1.EndpointPhasePAUSED},
+					},
+					{
+						Metadata: &v1.Metadata{Name: "ep-deleted", Workspace: "default"},
+						Spec: &v1.EndpointSpec{
+							Cluster: "test-cluster",
+							Engine:  &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+						},
+						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseDELETED},
+					},
+				}, nil)
+			},
+			acceleratorTyp: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			expectedImages: []string{},
+		},
+		{
+			name: "deduplicates images from multiple endpoints",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{
+					{
+						Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+						Spec: &v1.EndpointSpec{
+							Cluster:   "test-cluster",
+							Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+							Resources: &v1.ResourceSpec{Accelerator: map[string]string{"type": "nvidia_gpu"}},
+						},
+						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+					},
+					{
+						Metadata: &v1.Metadata{Name: "ep2", Workspace: "default"},
+						Spec: &v1.EndpointSpec{
+							Cluster:   "test-cluster",
+							Engine:    &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "v0.3.0"},
+							Resources: &v1.ResourceSpec{Accelerator: map[string]string{"type": "nvidia_gpu"}},
+						},
+						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+					},
+				}, nil)
+				// vllm engine
+				s.On("ListEngine", mock.MatchedBy(func(opt interface{}) bool {
+					return true
+				})).Return([]v1.Engine{
+					{
+						Spec: &v1.EngineSpec{
+							Versions: []*v1.EngineVersion{
+								{
+									Version: "v0.5.0",
+									Images: map[string]*v1.EngineImage{
+										"nvidia_gpu": {ImageName: "neutree/vllm-cuda", Tag: "v0.5.0"},
+									},
+								},
+								{
+									Version: "v0.3.0",
+									Images: map[string]*v1.EngineImage{
+										"nvidia_gpu": {ImageName: "neutree/llama-cpp-cuda", Tag: "v0.3.0"},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			acceleratorTyp: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			expectedImages: []string{"registry.example.com/neutree/vllm-cuda:v0.5.0", "registry.example.com/neutree/llama-cpp-cuda:v0.3.0"},
+		},
+		{
+			name: "no endpoints on cluster",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil)
+			},
+			acceleratorTyp: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			expectedImages: []string{},
+		},
+		{
+			name: "ListEndpoint error",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", mock.Anything).Return(nil, assert.AnError)
+			},
+			acceleratorTyp: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			wantErr:        true,
+		},
+		{
+			name: "engine not found - continues with other endpoints",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{
+					{
+						Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+						Spec: &v1.EndpointSpec{
+							Cluster: "test-cluster",
+							Engine:  &v1.EndpointEngineSpec{Engine: "missing-engine", Version: "v1.0.0"},
+						},
+						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+					},
+				}, nil)
+				s.On("ListEngine", mock.Anything).Return([]v1.Engine{}, nil)
+			},
+			acceleratorTyp: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			expectedImages: []string{},
+		},
+		{
+			name: "no image for accelerator type - returns empty",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{
+					{
+						Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+						Spec: &v1.EndpointSpec{
+							Cluster: "test-cluster",
+							Engine:  &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+						},
+						Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+					},
+				}, nil)
+				s.On("ListEngine", mock.Anything).Return([]v1.Engine{
+					{
+						Spec: &v1.EngineSpec{
+							Versions: []*v1.EngineVersion{
+								{
+									Version: "v0.5.0",
+									Images: map[string]*v1.EngineImage{
+										"amd_gpu": {ImageName: "neutree/vllm-rocm", Tag: "v0.5.0"},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			acceleratorTyp: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			expectedImages: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storagemocks.MockStorage{}
+			tt.setupMock(mockStorage)
+
+			r := &sshRayClusterReconciler{
+				storage: mockStorage,
+			}
+
+			reconcileCtx := &ReconcileContext{
+				Cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{
+						Name:      "test-cluster",
+						Workspace: "default",
+					},
+					Status: &v1.ClusterStatus{
+						AcceleratorType: tt.acceleratorTyp,
+					},
+				},
+				ImageRegistry: &v1.ImageRegistry{
+					Spec: &v1.ImageRegistrySpec{
+						URL: "registry.example.com",
+					},
+				},
+			}
+
+			images, err := r.collectEngineImages(reconcileCtx)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.ElementsMatch(t, tt.expectedImages, images)
+			}
+
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
+func TestResolveEngineImage(t *testing.T) {
+	tests := []struct {
+		name            string
+		endpoint        *v1.Endpoint
+		imagePrefix     string
+		acceleratorType string
+		setupMock       func(s *storagemocks.MockStorage)
+		expectedImage   string
+		wantErr         bool
+	}{
+		{
+			name: "resolves image successfully",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+				},
+			},
+			imagePrefix:     "registry.example.com",
+			acceleratorType: "nvidia_gpu",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEngine", mock.Anything).Return([]v1.Engine{
+					{
+						Spec: &v1.EngineSpec{
+							Versions: []*v1.EngineVersion{
+								{
+									Version: "v0.5.0",
+									Images: map[string]*v1.EngineImage{
+										"nvidia_gpu": {ImageName: "neutree/vllm-cuda", Tag: "v0.5.0"},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			expectedImage: "registry.example.com/neutree/vllm-cuda:v0.5.0",
+		},
+		{
+			name: "engine version not found - returns empty",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v999.0.0"},
+				},
+			},
+			imagePrefix:     "registry.example.com",
+			acceleratorType: "nvidia_gpu",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEngine", mock.Anything).Return([]v1.Engine{
+					{
+						Spec: &v1.EngineSpec{
+							Versions: []*v1.EngineVersion{
+								{
+									Version: "v0.5.0",
+									Images: map[string]*v1.EngineImage{
+										"nvidia_gpu": {ImageName: "neutree/vllm-cuda", Tag: "v0.5.0"},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+			},
+			expectedImage: "",
+		},
+		{
+			name: "engine not found - returns error",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "missing", Version: "v1.0.0"},
+				},
+			},
+			imagePrefix:     "registry.example.com",
+			acceleratorType: "nvidia_gpu",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEngine", mock.Anything).Return([]v1.Engine{}, nil)
+			},
+			wantErr: true,
+		},
+		{
+			name: "ListEngine error",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+				},
+			},
+			imagePrefix:     "registry.example.com",
+			acceleratorType: "nvidia_gpu",
+			setupMock: func(s *storagemocks.MockStorage) {
+				s.On("ListEngine", mock.Anything).Return(nil, assert.AnError)
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storagemocks.MockStorage{}
+			tt.setupMock(mockStorage)
+
+			r := &sshRayClusterReconciler{
+				storage: mockStorage,
+			}
+
+			image, err := r.resolveEngineImage(tt.endpoint, tt.imagePrefix, tt.acceleratorType)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedImage, image)
+			}
+
+			mockStorage.AssertExpectations(t)
 		})
 	}
 }

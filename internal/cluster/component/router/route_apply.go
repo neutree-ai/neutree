@@ -42,6 +42,7 @@ func (r *RouterComponent) ApplyResources(ctx context.Context) error {
 			v1.NeutreeClusterLabelKey:          r.cluster.Metadata.Name,
 			v1.NeutreeClusterWorkspaceLabelKey: r.cluster.Metadata.Workspace,
 			v1.LabelManagedBy:                  v1.LabelManagedByValue,
+			v1.NeutreeServingVersionLabel:      r.cluster.Spec.Version,
 		}).
 		WithLogger(r.logger)
 

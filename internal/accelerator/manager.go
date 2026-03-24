@@ -36,6 +36,11 @@ type Manager interface {
 	// Delegates to the registered plugin's GetContainerRuntimeConfig() and converts
 	// RuntimeConfig fields (Runtime, Options, Env) to Docker CLI flags.
 	GetEngineContainerRunOptions(acceleratorType string) ([]string, error)
+
+	// GetImageSuffix returns the image suffix for a given accelerator type
+	// (e.g. "rocm" for amd_gpu). Returns empty string for default variant or if
+	// the accelerator type is not registered.
+	GetImageSuffix(acceleratorType string) string
 }
 
 type registerPlugin struct {
@@ -314,6 +319,24 @@ func (a *manager) GetParser(acceleratorType string) (plugin.ResourceParser, bool
 	parser := p.Handle().GetResourceParser()
 
 	return parser, parser != nil
+}
+
+func (a *manager) GetImageSuffix(acceleratorType string) string {
+	if acceleratorType == "" {
+		return ""
+	}
+
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		return ""
+	}
+
+	rc, err := p.Handle().GetContainerRuntimeConfig()
+	if err != nil {
+		return ""
+	}
+
+	return rc.ImageSuffix
 }
 
 func (a *manager) GetEngineContainerRunOptions(acceleratorType string) ([]string, error) {

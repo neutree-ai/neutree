@@ -97,6 +97,46 @@ func TestWriteEarlyStatus_SkipsForFailedPhase(t *testing.T) {
 	WriteEarlyStatus(cluster, s)
 }
 
+func TestWriteEarlyStatus_Upgrading(t *testing.T) {
+	s := storagemocks.NewMockStorage(t)
+	cluster := &v1.Cluster{
+		ID:       10,
+		Metadata: &v1.Metadata{Workspace: "ws", Name: "c10"},
+		Spec:     &v1.ClusterSpec{Type: "ssh", Version: "v2.0.0", ImageRegistry: "reg"},
+		Status: &v1.ClusterStatus{
+			Initialized:      true,
+			Version:          "v1.0.0",
+			ObservedSpecHash: "old-hash",
+			Phase:            v1.ClusterPhaseRunning,
+		},
+	}
+
+	s.EXPECT().UpdateCluster("10", mock.MatchedBy(func(c *v1.Cluster) bool {
+		return c.Status != nil && c.Status.Phase == v1.ClusterPhaseUpgrading
+	})).Return(nil)
+
+	WriteEarlyStatus(cluster, s)
+	assert.Equal(t, v1.ClusterPhaseUpgrading, cluster.Status.Phase)
+}
+
+func TestWriteEarlyStatus_SkipsWhenPhaseAlreadyUpgrading(t *testing.T) {
+	s := storagemocks.NewMockStorage(t)
+	cluster := &v1.Cluster{
+		ID:       11,
+		Metadata: &v1.Metadata{Workspace: "ws", Name: "c11"},
+		Spec:     &v1.ClusterSpec{Type: "ssh", Version: "v2.0.0", ImageRegistry: "reg"},
+		Status: &v1.ClusterStatus{
+			Initialized:      true,
+			Version:          "v1.0.0",
+			ObservedSpecHash: "old-hash",
+			Phase:            v1.ClusterPhaseUpgrading,
+		},
+	}
+
+	// No UpdateCluster call expected since phase already matches
+	WriteEarlyStatus(cluster, s)
+}
+
 func TestWriteEarlyDeleting_WritesPhase(t *testing.T) {
 	s := storagemocks.NewMockStorage(t)
 	cluster := &v1.Cluster{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
 	"go.openly.dev/pointy"
 	appsv1 "k8s.io/api/apps/v1"
@@ -109,6 +110,10 @@ func Test_checkDeploymentStatus(t *testing.T) {
 			metricsCmpt := &MetricsComponent{
 				ctrlClient: fakeClient,
 				namespace:  "default",
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+					Spec:     &v1.ClusterSpec{},
+				},
 			}
 
 			ready, _, _, err := metricsCmpt.checkDeploymentStatus(context.Background())

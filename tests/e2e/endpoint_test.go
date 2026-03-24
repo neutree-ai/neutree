@@ -14,23 +14,10 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// --- Environment helpers ---
-
-func clusterName() string     { return os.Getenv("E2E_CLUSTER_NAME") }
-func engineName() string          { return envOrDefault("E2E_ENGINE_NAME", "vllm") }
-func engineVersionA() string      { return envOrDefault("E2E_ENGINE_VERSION_A", "v0.8.5") }
-func engineVersionB() string      { return envOrDefault("E2E_ENGINE_VERSION_B", "v0.11.2") }
-func modelName() string           { return os.Getenv("E2E_MODEL_NAME") }
-func modelVersion() string        { return envOrDefault("E2E_MODEL_VERSION", "latest") }
-func modelTask() string           { return envOrDefault("E2E_MODEL_TASK", "text-generation") }
-func acceleratorType() string     { return envOrDefault("E2E_ACCELERATOR_TYPE", "nvidia_gpu") }
-func acceleratorProduct() string  { return envOrDefault("E2E_ACCELERATOR_PRODUCT", "") }
-func endpointTimeout() string     { return envOrDefault("E2E_ENDPOINT_TIMEOUT", "10m") }
-
-// engineArgsYAML parses E2E_ENDPOINT_ENGINE_ARGS (comma-separated key=value pairs,
-// default "dtype=half") and returns a YAML snippet for spec.variables.engine_args.
+// engineArgsYAML parses EndpointEngineArgs (comma-separated key=value pairs)
+// and returns a YAML snippet for spec.variables.engine_args.
 func engineArgsYAML() string {
-	raw := envOrDefault("E2E_ENDPOINT_ENGINE_ARGS", "dtype=half")
+	raw := Cfg.EndpointEngineArgs
 	if raw == "" {
 		return ""
 	}
@@ -47,30 +34,50 @@ func engineArgsYAML() string {
 	return "\n" + strings.Join(lines, "\n")
 }
 
-func envOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-
-	return fallback
-}
-
 // --- Endpoint helpers ---
 
 // applyEndpoint renders the endpoint template and applies it.
 func applyEndpoint(name, engineVersion string) (yamlPath string) {
 	defaults := map[string]string{
 		"E2E_ENDPOINT_NAME":       name,
-		"E2E_WORKSPACE":           testWorkspace(),
-		"E2E_CLUSTER_NAME":    clusterName(),
-		"E2E_ENGINE_NAME":         engineName(),
+		"E2E_WORKSPACE":           Cfg.Workspace,
+		"E2E_CLUSTER_NAME":    Cfg.ClusterName,
+		"E2E_ENGINE_NAME":         Cfg.EngineName,
 		"E2E_ENGINE_VERSION":      engineVersion,
-		"E2E_MODEL_REGISTRY":      testRegistry(),
-		"E2E_MODEL_NAME":          modelName(),
-		"E2E_MODEL_VERSION":       modelVersion(),
-		"E2E_MODEL_TASK":          modelTask(),
-		"E2E_ACCELERATOR_TYPE":    acceleratorType(),
-		"E2E_ACCELERATOR_PRODUCT": acceleratorProduct(),
+		"E2E_MODEL_REGISTRY":      Cfg.ModelRegistryName,
+		"E2E_MODEL_NAME":          Cfg.ModelName,
+		"E2E_MODEL_VERSION":       Cfg.ModelVersion,
+		"E2E_MODEL_TASK":          Cfg.ModelTask,
+		"E2E_ACCELERATOR_TYPE":    Cfg.AcceleratorType,
+		"E2E_ACCELERATOR_PRODUCT": Cfg.AcceleratorProduct,
+		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
+	}
+
+	yamlPath, err := renderTemplateToTempFile(
+		filepath.Join("testdata", "endpoint.yaml"), defaults,
+	)
+	Expect(err).NotTo(HaveOccurred(), "failed to render endpoint template")
+
+	r := RunCLI("apply", "-f", yamlPath, "--force-update")
+	ExpectSuccess(r)
+
+	return yamlPath
+}
+
+// applyEndpointOnCluster renders and applies an endpoint on a specific cluster.
+func applyEndpointOnCluster(name, cluster, engineVersion string) (yamlPath string) {
+	defaults := map[string]string{
+		"E2E_ENDPOINT_NAME":       name,
+		"E2E_WORKSPACE":           Cfg.Workspace,
+		"E2E_CLUSTER_NAME":        cluster,
+		"E2E_ENGINE_NAME":         Cfg.EngineName,
+		"E2E_ENGINE_VERSION":      engineVersion,
+		"E2E_MODEL_REGISTRY":      Cfg.ModelRegistryName,
+		"E2E_MODEL_NAME":          Cfg.ModelName,
+		"E2E_MODEL_VERSION":       Cfg.ModelVersion,
+		"E2E_MODEL_TASK":          Cfg.ModelTask,
+		"E2E_ACCELERATOR_TYPE":    Cfg.AcceleratorType,
+		"E2E_ACCELERATOR_PRODUCT": Cfg.AcceleratorProduct,
 		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
 	}
 
@@ -88,16 +95,16 @@ func applyEndpoint(name, engineVersion string) (yamlPath string) {
 // waitEndpointRunning waits for an endpoint to reach Running phase.
 func waitEndpointRunning(name string) {
 	r := RunCLI("wait", "endpoint", name,
-		"-w", testWorkspace(),
+		"-w", Cfg.Workspace,
 		"--for", "jsonpath=.status.phase=Running",
-		"--timeout", endpointTimeout(),
+		"--timeout", Cfg.EndpointTimeout,
 	)
 	ExpectSuccess(r)
 }
 
 // getEndpoint retrieves endpoint details as JSON.
 func getEndpoint(name string) endpointJSON {
-	r := RunCLI("get", "endpoint", name, "-w", testWorkspace(), "-o", "json")
+	r := RunCLI("get", "endpoint", name, "-w", Cfg.Workspace, "-o", "json")
 	ExpectSuccess(r)
 
 	return parseEndpointJSON(r.Stdout)
@@ -105,9 +112,9 @@ func getEndpoint(name string) endpointJSON {
 
 // deleteEndpoint deletes an endpoint and waits for it to be removed.
 func deleteEndpoint(name string) {
-	RunCLI("delete", "endpoint", name, "-w", testWorkspace(), "--force", "--ignore-not-found")
+	RunCLI("delete", "endpoint", name, "-w", Cfg.Workspace, "--force", "--ignore-not-found")
 	RunCLI("wait", "endpoint", name,
-		"-w", testWorkspace(),
+		"-w", Cfg.Workspace,
 		"--for", "delete",
 		"--timeout", "5m",
 	)
@@ -160,7 +167,7 @@ func parseEndpointClusterJSON(stdout string) clusterPreCheckJSON {
 // inferChat sends a chat completion request and returns (status_code, body).
 func inferChat(serviceURL, prompt string) (int, string) {
 	reqBody := map[string]any{
-		"model": modelName(),
+		"model": Cfg.ModelName,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -178,7 +185,7 @@ func inferChat(serviceURL, prompt string) (int, string) {
 	)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to create inference request")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("NEUTREE_API_KEY"))
+	req.Header.Set("Authorization", "Bearer "+Cfg.APIKey)
 
 	resp, err := client.Do(req)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "inference request failed")
@@ -195,15 +202,15 @@ func inferChat(serviceURL, prompt string) (int, string) {
 var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 	BeforeAll(func() {
-		if clusterName() == "" {
+		if Cfg.ClusterName == "" {
 			Skip("E2E_CLUSTER_NAME not set, skipping endpoint tests")
 		}
-		if modelName() == "" {
+		if Cfg.ModelName == "" {
 			Skip("E2E_MODEL_NAME not set, skipping endpoint tests")
 		}
 
 		By("Verifying cluster is ready")
-		r := RunCLI("get", "cluster", clusterName(), "-w", testWorkspace(), "-o", "json")
+		r := RunCLI("get", "cluster", Cfg.ClusterName, "-w", Cfg.Workspace, "-o", "json")
 		ExpectSuccess(r)
 		c := parseEndpointClusterJSON(r.Stdout)
 		Expect(c.Status.Phase).To(Equal("Running"), "cluster must be Running")
@@ -214,7 +221,7 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 	})
 
 	AfterAll(func() {
-		if clusterName() == "" {
+		if Cfg.ClusterName == "" {
 			return
 		}
 
@@ -225,7 +232,7 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 		var epName string
 
 		BeforeAll(func() {
-			epName = "e2e-ep-single-" + runID
+			epName = "e2e-ep-single-" + Cfg.RunID
 		})
 
 		AfterAll(func() {
@@ -233,14 +240,14 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 		})
 
 		It("should deploy with engine container and reach Running", func() {
-			yamlPath := applyEndpoint(epName, engineVersionB())
+			yamlPath := applyEndpoint(epName, Cfg.EngineVersionB)
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(Equal("Running"))
-			Expect(ep.Spec.Engine.Version).To(Equal(engineVersionB()))
+			Expect(ep.Spec.Engine.Version).To(Equal(Cfg.EngineVersionB))
 			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
 		})
 
@@ -256,8 +263,8 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 		var epNameA, epNameB string
 
 		BeforeAll(func() {
-			epNameA = "e2e-ep-va-" + runID
-			epNameB = "e2e-ep-vb-" + runID
+			epNameA = "e2e-ep-va-" + Cfg.RunID
+			epNameB = "e2e-ep-vb-" + Cfg.RunID
 		})
 
 		AfterAll(func() {
@@ -266,9 +273,9 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 		})
 
 		It("should run two endpoints with different engine versions", func() {
-			yamlA := applyEndpoint(epNameA, engineVersionA())
+			yamlA := applyEndpoint(epNameA, Cfg.EngineVersionA)
 			defer os.Remove(yamlA)
-			yamlB := applyEndpoint(epNameB, engineVersionB())
+			yamlB := applyEndpoint(epNameB, Cfg.EngineVersionB)
 			defer os.Remove(yamlB)
 
 			waitEndpointRunning(epNameA)
@@ -278,8 +285,8 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 			epB := getEndpoint(epNameB)
 			Expect(epA.Status.Phase).To(Equal("Running"))
 			Expect(epB.Status.Phase).To(Equal("Running"))
-			Expect(epA.Spec.Engine.Version).To(Equal(engineVersionA()))
-			Expect(epB.Spec.Engine.Version).To(Equal(engineVersionB()))
+			Expect(epA.Spec.Engine.Version).To(Equal(Cfg.EngineVersionA))
+			Expect(epB.Spec.Engine.Version).To(Equal(Cfg.EngineVersionB))
 		})
 
 		It("should serve inference from both endpoints", func() {

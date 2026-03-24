@@ -134,6 +134,65 @@ func (_c *MockImageService_CheckPullPermission_Call) RunAndReturn(run func(strin
 	return _c
 }
 
+// GetImageLabels provides a mock function with given fields: image, auth
+func (_m *MockImageService) GetImageLabels(image string, auth authn.Authenticator) (map[string]string, error) {
+	ret := _m.Called(image, auth)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetImageLabels")
+	}
+
+	var r0 map[string]string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) (map[string]string, error)); ok {
+		return rf(image, auth)
+	}
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) map[string]string); ok {
+		r0 = rf(image, auth)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, authn.Authenticator) error); ok {
+		r1 = rf(image, auth)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockImageService_GetImageLabels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImageLabels'
+type MockImageService_GetImageLabels_Call struct {
+	*mock.Call
+}
+
+// GetImageLabels is a helper method to define mock.On call
+//   - image string
+//   - auth authn.Authenticator
+func (_e *MockImageService_Expecter) GetImageLabels(image interface{}, auth interface{}) *MockImageService_GetImageLabels_Call {
+	return &MockImageService_GetImageLabels_Call{Call: _e.mock.On("GetImageLabels", image, auth)}
+}
+
+func (_c *MockImageService_GetImageLabels_Call) Run(run func(image string, auth authn.Authenticator)) *MockImageService_GetImageLabels_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(authn.Authenticator))
+	})
+	return _c
+}
+
+func (_c *MockImageService_GetImageLabels_Call) Return(_a0 map[string]string, _a1 error) *MockImageService_GetImageLabels_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockImageService_GetImageLabels_Call) RunAndReturn(run func(string, authn.Authenticator) (map[string]string, error)) *MockImageService_GetImageLabels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImageTags provides a mock function with given fields: imageRepo, auth
 func (_m *MockImageService) ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error) {
 	ret := _m.Called(imageRepo, auth)

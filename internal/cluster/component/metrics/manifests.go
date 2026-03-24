@@ -281,6 +281,7 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: vmagent
+    neutree.ai/cluster-version: {{ .ClusterVersion }}
 spec:
   replicas: {{ .Replicas }}
   selector:
@@ -294,6 +295,7 @@ spec:
         app: vmagent
         cluster: {{ .ClusterName }}
         workspace: {{ .Workspace }}
+        neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
       affinity:
         podAntiAffinity:
@@ -343,6 +345,7 @@ type MetricsManifestVariables struct {
 	ImagePrefix           string
 	ImagePullSecret       string
 	Version               string
+	ClusterVersion        string
 	MetricsRemoteWriteURL string
 	Replicas              int
 	Resources             map[string]string
@@ -366,6 +369,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		ImagePrefix:           m.imagePrefix,
 		ImagePullSecret:       m.imagePullSecret,
 		Version:               version,
+		ClusterVersion:        m.cluster.GetVersion(),
 		MetricsRemoteWriteURL: m.metricsRemoteWriteURL,
 		Replicas:              replicas,
 		Resources:             resources,

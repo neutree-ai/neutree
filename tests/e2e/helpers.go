@@ -2,9 +2,7 @@ package e2e
 
 import (
 	"bytes"
-	"crypto/rand"
 	"fmt"
-	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,13 +17,6 @@ import (
 
 // cliBinary holds the path to the compiled neutree-cli binary.
 var cliBinary string
-
-// runID is a short random suffix generated once per test run,
-// used in resource names to avoid collisions between parallel runs.
-var runID = func() string {
-	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
-	return fmt.Sprintf("%06d", n.Int64())
-}()
 
 // --- Suite setup / teardown ---
 
@@ -68,8 +59,8 @@ func RunCLI(args ...string) CLIResult {
 // RunCLIWithStdin executes the neutree-cli binary with stdin input and given arguments.
 func RunCLIWithStdin(stdin string, args ...string) CLIResult {
 	injected := []string{
-		"--server-url", os.Getenv("NEUTREE_SERVER_URL"),
-		"--api-key", os.Getenv("NEUTREE_API_KEY"),
+		"--server-url", Cfg.ServerURL,
+		"--api-key", Cfg.APIKey,
 		"--insecure",
 	}
 	fullArgs := make([]string, 0, len(injected)+len(args))
@@ -277,26 +268,6 @@ func StartLocalRegistry() (string, string) {
 // StopLocalRegistry stops and removes the registry container.
 func StopLocalRegistry(containerID string) {
 	DockerRemove(containerID)
-}
-
-// --- Environment helpers ---
-
-// testRegistry returns the model registry name for tests.
-func testRegistry() string {
-	if r := os.Getenv("E2E_MODEL_REGISTRY"); r != "" {
-		return r
-	}
-
-	return "e2e-registry-" + runID
-}
-
-// testWorkspace returns the workspace name for tests.
-func testWorkspace() string {
-	if w := os.Getenv("E2E_WORKSPACE"); w != "" {
-		return w
-	}
-
-	return "default"
 }
 
 // --- Template rendering ---

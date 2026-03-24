@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 )
 
@@ -30,9 +29,9 @@ type CaseResult struct {
 //
 // If any are missing, it silently skips reporting.
 func ReportToTestRail(runID string, caseResults []CaseResult) error {
-	url := os.Getenv("TESTRAIL_URL")
-	user := os.Getenv("TESTRAIL_USER")
-	password := os.Getenv("TESTRAIL_PASSWORD")
+	url := Cfg.TestRailURL
+	user := Cfg.TestRailUser
+	password := Cfg.TestRailPassword
 
 	if url == "" || user == "" || password == "" {
 		fmt.Println("TestRail credentials not fully configured, skipping report")

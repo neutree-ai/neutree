@@ -16,6 +16,8 @@ type ImageService interface {
 	// CheckPullPermission checks if the provided auth has pull permission for the image
 	CheckPullPermission(image string, auth authn.Authenticator) (bool, error)
 	ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error)
+	// GetImageLabels returns the labels from an image's config.
+	GetImageLabels(image string, auth authn.Authenticator) (map[string]string, error)
 }
 
 type imageService struct {
@@ -73,6 +75,29 @@ func (svc *imageService) CheckPullPermission(image string, auth authn.Authentica
 	}
 
 	return true, nil
+}
+
+func (svc *imageService) GetImageLabels(image string, auth authn.Authenticator) (map[string]string, error) {
+	ref, err := name.ParseReference(image)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse image "+image)
+	}
+
+	img, err := remote.Image(ref, remote.WithAuth(auth), remote.WithTransport(svc.transport))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch image "+image)
+	}
+
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get config for image "+image)
+	}
+
+	if cfg == nil || cfg.Config.Labels == nil {
+		return map[string]string{}, nil
+	}
+
+	return cfg.Config.Labels, nil
 }
 
 func (svc *imageService) ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error) {

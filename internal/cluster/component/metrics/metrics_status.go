@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -43,7 +44,7 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 	return status, nil
 }
 
-// checkDeploymentStatus checks if the deployment is ready
+// checkDeploymentStatus checks if the deployment is ready and running the expected cluster version.
 func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int, int, error) {
 	deployment := &appsv1.Deployment{}
 
@@ -58,5 +59,17 @@ func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int
 	podsReady := int(deployment.Status.ReadyReplicas)
 	totalPods := int(deployment.Status.Replicas)
 
-	return util.IsDeploymentUpdatedAndReady(deployment), podsReady, totalPods, nil
+	if !util.IsDeploymentUpdatedAndReady(deployment) {
+		return false, podsReady, totalPods, nil
+	}
+
+	// Check that all running Pods have the expected cluster version label
+	match, err := component.AllPodsMatchVersion(ctx, m.ctrlClient, m.namespace,
+		map[string]string{"app": "vmagent", "cluster": m.cluster.GetName(), "workspace": m.cluster.GetWorkspace()},
+		m.cluster.GetVersion())
+	if err != nil {
+		return false, podsReady, totalPods, err
+	}
+
+	return match, podsReady, totalPods, nil
 }

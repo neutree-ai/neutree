@@ -15,12 +15,30 @@ const (
 
 // Ray node labels.
 const (
-	// NeutreeServingVersionLabel is the label key of Neutree Serving version on actual ray node.
-	NeutreeServingVersionLabel = "neutree.ai/neutree-serving-version"
+	// NeutreeServingVersionLabel is the label key for cluster version on Ray nodes,
+	// K8s Deployments, and Pods.
+	NeutreeServingVersionLabel = "neutree.ai/cluster-version"
+
+	// LegacyServingVersionLabel is the old label key, kept for backward compatibility
+	// when reading version from existing Ray nodes or K8s resources.
+	LegacyServingVersionLabel = "neutree.ai/neutree-serving-version"
 
 	// NeutreeNodeProvisionTypeLabel is the label key of Neutree node provision type on actual ray node.
 	// It can be either "static" or "autoscaler".
 	NeutreeNodeProvisionTypeLabel = "neutree.ai/node-provision-type"
+)
+
+// GetVersionFromLabels reads the cluster version from a label map.
+// It checks the current label key first, then falls back to the legacy key.
+func GetVersionFromLabels(labels map[string]string) string {
+	if v, ok := labels[NeutreeServingVersionLabel]; ok && v != "" {
+		return v
+	}
+
+	return labels[LegacyServingVersionLabel]
+}
+
+const (
 
 	// Ray node provision type.
 

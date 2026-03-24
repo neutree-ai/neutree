@@ -20,6 +20,10 @@ func DetermineClusterPhase(isResourceReady bool, cluster *v1.Cluster) v1.Cluster
 		return v1.ClusterPhaseInitializing
 	}
 
+	if needsVersionUpgrade(cluster) {
+		return v1.ClusterPhaseUpgrading
+	}
+
 	if cluster.Status != nil && cluster.Status.ObservedSpecHash != "" {
 		currentHash := ComputeClusterSpecHash(cluster.Spec)
 		if cluster.Status.ObservedSpecHash != currentHash {
@@ -28,6 +32,15 @@ func DetermineClusterPhase(isResourceReady bool, cluster *v1.Cluster) v1.Cluster
 	}
 
 	return v1.ClusterPhaseFailed
+}
+
+// needsVersionUpgrade returns true when the cluster's actual version differs
+// from the desired version, indicating a version upgrade is needed.
+// Used by both phase determination and SSH reconcile logic.
+func needsVersionUpgrade(cluster *v1.Cluster) bool {
+	return cluster.Status != nil && cluster.Status.Version != "" &&
+		cluster.Spec != nil && cluster.Spec.Version != "" &&
+		cluster.Status.Version != cluster.Spec.Version
 }
 
 // DetermineClusterDeletePhase determines the deletion phase.

@@ -275,86 +275,98 @@ func Test_checkServiceStatus(t *testing.T) {
 func Test_checkDeploymentStatus(t *testing.T) {
 	tests := []struct {
 		name          string
-		deployment    *appsv1.Deployment
+		specVersion   string
+		objects       []runtime.Object
 		expectedReady bool
 		expectError   bool
 	}{
 		{
-			name: "Deployment ready and available",
-			deployment: &appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "router",
-					Namespace:  "default",
-					Generation: 2,
-				},
-				Spec: appsv1.DeploymentSpec{
-					Replicas: pointy.Int32(3),
-				},
-				Status: appsv1.DeploymentStatus{
-					ObservedGeneration: 2,
-					ReadyReplicas:      3,
-					AvailableReplicas:  3,
-					UpdatedReplicas:    3,
-					Replicas:           3,
-					Conditions: []appsv1.DeploymentCondition{
-						{
-							Type:   appsv1.DeploymentAvailable,
-							Status: corev1.ConditionTrue,
-						},
-						{
-							Type:   appsv1.DeploymentProgressing,
-							Status: corev1.ConditionTrue,
+			name:        "Deployment ready with all pods matching version",
+			specVersion: "v1.0.0",
+			objects: []runtime.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "router", Namespace: "default", Generation: 2,
+					},
+					Spec: appsv1.DeploymentSpec{Replicas: pointy.Int32(2)},
+					Status: appsv1.DeploymentStatus{
+						ObservedGeneration: 2, ReadyReplicas: 2, AvailableReplicas: 2, UpdatedReplicas: 2, Replicas: 2,
+						Conditions: []appsv1.DeploymentCondition{
+							{Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue},
+							{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue},
 						},
 					},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: "router-aaa", Namespace: "default", Labels: map[string]string{
+						"app": "router", "cluster": "test", "workspace": "default",
+						v1.NeutreeServingVersionLabel: "v1.0.0",
+					}},
+					Status: corev1.PodStatus{Phase: corev1.PodRunning},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: "router-bbb", Namespace: "default", Labels: map[string]string{
+						"app": "router", "cluster": "test", "workspace": "default",
+						v1.NeutreeServingVersionLabel: "v1.0.0",
+					}},
+					Status: corev1.PodStatus{Phase: corev1.PodRunning},
 				},
 			},
 			expectedReady: true,
-			expectError:   false,
 		},
 		{
-			name: "Deployment not ready",
-			deployment: &appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "router",
-					Namespace:  "default",
-					Generation: 2,
-				},
-				Spec: appsv1.DeploymentSpec{
-					Replicas: pointy.Int32(4),
-				},
-				Status: appsv1.DeploymentStatus{
-					ObservedGeneration: 2,
-					ReadyReplicas:      3,
-					AvailableReplicas:  3,
-					UpdatedReplicas:    3,
-					Replicas:           3,
-					Conditions: []appsv1.DeploymentCondition{
-						{
-							Type:   appsv1.DeploymentAvailable,
-							Status: corev1.ConditionTrue,
+			name:        "Deployment ready but pod has old version (rolling update in progress)",
+			specVersion: "v1.1.0",
+			objects: []runtime.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "router", Namespace: "default", Generation: 2,
+					},
+					Spec: appsv1.DeploymentSpec{Replicas: pointy.Int32(2)},
+					Status: appsv1.DeploymentStatus{
+						ObservedGeneration: 2, ReadyReplicas: 2, AvailableReplicas: 2, UpdatedReplicas: 2, Replicas: 2,
+						Conditions: []appsv1.DeploymentCondition{
+							{Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue},
+							{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue},
 						},
 					},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: "router-aaa", Namespace: "default", Labels: map[string]string{
+						"app": "router", "cluster": "test", "workspace": "default",
+						v1.NeutreeServingVersionLabel: "v1.1.0",
+					}},
+					Status: corev1.PodStatus{Phase: corev1.PodRunning},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: "router-bbb", Namespace: "default", Labels: map[string]string{
+						"app": "router", "cluster": "test", "workspace": "default",
+						v1.NeutreeServingVersionLabel: "v1.0.0",
+					}},
+					Status: corev1.PodStatus{Phase: corev1.PodRunning},
 				},
 			},
 			expectedReady: false,
-			expectError:   false,
+		},
+		{
+			name:        "Deployment not ready (replicas mismatch)",
+			specVersion: "v1.0.0",
+			objects: []runtime.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "router", Namespace: "default", Generation: 2,
+					},
+					Spec:   appsv1.DeploymentSpec{Replicas: pointy.Int32(4)},
+					Status: appsv1.DeploymentStatus{ObservedGeneration: 2, ReadyReplicas: 3, AvailableReplicas: 3, UpdatedReplicas: 3, Replicas: 3},
+				},
+			},
+			expectedReady: false,
 		},
 		{
 			name: "Deployment not found",
-			deployment: &appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "router-test",
-					Namespace: "default",
-				},
-				Status: appsv1.DeploymentStatus{
-					ReadyReplicas:     1,
-					AvailableReplicas: 3,
-					Conditions: []appsv1.DeploymentCondition{
-						{
-							Type:   appsv1.DeploymentAvailable,
-							Status: corev1.ConditionFalse,
-						},
-					},
+			objects: []runtime.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{Name: "router-test", Namespace: "default"},
 				},
 			},
 			expectedReady: false,
@@ -365,19 +377,20 @@ func Test_checkDeploymentStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &RouterComponent{
-				ctrlClient: fakeClient.NewFakeClient(tt.deployment),
+				ctrlClient: fakeClient.NewFakeClient(tt.objects...),
 				namespace:  "default",
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+					Spec:     &v1.ClusterSpec{Version: tt.specVersion},
+				},
 			}
 			ready, _, _, err := r.checkDeploymentStatus(context.Background())
 			if tt.expectError {
 				assert.Error(t, err)
 				return
-			} else {
-				assert.NoError(t, err)
 			}
-			if ready != tt.expectedReady {
-				t.Errorf("checkDeploymentStatus() ready = %v, expected %v", ready, tt.expectedReady)
-			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedReady, ready)
 		})
 	}
 }

@@ -40,6 +40,26 @@ func TestDetermineClusterPhase(t *testing.T) {
 			expected: v1.ClusterPhaseFailed,
 		},
 		{
+			name:    "version mismatch -> Upgrading",
+			cluster: &v1.Cluster{Spec: specV2, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.0", ObservedSpecHash: hashV1}},
+			expected: v1.ClusterPhaseUpgrading,
+		},
+		{
+			name:    "version mismatch takes priority over hash mismatch -> Upgrading",
+			cluster: &v1.Cluster{Spec: specV2, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.0", ObservedSpecHash: "stale-hash"}},
+			expected: v1.ClusterPhaseUpgrading,
+		},
+		{
+			name:    "same version, hash mismatch -> Updating",
+			cluster: &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.0", ObservedSpecHash: "stale-hash"}},
+			expected: v1.ClusterPhaseUpdating,
+		},
+		{
+			name:    "empty status version, hash mismatch -> Updating",
+			cluster: &v1.Cluster{Spec: specV2, Status: &v1.ClusterStatus{Initialized: true, Version: "", ObservedSpecHash: hashV1}},
+			expected: v1.ClusterPhaseUpdating,
+		},
+		{
 			name:    "hash mismatch -> Updating",
 			cluster: &v1.Cluster{Spec: specV2, Status: &v1.ClusterStatus{Initialized: true, ObservedSpecHash: hashV1}},
 			expected: v1.ClusterPhaseUpdating,

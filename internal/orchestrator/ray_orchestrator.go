@@ -701,27 +701,24 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 		acceleratorType = acceleratorTypeCPU
 	}
 
-	// Look up engine image: try SSH-specific image first (e.g., "ssh_nvidia_gpu"),
-	// then fall back to generic accelerator key (e.g., "nvidia_gpu").
+	// Look up engine image and build full image reference
+	imagePrefix := ""
+	if imageRegistry != nil {
+		imagePrefix, err = util.GetImagePrefix(imageRegistry)
+		if err != nil {
+			return nil, nil, errors.Wrapf(err, "failed to get image prefix from registry")
+		}
+	}
+
+	// SSH clusters use GetImageForSSHAccelerator which tries "ssh_<type>" first,
+	// then falls back to generic accelerator key.
 	engineImage := targetVersion.GetImageForSSHAccelerator(acceleratorType)
 	if engineImage == nil {
 		return nil, nil, errors.Errorf("no engine image configured for accelerator %q in engine %s version %s",
 			acceleratorType, engine.Metadata.Name, endpoint.Spec.Engine.Version)
 	}
 
-	// Build image reference with registry prefix
-	imageRef := engineImage.ImageName + ":" + engineImage.Tag
-
-	if imageRegistry != nil {
-		imagePrefix, err := util.GetImagePrefix(imageRegistry)
-		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to get image prefix from registry")
-		}
-
-		if imagePrefix != "" {
-			imageRef = imagePrefix + "/" + engineImage.ImageName + ":" + engineImage.Tag
-		}
-	}
+	imageRef := util.BuildEngineImageRef(imagePrefix, engineImage)
 
 	// Base config: engine image + --rm only (for app_builder and Controller).
 	baseConfig = map[string]interface{}{

@@ -177,8 +177,36 @@ const (
 	ClusterPhaseDeleted      ClusterPhase = "Deleted"
 	ClusterPhaseInitializing ClusterPhase = "Initializing"
 	ClusterPhaseUpdating     ClusterPhase = "Updating"
+	ClusterPhaseUpgrading    ClusterPhase = "Upgrading"
 	ClusterPhaseDeleting     ClusterPhase = "Deleting"
 )
+
+// Image name constants for Neutree components.
+const (
+	NeutreeServeImageName  = "neutree/neutree-serve"
+	NeutreeRouterImageName = "neutree/router"
+)
+
+// Image label keys used to identify metadata in container images.
+// These labels are set at build time via `docker build --label`.
+const (
+	// ImageLabelVersion is the version label for container images.
+	// This is the same key as NeutreeServingVersionLabel, used consistently
+	// across image labels, K8s Deployment/Pod labels, and Ray node labels.
+	ImageLabelVersion = NeutreeServingVersionLabel
+	// ImageLabelAcceleratorType is the accelerator type of the image (e.g. "nvidia_gpu", "amd_gpu").
+	// Empty or absent for the default (NVIDIA) variant.
+	ImageLabelAcceleratorType = "neutree.ai/accelerator-type"
+)
+
+// GetVersion returns the cluster's desired version from spec, or empty string if nil.
+func (obj *Cluster) GetVersion() string {
+	if obj == nil || obj.Spec == nil {
+		return ""
+	}
+
+	return obj.Spec.Version
+}
 
 func (obj *Cluster) GetName() string {
 	if obj.Metadata == nil {

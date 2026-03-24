@@ -137,6 +137,13 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 
 	cluster.Status.Initialized = true
 
+	// When reconcile succeeds, all components (Router, Metrics) have verified
+	// that their Pods are running with the correct version. Set status.version
+	// to match spec.version.
+	if cluster.GetVersion() != "" {
+		cluster.Status.Version = cluster.GetVersion()
+	}
+
 	// Calculate resources (best-effort)
 	resources, err := c.calculateResources(reconcileCtx)
 	if err != nil {

@@ -56,8 +56,8 @@ func newRaySSHClusterReconcile(storage storage.Storage, acceleratorManager accel
 	return r
 }
 
-// logWithProcessMessage logs the process messages and updates the cluster status error message
-// now only used during cluster initialization
+// logWithProcessMessage logs the process messages and updates the cluster status error message.
+// Progress messages are written during initialization and upgrade to provide user-visible feedback.
 func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileContext, messages ...string) {
 	for _, message := range messages {
 		klog.Info(message + ": " + reconcileCtx.Cluster.Metadata.WorkspaceName())
@@ -70,7 +70,15 @@ func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileC
 		reconcileCtx.processMessages = append(reconcileCtx.processMessages, formatMessageWithTimestamp(message))
 	}
 
-	if reconcileCtx.Cluster.Status != nil && !reconcileCtx.Cluster.Status.Initialized {
+	if reconcileCtx.Cluster.Status == nil {
+		return
+	}
+
+	// Write progress messages during initialization or upgrade
+	isInitializing := !reconcileCtx.Cluster.Status.Initialized
+	isUpgrading := reconcileCtx.Cluster.Status.Phase == v1.ClusterPhaseUpgrading
+
+	if isInitializing || isUpgrading {
 		reconcileCtx.Cluster.Status.ErrorMessage = strings.Join(reconcileCtx.processMessages, "\n")
 		err := c.storage.UpdateCluster(strconv.Itoa(reconcileCtx.Cluster.ID), &v1.Cluster{
 			Status: reconcileCtx.Cluster.Status,
@@ -111,13 +119,19 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 
 	defer c.cleanupConfig(reconcileCtx) //nolint:errcheck
 
-	if reconcileCtx.Cluster.Status == nil || !reconcileCtx.Cluster.Status.Initialized {
+	switch {
+	case reconcileCtx.Cluster.Status == nil || !reconcileCtx.Cluster.Status.Initialized:
 		err = c.initialize(reconcileCtx)
 		if err != nil {
 			reconcileCtx.processMessages = append(reconcileCtx.processMessages, formatMessageWithTimestamp("Cluster initialization failed: "+err.Error()))
 			return errors.New(strings.Join(reconcileCtx.processMessages, "\n"))
 		}
-	} else {
+	case needsVersionUpgrade(reconcileCtx.Cluster):
+		err = c.upgradeCluster(reconcileCtx)
+		if err != nil {
+			return errors.Wrap(err, "failed to upgrade cluster")
+		}
+	default:
 		err = c.reconcileHeadNode(reconcileCtx)
 		if err != nil {
 			return errors.Wrap(err, "failed to reconcile head node")
@@ -158,6 +172,12 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 
 	cluster.Status.Initialized = true
 	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
+
+	// Default status.version to spec.version when not reported by Ray nodes
+	// (e.g. legacy nodes without version labels, or first initialization).
+	if cluster.Status.Version == "" && cluster.GetVersion() != "" {
+		cluster.Status.Version = cluster.GetVersion()
+	}
 
 	// Calculate resources only when cluster is ready (avoids unnecessary Ray dashboard calls during init/update)
 	resources, err := c.calculateClusterResources(reconcileCtx)
@@ -242,6 +262,34 @@ func (c *sshRayClusterReconciler) cleanupConfig(reconcileCtx *ReconcileContext) 
 func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileContext) error {
 	_, err := reconcileCtx.rayService.GetClusterMetadata()
 	if err == nil {
+		// Head is reachable. Check version consistency to handle rollback scenarios
+		// where Head was upgraded but user rolled spec.Version back.
+		if reconcileCtx.Cluster.Spec != nil && reconcileCtx.Cluster.Spec.Version != "" {
+			headVersion, verErr := c.getHeadNodeVersion(reconcileCtx)
+			if verErr != nil {
+				klog.Warningf("Failed to get head node version for %s: %v",
+					reconcileCtx.Cluster.Metadata.WorkspaceName(), verErr)
+			} else if headVersion != "" && headVersion != reconcileCtx.Cluster.Spec.Version {
+				klog.Infof("Head node version %s does not match spec version %s for cluster %s, rebuilding",
+					headVersion, reconcileCtx.Cluster.Spec.Version, reconcileCtx.Cluster.Metadata.WorkspaceName())
+
+				if err := c.downCluster(reconcileCtx); err != nil {
+					return errors.Wrap(err, "failed to down cluster for version consistency")
+				}
+
+				headIP, err := c.upCluster(reconcileCtx, true)
+				if err != nil {
+					return errors.Wrap(err, "failed to up cluster for version consistency")
+				}
+
+				if err := setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true); err != nil {
+					klog.Warningf("Failed to set head node provision status: %v", err)
+				}
+
+				return nil
+			}
+		}
+
 		return nil
 	}
 

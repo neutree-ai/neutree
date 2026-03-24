@@ -46,8 +46,14 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: router
+    neutree.ai/cluster-version: {{ .Version }}
 spec:
   replicas: {{ .Replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: router
@@ -59,6 +65,7 @@ spec:
         app: router
         cluster: {{ .ClusterName }}
         workspace: {{ .Workspace }}
+        neutree.ai/cluster-version: {{ .Version }}
     spec:
       affinity:
         podAntiAffinity:
@@ -77,7 +84,7 @@ spec:
       serviceAccountName: router-service-account
       containers:
       - name: router
-        image: {{ .ImagePrefix }}/neutree/router:{{ .Version }}
+        image: {{ .ImagePrefix }}/neutree/router:{{ .RouterVersion }}
         args:
         - --host
         - "0.0.0.0"
@@ -142,7 +149,8 @@ type RouteManifestVariables struct {
 	Namespace       string
 	ImagePrefix     string
 	ImagePullSecret string
-	Version         string
+	Version         string // Cluster version (spec.version), used for version labels
+	RouterVersion   string // Router image version (config.Router.Version or spec.version), used for image tag
 	Replicas        int
 	Resources       map[string]string
 	AccessMode      string
@@ -150,10 +158,11 @@ type RouteManifestVariables struct {
 
 // buildManifestVariables creates the data structure for rendering manifests
 func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
-	// default to cluster version if router version is not specified
 	version := r.cluster.Spec.Version
+
+	routerVersion := version
 	if r.config.Router.Version != "" {
-		version = r.config.Router.Version
+		routerVersion = r.config.Router.Version
 	}
 
 	accessMode := v1.KubernetesAccessModeLoadBalancer
@@ -188,6 +197,7 @@ func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
 		ImagePrefix:     r.imagePrefix,
 		ImagePullSecret: r.imagePullSecret,
 		Version:         version,
+		RouterVersion:   routerVersion,
 		Replicas:        replicas,
 		Resources:       resources,
 		AccessMode:      string(accessMode),
