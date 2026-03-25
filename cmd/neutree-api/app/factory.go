@@ -8,6 +8,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
+	"github.com/neutree-ai/neutree/internal/routes/clusters"
 	"github.com/neutree-ai/neutree/internal/routes/credentials"
 	"github.com/neutree-ai/neutree/internal/routes/logs"
 	"github.com/neutree-ai/neutree/internal/routes/models"
@@ -99,6 +100,19 @@ func CredentialsRouteFactory(register CredentialsRegisterFunc) RouteFactory {
 		register(deps.Group, deps.Middlewares, &credentials.Dependencies{
 			Storage:          deps.Config.Storage,
 			StorageAccessURL: deps.Config.StorageAccessURL,
+		})
+
+		return nil
+	}
+}
+
+type ClustersRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *clusters.Dependencies)
+
+func ClustersRouteFactory(register ClustersRegisterFunc) RouteFactory {
+	return func(deps *RouteOptions) error {
+		register(deps.Group, deps.Middlewares, &clusters.Dependencies{
+			Storage:      deps.Config.Storage,
+			ImageService: registry.NewImageService(),
 		})
 
 		return nil
