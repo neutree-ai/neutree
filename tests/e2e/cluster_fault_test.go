@@ -69,9 +69,9 @@ var _ = Describe("Cluster Fault Recovery", Ordered, Label("fault"), func() {
 		})
 
 		It("should recover after head raylet is killed", Label("C2614001"), func() {
-			By("Killing raylet process on head node (keeping GCS/dashboard alive)")
+			By("Killing raylet process inside ray_container (keeping GCS/dashboard alive)")
 			r := RunSSH(sshUser, headIP, sshKeyFile,
-				"pkill -f 'dist-packages/ray/core/src/ray/raylet/raylet' || true")
+				"docker exec ray_container pkill -f 'dist-packages/ray/core/src/ray/raylet/raylet' || true")
 			Expect(r.ExitCode).To(BeNumerically("<=", 1),
 				"pkill failed unexpectedly: %s", r.Stderr)
 
@@ -87,8 +87,8 @@ var _ = Describe("Cluster Fault Recovery", Ordered, Label("fault"), func() {
 		})
 
 		It("should recover after all head Ray processes are stopped", Label("C2614002"), func() {
-			By("Stopping all Ray processes on head node")
-			r := RunSSH(sshUser, headIP, sshKeyFile, "ray stop --force")
+			By("Stopping all Ray processes inside ray_container")
+			r := RunSSH(sshUser, headIP, sshKeyFile, "docker exec ray_container ray stop --force")
 			Expect(r.ExitCode).To(BeNumerically("<=", 1),
 				"ray stop failed unexpectedly: %s", r.Stderr)
 
