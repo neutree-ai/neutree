@@ -274,20 +274,7 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 				klog.Infof("Head node version %s does not match spec version %s for cluster %s, rebuilding",
 					headVersion, reconcileCtx.Cluster.Spec.Version, reconcileCtx.Cluster.Metadata.WorkspaceName())
 
-				if err := c.downCluster(reconcileCtx); err != nil {
-					return errors.Wrap(err, "failed to down cluster for version consistency")
-				}
-
-				headIP, err := c.upCluster(reconcileCtx, true)
-				if err != nil {
-					return errors.Wrap(err, "failed to up cluster for version consistency")
-				}
-
-				if err := setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true); err != nil {
-					klog.Warningf("Failed to set head node provision status: %v", err)
-				}
-
-				return nil
+				return c.rebuildHeadNode(reconcileCtx, true)
 			}
 		}
 
@@ -314,26 +301,30 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		}
 	}
 
-	// Down the cluster first to ensure a clean restart. This is necessary because
-	// ray up uses --no-restart, so it won't restart the raylet if GCS/dashboard
-	// are still running.
+	return c.rebuildHeadNode(reconcileCtx, false)
+}
+
+// rebuildHeadNode stops and restarts the head node. The downCluster call is necessary
+// because ray up uses --no-restart, so it won't restart the raylet if GCS/dashboard
+// are still running. versionChanged indicates whether this rebuild is due to a version
+// mismatch (passed through to upCluster to update version labels).
+func (c *sshRayClusterReconciler) rebuildHeadNode(reconcileCtx *ReconcileContext, versionChanged bool) error {
 	if err := c.downCluster(reconcileCtx); err != nil {
-		klog.Warningf("Failed to down cluster before recovery: %v", err)
+		return errors.Wrap(err, "failed to down cluster before rebuild")
 	}
 
-	headIP, err := c.upCluster(reconcileCtx, false)
+	headIP, err := c.upCluster(reconcileCtx, versionChanged)
 	if err != nil {
 		return errors.Wrap(err, "failed to up cluster")
 	}
 
-	err = setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true)
-	if err != nil {
+	if err := setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true); err != nil {
 		klog.Warningf("Failed to set head node provision status: %v", err)
 	}
 
 	_, err = reconcileCtx.rayService.GetClusterMetadata()
 	if err != nil {
-		return errors.Wrap(err, "failed to get cluster metadata after bringing up head node")
+		return errors.Wrap(err, "failed to get cluster metadata after rebuilding head node")
 	}
 
 	return nil

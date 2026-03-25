@@ -203,12 +203,11 @@ func TestReconcileHeadNode(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "reinit head node failed",
+			name: "reinit head node failed - down cluster fails",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError)
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				// downCluster fails
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError)
-
 			},
 			wantErr: true,
 		},
