@@ -40,10 +40,10 @@ var _ = Describe("Cluster Fault Recovery", Ordered, Label("fault"), func() {
 
 		BeforeAll(func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
-			sshKeyFile = profileSSHKeyFile()
-			if sshKeyFile == "" {
+			if len(profile.SSHNodes) == 0 || profile.SSHNodes[0].KeyFile == "" {
 				Skip("SSH key file path not configured in profile, skipping recovery tests")
 			}
+			sshKeyFile = expandHome(profile.SSHNodes[0].KeyFile)
 			clusterName = "e2e-ssh-fault-" + Cfg.RunID
 
 			yaml := renderSSHClusterYAML(map[string]string{
