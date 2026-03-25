@@ -6,6 +6,7 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/endpoint"
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
@@ -144,7 +145,36 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
 				o.On("CreateEndpoint", mock.Anything).Return(nil)
 				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
-				// updateObservedSpecHash + updateStatus calls
+				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			name: "skip orchestration when hash matches and endpoint is running",
+			in: func() *v1.Endpoint {
+				e := ep(id, v1.EndpointPhaseRUNNING)
+				e.Status.ObservedSpecHash = endpoint.ComputeEndpointSpecHash(e.Spec)
+				return e
+			}(),
+			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				// CreateEndpoint should NOT be called — orchestration is skipped.
+				// But the defer still runs getActualStatus for status monitoring.
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
+				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
+			},
+			wantErr: false,
+		},
+		{
+			name: "do not skip when endpoint is failed even with matching hash",
+			in: func() *v1.Endpoint {
+				e := ep(id, v1.EndpointPhaseFAILED)
+				e.Status.ObservedSpecHash = endpoint.ComputeEndpointSpecHash(e.Spec)
+				return e
+			}(),
+			setup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
+				o.On("CreateEndpoint", mock.Anything).Return(nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
 				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(nil)
 			},
 			wantErr: false,
@@ -354,7 +384,7 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			mockOrchestrator := &orchestratormocks.MockOrchestrator{}
 			tt.mockSetup(mockStorage, mockOrchestrator)
 			c := newTestEndpointController(mockStorage, mockOrchestrator)
-			c.updateStatusOnError(tt.input(), tt.inputErr)
+			c.updateStatusOnError(tt.input(), tt.inputErr, "")
 			mockStorage.AssertExpectations(t)
 			mockOrchestrator.AssertExpectations(t)
 		})

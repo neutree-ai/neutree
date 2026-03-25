@@ -61,17 +61,6 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 		return c.handleDeletion(obj)
 	}
 
-	// Defer block to handle status updates for non-deletion paths
-	defer func() {
-		c.updateStatusOnError(obj, err)
-	}()
-
-	o, err = c.getOrchestrator(obj)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get orchestrator for endpoint %s",
-			obj.Metadata.WorkspaceName())
-	}
-
 	// Compute spec hash from user-controlled fields only.
 	// If the hash hasn't changed and the endpoint is already Running, skip
 	// orchestration. This prevents cluster version upgrades (or other infra-only
@@ -81,6 +70,13 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	specChanged := obj.Status == nil ||
 		obj.Status.ObservedSpecHash == "" ||
 		obj.Status.ObservedSpecHash != specHash
+
+	// Defer block to handle status updates for non-deletion paths.
+	// The spec hash is threaded in so it can be persisted atomically with the
+	// phase when the endpoint reaches Running — matching the cluster controller pattern.
+	defer func() {
+		c.updateStatusOnError(obj, err, specHash)
+	}()
 
 	if !specChanged && obj.Status.Phase == v1.EndpointPhaseRUNNING {
 		klog.V(4).Infof("Endpoint %s spec unchanged (hash=%s), skipping orchestration",
@@ -95,6 +91,12 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 		return nil
 	}
 
+	o, err = c.getOrchestrator(obj)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get orchestrator for endpoint %s",
+			obj.Metadata.WorkspaceName())
+	}
+
 	if orchestrator.IsEndpointPaused(obj) {
 		err = o.PauseEndpoint(obj)
 		if err != nil {
@@ -107,10 +109,6 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			return errors.Wrapf(err, "failed to create or update endpoint %s",
 				obj.Metadata.WorkspaceName())
 		}
-	}
-
-	if err == nil && specChanged {
-		c.updateObservedSpecHash(obj, specHash)
 	}
 
 	err = c.gw.SyncEndpoint(obj)
@@ -139,7 +137,7 @@ func (c *EndpointController) handleDeletion(obj *v1.Endpoint) error {
 	}
 
 	defer func() {
-		c.updateStatusOnError(obj, err)
+		c.updateStatusOnError(obj, err, "")
 	}()
 
 	klog.Infof("Deleting endpoint %s (force=%v)", obj.Metadata.WorkspaceName(), isForceDelete)
@@ -167,7 +165,7 @@ func (c *EndpointController) performDeletion(obj *v1.Endpoint) error {
 	return nil
 }
 
-func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, err error) {
+func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, err error, specHash string) {
 	isForceDelete := v1.IsForceDelete(obj.GetAnnotations())
 	isDelete := obj.GetDeletionTimestamp() != ""
 
@@ -209,6 +207,13 @@ func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, err error) {
 		klog.Errorf("failed to get actual status for endpoint %s: %v",
 			obj.Metadata.WorkspaceName(), err)
 		return
+	}
+
+	// Set ObservedSpecHash only when endpoint reaches Running — this ensures
+	// the hash is persisted atomically with the phase in a single write,
+	// matching the cluster controller's pattern.
+	if status.Phase == v1.EndpointPhaseRUNNING && specHash != "" {
+		status.ObservedSpecHash = specHash
 	}
 
 	// Update if status changed
@@ -272,6 +277,11 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 		return true
 	}
 
+	// Update if observed spec hash changed (set when phase becomes Running)
+	if obj.Status.ObservedSpecHash != newStatus.ObservedSpecHash {
+		return true
+	}
+
 	return false
 }
 
@@ -300,11 +310,6 @@ func (c *EndpointController) updateStatus(obj *v1.Endpoint, status *v1.EndpointS
 	// If the new service URL is empty, use the old service URL to avoid it being set to empty.
 	if status.ServiceURL == "" && obj.Status != nil && obj.Status.ServiceURL != "" {
 		status.ServiceURL = obj.Status.ServiceURL
-	}
-
-	// Preserve ObservedSpecHash — it is managed by sync(), not by status updates.
-	if status.ObservedSpecHash == "" && obj.Status != nil && obj.Status.ObservedSpecHash != "" {
-		status.ObservedSpecHash = obj.Status.ObservedSpecHash
 	}
 
 	return c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Status: status})
@@ -353,20 +358,4 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	}
 
 	return orchestrator, nil
-}
-
-// updateObservedSpecHash persists the spec hash to endpoint status.
-func (c *EndpointController) updateObservedSpecHash(obj *v1.Endpoint, specHash string) {
-	status := &v1.EndpointStatus{}
-	if obj.Status != nil {
-		status = obj.Status
-	}
-
-	status.ObservedSpecHash = specHash
-
-	err := c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Status: status})
-	if err != nil {
-		klog.Errorf("failed to update observed spec hash for endpoint %s: %v",
-			obj.Metadata.WorkspaceName(), err)
-	}
 }
