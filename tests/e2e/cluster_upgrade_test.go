@@ -36,7 +36,7 @@ func newK8sClientFromBase64Kubeconfig(b64Kubeconfig string) kubernetes.Interface
 
 // findEndpointDeployment finds the Deployment for an endpoint across all namespaces using the "endpoint" label.
 func findEndpointDeployment(clientset kubernetes.Interface, endpointName string) *appsv1.Deployment {
-	// List all namespaces matching neutree cluster pattern
+	// List all namespaces and search each one for the endpoint Deployment
 	nsList, err := clientset.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to list namespaces")
 

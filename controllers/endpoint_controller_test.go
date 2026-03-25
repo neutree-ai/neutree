@@ -389,7 +389,33 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			mockOrchestrator.AssertExpectations(t)
 		})
 	}
+}
 
+func TestUpdateStatusOnError_SetsHashWhenRunning(t *testing.T) {
+	cluster := v1.Cluster{Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"}}
+
+	ms := &storagemocks.MockStorage{}
+	mo := &orchestratormocks.MockOrchestrator{}
+
+	ms.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+	mo.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+		Phase: v1.EndpointPhaseRUNNING,
+	}, nil)
+
+	// Capture the status written to verify hash is set
+	ms.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+		return ep.Status != nil &&
+			ep.Status.Phase == v1.EndpointPhaseRUNNING &&
+			ep.Status.ObservedSpecHash == "test-hash-abc"
+	})).Return(nil)
+
+	c := newTestEndpointController(ms, mo)
+
+	obj := ep(1, v1.EndpointPhaseDEPLOYING) // was deploying
+	c.updateStatusOnError(obj, nil, "test-hash-abc")
+
+	ms.AssertExpectations(t)
+	mo.AssertExpectations(t)
 }
 
 func Test_ShouldUpdateStatus(t *testing.T) {
@@ -446,6 +472,24 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			name:      "same phase and service URL",
 			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServiceURL: "same-url"},
 			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServiceURL: "same-url"},
+			want:      false,
+		},
+		{
+			name:      "hash changed triggers update",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "old-hash"},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "new-hash"},
+			want:      true,
+		},
+		{
+			name:      "hash set from empty triggers update",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "abc123"},
+			want:      true,
+		},
+		{
+			name:      "same hash no update",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "same"},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "same"},
 			want:      false,
 		},
 	}
