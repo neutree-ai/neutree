@@ -171,6 +171,10 @@ services:
       - SYS_ADMIN
     security_opt:
       - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     command:
       - --storage-access-url=http://postgrest:6432
       - --storage-jwt-secret={{ .JwtSecret }}
@@ -208,6 +212,10 @@ services:
       - SYS_ADMIN
     security_opt:
       - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     command:
       - --storage-access-url=http://postgrest:6432
       - --storage-jwt-secret={{ .JwtSecret }}

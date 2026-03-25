@@ -38,6 +38,9 @@ RUN cat > /entrypoint.sh <<'EOF'
 #!/bin/bash
 set -e
 
+# Set nofile ulimit explicitly to avoid rpcbind memory allocation issues
+ulimit -n 65536
+
 # Start rpcbind in background
 /sbin/rpcbind -w
 echo "rpcbind started"
