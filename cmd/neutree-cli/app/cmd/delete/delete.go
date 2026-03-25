@@ -136,7 +136,7 @@ func runDeleteByName(c *client.Client, opts *deleteOptions, args []string) error
 	if opts.wait {
 		fmt.Printf("%-50s deleting\n", label)
 
-		if err := waitForDeletion(c, kind, workspace, name, opts.timeout, opts.interval); err != nil {
+		if err := WaitForDeletion(c, kind, workspace, name, opts.timeout, opts.interval); err != nil {
 			return err
 		}
 
@@ -216,7 +216,7 @@ func runDeleteFromFile(c *client.Client, opts *deleteOptions) error {
 		if opts.wait {
 			fmt.Printf("%-50s deleting\n", label)
 
-			if err := waitForDeletion(c, kind, workspace, name, opts.timeout, opts.interval); err != nil {
+			if err := WaitForDeletion(c, kind, workspace, name, opts.timeout, opts.interval); err != nil {
 				fmt.Printf("%-50s wait failed (%v)\n", label, err)
 
 				hasError = true
@@ -237,8 +237,8 @@ func runDeleteFromFile(c *client.Client, opts *deleteOptions) error {
 	return nil
 }
 
-// waitForDeletion polls until the resource no longer exists or the timeout expires.
-func waitForDeletion(c *client.Client, kind, workspace, name string, timeout, interval time.Duration) error {
+// WaitForDeletion polls until the resource no longer exists or the timeout expires.
+func WaitForDeletion(c *client.Client, kind, workspace, name string, timeout, interval time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	var lastErr error
