@@ -177,6 +177,15 @@ func profileSSHPrivateKey() string {
 	return profile.sshHeadPrivateKeyBase64
 }
 
+// profileSSHKeyFile returns the SSH private key file path (for direct SSH use).
+func profileSSHKeyFile() string {
+	if len(profile.SSHNodes) > 0 && profile.SSHNodes[0].KeyFile != "" {
+		return expandHome(profile.SSHNodes[0].KeyFile)
+	}
+
+	return ""
+}
+
 // profileSSHWorkerIPs returns comma-separated worker IPs.
 func profileSSHWorkerIPs() string {
 	return profile.sshWorkerIPs

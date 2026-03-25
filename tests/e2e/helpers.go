@@ -125,6 +125,47 @@ func ExpectStdoutContains(r CLIResult, substr string) {
 		"stdout does not contain %q\nfull stdout: %s", substr, r.Stdout)
 }
 
+// --- SSH remote execution ---
+
+// RunSSH executes a command on a remote host via SSH using the given key file.
+func RunSSH(user, host, keyFile, command string) CLIResult {
+	args := []string{
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "ConnectTimeout=10",
+		"-i", keyFile,
+		fmt.Sprintf("%s@%s", user, host),
+		command,
+	}
+
+	cmd := exec.Command("ssh", args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+				exitCode = status.ExitStatus()
+			} else {
+				exitCode = 1
+			}
+		} else {
+			exitCode = 1
+		}
+	}
+
+	return CLIResult{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: exitCode,
+	}
+}
+
 // --- Output parsing ---
 
 // ParseTable parses tabwriter table output (header row + data rows) into
