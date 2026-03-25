@@ -145,8 +145,8 @@ func RunSSH(user, host, keyFile, command string) CLIResult {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-
 	exitCode := 0
+
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {

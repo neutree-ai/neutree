@@ -177,7 +177,6 @@ func profileSSHPrivateKey() string {
 	return profile.sshHeadPrivateKeyBase64
 }
 
-
 // profileSSHWorkerIPs returns comma-separated worker IPs.
 func profileSSHWorkerIPs() string {
 	return profile.sshWorkerIPs
