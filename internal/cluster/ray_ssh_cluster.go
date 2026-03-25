@@ -289,6 +289,15 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		klog.Infof("Head node not ready, try to up cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
 	}
 
+	return c.rebuildHeadNode(reconcileCtx, false)
+}
+
+// rebuildHeadNode stops and restarts the head node. It first checks ProvisioningWaitTime
+// to avoid rebuild loops, then calls downCluster + upCluster. The downCluster call is
+// necessary because ray up uses --no-restart, so it won't restart the raylet if
+// GCS/dashboard are still running. versionChanged indicates whether this rebuild is due
+// to a version mismatch (passed through to upCluster to update version labels).
+func (c *sshRayClusterReconciler) rebuildHeadNode(reconcileCtx *ReconcileContext, versionChanged bool) error {
 	provisioned, lastProvisionTime, err := getNodeLastProvisionTime(reconcileCtx, reconcileCtx.sshClusterConfig.Provider.HeadIP)
 	if err != nil {
 		return errors.Wrap(err, "failed to get head node last provision time")
@@ -296,19 +305,11 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 
 	if provisioned {
 		if time.Since(lastProvisionTime) < ProvisioningWaitTime {
-			klog.Infof("Head node %s was just provisioned at %s, skip initializing", reconcileCtx.sshClusterConfig.Provider.HeadIP, lastProvisionTime.Format(time.RFC3339))
+			klog.Infof("Head node %s was just provisioned at %s, skip rebuilding", reconcileCtx.sshClusterConfig.Provider.HeadIP, lastProvisionTime.Format(time.RFC3339))
 			return errors.New("head node just provisioned, waiting for it to be ready")
 		}
 	}
 
-	return c.rebuildHeadNode(reconcileCtx, false)
-}
-
-// rebuildHeadNode stops and restarts the head node. The downCluster call is necessary
-// because ray up uses --no-restart, so it won't restart the raylet if GCS/dashboard
-// are still running. versionChanged indicates whether this rebuild is due to a version
-// mismatch (passed through to upCluster to update version labels).
-func (c *sshRayClusterReconciler) rebuildHeadNode(reconcileCtx *ReconcileContext, versionChanged bool) error {
 	if err := c.downCluster(reconcileCtx); err != nil {
 		return errors.Wrap(err, "failed to down cluster before rebuild")
 	}
