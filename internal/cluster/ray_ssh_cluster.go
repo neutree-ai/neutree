@@ -301,18 +301,17 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		}
 	}
 
-	return c.rebuildHeadNode(reconcileCtx, false)
-}
-
-// rebuildHeadNode stops and restarts the head node. The downCluster call is necessary
-// because ray up uses --no-restart, so it won't restart the raylet if GCS/dashboard
-// are still running. versionChanged indicates whether this rebuild is due to a version
-// mismatch (passed through to upCluster to update version labels).
-func (c *sshRayClusterReconciler) rebuildHeadNode(reconcileCtx *ReconcileContext, versionChanged bool) error {
-	if err := c.downCluster(reconcileCtx); err != nil {
-		return errors.Wrap(err, "failed to down cluster before rebuild")
+	// Initialized cluster needs down first (raylet won't restart with --no-restart);
+	// uninitialized cluster just needs up.
+	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.Initialized {
+		return c.rebuildHeadNode(reconcileCtx, false)
 	}
 
+	return c.initHeadNode(reconcileCtx, false)
+}
+
+// initHeadNode starts the head node and verifies it is reachable.
+func (c *sshRayClusterReconciler) initHeadNode(reconcileCtx *ReconcileContext, versionChanged bool) error {
 	headIP, err := c.upCluster(reconcileCtx, versionChanged)
 	if err != nil {
 		return errors.Wrap(err, "failed to up cluster")
@@ -324,10 +323,21 @@ func (c *sshRayClusterReconciler) rebuildHeadNode(reconcileCtx *ReconcileContext
 
 	_, err = reconcileCtx.rayService.GetClusterMetadata()
 	if err != nil {
-		return errors.Wrap(err, "failed to get cluster metadata after rebuilding head node")
+		return errors.Wrap(err, "failed to get cluster metadata after starting head node")
 	}
 
 	return nil
+}
+
+// rebuildHeadNode stops the cluster then re-initializes the head node. The downCluster
+// call is necessary because ray up uses --no-restart, so it won't restart the raylet
+// if GCS/dashboard are still running.
+func (c *sshRayClusterReconciler) rebuildHeadNode(reconcileCtx *ReconcileContext, versionChanged bool) error {
+	if err := c.downCluster(reconcileCtx); err != nil {
+		return errors.Wrap(err, "failed to down cluster before rebuild")
+	}
+
+	return c.initHeadNode(reconcileCtx, versionChanged)
 }
 
 func (c *sshRayClusterReconciler) reconcileWorkerNode(reconcileCtx *ReconcileContext) error { //nolint:gocyclo
