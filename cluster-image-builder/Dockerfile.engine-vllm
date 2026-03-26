@@ -37,7 +37,7 @@ WORKDIR ${HOME}
 RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
     cd /install \
     && whl=$(ls .whl/*.whl) \
-    && uv pip install --system "${whl}[serve]"
+    && uv pip install --system "${whl}[serve,cgraph]"
 
 # Install common serve-layer dependencies
 RUN --mount=type=bind,src=requirements,target=requirements \

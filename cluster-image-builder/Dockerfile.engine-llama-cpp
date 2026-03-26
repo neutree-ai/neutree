@@ -48,7 +48,7 @@ RUN pip install --no-cache-dir llama_cpp_python==${LLAMA_CPP_VERSION}
 RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
     cd /install \
     && whl=$(ls .whl/*.whl) \
-    && pip install --no-cache-dir "${whl}[serve]"
+    && pip install --no-cache-dir "${whl}[serve,cgraph]"
 
 # Install common serve-layer dependencies
 RUN --mount=type=bind,src=requirements,target=requirements \
