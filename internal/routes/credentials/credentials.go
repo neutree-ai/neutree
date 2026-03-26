@@ -47,6 +47,13 @@ func RegisterCredentialsRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 			Storage: deps.Storage,
 		}),
 		handleResourceCredentials(proxyDeps, "model_registries"))
+
+	// External endpoint credentials (auth tokens)
+	credGroup.GET("/external_endpoints",
+		middleware.RequirePermission("external_endpoint:read-credentials", middleware.PermissionDependencies{
+			Storage: deps.Storage,
+		}),
+		handleResourceCredentials(proxyDeps, "external_endpoints"))
 }
 
 func handleResourceCredentials(deps *proxies.Dependencies, tabelName string) gin.HandlerFunc {
