@@ -67,6 +67,16 @@ type Profile struct {
 		Task    string `yaml:"task"`
 	} `yaml:"model"`
 
+	EmbeddingModel struct {
+		Name    string `yaml:"name"`
+		Version string `yaml:"version"`
+	} `yaml:"embedding_model"`
+
+	RerankModel struct {
+		Name    string `yaml:"name"`
+		Version string `yaml:"version"`
+	} `yaml:"rerank_model"`
+
 	Endpoint struct {
 		Cluster            string `yaml:"cluster"`
 		AcceleratorType    string `yaml:"accelerator_type"`
@@ -290,6 +300,12 @@ func profileEndpointTimeout() string {
 
 	return "10m"
 }
+
+func profileEmbeddingModelName() string    { return profile.EmbeddingModel.Name }
+func profileEmbeddingModelVersion() string { return profile.EmbeddingModel.Version }
+
+func profileRerankModelName() string    { return profile.RerankModel.Name }
+func profileRerankModelVersion() string { return profile.RerankModel.Version }
 
 func profileMockUpstreamHost() string {
 	if profile.MockUpstreamHost != "" {
