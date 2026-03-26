@@ -469,11 +469,20 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	modelRegistry *v1.ModelRegistry, engine *v1.Engine, imageRegistry *v1.ImageRegistry,
 	acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
+	// Strip any variant/prerelease/build suffix (e.g., "-cu130", "-rocm5", "-beta", "+build123")
+	// from the version for the import path. All such variants share the same serve app code
+	// as the base version.
+	baseVersion, err := semver.BaseVersion(endpoint.Spec.Engine.Version)
+	if err != nil {
+		return dashboard.RayServeApplication{}, fmt.Errorf("failed to parse engine version %q for import path: %w",
+			endpoint.Spec.Engine.Version, err)
+	}
+
 	app := dashboard.RayServeApplication{
 		Name:        EndpointToServeApplicationName(endpoint),
 		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
 		ImportPath: fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"),
-			strings.ReplaceAll(endpoint.Spec.Engine.Version, ".", "_")),
+			strings.ReplaceAll(baseVersion, ".", "_")),
 		Args: map[string]interface{}{},
 	}
 
