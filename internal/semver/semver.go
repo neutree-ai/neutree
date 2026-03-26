@@ -23,7 +23,7 @@ func LessThan(a, b string) (bool, error) {
 
 // BaseVersion parses a semver version string and returns only the
 // "vMajor.Minor.Patch" portion, stripping any prerelease or metadata suffix.
-// For example, "v0.17.1-cuda130" returns "v0.17.1".
+// For example, "v0.17.1-cu130" returns "v0.17.1".
 // The "v" prefix is preserved if present in the input.
 func BaseVersion(version string) (string, error) {
 	if version == "" {

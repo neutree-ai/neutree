@@ -672,7 +672,7 @@ func TestEndpointToApplication_ImportPathStripsVariantSuffix(t *testing.T) {
 		},
 		{
 			name:               "cuda variant stripped",
-			engineVersion:      "v0.17.1-cuda130",
+			engineVersion:      "v0.17.1-cu130",
 			expectedImportPath: "serve.vllm.v0_17_1.app:app_builder",
 		},
 		{

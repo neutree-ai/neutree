@@ -85,12 +85,12 @@ func TestBaseVersion(t *testing.T) {
 		},
 		{
 			name:     "cuda variant",
-			version:  "v0.17.1-cuda130",
+			version:  "v0.17.1-cu130",
 			expected: "v0.17.1",
 		},
 		{
 			name:     "cuda variant without v prefix",
-			version:  "0.17.1-cuda130",
+			version:  "0.17.1-cu130",
 			expected: "0.17.1",
 		},
 		{
