@@ -34,109 +34,52 @@ func JsonEqual(obj1, obj2 interface{}) (bool, string, error) {
 	return false, diff, nil
 }
 
-// JsonContains checks whether the JSON value `current` satisfies the constraints expressed by `desired`.
-// For objects, every key in `desired` constrains the corresponding field in `current`:
-//   - If the value in `desired` is non-nil, `current` must have that field present with a matching value
-//     (though it may also have additional fields not mentioned in `desired`).
-//   - If the value in `desired` is nil, the field in `current` may be missing or explicitly null, but must
-//     not be present with a non-null value.
-//
-// For arrays, `current` and `desired` must have the same length, and elements are compared positionally:
-// each element in `desired` must be contained in the element at the same index in `current`. This is not
-// a general subset/containment check for arrays.
-// Both inputs are normalized through JSON round-trip to ensure consistent types (e.g., int → float64).
-func JsonContains(current, desired interface{}) (bool, string, error) {
-	curJSON, err := json.Marshal(current)
+// NormalizeJSON normalizes a value for stable comparison by JSON round-tripping
+// (to unify Go types like int→float64, map[string]string→map[string]interface{})
+// and stripping null values and empty maps. This handles Kong's config normalization
+// where null fields are stored explicitly and nil maps become empty objects {}.
+func NormalizeJSON(obj interface{}) (interface{}, error) {
+	data, err := json.Marshal(obj)
 	if err != nil {
-		return false, "", err
+		return nil, err
 	}
 
-	desJSON, err := json.Marshal(desired)
-	if err != nil {
-		return false, "", err
+	var normalized interface{}
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return nil, err
 	}
 
-	var curNorm, desNorm interface{}
-	if err := json.Unmarshal(curJSON, &curNorm); err != nil {
-		return false, "", err
-	}
-
-	if err := json.Unmarshal(desJSON, &desNorm); err != nil {
-		return false, "", err
-	}
-
-	if jsonContainsAll(curNorm, desNorm) {
-		return true, "", nil
-	}
-
-	var diff string
-
-	j1, err1 := jd.ReadJsonString(string(curJSON))
-	j2, err2 := jd.ReadJsonString(string(desJSON))
-
-	if err1 == nil && err2 == nil {
-		diff = j1.Diff(j2).Render()
-	}
-
-	return false, diff, nil
+	return stripEmpty(normalized), nil
 }
 
-func jsonContainsAll(current, desired interface{}) bool {
-	if desired == nil {
-		return current == nil
-	}
-
-	if current == nil {
-		return false
-	}
-
-	switch d := desired.(type) {
+func stripEmpty(v interface{}) interface{} {
+	switch t := v.(type) {
 	case map[string]interface{}:
-		c, ok := current.(map[string]interface{})
-		if !ok {
-			return false
-		}
+		m := make(map[string]interface{})
 
-		for key, dVal := range d {
-			cVal, exists := c[key]
-
-			if dVal == nil {
-				if exists && cVal != nil {
-					return false
-				}
-
+		for k, val := range t {
+			if val == nil {
 				continue
 			}
 
-			if !exists {
-				return false
+			cleaned := stripEmpty(val)
+			if cm, ok := cleaned.(map[string]interface{}); ok && len(cm) == 0 {
+				continue
 			}
 
-			if !jsonContainsAll(cVal, dVal) {
-				return false
-			}
+			m[k] = cleaned
 		}
 
-		return true
+		return m
 	case []interface{}:
-		c, ok := current.([]interface{})
-		if !ok {
-			return false
+		a := make([]interface{}, len(t))
+		for i, val := range t {
+			a[i] = stripEmpty(val)
 		}
 
-		if len(c) != len(d) {
-			return false
-		}
-
-		for i := range d {
-			if !jsonContainsAll(c[i], d[i]) {
-				return false
-			}
-		}
-
-		return true
+		return a
 	default:
-		return current == desired
+		return v
 	}
 }
 

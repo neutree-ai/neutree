@@ -283,21 +283,29 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 		return nil
 	}
 
-	// Use subset comparison: check if Kong's current config already contains all desired fields.
-	// This avoids false diffs from Kong-added defaults inside array elements, which are lost
-	// when RFC 7386 JSON Merge Patch replaces arrays atomically.
-	contains, diff, err := util.JsonContains(curPlugin.Config, plugin.Config)
+	// Normalize both configs to handle Kong's storage quirks:
+	// - Kong stores explicit null for unset fields (e.g. auth_header: null)
+	// - Kong converts nil maps to empty objects (e.g. model_mapping: {})
+	// Stripping nulls and empty maps from both sides ensures stable comparison.
+	normalizedCur, err := util.NormalizeJSON(curPlugin.Config)
+	if err != nil {
+		return errors.Wrapf(err, "failed to normalize current plugin config")
+	}
+
+	normalizedDes, err := util.NormalizeJSON(plugin.Config)
+	if err != nil {
+		return errors.Wrapf(err, "failed to normalize desired plugin config")
+	}
+
+	result, diff, err := util.JsonEqual(normalizedCur, normalizedDes)
 	if err != nil {
 		return errors.Wrapf(err, "failed to compare plugin config")
 	}
 
-	if !contains {
+	if !result {
 		klog.Infof("plugin config changed, updating plugin: %s", *plugin.InstanceName)
 		klog.V(4).Info("plugin config diff: ", diff)
 
-		// Merge to preserve Kong's top-level internal fields before updating.
-		// Note: Kong-added defaults inside array elements are NOT preserved by merge
-		// (RFC 7386 replaces arrays atomically), but Kong will re-apply them.
 		err = util.JsonMerge(curPlugin.Config, plugin.Config, &plugin.Config)
 		if err != nil {
 			return errors.Wrapf(err, "failed to merge plugin config")
