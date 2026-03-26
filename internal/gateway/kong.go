@@ -283,19 +283,23 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 		return nil
 	}
 
-	err = util.JsonMerge(curPlugin.Config, plugin.Config, &plugin.Config)
-	if err != nil {
-		return errors.Wrapf(err, "failed to merge plugin config")
-	}
-
-	result, diff, err := util.JsonEqual(curPlugin.Config, plugin.Config)
+	// Use subset comparison: check if Kong's current config already contains all desired fields.
+	// This avoids false diffs from Kong-added defaults inside array elements, which are lost
+	// when RFC 7386 JSON Merge Patch replaces arrays atomically.
+	contains, diff, err := util.JsonContains(curPlugin.Config, plugin.Config)
 	if err != nil {
 		return errors.Wrapf(err, "failed to compare plugin config")
 	}
 
-	if !result {
+	if !contains {
 		klog.Infof("plugin config changed, updating plugin: %s", *plugin.InstanceName)
 		klog.V(4).Info("plugin config diff: ", diff)
+
+		// Merge to preserve Kong's internal fields before updating
+		err = util.JsonMerge(curPlugin.Config, plugin.Config, &plugin.Config)
+		if err != nil {
+			return errors.Wrapf(err, "failed to merge plugin config")
+		}
 
 		curPlugin.Config = plugin.Config
 

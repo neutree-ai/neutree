@@ -38,39 +38,125 @@ func TestJsonEqual(t *testing.T) {
 			obj2:     map[string]interface{}{"nested": map[string]interface{}{"a": "b"}},
 			expected: true,
 		},
-		{
-			name: "array with null field vs array without field",
-			obj1: map[string]interface{}{
-				"upstreams": []interface{}{
-					map[string]interface{}{"host": "example.com", "auth_header": nil},
-				},
-			},
-			obj2: map[string]interface{}{
-				"upstreams": []interface{}{
-					map[string]interface{}{"host": "example.com"},
-				},
-			},
-			expected: false,
-		},
-		{
-			name: "array entries identical without null fields",
-			obj1: map[string]interface{}{
-				"upstreams": []interface{}{
-					map[string]interface{}{"host": "example.com", "port": float64(443)},
-				},
-			},
-			obj2: map[string]interface{}{
-				"upstreams": []interface{}{
-					map[string]interface{}{"host": "example.com", "port": float64(443)},
-				},
-			},
-			expected: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, diff, err := JsonEqual(tt.obj1, tt.obj2)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result, "diff: %s", diff)
+		})
+	}
+}
+
+func TestJsonContains(t *testing.T) {
+	tests := []struct {
+		name     string
+		current  interface{}
+		desired  interface{}
+		expected bool
+	}{
+		{
+			name:     "identical objects",
+			current:  map[string]interface{}{"key": "value"},
+			desired:  map[string]interface{}{"key": "value"},
+			expected: true,
+		},
+		{
+			name:     "current has extra fields",
+			current:  map[string]interface{}{"key": "value", "extra": "field"},
+			desired:  map[string]interface{}{"key": "value"},
+			expected: true,
+		},
+		{
+			name:     "desired has field not in current",
+			current:  map[string]interface{}{"key": "value"},
+			desired:  map[string]interface{}{"key": "value", "missing": "field"},
+			expected: false,
+		},
+		{
+			name:     "different values for same key",
+			current:  map[string]interface{}{"key": "value1"},
+			desired:  map[string]interface{}{"key": "value2"},
+			expected: false,
+		},
+		{
+			name: "nested objects - current has extras",
+			current: map[string]interface{}{
+				"nested": map[string]interface{}{"a": "b", "extra": "c"},
+			},
+			desired: map[string]interface{}{
+				"nested": map[string]interface{}{"a": "b"},
+			},
+			expected: true,
+		},
+		{
+			name: "array elements - current has extra fields per element",
+			current: map[string]interface{}{
+				"items": []interface{}{
+					map[string]interface{}{"host": "x", "port": float64(443), "timeout": float64(60000)},
+				},
+			},
+			desired: map[string]interface{}{
+				"items": []interface{}{
+					map[string]interface{}{"host": "x", "port": float64(443)},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "array length mismatch",
+			current: map[string]interface{}{
+				"items": []interface{}{
+					map[string]interface{}{"host": "x"},
+				},
+			},
+			desired: map[string]interface{}{
+				"items": []interface{}{
+					map[string]interface{}{"host": "x"},
+					map[string]interface{}{"host": "y"},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "int vs float64 normalization via JSON round-trip",
+			current: map[string]interface{}{
+				"port": float64(443),
+			},
+			desired: map[string]interface{}{
+				"port": 443, // Go int, normalized to float64 by JSON round-trip
+			},
+			expected: true,
+		},
+		{
+			name: "desired nil field - current missing",
+			current: map[string]interface{}{
+				"key": "value",
+			},
+			desired: map[string]interface{}{
+				"key":         "value",
+				"auth_header": nil,
+			},
+			expected: true,
+		},
+		{
+			name: "desired nil field - current has value",
+			current: map[string]interface{}{
+				"key":         "value",
+				"auth_header": "Bearer xxx",
+			},
+			desired: map[string]interface{}{
+				"key":         "value",
+				"auth_header": nil,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, diff, err := JsonContains(tt.current, tt.desired)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result, "diff: %s", diff)
 		})
@@ -123,42 +209,52 @@ func TestJsonMerge(t *testing.T) {
 	}
 }
 
-// TestNullFieldCausesInstableComparison demonstrates that explicit null values
-// in plugin configs can cause instable comparisons when Kong strips nulls on return.
-// This is the root cause of continuous plugin update loops.
-func TestNullFieldCausesInstableComparison(t *testing.T) {
-	// Simulate what Kong returns (no null fields)
+// TestKongDefaultFieldsInArraysCausesContinuousUpdate demonstrates the root cause:
+// Kong adds default fields to plugin config array entries. Since JSON Merge Patch (RFC 7386)
+// replaces arrays atomically, those defaults are lost during merge, causing a persistent diff.
+// The fix uses JsonContains (subset comparison) instead of JsonEqual for the comparison step.
+func TestKongDefaultFieldsInArraysCausesContinuousUpdate(t *testing.T) {
+	// Kong returns config with default fields added to upstream entries
 	kongConfig := map[string]interface{}{
 		"route_prefix": "/workspace/ws/external-endpoint/ep",
 		"upstreams": []interface{}{
 			map[string]interface{}{
-				"scheme": "https",
-				"host":   "api.example.com",
-				"port":   float64(443),
-				"path":   "/v1",
+				"scheme":          "https",
+				"host":            "api.example.com",
+				"port":            float64(443),
+				"path":            "/v1",
+				"model_mapping":   map[string]interface{}{"gpt-4": "gpt-4"},
+				"connect_timeout": float64(60000), // Kong-added default
+				"send_timeout":    float64(60000), // Kong-added default
 			},
 		},
 	}
 
-	// Desired config WITHOUT explicit nil values (the fix)
-	desiredConfigFixed := map[string]interface{}{
+	// Our desired config (only includes fields we manage)
+	desiredConfig := map[string]interface{}{
 		"route_prefix": "/workspace/ws/external-endpoint/ep",
 		"upstreams": []map[string]interface{}{
 			{
-				"scheme": "https",
-				"host":   "api.example.com",
-				"port":   443,
-				"path":   "/v1",
+				"scheme":        "https",
+				"host":          "api.example.com",
+				"port":          float64(443),
+				"path":          "/v1",
+				"model_mapping": map[string]string{"gpt-4": "gpt-4"},
 			},
 		},
 	}
 
-	// After merge, the desired config should match Kong's config
-	var mergedFixed map[string]interface{}
-	err := JsonMerge(kongConfig, desiredConfigFixed, &mergedFixed)
+	// OLD behavior: JsonMerge + JsonEqual → continuous update loop
+	var merged map[string]interface{}
+	err := JsonMerge(kongConfig, desiredConfig, &merged)
 	require.NoError(t, err)
 
-	result, _, err := JsonEqual(kongConfig, mergedFixed)
+	equalResult, _, err := JsonEqual(kongConfig, merged)
 	require.NoError(t, err)
-	assert.True(t, result, "fixed config should be stable: no diff after merge with Kong's config")
+	assert.False(t, equalResult, "JsonEqual after merge should detect diff due to lost Kong defaults in array")
+
+	// NEW behavior: JsonContains → stable comparison (no false positive)
+	containsResult, _, err := JsonContains(kongConfig, desiredConfig)
+	require.NoError(t, err)
+	assert.True(t, containsResult, "JsonContains should confirm Kong's config already contains all desired fields")
 }
