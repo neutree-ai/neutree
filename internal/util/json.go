@@ -34,10 +34,16 @@ func JsonEqual(obj1, obj2 interface{}) (bool, string, error) {
 	return false, diff, nil
 }
 
-// JsonContains checks if all fields in desired exist in current with matching values.
-// For objects, every key-value pair in desired must exist in current (current may have extra keys).
-// For arrays, both must have the same length, and each element in desired must be contained
-// in the corresponding element of current.
+// JsonContains checks whether the JSON value `current` satisfies the constraints expressed by `desired`.
+// For objects, every key in `desired` constrains the corresponding field in `current`:
+//   - If the value in `desired` is non-nil, `current` must have that field present with a matching value
+//     (though it may also have additional fields not mentioned in `desired`).
+//   - If the value in `desired` is nil, the field in `current` may be missing or explicitly null, but must
+//     not be present with a non-null value.
+//
+// For arrays, `current` and `desired` must have the same length, and elements are compared positionally:
+// each element in `desired` must be contained in the element at the same index in `current`. This is not
+// a general subset/containment check for arrays.
 // Both inputs are normalized through JSON round-trip to ensure consistent types (e.g., int → float64).
 func JsonContains(current, desired interface{}) (bool, string, error) {
 	curJSON, err := json.Marshal(current)
