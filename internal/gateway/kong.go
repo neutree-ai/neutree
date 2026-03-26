@@ -283,21 +283,25 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 		return nil
 	}
 
-	// Normalize both configs to handle Kong's storage quirks:
-	// - Kong stores explicit null for unset fields (e.g. auth_header: null)
-	// - Kong converts nil maps to empty objects (e.g. model_mapping: {})
-	// Stripping nulls and empty maps from both sides ensures stable comparison.
+	// Merge desired config into current to preserve Kong's internal fields,
+	// then normalize both sides to handle Kong's storage quirks
+	// (explicit nulls for unset fields, nil maps stored as empty objects {}).
+	err = util.JsonMerge(curPlugin.Config, plugin.Config, &plugin.Config)
+	if err != nil {
+		return errors.Wrapf(err, "failed to merge plugin config")
+	}
+
 	normalizedCur, err := util.NormalizeJSON(curPlugin.Config)
 	if err != nil {
 		return errors.Wrapf(err, "failed to normalize current plugin config")
 	}
 
-	normalizedDes, err := util.NormalizeJSON(plugin.Config)
+	normalizedMerged, err := util.NormalizeJSON(plugin.Config)
 	if err != nil {
-		return errors.Wrapf(err, "failed to normalize desired plugin config")
+		return errors.Wrapf(err, "failed to normalize merged plugin config")
 	}
 
-	result, diff, err := util.JsonEqual(normalizedCur, normalizedDes)
+	result, diff, err := util.JsonEqual(normalizedCur, normalizedMerged)
 	if err != nil {
 		return errors.Wrapf(err, "failed to compare plugin config")
 	}
@@ -305,11 +309,6 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 	if !result {
 		klog.Infof("plugin config changed, updating plugin: %s", *plugin.InstanceName)
 		klog.V(4).Info("plugin config diff: ", diff)
-
-		err = util.JsonMerge(curPlugin.Config, plugin.Config, &plugin.Config)
-		if err != nil {
-			return errors.Wrapf(err, "failed to merge plugin config")
-		}
 
 		curPlugin.Config = plugin.Config
 
