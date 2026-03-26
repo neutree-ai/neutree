@@ -38,6 +38,11 @@ RUN cat > /entrypoint.sh <<'EOF'
 #!/bin/bash
 set -e
 
+# Set nofile ulimit explicitly to avoid rpcbind memory allocation issues
+ulimit -Sn 65536 2>/dev/null || echo "Warning: failed to set soft nofile limit to 65536" >&2
+ulimit -Hn 65536 2>/dev/null || echo "Warning: failed to set hard nofile limit to 65536" >&2
+echo "Effective nofile limits: soft=$(ulimit -Sn) hard=$(ulimit -Hn)"
+
 # Start rpcbind in background
 /sbin/rpcbind -w
 echo "rpcbind started"
