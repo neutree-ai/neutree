@@ -809,12 +809,13 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			}
 
 			upstreamEntry = map[string]interface{}{
-				"model_mapping": entry.ModelMapping,
-				"scheme":        scheme,
-				"host":          host,
-				"port":          port,
-				"path":          path,
-				"auth_header":   nil,
+				"scheme": scheme,
+				"host":   host,
+				"port":   port,
+				"path":   path,
+			}
+			if entry.ModelMapping != nil {
+				upstreamEntry["model_mapping"] = entry.ModelMapping
 			}
 		case entry.Upstream != nil:
 			uc, err := util.ParseURLComponents(entry.Upstream.URL)
@@ -823,12 +824,13 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			}
 
 			upstreamEntry = map[string]interface{}{
-				"model_mapping": entry.ModelMapping,
-				"scheme":        uc.Scheme,
-				"host":          uc.Host,
-				"port":          uc.Port,
-				"path":          uc.Path,
-				"auth_header":   nil,
+				"scheme": uc.Scheme,
+				"host":   uc.Host,
+				"port":   uc.Port,
+				"path":   uc.Path,
+			}
+			if entry.ModelMapping != nil {
+				upstreamEntry["model_mapping"] = entry.ModelMapping
 			}
 
 			if entry.Auth != nil {
