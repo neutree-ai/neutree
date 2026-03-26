@@ -659,6 +659,64 @@ func TestEndpointToApplication_RouteConsistency(t *testing.T) {
 	assert.Equal(t, "/production/chat-model", app.RoutePrefix)
 }
 
+func TestEndpointToApplication_ImportPathStripsVariantSuffix(t *testing.T) {
+	tests := []struct {
+		name               string
+		engineVersion      string
+		expectedImportPath string
+	}{
+		{
+			name:               "plain version",
+			engineVersion:      "v0.11.2",
+			expectedImportPath: "serve.vllm.v0_11_2.app:app_builder",
+		},
+		{
+			name:               "cuda variant stripped",
+			engineVersion:      "v0.17.1-cuda130",
+			expectedImportPath: "serve.vllm.v0_17_1.app:app_builder",
+		},
+		{
+			name:               "rocm variant stripped",
+			engineVersion:      "v0.17.1-rocm60",
+			expectedImportPath: "serve.vllm.v0_17_1.app:app_builder",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint := &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "ws",
+					Name:      "ep",
+				},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine:  "vllm",
+						Version: tt.engineVersion,
+					},
+					Resources: &v1.ResourceSpec{
+						Accelerator: map[string]string{},
+					},
+					DeploymentOptions: map[string]interface{}{},
+					Model: &v1.ModelSpec{
+						Name: "test-model",
+					},
+				},
+			}
+
+			modelRegistry := &v1.ModelRegistry{
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.HuggingFaceModelRegistryType,
+				},
+			}
+
+			app, err := EndpointToApplication(endpoint, &v1.Cluster{}, modelRegistry, nil, nil, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedImportPath, app.ImportPath)
+		})
+	}
+}
+
 func TestEndpointToApplication_SchedulerAliasRoundrobinToPow2(t *testing.T) {
 	endpoint := &v1.Endpoint{
 		Metadata: &v1.Metadata{
