@@ -41,6 +41,10 @@ func TestWorkspaceUserPermissions_HasExpectedPermissions(t *testing.T) {
 		"model_catalog:create",
 		"model_catalog:update",
 		"model_catalog:delete",
+		"external_endpoint:read",
+		"external_endpoint:create",
+		"external_endpoint:update",
+		"external_endpoint:delete",
 	}
 
 	var permissions []string
