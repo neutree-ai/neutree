@@ -295,7 +295,9 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 		klog.Infof("plugin config changed, updating plugin: %s", *plugin.InstanceName)
 		klog.V(4).Info("plugin config diff: ", diff)
 
-		// Merge to preserve Kong's internal fields before updating
+		// Merge to preserve Kong's top-level internal fields before updating.
+		// Note: Kong-added defaults inside array elements are NOT preserved by merge
+		// (RFC 7386 replaces arrays atomically), but Kong will re-apply them.
 		err = util.JsonMerge(curPlugin.Config, plugin.Config, &plugin.Config)
 		if err != nil {
 			return errors.Wrapf(err, "failed to merge plugin config")
@@ -813,13 +815,12 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			}
 
 			upstreamEntry = map[string]interface{}{
-				"scheme": scheme,
-				"host":   host,
-				"port":   port,
-				"path":   path,
-			}
-			if entry.ModelMapping != nil {
-				upstreamEntry["model_mapping"] = entry.ModelMapping
+				"model_mapping": entry.ModelMapping,
+				"scheme":        scheme,
+				"host":          host,
+				"port":          port,
+				"path":          path,
+				"auth_header":   nil,
 			}
 		case entry.Upstream != nil:
 			uc, err := util.ParseURLComponents(entry.Upstream.URL)
@@ -828,13 +829,12 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			}
 
 			upstreamEntry = map[string]interface{}{
-				"scheme": uc.Scheme,
-				"host":   uc.Host,
-				"port":   uc.Port,
-				"path":   uc.Path,
-			}
-			if entry.ModelMapping != nil {
-				upstreamEntry["model_mapping"] = entry.ModelMapping
+				"model_mapping": entry.ModelMapping,
+				"scheme":        uc.Scheme,
+				"host":          uc.Host,
+				"port":          uc.Port,
+				"path":          uc.Path,
+				"auth_header":   nil,
 			}
 
 			if entry.Auth != nil {

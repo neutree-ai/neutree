@@ -230,7 +230,7 @@ func TestKongDefaultFieldsInArraysCausesContinuousUpdate(t *testing.T) {
 		},
 	}
 
-	// Our desired config (only includes fields we manage)
+	// Our desired config (includes all managed fields, nil for unset ones)
 	desiredConfig := map[string]interface{}{
 		"route_prefix": "/workspace/ws/external-endpoint/ep",
 		"upstreams": []map[string]interface{}{
@@ -240,6 +240,7 @@ func TestKongDefaultFieldsInArraysCausesContinuousUpdate(t *testing.T) {
 				"port":          float64(443),
 				"path":          "/v1",
 				"model_mapping": map[string]string{"gpt-4": "gpt-4"},
+				"auth_header":   nil, // explicitly nil — ensures stale auth is detected
 			},
 		},
 	}
@@ -257,4 +258,42 @@ func TestKongDefaultFieldsInArraysCausesContinuousUpdate(t *testing.T) {
 	containsResult, _, err := JsonContains(kongConfig, desiredConfig)
 	require.NoError(t, err)
 	assert.True(t, containsResult, "JsonContains should confirm Kong's config already contains all desired fields")
+}
+
+// TestAuthRemovalDetectedByJsonContains verifies that removing auth from an upstream
+// entry is correctly detected as a config change.
+func TestAuthRemovalDetectedByJsonContains(t *testing.T) {
+	// Kong has old auth token
+	kongConfig := map[string]interface{}{
+		"route_prefix": "/workspace/ws/external-endpoint/ep",
+		"upstreams": []interface{}{
+			map[string]interface{}{
+				"scheme":        "https",
+				"host":          "api.example.com",
+				"port":          float64(443),
+				"path":          "/v1",
+				"model_mapping": map[string]interface{}{"gpt-4": "gpt-4"},
+				"auth_header":   "Bearer old_token",
+			},
+		},
+	}
+
+	// User removes auth — desired has auth_header: nil
+	desiredConfig := map[string]interface{}{
+		"route_prefix": "/workspace/ws/external-endpoint/ep",
+		"upstreams": []map[string]interface{}{
+			{
+				"scheme":        "https",
+				"host":          "api.example.com",
+				"port":          float64(443),
+				"path":          "/v1",
+				"model_mapping": map[string]string{"gpt-4": "gpt-4"},
+				"auth_header":   nil,
+			},
+		},
+	}
+
+	result, _, err := JsonContains(kongConfig, desiredConfig)
+	require.NoError(t, err)
+	assert.False(t, result, "JsonContains should detect that Kong has a stale auth_header that needs to be removed")
 }
