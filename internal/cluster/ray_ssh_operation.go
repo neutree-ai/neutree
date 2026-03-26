@@ -464,7 +464,9 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileContext) (bool, string, error) {
 	_, err := reconcileCtx.rayService.GetClusterMetadata()
 	if err != nil {
-		return false, "", nil // dashboard unreachable
+		klog.V(4).Infof("Head node dashboard unreachable for cluster %s: %v",
+			reconcileCtx.Cluster.Metadata.WorkspaceName(), err)
+		return false, "", nil
 	}
 
 	nodes, err := reconcileCtx.rayService.ListNodes()

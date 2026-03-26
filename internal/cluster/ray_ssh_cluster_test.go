@@ -193,23 +193,51 @@ func TestReconcileHeadNode(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "reinit head node success",
+			name: "rebuild head node success - dashboard unreachable",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// checkHeadNodeHealth: dashboard unreachable → not alive
 				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
+				// rebuildHeadNode: downCluster (Execute) then upCluster (GetNodeRuntimeConfig + Execute)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// initHeadNode: post-start GetClusterMetadata verify
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
 			},
 			wantErr: false,
 		},
 		{
-			name: "reinit head node failed - down cluster fails",
+			name: "rebuild head node failed - down cluster fails",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
-				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError)
-				// downCluster fails
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError)
+				// checkHeadNodeHealth: dashboard unreachable → not alive
+				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
+				// rebuildHeadNode: downCluster fails
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError).Once()
 			},
 			wantErr: true,
+		},
+		{
+			name: "init head node success - uninitialized cluster",
+			cluster: &v1.Cluster{
+				ID: *pointer.Int(1),
+				Metadata: &v1.Metadata{
+					Name: "test",
+				},
+				Status: &v1.ClusterStatus{
+					Initialized:     false,
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+				},
+			},
+			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// checkHeadNodeHealth: dashboard unreachable → not alive
+				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
+				// initHeadNode (no downCluster): upCluster (GetNodeRuntimeConfig + Execute)
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// initHeadNode: post-start GetClusterMetadata verify
+				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
+			},
+			wantErr: false,
 		},
 		{
 			name: "head version matches spec - no rebuild needed",
