@@ -133,6 +133,8 @@ func RunSSH(user, host, keyFile, command string) CLIResult {
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "ConnectTimeout=10",
+		"-o", "BatchMode=yes",
+		"-o", "IdentitiesOnly=yes",
 		"-i", keyFile,
 		fmt.Sprintf("%s@%s", user, host),
 		command,

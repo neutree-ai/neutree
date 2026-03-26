@@ -283,7 +283,7 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 
 	// Head is down (dashboard unreachable or raylet dead) - write recovery status for user feedback
 	WriteRecoveryStatus(reconcileCtx.Cluster, c.storage,
-		fmt.Sprintf("head node %s unhealthy (raylet not alive), attempting recovery", reconcileCtx.sshClusterConfig.Provider.HeadIP))
+		fmt.Sprintf("head node %s unhealthy (dashboard unreachable or raylet not alive), attempting recovery", reconcileCtx.sshClusterConfig.Provider.HeadIP))
 
 	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.Phase != v1.ClusterPhaseInitializing {
 		klog.Infof("Head node not ready, try to up cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
