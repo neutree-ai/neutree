@@ -394,7 +394,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 		BeforeAll(func() {
 			kubeconfig = requireK8sEnv()
 			upgradeVersion = requireUpgradeVersion()
-			if Cfg.ModelName == "" {
+			if profileModelName() == "" {
 				Skip("E2E_MODEL_NAME not set, skipping K8s endpoint no-rollout tests")
 			}
 
@@ -433,7 +433,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 		It("should deploy endpoint and record baseline", func() {
 			By("Creating endpoint")
-			yamlPath := applyEndpointOnCluster(epName, clusterName, Cfg.EngineVersionB)
+			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersionB())
 			defer os.Remove(yamlPath)
 
 			By("Waiting for endpoint Running")
@@ -526,7 +526,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("upgrade"), func() {
 
 		It("should trigger rolling update when user changes endpoint", func() {
 			By("Rendering endpoint template and modifying replicas to 2")
-			yamlPath := applyEndpointOnCluster(epName, clusterName, Cfg.EngineVersionB)
+			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersionB())
 			defer os.Remove(yamlPath)
 
 			// Read rendered YAML, change replicas from 1 to 2, re-apply
