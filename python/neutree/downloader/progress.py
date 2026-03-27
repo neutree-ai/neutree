@@ -84,7 +84,7 @@ class ProgressReporter:
         self._logger = dest_logger
         self._total_size = total_size
         self._label = label
-        self._interval = interval if interval is not None else self._interval_from_env()
+        self._interval = max(self._MIN_INTERVAL, interval) if interval is not None else self._interval_from_env()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._start_time: float | None = None
@@ -113,13 +113,22 @@ class ProgressReporter:
         elapsed = time.time() - self._start_time if self._start_time is not None else 0
         final_size = get_dir_size(self._dest)
         speed = final_size / elapsed if elapsed > 0 else 0
-        self._logger.info(
-            "%s completed: %s in %.0fs (%s/s)",
-            self._label,
-            format_size(final_size),
-            elapsed,
-            format_size(speed),
-        )
+        if exc_type is None:
+            self._logger.info(
+                "%s completed: %s in %.0fs (%s/s)",
+                self._label,
+                format_size(final_size),
+                elapsed,
+                format_size(speed),
+            )
+        else:
+            self._logger.warning(
+                "%s aborted after %.0fs (%s transferred): %s",
+                self._label,
+                elapsed,
+                format_size(final_size),
+                exc_val,
+            )
 
     # ------------------------------------------------------------------
     # Internal
