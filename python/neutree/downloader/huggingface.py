@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any
 
 from .base import Downloader
 from huggingface_hub.hf_api import RepoFile
+from .progress import is_interactive, ProgressReporter
 from .utils import (
     ensure_dir,
     resolve_allow_pattern,
@@ -73,7 +74,16 @@ class HuggingFaceDownloader(Downloader):
         # Empty string would be treated as an invalid branch name
         version = metadata.get("version") or None if metadata else None
 
-        hf.snapshot_download(repo_id=repo_id, allow_patterns=allow_pattern, local_dir=dest, token=token, revision=version)
+        # In non-TTY environments (K8s init containers) tqdm progress bars are
+        # invisible.  Disable them explicitly and use our log-based reporter.
+        if not is_interactive():
+            try:
+                hf.utils.disable_progress_bars()
+            except Exception:
+                pass  # older huggingface_hub versions may lack this helper
+
+        with ProgressReporter(dest, logger, label="HuggingFace download"):
+            hf.snapshot_download(repo_id=repo_id, allow_patterns=allow_pattern, local_dir=dest, token=token, revision=version)
 
         # Verify downloaded files if not skipped
         if not should_skip_verification():

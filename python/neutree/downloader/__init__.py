@@ -12,6 +12,7 @@ __all__ = [
     "huggingface",
     "local",
     "entity",
+    "progress",
     "utils",
     "get_downloader",
     "build_request_from_model_args",

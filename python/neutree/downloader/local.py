@@ -7,6 +7,7 @@ import shutil
 import fnmatch
 
 from .base import Downloader
+from .progress import ProgressReporter, get_dir_size
 from .utils import (
     ensure_dir,
     resolve_allow_pattern,
@@ -54,6 +55,18 @@ class LocalDownloader(Downloader):
 
         allow_pattern = resolve_allow_pattern(metadata)
 
+        # Compute total source size for percentage-based progress reporting
+        total_size = get_dir_size(src)
+
+        with ProgressReporter(dest, logger, total_size=total_size, label="Local copy"):
+            self._copy_files(src, dest, allow_pattern=allow_pattern, recursive=recursive, overwrite=overwrite)
+
+        # Verify copied files against source-of-truth checksums
+        if not should_skip_verification():
+            self._verify_copied_files(dest)
+
+    def _copy_files(self, src: str, dest: str, *, allow_pattern: Optional[str], recursive: bool, overwrite: bool) -> None:
+        """Copy files from source to destination."""
         if recursive:
             # copy all files; skip existing unless overwrite
             for root, dirs, files in os.walk(src):
@@ -84,10 +97,6 @@ class LocalDownloader(Downloader):
                     if os.path.exists(t) and not overwrite:
                         continue
                     shutil.copy2(s, t)
-
-        # Verify copied files against source-of-truth checksums
-        if not should_skip_verification():
-            self._verify_copied_files(dest)
 
     def _verify_copied_files(self, dest: str) -> None:
         """Verify copied files against .neutree/checksums/ (source of truth).
