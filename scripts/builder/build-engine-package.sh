@@ -369,10 +369,14 @@ else
         IMAGE_NAME="${PARTS[1]}"
         IMAGE_TAG="${PARTS[2]}"
 
+        IMAGE_FILE="images/${IMAGE_NAME//\//-}-${IMAGE_TAG}.tar"
+        IMAGE_FILE_BASENAME=$(basename "$IMAGE_FILE")
+
         IMAGE_ENTRIES="${IMAGE_ENTRIES}
     - accelerator: \"$ACCELERATOR\"
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
+      image_file: \"images/$IMAGE_FILE_BASENAME\"
       platform: \"linux/amd64\""
     done
 fi
