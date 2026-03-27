@@ -156,6 +156,7 @@ Options:
     -c, --schema FILE         Path to engine_schema.json file (optional)
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
+    --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
 Examples:
@@ -197,6 +198,13 @@ Examples:
         -c ./engine_schema.json \\
         -d "vLLM engine with values schema"
 
+    # Generate only the manifest file (no Docker image export or packaging)
+    $0 --manifest-only -n vllm -v v0.5.0 \\
+        -i "nvidia-gpu:neutree/vllm-cuda:v0.5.0" \\
+        -s "generate" \\
+        -t ./template \\
+        -d "vLLM engine manifest only"
+
 EOF
 }
 
@@ -210,6 +218,7 @@ TEMPLATE_DIR=""
 SCHEMA_FILE=""
 OUTPUT_FILE=""
 DESCRIPTION=""
+MANIFEST_ONLY=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -248,6 +257,10 @@ while [[ $# -gt 0 ]]; do
         -d|--description)
             DESCRIPTION="$2"
             shift 2
+            ;;
+        --manifest-only)
+            MANIFEST_ONLY="true"
+            shift
             ;;
         -h|--help)
             show_usage
@@ -298,53 +311,71 @@ mkdir -p "$IMAGES_DIR"
 print_info "Building engine version package: $ENGINE_NAME $ENGINE_VERSION"
 print_info "Temporary directory: $TEMP_DIR"
 
-# Export Docker images
-print_info "Exporting Docker images..."
 IFS=',' read -ra IMAGE_SPECS <<< "$IMAGES"
 IMAGE_ENTRIES=""
 
-for spec in "${IMAGE_SPECS[@]}"; do
-    IFS=':' read -ra PARTS <<< "$spec"
-    ACCELERATOR="${PARTS[0]}"
-    IMAGE_NAME="${PARTS[1]}"
-    IMAGE_TAG="${PARTS[2]}"
+if [ -z "$MANIFEST_ONLY" ]; then
+    # Export Docker images
+    print_info "Exporting Docker images..."
 
-    FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
-    IMAGE_FILE="images/${IMAGE_NAME//\//-}-${IMAGE_TAG}.tar"
-    IMAGE_FILE_BASENAME=$(basename "$IMAGE_FILE")
-    OUTPUT_TAR="$IMAGES_DIR/$IMAGE_FILE_BASENAME"
+    for spec in "${IMAGE_SPECS[@]}"; do
+        IFS=':' read -ra PARTS <<< "$spec"
+        ACCELERATOR="${PARTS[0]}"
+        IMAGE_NAME="${PARTS[1]}"
+        IMAGE_TAG="${PARTS[2]}"
 
-    print_info "Exporting $FULL_IMAGE for $ACCELERATOR..."
+        FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
+        IMAGE_FILE="images/${IMAGE_NAME//\//-}-${IMAGE_TAG}.tar"
+        IMAGE_FILE_BASENAME=$(basename "$IMAGE_FILE")
+        OUTPUT_TAR="$IMAGES_DIR/$IMAGE_FILE_BASENAME"
 
-    # Check if image exists, if not, pull it
-    if ! docker image inspect "$FULL_IMAGE" > /dev/null 2>&1; then
-        print_warn "Image $FULL_IMAGE not found locally. Pulling image..."
-        if ! docker pull "$FULL_IMAGE"; then
-            print_error "Failed to pull image $FULL_IMAGE"
-            exit 1
+        print_info "Exporting $FULL_IMAGE for $ACCELERATOR..."
+
+        # Check if image exists, if not, pull it
+        if ! docker image inspect "$FULL_IMAGE" > /dev/null 2>&1; then
+            print_warn "Image $FULL_IMAGE not found locally. Pulling image..."
+            if ! docker pull "$FULL_IMAGE"; then
+                print_error "Failed to pull image $FULL_IMAGE"
+                exit 1
+            fi
+            print_info "Successfully pulled $FULL_IMAGE"
         fi
-        print_info "Successfully pulled $FULL_IMAGE"
-    fi
 
-    docker save "$FULL_IMAGE" -o "$OUTPUT_TAR"
+        docker save "$FULL_IMAGE" -o "$OUTPUT_TAR"
 
-    if [ $? -eq 0 ]; then
-        IMAGE_SIZE=$(stat -f%z "$OUTPUT_TAR" 2>/dev/null || stat -c%s "$OUTPUT_TAR" 2>/dev/null)
-        print_info "Exported $FULL_IMAGE ($(numfmt --to=iec-i --suffix=B $IMAGE_SIZE 2>/dev/null || echo $IMAGE_SIZE bytes))"
+        if [ $? -eq 0 ]; then
+            IMAGE_SIZE=$(stat -f%z "$OUTPUT_TAR" 2>/dev/null || stat -c%s "$OUTPUT_TAR" 2>/dev/null)
+            print_info "Exported $FULL_IMAGE ($(numfmt --to=iec-i --suffix=B $IMAGE_SIZE 2>/dev/null || echo $IMAGE_SIZE bytes))"
 
-        # Add to manifest entries
-        IMAGE_ENTRIES="${IMAGE_ENTRIES}
+            # Add to manifest entries
+            IMAGE_ENTRIES="${IMAGE_ENTRIES}
     - accelerator: \"$ACCELERATOR\"
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
       image_file: \"images/$IMAGE_FILE_BASENAME\"
       platform: \"linux/amd64\"
       size: $IMAGE_SIZE"
-    else
-        print_error "Failed to export $FULL_IMAGE"
-        exit 1
-    fi
-done
+        else
+            print_error "Failed to export $FULL_IMAGE"
+            exit 1
+        fi
+    done
+else
+    # Manifest-only mode: build image entries without Docker export
+    print_info "Manifest-only mode: skipping Docker image export"
+    for spec in "${IMAGE_SPECS[@]}"; do
+        IFS=':' read -ra PARTS <<< "$spec"
+        ACCELERATOR="${PARTS[0]}"
+        IMAGE_NAME="${PARTS[1]}"
+        IMAGE_TAG="${PARTS[2]}"
+
+        IMAGE_ENTRIES="${IMAGE_ENTRIES}
+    - accelerator: \"$ACCELERATOR\"
+      image_name: \"$IMAGE_NAME\"
+      tag: \"$IMAGE_TAG\"
+      platform: \"linux/amd64\""
+    done
+fi
 
 # Create manifest
 print_info "Creating manifest..."
@@ -497,42 +528,59 @@ ${SUPPORTED_TASKS_SECTION}
 EOF
 fi
 
-# Create the package
-print_info "Creating package archive: $OUTPUT_FILE"
-cd "$PACKAGE_DIR"
-tar -I "pigz -p 16" -cf "$OUTPUT_FILE" *
-cd - > /dev/null
+if [ -z "$MANIFEST_ONLY" ]; then
+    # Create the package
+    print_info "Creating package archive: $OUTPUT_FILE"
+    cd "$PACKAGE_DIR"
+    tar -I "pigz -p 16" -cf "$OUTPUT_FILE" *
+    cd - > /dev/null
 
-# Move to final location
-mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
+    # Move to final location
+    mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
 
-# Copy standalone manifest.yaml for release
-MANIFEST_OUTPUT="${ENGINE_NAME}-${ENGINE_VERSION}-manifest.yaml"
-cp "$PACKAGE_DIR/manifest.yaml" "$OUTPUT_DIR/$MANIFEST_OUTPUT"
-print_info "Standalone manifest copied to: $OUTPUT_DIR/$MANIFEST_OUTPUT"
-# Calculate checksum
-print_info "Calculating checksum..."
-if command -v md5sum &> /dev/null; then
-    md5sum "$OUTPUT_DIR/$OUTPUT_FILE" > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
+    # Copy standalone manifest.yaml for release
+    MANIFEST_OUTPUT="${ENGINE_NAME}-${ENGINE_VERSION}-manifest.yaml"
+    cp "$PACKAGE_DIR/manifest.yaml" "$OUTPUT_DIR/$MANIFEST_OUTPUT"
+    print_info "Standalone manifest copied to: $OUTPUT_DIR/$MANIFEST_OUTPUT"
+    # Calculate checksum
+    print_info "Calculating checksum..."
+    if command -v md5sum &> /dev/null; then
+        md5sum "$OUTPUT_DIR/$OUTPUT_FILE" > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
+    else
+        md5 "$OUTPUT_DIR/$OUTPUT_FILE" | awk '{print $4}' > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
+    fi
+
+    # Get package size
+    PACKAGE_SIZE=$(stat -f%z "$OUTPUT_DIR/$OUTPUT_FILE" 2>/dev/null || stat -c%s "$OUTPUT_DIR/$OUTPUT_FILE" 2>/dev/null)
+    print_info "Package created successfully!"
+    echo ""
+    echo "================================================"
+    echo "Package Information:"
+    echo "================================================"
+    echo "Name:        $ENGINE_NAME"
+    echo "Version:     $ENGINE_VERSION"
+    echo "File:        $OUTPUT_FILE"
+    echo "Size:        $(numfmt --to=iec-i --suffix=B $PACKAGE_SIZE 2>/dev/null || echo $PACKAGE_SIZE bytes)"
+    echo "================================================"
+    echo ""
+    print_info "You can now validate the package with:"
+    echo "    neutree-cli import validate --package $OUTPUT_FILE"
+    echo ""
+    print_info "Or import it with:"
+    echo "    neutree-cli import engine --package $OUTPUT_FILE --workspace <workspace> --api-key <api-key> --server-url <server-url>"
 else
-    md5 "$OUTPUT_DIR/$OUTPUT_FILE" | awk '{print $4}' > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
-fi
+    # Manifest-only: output just the manifest file
+    mkdir -p "$OUTPUT_DIR"
+    MANIFEST_OUTPUT="${ENGINE_NAME}-${ENGINE_VERSION}-manifest.yaml"
+    cp "$PACKAGE_DIR/manifest.yaml" "$OUTPUT_DIR/$MANIFEST_OUTPUT"
 
-# Get package size
-PACKAGE_SIZE=$(stat -f%z "$OUTPUT_DIR/$OUTPUT_FILE" 2>/dev/null || stat -c%s "$OUTPUT_DIR/$OUTPUT_FILE" 2>/dev/null)
-print_info "Package created successfully!"
-echo ""
-echo "================================================"
-echo "Package Information:"
-echo "================================================"
-echo "Name:        $ENGINE_NAME"
-echo "Version:     $ENGINE_VERSION"
-echo "File:        $OUTPUT_FILE"
-echo "Size:        $(numfmt --to=iec-i --suffix=B $PACKAGE_SIZE 2>/dev/null || echo $PACKAGE_SIZE bytes)"
-echo "================================================"
-echo ""
-print_info "You can now validate the package with:"
-echo "    neutree-cli import validate --package $OUTPUT_FILE"
-echo ""
-print_info "Or import it with:"
-echo "    neutree-cli import engine --package $OUTPUT_FILE --workspace <workspace> --api-key <api-key> --server-url <server-url>"
+    print_info "Manifest generated successfully!"
+    echo ""
+    echo "================================================"
+    echo "Manifest Information:"
+    echo "================================================"
+    echo "Name:        $ENGINE_NAME"
+    echo "Version:     $ENGINE_VERSION"
+    echo "File:        $OUTPUT_DIR/$MANIFEST_OUTPUT"
+    echo "================================================"
+fi

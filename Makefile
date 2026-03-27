@@ -341,6 +341,18 @@ build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENG
 		-o $(ENGINE_NAME)-$(ENGINE_VERSION).tar.gz \
 		-d "$(ENGINE_DESCRIPTION)"
 
+.PHONY: build-engine-manifest
+build-engine-manifest: ## Build engine manifest only (no Docker image export, configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION)
+	@mkdir -p $(ENGINE_PACKAGE_OUTPUT_DIR)
+	bash $(ENGINE_PACKAGE_SCRIPT) --manifest-only \
+		-n $(ENGINE_NAME) \
+		-v $(ENGINE_VERSION) \
+		-i "$(ENGINE_IMAGES)" \
+		-s "$(ENGINE_TASKS)" \
+		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/schema.json) \
+		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/templates) \
+		-d "$(ENGINE_DESCRIPTION)"
+
 .PHONY: sync-images-list
 sync-images-list: ## Sync images list for building package
 	helm template neutree ./deploy/chart/neutree \
