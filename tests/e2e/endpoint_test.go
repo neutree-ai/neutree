@@ -136,7 +136,16 @@ func parseEndpointClusterJSON(stdout string) clusterPreCheckJSON {
 }
 
 // applyEndpointWithTask renders the endpoint template with custom model/task and applies it.
-func applyEndpointWithTask(name, engineVersion, model, modelVer, task string) (yamlPath string) {
+// extraEngineArgs are appended after the profile-level engine_args (e.g. "enable_prefix_caching=false").
+func applyEndpointWithTask(name, engineVersion, model, modelVer, task string, extraEngineArgs ...string) (yamlPath string) {
+	argsYAML := engineArgsYAML()
+	for _, pair := range extraEngineArgs {
+		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if ok && k != "" {
+			argsYAML += fmt.Sprintf("\n      %s: %s", strings.TrimSpace(k), strings.TrimSpace(v))
+		}
+	}
+
 	defaults := map[string]string{
 		"E2E_ENDPOINT_NAME":       name,
 		"E2E_WORKSPACE":           profileWorkspace(),
@@ -149,7 +158,7 @@ func applyEndpointWithTask(name, engineVersion, model, modelVer, task string) (y
 		"E2E_MODEL_TASK":          task,
 		"E2E_ACCELERATOR_TYPE":    profileAcceleratorType(),
 		"E2E_ACCELERATOR_PRODUCT": profileAcceleratorProduct(),
-		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
+		"E2E_ENGINE_ARGS_YAML":    argsYAML,
 	}
 
 	yamlPath, err := renderTemplateToTempFile(
@@ -342,7 +351,8 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 		It("should deploy embedding endpoint and reach Running", func() {
 			yamlPath := applyEndpointWithTask(epName, profileEngineVersionB(),
-				profileEmbeddingModelName(), profileEmbeddingModelVersion(), "text-embedding")
+				profileEmbeddingModelName(), profileEmbeddingModelVersion(), "text-embedding",
+				"enable_prefix_caching=false")
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
@@ -409,7 +419,8 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 		It("should deploy rerank endpoint and reach Running", func() {
 			yamlPath := applyEndpointWithTask(epName, profileEngineVersionB(),
-				profileRerankModelName(), profileRerankModelVersion(), "text-rerank")
+				profileRerankModelName(), profileRerankModelVersion(), "text-rerank",
+				"enable_prefix_caching=false")
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
