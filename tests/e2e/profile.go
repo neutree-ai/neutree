@@ -301,11 +301,21 @@ func profileEndpointTimeout() string {
 	return "10m"
 }
 
-func profileEmbeddingModelName() string    { return profile.EmbeddingModel.Name }
-func profileEmbeddingModelVersion() string { return profile.EmbeddingModel.Version }
+func profileEmbeddingModelName() string { return profile.EmbeddingModel.Name }
+func profileEmbeddingModelVersion() string {
+	if profile.EmbeddingModel.Version != "" {
+		return profile.EmbeddingModel.Version
+	}
+	return "latest"
+}
 
-func profileRerankModelName() string    { return profile.RerankModel.Name }
-func profileRerankModelVersion() string { return profile.RerankModel.Version }
+func profileRerankModelName() string { return profile.RerankModel.Name }
+func profileRerankModelVersion() string {
+	if profile.RerankModel.Version != "" {
+		return profile.RerankModel.Version
+	}
+	return "latest"
+}
 
 func profileMockUpstreamHost() string {
 	if profile.MockUpstreamHost != "" {

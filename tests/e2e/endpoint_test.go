@@ -177,7 +177,7 @@ func applyEndpointWithTask(name, engineVersion, model, modelVer, task string, ex
 // doInferenceRequest sends a JSON POST to the given URL path and returns (status_code, body).
 func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, string) {
 	payloadBytes, err := json.Marshal(reqBody)
-	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "failed to marshal inference request")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to marshal inference request")
 
 	client := &http.Client{Timeout: 60 * time.Second}
 
@@ -185,16 +185,16 @@ func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, s
 		strings.TrimRight(serviceURL, "/")+path,
 		strings.NewReader(string(payloadBytes)),
 	)
-	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "failed to create inference request")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to create inference request")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+Cfg.APIKey)
 
 	resp, err := client.Do(req)
-	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "inference request failed")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "inference request failed")
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
-	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "failed to read inference response")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to read inference response")
 
 	return resp.StatusCode, string(body)
 }
@@ -266,7 +266,9 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 		})
 
 		AfterAll(func() {
-			deleteEndpoint(epName)
+			if epName != "" {
+				deleteEndpoint(epName)
+			}
 		})
 
 		It("should deploy with engine container and reach Running", func() {
@@ -457,10 +459,10 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 				score, ok := result["relevance_score"].(float64)
 				Expect(ok).To(BeTrue(), "relevance_score should be a number")
+				// Scores are expected in [0,1] for models with sigmoid-normalized output (e.g. BGE-Reranker).
 				Expect(score).To(BeNumerically(">=", 0.0))
 				Expect(score).To(BeNumerically("<=", 1.0))
 			}
 		})
-
 	})
 })
