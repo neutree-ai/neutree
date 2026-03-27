@@ -152,7 +152,7 @@ Options:
                               Comma-separated list of supported tasks
                               Example: generate,embedding
     -m, --manifest FILE       Path to manifest template file (optional)
-    -t, --template-dir DIR    Path to template directory containing template/kubernetes/default.yaml
+    -t, --template-dir DIR    Path to template directory containing kubernetes/default.yaml
     -c, --schema FILE         Path to engine_schema.json file (optional)
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
@@ -418,7 +418,7 @@ else
     # Check if template directory is provided
     DEPLOY_TEMPLATE_CONTENT=""
     if [ -n "$TEMPLATE_DIR" ]; then
-        TEMPLATE_BASE_DIR="$TEMPLATE_DIR/template"
+        TEMPLATE_BASE_DIR="$TEMPLATE_DIR"
         if [ -d "$TEMPLATE_BASE_DIR" ]; then
             print_info "Scanning template directory: $TEMPLATE_BASE_DIR"
             DEPLOY_TEMPLATE_CONTENT=$(scan_and_generate_deploy_templates "$TEMPLATE_BASE_DIR")
