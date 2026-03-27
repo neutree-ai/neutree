@@ -12,8 +12,6 @@ import sys
 import threading
 import time
 
-logger = logging.getLogger(__name__)
-
 
 def is_interactive() -> bool:
     """Return True when stderr is connected to an interactive terminal."""
@@ -112,7 +110,7 @@ class ProgressReporter:
         if self._thread is not None:
             self._thread.join(timeout=5.0)
         # Final summary
-        elapsed = time.time() - self._start_time
+        elapsed = time.time() - self._start_time if self._start_time is not None else 0
         final_size = get_dir_size(self._dest)
         speed = final_size / elapsed if elapsed > 0 else 0
         self._logger.info(

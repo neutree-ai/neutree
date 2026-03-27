@@ -61,9 +61,10 @@ class LocalDownloader(Downloader):
         with ProgressReporter(dest, logger, total_size=total_size, label="Local copy"):
             self._copy_files(src, dest, allow_pattern=allow_pattern, recursive=recursive, overwrite=overwrite)
 
-        # Verify copied files against source-of-truth checksums
-        if not should_skip_verification():
-            self._verify_copied_files(dest)
+            # Verify inside the progress context so users see activity during
+            # potentially slow SHA-256 hashing of large model files.
+            if not should_skip_verification():
+                self._verify_copied_files(dest)
 
     def _copy_files(self, src: str, dest: str, *, allow_pattern: Optional[str], recursive: bool, overwrite: bool) -> None:
         """Copy files from source to destination."""

@@ -4,28 +4,15 @@ Run with (from project root):
     PYTHONPATH=python python3 -m pytest python/neutree/downloader/test_progress.py -v
 """
 
-import hashlib
 import logging
 import os
 import shutil
 import sys
 import tempfile
-import types
 import unittest
 from unittest import mock
 
-# Provide stub huggingface_hub modules when the real package is absent.
-_fake_sha = types.ModuleType("huggingface_hub.utils.sha")
-_fake_sha.git_hash = lambda data: ""
-_fake_sha.sha_fileobj = lambda stream, bufsize=0: hashlib.sha256(stream.read()).digest()
-sys.modules.setdefault("huggingface_hub", types.ModuleType("huggingface_hub"))
-sys.modules.setdefault("huggingface_hub.utils", types.ModuleType("huggingface_hub.utils"))
-sys.modules.setdefault("huggingface_hub.utils.sha", _fake_sha)
-_fake_hf_api = types.ModuleType("huggingface_hub.hf_api")
-_fake_hf_api.RepoFile = type("RepoFile", (), {})
-sys.modules.setdefault("huggingface_hub.hf_api", _fake_hf_api)
-
-from neutree.downloader.progress import (  # noqa: E402
+from neutree.downloader.progress import (
     ProgressReporter,
     format_size,
     get_dir_size,

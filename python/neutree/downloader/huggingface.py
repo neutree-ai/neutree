@@ -85,9 +85,10 @@ class HuggingFaceDownloader(Downloader):
         with ProgressReporter(dest, logger, label="HuggingFace download"):
             hf.snapshot_download(repo_id=repo_id, allow_patterns=allow_pattern, local_dir=dest, token=token, revision=version)
 
-        # Verify downloaded files if not skipped
-        if not should_skip_verification():
-            self._verify_downloaded_files(repo_id, dest, revision=version, token=token)
+            # Verify inside the progress context so users see activity during
+            # potentially slow SHA-256 hashing of large model files.
+            if not should_skip_verification():
+                self._verify_downloaded_files(repo_id, dest, revision=version, token=token)
 
     def _verify_downloaded_files(self, repo_id: str, dest: str, revision: Optional[str] = None, token: Optional[str] = None) -> None:
         """Verify downloaded files against HF repository checksums.
