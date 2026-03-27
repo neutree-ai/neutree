@@ -79,6 +79,13 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 	if manifest.Metadata != nil && manifest.Metadata.PackageURL != "" {
 		klog.Infof("Package URL found: %s", manifest.Metadata.PackageURL)
 
+		// Ensure the parent directory exists when user specifies a custom extract path.
+		if opts.ExtractPath != "" {
+			if err := os.MkdirAll(opts.ExtractPath, 0o755); err != nil {
+				return nil, errors.Wrap(err, "failed to create extract path directory")
+			}
+		}
+
 		// Create a unique temporary directory to avoid concurrent import overwrites.
 		tempDir, err := os.MkdirTemp(opts.ExtractPath, "neutree-*")
 		if err != nil {
@@ -123,6 +130,13 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 
 // importFromArchive handles the traditional tar.gz archive import flow.
 func (i *Importer) importFromArchive(ctx context.Context, opts *ImportOptions, result *ImportResult) (*ImportResult, error) {
+	// Ensure the parent directory exists when user specifies a custom extract path.
+	if opts.ExtractPath != "" {
+		if err := os.MkdirAll(opts.ExtractPath, 0o755); err != nil {
+			return nil, errors.Wrap(err, "failed to create extract path directory")
+		}
+	}
+
 	// Create a unique temporary directory to avoid concurrent import overwrites.
 	// When ExtractPath is empty, os.MkdirTemp uses the system default temp dir.
 	// When ExtractPath is set, a unique subdirectory is created under it.
