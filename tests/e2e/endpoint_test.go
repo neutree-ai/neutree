@@ -16,13 +16,17 @@ import (
 
 // --- Environment helpers ---
 
-func clusterName() string     { return os.Getenv("E2E_CLUSTER_NAME") }
+func clusterName() string         { return os.Getenv("E2E_CLUSTER_NAME") }
 func engineName() string          { return envOrDefault("E2E_ENGINE_NAME", "vllm") }
 func engineVersionA() string      { return envOrDefault("E2E_ENGINE_VERSION_A", "v0.8.5") }
 func engineVersionB() string      { return envOrDefault("E2E_ENGINE_VERSION_B", "v0.11.2") }
 func modelName() string           { return os.Getenv("E2E_MODEL_NAME") }
 func modelVersion() string        { return envOrDefault("E2E_MODEL_VERSION", "latest") }
 func modelTask() string           { return envOrDefault("E2E_MODEL_TASK", "text-generation") }
+func embeddingModelName() string  { return os.Getenv("E2E_EMBEDDING_MODEL_NAME") }
+func embeddingModelVersion() string { return envOrDefault("E2E_EMBEDDING_MODEL_VERSION", "latest") }
+func rerankModelName() string     { return os.Getenv("E2E_RERANK_MODEL_NAME") }
+func rerankModelVersion() string  { return envOrDefault("E2E_RERANK_MODEL_VERSION", "latest") }
 func acceleratorType() string     { return envOrDefault("E2E_ACCELERATOR_TYPE", "nvidia_gpu") }
 func acceleratorProduct() string  { return envOrDefault("E2E_ACCELERATOR_PRODUCT", "") }
 func endpointTimeout() string     { return envOrDefault("E2E_ENDPOINT_TIMEOUT", "10m") }
@@ -155,39 +159,87 @@ func parseEndpointClusterJSON(stdout string) clusterPreCheckJSON {
 	return c
 }
 
-// --- Inference helper ---
+// applyEndpointWithTask renders the endpoint template with custom model/task settings and applies it.
+func applyEndpointWithTask(name, engineVersion, model, modelVer, task string) (yamlPath string) {
+	defaults := map[string]string{
+		"E2E_ENDPOINT_NAME":       name,
+		"E2E_WORKSPACE":           testWorkspace(),
+		"E2E_CLUSTER_NAME":        clusterName(),
+		"E2E_ENGINE_NAME":         engineName(),
+		"E2E_ENGINE_VERSION":      engineVersion,
+		"E2E_MODEL_REGISTRY":      testRegistry(),
+		"E2E_MODEL_NAME":          model,
+		"E2E_MODEL_VERSION":       modelVer,
+		"E2E_MODEL_TASK":          task,
+		"E2E_ACCELERATOR_TYPE":    acceleratorType(),
+		"E2E_ACCELERATOR_PRODUCT": acceleratorProduct(),
+		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
+	}
+
+	yamlPath, err := renderTemplateToTempFile(
+		filepath.Join("testdata", "endpoint.yaml"), defaults,
+	)
+	Expect(err).NotTo(HaveOccurred(), "failed to render endpoint template")
+
+	r := RunCLI("apply", "-f", yamlPath, "--force-update")
+	ExpectSuccess(r)
+
+	return yamlPath
+}
+
+// --- Inference helpers ---
+
+// doInferenceRequest sends a JSON POST to the given URL path and returns (status_code, body).
+func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, string) {
+	payloadBytes, err := json.Marshal(reqBody)
+	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "failed to marshal inference request")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+
+	req, err := http.NewRequest(http.MethodPost,
+		strings.TrimRight(serviceURL, "/")+path,
+		strings.NewReader(string(payloadBytes)),
+	)
+	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "failed to create inference request")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("NEUTREE_API_KEY"))
+
+	resp, err := client.Do(req)
+	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "inference request failed")
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "failed to read inference response")
+
+	return resp.StatusCode, string(body)
+}
 
 // inferChat sends a chat completion request and returns (status_code, body).
 func inferChat(serviceURL, prompt string) (int, string) {
-	reqBody := map[string]any{
+	return doInferenceRequest(serviceURL, "/v1/chat/completions", map[string]any{
 		"model": modelName(),
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
 		"max_tokens": 16,
-	}
-	payloadBytes, err := json.Marshal(reqBody)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to marshal chat request")
-	payload := string(payloadBytes)
+	})
+}
 
-	client := &http.Client{Timeout: 60 * time.Second}
+// inferEmbedding sends an embedding request and returns (status_code, body).
+func inferEmbedding(serviceURL, model, input string) (int, string) {
+	return doInferenceRequest(serviceURL, "/v1/embeddings", map[string]any{
+		"model": model,
+		"input": input,
+	})
+}
 
-	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(serviceURL, "/")+"/v1/chat/completions",
-		strings.NewReader(payload),
-	)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to create inference request")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("NEUTREE_API_KEY"))
-
-	resp, err := client.Do(req)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "inference request failed")
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to read inference response")
-
-	return resp.StatusCode, string(body)
+// inferRerank sends a rerank request and returns (status_code, body).
+func inferRerank(serviceURL, model, query string, documents []string) (int, string) {
+	return doInferenceRequest(serviceURL, "/v1/rerank", map[string]any{
+		"model":     model,
+		"query":     query,
+		"documents": documents,
+	})
 }
 
 // --- Tests ---
@@ -293,6 +345,170 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 			codeB, bodyB := inferChat(epB.Status.ServiceURL, "Hello")
 			Expect(codeB).To(Equal(http.StatusOK), "inference on ep-B failed: %s", bodyB)
 			Expect(bodyB).To(ContainSubstring("choices"))
+		})
+	})
+
+	Describe("Embedding Inference", Label("embedding"), func() {
+		var epName string
+
+		BeforeAll(func() {
+			if embeddingModelName() == "" {
+				Skip("E2E_EMBEDDING_MODEL_NAME not set, skipping embedding tests")
+			}
+			epName = "e2e-ep-embed-" + runID
+		})
+
+		AfterAll(func() {
+			if epName != "" {
+				deleteEndpoint(epName)
+			}
+		})
+
+		It("should deploy embedding endpoint and reach Running", func() {
+			yamlPath := applyEndpointWithTask(epName, engineVersionB(),
+				embeddingModelName(), embeddingModelVersion(), "text-embedding")
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(epName)
+
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(Equal("Running"))
+			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
+		})
+
+		It("should serve embedding requests", func() {
+			ep := getEndpoint(epName)
+			code, body := inferEmbedding(ep.Status.ServiceURL, embeddingModelName(), "Hello world")
+			Expect(code).To(Equal(http.StatusOK), "embedding inference failed: %s", body)
+
+			var resp map[string]any
+			Expect(json.Unmarshal([]byte(body), &resp)).To(Succeed())
+			Expect(resp).To(HaveKey("data"))
+
+			data, ok := resp["data"].([]any)
+			Expect(ok).To(BeTrue(), "data should be an array")
+			Expect(data).NotTo(BeEmpty(), "embedding data should not be empty")
+
+			first, ok := data[0].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(first).To(HaveKey("embedding"))
+
+			embedding, ok := first["embedding"].([]any)
+			Expect(ok).To(BeTrue(), "embedding should be an array of floats")
+			Expect(embedding).NotTo(BeEmpty(), "embedding vector should not be empty")
+		})
+
+		It("should serve batch embedding requests", func() {
+			ep := getEndpoint(epName)
+			code, body := doInferenceRequest(ep.Status.ServiceURL, "/v1/embeddings", map[string]any{
+				"model": embeddingModelName(),
+				"input": []string{"Hello world", "Goodbye world"},
+			})
+			Expect(code).To(Equal(http.StatusOK), "batch embedding inference failed: %s", body)
+
+			var resp map[string]any
+			Expect(json.Unmarshal([]byte(body), &resp)).To(Succeed())
+
+			data, ok := resp["data"].([]any)
+			Expect(ok).To(BeTrue(), "data should be an array")
+			Expect(data).To(HaveLen(2), "batch embedding should return 2 results")
+		})
+	})
+
+	Describe("Rerank Inference", Label("rerank"), func() {
+		var epName string
+
+		BeforeAll(func() {
+			if rerankModelName() == "" {
+				Skip("E2E_RERANK_MODEL_NAME not set, skipping rerank tests")
+			}
+			epName = "e2e-ep-rerank-" + runID
+		})
+
+		AfterAll(func() {
+			if epName != "" {
+				deleteEndpoint(epName)
+			}
+		})
+
+		It("should deploy rerank endpoint and reach Running", func() {
+			yamlPath := applyEndpointWithTask(epName, engineVersionB(),
+				rerankModelName(), rerankModelVersion(), "text-rerank")
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(epName)
+
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(Equal("Running"))
+			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
+		})
+
+		It("should serve rerank requests", func() {
+			ep := getEndpoint(epName)
+			documents := []string{
+				"Paris is the capital of France.",
+				"Berlin is the capital of Germany.",
+				"London is the capital of the United Kingdom.",
+			}
+			code, body := inferRerank(ep.Status.ServiceURL, rerankModelName(),
+				"What is the capital of France?", documents)
+			Expect(code).To(Equal(http.StatusOK), "rerank inference failed: %s", body)
+
+			var resp map[string]any
+			Expect(json.Unmarshal([]byte(body), &resp)).To(Succeed())
+			Expect(resp).To(HaveKey("results"))
+
+			results, ok := resp["results"].([]any)
+			Expect(ok).To(BeTrue(), "results should be an array")
+			Expect(results).To(HaveLen(len(documents)), "rerank should return a result for each document")
+
+			// Verify each result has index and relevance_score
+			for _, r := range results {
+				result, ok := r.(map[string]any)
+				Expect(ok).To(BeTrue())
+				Expect(result).To(HaveKey("index"))
+				Expect(result).To(HaveKey("relevance_score"))
+
+				score, ok := result["relevance_score"].(float64)
+				Expect(ok).To(BeTrue(), "relevance_score should be a number")
+				Expect(score).To(BeNumerically(">=", 0.0))
+				Expect(score).To(BeNumerically("<=", 1.0))
+			}
+		})
+
+		It("should rank the most relevant document highest", func() {
+			ep := getEndpoint(epName)
+			documents := []string{
+				"The Eiffel Tower is in Paris.",
+				"Machine learning is a branch of artificial intelligence.",
+				"Paris is the capital and most populous city of France.",
+			}
+			code, body := inferRerank(ep.Status.ServiceURL, rerankModelName(),
+				"What is the capital of France?", documents)
+			Expect(code).To(Equal(http.StatusOK), "rerank inference failed: %s", body)
+
+			var resp map[string]any
+			Expect(json.Unmarshal([]byte(body), &resp)).To(Succeed())
+
+			results, ok := resp["results"].([]any)
+			Expect(ok).To(BeTrue())
+
+			// Find the result with the highest relevance_score
+			var bestIdx int
+			var bestScore float64
+			for _, r := range results {
+				result := r.(map[string]any)
+				idx := int(result["index"].(float64))
+				score := result["relevance_score"].(float64)
+				if score > bestScore {
+					bestScore = score
+					bestIdx = idx
+				}
+			}
+
+			// Document at index 2 ("Paris is the capital...") should rank highest
+			Expect(bestIdx).To(Equal(2),
+				"the document explicitly mentioning 'capital of France' should rank highest")
 		})
 	})
 })
