@@ -293,7 +293,8 @@ class Backend:
                 message={"error": "Invalid payload for EmbeddingCompletionRequest", "details": str(e)},
                 status_code=400,
             )
-        return await self.openai_serving_embedding.create_embedding(request, None)
+        # v0.18.0: ServingEmbedding uses __call__ instead of create_embedding
+        return await self.openai_serving_embedding(request, None)
 
     async def rerank(self, payload: Any):
         """
