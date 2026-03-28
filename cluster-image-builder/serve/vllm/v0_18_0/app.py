@@ -373,6 +373,9 @@ class Controller:
         result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
         if isinstance(result, ErrorResponse):
             return JSONResponse(content=result.model_dump(), status_code=result.code)
+        # v0.18.0: ServingEmbedding.__call__ returns a Response directly
+        if hasattr(result, 'body'):
+            return result
         return JSONResponse(content=result.model_dump())
 
     @app.post("/v1/rerank")
