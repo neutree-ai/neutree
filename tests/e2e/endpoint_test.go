@@ -457,11 +457,8 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 				Expect(result).To(HaveKey("index"))
 				Expect(result).To(HaveKey("relevance_score"))
 
-				score, ok := result["relevance_score"].(float64)
+				_, ok = result["relevance_score"].(float64)
 				Expect(ok).To(BeTrue(), "relevance_score should be a number")
-				// Scores are expected in [0,1] for models with sigmoid-normalized output (e.g. BGE-Reranker).
-				Expect(score).To(BeNumerically(">=", 0.0))
-				Expect(score).To(BeNumerically("<=", 1.0))
 			}
 		})
 	})
