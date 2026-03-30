@@ -118,11 +118,16 @@ class Backend:
         # vLLM auto-detects the correct mode from model architecture.
 
         # merge engine args
+        # NOTE: enable_prefix_caching is intentionally NOT set here.
+        # vLLM v0.8.0+ (V1 engine) defaults to True for generate models.
+        # vLLM v0.12.0+ uses ModelConfig.is_prefix_caching_supported for
+        # smart per-model-type defaults (e.g. False for encoder-only/hybrid).
+        # Letting vLLM decide avoids overriding those intelligent defaults
+        # and keeps behavior consistent with the Kubernetes deployment path.
         args = dict(
             model=model_path,
             served_model_name=self.model_id,
             disable_log_stats=False,
-            enable_prefix_caching=True,
         )
 
         args.update(engine_kwargs)
