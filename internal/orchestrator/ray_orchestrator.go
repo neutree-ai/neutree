@@ -769,19 +769,21 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 				return nil, nil, errors.Wrap(err, "failed to create model registry for NFS type detection")
 			}
 
-			nfsType, err := registry.GetNFSType()
+			nfsVersion, err := registry.GetNFSVersion()
 			if err != nil {
-				return nil, nil, errors.Wrap(err, "failed to detect NFS type from control-plane mount")
+				return nil, nil, errors.Wrap(err, "failed to detect NFS version from control-plane mount")
 			}
 
-			if nfsType == "" {
-				return nil, nil, errors.New("NFS mount not found on control-plane, cannot determine NFS type for engine container")
+			if nfsVersion == "" {
+				return nil, nil, errors.New("NFS mount not found on control-plane, cannot determine NFS version for engine container")
 			}
 
 			nfsMountPath := filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
+			// Always use type=nfs (nfs4 filesystem type removed in kernel 5.6+),
+			// with explicit nfsvers to ensure correct version on all kernel versions.
 			backendRunOptions = append(backendRunOptions, fmt.Sprintf(
-				"--mount type=volume,dst=%s,volume-opt=type=%s,volume-opt=o=addr=%s,volume-opt=device=:%s",
-				nfsMountPath, nfsType, registryURL.Hostname(), registryURL.Path))
+				"--mount type=volume,dst=%s,volume-opt=type=nfs,volume-opt=o=addr=%s\\,nfsvers=%s,volume-opt=device=:%s",
+				nfsMountPath, registryURL.Hostname(), nfsVersion, registryURL.Path))
 		}
 	}
 
