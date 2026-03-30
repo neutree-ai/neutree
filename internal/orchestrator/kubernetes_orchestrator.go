@@ -294,7 +294,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		// Clean up stale manifest ConfigMap from a previous incomplete deletion
 		// to allow fresh deployment on the next reconcile.
 		if err := k.cleanupManifestConfigMap(ctrlClient, namespace, endpoint.Metadata.Name); err != nil {
-			klog.Warningf("Failed to cleanup stale manifest ConfigMap for endpoint %s: %v", endpoint.Metadata.Name, err)
+			return nil, errors.Wrapf(err, "failed to cleanup stale manifest ConfigMap for endpoint %s", endpoint.Metadata.WorkspaceName())
 		}
 
 		return &v1.EndpointStatus{
