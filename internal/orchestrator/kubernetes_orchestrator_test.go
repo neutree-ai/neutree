@@ -299,6 +299,32 @@ func (f *FakeK8sClient) WithUnschedulablePod(message string) *FakeK8sClient {
 	return f
 }
 
+func (f *FakeK8sClient) WithManifestConfigMap(endpointName string) *FakeK8sClient {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("neutree-%s-deployment-config", endpointName),
+			Namespace: "test-namespace",
+		},
+		Data: map[string]string{
+			"last-applied-config": "dGVzdC1jb25maWc=", // base64 "test-config"
+		},
+	}
+	err := f.Client.Create(context.Background(), cm)
+	if err != nil {
+		f.t.Fatalf("failed to create manifest configmap: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) HasManifestConfigMap(endpointName string) bool {
+	cm := &corev1.ConfigMap{}
+	err := f.Client.Get(context.Background(), client.ObjectKey{
+		Namespace: "test-namespace",
+		Name:      fmt.Sprintf("neutree-%s-deployment-config", endpointName),
+	}, cm)
+	return err == nil
+}
+
 func (f *FakeK8sClient) AssertExpectations() {
 	// No-op for compatibility with test code
 }
@@ -2695,4 +2721,47 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			fakeClient.AssertExpectations()
 		})
 	}
+
+	// Test cases verifying manifest ConfigMap cleanup
+	t.Run("cleanup stale ConfigMap when deleting and deployment not found", func(t *testing.T) {
+		fakeClient := NewFakeK8sClient(t).
+			WithManifestConfigMap("chat-model") // stale ConfigMap from previous deployment
+
+		ep := newEndpoint()
+		ep.Metadata.DeletionTimestamp = "2024-01-01T00:00:00Z"
+
+		o := &kubernetesOrchestrator{}
+		status, err := o.getEndpointStats(fakeClient, "test-namespace", ep)
+
+		require.NoError(t, err)
+		assert.Equal(t, v1.EndpointPhaseDELETED, status.Phase)
+		assert.False(t, fakeClient.HasManifestConfigMap("chat-model"), "manifest ConfigMap should be cleaned up during deletion")
+	})
+
+	t.Run("cleanup stale ConfigMap when not deleting and deployment not found", func(t *testing.T) {
+		fakeClient := NewFakeK8sClient(t).
+			WithManifestConfigMap("chat-model") // stale ConfigMap from previous incomplete deletion
+
+		ep := newEndpoint()
+
+		o := &kubernetesOrchestrator{}
+		status, err := o.getEndpointStats(fakeClient, "test-namespace", ep)
+
+		require.NoError(t, err)
+		assert.Equal(t, v1.EndpointPhaseDEPLOYING, status.Phase)
+		assert.False(t, fakeClient.HasManifestConfigMap("chat-model"), "stale manifest ConfigMap should be cleaned up")
+	})
+
+	t.Run("no error when ConfigMap does not exist during cleanup", func(t *testing.T) {
+		fakeClient := NewFakeK8sClient(t) // no ConfigMap
+
+		ep := newEndpoint()
+		ep.Metadata.DeletionTimestamp = "2024-01-01T00:00:00Z"
+
+		o := &kubernetesOrchestrator{}
+		status, err := o.getEndpointStats(fakeClient, "test-namespace", ep)
+
+		require.NoError(t, err)
+		assert.Equal(t, v1.EndpointPhaseDELETED, status.Phase)
+	})
 }
