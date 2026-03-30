@@ -784,11 +784,11 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 			// and older kernels won't auto-negotiate to v4.
 			if nfsVersion != "3" {
 				backendRunOptions = append(backendRunOptions, fmt.Sprintf(
-					`--mount type=volume,dst=%s,volume-opt=type=nfs,"volume-opt=o=addr=%s,nfsvers=%s",volume-opt=device=:%s`,
+					`--mount 'type=volume,dst=%s,volume-opt=type=nfs,"volume-opt=o=addr=%s,nfsvers=%s",volume-opt=device=:%s'`,
 					nfsMountPath, registryURL.Hostname(), nfsVersion, registryURL.Path))
 			} else {
 				backendRunOptions = append(backendRunOptions, fmt.Sprintf(
-					"--mount type=volume,dst=%s,volume-opt=type=nfs,volume-opt=o=addr=%s,volume-opt=device=:%s",
+					"--mount 'type=volume,dst=%s,volume-opt=type=nfs,volume-opt=o=addr=%s,volume-opt=device=:%s'",
 					nfsMountPath, registryURL.Hostname(), registryURL.Path))
 			}
 		}
