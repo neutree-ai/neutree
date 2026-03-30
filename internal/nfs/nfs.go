@@ -68,8 +68,9 @@ func GetMountType(device string, mountPoint string) (string, error) {
 
 // GetNFSVersion returns the NFS protocol version (e.g. "3", "4", "4.1", "4.2")
 // for the given device mounted at mountPoint by reading /proc/mounts.
-// It infers the version from the filesystem type ("nfs4" → "4") or from
-// mount options ("vers=X" / "nfsvers=X"). Defaults to "3" if undetermined.
+// It checks mount options first (vers=X / nfsvers=X) for the precise minor
+// version, then falls back to the filesystem type ("nfs4" → "4").
+// Defaults to "3" if no version information is found.
 func GetNFSVersion(device string, mountPoint string) (string, error) {
 	mountPoints, err := mountInterface.List()
 	if err != nil {
@@ -78,10 +79,7 @@ func GetNFSVersion(device string, mountPoint string) (string, error) {
 
 	for _, mp := range mountPoints {
 		if mp.Path == mountPoint && mp.Device == device {
-			if mp.Type == "nfs4" {
-				return "4", nil
-			}
-
+			// Check opts first — they carry the precise minor version (4.0, 4.1, 4.2).
 			for _, opt := range mp.Opts {
 				if strings.HasPrefix(opt, "vers=") {
 					return strings.TrimPrefix(opt, "vers="), nil
@@ -90,6 +88,11 @@ func GetNFSVersion(device string, mountPoint string) (string, error) {
 				if strings.HasPrefix(opt, "nfsvers=") {
 					return strings.TrimPrefix(opt, "nfsvers="), nil
 				}
+			}
+
+			// Fall back: nfs4 type with no vers= option means base NFSv4.
+			if mp.Type == "nfs4" {
+				return "4", nil
 			}
 
 			return "3", nil
