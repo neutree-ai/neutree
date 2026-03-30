@@ -48,10 +48,12 @@ func IsMountExist(device string, mountPoint string) (bool, error) {
 	return false, nil
 }
 
-// GetMountType returns the filesystem type (e.g. "nfs", "nfs4") for the
-// given device mounted at mountPoint by reading /proc/mounts.
-// Returns an error if the mount is not found.
-func GetMountType(device string, mountPoint string) (string, error) {
+// GetNFSVersion returns the NFS protocol version (e.g. "3", "4", "4.1", "4.2")
+// for the given device mounted at mountPoint by reading /proc/mounts.
+// It checks mount options first (vers=X / nfsvers=X) for the precise minor
+// version, then falls back to the filesystem type ("nfs4" → "4").
+// Defaults to "3" if no version information is found.
+func GetNFSVersion(device string, mountPoint string) (string, error) {
 	mountPoints, err := mountInterface.List()
 	if err != nil {
 		return "", err
@@ -59,7 +61,21 @@ func GetMountType(device string, mountPoint string) (string, error) {
 
 	for _, mp := range mountPoints {
 		if mp.Path == mountPoint && mp.Device == device {
-			return mp.Type, nil
+			for _, opt := range mp.Opts {
+				if strings.HasPrefix(opt, "vers=") {
+					return strings.TrimPrefix(opt, "vers="), nil
+				}
+
+				if strings.HasPrefix(opt, "nfsvers=") {
+					return strings.TrimPrefix(opt, "nfsvers="), nil
+				}
+			}
+
+			if mp.Type == "nfs4" {
+				return "4", nil
+			}
+
+			return "3", nil
 		}
 	}
 

@@ -17,6 +17,8 @@ import (
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/model_registry"
+	modelregistrymocks "github.com/neutree-ai/neutree/pkg/model_registry/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -1228,6 +1230,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 		modelCaches            []v1.ModelCache
 		modelRegistry          *v1.ModelRegistry
 		setupMgr               func(t *testing.T) *acceleratormocks.MockManager
+		setupModelRegistry     func(t *testing.T)
 		expectErr              bool
 		expectErrMsg           string
 		expectedImage          string
@@ -1352,6 +1355,87 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			expectedBackendOptions: []string{
 				"-v /data/cache1:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "cache-1"),
 				"-v /data/cache2:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "cache-2"),
+				"--rm",
+			},
+		},
+		// NFS mount cases
+		{
+			name: "NFS nfs4 type uses type=nfs with nfsvers=4",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Workspace: "ws", Name: "ep"},
+				Spec: &v1.EndpointSpec{
+					Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Resources: &v1.ResourceSpec{Accelerator: map[string]string{v1.AcceleratorTypeKey: nvidiaGPU}},
+				},
+			},
+			engine:        defaultEngine,
+			imageRegistry: defaultImageRegistry,
+			modelRegistry: &v1.ModelRegistry{
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://10.0.0.1:/models",
+				},
+			},
+			setupMgr: func(t *testing.T) *acceleratormocks.MockManager {
+				mgr := acceleratormocks.NewMockManager(t)
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
+				return mgr
+			},
+			setupModelRegistry: func(t *testing.T) {
+				mockRegistry := modelregistrymocks.NewMockModelRegistry(t)
+				mockRegistry.EXPECT().GetNFSVersion().Return("4.1", nil)
+				model_registry.NewModelRegistry = func(_ *v1.ModelRegistry) (model_registry.ModelRegistry, error) {
+					return mockRegistry, nil
+				}
+			},
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				`--mount 'type=volume,dst=/mnt/ws/ep,volume-opt=type=nfs,"volume-opt=o=addr=10.0.0.1,nfsvers=4.1",volume-opt=device=:/models'`,
+				"--rm",
+			},
+		},
+		{
+			name: "NFS v3 uses type=nfs without nfsvers",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Workspace: "ws", Name: "ep"},
+				Spec: &v1.EndpointSpec{
+					Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Resources: &v1.ResourceSpec{Accelerator: map[string]string{v1.AcceleratorTypeKey: nvidiaGPU}},
+				},
+			},
+			engine:        defaultEngine,
+			imageRegistry: defaultImageRegistry,
+			modelRegistry: &v1.ModelRegistry{
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://10.0.0.1:/models",
+				},
+			},
+			setupMgr: func(t *testing.T) *acceleratormocks.MockManager {
+				mgr := acceleratormocks.NewMockManager(t)
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
+				return mgr
+			},
+			setupModelRegistry: func(t *testing.T) {
+				mockRegistry := modelregistrymocks.NewMockModelRegistry(t)
+				mockRegistry.EXPECT().GetNFSVersion().Return("3", nil)
+				model_registry.NewModelRegistry = func(_ *v1.ModelRegistry) (model_registry.ModelRegistry, error) {
+					return mockRegistry, nil
+				}
+			},
+			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectedBaseOptions: []string{
+				"--rm",
+			},
+			expectedBackendOptions: []string{
+				"--runtime=nvidia",
+				"--gpus all",
+				"--mount 'type=volume,dst=/mnt/ws/ep,volume-opt=type=nfs,volume-opt=o=addr=10.0.0.1,volume-opt=device=:/models'",
 				"--rm",
 			},
 		},
@@ -1514,6 +1598,12 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.setupModelRegistry != nil {
+				origNewModelRegistry := model_registry.NewModelRegistry
+				tt.setupModelRegistry(t)
+				defer func() { model_registry.NewModelRegistry = origNewModelRegistry }()
+			}
+
 			var mgr *acceleratormocks.MockManager
 			if tt.setupMgr != nil {
 				mgr = tt.setupMgr(t)
