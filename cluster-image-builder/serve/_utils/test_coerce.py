@@ -153,8 +153,9 @@ class TestFilterEngineArgs:
         with caplog.at_level(logging.WARNING, logger="ray.serve"):
             filter_engine_args(args, _FakeEngineArgs)
         assert args == {"model": "llama"}
-        assert "response_role" in caplog.text
+        assert "2 unknown engine parameter(s) ignored" in caplog.text
         assert "bogus" in caplog.text
+        assert "response_role" in caplog.text
 
     def test_empty_args(self):
         args = {}
@@ -166,6 +167,7 @@ class TestFilterEngineArgs:
         with caplog.at_level(logging.WARNING, logger="ray.serve"):
             filter_engine_args(args, _FakeEngineArgs)
         assert args == {}
+        assert "2 unknown engine parameter(s) ignored" in caplog.text
 
     def test_non_dataclass_is_noop(self, caplog):
         args = {"anything": "goes"}

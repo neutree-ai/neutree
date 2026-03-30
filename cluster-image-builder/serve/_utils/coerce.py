@@ -92,7 +92,12 @@ def filter_engine_args(args: Dict[str, Any], engine_args_class: type) -> None:
             engine_args_class,
         )
         return
-    unknown = [k for k in args if k not in known_fields]
+    unknown = [k for k in list(args) if k not in known_fields]
     for key in unknown:
-        value = args.pop(key)
-        logger.warning("Unknown engine parameter %r=%r ignored", key, value)
+        args.pop(key, None)
+    if unknown:
+        logger.warning(
+            "filter_engine_args: %d unknown engine parameter(s) ignored: %s",
+            len(unknown),
+            ", ".join(sorted(unknown)),
+        )
