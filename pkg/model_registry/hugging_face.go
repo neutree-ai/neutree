@@ -243,6 +243,6 @@ func (hf *huggingFace) GetModelPath(name, version string) (string, error) {
 	return "", errors.New(errHuggingFaceNotSupported)
 }
 
-func (hf *huggingFace) GetNFSType() (string, error) {
+func (hf *huggingFace) GetNFSVersion() (string, error) {
 	return "", nil
 }

@@ -124,7 +124,7 @@ func (f *localFile) HealthyCheck() error {
 	return nil
 }
 
-func (f *localFile) GetNFSType() (string, error) {
+func (f *localFile) GetNFSVersion() (string, error) {
 	return "", nil
 }
 
@@ -200,8 +200,8 @@ func (n *nfsFile) HealthyCheck() error {
 	return nil
 }
 
-func (n *nfsFile) GetNFSType() (string, error) {
-	return nfs.GetMountType(n.nfsServerPath, n.targetPath)
+func (n *nfsFile) GetNFSVersion() (string, error) {
+	return nfs.GetNFSVersion(n.nfsServerPath, n.targetPath)
 }
 
 func newFileBased(registry *v1.ModelRegistry) (ModelRegistry, error) {

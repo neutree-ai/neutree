@@ -28,9 +28,9 @@ type ModelRegistry interface {
 	ExportModel(name, version, outputPath string) error
 	GetModelPath(name, version string) (string, error)
 
-	// GetNFSType returns the NFS filesystem type (e.g. "nfs", "nfs4") detected
-	// from the control-plane mount. Returns empty string for non-NFS registries.
-	GetNFSType() (string, error)
+	// GetNFSVersion returns the NFS protocol version (e.g. "3", "4", "4.1")
+	// detected from the control-plane mount. Returns empty string for non-NFS registries.
+	GetNFSVersion() (string, error)
 }
 
 type NewModelRegistryFunc func(registry *v1.ModelRegistry) (ModelRegistry, error)

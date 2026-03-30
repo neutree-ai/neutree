@@ -1383,7 +1383,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			setupModelRegistry: func(t *testing.T) {
 				mockRegistry := modelregistrymocks.NewMockModelRegistry(t)
-				mockRegistry.EXPECT().GetNFSType().Return("nfs4", nil)
+				mockRegistry.EXPECT().GetNFSVersion().Return("4.1", nil)
 				model_registry.NewModelRegistry = func(_ *v1.ModelRegistry) (model_registry.ModelRegistry, error) {
 					return mockRegistry, nil
 				}
@@ -1395,12 +1395,12 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
 				"--gpus all",
-				`--mount 'type=volume,dst=/mnt/ws/ep,volume-opt=type=nfs,"volume-opt=o=addr=10.0.0.1,nfsvers=4",volume-opt=device=:/models'`,
+				`--mount 'type=volume,dst=/mnt/ws/ep,volume-opt=type=nfs,"volume-opt=o=addr=10.0.0.1,nfsvers=4.1",volume-opt=device=:/models'`,
 				"--rm",
 			},
 		},
 		{
-			name: "NFS nfs type uses type=nfs without nfsvers",
+			name: "NFS v3 uses type=nfs without nfsvers",
 			endpoint: &v1.Endpoint{
 				Metadata: &v1.Metadata{Workspace: "ws", Name: "ep"},
 				Spec: &v1.EndpointSpec{
@@ -1423,7 +1423,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			setupModelRegistry: func(t *testing.T) {
 				mockRegistry := modelregistrymocks.NewMockModelRegistry(t)
-				mockRegistry.EXPECT().GetNFSType().Return("nfs", nil)
+				mockRegistry.EXPECT().GetNFSVersion().Return("3", nil)
 				model_registry.NewModelRegistry = func(_ *v1.ModelRegistry) (model_registry.ModelRegistry, error) {
 					return mockRegistry, nil
 				}
