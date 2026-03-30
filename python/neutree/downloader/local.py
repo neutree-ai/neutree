@@ -34,6 +34,7 @@ if not logger.handlers:
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     ))
     logger.addHandler(_handler)
+    logger.propagate = False
 
 
 class LocalDownloader(Downloader):
