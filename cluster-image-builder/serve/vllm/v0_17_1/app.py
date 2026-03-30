@@ -92,27 +92,46 @@ class Backend:
         self.model_id = model_serve_name
         self.model_task = model_task
 
-        # Extract our custom parameters BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors
+        # Extract FrontendArgs BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors.
+        # FrontendArgs are NOT engine parameters — they configure the Serving layer (chat, embedding, score).
+        # If left in engine_kwargs, they would be passed to AsyncEngineArgs and cause TypeError.
+
         # Tool calling configuration
-        self.enable_auto_tools = False
         self.tool_parser = engine_kwargs.pop("tool_call_parser", None)
+        self.enable_auto_tools = engine_kwargs.pop("enable_auto_tool_choice", False)
         if self.tool_parser:
             self.enable_auto_tools = True
+        self.exclude_tools_when_tool_choice_none = engine_kwargs.pop("exclude_tools_when_tool_choice_none", False)
 
         # Reasoning configuration (read but don't pop - engine needs these too)
         self.reasoning_parser = engine_kwargs.get("reasoning_parser", None)
 
-        # Extract chat template parameters
+        # Chat template parameters
         self.chat_template = engine_kwargs.pop("chat_template", None)
         self.chat_template_content_format = engine_kwargs.pop("chat_template_content_format", "auto")
+        self.trust_request_chat_template = engine_kwargs.pop("trust_request_chat_template", False)
+        self.default_chat_template_kwargs = engine_kwargs.pop("default_chat_template_kwargs", None)
 
-        # Extract other chat-specific parameters (keep defaults from vLLM)
+        # Chat/serving behavior parameters
         self.response_role = engine_kwargs.pop("response_role", "assistant")
         self.enable_prompt_tokens_details = engine_kwargs.pop("enable_prompt_tokens_details", False)
+        self.return_tokens_as_token_ids = engine_kwargs.pop("return_tokens_as_token_ids", False)
+        self.enable_force_include_usage = engine_kwargs.pop("enable_force_include_usage", False)
 
-        # v0.17.1: new FrontendArgs with functional impact
-        self.default_chat_template_kwargs = engine_kwargs.pop("default_chat_template_kwargs", None)
+        # Logging/debugging parameters
+        self.enable_log_outputs = engine_kwargs.pop("enable_log_outputs", False)
+        self.enable_log_deltas = engine_kwargs.pop("enable_log_deltas", True)
+        self.log_error_stack = engine_kwargs.pop("log_error_stack", False)
+
+        # Pooling/scoring parameters
         self.use_gpu_for_pooling_score = engine_kwargs.pop("use_gpu_for_pooling_score", False)
+
+        # FrontendArgs not used in Ray Serve mode (pop to prevent AsyncEngineArgs errors)
+        engine_kwargs.pop("tool_parser_plugin", None)
+        engine_kwargs.pop("tool_server", None)
+        engine_kwargs.pop("tokens_only", None)
+        engine_kwargs.pop("enable_server_load_tracking", None)
+        engine_kwargs.pop("enable_tokenizer_info_endpoint", None)
 
         # v0.17.1: --task removed, replaced by --runner/--convert (both default "auto").
         # vLLM auto-detects the correct mode from model architecture.
@@ -179,10 +198,17 @@ class Backend:
                 request_logger=None,
                 chat_template=self.chat_template,
                 chat_template_content_format=self.chat_template_content_format,
+                trust_request_chat_template=self.trust_request_chat_template,
+                return_tokens_as_token_ids=self.return_tokens_as_token_ids,
                 enable_auto_tools=self.enable_auto_tools,
+                exclude_tools_when_tool_choice_none=self.exclude_tools_when_tool_choice_none,
                 tool_parser=self.tool_parser,
                 reasoning_parser=self.reasoning_parser,
                 enable_prompt_tokens_details=self.enable_prompt_tokens_details,
+                enable_force_include_usage=self.enable_force_include_usage,
+                enable_log_outputs=self.enable_log_outputs,
+                enable_log_deltas=self.enable_log_deltas,
+                log_error_stack=self.log_error_stack,
                 default_chat_template_kwargs=self.default_chat_template_kwargs,
             )
         return self.openai_serving_chat
@@ -197,6 +223,8 @@ class Backend:
                 request_logger=None,
                 chat_template=self.chat_template,
                 chat_template_content_format=self.chat_template_content_format,
+                trust_request_chat_template=self.trust_request_chat_template,
+                log_error_stack=self.log_error_stack,
             )
         return self.openai_serving_embedding
 
@@ -208,6 +236,7 @@ class Backend:
                 self.engine,
                 models,
                 request_logger=None,
+                log_error_stack=self.log_error_stack,
                 use_gpu_for_pooling_score=self.use_gpu_for_pooling_score,
             )
         return self.openai_serving_score
