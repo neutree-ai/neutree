@@ -54,7 +54,8 @@ images:
 	}
 
 	cmd.Flags().StringVarP(&opts.packagePath, "package", "p", "", "Path to the cluster image package file (required)")
-	cmd.Flags().StringVar(&opts.extractPath, "extract-path", "/tmp", "Path to extract package to (default: temporary directory)")
+	cmd.Flags().StringVar(&opts.extractPath, "extract-path", "",
+		"Parent directory for extraction; a unique subdirectory is created automatically (default: system temp dir)")
 	cmd.Flags().BoolVar(&opts.importLocal, "local", false, "Skip pushing images to the registry, only load images locally")
 
 	_ = cmd.MarkFlagRequired("package")

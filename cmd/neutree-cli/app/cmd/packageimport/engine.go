@@ -55,7 +55,8 @@ Use --skip-image-push to only update engine definitions without pushing images.
 	cmd.Flags().StringVarP(&opts.packagePath, "package", "p", "", "Path to engine package (.tar.gz) or manifest file (.yaml/.yml) (required)")
 	cmd.Flags().BoolVar(&opts.skipImagePush, "skip-image-push", false, "Skip loading and pushing images (metadata-only import)")
 	cmd.Flags().BoolVarP(&opts.force, "force", "f", false, "Force overwrite if engine version already exists")
-	cmd.Flags().StringVar(&opts.extractPath, "extract-path", "", "Path to extract package to (default: temporary directory)")
+	cmd.Flags().StringVar(&opts.extractPath, "extract-path", "",
+		"Parent directory for extraction; a unique subdirectory is created automatically (default: system temp dir)")
 
 	_ = cmd.MarkFlagRequired("package")
 

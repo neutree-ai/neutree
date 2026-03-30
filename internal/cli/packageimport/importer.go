@@ -79,17 +79,22 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 	if manifest.Metadata != nil && manifest.Metadata.PackageURL != "" {
 		klog.Infof("Package URL found: %s", manifest.Metadata.PackageURL)
 
-		// Create temporary directory if not specified
-		if opts.ExtractPath == "" {
-			tempDir, err := os.MkdirTemp("", "neutree-*")
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to create temporary directory")
+		// Ensure the parent directory exists when user specifies a custom extract path.
+		if opts.ExtractPath != "" {
+			if err := os.MkdirAll(opts.ExtractPath, 0o755); err != nil {
+				return nil, errors.Wrap(err, "failed to create extract path directory")
 			}
-
-			opts.ExtractPath = tempDir
-
-			defer os.RemoveAll(tempDir)
 		}
+
+		// Create a unique temporary directory to avoid concurrent import overwrites.
+		tempDir, err := os.MkdirTemp(opts.ExtractPath, "neutree-*")
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create temporary directory")
+		}
+
+		opts.ExtractPath = tempDir
+
+		defer os.RemoveAll(tempDir)
 
 		// Stream-extract the package directly from HTTP response
 		klog.Infof("Downloading and extracting package to %s", opts.ExtractPath)
@@ -125,17 +130,24 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 
 // importFromArchive handles the traditional tar.gz archive import flow.
 func (i *Importer) importFromArchive(ctx context.Context, opts *ImportOptions, result *ImportResult) (*ImportResult, error) {
-	// Create temporary directory if not specified
-	if opts.ExtractPath == "" {
-		tempDir, err := os.MkdirTemp("", "neutree-*")
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create temporary directory")
+	// Ensure the parent directory exists when user specifies a custom extract path.
+	if opts.ExtractPath != "" {
+		if err := os.MkdirAll(opts.ExtractPath, 0o755); err != nil {
+			return nil, errors.Wrap(err, "failed to create extract path directory")
 		}
-
-		opts.ExtractPath = tempDir
-
-		defer os.RemoveAll(tempDir)
 	}
+
+	// Create a unique temporary directory to avoid concurrent import overwrites.
+	// When ExtractPath is empty, os.MkdirTemp uses the system default temp dir.
+	// When ExtractPath is set, a unique subdirectory is created under it.
+	tempDir, err := os.MkdirTemp(opts.ExtractPath, "neutree-*")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create temporary directory")
+	}
+
+	opts.ExtractPath = tempDir
+
+	defer os.RemoveAll(tempDir)
 
 	klog.Infof("Extracting package to %s", opts.ExtractPath)
 
