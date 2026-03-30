@@ -48,6 +48,16 @@ model:
   file: model.safetensors
   task: text-generation
 
+# Optional: embedding inference tests (skip if not configured)
+embedding_model:
+  name: ""
+  version: ""
+
+# Optional: rerank inference tests (skip if not configured)
+rerank_model:
+  name: ""
+  version: ""
+
 endpoint:
   cluster: ""
   accelerator_type: nvidia_gpu

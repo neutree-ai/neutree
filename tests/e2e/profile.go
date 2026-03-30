@@ -9,6 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const defaultModelVersion = "latest"
+
 // Profile represents the test-infra standard profile format (snake_case).
 type Profile struct {
 	Auth struct {
@@ -66,6 +68,16 @@ type Profile struct {
 		File    string `yaml:"file"`
 		Task    string `yaml:"task"`
 	} `yaml:"model"`
+
+	EmbeddingModel struct {
+		Name    string `yaml:"name"`
+		Version string `yaml:"version"`
+	} `yaml:"embedding_model"`
+
+	RerankModel struct {
+		Name    string `yaml:"name"`
+		Version string `yaml:"version"`
+	} `yaml:"rerank_model"`
 
 	Endpoint struct {
 		Cluster            string `yaml:"cluster"`
@@ -252,7 +264,7 @@ func profileModelVersion() string {
 		return profile.Model.Version
 	}
 
-	return "latest"
+	return defaultModelVersion
 }
 
 func profileModelTask() string {
@@ -289,6 +301,24 @@ func profileEndpointTimeout() string {
 	}
 
 	return "10m"
+}
+
+func profileEmbeddingModelName() string { return profile.EmbeddingModel.Name }
+func profileEmbeddingModelVersion() string {
+	if profile.EmbeddingModel.Version != "" {
+		return profile.EmbeddingModel.Version
+	}
+
+	return defaultModelVersion
+}
+
+func profileRerankModelName() string { return profile.RerankModel.Name }
+func profileRerankModelVersion() string {
+	if profile.RerankModel.Version != "" {
+		return profile.RerankModel.Version
+	}
+
+	return defaultModelVersion
 }
 
 func profileMockUpstreamHost() string {
