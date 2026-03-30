@@ -167,7 +167,9 @@ class TestFilterEngineArgs:
             filter_engine_args(args, _FakeEngineArgs)
         assert args == {}
 
-    def test_non_dataclass_is_noop(self):
+    def test_non_dataclass_is_noop(self, caplog):
         args = {"anything": "goes"}
-        filter_engine_args(args, dict)
+        with caplog.at_level(logging.WARNING, logger="ray.serve"):
+            filter_engine_args(args, dict)
         assert args == {"anything": "goes"}
+        assert "could not introspect" in caplog.text

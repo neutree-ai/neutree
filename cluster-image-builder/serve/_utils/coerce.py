@@ -87,6 +87,10 @@ def filter_engine_args(args: Dict[str, Any], engine_args_class: type) -> None:
     """
     known_fields = set(_get_field_annotations(engine_args_class).keys())
     if not known_fields:
+        logger.warning(
+            "filter_engine_args: could not introspect %r — skipping unknown-key filter",
+            engine_args_class,
+        )
         return
     unknown = [k for k in args if k not in known_fields]
     for key in unknown:
