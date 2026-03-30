@@ -454,20 +454,40 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	return rayClusterConfig, nil
 }
 
-// getHeadNodeVersion returns the NeutreeServingVersionLabel from the alive head node.
-func (c *sshRayClusterReconciler) getHeadNodeVersion(reconcileCtx *ReconcileContext) (string, error) {
-	nodes, err := reconcileCtx.rayService.ListNodes()
+// checkHeadNodeHealth checks whether the head node is fully healthy by verifying both
+// dashboard API reachability (GCS) and the head node's raylet state, and returns the
+// head node's serving version when alive. This avoids redundant ListNodes calls.
+// Returns:
+//   - (true, version, nil)  — dashboard reachable AND at least one head raylet is ALIVE
+//   - (false, "", nil)      — dashboard unreachable, or raylet is not alive
+//   - (false, "", err)      — an unexpected error occurred (e.g. ListNodes failed)
+func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileContext) (bool, string, error) {
+	_, err := reconcileCtx.rayService.GetClusterMetadata()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to list ray nodes")
+		klog.V(4).Infof("Head node dashboard unreachable for cluster %s: %v",
+			reconcileCtx.Cluster.Metadata.WorkspaceName(), err)
+		return false, "", nil
 	}
 
+	nodes, err := reconcileCtx.rayService.ListNodes()
+	if err != nil {
+		return false, "", errors.Wrap(err, "failed to list ray nodes")
+	}
+
+	// Ray can keep multiple records for the same head node across restarts
+	// (old DEAD entry + new ALIVE entry). Return alive only if at least one
+	// head node record is in AliveNodeState.
 	for _, node := range nodes {
 		if node.Raylet.IsHeadNode && node.Raylet.State == v1.AliveNodeState {
-			return v1.GetVersionFromLabels(node.Raylet.Labels), nil
+			return true, v1.GetVersionFromLabels(node.Raylet.Labels), nil
 		}
 	}
 
-	return "", nil
+	// No alive head node found. This covers:
+	// - Head raylet exited and Ray lost the isHeadNode flag
+	// - Head node exists but state is DEAD
+	// - No head node in list yet (initial startup; ProvisioningWaitTime prevents rebuild loops)
+	return false, "", nil
 }
 
 func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext) error {

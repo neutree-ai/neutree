@@ -49,7 +49,14 @@ func TestInitializeCluster(t *testing.T) {
 					assert.Equal(t, v1.ClusterPhaseInitializing, cluster.Status.Phase)
 				}).Return(nil).Once()
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
-				dashboardSvc.On("ListNodes").Return(nil, nil)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+						},
+					},
+				}, nil)
 				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {}).Return(nil).Maybe()
 			},
 		},
@@ -98,7 +105,14 @@ func TestInitializeCluster(t *testing.T) {
 					assert.Equal(t, v1.ClusterPhaseInitializing, cluster.Status.Phase)
 				}).Return(nil).Once()
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
-				dashboardSvc.On("ListNodes").Return(nil, nil)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+						},
+					},
+				}, nil)
 				s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {}).Return(nil).Maybe()
 			},
 		},
@@ -167,28 +181,63 @@ func TestReconcileHeadNode(t *testing.T) {
 			name: "reconcile head node success",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.AliveNodeState,
+						},
+					},
+				}, nil)
 			},
 			wantErr: false,
 		},
 		{
-			name: "reinit head node success",
+			name: "rebuild head node success - dashboard unreachable",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// checkHeadNodeHealth: dashboard unreachable → not alive
 				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
+				// rebuildHeadNode: downCluster (Execute) then upCluster (GetNodeRuntimeConfig + Execute)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// initHeadNode: post-start GetClusterMetadata verify
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
 			},
 			wantErr: false,
 		},
 		{
-			name: "reinit head node failed",
+			name: "rebuild head node failed - down cluster fails",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
-				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError)
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError)
-
+				// checkHeadNodeHealth: dashboard unreachable → not alive
+				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
+				// rebuildHeadNode: downCluster fails
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError).Once()
 			},
 			wantErr: true,
+		},
+		{
+			name: "init head node success - uninitialized cluster",
+			cluster: &v1.Cluster{
+				ID: *pointer.Int(1),
+				Metadata: &v1.Metadata{
+					Name: "test",
+				},
+				Status: &v1.ClusterStatus{
+					Initialized:     false,
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+				},
+			},
+			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// checkHeadNodeHealth: dashboard unreachable → not alive
+				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
+				// initHeadNode (no downCluster): upCluster (GetNodeRuntimeConfig + Execute)
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// initHeadNode: post-start GetClusterMetadata verify
+				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
+			},
+			wantErr: false,
 		},
 		{
 			name: "head version matches spec - no rebuild needed",
@@ -250,6 +299,29 @@ func TestReconcileHeadNode(t *testing.T) {
 					},
 				}, nil)
 				// downCluster: ray down (no workers)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// upCluster: mutateAcceleratorRuntimeConfig + ray up
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name: "head raylet dead but dashboard reachable - rebuild",
+			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// Dashboard is reachable but head raylet is dead
+				// GetClusterMetadata called twice: once in checkHeadNodeHealth, once after upCluster
+				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Times(2)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{
+						Raylet: v1.Raylet{
+							IsHeadNode: true,
+							State:      v1.DeadNodeState,
+						},
+					},
+				}, nil)
+				// downCluster first (ray stop), then upCluster (ray up)
+				// downCluster: ray down
 				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
 				// upCluster: mutateAcceleratorRuntimeConfig + ray up
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
