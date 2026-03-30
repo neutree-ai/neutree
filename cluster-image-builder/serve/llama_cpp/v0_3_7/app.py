@@ -305,8 +305,8 @@ def app_builder(args: Dict[str, Any]) -> Application:
             app_env_vars = ray.get_runtime_context().runtime_env.get("env_vars")
             if app_env_vars:
                 runtime_env["env_vars"] = app_env_vars
-        except Exception:
-            pass
+        except (AttributeError, KeyError, TypeError) as exc:
+            print(f"[app_builder] Unable to propagate app-level env_vars to backend runtime_env: {exc}")
         backend_deploy_options["ray_actor_options"]["runtime_env"] = runtime_env
 
     # Configure backend deployment

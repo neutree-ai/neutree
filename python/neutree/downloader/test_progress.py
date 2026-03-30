@@ -112,6 +112,7 @@ class TestProgressReporter(unittest.TestCase):
         # Thread should be stopped after exit
         self.assertFalse(reporter._thread.is_alive())
 
+    @mock.patch("neutree.downloader.progress.ProgressReporter._MIN_INTERVAL", 0.1)
     @mock.patch("neutree.downloader.progress.is_interactive", return_value=False)
     def test_logs_progress(self, _mock_interactive):
         # Write a file so there's something to report
@@ -129,6 +130,7 @@ class TestProgressReporter(unittest.TestCase):
             has_progress = any("progress" in c or "completed" in c for c in calls)
             self.assertTrue(has_progress, f"Expected progress/completed in logs, got: {calls}")
 
+    @mock.patch("neutree.downloader.progress.ProgressReporter._MIN_INTERVAL", 0.1)
     @mock.patch("neutree.downloader.progress.is_interactive", return_value=False)
     def test_logs_percentage_with_total_size(self, _mock_interactive):
         with open(os.path.join(self.tmpdir, "data.bin"), "wb") as f:

@@ -7,7 +7,7 @@ import shutil
 import fnmatch
 
 from .base import Downloader
-from .progress import ProgressReporter, get_dir_size
+from .progress import ProgressReporter, get_dir_size, is_interactive
 from .utils import (
     ensure_dir,
     resolve_allow_pattern,
@@ -56,8 +56,9 @@ class LocalDownloader(Downloader):
 
         allow_pattern = resolve_allow_pattern(metadata)
 
-        # Compute total source size for percentage-based progress reporting
-        total_size = get_dir_size(src)
+        # Only compute total source size when progress reporting is active (non-TTY)
+        # to avoid an unnecessary full directory scan in interactive environments.
+        total_size = get_dir_size(src) if not is_interactive() else None
 
         with ProgressReporter(dest, logger, total_size=total_size, label="Local copy"):
             self._copy_files(src, dest, allow_pattern=allow_pattern, recursive=recursive, overwrite=overwrite)
