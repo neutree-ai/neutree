@@ -270,15 +270,6 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 
 	if isDeleting {
 		if !exists {
-			// Clean up manifest ConfigMap to prevent orphaning when the Deployment
-			// is already gone but the ConfigMap was not cleaned during deletion
-			// (e.g., race between applier.Delete and status check, or force delete).
-			// Propagate errors so the controller retries instead of marking DELETED
-			// with an orphaned ConfigMap.
-			if err := k.cleanupManifestConfigMap(ctrlClient, namespace, endpoint.Metadata.Name); err != nil {
-				return nil, errors.Wrapf(err, "failed to cleanup manifest ConfigMap for endpoint %s", endpoint.Metadata.WorkspaceName())
-			}
-
 			return &v1.EndpointStatus{
 				Phase: v1.EndpointPhaseDELETED,
 			}, nil
@@ -291,12 +282,6 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 	}
 
 	if !exists {
-		// Clean up stale manifest ConfigMap from a previous incomplete deletion
-		// to allow fresh deployment on the next reconcile.
-		if err := k.cleanupManifestConfigMap(ctrlClient, namespace, endpoint.Metadata.Name); err != nil {
-			return nil, errors.Wrapf(err, "failed to cleanup stale manifest ConfigMap for endpoint %s", endpoint.Metadata.WorkspaceName())
-		}
-
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDEPLOYING,
 			ErrorMessage: "Endpoint deploying in progress: Endpoint deployment not found in namespace " + namespace,
@@ -344,13 +329,6 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		Phase:        v1.EndpointPhaseDEPLOYING,
 		ErrorMessage: "Endpoint deploying in progress: " + errorMessage,
 	}, nil
-}
-
-// cleanupManifestConfigMap removes the manifest ConfigMap for an endpoint.
-// This is safe to call even if the ConfigMap doesn't exist (idempotent).
-func (k *kubernetesOrchestrator) cleanupManifestConfigMap(ctrlClient client.Client, namespace, endpointName string) error {
-	configStore := deploy.NewConfigStore(ctrlClient)
-	return configStore.Delete(context.Background(), namespace, endpointName, "deployment")
 }
 
 // getPodsForDeployment retrieves pods managed by the given deployment

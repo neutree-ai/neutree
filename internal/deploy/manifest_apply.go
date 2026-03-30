@@ -287,10 +287,9 @@ func (m *ManifestApply) Delete(
 
 		if err := m.ctrlClient.Delete(ctx, obj); err != nil {
 			if !apierrors.IsNotFound(err) {
-				klog.ErrorS(err, "Failed to delete resource",
-					"kind", obj.GetKind(),
-					"name", obj.GetName())
-				// Continue with other resources
+				return false, errors.Wrapf(err, "failed to delete resource %s/%s",
+					obj.GetKind(),
+					obj.GetName())
 			}
 		}
 	}

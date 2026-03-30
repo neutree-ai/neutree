@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
@@ -244,6 +245,56 @@ func TestKubernetesDeployer_LabelsAppliedToObjects(t *testing.T) {
 		if objLabels[k] != v {
 			t.Errorf("Object missing label %s=%s, got %v", k, v, objLabels)
 		}
+	}
+}
+
+func TestKubernetesDeployer_DeleteCleansConfigMapWhenResourcesStillTerminating(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ctx := context.Background()
+
+	resourceName := "test-endpoint"
+	componentName := "deployment"
+
+	// Pre-create a ConfigMap (simulating prior Apply)
+	store := NewConfigStore(fakeClient)
+	// Config references a ConfigMap resource that "exists" in the cluster
+	testConfig := `[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"endpoint-cm","namespace":"default"},"data":{"key":"value"}}]`
+	err := store.Set(ctx, "default", resourceName, componentName, testConfig, nil)
+	if err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	// Also create the referenced resource so Delete finds it (simulating terminating resource)
+	referencedCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "endpoint-cm", Namespace: "default"},
+		Data:       map[string]string{"key": "value"},
+	}
+	if err := fakeClient.Create(ctx, referencedCM); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	applier := NewKubernetesDeployer(fakeClient, "default", resourceName, componentName).
+		WithLogger(klog.Background())
+
+	deleteFinished, err := applier.Delete(ctx)
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	// deleteFinished may be true or false depending on fake client behavior,
+	// but the ConfigMap should always be cleaned up
+	_ = deleteFinished
+
+	// Verify the manifest ConfigMap was cleaned up
+	savedConfig, err := store.Get(ctx, "default", resourceName, componentName)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if savedConfig != "" {
+		t.Errorf("ConfigMap should have been cleaned up, but still has config: %v", savedConfig)
 	}
 }
 
