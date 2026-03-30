@@ -325,61 +325,6 @@ func (_c *MockModelRegistry_GetModelVersion_Call) RunAndReturn(run func(string, 
 	return _c
 }
 
-// GetNFSVersion provides a mock function with no fields
-func (_m *MockModelRegistry) GetNFSVersion() (string, error) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetNFSVersion")
-	}
-
-	var r0 string
-	var r1 error
-	if rf, ok := ret.Get(0).(func() (string, error)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockModelRegistry_GetNFSVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNFSVersion'
-type MockModelRegistry_GetNFSVersion_Call struct {
-	*mock.Call
-}
-
-// GetNFSVersion is a helper method to define mock.On call
-func (_e *MockModelRegistry_Expecter) GetNFSVersion() *MockModelRegistry_GetNFSVersion_Call {
-	return &MockModelRegistry_GetNFSVersion_Call{Call: _e.mock.On("GetNFSVersion")}
-}
-
-func (_c *MockModelRegistry_GetNFSVersion_Call) Run(run func()) *MockModelRegistry_GetNFSVersion_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockModelRegistry_GetNFSVersion_Call) Return(_a0 string, _a1 error) *MockModelRegistry_GetNFSVersion_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockModelRegistry_GetNFSVersion_Call) RunAndReturn(run func() (string, error)) *MockModelRegistry_GetNFSVersion_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // HealthyCheck provides a mock function with no fields
 func (_m *MockModelRegistry) HealthyCheck() error {
 	ret := _m.Called()
@@ -528,6 +473,61 @@ func (_c *MockModelRegistry_ListModels_Call) Return(_a0 []v1.GeneralModel, _a1 e
 }
 
 func (_c *MockModelRegistry_ListModels_Call) RunAndReturn(run func(model_registry.ListOption) ([]v1.GeneralModel, error)) *MockModelRegistry_ListModels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetNFSType provides a mock function with no fields
+func (_m *MockModelRegistry) GetNFSType() (string, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNFSType")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (string, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockModelRegistry_GetNFSType_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNFSType'
+type MockModelRegistry_GetNFSType_Call struct {
+	*mock.Call
+}
+
+// GetNFSType is a helper method to define mock.On call
+func (_e *MockModelRegistry_Expecter) GetNFSType() *MockModelRegistry_GetNFSType_Call {
+	return &MockModelRegistry_GetNFSType_Call{Call: _e.mock.On("GetNFSType")}
+}
+
+func (_c *MockModelRegistry_GetNFSType_Call) Run(run func()) *MockModelRegistry_GetNFSType_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockModelRegistry_GetNFSType_Call) Return(_a0 string, _a1 error) *MockModelRegistry_GetNFSType_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockModelRegistry_GetNFSType_Call) RunAndReturn(run func() (string, error)) *MockModelRegistry_GetNFSType_Call {
 	_c.Call.Return(run)
 	return _c
 }
