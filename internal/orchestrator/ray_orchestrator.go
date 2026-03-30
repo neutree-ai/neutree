@@ -779,11 +779,18 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 			}
 
 			nfsMountPath := filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
-			// Always use type=nfs (nfs4 filesystem type removed in kernel 5.6+),
-			// with explicit nfsvers to ensure correct version on all kernel versions.
-			backendRunOptions = append(backendRunOptions, fmt.Sprintf(
-				"--mount type=volume,dst=%s,volume-opt=type=nfs,volume-opt=o=addr=%s\\,nfsvers=%s,volume-opt=device=:%s",
-				nfsMountPath, registryURL.Hostname(), nfsVersion, registryURL.Path))
+			// Always use type=nfs (nfs4 filesystem type removed in kernel 5.6+).
+			// For NFSv4+, add explicit nfsvers since Docker calls mount(2) directly
+			// and older kernels won't auto-negotiate to v4.
+			if nfsVersion != "3" {
+				backendRunOptions = append(backendRunOptions, fmt.Sprintf(
+					`--mount type=volume,dst=%s,volume-opt=type=nfs,"volume-opt=o=addr=%s,nfsvers=%s",volume-opt=device=:%s`,
+					nfsMountPath, registryURL.Hostname(), nfsVersion, registryURL.Path))
+			} else {
+				backendRunOptions = append(backendRunOptions, fmt.Sprintf(
+					"--mount type=volume,dst=%s,volume-opt=type=nfs,volume-opt=o=addr=%s,volume-opt=device=:%s",
+					nfsMountPath, registryURL.Hostname(), registryURL.Path))
+			}
 		}
 	}
 
