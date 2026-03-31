@@ -163,17 +163,18 @@ func (a *KubernetesDeployer) Delete(ctx context.Context) (bool, error) {
 		return deleteFinished, err
 	}
 
-	// 3. Clean up ConfigMap once all resources have been processed for deletion.
-	// At this point, every resource is either already gone, marked for deletion,
-	// or has had Delete() successfully called on it (manifestApply.Delete returned nil).
-	err = a.configStore.Delete(ctx, a.namespace, a.resourceName, a.componentName)
-	if err != nil {
-		return deleteFinished, err
+	// 3. Clean up ConfigMap if deletion is complete
+	if deleteFinished {
+		err = a.configStore.Delete(ctx, a.namespace, a.resourceName, a.componentName)
+		if err != nil {
+			a.logger.Error(err, "Failed to delete ConfigMap")
+			// Don't return error as resources were successfully deleted
+		} else {
+			a.logger.Info("Deleted configuration",
+				"resourceName", a.resourceName,
+				"componentName", a.componentName)
+		}
 	}
-
-	a.logger.Info("Deleted configuration",
-		"resourceName", a.resourceName,
-		"componentName", a.componentName)
 
 	return deleteFinished, nil
 }

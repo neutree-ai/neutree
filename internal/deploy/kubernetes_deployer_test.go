@@ -249,7 +249,7 @@ func TestKubernetesDeployer_LabelsAppliedToObjects(t *testing.T) {
 	}
 }
 
-func TestKubernetesDeployer_DeleteCleansConfigMapWhenResourcesStillTerminating(t *testing.T) {
+func TestKubernetesDeployer_DeleteCleansConfigMapOnSecondPass(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 
@@ -259,16 +259,15 @@ func TestKubernetesDeployer_DeleteCleansConfigMapWhenResourcesStillTerminating(t
 	resourceName := "test-endpoint"
 	componentName := "deployment"
 
-	// Pre-create a ConfigMap (simulating prior Apply)
+	// Pre-create a manifest ConfigMap (simulating prior Apply)
 	store := NewConfigStore(fakeClient)
-	// Config references a ConfigMap resource that "exists" in the cluster
 	testConfig := `[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"endpoint-cm","namespace":"default"},"data":{"key":"value"}}]`
 	err := store.Set(ctx, "default", resourceName, componentName, testConfig, nil)
 	if err != nil {
 		t.Fatalf("Set() error = %v", err)
 	}
 
-	// Also create the referenced resource so Delete finds it (simulating terminating resource)
+	// Create the referenced resource so Delete finds it on first pass
 	referencedCM := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "endpoint-cm", Namespace: "default"},
 		Data:       map[string]string{"key": "value"},
@@ -280,16 +279,25 @@ func TestKubernetesDeployer_DeleteCleansConfigMapWhenResourcesStillTerminating(t
 	applier := NewKubernetesDeployer(fakeClient, "default", resourceName, componentName).
 		WithLogger(klog.Background())
 
+	// First pass: resource exists at Get time → deleteFinished=false, CM not cleaned
 	deleteFinished, err := applier.Delete(ctx)
 	if err != nil {
-		t.Fatalf("Delete() error = %v", err)
+		t.Fatalf("First Delete() error = %v", err)
+	}
+	if deleteFinished {
+		t.Errorf("First Delete() finished = true, want false (resource existed at check time)")
 	}
 
-	// deleteFinished may be true or false depending on fake client behavior,
-	// but the ConfigMap should always be cleaned up
-	_ = deleteFinished
+	// Second pass: resource is gone → deleteFinished=true, CM cleaned
+	deleteFinished, err = applier.Delete(ctx)
+	if err != nil {
+		t.Fatalf("Second Delete() error = %v", err)
+	}
+	if !deleteFinished {
+		t.Errorf("Second Delete() finished = false, want true")
+	}
 
-	// Verify the manifest ConfigMap object was actually removed
+	// Verify the manifest ConfigMap was cleaned up
 	cm := &corev1.ConfigMap{}
 	err = fakeClient.Get(ctx, client.ObjectKey{
 		Namespace: "default",

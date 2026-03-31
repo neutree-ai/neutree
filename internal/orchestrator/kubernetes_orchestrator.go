@@ -270,6 +270,21 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 
 	if isDeleting {
 		if !exists {
+			// Deployment is gone (deleted immediately with Background propagation),
+			// but pods may still be terminating. Check pods to avoid marking DELETED
+			// prematurely, which would skip the ConfigMap cleanup cycle in the deployer.
+			pods, err := k.getPodsForEndpoint(ctrlClient, namespace, endpoint.Metadata.Name)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to list pods for endpoint %s", endpoint.Metadata.WorkspaceName())
+			}
+
+			if len(pods) > 0 {
+				return &v1.EndpointStatus{
+					Phase:        v1.EndpointPhaseDELETING,
+					ErrorMessage: fmt.Sprintf("Endpoint deleting in progress: waiting for %d pod(s) to terminate", len(pods)),
+				}, nil
+			}
+
 			return &v1.EndpointStatus{
 				Phase: v1.EndpointPhaseDELETED,
 			}, nil
@@ -329,6 +344,25 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		Phase:        v1.EndpointPhaseDEPLOYING,
 		ErrorMessage: "Endpoint deploying in progress: " + errorMessage,
 	}, nil
+}
+
+// getPodsForEndpoint retrieves pods for an endpoint by label, without requiring the Deployment object.
+// This is used during deletion when the Deployment has already been removed but pods may still be terminating.
+func (k *kubernetesOrchestrator) getPodsForEndpoint(ctrlClient client.Client, namespace, endpointName string) ([]corev1.Pod, error) {
+	podList := &corev1.PodList{}
+
+	err := ctrlClient.List(context.Background(), podList,
+		client.InNamespace(namespace),
+		client.MatchingLabels(map[string]string{
+			"app":      "inference",
+			"endpoint": endpointName,
+		}),
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to list pods for endpoint %s", endpointName)
+	}
+
+	return podList.Items, nil
 }
 
 // getPodsForDeployment retrieves pods managed by the given deployment

@@ -2520,6 +2520,21 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			expectError:   false,
 		},
 		{
+			name: "return Deleting when deployment gone but pods still terminating",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Metadata.DeletionTimestamp = "2024-01-01T00:00:00Z"
+				return ep
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				// No deployment, but pods still exist (terminating)
+				return NewFakeK8sClient(t).WithPods(1)
+			},
+			expectedPhase:  v1.EndpointPhaseDELETING,
+			expectErrorMsg: "waiting for 1 pod(s) to terminate",
+			expectError:    false,
+		},
+		{
 			name: "return Deleting for existing deployment when deletion timestamp is set",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
