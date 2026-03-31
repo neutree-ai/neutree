@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -288,13 +289,14 @@ func TestKubernetesDeployer_DeleteCleansConfigMapWhenResourcesStillTerminating(t
 	// but the ConfigMap should always be cleaned up
 	_ = deleteFinished
 
-	// Verify the manifest ConfigMap was cleaned up
-	savedConfig, err := store.Get(ctx, "default", resourceName, componentName)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if savedConfig != "" {
-		t.Errorf("ConfigMap should have been cleaned up, but still has config: %v", savedConfig)
+	// Verify the manifest ConfigMap object was actually removed
+	cm := &corev1.ConfigMap{}
+	err = fakeClient.Get(ctx, client.ObjectKey{
+		Namespace: "default",
+		Name:      "neutree-" + resourceName + "-" + componentName + "-config",
+	}, cm)
+	if err == nil {
+		t.Errorf("ConfigMap should have been deleted, but still exists")
 	}
 }
 

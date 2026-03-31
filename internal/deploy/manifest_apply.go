@@ -287,8 +287,9 @@ func (m *ManifestApply) Delete(
 
 		if err := m.ctrlClient.Delete(ctx, obj); err != nil {
 			if !apierrors.IsNotFound(err) {
-				return false, errors.Wrapf(err, "failed to delete resource %s/%s",
+				return false, errors.Wrapf(err, "failed to delete resource %s/%s/%s",
 					obj.GetKind(),
+					obj.GetNamespace(),
 					obj.GetName())
 			}
 		}

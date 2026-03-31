@@ -168,12 +168,12 @@ func (a *KubernetesDeployer) Delete(ctx context.Context) (bool, error) {
 	// or has had Delete() successfully called on it (manifestApply.Delete returned nil).
 	err = a.configStore.Delete(ctx, a.namespace, a.resourceName, a.componentName)
 	if err != nil {
-		a.logger.Error(err, "Failed to delete ConfigMap")
-	} else {
-		a.logger.Info("Deleted configuration",
-			"resourceName", a.resourceName,
-			"componentName", a.componentName)
+		return deleteFinished, err
 	}
+
+	a.logger.Info("Deleted configuration",
+		"resourceName", a.resourceName,
+		"componentName", a.componentName)
 
 	return deleteFinished, nil
 }
