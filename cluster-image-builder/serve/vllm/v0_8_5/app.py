@@ -12,7 +12,6 @@ from starlette_context.plugins import RequestIdPlugin
 from starlette_context.middleware import RawContextMiddleware
 from fastapi.middleware import Middleware
 
-import ray
 from ray import serve
 from ray.serve import Application
 from ray.serve.config import RequestRouterConfig
@@ -33,6 +32,7 @@ from vllm.engine.metrics import RayPrometheusStatLogger
 
 from downloader import get_downloader, build_request_from_model_args
 from serve._utils import coerce_args
+from serve._utils.runtime_env import build_backend_runtime_env
 
 
 def _sanitize_metric_cls(base_cls):
@@ -472,17 +472,8 @@ def app_builder(args: Dict[str, Any]) -> Application:
     # Ray replaces "container" per-key, so this must be self-contained.
     backend_container = args.get('backend_container')
     if backend_container:
-        runtime_env = {"container": backend_container}
-        # Ray replaces runtime_env per-deployment (no merge). Carry forward
-        # env_vars from the app-level runtime_env so environment variables
-        # (HF token, engine identity, etc.) reach the Backend container.
-        try:
-            app_env_vars = ray.get_runtime_context().runtime_env.get("env_vars")
-            if app_env_vars:
-                runtime_env["env_vars"] = app_env_vars
-        except (AttributeError, KeyError, TypeError) as exc:
-            print(f"[app_builder] Unable to propagate app-level env_vars to backend runtime_env: {exc}")
-        backend_deploy_options["ray_actor_options"]["runtime_env"] = runtime_env
+        backend_deploy_options["ray_actor_options"]["runtime_env"] = \
+            build_backend_runtime_env(backend_container)
 
     # Configure backend deployment
     backend_deployment = Backend.options(**backend_deploy_options).bind(
