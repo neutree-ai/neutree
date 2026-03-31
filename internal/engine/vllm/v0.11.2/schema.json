@@ -10,24 +10,13 @@
     },
     "runner": {
       "type": "string",
-      "enum": [
-        "auto",
-        "draft",
-        "generate",
-        "pooling"
-      ],
+      "enum": ["auto", "draft", "generate", "pooling"],
       "default": "auto",
       "description": "The type of model runner to use"
     },
     "convert": {
       "type": "string",
-      "enum": [
-        "auto",
-        "classify",
-        "embed",
-        "none",
-        "reward"
-      ],
+      "enum": ["auto", "classify", "embed", "none", "reward"],
       "default": "auto",
       "description": "Convert the model using adapters"
     },
@@ -37,12 +26,7 @@
     },
     "tokenizer_mode": {
       "type": "string",
-      "enum": [
-        "auto",
-        "slow",
-        "mistral",
-        "custom"
-      ],
+      "enum": ["auto", "slow", "mistral", "custom"],
       "default": "auto",
       "description": "The tokenizer mode to use"
     },
@@ -53,14 +37,7 @@
     },
     "dtype": {
       "type": "string",
-      "enum": [
-        "auto",
-        "half",
-        "float16",
-        "bfloat16",
-        "float",
-        "float32"
-      ],
+      "enum": ["auto", "half", "float16", "bfloat16", "float", "float32"],
       "default": "auto",
       "description": "Data type for model weights and activations"
     },
@@ -99,7 +76,7 @@
     },
     "max_model_len": {
       "type": "integer",
-      "description": "Model context length. Supports human-readable format like '1k', '2M'"
+      "description": "Model context length. Maximum number of tokens the model can process"
     },
     "quantization": {
       "type": "string",
@@ -117,12 +94,7 @@
     },
     "logprobs_mode": {
       "type": "string",
-      "enum": [
-        "processed_logits",
-        "processed_logprobs",
-        "raw_logits",
-        "raw_logprobs"
-      ],
+      "enum": ["processed_logits", "processed_logprobs", "raw_logits", "raw_logprobs"],
       "default": "raw_logprobs",
       "description": "Indicates the content returned in logprobs"
     },
@@ -147,10 +119,7 @@
       "description": "Enable passing text embeddings via prompt_embeds"
     },
     "served_model_name": {
-      "type": [
-        "string",
-        "array"
-      ],
+      "type": ["string", "array"],
       "items": {
         "type": "string"
       },
@@ -158,19 +127,12 @@
     },
     "config_format": {
       "type": "string",
-      "enum": [
-        "auto",
-        "hf",
-        "mistral"
-      ],
+      "enum": ["auto", "hf", "mistral"],
       "default": "auto",
       "description": "The format of the model config to load"
     },
     "hf_token": {
-      "type": [
-        "string",
-        "boolean"
-      ],
+      "type": ["string", "boolean"],
       "description": "Hugging Face token for authentication"
     },
     "hf_overrides": {
@@ -203,12 +165,7 @@
     },
     "model_impl": {
       "type": "string",
-      "enum": [
-        "auto",
-        "terratorch",
-        "transformers",
-        "vllm"
-      ],
+      "enum": ["auto", "terratorch", "transformers", "vllm"],
       "default": "auto",
       "description": "Which implementation of the model to use"
     },
@@ -238,11 +195,7 @@
     },
     "safetensors_load_strategy": {
       "type": "string",
-      "enum": [
-        "lazy",
-        "eager",
-        "torchao"
-      ],
+      "enum": ["lazy", "eager", "torchao"],
       "default": "lazy",
       "description": "Loading strategy for safetensors weights"
     },
@@ -256,9 +209,7 @@
       "items": {
         "type": "string"
       },
-      "default": [
-        "original/**/*"
-      ],
+      "default": ["original/**/*"],
       "description": "Patterns to ignore when loading model"
     },
     "use_tqdm_on_load": {
@@ -267,7 +218,7 @@
       "description": "Enable tqdm progress bar when loading"
     },
     "pt_load_map_location": {
-      "type": "string",
+      "type": ["string", "object"],
       "default": "cpu",
       "description": "Map location for loading pytorch checkpoint"
     },
@@ -283,12 +234,7 @@
     },
     "distributed_executor_backend": {
       "type": "string",
-      "enum": [
-        "external_launcher",
-        "mp",
-        "ray",
-        "uni"
-      ],
+      "enum": ["external_launcher", "mp", "ray", "uni"],
       "description": "Backend for distributed model workers"
     },
     "pipeline_parallel_size": {
@@ -366,10 +312,7 @@
     },
     "data_parallel_backend": {
       "type": "string",
-      "enum": [
-        "mp",
-        "ray"
-      ],
+      "enum": ["mp", "ray"],
       "default": "mp",
       "description": "Backend for data parallel"
     },
@@ -390,15 +333,7 @@
     },
     "all2all_backend": {
       "type": "string",
-      "enum": [
-        "allgather_reducescatter",
-        "deepep_high_throughput",
-        "deepep_low_latency",
-        "flashinfer_all2allv",
-        "naive",
-        "pplx",
-        "None"
-      ],
+      "enum": ["allgather_reducescatter", "deepep_high_throughput", "deepep_low_latency", "flashinfer_all2allv", "naive", "pplx", "None"],
       "description": "All2All backend for MoE expert parallel"
     },
     "enable_dbo": {
@@ -432,10 +367,7 @@
     },
     "expert_placement_strategy": {
       "type": "string",
-      "enum": [
-        "linear",
-        "round_robin"
-      ],
+      "enum": ["linear", "round_robin"],
       "default": "linear",
       "description": "Expert placement strategy for MoE layers"
     },
@@ -470,15 +402,7 @@
     },
     "block_size": {
       "type": "integer",
-      "enum": [
-        1,
-        8,
-        16,
-        32,
-        64,
-        128,
-        256
-      ],
+      "enum": [1, 8, 16, 32, 64, 128, 256],
       "description": "Size of a contiguous cache block"
     },
     "gpu_memory_utilization": {
@@ -500,15 +424,7 @@
     },
     "kv_cache_dtype": {
       "type": "string",
-      "enum": [
-        "auto",
-        "bfloat16",
-        "fp8",
-        "fp8_ds_mla",
-        "fp8_e4m3",
-        "fp8_e5m2",
-        "fp8_inc"
-      ],
+      "enum": ["auto", "bfloat16", "fp8", "fp8_ds_mla", "fp8_e4m3", "fp8_e5m2", "fp8_inc"],
       "default": "auto",
       "description": "Data type for KV cache storage"
     },
@@ -522,10 +438,7 @@
     },
     "prefix_caching_hash_algo": {
       "type": "string",
-      "enum": [
-        "sha256",
-        "sha256_cbor"
-      ],
+      "enum": ["sha256", "sha256_cbor"],
       "default": "sha256",
       "description": "Hash algorithm for prefix caching"
     },
@@ -547,19 +460,13 @@
     },
     "mamba_cache_dtype": {
       "type": "string",
-      "enum": [
-        "auto",
-        "float32"
-      ],
+      "enum": ["auto", "float32"],
       "default": "auto",
       "description": "Data type for Mamba cache"
     },
     "mamba_ssm_cache_dtype": {
       "type": "string",
-      "enum": [
-        "auto",
-        "float32"
-      ],
+      "enum": ["auto", "float32"],
       "default": "auto",
       "description": "Data type for Mamba SSM state"
     },
@@ -573,11 +480,7 @@
     },
     "kv_offloading_backend": {
       "type": "string",
-      "enum": [
-        "lmcache",
-        "native",
-        "None"
-      ],
+      "enum": ["lmcache", "native", "None"],
       "description": "Backend for KV cache offloading"
     },
     "limit_mm_per_prompt": {
@@ -611,10 +514,7 @@
     },
     "mm_processor_cache_type": {
       "type": "string",
-      "enum": [
-        "lru",
-        "shm"
-      ],
+      "enum": ["lru", "shm"],
       "default": "lru",
       "description": "Type of cache for multi-modal processor"
     },
@@ -625,10 +525,7 @@
     },
     "mm_encoder_tp_mode": {
       "type": "string",
-      "enum": [
-        "data",
-        "weights"
-      ],
+      "enum": ["data", "weights"],
       "description": "Multi-modal encoder tensor parallel mode"
     },
     "mm_encoder_attn_backend": {
@@ -663,17 +560,7 @@
     },
     "max_lora_rank": {
       "type": "integer",
-      "enum": [
-        1,
-        8,
-        16,
-        32,
-        64,
-        128,
-        256,
-        320,
-        512
-      ],
+      "enum": [1, 8, 16, 32, 64, 128, 256, 320, 512],
       "default": 16,
       "description": "Maximum LoRA rank"
     },
@@ -705,18 +592,7 @@
     },
     "collect_detailed_traces": {
       "type": "string",
-      "enum": [
-        "all",
-        "model",
-        "worker",
-        "None",
-        "model,worker",
-        "model,all",
-        "worker,model",
-        "worker,all",
-        "all,model",
-        "all,worker"
-      ],
+      "enum": ["all", "model", "worker", "None", "model,worker", "model,all", "worker,model", "worker,all", "all,model", "all,worker"],
       "description": "Collect detailed traces for specified modules"
     },
     "max_num_batched_tokens": {
@@ -749,10 +625,7 @@
     },
     "scheduling_policy": {
       "type": "string",
-      "enum": [
-        "fcfs",
-        "priority"
-      ],
+      "enum": ["fcfs", "priority"],
       "default": "fcfs",
       "description": "The scheduling policy to use"
     },
@@ -868,11 +741,7 @@
     },
     "chat_template_content_format": {
       "type": "string",
-      "enum": [
-        "auto",
-        "string",
-        "openai"
-      ],
+      "enum": ["auto", "string", "openai"],
       "default": "auto",
       "description": "Chat template content format"
     },
@@ -946,10 +815,7 @@
     },
     "preemption_mode": {
       "type": "string",
-      "enum": [
-        "swap",
-        "recompute"
-      ],
+      "enum": ["swap", "recompute"],
       "description": "Preemption mode during memory shortage"
     },
     "num_scheduler_steps": {
