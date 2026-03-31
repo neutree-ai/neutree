@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -303,8 +304,8 @@ func TestKubernetesDeployer_DeleteCleansConfigMapOnSecondPass(t *testing.T) {
 		Namespace: "default",
 		Name:      "neutree-" + resourceName + "-" + componentName + "-config",
 	}, cm)
-	if err == nil {
-		t.Errorf("ConfigMap should have been deleted, but still exists")
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("Expected NotFound error for deleted ConfigMap, got: %v", err)
 	}
 }
 
