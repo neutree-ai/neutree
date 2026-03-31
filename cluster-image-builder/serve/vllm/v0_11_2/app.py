@@ -32,6 +32,7 @@ from vllm.entrypoints.openai.serving_models import BaseModelPath, OpenAIServingM
 from downloader import get_downloader, build_request_from_model_args
 from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
 from serve._utils import coerce_args
+from serve._utils.runtime_env import build_backend_runtime_env
 
 
 class SchedulerType(str, enum.Enum):
@@ -428,9 +429,8 @@ def app_builder(args: Dict[str, Any]) -> Application:
     # Ray replaces "container" per-key, so this must be self-contained.
     backend_container = args.get('backend_container')
     if backend_container:
-        backend_deploy_options["ray_actor_options"]["runtime_env"] = {
-            "container": backend_container
-        }
+        backend_deploy_options["ray_actor_options"]["runtime_env"] = \
+            build_backend_runtime_env(backend_container)
 
     # Configure backend deployment
     backend_deployment = Backend.options(**backend_deploy_options).bind(
