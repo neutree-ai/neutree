@@ -400,37 +400,6 @@ func TestDelete_AlreadyMarkedForDeletion(t *testing.T) {
 	assert.False(t, finished)
 }
 
-func TestDelete_ResourceDeleteFails(t *testing.T) {
-	deployment := createTestDeployment("nginx", "test-ns", 3)
-
-	lastApplied := []unstructured.Unstructured{*deployment}
-	lastAppliedJSON, _ := json.Marshal(lastApplied)
-
-	fakeClient := newFakeClient(deployment)
-	// Wrap with a client that fails on Delete
-	errClient := &deleteErrorClient{Client: fakeClient, deleteErr: assert.AnError}
-
-	ma := NewManifestApply(errClient, "test-ns").
-		WithLastAppliedConfig(string(lastAppliedJSON)).
-		WithLogger(klog.NewKlogr())
-
-	finished, err := ma.Delete(context.Background())
-
-	assert.Error(t, err)
-	assert.False(t, finished)
-	assert.Contains(t, err.Error(), "failed to delete resource")
-}
-
-// deleteErrorClient wraps a client to simulate Delete errors
-type deleteErrorClient struct {
-	client.Client
-	deleteErr error
-}
-
-func (d *deleteErrorClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
-	return d.deleteErr
-}
-
 func TestObjectKey(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -287,10 +287,12 @@ func (m *ManifestApply) Delete(
 
 		if err := m.ctrlClient.Delete(ctx, obj); err != nil {
 			if !apierrors.IsNotFound(err) {
-				return false, errors.Wrapf(err, "failed to delete resource %s/%s/%s",
-					obj.GetKind(),
-					obj.GetNamespace(),
-					obj.GetName())
+				klog.ErrorS(err, "Failed to delete resource",
+					"kind", obj.GetKind(),
+					"namespace", obj.GetNamespace(),
+					"name", obj.GetName())
+				// Continue with other resources; deleteFinished remains false
+				// so ConfigMap won't be cleaned. Next reconcile will retry.
 			}
 		}
 	}
