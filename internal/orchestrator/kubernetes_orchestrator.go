@@ -269,30 +269,24 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 	isDeleting := endpoint.GetDeletionTimestamp() != ""
 
 	if isDeleting {
-		if !exists {
-			// Deployment is gone (deleted immediately with Background propagation),
-			// but pods may still be terminating. Check pods to avoid marking DELETED
-			// prematurely, which would skip the ConfigMap cleanup cycle in the deployer.
-			pods, err := k.getPodsForEndpoint(ctrlClient, namespace, endpoint.Metadata.Name)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to list pods for endpoint %s", endpoint.Metadata.WorkspaceName())
-			}
+		// Check pods directly instead of Deployment for deletion status.
+		// Deployment is deleted immediately (K8s Background propagation),
+		// but pods linger while GC terminates them. This ensures the status
+		// stays DELETING long enough for the deployer's ConfigMap cleanup cycle.
+		pods, err := k.getPodsForEndpoint(ctrlClient, namespace, endpoint.Metadata.Name)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to list pods for endpoint %s", endpoint.Metadata.WorkspaceName())
+		}
 
-			if len(pods) > 0 {
-				return &v1.EndpointStatus{
-					Phase:        v1.EndpointPhaseDELETING,
-					ErrorMessage: fmt.Sprintf("Endpoint deleting in progress: waiting for %d pod(s) to terminate", len(pods)),
-				}, nil
-			}
-
+		if len(pods) > 0 {
 			return &v1.EndpointStatus{
-				Phase: v1.EndpointPhaseDELETED,
+				Phase:        v1.EndpointPhaseDELETING,
+				ErrorMessage: fmt.Sprintf("Endpoint deleting in progress: waiting for %d pod(s) to terminate", len(pods)),
 			}, nil
 		}
 
 		return &v1.EndpointStatus{
-			Phase:        v1.EndpointPhaseDELETING,
-			ErrorMessage: "Endpoint deleting in progress: waiting for endpoint to be fully deleted",
+			Phase: v1.EndpointPhaseDELETED,
 		}, nil
 	}
 
