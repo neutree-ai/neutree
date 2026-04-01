@@ -27,16 +27,22 @@ func TestGetBuiltinEngines(t *testing.T) {
 		t.Error("expected llama-cpp engine to be registered")
 	}
 
-	// Verify vllm v0.11.2 has nvidia_gpu image
+	// Verify vllm versions have nvidia_gpu image and deploy template
 	for _, e := range engines {
 		if e.Metadata.Name != "vllm" {
 			continue
 		}
 
 		for _, v := range e.Spec.Versions {
-			if v.Version == "v0.11.2" {
+			switch v.Version {
+			case "v0.11.2", "v0.17.1":
 				if _, ok := v.Images["nvidia_gpu"]; !ok {
-					t.Error("vllm v0.11.2 missing nvidia_gpu image")
+					t.Errorf("vllm %s missing nvidia_gpu image", v.Version)
+				}
+				if k8sTemplates, ok := v.DeployTemplate["kubernetes"]; !ok {
+					t.Errorf("vllm %s missing kubernetes deploy template", v.Version)
+				} else if _, ok := k8sTemplates["default"]; !ok {
+					t.Errorf("vllm %s missing default kubernetes deploy template", v.Version)
 				}
 			}
 		}

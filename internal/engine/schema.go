@@ -18,8 +18,8 @@ var vllmV0_17_1EngineSchema []byte
 //go:embed llama-cpp/v0.3.7/schema.json
 var llamaCppV0_3_7EngineSchema []byte
 
-// GetVLLMDefaultEngineSchema returns the parsed JSON schema for vLLM V0.8.5 engine
-func GetVLLMDefaultEngineSchema() (map[string]interface{}, error) {
+// GetVLLMV0_8_5EngineSchema returns the parsed JSON schema for vLLM V0.8.5 engine
+func GetVLLMV0_8_5EngineSchema() (map[string]interface{}, error) {
 	var schema map[string]interface{}
 	if err := json.Unmarshal(vllmV0_8_5EngineSchema, &schema); err != nil {
 		return nil, fmt.Errorf("failed to parse vLLM V0.8.5 engine schema: %w", err)
@@ -59,7 +59,7 @@ func GetLlamaCppDefaultEngineSchema() (map[string]interface{}, error) {
 
 // EngineSchemas contains all available engine schemas
 var EngineSchemas = map[string]func() (map[string]interface{}, error){
-	"vllm-v0.8.5":      GetVLLMDefaultEngineSchema,
+	"vllm-v0.8.5":      GetVLLMV0_8_5EngineSchema,
 	"llama-cpp-v0.3.7": GetLlamaCppDefaultEngineSchema,
 	"vllm-v0.11.2":     GetVLLMV0_11_2EngineSchema,
 	"vllm-v0.17.1":     GetVLLMV0_17_1EngineSchema,

@@ -11,7 +11,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 		return nil, err
 	}
 
-	vllmV0_8_5EngineSchema, err := GetVLLMDefaultEngineSchema()
+	vllmV0_8_5EngineSchema, err := GetVLLMV0_8_5EngineSchema()
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						},
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
-								"default": GetVLLMDefaultDeployTemplate(),
+								"default": GetVLLMV0_11_2DeployTemplate(),
 							},
 						},
 					},
