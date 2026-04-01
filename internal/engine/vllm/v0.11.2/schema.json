@@ -75,8 +75,8 @@
       "description": "Revision of the tokenizer to use"
     },
     "max_model_len": {
-      "type": ["integer", "string"],
-      "description": "Model context length. Supports human-readable format like '1k', '2M'"
+      "type": "integer",
+      "description": "Model context length. Maximum number of tokens the model can process"
     },
     "quantization": {
       "type": "string",
@@ -141,7 +141,7 @@
       "description": "Arguments to be forwarded to HuggingFace config"
     },
     "pooler_config": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Pooler config for output pooling behavior"
     },
     "logits_processor_pattern": {
@@ -174,7 +174,7 @@
       "description": "Override dtype for attention"
     },
     "logits_processors": {
-      "type": ["string", "array"],
+      "type": "array",
       "items": {
         "type": "string"
       },
@@ -362,7 +362,7 @@
       "description": "Enable expert parallelism load balancing"
     },
     "eplb_config": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Expert parallelism configuration"
     },
     "expert_placement_strategy": {
@@ -413,7 +413,7 @@
       "description": "The fraction of GPU memory to be used"
     },
     "kv_cache_memory_bytes": {
-      "type": ["integer", "string"],
+      "type": "integer",
       "description": "Size of KV Cache per GPU in bytes"
     },
     "swap_space": {
@@ -484,7 +484,7 @@
       "description": "Backend for KV cache offloading"
     },
     "limit_mm_per_prompt": {
-      "type": ["string", "object"],
+      "type": "object",
       "default": {},
       "description": "Maximum number of multi-modal items per prompt"
     },
@@ -494,12 +494,12 @@
       "description": "Enable passing multimodal embeddings"
     },
     "media_io_kwargs": {
-      "type": ["string", "object"],
+      "type": "object",
       "default": {},
       "description": "Additional args for processing media inputs"
     },
     "mm_processor_kwargs": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Arguments forwarded to multi-modal processor"
     },
     "mm_processor_cache_gb": {
@@ -579,7 +579,7 @@
       "description": "Use fully sharded LoRA layers"
     },
     "default_mm_loras": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Default LoRA paths for specific modalities"
     },
     "show_hidden_metrics_for_version": {
@@ -596,7 +596,7 @@
       "description": "Collect detailed traces for specified modules"
     },
     "max_num_batched_tokens": {
-      "type": ["integer", "string"],
+      "type": "integer",
       "description": "Maximum number of batched tokens per iteration"
     },
     "max_num_seqs": {
@@ -686,23 +686,23 @@
       "description": "Specialize CUDA graphs for LoRA"
     },
     "speculative_config": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Speculative decoding configuration"
     },
     "kv_transfer_config": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Distributed KV cache transfer config"
     },
     "kv_events_config": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Event publishing configuration"
     },
     "ec_transfer_config": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Distributed EC cache transfer config"
     },
     "compilation_config": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "torch.compile and cudagraph configuration"
     },
     "additional_config": {
@@ -711,7 +711,7 @@
       "description": "Additional platform-specific configuration"
     },
     "structured_outputs_config": {
-      "type": ["string", "object"],
+      "type": "object",
       "description": "Structured outputs configuration"
     },
     "headless": {
