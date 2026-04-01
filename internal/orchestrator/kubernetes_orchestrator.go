@@ -273,7 +273,10 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		// Deployment is deleted immediately (K8s Background propagation),
 		// but pods linger while GC terminates them. This ensures the status
 		// stays DELETING long enough for the deployer's ConfigMap cleanup cycle.
-		pods, err := k.getPodsForEndpoint(ctrlClient, namespace, endpoint.Metadata.Name)
+		pods, err := k.listPods(ctrlClient, namespace, map[string]string{
+			"app":      "inference",
+			"endpoint": endpoint.Metadata.Name,
+		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to list pods for endpoint %s", endpoint.Metadata.WorkspaceName())
 		}
@@ -298,7 +301,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 	}
 
 	// Check for CrashLoopBackOff or other critical failures
-	pods, err := k.getPodsForDeployment(dep, ctrlClient)
+	pods, err := k.listPods(ctrlClient, namespace, dep.Spec.Selector.MatchLabels)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get pods for deployment %s", dep.Name)
 	}
@@ -340,35 +343,16 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 	}, nil
 }
 
-// getPodsForEndpoint retrieves pods for an endpoint by label, without requiring the Deployment object.
-// This is used during deletion when the Deployment has already been removed but pods may still be terminating.
-func (k *kubernetesOrchestrator) getPodsForEndpoint(ctrlClient client.Client, namespace, endpointName string) ([]corev1.Pod, error) {
+// listPods lists pods matching the given labels in the specified namespace.
+func (k *kubernetesOrchestrator) listPods(ctrlClient client.Client, namespace string, labels map[string]string) ([]corev1.Pod, error) {
 	podList := &corev1.PodList{}
 
 	err := ctrlClient.List(context.Background(), podList,
 		client.InNamespace(namespace),
-		client.MatchingLabels(map[string]string{
-			"app":      "inference",
-			"endpoint": endpointName,
-		}),
+		client.MatchingLabels(labels),
 	)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to list pods for endpoint %s", endpointName)
-	}
-
-	return podList.Items, nil
-}
-
-// getPodsForDeployment retrieves pods managed by the given deployment
-func (k *kubernetesOrchestrator) getPodsForDeployment(dep *appsv1.Deployment, ctrlClient client.Client) ([]corev1.Pod, error) {
-	podList := &corev1.PodList{}
-
-	err := ctrlClient.List(context.Background(), podList,
-		client.InNamespace(dep.Namespace),
-		client.MatchingLabels(dep.Spec.Selector.MatchLabels),
-	)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to list pods for deployment %s", dep.Name)
+		return nil, errors.Wrapf(err, "failed to list pods in namespace %s", namespace)
 	}
 
 	return podList.Items, nil
