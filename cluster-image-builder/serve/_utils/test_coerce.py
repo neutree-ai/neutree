@@ -1,12 +1,13 @@
-"""Tests for serve._utils.coerce_args."""
+"""Tests for serve._utils.coerce_args and filter_engine_args."""
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
-from serve._utils import coerce_args
+from serve._utils import coerce_args, filter_engine_args
 
 
 class SampleModel(BaseModel):
@@ -122,3 +123,55 @@ class TestCoerceArgs:
         args = {"count": "42"}
         coerce_args(args, SampleStdDataclass)
         assert args["count"] == "42"
+
+
+
+# ---------------------------------------------------------------------------
+# Fixture for filter_engine_args tests
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _FakeEngineArgs:
+    model: str = ""
+    max_model_len: int = 0
+    tensor_parallel_size: int = 1
+    reasoning_parser: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Tests for filter_engine_args
+# ---------------------------------------------------------------------------
+
+class TestFilterEngineArgs:
+    def test_known_fields_kept(self):
+        args = {"model": "llama", "max_model_len": 4096}
+        filter_engine_args(args, _FakeEngineArgs)
+        assert args == {"model": "llama", "max_model_len": 4096}
+
+    def test_unknown_fields_removed(self, caplog):
+        args = {"model": "llama", "response_role": "user", "bogus": 42}
+        with caplog.at_level(logging.WARNING, logger="ray.serve"):
+            filter_engine_args(args, _FakeEngineArgs)
+        assert args == {"model": "llama"}
+        assert "2 unknown engine parameter(s) ignored" in caplog.text
+        assert "bogus" in caplog.text
+        assert "response_role" in caplog.text
+
+    def test_empty_args(self):
+        args = {}
+        filter_engine_args(args, _FakeEngineArgs)
+        assert args == {}
+
+    def test_all_unknown(self, caplog):
+        args = {"tool_call_parser": "hermes", "chat_template": "custom"}
+        with caplog.at_level(logging.WARNING, logger="ray.serve"):
+            filter_engine_args(args, _FakeEngineArgs)
+        assert args == {}
+        assert "2 unknown engine parameter(s) ignored" in caplog.text
+
+    def test_non_dataclass_is_noop(self, caplog):
+        args = {"anything": "goes"}
+        with caplog.at_level(logging.WARNING, logger="ray.serve"):
+            filter_engine_args(args, dict)
+        assert args == {"anything": "goes"}
+        assert "could not introspect" in caplog.text

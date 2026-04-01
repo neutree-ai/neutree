@@ -2,8 +2,11 @@
 
 import dataclasses
 import json
+import logging
 import typing
 from typing import Any, Dict, Union
+
+logger = logging.getLogger("ray.serve")
 
 
 def _get_field_annotations(model_class: type) -> Dict[str, Any]:
@@ -72,3 +75,29 @@ def coerce_args(args: Dict[str, Any], model_class: type) -> None:
                 continue
             if isinstance(parsed, (dict, list)):
                 args[field_name] = parsed
+
+
+def filter_engine_args(args: Dict[str, Any], engine_args_class: type) -> None:
+    """Remove keys from *args* that are not recognised by *engine_args_class*.
+
+    This prevents ``AsyncEngineArgs(**args)`` from crashing with a TypeError
+    when the dict contains serving-only or otherwise unknown parameters.
+
+    Mutates *args* in place.  Unknown keys are logged as warnings.
+    """
+    known_fields = set(_get_field_annotations(engine_args_class).keys())
+    if not known_fields:
+        logger.warning(
+            "filter_engine_args: could not introspect %r — skipping unknown-key filter",
+            engine_args_class,
+        )
+        return
+    unknown = [k for k in list(args) if k not in known_fields]
+    for key in unknown:
+        args.pop(key, None)
+    if unknown:
+        logger.warning(
+            "filter_engine_args: %d unknown engine parameter(s) ignored: %s",
+            len(unknown),
+            ", ".join(sorted(unknown)),
+        )
