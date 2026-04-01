@@ -289,8 +289,10 @@ func (m *ManifestApply) Delete(
 			if !apierrors.IsNotFound(err) {
 				klog.ErrorS(err, "Failed to delete resource",
 					"kind", obj.GetKind(),
+					"namespace", obj.GetNamespace(),
 					"name", obj.GetName())
-				// Continue with other resources
+				// Continue with other resources; deleteFinished remains false
+				// so ConfigMap won't be cleaned. Next reconcile will retry.
 			}
 		}
 	}
