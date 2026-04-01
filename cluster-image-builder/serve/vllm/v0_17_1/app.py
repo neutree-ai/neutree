@@ -32,7 +32,8 @@ from vllm.entrypoints.pooling.score.serving import ServingScores
 
 from downloader import get_downloader, build_request_from_model_args
 from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
-from serve._utils import coerce_args
+from serve._utils import coerce_args, filter_engine_args
+from serve._utils.runtime_env import build_backend_runtime_env
 
 
 class SchedulerType(str, enum.Enum):
@@ -156,6 +157,10 @@ class Backend:
         # values as strings (e.g. '{"temperature": 0.5}' instead of a native dict),
         # since unlike the K8s CLI path there is no argparse layer to do json.loads.
         coerce_args(args, AsyncEngineArgs)
+
+        # Drop any keys not recognised by AsyncEngineArgs (e.g. serving-only
+        # params that were read but not popped) to prevent TypeError on init.
+        filter_engine_args(args, AsyncEngineArgs)
 
         engine_args = AsyncEngineArgs(
             **args
@@ -457,9 +462,8 @@ def app_builder(args: Dict[str, Any]) -> Application:
     # Ray replaces "container" per-key, so this must be self-contained.
     backend_container = args.get('backend_container')
     if backend_container:
-        backend_deploy_options["ray_actor_options"]["runtime_env"] = {
-            "container": backend_container
-        }
+        backend_deploy_options["ray_actor_options"]["runtime_env"] = \
+            build_backend_runtime_env(backend_container)
 
     # Configure backend deployment
     backend_deployment = Backend.options(**backend_deploy_options).bind(
