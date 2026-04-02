@@ -24,6 +24,22 @@ type CaseResult struct {
 	Comment string
 }
 
+// parseCaseID strips the optional "C" prefix and converts a case ID string to int.
+// Returns (0, false) if the string is not a valid case ID.
+func parseCaseID(raw string) (int, bool) {
+	s := raw
+	if len(s) > 0 && s[0] == 'C' {
+		s = s[1:]
+	}
+
+	id, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+
+	return id, true
+}
+
 // ReportToTestRail sends test results to a TestRail run.
 // It reads connection info (URL, user, password) from the profile struct.
 // runID is resolved by the caller via profileTestrailRunID(), which checks
@@ -50,20 +66,15 @@ func ReportToTestRail(runID string, caseResults []CaseResult) error {
 	}{}
 
 	for _, r := range caseResults {
+		caseIDInt, ok := parseCaseID(r.CaseID)
+		if !ok {
+			fmt.Printf("Skipping invalid case ID %q\n", r.CaseID)
+			continue
+		}
+
 		statusID := trStatusPassed
 		if !r.Passed {
 			statusID = trStatusFailed
-		}
-		// Strip the "C" prefix if present (TestRail API expects numeric ID)
-		caseID := r.CaseID
-		if len(caseID) > 0 && caseID[0] == 'C' {
-			caseID = caseID[1:]
-		}
-
-		caseIDInt, err := strconv.Atoi(caseID)
-		if err != nil {
-			fmt.Printf("Skipping invalid case ID %q: %v\n", r.CaseID, err)
-			continue
 		}
 
 		payload.Results = append(payload.Results, trResult{
@@ -187,11 +198,10 @@ func fetchRunCaseIDs(runID int) ([]int, error) {
 			allCaseIDs = append(allCaseIDs, t.CaseID)
 		}
 
-		if len(page.Tests) < limit {
+		offset += len(page.Tests)
+		if offset >= page.Size {
 			break
 		}
-
-		offset += limit
 	}
 
 	return allCaseIDs, nil
@@ -266,14 +276,9 @@ func ReportToTestRailPlan(planID string, caseResults []CaseResult) error {
 	runResults := make(map[int][]CaseResult)
 
 	for _, r := range caseResults {
-		caseID := r.CaseID
-		if len(caseID) > 0 && caseID[0] == 'C' {
-			caseID = caseID[1:]
-		}
-
-		caseIDInt, err := strconv.Atoi(caseID)
-		if err != nil {
-			fmt.Printf("Skipping invalid case ID %q: %v\n", r.CaseID, err)
+		caseIDInt, ok := parseCaseID(r.CaseID)
+		if !ok {
+			fmt.Printf("Skipping invalid case ID %q\n", r.CaseID)
 			continue
 		}
 
