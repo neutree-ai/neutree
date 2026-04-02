@@ -444,6 +444,15 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	if username != "" && token != "" {
 		dockerLoginCommand := fmt.Sprintf("docker login %s -u '%s' -p '%s'", host, username, token)
 		initializationCommands = append(initializationCommands, dockerLoginCommand)
+
+		// For new clusters using DOOD architecture, also run docker login inside the
+		// ray container so its Docker CLI can authenticate when pulling engine images
+		// via runtime_env container (DOOD uses docker.sock from host).
+		if isNewCluster {
+			rayClusterConfig.HeadStartRayCommands = append([]string{dockerLoginCommand}, rayClusterConfig.HeadStartRayCommands...)
+			rayClusterConfig.WorkerStartRayCommands = append([]string{dockerLoginCommand}, rayClusterConfig.WorkerStartRayCommands...)
+			rayClusterConfig.StaticWorkerStartRayCommands = append([]string{dockerLoginCommand}, rayClusterConfig.StaticWorkerStartRayCommands...)
+		}
 	}
 
 	rayClusterConfig.InitializationCommands = initializationCommands
