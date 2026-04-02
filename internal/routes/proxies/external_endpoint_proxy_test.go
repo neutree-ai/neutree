@@ -10,13 +10,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
+	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 func TestHandleTestConnectivity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	deps := &Dependencies{Storage: new(storageMocks.MockStorage)}
 
 	tests := []struct {
 		name           string
@@ -29,16 +34,22 @@ func TestHandleTestConnectivity(t *testing.T) {
 		wantErrContain string
 	}{
 		{
-			name:           "missing body",
+			name:           "missing upstream and endpoint_ref",
 			body:           `{}`,
 			wantHTTPStatus: http.StatusBadRequest,
-			wantErrContain: "upstream.url is required",
+			wantErrContain: "either upstream.url or endpoint_ref is required",
 		},
 		{
 			name:           "invalid json",
 			body:           `{invalid`,
 			wantHTTPStatus: http.StatusBadRequest,
 			wantErrContain: "invalid request body",
+		},
+		{
+			name:           "both upstream and endpoint_ref",
+			body:           `{"upstream":{"url":"http://localhost"},"endpoint_ref":"my-ep","workspace":"default"}`,
+			wantHTTPStatus: http.StatusBadRequest,
+			wantErrContain: "mutually exclusive",
 		},
 		{
 			name: "upstream returns 401",
@@ -59,9 +70,9 @@ func TestHandleTestConnectivity(t *testing.T) {
 					assert.Equal(t, "/v1/models", r.URL.Path)
 					assert.Equal(t, "Bearer sk-test", r.Header.Get("Authorization"))
 					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					json.NewEncoder(w).Encode(map[string]any{
 						"object": "list",
-						"data": []map[string]interface{}{
+						"data": []map[string]any{
 							{"id": "gpt-4o", "object": "model"},
 							{"id": "gpt-4o-mini", "object": "model"},
 						},
@@ -78,9 +89,9 @@ func TestHandleTestConnectivity(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					assert.Empty(t, r.Header.Get("Authorization"))
 					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					json.NewEncoder(w).Encode(map[string]any{
 						"object": "list",
-						"data": []map[string]interface{}{
+						"data": []map[string]any{
 							{"id": "test-model", "object": "model"},
 						},
 					})
@@ -95,9 +106,9 @@ func TestHandleTestConnectivity(t *testing.T) {
 			mockServer: func() *httptest.Server {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					json.NewEncoder(w).Encode(map[string]any{
 						"object": "list",
-						"data":   []map[string]interface{}{},
+						"data":   []map[string]any{},
 					})
 				}))
 			},
@@ -132,6 +143,7 @@ func TestHandleTestConnectivity(t *testing.T) {
 						Credential: "sk-test",
 					}
 				}
+
 				b, _ := json.Marshal(reqObj)
 				body = string(b)
 			}
@@ -141,7 +153,7 @@ func TestHandleTestConnectivity(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/external_endpoints/test_connectivity", strings.NewReader(body))
 			c.Request.Header.Set("Content-Type", "application/json")
 
-			handler := handleTestConnectivity()
+			handler := handleTestConnectivity(deps)
 			handler(c)
 
 			assert.Equal(t, tt.wantHTTPStatus, w.Code)
@@ -164,6 +176,114 @@ func TestHandleTestConnectivity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleTestConnectivityEndpointRef(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Start mock server to act as internal endpoint
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/test-ws/my-endpoint/v1/models", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "my-local-model"},
+			},
+		})
+	}))
+	defer mockServer.Close()
+
+	// Parse mock server URL for cluster dashboard URL
+	dashboardURL := mockServer.URL
+
+	mockStorage := new(storageMocks.MockStorage)
+	deps := &Dependencies{Storage: mockStorage}
+
+	// Mock ListEndpoint
+	mockStorage.On("ListEndpoint", mock.MatchedBy(func(opt storage.ListOption) bool {
+		return len(opt.Filters) == 2
+	})).Return([]v1.Endpoint{
+		{
+			Spec: &v1.EndpointSpec{
+				Cluster: "my-cluster",
+			},
+		},
+	}, nil)
+
+	// Mock ListCluster — return dashboard URL pointing at mock server
+	mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+		return len(opt.Filters) == 2
+	})).Return([]v1.Cluster{
+		{
+			Spec: &v1.ClusterSpec{
+				Type: v1.KubernetesClusterType,
+			},
+			Status: &v1.ClusterStatus{
+				DashboardURL: dashboardURL,
+			},
+		},
+	}, nil)
+
+	epRef := "my-endpoint"
+	ws := "test-ws"
+	reqObj := testConnectivityRequest{
+		EndpointRef: &epRef,
+		Workspace:   &ws,
+	}
+
+	b, _ := json.Marshal(reqObj)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/external_endpoints/test_connectivity", strings.NewReader(string(b)))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler := handleTestConnectivity(deps)
+	handler(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp testConnectivityResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	assert.True(t, resp.Success)
+	assert.Equal(t, []string{"my-local-model"}, resp.Models)
+
+	mockStorage.AssertExpectations(t)
+}
+
+func TestHandleTestConnectivityEndpointRefNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockStorage := new(storageMocks.MockStorage)
+	deps := &Dependencies{Storage: mockStorage}
+
+	mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil)
+
+	epRef := "nonexistent"
+	ws := "default"
+	reqObj := testConnectivityRequest{
+		EndpointRef: &epRef,
+		Workspace:   &ws,
+	}
+
+	b, _ := json.Marshal(reqObj)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/external_endpoints/test_connectivity", strings.NewReader(string(b)))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler := handleTestConnectivity(deps)
+	handler(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp testConnectivityResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Error, "not found")
 }
 
 func TestParseModelIDs(t *testing.T) {

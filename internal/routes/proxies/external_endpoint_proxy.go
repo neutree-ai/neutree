@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -33,13 +35,16 @@ func RegisterExternalEndpointRoutes(group *gin.RouterGroup, middlewares []gin.Ha
 	proxyGroup.PATCH("", handler)
 
 	// Test connectivity endpoint
-	proxyGroup.POST("/test_connectivity", handleTestConnectivity())
+	proxyGroup.POST("/test_connectivity", handleTestConnectivity(deps))
 }
 
 // testConnectivityRequest is the request body for the test connectivity endpoint.
+// Exactly one of Upstream or EndpointRef must be set.
 type testConnectivityRequest struct {
-	Upstream *v1.ExternalEndpointUpstreamSpec `json:"upstream"`
-	Auth     *v1.ExternalEndpointAuthSpec     `json:"auth,omitempty"`
+	Upstream    *v1.ExternalEndpointUpstreamSpec `json:"upstream,omitempty"`
+	Auth        *v1.ExternalEndpointAuthSpec     `json:"auth,omitempty"`
+	EndpointRef *string                          `json:"endpoint_ref,omitempty"`
+	Workspace   *string                          `json:"workspace,omitempty"`
 }
 
 // testConnectivityResponse is the response body for the test connectivity endpoint.
@@ -50,7 +55,7 @@ type testConnectivityResponse struct {
 	Error     string   `json:"error,omitempty"`
 }
 
-func handleTestConnectivity() gin.HandlerFunc {
+func handleTestConnectivity(deps *Dependencies) gin.HandlerFunc {
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 		Transport: &http.Transport{
@@ -71,16 +76,15 @@ func handleTestConnectivity() gin.HandlerFunc {
 			return
 		}
 
-		if req.Upstream == nil || req.Upstream.URL == "" {
+		modelsURL, urlErr := resolveModelsURL(deps, &req)
+		if urlErr != nil {
 			c.JSON(http.StatusBadRequest, testConnectivityResponse{
 				Success: false,
-				Error:   "upstream.url is required",
+				Error:   urlErr.Error(),
 			})
 
 			return
 		}
-
-		modelsURL := req.Upstream.URL + "/models"
 
 		httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, modelsURL, nil)
 		if err != nil {
@@ -147,6 +151,71 @@ func handleTestConnectivity() gin.HandlerFunc {
 			Models:    models,
 		})
 	}
+}
+
+// resolveModelsURL builds the /models URL to probe.
+// For external upstreams: {url}/models  (user URL already includes /v1)
+// For endpoint refs: {scheme}://{host}:{port}/{workspace}/{name}/v1/models
+func resolveModelsURL(deps *Dependencies, req *testConnectivityRequest) (string, error) {
+	hasUpstream := req.Upstream != nil && req.Upstream.URL != ""
+	hasEndpointRef := req.EndpointRef != nil && *req.EndpointRef != ""
+
+	if !hasUpstream && !hasEndpointRef {
+		return "", fmt.Errorf("either upstream.url or endpoint_ref is required")
+	}
+
+	if hasUpstream && hasEndpointRef {
+		return "", fmt.Errorf("upstream and endpoint_ref are mutually exclusive")
+	}
+
+	if hasUpstream {
+		return req.Upstream.URL + "/models", nil
+	}
+
+	// Resolve endpoint ref
+	workspace := "default"
+	if req.Workspace != nil && *req.Workspace != "" {
+		workspace = *req.Workspace
+	}
+
+	endpointName := *req.EndpointRef
+
+	endpoints, err := deps.Storage.ListEndpoint(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(endpointName)},
+			{Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote(workspace)},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to look up endpoint %s: %w", endpointName, err)
+	}
+
+	if len(endpoints) == 0 {
+		return "", fmt.Errorf("endpoint %s not found in workspace %s", endpointName, workspace)
+	}
+
+	ep := &endpoints[0]
+
+	clusters, err := deps.Storage.ListCluster(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(ep.Spec.Cluster)},
+			{Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote(workspace)},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to look up cluster %s: %w", ep.Spec.Cluster, err)
+	}
+
+	if len(clusters) == 0 {
+		return "", fmt.Errorf("cluster %s not found for endpoint %s", ep.Spec.Cluster, endpointName)
+	}
+
+	scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
+	if err != nil {
+		return "", fmt.Errorf("failed to get cluster serve address: %w", err)
+	}
+
+	return fmt.Sprintf("%s://%s:%d/%s/%s/v1/models", scheme, host, port, workspace, endpointName), nil
 }
 
 // parseModelIDs validates and extracts model IDs from an OpenAI-compatible /models response.
