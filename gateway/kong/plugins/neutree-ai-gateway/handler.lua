@@ -11,6 +11,13 @@ local AIGatewayHandler = {
 
 local EMPTY = {}
 
+-- cjson decodes JSON null as cjson.null (a userdata sentinel).
+-- Indexing userdata causes "attempt to index a userdata value".
+-- Use this helper wherever a decoded field might be null.
+local function is_table(v)
+    return type(v) == "table"
+end
+
 local SUPPORTED_ROUTE_TYPES = {
     "/v1/chat/completions",
     "/v1/embeddings",
@@ -478,7 +485,7 @@ local function convert_response(openai_resp, request_model)
         }
     end
 
-    local usage = openai_resp.usage or EMPTY
+    local usage = is_table(openai_resp.usage) and openai_resp.usage or EMPTY
     return {
         id = openai_resp.id or ("msg_" .. ngx.now()),
         type = "message",
@@ -604,7 +611,7 @@ local function handle_openai_json_response()
 
     local route_type = kong.ctx.plugin.route_type
     kong.ctx.plugin.response_model = ai_response.model
-    if ai_response.usage then
+    if is_table(ai_response.usage) then
         if route_type == "/v1/chat/completions" then
             kong.ctx.plugin.completions_tokens = ai_response.usage.completion_tokens
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
@@ -641,7 +648,7 @@ local function handle_openai_stream_response(chunk, finished)
                     if kong.ctx.plugin.response_model == nil and event_t.model then
                         kong.ctx.plugin.response_model = event_t.model
                     end
-                    if event_t.usage then
+                    if is_table(event_t.usage) then
                         kong.ctx.plugin.prompt_tokens = event_t.usage.prompt_tokens
                         kong.ctx.plugin.completions_tokens = event_t.usage.completion_tokens
                         kong.ctx.plugin.total_tokens = event_t.usage.total_tokens
@@ -674,7 +681,7 @@ local function handle_anthropic_non_stream_body()
         end
 
         ctx.response_model = openai_resp.model
-        if openai_resp.usage then
+        if is_table(openai_resp.usage) then
             ctx.input_tokens = openai_resp.usage.prompt_tokens or 0
             ctx.output_tokens = openai_resp.usage.completion_tokens or 0
         end
@@ -740,7 +747,7 @@ local function handle_anthropic_stream_body()
         if event_t.model and ctx.response_model == nil then
             ctx.response_model = event_t.model
         end
-        if event_t.usage then
+        if is_table(event_t.usage) then
             ctx.input_tokens = event_t.usage.prompt_tokens or ctx.input_tokens
             ctx.output_tokens = event_t.usage.completion_tokens or ctx.output_tokens
         end
