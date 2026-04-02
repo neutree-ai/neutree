@@ -18,7 +18,7 @@ on:
         description: "the ray version branch/tag to build from"
         required: false
         type: string
-        default: "ray-2.53.0-neutree"
+        default: "ray-2.53.0-neutree-fix"
       ray_short_version:
         description: "ray short version for image tag (e.g: ray2.53.0)"
         required: false
