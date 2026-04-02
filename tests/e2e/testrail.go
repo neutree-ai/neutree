@@ -128,7 +128,7 @@ type trTestItem struct {
 
 type trTestsPage struct {
 	Tests []trTestItem `json:"tests"`
-	Size  int          `json:"size"`
+	Size  int          `json:"size"` // total count across all pages, not current page length
 }
 
 // trGet makes an authenticated GET request to the TestRail API.
