@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -197,6 +198,22 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 			v1.NeutreeClusterWorkspaceLabelKey: ctx.Cluster.Metadata.Workspace,
 			v1.LabelManagedBy:                  v1.LabelManagedByValue,
 		}).
+		WithMutate(func(obj *unstructured.Unstructured) error {
+			// Inject spec hash and NeutreeVersion as annotations on the Deployment
+			// so they are included in the SSA apply and managed by the field owner.
+			if obj.GetKind() == "Deployment" {
+				ann := obj.GetAnnotations()
+				if ann == nil {
+					ann = make(map[string]string)
+				}
+
+				ann[annEndpointSpecHash] = currentSpecHash
+				ann[annNeutreeVersion] = renderVars.NeutreeVersion
+				obj.SetAnnotations(ann)
+			}
+
+			return nil
+		}).
 		WithLogger(ctx.logger)
 
 	// Apply manifests (automatically handles configuration storage)
@@ -210,25 +227,28 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 			"changedObjects", changedCount)
 	}
 
-	// Patch spec hash and NeutreeVersion as annotations on the Deployment.
-	// Runs on every reconcile to bootstrap for existing endpoints.
-	// Annotation-only changes do not trigger a rollout.
-	dep := &appsv1.Deployment{}
-	if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
-		Namespace: namespace,
-		Name:      ctx.Endpoint.Metadata.Name,
-	}, dep); err == nil {
-		patch := client.MergeFrom(dep.DeepCopy())
+	// Bootstrap: patch annotations on existing Deployments that were created before
+	// this code (no annotations yet). Mutate only runs on changed objects, so this
+	// separate patch handles the no-op reconcile case. Annotation-only changes do
+	// not trigger a rollout.
+	if existingDep.Annotations == nil || existingDep.Annotations[annNeutreeVersion] == "" {
+		dep := &appsv1.Deployment{}
+		if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
+			Namespace: namespace,
+			Name:      ctx.Endpoint.Metadata.Name,
+		}, dep); err == nil {
+			patch := client.MergeFrom(dep.DeepCopy())
 
-		if dep.Annotations == nil {
-			dep.Annotations = make(map[string]string)
-		}
+			if dep.Annotations == nil {
+				dep.Annotations = make(map[string]string)
+			}
 
-		dep.Annotations[annEndpointSpecHash] = currentSpecHash
-		dep.Annotations[annNeutreeVersion] = renderVars.NeutreeVersion
+			dep.Annotations[annEndpointSpecHash] = currentSpecHash
+			dep.Annotations[annNeutreeVersion] = renderVars.NeutreeVersion
 
-		if patchErr := ctx.ctrClient.Patch(context.Background(), dep, patch); patchErr != nil {
-			ctx.logger.Error(patchErr, "Failed to patch deployment annotations")
+			if patchErr := ctx.ctrClient.Patch(context.Background(), dep, patch); patchErr != nil {
+				ctx.logger.Error(patchErr, "Failed to bootstrap deployment annotations")
+			}
 		}
 	}
 
