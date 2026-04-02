@@ -165,6 +165,7 @@ func parseModelIDs(body []byte) ([]string, error) {
 	var data []struct {
 		ID string `json:"id"`
 	}
+
 	if err := json.Unmarshal(dataRaw, &data); err != nil {
 		return nil, fmt.Errorf("\"data\" is not a valid array: %w", err)
 	}
