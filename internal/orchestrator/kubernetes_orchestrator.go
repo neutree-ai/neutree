@@ -170,6 +170,9 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		storedHash := existingDep.Annotations[annEndpointSpecHash]
 		storedVersion := existingDep.Annotations[annNeutreeVersion]
 
+		// Preserve NeutreeVersion when:
+		// - storedHash == currentSpecHash: endpoint spec unchanged (cluster-only upgrade)
+		// - storedHash == "": legacy endpoint bootstrapped with version but no hash yet
 		if storedVersion != "" && (storedHash == "" || storedHash == currentSpecHash) {
 			renderVars.NeutreeVersion = storedVersion
 		}
@@ -227,16 +230,18 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 			"changedObjects", changedCount)
 	}
 
-	// Bootstrap: patch annotations on existing Deployments that were created before
-	// this code (no annotations yet). Mutate only runs on changed objects, so this
-	// separate patch handles the no-op reconcile case. Annotation-only changes do
-	// not trigger a rollout.
-	if existingDep.Annotations == nil || existingDep.Annotations[annNeutreeVersion] == "" {
-		dep := &appsv1.Deployment{}
-		if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
-			Namespace: namespace,
-			Name:      ctx.Endpoint.Metadata.Name,
-		}, dep); err == nil {
+	// Bootstrap: patch annotations on Deployments that don't have them yet.
+	// WithMutate only runs on changed objects (spec diff > 0). For no-op reconciles
+	// (e.g., existing endpoints deployed before this code, or stable endpoints after
+	// a cluster upgrade where NeutreeVersion was preserved), this patch is the only
+	// path that writes/refreshes annotations. Annotation-only changes do not trigger
+	// a rollout.
+	dep := &appsv1.Deployment{}
+	if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
+		Namespace: namespace,
+		Name:      ctx.Endpoint.Metadata.Name,
+	}, dep); err == nil {
+		if dep.Annotations == nil || dep.Annotations[annNeutreeVersion] == "" {
 			patch := client.MergeFrom(dep.DeepCopy())
 
 			if dep.Annotations == nil {
