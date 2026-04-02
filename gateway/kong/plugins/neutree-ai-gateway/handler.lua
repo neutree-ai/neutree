@@ -29,6 +29,17 @@ local function extract_suffix(request_path, prefix)
     return suffix
 end
 
+-- Strip the /v1 prefix from client-facing suffix so it is not duplicated
+-- when the upstream URL already includes the API version path (e.g. /v1).
+local function strip_api_version_prefix(path)
+    local stripped = path:gsub("^/v1/", "/", 1)
+    if stripped == path then
+        -- also handle exact "/v1" without trailing slash
+        stripped = path:gsub("^/v1$", "/", 1)
+    end
+    return stripped
+end
+
 local function is_models_path(path)
     return path == "/v1/models" or path == "/v1/models/"
 end
@@ -856,7 +867,11 @@ function AIGatewayHandler:access(conf)
             if route_err then
                 return route_err
             end
-            kong.service.request.set_path(build_upstream_path(matched_entry, "/v1/chat/completions"))
+            if matched_entry.internal then
+                kong.service.request.set_path(build_upstream_path(matched_entry, "/v1/chat/completions"))
+            else
+                kong.service.request.set_path(build_upstream_path(matched_entry, "/chat/completions"))
+            end
             openai_req.model = matched_entry.model_mapping[openai_req.model]
         else
             kong.service.request.set_path(string.gsub(request_path, "/anthropic/v1/messages/?$", "/v1/chat/completions"))
@@ -933,7 +948,11 @@ function AIGatewayHandler:access(conf)
             return route_err
         end
 
-        kong.service.request.set_path(build_upstream_path(matched_entry, suffix))
+        if matched_entry.internal then
+            kong.service.request.set_path(build_upstream_path(matched_entry, suffix))
+        else
+            kong.service.request.set_path(build_upstream_path(matched_entry, strip_api_version_prefix(suffix)))
+        end
         ai_request.model = matched_entry.model_mapping[ai_request.model]
         local new_body = cjson.encode(ai_request)
         if new_body then

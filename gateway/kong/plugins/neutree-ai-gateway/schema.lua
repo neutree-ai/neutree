@@ -43,6 +43,13 @@ local upstream_entry = {
         values = { type = "string" },
       },
     },
+    {
+      internal = {
+        type = "boolean",
+        required = false,
+        default = false,
+      },
+    },
   },
 }
 

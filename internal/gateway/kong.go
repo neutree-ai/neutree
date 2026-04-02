@@ -828,6 +828,7 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 				"port":          port,
 				"path":          path,
 				"auth_header":   nil,
+				"internal":      true,
 			}
 		case entry.Upstream != nil:
 			uc, err := util.ParseURLComponents(entry.Upstream.URL)
