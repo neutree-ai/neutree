@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -101,6 +102,206 @@ func ReportToTestRail(runID string, caseResults []CaseResult) error {
 	}
 
 	fmt.Printf("Successfully reported %d results to TestRail run %s\n", len(caseResults), runID)
+
+	return nil
+}
+
+// --- Plan-based reporting ---
+
+type trPlanRun struct {
+	ID int `json:"id"`
+}
+
+type trPlanEntry struct {
+	IncludeAll bool        `json:"include_all"`
+	CaseIDs    []int       `json:"case_ids"`
+	Runs       []trPlanRun `json:"runs"`
+}
+
+type trPlan struct {
+	Entries []trPlanEntry `json:"entries"`
+}
+
+type trTestItem struct {
+	CaseID int `json:"case_id"`
+}
+
+type trTestsPage struct {
+	Tests []trTestItem `json:"tests"`
+	Size  int          `json:"size"`
+}
+
+// trGet makes an authenticated GET request to the TestRail API.
+func trGet(apiPath string) ([]byte, error) {
+	endpoint := fmt.Sprintf("%s/index.php?/api/v2/%s", profile.Testrail.URL, apiPath)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.SetBasicAuth(profile.Testrail.User, profile.Testrail.Password)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return body, nil
+}
+
+// fetchRunCaseIDs retrieves all case IDs for a given run, handling pagination.
+func fetchRunCaseIDs(runID int) ([]int, error) {
+	var allCaseIDs []int
+
+	offset := 0
+	const limit = 250
+
+	for {
+		path := fmt.Sprintf("get_tests/%d&offset=%d&limit=%d", runID, offset, limit)
+
+		body, err := trGet(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get tests for run %d: %w", runID, err)
+		}
+
+		var page trTestsPage
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("failed to parse tests response: %w", err)
+		}
+
+		for _, t := range page.Tests {
+			allCaseIDs = append(allCaseIDs, t.CaseID)
+		}
+
+		if len(page.Tests) < limit {
+			break
+		}
+
+		offset += limit
+	}
+
+	return allCaseIDs, nil
+}
+
+// fetchPlanRunCases retrieves the plan structure and returns a map of runID to the set of caseIDs it covers.
+func fetchPlanRunCases(planID string) (map[int]map[int]bool, error) {
+	body, err := trGet("get_plan/" + planID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get plan %s: %w", planID, err)
+	}
+
+	var plan trPlan
+	if err := json.Unmarshal(body, &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plan response: %w", err)
+	}
+
+	result := make(map[int]map[int]bool)
+
+	for _, entry := range plan.Entries {
+		var caseIDs []int
+
+		if !entry.IncludeAll {
+			caseIDs = entry.CaseIDs
+		} else if len(entry.Runs) > 0 {
+			// When include_all is true, case_ids is empty; fetch from the first run.
+			// All runs in the same entry share the same suite, so any run works.
+			caseIDs, err = fetchRunCaseIDs(entry.Runs[0].ID)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			fmt.Printf("Warning: plan entry has include_all=true but no runs, skipping\n")
+			continue
+		}
+
+		caseIDSet := make(map[int]bool, len(caseIDs))
+		for _, id := range caseIDs {
+			caseIDSet[id] = true
+		}
+
+		for _, run := range entry.Runs {
+			result[run.ID] = caseIDSet
+		}
+	}
+
+	return result, nil
+}
+
+// ReportToTestRailPlan fetches the plan structure and distributes test results
+// to the appropriate runs based on case ID membership.
+func ReportToTestRailPlan(planID string, caseResults []CaseResult) error {
+	if profile.Testrail.URL == "" || profile.Testrail.User == "" || profile.Testrail.Password == "" {
+		fmt.Println("TestRail credentials not fully configured, skipping report")
+		return nil
+	}
+
+	runCases, err := fetchPlanRunCases(planID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch plan structure: %w", err)
+	}
+
+	// Build caseID -> []runID reverse index.
+	caseToRuns := make(map[int][]int)
+	for runID, cases := range runCases {
+		for caseID := range cases {
+			caseToRuns[caseID] = append(caseToRuns[caseID], runID)
+		}
+	}
+
+	// Group results by run.
+	runResults := make(map[int][]CaseResult)
+
+	for _, r := range caseResults {
+		caseID := r.CaseID
+		if len(caseID) > 0 && caseID[0] == 'C' {
+			caseID = caseID[1:]
+		}
+
+		caseIDInt, err := strconv.Atoi(caseID)
+		if err != nil {
+			fmt.Printf("Skipping invalid case ID %q: %v\n", r.CaseID, err)
+			continue
+		}
+
+		runIDs, ok := caseToRuns[caseIDInt]
+		if !ok {
+			fmt.Printf("Warning: case %s not found in any run of plan %s\n", r.CaseID, planID)
+			continue
+		}
+
+		for _, runID := range runIDs {
+			runResults[runID] = append(runResults[runID], r)
+		}
+	}
+
+	// Submit results to each run.
+	var errs []string
+
+	for runID, results := range runResults {
+		if err := ReportToTestRail(strconv.Itoa(runID), results); err != nil {
+			errs = append(errs, fmt.Sprintf("run %d: %v", runID, err))
+		}
+	}
+
+	fmt.Printf("Plan %s: submitted results to %d run(s) (%d failed)\n", planID, len(runResults), len(errs))
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to report to %d run(s): %s", len(errs), strings.Join(errs, "; "))
+	}
 
 	return nil
 }
