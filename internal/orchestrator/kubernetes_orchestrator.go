@@ -156,10 +156,16 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 	// Preserve NeutreeVersion when only the cluster version changed (not the endpoint spec).
 	// The spec hash and NeutreeVersion are stored as annotations on the K8s Deployment.
 	existingDep := &appsv1.Deployment{}
+
 	if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
 		Namespace: namespace,
 		Name:      ctx.Endpoint.Metadata.Name,
-	}, existingDep); err == nil && existingDep.Annotations != nil {
+	}, existingDep); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return errors.Wrapf(err, "failed to get existing deployment for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+		}
+		// Deployment does not exist yet (first deploy) — nothing to preserve.
+	} else if existingDep.Annotations != nil {
 		storedHash := existingDep.Annotations[annEndpointSpecHash]
 		storedVersion := existingDep.Annotations[annNeutreeVersion]
 
