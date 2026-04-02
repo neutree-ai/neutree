@@ -222,7 +222,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		dep.Annotations[annNeutreeVersion] = renderVars.NeutreeVersion
 
 		if patchErr := ctx.ctrClient.Patch(context.Background(), dep, patch); patchErr != nil {
-			ctx.logger.V(4).Info("Failed to patch deployment annotations", "error", patchErr)
+			ctx.logger.Error(patchErr, "Failed to patch deployment annotations")
 		}
 	}
 
