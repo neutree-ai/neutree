@@ -21,6 +21,7 @@ func TestHandleTestConnectivity(t *testing.T) {
 	tests := []struct {
 		name           string
 		body           string
+		withAuth       bool
 		mockServer     func() *httptest.Server
 		wantHTTPStatus int
 		wantSuccess    bool
@@ -51,7 +52,8 @@ func TestHandleTestConnectivity(t *testing.T) {
 			wantErrContain: "upstream returned HTTP 401",
 		},
 		{
-			name: "successful with models",
+			name:     "successful with models",
+			withAuth: true,
 			mockServer: func() *httptest.Server {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, "/v1/models", r.URL.Path)
@@ -78,12 +80,29 @@ func TestHandleTestConnectivity(t *testing.T) {
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode(map[string]interface{}{
 						"object": "list",
-						"data":   []map[string]interface{}{},
+						"data": []map[string]interface{}{
+							{"id": "test-model", "object": "model"},
+						},
 					})
 				}))
 			},
 			wantHTTPStatus: http.StatusOK,
 			wantSuccess:    true,
+			wantModels:     []string{"test-model"},
+		},
+		{
+			name: "empty model list",
+			mockServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"object": "list",
+						"data":   []map[string]interface{}{},
+					})
+				}))
+			},
+			wantHTTPStatus: http.StatusOK,
+			wantErrContain: "no models found",
 		},
 		{
 			name: "connection refused",
@@ -107,8 +126,7 @@ func TestHandleTestConnectivity(t *testing.T) {
 						URL: server.URL + "/v1",
 					},
 				}
-				// Add auth for the "successful with models" case
-				if tt.wantModels != nil {
+				if tt.withAuth {
 					reqObj.Auth = &v1.ExternalEndpointAuthSpec{
 						Type:       "bearer",
 						Credential: "sk-test",
@@ -150,9 +168,11 @@ func TestHandleTestConnectivity(t *testing.T) {
 
 func TestParseModelIDs(t *testing.T) {
 	tests := []struct {
-		name string
-		body string
-		want []string
+		name       string
+		body       string
+		want       []string
+		wantErr    bool
+		errContain string
 	}{
 		{
 			name: "valid response",
@@ -160,26 +180,46 @@ func TestParseModelIDs(t *testing.T) {
 			want: []string{"model-a", "model-b"},
 		},
 		{
-			name: "empty data",
-			body: `{"data":[]}`,
-			want: []string{},
+			name:       "empty data",
+			body:       `{"data":[]}`,
+			wantErr:    true,
+			errContain: "no models found",
 		},
 		{
-			name: "invalid json",
-			body: `not json`,
-			want: nil,
+			name:       "invalid json",
+			body:       `not json`,
+			wantErr:    true,
+			errContain: "invalid JSON",
+		},
+		{
+			name:       "missing data field",
+			body:       `{"object":"list"}`,
+			wantErr:    true,
+			errContain: "missing \"data\" field",
 		},
 		{
 			name: "skip empty ids",
 			body: `{"data":[{"id":"model-a"},{"id":""}]}`,
 			want: []string{"model-a"},
 		},
+		{
+			name:       "all empty ids",
+			body:       `{"data":[{"id":""},{"id":""}]}`,
+			wantErr:    true,
+			errContain: "no models found",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseModelIDs([]byte(tt.body))
-			assert.Equal(t, tt.want, got)
+			got, err := parseModelIDs([]byte(tt.body))
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContain)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
 		})
 	}
 }

@@ -67,6 +67,7 @@ func handleTestConnectivity() gin.HandlerFunc {
 				Success: false,
 				Error:   "invalid request body: " + err.Error(),
 			})
+
 			return
 		}
 
@@ -75,6 +76,7 @@ func handleTestConnectivity() gin.HandlerFunc {
 				Success: false,
 				Error:   "upstream.url is required",
 			})
+
 			return
 		}
 
@@ -86,6 +88,7 @@ func handleTestConnectivity() gin.HandlerFunc {
 				Success: false,
 				Error:   "invalid upstream URL: " + err.Error(),
 			})
+
 			return
 		}
 
@@ -103,8 +106,10 @@ func handleTestConnectivity() gin.HandlerFunc {
 				LatencyMs: latencyMs,
 				Error:     "connection failed: " + err.Error(),
 			})
+
 			return
 		}
+
 		defer resp.Body.Close()
 
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
@@ -114,16 +119,27 @@ func handleTestConnectivity() gin.HandlerFunc {
 			if len(body) > 0 {
 				errMsg += ": " + string(body)
 			}
+
 			c.JSON(http.StatusOK, testConnectivityResponse{
 				Success:   false,
 				LatencyMs: latencyMs,
 				Error:     errMsg,
 			})
+
 			return
 		}
 
-		// Try to parse OpenAI-compatible model list
-		models := parseModelIDs(body)
+		// Validate OpenAI-compatible model list response
+		models, parseErr := parseModelIDs(body)
+		if parseErr != nil {
+			c.JSON(http.StatusOK, testConnectivityResponse{
+				Success:   false,
+				LatencyMs: latencyMs,
+				Error:     "upstream response is not a valid OpenAI-compatible model list: " + parseErr.Error(),
+			})
+
+			return
+		}
 
 		c.JSON(http.StatusOK, testConnectivityResponse{
 			Success:   true,
@@ -133,22 +149,37 @@ func handleTestConnectivity() gin.HandlerFunc {
 	}
 }
 
-// parseModelIDs extracts model IDs from an OpenAI-compatible /models response.
-func parseModelIDs(body []byte) []string {
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil
+// parseModelIDs validates and extracts model IDs from an OpenAI-compatible /models response.
+// Returns error if body is not valid JSON, missing "data" array, or contains no models.
+func parseModelIDs(body []byte) ([]string, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	ids := make([]string, 0, len(result.Data))
-	for _, m := range result.Data {
+	dataRaw, ok := raw["data"]
+	if !ok {
+		return nil, fmt.Errorf("missing \"data\" field")
+	}
+
+	var data []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(dataRaw, &data); err != nil {
+		return nil, fmt.Errorf("\"data\" is not a valid array: %w", err)
+	}
+
+	ids := make([]string, 0, len(data))
+
+	for _, m := range data {
 		if m.ID != "" {
 			ids = append(ids, m.ID)
 		}
 	}
-	return ids
+
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no models found in response")
+	}
+
+	return ids, nil
 }
