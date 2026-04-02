@@ -324,7 +324,7 @@ ENGINE_PACKAGE_OUTPUT_DIR ?= dist
 ENGINE_BASE_DIR := internal/engine
 ENGINE_NAME ?= vllm
 ENGINE_VERSION ?= v0.11.2
-ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:v0.11.2-ray2.53.0,amd_gpu:neutree/engine-vllm-rocm:v0.11.2-ray2.53.0
+ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:v0.11.2-ray2.53.0
 ENGINE_TASKS ?= text-generation,text-embedding,text-rerank
 ENGINE_DESCRIPTION ?= $(ENGINE_NAME) inference engine
 
