@@ -1,10 +1,12 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
+	"text/template"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -1508,6 +1510,74 @@ func TestEscapeEngineArgsForTemplate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			escapeEngineArgsForTemplate(tt.args)
 			assert.Equal(t, tt.expected, tt.args)
+		})
+	}
+}
+
+func TestEngineArgsBooleanTemplateRendering(t *testing.T) {
+	// This template mirrors the EngineArgs rendering logic in the vLLM deploy template.
+	const tpl = `{{- range $key, $value := .EngineArgs }}
+{{- if eq (printf "%v" $value) "true" }}
+- --{{ $key }}
+{{- else if eq (printf "%v" $value) "false" }}
+- --no-{{ $key }}
+{{- else }}
+- --{{ $key }}
+- "{{ $value }}"
+{{- end }}
+{{- end }}`
+
+	tests := []struct {
+		name     string
+		args     map[string]interface{}
+		expected string
+	}{
+		{
+			name:     "bool true emits flag only",
+			args:     map[string]interface{}{"enable_lora": true},
+			expected: "\n- --enable_lora",
+		},
+		{
+			name:     "bool false emits --no- prefix",
+			args:     map[string]interface{}{"enable_prefix_caching": false},
+			expected: "\n- --no-enable_prefix_caching",
+		},
+		{
+			name:     "string true emits flag only",
+			args:     map[string]interface{}{"trust_remote_code": "true"},
+			expected: "\n- --trust_remote_code",
+		},
+		{
+			name:     "string false emits --no- prefix",
+			args:     map[string]interface{}{"interrupt_requests": "false"},
+			expected: "\n- --no-interrupt_requests",
+		},
+		{
+			name:     "string value emits flag with value",
+			args:     map[string]interface{}{"dtype": "float16"},
+			expected: "\n- --dtype\n- \"float16\"",
+		},
+		{
+			name:     "integer value emits flag with value",
+			args:     map[string]interface{}{"tensor_parallel_size": 4},
+			expected: "\n- --tensor_parallel_size\n- \"4\"",
+		},
+		{
+			name:     "float value emits flag with value",
+			args:     map[string]interface{}{"gpu_memory_utilization": 0.9},
+			expected: "\n- --gpu_memory_utilization\n- \"0.9\"",
+		},
+	}
+
+	tmpl, err := template.New("test").Parse(tpl)
+	require.NoError(t, err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := tmpl.Execute(&buf, map[string]interface{}{"EngineArgs": tt.args})
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, buf.String())
 		})
 	}
 }

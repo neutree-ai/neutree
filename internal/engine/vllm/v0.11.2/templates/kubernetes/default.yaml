@@ -111,10 +111,14 @@ spec:
           {{- end }}
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
+          {{- if eq (printf "%v" $value) "true" }}
           - --{{ $key }}
-      {{- if ne (printf "%v" $value) "true"}}
+          {{- else if eq (printf "%v" $value) "false" }}
+          - --no-{{ $key }}
+          {{- else }}
+          - --{{ $key }}
           - "{{ $value }}"
-      {{- end }}
+          {{- end }}
           {{- end }}
           {{- end }}
           resources:
