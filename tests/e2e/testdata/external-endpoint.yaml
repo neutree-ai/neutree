@@ -6,7 +6,7 @@ metadata:
 spec:
   upstreams:
     - upstream:
-        url: ${E2E_MOCK_UPSTREAM_URL}
+        url: ${E2E_MOCK_UPSTREAM_URL}/v1
       auth:
         type: bearer
         credential: ${E2E_MOCK_AUTH_TOKEN}

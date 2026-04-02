@@ -7,8 +7,8 @@ import (
 )
 
 type ExternalEndpointUpstreamSpec struct {
-	// URL is the base URL of the external API (without API path suffix)
-	// Example: "https://api.openai.com"
+	// URL is the base URL of the external API, including the API version path.
+	// Example: "https://api.openai.com/v1"
 	URL string `json:"url"`
 }
 
