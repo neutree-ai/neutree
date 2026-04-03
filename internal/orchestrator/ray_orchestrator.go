@@ -483,7 +483,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		Name:        EndpointToServeApplicationName(endpoint),
 		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
 		ImportPath: fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"),
-			strings.ReplaceAll(baseVersion, ".", "_")),
+			strings.NewReplacer(".", "_", "-", "_").Replace(baseVersion)),
 		Args: map[string]interface{}{},
 	}
 

@@ -688,9 +688,9 @@ func TestEndpointToApplication_ImportPathStripsVariantSuffix(t *testing.T) {
 			expectedImportPath: "serve.vllm.gemma4.app:app_builder",
 		},
 		{
-			name:               "non-semver hyphenated version used as-is",
+			name:               "non-semver hyphenated version sanitized",
 			engineVersion:      "gemma-4",
-			expectedImportPath: "serve.vllm.gemma-4.app:app_builder",
+			expectedImportPath: "serve.vllm.gemma_4.app:app_builder",
 		},
 	}
 
