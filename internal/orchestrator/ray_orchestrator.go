@@ -476,6 +476,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	if err != nil {
 		klog.Warningf("engine version %q is not a semver string, using as-is for import path: %v",
 			endpoint.Spec.Engine.Version, err)
+
 		baseVersion = endpoint.Spec.Engine.Version
 	}
 
