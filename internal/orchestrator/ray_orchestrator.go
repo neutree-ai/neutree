@@ -474,6 +474,8 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	// as the base version. Non-semver versions (e.g., "gemma4") are used as-is.
 	baseVersion, err := semver.BaseVersion(endpoint.Spec.Engine.Version)
 	if err != nil {
+		klog.Warningf("engine version %q is not a semver string, using as-is for import path: %v",
+			endpoint.Spec.Engine.Version, err)
 		baseVersion = endpoint.Spec.Engine.Version
 	}
 
