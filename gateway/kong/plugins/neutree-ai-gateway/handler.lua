@@ -137,11 +137,12 @@ local function set_upstream_target(entry)
         ngx.var.upstream_host = target_host
     end
 
+    kong.service.request.clear_header("x-consumer-id")
+    kong.service.request.clear_header("x-consumer-custom-id")
+    kong.service.request.clear_header("x-credential-identifier")
+
     if entry.auth_header and entry.auth_header ~= "" then
         kong.service.request.set_header("Authorization", entry.auth_header)
-        kong.service.request.clear_header("x-consumer-id")
-        kong.service.request.clear_header("x-consumer-custom-id")
-        kong.service.request.clear_header("x-credential-identifier")
     end
 
     return connect_host
