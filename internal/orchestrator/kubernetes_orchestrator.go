@@ -358,48 +358,73 @@ func (k *kubernetesOrchestrator) listPods(ctrlClient client.Client, namespace st
 	return podList.Items, nil
 }
 
+// checkContainerStatuses checks a slice of container statuses for critical failures.
+// containerType should be "Container" or "Init Container" for error message clarity.
+func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, containerType string) (bool, []string) {
+	var (
+		failed   bool
+		errorMsg []string
+	)
+
+	for _, cs := range statuses {
+		// Check for OOMKilled in both current state and last termination state.
+		// The first OOM kill appears in State.Terminated before any restart;
+		// subsequent OOM kills appear in LastTerminationState.Terminated.
+		if (cs.State.Terminated != nil && cs.State.Terminated.Reason == "OOMKilled") ||
+			(cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == "OOMKilled") {
+			failed = true
+
+			errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' was killed due to OOM (Out of Memory)",
+				podName, containerType, cs.Name))
+
+			continue
+		}
+
+		// Check for CrashLoopBackOff with restart count >= 5
+		if cs.State.Waiting != nil {
+			reason := cs.State.Waiting.Reason
+
+			if reason == "CrashLoopBackOff" && cs.RestartCount >= 5 {
+				failed = true
+
+				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' in CrashLoopBackOff (restarted %d times): %s",
+					podName, containerType, cs.Name, cs.RestartCount, cs.State.Waiting.Message))
+
+				continue
+			}
+			// Check for ImagePullBackOff
+			if reason == "ImagePullBackOff" || reason == "ErrImagePull" {
+				failed = true
+
+				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' failed to pull image: %s",
+					podName, containerType, cs.Name, cs.State.Waiting.Message))
+
+				continue
+			}
+		}
+	}
+
+	return failed, errorMsg
+}
+
 // checkPodFailures checks if any pods have critical failures like CrashLoopBackOff
 func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, string) {
 	failed := false
 	var errorMsg []string
 
 	for _, pod := range pods {
+		// Check init container statuses
+		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.InitContainerStatuses, "Init Container"); f {
+			failed = true
+
+			errorMsg = append(errorMsg, msgs...)
+		}
+
 		// Check container statuses
-		for _, cs := range pod.Status.ContainerStatuses {
-			// Check for OOMKilled
-			if cs.LastTerminationState.Terminated != nil {
-				if cs.LastTerminationState.Terminated.Reason == "OOMKilled" {
-					failed = true
+		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.ContainerStatuses, "Container"); f {
+			failed = true
 
-					errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' Container '%s' was killed due to OOM (Out of Memory)",
-						pod.Name, cs.Name))
-
-					continue
-				}
-			}
-
-			// Check for CrashLoopBackOff with restart count >= 5
-			if cs.State.Waiting != nil {
-				reason := cs.State.Waiting.Reason
-
-				if reason == "CrashLoopBackOff" && cs.RestartCount >= 5 {
-					failed = true
-
-					errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' Container '%s' in CrashLoopBackOff (restarted %d times): %s",
-						pod.Name, cs.Name, cs.RestartCount, cs.State.Waiting.Message))
-
-					continue
-				}
-				// Check for ImagePullBackOff
-				if reason == "ImagePullBackOff" || reason == "ErrImagePull" {
-					failed = true
-
-					errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' Container '%s' failed to pull image: %s",
-						pod.Name, cs.Name, cs.State.Waiting.Message))
-
-					continue
-				}
-			}
+			errorMsg = append(errorMsg, msgs...)
 		}
 
 		// Check for pod scheduling failures

@@ -270,6 +270,111 @@ func (f *FakeK8sClient) WithPodOOMKilled(containerName string) *FakeK8sClient {
 	return f
 }
 
+func (f *FakeK8sClient) WithInitContainerInCrashLoopBackOff(containerName string, restartCount int32) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-init-crash",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:         containerName,
+					Ready:        false,
+					RestartCount: restartCount,
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason:  "CrashLoopBackOff",
+							Message: "Init container is crashing",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) WithInitContainerInImagePullBackOff(containerName string) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-init-image-pull",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  containerName,
+					Ready: false,
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason:  "ImagePullBackOff",
+							Message: "Failed to pull init container image",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
+func (f *FakeK8sClient) WithInitContainerOOMKilled(containerName string) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-init-oom",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  containerName,
+					Ready: false,
+					LastTerminationState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Reason:  "OOMKilled",
+							Message: "Out of memory",
+						},
+					},
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason: "CrashLoopBackOff",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
 func (f *FakeK8sClient) WithUnschedulablePod(message string) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2674,6 +2779,48 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "unschedulable",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for init container in CrashLoopBackOff with high restart count",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithInitContainerInCrashLoopBackOff("model-downloader", 5)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Init Container",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for init container with ImagePullBackOff",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithInitContainerInImagePullBackOff("model-downloader")
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Init Container",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for init container with OOMKilled",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithInitContainerOOMKilled("model-downloader")
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Init Container",
 			expectError:    false,
 		},
 		{
