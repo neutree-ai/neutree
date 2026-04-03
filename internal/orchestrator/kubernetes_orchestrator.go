@@ -241,7 +241,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		Namespace: namespace,
 		Name:      ctx.Endpoint.Metadata.Name,
 	}, dep); err == nil {
-		if dep.Annotations == nil || dep.Annotations[annNeutreeVersion] == "" {
+		if dep.Annotations == nil || dep.Annotations[annNeutreeVersion] == "" || dep.Annotations[annEndpointSpecHash] == "" {
 			patch := client.MergeFrom(dep.DeepCopy())
 
 			if dep.Annotations == nil {
