@@ -20,7 +20,7 @@ from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.v1.engine.async_llm import AsyncLLM
 from vllm.entrypoints.openai.protocol import (
-    ChatCompletionRequest, ErrorResponse,
+    ChatCompletionRequest, ErrorResponse, ErrorInfo,
     RerankRequest,
     EmbeddingCompletionRequest,
 )
@@ -249,8 +249,11 @@ class Backend:
         except (TypeError, ValueError) as e:
             logging.error(f"Invalid payload for EmbeddingCompletionRequest: {e}")
             return ErrorResponse(
-                message={"error": "Invalid payload for EmbeddingCompletionRequest", "details": str(e)},
-                status_code=400,
+                error=ErrorInfo(
+                    message=f"Invalid payload for EmbeddingCompletionRequest: {e}",
+                    type="invalid_request_error",
+                    code=400,
+                )
             )
         return await self.openai_serving_embedding.create_embedding(request, None)
 
