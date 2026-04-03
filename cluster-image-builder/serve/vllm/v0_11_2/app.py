@@ -225,14 +225,14 @@ class Backend:
 
         if isinstance(result, ErrorResponse):
             if is_stream:
-                logging.error(f"Error during chat completion: {result.message}")
+                logging.error(f"Error during chat completion: {result.error.message}")
                 async def error_generator():
                     import json
                     error_data = {
                         "error": {
                             "message": "Request processing failed",
                             "type": "internal_server_error",
-                            "details": str(result.message)
+                            "details": str(result.error.message)
                         }
                     }
                     yield f"data: {json.dumps(error_data)}\n\n"
@@ -321,7 +321,7 @@ class Controller:
             # Handle non-streaming response as before
             result = await self.backend.options(stream=False).generate.remote(req_obj)
             if isinstance(result, ErrorResponse):
-                return JSONResponse(content=result.model_dump(), status_code=result.code)
+                return JSONResponse(content=result.model_dump(), status_code=result.error.code)
             return JSONResponse(content=result.model_dump())
 
     @app.post("/v1/embeddings")
@@ -330,7 +330,7 @@ class Controller:
         req_obj = await request.json()
         result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
         if isinstance(result, ErrorResponse):
-            return JSONResponse(content=result.model_dump(), status_code=result.code)
+            return JSONResponse(content=result.model_dump(), status_code=result.error.code)
         return JSONResponse(content=result.model_dump())
 
     @app.post("/v1/rerank")
@@ -339,7 +339,7 @@ class Controller:
         req_obj = await request.json()
         result = await self.backend.options(stream=False).rerank.remote(req_obj)
         if isinstance(result, ErrorResponse):
-            return JSONResponse(content=result.model_dump(), status_code=result.code)
+            return JSONResponse(content=result.model_dump(), status_code=result.error.code)
         return JSONResponse(content=result.model_dump())
 
     @app.get("/v1/models")
