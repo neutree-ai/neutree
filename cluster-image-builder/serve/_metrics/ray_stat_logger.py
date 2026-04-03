@@ -5,11 +5,16 @@ from ray import serve
 from vllm.v1.metrics.ray_wrappers import (
     RayPrometheusStatLogger,
     RaySpecDecodingProm,
-    RayKVConnectorPrometheus,
     RayGaugeWrapper,
     RayCounterWrapper,
     RayHistogramWrapper,
 )
+
+# v0.18.x exports RayKVConnectorPrometheus; vLLM main renamed it to RayKVConnectorProm.
+try:
+    from vllm.v1.metrics.ray_wrappers import RayKVConnectorPrometheus as RayKVConnectorProm
+except ImportError:
+    from vllm.v1.metrics.ray_wrappers import RayKVConnectorProm
 
 logger = logging.getLogger("ray.serve")
 
@@ -88,7 +93,7 @@ class NeutreeRayStatLogger(RayPrometheusStatLogger):
             self._spec_decoding_cls = _make_extended_spec_decoding_cls(
                 RaySpecDecodingProm, extra_labels)
             self._kv_connector_cls = _make_extended_kv_connector_cls(
-                RayKVConnectorPrometheus, extra_labels)
+                RayKVConnectorProm, extra_labels)
 
         super().__init__(vllm_config, engine_indexes)
 
