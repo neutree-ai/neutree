@@ -307,8 +307,7 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 	}
 
 	if !result {
-		klog.Infof("plugin config changed, updating plugin: %s", *plugin.InstanceName)
-		klog.V(4).Info("plugin config diff: ", diff)
+		klog.Infof("plugin config changed, updating plugin: %s, diff: %s", *plugin.InstanceName, diff)
 
 		curPlugin.Config = plugin.Config
 
@@ -843,6 +842,7 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 				"port":          uc.Port,
 				"path":          uc.Path,
 				"auth_header":   nil,
+				"internal":      false,
 			}
 
 			if entry.Auth != nil {
