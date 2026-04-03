@@ -222,11 +222,13 @@ if auth_header then
   local _, _, token = string.find(auth_header, "Bearer%s+(.+)")
   if token then
     kong.service.request.set_header("kong_apikey", token)
+    kong.service.request.clear_header("Authorization")
   end
 end
 local x_api_key = kong.request.get_header("x-api-key")
 if x_api_key then
   kong.service.request.set_header("kong_apikey", x_api_key)
+  kong.service.request.clear_header("x-api-key")
 end`,
 			},
 		},

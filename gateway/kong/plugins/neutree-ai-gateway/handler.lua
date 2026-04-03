@@ -139,6 +139,9 @@ local function set_upstream_target(entry)
 
     if entry.auth_header and entry.auth_header ~= "" then
         kong.service.request.set_header("Authorization", entry.auth_header)
+        kong.service.request.clear_header("x-consumer-id")
+        kong.service.request.clear_header("x-consumer-custom-id")
+        kong.service.request.clear_header("x-credential-identifier")
     end
 
     return connect_host
