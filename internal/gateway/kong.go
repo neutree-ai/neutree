@@ -841,7 +841,7 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 				"host":          uc.Host,
 				"port":          uc.Port,
 				"path":          uc.Path,
-				"auth_header": nil,
+				"auth_header":   nil,
 				// Must explicitly set "internal" to match Kong schema default (false),
 				// otherwise the merge-patch array replacement drops it and causes a perpetual sync loop.
 				"internal": false,
