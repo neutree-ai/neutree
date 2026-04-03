@@ -161,7 +161,6 @@ spec:
             - name: aggregator-log
               containerPort: 30122
               protocol: TCP
-              containerPort: 30122
           {{- with .Values.vector.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
