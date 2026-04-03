@@ -682,6 +682,11 @@ func TestEndpointToApplication_ImportPathStripsVariantSuffix(t *testing.T) {
 			engineVersion:      "v0.17.1-rocm60",
 			expectedImportPath: "serve.vllm.v0_17_1.app:app_builder",
 		},
+		{
+			name:               "v0.18.1 plain version",
+			engineVersion:      "v0.18.1",
+			expectedImportPath: "serve.vllm.v0_18_1.app:app_builder",
+		},
 	}
 
 	for _, tt := range tests {
