@@ -20,8 +20,8 @@ ENGINE_VLLM_BASE_IMAGE_REPO ?= vllm/vllm-openai
 ENGINE_VLLM_ROCM_BASE_IMAGE_REPO ?= vllm/vllm-openai-rocm
 ENGINE_VLLM_VERSION ?= v0.11.2
 ENGINE_VLLM_DIR_VERSION ?= $(shell echo $(ENGINE_VLLM_VERSION) | sed 's/-.*//' | tr '.' '_')
-ENGINE_LLAMA_CPP_VERSION ?= 0.3.7
-ENGINE_LLAMA_CPP_DIR_VERSION ?= $(shell echo v$(ENGINE_LLAMA_CPP_VERSION) | tr '.' '_')
+ENGINE_LLAMA_CPP_VERSION ?= v0.3.7
+ENGINE_LLAMA_CPP_DIR_VERSION ?= $(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/-.*//' | tr '.' '_')
 RAY_SHORT_VERSION ?= ray2.53.0
 
 .PHONY: docker-build
@@ -54,8 +54,8 @@ docker-build-engine-vllm-rocm: prepare ## Build the vLLM engine image (ROCm)
 
 .PHONY: docker-build-engine-llama-cpp
 docker-build-engine-llama-cpp: prepare ## Build the llama-cpp-python engine image
-	docker build --build-arg LLAMA_CPP_VERSION=$(ENGINE_LLAMA_CPP_VERSION) --build-arg ENGINE_VERSION_DIR=$(ENGINE_LLAMA_CPP_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-llama-cpp -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:v$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION) .
+	docker build --build-arg LLAMA_CPP_VERSION=$(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/^v//') --build-arg ENGINE_VERSION_DIR=$(ENGINE_LLAMA_CPP_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.engine-llama-cpp -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-push
 docker-push: ## Run docker-push-* targets for all the images
@@ -79,7 +79,7 @@ docker-push-engine-vllm-rocm: ## Push the vLLM engine image (ROCm)
 
 .PHONY: docker-push-engine-llama-cpp
 docker-push-engine-llama-cpp: ## Push the llama-cpp-python engine image
-	docker push $(NEUTREE_ENGINE_IMAGE)-llama-cpp:v$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-manifest-engine-vllm
 docker-push-manifest-engine-vllm: ## Push the vLLM engine manifest image
@@ -87,7 +87,7 @@ docker-push-manifest-engine-vllm: ## Push the vLLM engine manifest image
 
 .PHONY: docker-push-manifest-engine-llama-cpp
 docker-push-manifest-engine-llama-cpp: ## Push the llama-cpp engine manifest image
-	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:v$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-llama-cpp:v$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION)~g")
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION)~g")
 
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ACCELERATORS))

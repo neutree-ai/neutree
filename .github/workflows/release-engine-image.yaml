@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       engine:
-        description: "engine name (e.g: vllm)"
+        description: "engine name"
         required: true
         type: choice
         options:
           - vllm
+          - llama-cpp
       engine_version:
-        description: "engine version (e.g: v0.11.2)"
+        description: "engine version (e.g: v0.11.2 for vllm, v0.3.7 for llama-cpp)"
         required: true
         type: string
       ray_version:
@@ -45,6 +46,7 @@ jobs:
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
           ARCH: amd64
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_VERSION: ${{ github.event.inputs.ray_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
   push-manifests:
@@ -69,4 +71,5 @@ jobs:
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
           ALL_ARCH: amd64
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
