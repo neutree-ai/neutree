@@ -367,16 +367,17 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 	)
 
 	for _, cs := range statuses {
-		// Check for OOMKilled
-		if cs.LastTerminationState.Terminated != nil {
-			if cs.LastTerminationState.Terminated.Reason == "OOMKilled" {
-				failed = true
+		// Check for OOMKilled in both current state and last termination state.
+		// The first OOM kill appears in State.Terminated before any restart;
+		// subsequent OOM kills appear in LastTerminationState.Terminated.
+		if (cs.State.Terminated != nil && cs.State.Terminated.Reason == "OOMKilled") ||
+			(cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == "OOMKilled") {
+			failed = true
 
-				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' was killed due to OOM (Out of Memory)",
-					podName, containerType, cs.Name))
+			errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' was killed due to OOM (Out of Memory)",
+				podName, containerType, cs.Name))
 
-				continue
-			}
+			continue
 		}
 
 		// Check for CrashLoopBackOff with restart count >= 5
