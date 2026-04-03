@@ -27,8 +27,8 @@ from vllm.entrypoints.openai.models.protocol import BaseModelPath
 from vllm.entrypoints.openai.models.serving import OpenAIServingModels
 from vllm.entrypoints.pooling.embed.protocol import EmbeddingCompletionRequest
 from vllm.entrypoints.pooling.embed.serving import ServingEmbedding
-from vllm.entrypoints.pooling.score.protocol import RerankRequest
-from vllm.entrypoints.pooling.score.serving import ServingScores
+from vllm.entrypoints.pooling.scoring.protocol import RerankRequest
+from vllm.entrypoints.pooling.scoring.serving import ServingScores
 
 # gemma4: new rendering pipeline for OpenAIServingChat
 from vllm.entrypoints.serve.render.serving import OpenAIServingRender
