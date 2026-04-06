@@ -682,6 +682,16 @@ func TestEndpointToApplication_ImportPathStripsVariantSuffix(t *testing.T) {
 			engineVersion:      "v0.17.1-rocm60",
 			expectedImportPath: "serve.vllm.v0_17_1.app:app_builder",
 		},
+		{
+			name:               "non-semver version used as-is",
+			engineVersion:      "gemma4",
+			expectedImportPath: "serve.vllm.gemma4.app:app_builder",
+		},
+		{
+			name:               "non-semver hyphenated version sanitized",
+			engineVersion:      "gemma-4",
+			expectedImportPath: "serve.vllm.gemma_4.app:app_builder",
+		},
 	}
 
 	for _, tt := range tests {

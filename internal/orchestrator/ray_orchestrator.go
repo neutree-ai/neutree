@@ -471,18 +471,20 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
 	// Strip any variant/prerelease/build suffix (e.g., "-cu130", "-rocm5", "-beta", "+build123")
 	// from the version for the import path. All such variants share the same serve app code
-	// as the base version.
+	// as the base version. Non-semver versions (e.g., "gemma4") are used as-is.
 	baseVersion, err := semver.BaseVersion(endpoint.Spec.Engine.Version)
 	if err != nil {
-		return dashboard.RayServeApplication{}, fmt.Errorf("failed to parse engine version %q for import path: %w",
+		klog.Warningf("engine version %q is not a semver string, using as-is for import path: %v",
 			endpoint.Spec.Engine.Version, err)
+
+		baseVersion = endpoint.Spec.Engine.Version
 	}
 
 	app := dashboard.RayServeApplication{
 		Name:        EndpointToServeApplicationName(endpoint),
 		RoutePrefix: fmt.Sprintf("/%s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name),
 		ImportPath: fmt.Sprintf("serve.%s.%s.app:app_builder", strings.ReplaceAll(endpoint.Spec.Engine.Engine, "-", "_"),
-			strings.ReplaceAll(baseVersion, ".", "_")),
+			strings.NewReplacer(".", "_", "-", "_").Replace(baseVersion)),
 		Args: map[string]interface{}{},
 	}
 
