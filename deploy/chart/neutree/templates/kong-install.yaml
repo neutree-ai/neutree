@@ -656,7 +656,7 @@ spec:
           periodSeconds: 10
           successThreshold: 1
           timeoutSeconds: 5
-        {{- with .Values.auth.resources }}
+        {{- with .Values.kong.resources }}
         resources:
           {{- toYaml . | nindent 12 }}
         {{- end }}

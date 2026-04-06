@@ -161,8 +161,7 @@ spec:
             - name: aggregator-log
               containerPort: 30122
               protocol: TCP
-              containerPort: 30122
-          {{- with .Values.postgrest.resources }}
+          {{- with .Values.vector.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
