@@ -111,7 +111,13 @@ class Backend:
         self.chat_template = engine_kwargs.pop("chat_template", None)
         self.chat_template_content_format = engine_kwargs.pop("chat_template_content_format", "auto")
         self.trust_request_chat_template = engine_kwargs.pop("trust_request_chat_template", False)
-        self.default_chat_template_kwargs = engine_kwargs.pop("default_chat_template_kwargs", None)
+        _raw_kwargs = engine_kwargs.pop("default_chat_template_kwargs", None)
+        if isinstance(_raw_kwargs, str):
+            try:
+                _raw_kwargs = json.loads(_raw_kwargs)
+            except (json.JSONDecodeError, TypeError):
+                _raw_kwargs = None
+        self.default_chat_template_kwargs = _raw_kwargs
 
         # Chat/serving behavior parameters
         self.response_role = engine_kwargs.pop("response_role", "assistant")
