@@ -3111,7 +3111,7 @@
         },
         {
           "exemplar": true,
-          "expr": "sum(ray_node_gpus_utilization{instance=~\"$Instance\",SessionName=~\"$SessionName\",neutree_cluster=~\"$Cluster\",}) / on() (sum(autoscaler_cluster_resources{resource=\"GPU\",instance=~\"$Instance\",SessionName=~\"$SessionName\",neutree_cluster=~\"$Cluster\",}) or vector(0))",
+          "expr": "avg(ray_node_gpus_utilization{instance=~\"$Instance\",SessionName=~\"$SessionName\",neutree_cluster=~\"$Cluster\"}) / 100",
           "interval": "",
           "legendFormat": "GPU (physical)",
           "queryType": "randomWalk",

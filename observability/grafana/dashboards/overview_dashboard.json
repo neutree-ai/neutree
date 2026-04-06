@@ -74,7 +74,7 @@
 			"datasource": "${datasource}",
 			"targets": [
 				{
-					"expr": "avg((sum by (neutree_cluster) (ray_node_gpus_utilization{neutree_cluster=~\"$Cluster\"} / 100 ) / (sum by (neutree_cluster) (autoscaler_cluster_resources{resource=\"GPU\",neutree_cluster=~\"$Cluster\"}) or vector(0))) or (avg by (neutree_cluster) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=~\"$Cluster\"}) / 100))",
+					"expr": "avg(avg by (neutree_cluster) (ray_node_gpus_utilization{neutree_cluster=~\"$Cluster\"}) / 100 or avg by (neutree_cluster) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=~\"$Cluster\"}) / 100)",
 					"format": "time_series",
 					"instant": true,
 					"refId": "A"
@@ -123,7 +123,7 @@
 					"refId": "B"
 				},
 				{
-					"expr": "avg((sum by (neutree_cluster) (ray_node_gpus_utilization{neutree_cluster=~\"$Cluster\"} / 100) / (sum by (neutree_cluster) (autoscaler_cluster_resources{resource=\"GPU\",neutree_cluster=~\"$Cluster\"}) or vector(0))) or (avg by (neutree_cluster) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=~\"$Cluster\"}) / 100))",
+					"expr": "avg(avg by (neutree_cluster) (ray_node_gpus_utilization{neutree_cluster=~\"$Cluster\"}) / 100 or avg by (neutree_cluster) (DCGM_FI_DEV_GPU_UTIL{neutree_cluster=~\"$Cluster\"}) / 100)",
 					"legendFormat": "GPU utilization",
 					"refId": "C"
 				},
