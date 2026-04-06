@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -18,7 +20,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	annEndpointSpecHash = "neutree.ai/endpoint-spec-hash"
+	annNeutreeVersion   = "neutree.ai/neutree-version"
 )
 
 var _ Orchestrator = &kubernetesOrchestrator{}
@@ -121,10 +129,53 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 	return nil
 }
 
+// computeEndpointSpecHash computes a SHA256 hash of the endpoint spec.
+func computeEndpointSpecHash(endpoint *v1.Endpoint) (string, error) {
+	specJSON, err := json.Marshal(endpoint.Spec)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to marshal endpoint spec for hashing")
+	}
+
+	hash := sha256.Sum256(specJSON)
+
+	return fmt.Sprintf("%x", hash), nil
+}
+
 func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error {
+	namespace := util.ClusterNamespace(ctx.Cluster)
+
 	renderVars, err := k.buildManifestVariables(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, ctx.Engine, ctx.ImageRegistry)
 	if err != nil {
 		return errors.Wrapf(err, "failed to build manifest variables for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+	}
+
+	currentSpecHash, err := computeEndpointSpecHash(ctx.Endpoint)
+	if err != nil {
+		return errors.Wrapf(err, "failed to compute endpoint spec hash for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+	}
+
+	// Preserve NeutreeVersion when only the cluster version changed (not the endpoint spec).
+	// The spec hash and NeutreeVersion are stored as annotations on the K8s Deployment.
+	existingDep := &appsv1.Deployment{}
+
+	if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
+		Namespace: namespace,
+		Name:      ctx.Endpoint.Metadata.Name,
+	}, existingDep); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return errors.Wrapf(err, "failed to get existing deployment for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+		}
+		// Deployment does not exist yet (first deploy) — nothing to preserve.
+	} else if existingDep.Annotations != nil {
+		storedHash := existingDep.Annotations[annEndpointSpecHash]
+		storedVersion := existingDep.Annotations[annNeutreeVersion]
+
+		// Preserve NeutreeVersion when:
+		// - storedHash == currentSpecHash: endpoint spec unchanged (cluster-only upgrade)
+		// - storedHash == "": legacy endpoint bootstrapped with version but no hash yet
+		if storedVersion != "" && (storedHash == "" || storedHash == currentSpecHash) {
+			renderVars.NeutreeVersion = storedVersion
+		}
 	}
 
 	deployTemplate, err := k.getDeployTemplate(ctx.Endpoint, ctx.Engine)
@@ -139,7 +190,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 
 	applier := deploy.NewKubernetesDeployer(
 		ctx.ctrClient,
-		util.ClusterNamespace(ctx.Cluster),
+		namespace,
 		ctx.Endpoint.Metadata.Name, // resourceName
 		"deployment",               // componentName
 	).
@@ -149,6 +200,22 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 			v1.NeutreeClusterLabelKey:          ctx.Cluster.Metadata.Name,
 			v1.NeutreeClusterWorkspaceLabelKey: ctx.Cluster.Metadata.Workspace,
 			v1.LabelManagedBy:                  v1.LabelManagedByValue,
+		}).
+		WithMutate(func(obj *unstructured.Unstructured) error {
+			// Inject spec hash and NeutreeVersion as annotations on the Deployment
+			// so they are included in the SSA apply and managed by the field owner.
+			if obj.GetKind() == "Deployment" {
+				ann := obj.GetAnnotations()
+				if ann == nil {
+					ann = make(map[string]string)
+				}
+
+				ann[annEndpointSpecHash] = currentSpecHash
+				ann[annNeutreeVersion] = renderVars.NeutreeVersion
+				obj.SetAnnotations(ann)
+			}
+
+			return nil
 		}).
 		WithLogger(ctx.logger)
 
@@ -161,6 +228,33 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 	if changedCount > 0 {
 		ctx.logger.Info("Applied endpoint manifests",
 			"changedObjects", changedCount)
+	}
+
+	// Bootstrap: patch annotations on Deployments that don't have them yet.
+	// WithMutate only runs on changed objects (spec diff > 0). For no-op reconciles
+	// (e.g., existing endpoints deployed before this code, or stable endpoints after
+	// a cluster upgrade where NeutreeVersion was preserved), this patch is the only
+	// path that writes/refreshes annotations. Annotation-only changes do not trigger
+	// a rollout.
+	dep := &appsv1.Deployment{}
+	if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
+		Namespace: namespace,
+		Name:      ctx.Endpoint.Metadata.Name,
+	}, dep); err == nil {
+		if dep.Annotations == nil || dep.Annotations[annNeutreeVersion] == "" || dep.Annotations[annEndpointSpecHash] == "" {
+			patch := client.MergeFrom(dep.DeepCopy())
+
+			if dep.Annotations == nil {
+				dep.Annotations = make(map[string]string)
+			}
+
+			dep.Annotations[annEndpointSpecHash] = currentSpecHash
+			dep.Annotations[annNeutreeVersion] = renderVars.NeutreeVersion
+
+			if patchErr := ctx.ctrClient.Patch(context.Background(), dep, patch); patchErr != nil {
+				ctx.logger.Error(patchErr, "Failed to bootstrap deployment annotations")
+			}
+		}
 	}
 
 	return nil
