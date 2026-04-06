@@ -123,6 +123,9 @@ class Backend:
             else:
                 print(f"[Backend] WARNING: default_chat_template_kwargs is not a valid JSON dict: {_raw_kwargs!r}, ignoring")
                 _raw_kwargs = None
+        elif _raw_kwargs is not None and not isinstance(_raw_kwargs, dict):
+            print(f"[Backend] WARNING: default_chat_template_kwargs must be a dict or JSON object string, got {type(_raw_kwargs).__name__}; ignoring")
+            _raw_kwargs = None
         self.default_chat_template_kwargs = _raw_kwargs
 
         # Chat/serving behavior parameters
