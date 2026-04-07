@@ -137,9 +137,16 @@ local function set_upstream_target(entry)
         ngx.var.upstream_host = target_host
     end
 
-    kong.service.request.clear_header("x-consumer-id")
-    kong.service.request.clear_header("x-consumer-custom-id")
-    kong.service.request.clear_header("x-credential-identifier")
+    -- Clear Kong authentication headers to prevent leaking to upstream
+    local headers = kong.request.get_headers()
+    for name, _ in pairs(headers) do
+        local lower_name = name:lower()
+        if lower_name:sub(1, 11) == "x-consumer-" or
+           lower_name:sub(1, 13) == "x-credential-" or
+           lower_name == "x-anonymous-consumer" then
+            kong.service.request.clear_header(name)
+        end
+    end
 
     if entry.auth_header and entry.auth_header ~= "" then
         kong.service.request.set_header("Authorization", entry.auth_header)
