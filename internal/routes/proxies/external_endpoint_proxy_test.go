@@ -295,7 +295,8 @@ func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
 		storedCredential  string
 		requestURL        string
 		storedURL         string
-		expectBackfill    bool
+		storedUpstreamURL string // original URL for matching, empty means use requestURL
+		permissionGranted *bool  // nil = no permission check expected, true/false = mock result
 		wantAuthHeader    string
 	}{
 		{
@@ -304,7 +305,17 @@ func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
 			storedCredential:  "sk-stored-secret",
 			requestURL:        "/v1",
 			storedURL:         "/v1",
-			expectBackfill:    true,
+			permissionGranted: boolPtr(true),
+			wantAuthHeader:    "Bearer sk-stored-secret",
+		},
+		{
+			name:              "backfill using stored_upstream_url when request URL changed",
+			requestCredential: "",
+			storedCredential:  "sk-stored-secret",
+			requestURL:        "/v1/new",
+			storedURL:         "/v1",
+			storedUpstreamURL: "/v1",
+			permissionGranted: boolPtr(true),
 			wantAuthHeader:    "Bearer sk-stored-secret",
 		},
 		{
@@ -313,7 +324,16 @@ func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
 			storedCredential:  "sk-stored-secret",
 			requestURL:        "/v1",
 			storedURL:         "/v2",
-			expectBackfill:    true,
+			permissionGranted: boolPtr(true),
+			wantAuthHeader:    "",
+		},
+		{
+			name:              "no backfill when permission denied",
+			requestCredential: "",
+			storedCredential:  "sk-stored-secret",
+			requestURL:        "/v1",
+			storedURL:         "/v1",
+			permissionGranted: boolPtr(false),
 			wantAuthHeader:    "",
 		},
 		{
@@ -322,7 +342,7 @@ func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
 			storedCredential:  "sk-stored-secret",
 			requestURL:        "/v1",
 			storedURL:         "/v1",
-			expectBackfill:    false,
+			permissionGranted: nil,
 			wantAuthHeader:    "Bearer sk-new-key",
 		},
 	}
@@ -344,27 +364,41 @@ func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
 			mockStorage := new(storageMocks.MockStorage)
 			deps := &Dependencies{Storage: mockStorage}
 
-			if tt.expectBackfill {
-				mockStorage.On("ListExternalEndpoint", mock.MatchedBy(func(opt storage.ListOption) bool {
-					return len(opt.Filters) == 2
-				})).Return([]v1.ExternalEndpoint{
-					{
-						Spec: &v1.ExternalEndpointSpec{
-							Upstreams: []v1.ExternalEndpointUpstreamEntry{
-								{
-									Upstream: &v1.ExternalEndpointUpstreamSpec{
-										URL: mockServer.URL + tt.storedURL,
+			if tt.permissionGranted != nil {
+				granted := *tt.permissionGranted
+				mockStorage.On("CallDatabaseFunction", "has_permission",
+					mock.MatchedBy(func(params map[string]interface{}) bool {
+						return params["user_uuid"] == "test-user-uuid" &&
+							params["required_permission"] == "external_endpoint:read-credentials" &&
+							params["workspace"] == "default"
+					}), mock.Anything).
+					Run(func(args mock.Arguments) {
+						result := args.Get(2).(*bool)
+						*result = granted
+					}).Return(nil)
+
+				if granted {
+					mockStorage.On("ListExternalEndpoint", mock.MatchedBy(func(opt storage.ListOption) bool {
+						return len(opt.Filters) == 2
+					})).Return([]v1.ExternalEndpoint{
+						{
+							Spec: &v1.ExternalEndpointSpec{
+								Upstreams: []v1.ExternalEndpointUpstreamEntry{
+									{
+										Upstream: &v1.ExternalEndpointUpstreamSpec{
+											URL: mockServer.URL + tt.storedURL,
+										},
+										Auth: &v1.ExternalEndpointAuthSpec{
+											Type:       "bearer",
+											Credential: tt.storedCredential,
+										},
+										ModelMapping: map[string]string{"fast": "gpt-4o-mini"},
 									},
-									Auth: &v1.ExternalEndpointAuthSpec{
-										Type:       "bearer",
-										Credential: tt.storedCredential,
-									},
-									ModelMapping: map[string]string{"fast": "gpt-4o-mini"},
 								},
 							},
 						},
-					},
-				}, nil)
+					}, nil)
+				}
 			}
 
 			eeName := "my-ee"
@@ -381,9 +415,15 @@ func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
 				Workspace: &ws,
 			}
 
+			if tt.storedUpstreamURL != "" {
+				url := mockServer.URL + tt.storedUpstreamURL
+				reqObj.StoredUpstreamURL = &url
+			}
+
 			b, _ := json.Marshal(reqObj)
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
+			c.Set("user_id", "test-user-uuid")
 			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/external_endpoints/test_connectivity", strings.NewReader(string(b)))
 			c.Request.Header.Set("Content-Type", "application/json")
 
@@ -454,4 +494,8 @@ func TestParseModelIDs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }

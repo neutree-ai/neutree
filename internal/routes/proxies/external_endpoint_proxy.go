@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -50,6 +51,9 @@ type testConnectivityRequest struct {
 	// Name is the external endpoint name, used to backfill credentials in edit mode
 	// when the auth credential is not provided in the request.
 	Name *string `json:"name,omitempty"`
+	// StoredUpstreamURL is the original upstream URL from the stored EE, used to
+	// identify which upstream entry to backfill credentials from when the URL has been modified.
+	StoredUpstreamURL *string `json:"stored_upstream_url,omitempty"`
 }
 
 // testConnectivityResponse is the response body for the test connectivity endpoint.
@@ -101,9 +105,10 @@ func handleTestConnectivity(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Backfill credential from stored EE when auth credential is empty (edit mode)
-		if req.Auth != nil && req.Auth.Credential == "" && req.Name != nil && *req.Name != "" {
-			backfillAuthCredential(deps, &req)
+		// Backfill credential from stored EE when auth credential is empty (edit mode).
+		// Only for external upstream requests; endpoint_ref requests don't need credential backfill.
+		if req.Upstream != nil && req.Auth != nil && req.Auth.Credential == "" && req.Name != nil && *req.Name != "" {
+			backfillAuthCredential(c, deps, &req)
 		}
 
 		if req.Auth != nil && req.Auth.Credential != "" {
@@ -230,10 +235,32 @@ func resolveModelsURL(deps *Dependencies, req *testConnectivityRequest) (string,
 
 // backfillAuthCredential fetches the stored external endpoint and backfills
 // the auth credential when it's missing from the request (edit mode scenario).
-func backfillAuthCredential(deps *Dependencies, req *testConnectivityRequest) {
+func backfillAuthCredential(c *gin.Context, deps *Dependencies, req *testConnectivityRequest) {
 	workspace := defaultWorkspace
 	if req.Workspace != nil && *req.Workspace != "" {
 		workspace = *req.Workspace
+	}
+
+	// Check that the caller has permission to read EE credentials in this workspace
+	userID := c.GetString("user_id")
+	if userID == "" {
+		return
+	}
+
+	var hasPermission bool
+
+	err := deps.Storage.CallDatabaseFunction("has_permission", map[string]interface{}{
+		"user_uuid":           userID,
+		"required_permission": "external_endpoint:read-credentials",
+		"workspace":           workspace,
+	}, &hasPermission)
+	if err != nil {
+		klog.Warningf("Failed to check permission for credential backfill (user=%s, workspace=%s): %v", userID, workspace, err)
+		return
+	}
+
+	if !hasPermission {
+		return
 	}
 
 	ees, err := deps.Storage.ListExternalEndpoint(storage.ListOption{
@@ -251,12 +278,21 @@ func backfillAuthCredential(deps *Dependencies, req *testConnectivityRequest) {
 		return
 	}
 
+	// Determine which URL to match against stored upstream entries:
+	// prefer stored_upstream_url (original URL before edit), fall back to current request URL.
+	matchURL := ""
+	if req.StoredUpstreamURL != nil && *req.StoredUpstreamURL != "" {
+		matchURL = *req.StoredUpstreamURL
+	} else if req.Upstream != nil {
+		matchURL = req.Upstream.URL
+	}
+
 	for _, entry := range ee.Spec.Upstreams {
 		if entry.Auth == nil || entry.Auth.Credential == "" {
 			continue
 		}
 
-		if req.Upstream != nil && entry.Upstream != nil && req.Upstream.URL == entry.Upstream.URL {
+		if entry.Upstream != nil && matchURL == entry.Upstream.URL {
 			req.Auth.Credential = entry.Auth.Credential
 			return
 		}
