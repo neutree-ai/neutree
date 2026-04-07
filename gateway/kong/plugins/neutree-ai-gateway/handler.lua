@@ -138,15 +138,11 @@ local function set_upstream_target(entry)
     end
 
     -- Clear Kong authentication headers to prevent leaking to upstream
-    local headers = kong.request.get_headers()
-    for name, _ in pairs(headers) do
-        local lower_name = name:lower()
-        if lower_name:sub(1, 11) == "x-consumer-" or
-           lower_name:sub(1, 13) == "x-credential-" or
-           lower_name == "x-anonymous-consumer" then
-            kong.service.request.clear_header(name)
-        end
-    end
+    kong.service.request.clear_header("x-consumer-id")
+    kong.service.request.clear_header("x-consumer-custom-id")
+    kong.service.request.clear_header("x-consumer-username")
+    kong.service.request.clear_header("x-credential-identifier")
+    kong.service.request.clear_header("x-anonymous-consumer")
 
     if entry.auth_header and entry.auth_header ~= "" then
         kong.service.request.set_header("Authorization", entry.auth_header)
