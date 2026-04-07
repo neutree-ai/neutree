@@ -286,6 +286,118 @@ func TestHandleTestConnectivityEndpointRefNotFound(t *testing.T) {
 	assert.Contains(t, resp.Error, "not found")
 }
 
+func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name              string
+		requestCredential string
+		storedCredential  string
+		requestURL        string
+		storedURL         string
+		expectBackfill    bool
+		wantAuthHeader    string
+	}{
+		{
+			name:              "backfill credential when empty and EE name provided",
+			requestCredential: "",
+			storedCredential:  "sk-stored-secret",
+			requestURL:        "/v1",
+			storedURL:         "/v1",
+			expectBackfill:    true,
+			wantAuthHeader:    "Bearer sk-stored-secret",
+		},
+		{
+			name:              "no backfill when upstream URL does not match",
+			requestCredential: "",
+			storedCredential:  "sk-stored-secret",
+			requestURL:        "/v1",
+			storedURL:         "/v2",
+			expectBackfill:    true,
+			wantAuthHeader:    "",
+		},
+		{
+			name:              "no backfill when new credential provided",
+			requestCredential: "sk-new-key",
+			storedCredential:  "sk-stored-secret",
+			requestURL:        "/v1",
+			storedURL:         "/v1",
+			expectBackfill:    false,
+			wantAuthHeader:    "Bearer sk-new-key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var receivedAuth string
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				receivedAuth = r.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]any{
+						{"id": "test-model"},
+					},
+				})
+			}))
+			defer mockServer.Close()
+
+			mockStorage := new(storageMocks.MockStorage)
+			deps := &Dependencies{Storage: mockStorage}
+
+			if tt.expectBackfill {
+				mockStorage.On("ListExternalEndpoint", mock.MatchedBy(func(opt storage.ListOption) bool {
+					return len(opt.Filters) == 2
+				})).Return([]v1.ExternalEndpoint{
+					{
+						Spec: &v1.ExternalEndpointSpec{
+							Upstreams: []v1.ExternalEndpointUpstreamEntry{
+								{
+									Upstream: &v1.ExternalEndpointUpstreamSpec{
+										URL: mockServer.URL + tt.storedURL,
+									},
+									Auth: &v1.ExternalEndpointAuthSpec{
+										Type:       "bearer",
+										Credential: tt.storedCredential,
+									},
+									ModelMapping: map[string]string{"fast": "gpt-4o-mini"},
+								},
+							},
+						},
+					},
+				}, nil)
+			}
+
+			eeName := "my-ee"
+			ws := "default"
+			reqObj := testConnectivityRequest{
+				Upstream: &v1.ExternalEndpointUpstreamSpec{
+					URL: mockServer.URL + tt.requestURL,
+				},
+				Auth: &v1.ExternalEndpointAuthSpec{
+					Type:       "bearer",
+					Credential: tt.requestCredential,
+				},
+				Name:      &eeName,
+				Workspace: &ws,
+			}
+
+			b, _ := json.Marshal(reqObj)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/external_endpoints/test_connectivity", strings.NewReader(string(b)))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			handler := handleTestConnectivity(deps)
+			handler(c)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tt.wantAuthHeader, receivedAuth)
+
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
 func TestParseModelIDs(t *testing.T) {
 	tests := []struct {
 		name       string
