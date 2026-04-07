@@ -16,6 +16,8 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
+const defaultWorkspace = "default"
+
 // RegisterExternalEndpointRoutes registers external endpoint routes
 // The auth.credential field is masked in API responses (api:"-" tag)
 //
@@ -45,6 +47,9 @@ type testConnectivityRequest struct {
 	Auth        *v1.ExternalEndpointAuthSpec     `json:"auth,omitempty"`
 	EndpointRef *string                          `json:"endpoint_ref,omitempty"`
 	Workspace   *string                          `json:"workspace,omitempty"`
+	// Name is the external endpoint name, used to backfill credentials in edit mode
+	// when the auth credential is not provided in the request.
+	Name *string `json:"name,omitempty"`
 }
 
 // testConnectivityResponse is the response body for the test connectivity endpoint.
@@ -96,7 +101,12 @@ func handleTestConnectivity(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if req.Auth != nil {
+		// Backfill credential from stored EE when auth credential is empty (edit mode)
+		if req.Auth != nil && req.Auth.Credential == "" && req.Name != nil && *req.Name != "" {
+			backfillAuthCredential(deps, &req)
+		}
+
+		if req.Auth != nil && req.Auth.Credential != "" {
 			httpReq.Header.Set("Authorization", req.Auth.AuthHeaderValue())
 		}
 
@@ -173,7 +183,7 @@ func resolveModelsURL(deps *Dependencies, req *testConnectivityRequest) (string,
 	}
 
 	// Resolve endpoint ref
-	workspace := "default"
+	workspace := defaultWorkspace
 	if req.Workspace != nil && *req.Workspace != "" {
 		workspace = *req.Workspace
 	}
@@ -216,6 +226,41 @@ func resolveModelsURL(deps *Dependencies, req *testConnectivityRequest) (string,
 	}
 
 	return fmt.Sprintf("%s://%s:%d/%s/%s/v1/models", scheme, host, port, workspace, endpointName), nil
+}
+
+// backfillAuthCredential fetches the stored external endpoint and backfills
+// the auth credential when it's missing from the request (edit mode scenario).
+func backfillAuthCredential(deps *Dependencies, req *testConnectivityRequest) {
+	workspace := defaultWorkspace
+	if req.Workspace != nil && *req.Workspace != "" {
+		workspace = *req.Workspace
+	}
+
+	ees, err := deps.Storage.ListExternalEndpoint(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(*req.Name)},
+			{Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote(workspace)},
+		},
+	})
+	if err != nil || len(ees) == 0 {
+		return
+	}
+
+	ee := &ees[0]
+	if ee.Spec == nil {
+		return
+	}
+
+	for _, entry := range ee.Spec.Upstreams {
+		if entry.Auth == nil || entry.Auth.Credential == "" {
+			continue
+		}
+
+		if req.Upstream != nil && entry.Upstream != nil && req.Upstream.URL == entry.Upstream.URL {
+			req.Auth.Credential = entry.Auth.Credential
+			return
+		}
+	}
 }
 
 // parseModelIDs validates and extracts model IDs from an OpenAI-compatible /models response.
