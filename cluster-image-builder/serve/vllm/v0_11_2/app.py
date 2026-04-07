@@ -20,7 +20,7 @@ from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.v1.engine.async_llm import AsyncLLM
 from vllm.entrypoints.openai.protocol import (
-    ChatCompletionRequest, ErrorResponse,
+    ChatCompletionRequest, ErrorResponse, ErrorInfo,
     RerankRequest,
     EmbeddingCompletionRequest,
 )
@@ -225,14 +225,14 @@ class Backend:
 
         if isinstance(result, ErrorResponse):
             if is_stream:
-                logging.error(f"Error during chat completion: {result.message}")
+                logging.error(f"Error during chat completion: {result.error.message}")
                 async def error_generator():
                     import json
                     error_data = {
                         "error": {
                             "message": "Request processing failed",
                             "type": "internal_server_error",
-                            "details": str(result.message)
+                            "details": str(result.error.message)
                         }
                     }
                     yield f"data: {json.dumps(error_data)}\n\n"
@@ -249,8 +249,11 @@ class Backend:
         except (TypeError, ValueError) as e:
             logging.error(f"Invalid payload for EmbeddingCompletionRequest: {e}")
             return ErrorResponse(
-                message={"error": "Invalid payload for EmbeddingCompletionRequest", "details": str(e)},
-                status_code=400,
+                error=ErrorInfo(
+                    message=f"Invalid payload for EmbeddingCompletionRequest: {e}",
+                    type="invalid_request_error",
+                    code=400,
+                )
             )
         return await self.openai_serving_embedding.create_embedding(request, None)
 
@@ -321,7 +324,7 @@ class Controller:
             # Handle non-streaming response as before
             result = await self.backend.options(stream=False).generate.remote(req_obj)
             if isinstance(result, ErrorResponse):
-                return JSONResponse(content=result.model_dump(), status_code=result.code)
+                return JSONResponse(content=result.model_dump(), status_code=result.error.code)
             return JSONResponse(content=result.model_dump())
 
     @app.post("/v1/embeddings")
@@ -330,7 +333,7 @@ class Controller:
         req_obj = await request.json()
         result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
         if isinstance(result, ErrorResponse):
-            return JSONResponse(content=result.model_dump(), status_code=result.code)
+            return JSONResponse(content=result.model_dump(), status_code=result.error.code)
         return JSONResponse(content=result.model_dump())
 
     @app.post("/v1/rerank")
@@ -339,7 +342,7 @@ class Controller:
         req_obj = await request.json()
         result = await self.backend.options(stream=False).rerank.remote(req_obj)
         if isinstance(result, ErrorResponse):
-            return JSONResponse(content=result.model_dump(), status_code=result.code)
+            return JSONResponse(content=result.model_dump(), status_code=result.error.code)
         return JSONResponse(content=result.model_dump())
 
     @app.get("/v1/models")
