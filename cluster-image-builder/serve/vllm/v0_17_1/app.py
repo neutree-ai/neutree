@@ -111,7 +111,22 @@ class Backend:
         self.chat_template = engine_kwargs.pop("chat_template", None)
         self.chat_template_content_format = engine_kwargs.pop("chat_template_content_format", "auto")
         self.trust_request_chat_template = engine_kwargs.pop("trust_request_chat_template", False)
-        self.default_chat_template_kwargs = engine_kwargs.pop("default_chat_template_kwargs", None)
+        _raw_kwargs = engine_kwargs.pop("default_chat_template_kwargs", None)
+        # Coerce JSON string → dict, following the same pattern as coerce_args().
+        if isinstance(_raw_kwargs, str):
+            try:
+                parsed = json.loads(_raw_kwargs)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            if isinstance(parsed, dict):
+                _raw_kwargs = parsed
+            else:
+                print(f"[Backend] WARNING: default_chat_template_kwargs is not a valid JSON dict: {_raw_kwargs!r}, ignoring")
+                _raw_kwargs = None
+        elif _raw_kwargs is not None and not isinstance(_raw_kwargs, dict):
+            print(f"[Backend] WARNING: default_chat_template_kwargs must be a dict or JSON object string, got {type(_raw_kwargs).__name__}; ignoring")
+            _raw_kwargs = None
+        self.default_chat_template_kwargs = _raw_kwargs
 
         # Chat/serving behavior parameters
         self.response_role = engine_kwargs.pop("response_role", "assistant")
