@@ -1703,14 +1703,17 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 		imageRegistry              *v1.ImageRegistry
 		setupMgr                   func(t *testing.T) *acceleratormocks.MockManager
 		expectContainer            bool
-		expectedContainerImage     string
+		expectedBaseImage          string // framework image (base container)
+		expectedBackendImage       string // engine image (backend container)
 		expectedBaseRunOptions     []string
 		expectedBackendRunOptions  []string
 		expectedEngineName         string
 		expectedEngineVersion      string
+		expectedImportPath         string
+		expectedBackendClass       string
 	}{
 		{
-			name: "new GPU cluster generates container and backend_container",
+			name: "new GPU cluster uses framework image for base and engine image for backend",
 			endpoint: &v1.Endpoint{
 				Metadata: &v1.Metadata{Workspace: "default", Name: "test-ep"},
 				Spec: &v1.EndpointSpec{
@@ -1741,8 +1744,9 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
 				return mgr
 			},
-			expectContainer:        true,
-			expectedContainerImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
+			expectContainer:   true,
+			expectedBaseImage: "registry.example.com/neutree-serve-framework:ray2.53.0",
+			expectedBackendImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
 			expectedBaseRunOptions: []string{"--rm"},
 			expectedBackendRunOptions: []string{
 				"--runtime=nvidia", "--gpus all",
@@ -1751,6 +1755,8 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 			},
 			expectedEngineName:    "vllm",
 			expectedEngineVersion: "v0.12.0",
+			expectedImportPath:    frameworkImportPath,
+			expectedBackendClass:  "serve.engines.vllm_v0_12_0.backend:Backend",
 		},
 		{
 			name: "old cluster (v1.0.0) does not generate container config",
@@ -1776,6 +1782,7 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 			expectContainer:       false,
 			expectedEngineName:    "vllm",
 			expectedEngineVersion: "v0.12.0",
+			expectedImportPath:    "serve.vllm.v0_12_0.app:app_builder",
 		},
 		{
 			name: "empty cluster version treated as old cluster",
@@ -1792,9 +1799,10 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 			expectContainer:       false,
 			expectedEngineName:    "vllm",
 			expectedEngineVersion: "v0.12.0",
+			expectedImportPath:    "serve.vllm.v0_12_0.app:app_builder",
 		},
 		{
-			name: "CPU endpoint on new cluster generates container without GPU options",
+			name: "CPU endpoint on new cluster uses framework image",
 			endpoint: &v1.Endpoint{
 				Metadata: &v1.Metadata{Workspace: "default", Name: "cpu-ep"},
 				Spec: &v1.EndpointSpec{
@@ -1810,11 +1818,14 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 			engine:                 cpuEngine,
 			imageRegistry:          defaultImageRegistry,
 			expectContainer:        true,
-			expectedContainerImage: "registry.example.com/neutree/engine-llama-cpp:v0.3.7-ray2.53.0",
+			expectedBaseImage:      "registry.example.com/neutree-serve-framework:ray2.53.0",
+			expectedBackendImage:   "registry.example.com/neutree/engine-llama-cpp:v0.3.7-ray2.53.0",
 			expectedBaseRunOptions: []string{"--rm"},
 			expectedBackendRunOptions: []string{"--rm"},
 			expectedEngineName:     "llama-cpp",
 			expectedEngineVersion:  "v0.3.7",
+			expectedImportPath:     frameworkImportPath,
+			expectedBackendClass:   "serve.engines.llama_cpp_v0_3_7.backend:Backend",
 		},
 	}
 
@@ -1833,31 +1844,39 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 			assert.Equal(t, tt.expectedEngineName, envs["ENGINE_NAME"])
 			assert.Equal(t, tt.expectedEngineVersion, envs["ENGINE_VERSION"])
 
+			// Verify import path
+			assert.Equal(t, tt.expectedImportPath, app.ImportPath)
+
 			if !tt.expectContainer {
 				_, hasContainer := app.RuntimeEnv["container"]
 				assert.False(t, hasContainer, "should not have runtime_env.container")
 				_, hasBackend := app.Args["backend_container"]
 				assert.False(t, hasBackend, "should not have backend_container")
+				_, hasBackendClass := app.Args["backend_class"]
+				assert.False(t, hasBackendClass, "old cluster should not have backend_class")
 				return
 			}
 
-			// Verify base container config
+			// Verify base container config (framework image)
 			container, ok := app.RuntimeEnv["container"].(map[string]interface{})
 			assert.True(t, ok, "runtime_env should have 'container'")
-			assert.Equal(t, tt.expectedContainerImage, container["image"])
+			assert.Equal(t, tt.expectedBaseImage, container["image"])
 
 			baseOpts, ok := container["run_options"].([]string)
 			assert.True(t, ok)
 			assert.Equal(t, tt.expectedBaseRunOptions, baseOpts)
 
-			// Verify backend container config
+			// Verify backend container config (engine image)
 			backendContainer, ok := app.Args["backend_container"].(map[string]interface{})
 			assert.True(t, ok, "args should have 'backend_container'")
-			assert.Equal(t, tt.expectedContainerImage, backendContainer["image"])
+			assert.Equal(t, tt.expectedBackendImage, backendContainer["image"])
 
 			backendOpts, ok := backendContainer["run_options"].([]string)
 			assert.True(t, ok)
 			assert.Equal(t, tt.expectedBackendRunOptions, backendOpts)
+
+			// Verify backend_class for dynamic import
+			assert.Equal(t, tt.expectedBackendClass, app.Args["backend_class"])
 		})
 	}
 }

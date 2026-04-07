@@ -1,8 +1,6 @@
 ARG RAY_COMMIT
 ARG COMMON_WORKDIR=/app
 ARG RAY_REPO
-ARG ENGINE_BASE_IMAGE=vllm/vllm-openai:v0.11.2
-ARG ENGINE_VERSION_DIR=v0_11_2
 ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
 
 # --- Ray source fetch ---
@@ -27,36 +25,30 @@ WORKDIR /ray
 COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
 RUN /ray/python/build-wheel-manylinux2014.sh
 
-# --- Engine image ---
-FROM ${ENGINE_BASE_IMAGE}
+# --- Framework image ---
+FROM python:3.12-slim
 
 ENV HOME=/home/ray
 WORKDIR ${HOME}
 
-# Install Ray neutree fork (same version as cluster image)
+# Install uv for fast package management
+RUN pip install --no-cache-dir uv
+
+# Install Ray neutree fork (same version as cluster/engine images)
 RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
     cd /install \
     && whl=$(ls .whl/*.whl) \
-    && uv pip install --system "${whl}[serve,cgraph]"
+    && uv pip install --system "${whl}[serve]"
 
-# Install common serve-layer dependencies
+# Install common serve-layer dependencies (fastapi, starlette, etc.)
 RUN --mount=type=bind,src=requirements,target=requirements \
     uv pip install --system -r requirements/common.txt
 
-# Copy Neutree serve layer code (shared + specified engine version only)
-ARG ENGINE_VERSION_DIR
-COPY serve/_metrics ./serve/_metrics
-COPY serve/_replica_scheduler ./serve/_replica_scheduler
-COPY serve/_utils ./serve/_utils
-COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
-COPY serve/engines ./serve/engines
-COPY downloader ./downloader
-RUN uv pip install --system -r downloader/requirements.txt
+# Copy ONLY framework code — no engine code, no downloader, no metrics.
+COPY serve/framework ./serve/framework
 
-# Ensure "python" is in PATH (some base images only provide "python3")
+# Ensure "python" is in PATH
 RUN ln -sf $(which python3) /usr/bin/python 2>/dev/null || true
 
-# Reset ENTRYPOINT from base image (vllm/vllm-openai sets "vllm serve")
-# so that Ray can execute its own commands in this container.
 ENTRYPOINT []
 CMD ["/bin/bash"]

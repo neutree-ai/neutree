@@ -5,6 +5,7 @@ IMAGE_PROJECT ?= neutree
 IMAGE_PREFIX ?= ${IMAGE_REPO}/${IMAGE_PROJECT}/
 IMAGE_TAG ?= ${shell echo $(VERSION) | awk -F '/' '{print $$NF}'}
 NEUTREE_SERVE_IMAGE := $(IMAGE_PREFIX)neutree-serve
+NEUTREE_FRAMEWORK_IMAGE := $(IMAGE_PREFIX)neutree-serve-framework
 NEUTREE_ENGINE_IMAGE := $(IMAGE_PREFIX)engine
 
 ARCH ?= amd64
@@ -42,6 +43,11 @@ docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
 		--label neutree.ai/accelerator-type=amd_gpu \
 		-f Dockerfile.rocm -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG)-rocm .
 
+.PHONY: docker-build-framework
+docker-build-framework: prepare ## Build the serve framework image
+	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.framework -t $(NEUTREE_FRAMEWORK_IMAGE):$(RAY_SHORT_VERSION) .
+
 .PHONY: docker-build-engine-vllm
 docker-build-engine-vllm: prepare ## Build the vLLM engine image (NVIDIA)
 	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_VERSION) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
@@ -68,6 +74,10 @@ docker-push-gpu: ## Push the GPU image
 .PHONY: docker-push-amd-gpu
 docker-push-amd-gpu: ## Push the AMD GPU image
 	docker push $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG)-rocm
+
+.PHONY: docker-push-framework
+docker-push-framework: ## Push the serve framework image
+	docker push $(NEUTREE_FRAMEWORK_IMAGE):$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-engine-vllm
 docker-push-engine-vllm: ## Push the vLLM engine image (NVIDIA)
