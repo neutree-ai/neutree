@@ -8,7 +8,6 @@ CREATE TYPE api.user_profile_spec AS (
 
 CREATE TYPE api.user_profile_status AS (
     phase TEXT,
-    service_url TEXT,
     error_message TEXT
 );
 
@@ -134,15 +133,15 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM api.user_profiles WHERE id = p_user_id) THEN
         RAISE EXCEPTION 'User profile not found';
     END IF;
-    
+
     -- Use name as display_name if not provided
     IF p_display_name IS NULL THEN
         p_display_name := p_name;
     END IF;
-    
+
     -- Generate a new API key value
     v_key_value := api.generate_api_key();
-    
+
     -- Insert the new API key with the generated key value in status.sk_value
     INSERT INTO api.api_keys (
         api_version,
@@ -175,23 +174,23 @@ DECLARE
     v_user_id UUID;
 BEGIN
     -- Get the API key where status.sk_value matches
-    SELECT * INTO v_api_key 
-    FROM api.api_keys 
+    SELECT * INTO v_api_key
+    FROM api.api_keys
     WHERE (status).sk_value = p_sk_value;
-    
+
     -- Check if the API key exists
     IF v_api_key IS NULL THEN
         RETURN NULL;
     END IF;
-    
+
     -- Get user_id
     v_user_id := v_api_key.user_id;
-    
+
     -- Check if the user exists
     IF NOT EXISTS (SELECT 1 FROM api.user_profiles WHERE id = v_user_id) THEN
         RETURN NULL;
     END IF;
-    
+
     -- Update last_used_at timestamp
     UPDATE api.api_keys
     SET status = ROW(
@@ -199,7 +198,7 @@ BEGIN
         (v_api_key.status).last_transition_time,
         (v_api_key.status).error_message,
         (v_api_key.status).sk_value,
-        (v_api_key.status).usage, 
+        (v_api_key.status).usage,
         CURRENT_TIMESTAMP,
         (v_api_key.status).last_sync_at
     )::api.api_key_status
@@ -263,7 +262,7 @@ BEGIN
     SELECT id, (metadata).workspace INTO v_api_key
     FROM api.api_keys
     WHERE id = p_api_key_id;
-    
+
     -- If API key not found, return JSON with error instead of raising exception
     IF v_api_key.id IS NULL THEN
         RETURN jsonb_build_object(
@@ -272,10 +271,10 @@ BEGIN
             'request_id', p_request_id
         );
     END IF;
-    
+
     -- Get workspace from API key metadata
     v_workspace := v_api_key.workspace;
-    
+
     -- Insert usage record with dimensional data
     INSERT INTO api.api_usage_records (
         api_key_id,
@@ -361,9 +360,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION api.handle_api_key_delete()
 RETURNS TRIGGER AS $$
 BEGIN
-    DELETE FROM api.api_daily_usage 
+    DELETE FROM api.api_daily_usage
     WHERE ((spec).api_key_id) = OLD.id;
-    
+
     RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;
@@ -387,7 +386,7 @@ BEGIN
         p_older_than := now();
     END IF;
 
-    FOR v_record IN 
+    FOR v_record IN
         SELECT
             id,
             api_key_id,
@@ -396,29 +395,29 @@ BEGIN
             COALESCE(workspace, 'default') AS workspace,
             usage_amount
         FROM api.api_usage_records
-        WHERE 
+        WHERE
             is_aggregated = false AND
             created_at < p_older_than
         ORDER BY created_at
     LOOP
         v_date := v_record.usage_date;
         v_dimension_key := v_record.model || ':' || v_record.workspace;
-        
+
         -- Get workspace from API key
         SELECT (ak.metadata).workspace INTO v_workspace
         FROM api.api_keys ak
         WHERE ak.id = v_record.api_key_id;
-        
+
         -- Get or create the daily usage record
-        SELECT 
-            id, 
-            ((spec).dimensional_usage) AS dimensional_usage 
-        INTO v_daily_record 
+        SELECT
+            id,
+            ((spec).dimensional_usage) AS dimensional_usage
+        INTO v_daily_record
         FROM api.api_daily_usage
-        WHERE 
-            ((spec).api_key_id) = v_record.api_key_id AND 
+        WHERE
+            ((spec).api_key_id) = v_record.api_key_id AND
             ((spec).usage_date) = v_date;
-            
+
         IF NOT FOUND THEN
             -- Create metadata for new record
             v_metadata := ROW(
@@ -430,7 +429,7 @@ BEGIN
                 CURRENT_TIMESTAMP,
                 '{}'::json
             )::api.metadata;
-            
+
             INSERT INTO api.api_daily_usage (
                 api_version,
                 kind,
@@ -454,7 +453,7 @@ BEGIN
             RETURNING id, ((spec).dimensional_usage) INTO v_daily_record;
         ELSE
             UPDATE api.api_daily_usage
-            SET 
+            SET
                 spec = ROW(
                     (spec).api_key_id,
                     (spec).usage_date,
@@ -475,15 +474,15 @@ BEGIN
                 )::api.api_daily_usage_status
             WHERE id = v_daily_record.id;
         END IF;
-        
+
         -- Mark record as aggregated
         UPDATE api.api_usage_records
         SET is_aggregated = true
         WHERE id = v_record.id;
-        
+
         v_count := v_count + 1;
     END LOOP;
-    
+
     RETURN v_count;
 END;
 $$ LANGUAGE plpgsql;
@@ -497,7 +496,7 @@ DECLARE
     v_api_key RECORD;
     v_total_usage BIGINT;
 BEGIN
-    FOR v_api_key IN 
+    FOR v_api_key IN
         SELECT id, (status).usage AS current_usage
         FROM api.api_keys
     LOOP
@@ -517,11 +516,11 @@ BEGIN
                 now()  -- Update last_sync_at
             )::api.api_key_status
             WHERE id = v_api_key.id;
-            
+
             v_count := v_count + 1;
         END IF;
     END LOOP;
-    
+
     RETURN v_count;
 END;
 $$ LANGUAGE plpgsql;
@@ -581,30 +580,30 @@ BEGIN
         AND (p_api_key_id IS NULL OR id = p_api_key_id)
     ),
     dimension_data AS (
-        SELECT 
+        SELECT
             (u.spec).usage_date,
             (u.spec).api_key_id,
             k.key_name,
             split_part(kv.key, ':', 1) AS model,
             split_part(kv.key, ':', 2) AS workspace,
             (kv.value)::bigint AS dimension_usage
-        FROM 
+        FROM
             api.api_daily_usage u
             JOIN user_api_keys k ON (u.spec).api_key_id = k.id,
             jsonb_each((u.spec).dimensional_usage) kv
-        WHERE 
+        WHERE
             (u.spec).usage_date BETWEEN p_start_date AND p_end_date
     )
-    SELECT 
+    SELECT
         d.usage_date,
         d.api_key_id,
         d.key_name,
         d.model,
         d.workspace,
         d.dimension_usage
-    FROM 
+    FROM
         dimension_data d
-    WHERE 
+    WHERE
         (p_model IS NULL OR d.model = p_model) AND
         (p_workspace IS NULL OR d.workspace = p_workspace)
     ORDER BY
