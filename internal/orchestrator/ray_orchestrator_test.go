@@ -930,10 +930,8 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "llama-2-7b", "v1.0"),
 				"registry_path": filepath.Join("/mnt", "default", "llama-endpoint", "models", "llama-2-7b", "v1.0"),
 			},
-			expectedEnvs: map[string]string{
-				"ENGINE_NAME": "", "ENGINE_VERSION": "",
-			},
-			wantErr: false,
+			expectedEnvs: map[string]string{},
+			wantErr:      false,
 		},
 		{
 			name: "BentoML modelRegistry - specific version - with cluster model cache",
@@ -986,10 +984,8 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "test-cache", "llama-2-7b", "v1.0"),
 				"registry_path": filepath.Join("/mnt", "default", "llama-endpoint", "models", "llama-2-7b", "v1.0"),
 			},
-			expectedEnvs: map[string]string{
-				"ENGINE_NAME": "", "ENGINE_VERSION": "",
-			},
-			wantErr: false,
+			expectedEnvs: map[string]string{},
+			wantErr:      false,
 		},
 		{
 			name: "BentoML modelRegistry - specific version - with cluster multi model cache - only use the first one",
@@ -1046,10 +1042,8 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "test-cache-1", "llama-2-7b", "v1.0"),
 				"registry_path": filepath.Join("/mnt", "default", "llama-endpoint", "models", "llama-2-7b", "v1.0"),
 			},
-			expectedEnvs: map[string]string{
-				"ENGINE_NAME": "", "ENGINE_VERSION": "",
-			},
-			wantErr: false,
+			expectedEnvs: map[string]string{},
+			wantErr:      false,
 		},
 		{
 			name: "HuggingFace modelRegistry - specific version",
@@ -1092,9 +1086,8 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 				"registry_path": "llama-2-7b",
 			},
 			expectedEnvs: map[string]string{
-				v1.HFEndpoint:    "https://huggingface.co",
-				v1.HFTokenEnv:    "test-token",
-				"ENGINE_NAME": "", "ENGINE_VERSION": "",
+				v1.HFEndpoint: "https://huggingface.co",
+				v1.HFTokenEnv: "test-token",
 			},
 			wantErr: false,
 		},
@@ -1138,9 +1131,8 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 				"registry_path": "llama-2-7b",
 			},
 			expectedEnvs: map[string]string{
-				v1.HFEndpoint:    "https://huggingface.co",
-				v1.HFTokenEnv:    "test-token",
-				"ENGINE_NAME": "", "ENGINE_VERSION": "",
+				v1.HFEndpoint: "https://huggingface.co",
+				v1.HFTokenEnv: "test-token",
 			},
 			wantErr: false,
 		},
@@ -1774,8 +1766,8 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 				return mgr
 			},
 			expectContainer:       false,
-			expectedEngineName:    "vllm",
-			expectedEngineVersion: "v0.12.0",
+			expectedEngineName:    "",
+			expectedEngineVersion: "",
 		},
 		{
 			name: "empty cluster version treated as old cluster",
@@ -1790,8 +1782,8 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 			},
 			cluster:               &v1.Cluster{},
 			expectContainer:       false,
-			expectedEngineName:    "vllm",
-			expectedEngineVersion: "v0.12.0",
+			expectedEngineName:    "",
+			expectedEngineVersion: "",
 		},
 		{
 			name: "CPU endpoint on new cluster generates container without GPU options",
