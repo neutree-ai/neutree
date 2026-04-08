@@ -342,13 +342,16 @@ if [ -z "$MANIFEST_ONLY" ]; then
     done
 
     # Save all images into a single tar
+    if [ ${#ALL_IMAGES[@]} -eq 0 ]; then
+        print_error "No images to save"
+        exit 1
+    fi
+
     COMBINED_TAR="$IMAGES_DIR/${ENGINE_NAME}-${ENGINE_VERSION}-images.tar"
     COMBINED_TAR_BASENAME=$(basename "$COMBINED_TAR")
     print_info "Saving ${#ALL_IMAGES[@]} image(s) into $COMBINED_TAR_BASENAME..."
 
-    docker save "${ALL_IMAGES[@]}" -o "$COMBINED_TAR"
-
-    if [ $? -ne 0 ]; then
+    if ! docker save "${ALL_IMAGES[@]}" -o "$COMBINED_TAR"; then
         print_error "Failed to export images"
         exit 1
     fi
@@ -377,20 +380,18 @@ if [ -z "$MANIFEST_ONLY" ]; then
 else
     # Manifest-only mode: build image entries without Docker export
     print_info "Manifest-only mode: skipping Docker image export"
+    COMBINED_TAR_BASENAME="${ENGINE_NAME}-${ENGINE_VERSION}-images.tar"
     for spec in "${IMAGE_SPECS[@]}"; do
         IFS=':' read -ra PARTS <<< "$spec"
         ACCELERATOR="${PARTS[0]}"
         IMAGE_NAME="${PARTS[1]}"
         IMAGE_TAG="${PARTS[2]}"
 
-        IMAGE_FILE="images/${IMAGE_NAME//\//-}-${IMAGE_TAG}.tar"
-        IMAGE_FILE_BASENAME=$(basename "$IMAGE_FILE")
-
         IMAGE_ENTRIES="${IMAGE_ENTRIES}
     - accelerator: \"$ACCELERATOR\"
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
-      image_file: \"images/$IMAGE_FILE_BASENAME\"
+      image_file: \"images/$COMBINED_TAR_BASENAME\"
       platform: \"linux/amd64\""
     done
 fi
