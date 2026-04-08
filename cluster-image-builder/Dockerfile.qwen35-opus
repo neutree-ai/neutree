@@ -1,4 +1,4 @@
-FROM vllm/vllm-openai:v0.18.1-cu130
+FROM vllm/vllm-openai:v0.18.1
 
 RUN pip install --upgrade pip && \
     pip install --upgrade transformers tokenizers && \
