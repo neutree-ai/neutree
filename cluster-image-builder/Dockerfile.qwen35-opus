@@ -1,0 +1,15 @@
+FROM vllm/vllm-openai:v0.18.1-cu130
+
+RUN pip install --upgrade pip && \
+    pip install --upgrade transformers tokenizers && \
+    pip install huggingface-hub sentencepiece
+
+# Fix qwen3_5 config list-vs-set issue for transformers 5.x
+RUN python3 -c "\
+import pathlib; \
+p = pathlib.Path('/usr/local/lib/python3.12/dist-packages/vllm/transformers_utils/configs/qwen3_5.py'); \
+t = p.read_text(); \
+t = t.replace('kwargs[\"ignore_keys_at_rope_validation\"] = [', 'kwargs[\"ignore_keys_at_rope_validation\"] = {'); \
+t = t.replace('\"mrope_interleaved\",\n ]', '\"mrope_interleaved\",\n }'); \
+p.write_text(t); \
+print('Patched qwen3_5.py: list -> set')"
