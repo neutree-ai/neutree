@@ -392,12 +392,10 @@ var _ = Describe("Model", Ordered, func() {
 			r := pushModel(name, version, 64)
 			ExpectSuccess(r)
 
-			// Get without version — ParseModelTag defaults to "latest"
+			// Get without version — should return the model (defaults to latest)
 			r = Model.Get(name)
-			if r.ExitCode == 0 {
-				Expect(ParseKV(r.Stdout)["Name"]).To(Equal(name))
-			}
-			// If server requires explicit version, failing is acceptable
+			ExpectSuccess(r)
+			Expect(ParseKV(r.Stdout)["Name"]).To(Equal(name))
 		})
 	})
 

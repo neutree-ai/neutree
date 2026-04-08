@@ -533,7 +533,7 @@ var _ = Describe("Engine", Ordered, func() {
 			Expect(e.Spec.Versions[0].DeployTempl["kubernetes"]).To(HaveKey("default"))
 		})
 
-		It("should create engine from standalone manifest YAML", Label("manifest"), func() {
+		It("should create engine from standalone manifest YAML", Label("manifest", "C2642204"), func() {
 			name := "e2e-engine-manifest-create"
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
@@ -560,7 +560,7 @@ var _ = Describe("Engine", Ordered, func() {
 			Expect(e.Spec.Versions[0].SupportedTasks).To(ContainElement("text-generation"))
 		})
 
-		It("should add version to existing engine via manifest import", Label("manifest"), func() {
+		It("should add version to existing engine via manifest import", Label("manifest", "C2642205"), func() {
 			name := "e2e-engine-manifest-addver"
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
@@ -633,7 +633,7 @@ var _ = Describe("Engine", Ordered, func() {
 			Expect(e.Spec.Versions[0].Images).To(HaveKey("amd_gpu"))
 		})
 
-		It("should validate standalone manifest YAML via validate command", Label("manifest"), func() {
+		It("should validate standalone manifest YAML via validate command", Label("manifest", "C2642206"), func() {
 			manifest := buildEngineManifestFile(engineManifest{
 				Name:    "e2e-engine-validate-manifest",
 				Version: "v1.0.0",
@@ -645,6 +645,99 @@ var _ = Describe("Engine", Ordered, func() {
 
 			r := RunCLI("import", "validate", "-p", manifest)
 			ExpectSuccess(r)
+		})
+
+		It("should reject invalid manifest YAML via validate command", Label("manifest"), func() {
+			// Missing required fields.
+			tmpFile, err := os.CreateTemp("", "e2e-bad-manifest-*.yaml")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = tmpFile.WriteString("manifest_version: '1'\nmetadata:\n  version: '1'\n")
+			Expect(err).NotTo(HaveOccurred())
+			tmpFile.Close()
+			defer os.Remove(tmpFile.Name())
+
+			r := RunCLI("import", "validate", "-p", tmpFile.Name())
+			ExpectFailed(r)
+		})
+
+		It("should fail when --mirror-registry has path and --registry-project is also set", Label("C2642201"), func() {
+			manifest := buildEngineManifestFile(engineManifest{
+				Name:    "e2e-engine-conflict",
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"},
+				},
+			})
+			defer os.Remove(manifest)
+
+			r := RunCLI("import", "engine", "-p", manifest,
+				"--mirror-registry", "registry:5000/old-project",
+				"--registry-project", "new-project",
+				"--force",
+			)
+			ExpectFailed(r)
+		})
+
+		It("should accept --mirror-registry and --registry-project flags", Label("C2642200"), func() {
+			if profile.ImageRegistry.URL == "" {
+				Skip("image_registry.url not configured in profile")
+			}
+
+			name := "e2e-engine-import-push"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			manifest := buildEngineManifestFile(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"},
+				},
+			})
+			defer os.Remove(manifest)
+
+			r := EngineH.ImportManifest(manifest,
+				"--mirror-registry", profile.ImageRegistry.URL,
+				"--registry-project", profile.ImageRegistry.Repository,
+				"--skip-image-push",
+			)
+			ExpectSuccess(r)
+
+			// Verify engine was created successfully.
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(1))
+			Expect(e.Spec.Versions[0].Version).To(Equal("v1.0.0"))
+		})
+
+		It("should accept https:// prefix in --mirror-registry", Label("C2642202"), func() {
+			if profile.ImageRegistry.URL == "" {
+				Skip("image_registry.url not configured in profile")
+			}
+
+			name := "e2e-engine-import-https"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			manifest := buildEngineManifestFile(engineManifest{
+				Name:    name,
+				Version: "v1.0.0",
+				Images: map[string][2]string{
+					"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"},
+				},
+			})
+			defer os.Remove(manifest)
+
+			r := EngineH.ImportManifest(manifest,
+				"--mirror-registry", "https://"+profile.ImageRegistry.URL,
+				"--registry-project", profile.ImageRegistry.Repository,
+				"--skip-image-push",
+			)
+			ExpectSuccess(r)
+
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.Versions).To(HaveLen(1))
 		})
 
 		It("should download and import images via manifest with package_url", Label("manifest", "docker"), func() {
@@ -749,7 +842,7 @@ var _ = Describe("Engine", Ordered, func() {
 
 	Describe("RemoveVersion", Label("engine", "remove-version"), func() {
 
-		It("should remove a version from a multi-version engine", func() {
+		It("should remove a version from a multi-version engine", Label("C2642207"), func() {
 			name := "e2e-engine-rmver"
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
@@ -814,7 +907,7 @@ var _ = Describe("Engine", Ordered, func() {
 			ExpectFailed(r)
 		})
 
-		It("should delete engine when force-removing the last version", func() {
+		It("should delete engine when force-removing the last version", Label("C2642208"), func() {
 			name := "e2e-engine-rmver-force"
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
@@ -895,6 +988,42 @@ var _ = Describe("Engine", Ordered, func() {
 			Expect(e.Spec.Versions).To(HaveLen(1))
 			Expect(e.Spec.SupportedTasks).To(ContainElement("text-generation"))
 			Expect(e.Spec.SupportedTasks).NotTo(ContainElement("text-embedding"))
+		})
+
+		It("should reject removing a version in use by an endpoint", Label("C2642209"), func() {
+			// Use the real engine (e.g., vllm) and version from profile.
+			engineName := profileEngineName()
+			engineVersion := profileEngineVersion()
+
+			if engineName == "" || engineVersion == "" {
+				Skip("engine name/version not configured in profile")
+			}
+
+			// Verify the engine exists with this version.
+			r := EngineH.Get(engineName)
+			ExpectSuccess(r)
+
+			// Create a temporary endpoint that references this engine version.
+			epName := "e2e-ep-rmver-inuse-" + Cfg.RunID
+			clusterName := setupSSHCluster("e2e-rmver-")
+			DeferCleanup(func() {
+				deleteEndpoint(epName)
+				teardownCluster(clusterName)
+			})
+
+			SetupModelRegistry()
+			defer TeardownModelRegistry()
+
+			yamlPath := applyEndpointOnCluster(epName, clusterName, engineVersion)
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(epName)
+
+			// Try to remove the version — should be rejected.
+			r = EngineH.RemoveVersion(engineName, engineVersion)
+			ExpectFailed(r)
+			Expect(r.Stderr + r.Stdout).To(ContainSubstring("in use"),
+				"should report version is in use by endpoint")
 		})
 	})
 })
