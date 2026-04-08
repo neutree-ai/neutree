@@ -318,6 +318,8 @@ if [ -z "$MANIFEST_ONLY" ]; then
     # Export Docker images
     print_info "Exporting Docker images..."
 
+    # Collect all full image references and ensure they exist locally
+    ALL_IMAGES=()
     for spec in "${IMAGE_SPECS[@]}"; do
         IFS=':' read -ra PARTS <<< "$spec"
         ACCELERATOR="${PARTS[0]}"
@@ -325,11 +327,6 @@ if [ -z "$MANIFEST_ONLY" ]; then
         IMAGE_TAG="${PARTS[2]}"
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
-        IMAGE_FILE="images/${IMAGE_NAME//\//-}-${IMAGE_TAG}.tar"
-        IMAGE_FILE_BASENAME=$(basename "$IMAGE_FILE")
-        OUTPUT_TAR="$IMAGES_DIR/$IMAGE_FILE_BASENAME"
-
-        print_info "Exporting $FULL_IMAGE for $ACCELERATOR..."
 
         # Check if image exists, if not, pull it
         if ! docker image inspect "$FULL_IMAGE" > /dev/null 2>&1; then
@@ -341,24 +338,41 @@ if [ -z "$MANIFEST_ONLY" ]; then
             print_info "Successfully pulled $FULL_IMAGE"
         fi
 
-        docker save "$FULL_IMAGE" -o "$OUTPUT_TAR"
+        ALL_IMAGES+=("$FULL_IMAGE")
+    done
 
-        if [ $? -eq 0 ]; then
-            IMAGE_SIZE=$(stat -f%z "$OUTPUT_TAR" 2>/dev/null || stat -c%s "$OUTPUT_TAR" 2>/dev/null)
-            print_info "Exported $FULL_IMAGE ($(numfmt --to=iec-i --suffix=B $IMAGE_SIZE 2>/dev/null || echo $IMAGE_SIZE bytes))"
+    # Save all images into a single tar
+    COMBINED_TAR="$IMAGES_DIR/${ENGINE_NAME}-${ENGINE_VERSION}-images.tar"
+    COMBINED_TAR_BASENAME=$(basename "$COMBINED_TAR")
+    print_info "Saving ${#ALL_IMAGES[@]} image(s) into $COMBINED_TAR_BASENAME..."
 
-            # Add to manifest entries
-            IMAGE_ENTRIES="${IMAGE_ENTRIES}
+    docker save "${ALL_IMAGES[@]}" -o "$COMBINED_TAR"
+
+    if [ $? -ne 0 ]; then
+        print_error "Failed to export images"
+        exit 1
+    fi
+
+    IMAGE_SIZE=$(stat -f%z "$COMBINED_TAR" 2>/dev/null || stat -c%s "$COMBINED_TAR" 2>/dev/null)
+    print_info "Exported ${#ALL_IMAGES[@]} image(s) ($(numfmt --to=iec-i --suffix=B $IMAGE_SIZE 2>/dev/null || echo $IMAGE_SIZE bytes))"
+
+    # Build manifest entries with per-image size from docker inspect
+    for spec in "${IMAGE_SPECS[@]}"; do
+        IFS=':' read -ra PARTS <<< "$spec"
+        ACCELERATOR="${PARTS[0]}"
+        IMAGE_NAME="${PARTS[1]}"
+        IMAGE_TAG="${PARTS[2]}"
+
+        FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
+        INSPECT_SIZE=$(docker image inspect "$FULL_IMAGE" --format '{{.Size}}')
+
+        IMAGE_ENTRIES="${IMAGE_ENTRIES}
     - accelerator: \"$ACCELERATOR\"
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
-      image_file: \"images/$IMAGE_FILE_BASENAME\"
+      image_file: \"images/$COMBINED_TAR_BASENAME\"
       platform: \"linux/amd64\"
-      size: $IMAGE_SIZE"
-        else
-            print_error "Failed to export $FULL_IMAGE"
-            exit 1
-        fi
+      size: $INSPECT_SIZE"
     done
 else
     # Manifest-only mode: build image entries without Docker export
@@ -427,39 +441,20 @@ else
             print_info "Scanning template directory: $TEMPLATE_BASE_DIR"
             DEPLOY_TEMPLATE_CONTENT=$(scan_and_generate_deploy_templates "$TEMPLATE_BASE_DIR")
             if [ $? -ne 0 ] || [ -z "$DEPLOY_TEMPLATE_CONTENT" ]; then
-                print_warn "No valid templates found in $TEMPLATE_BASE_DIR"
-                print_warn "Using default deploy template configuration"
+                print_warn "No valid templates found in $TEMPLATE_BASE_DIR, skipping deploy_template"
                 DEPLOY_TEMPLATE_CONTENT=""
             fi
         else
-            print_warn "Template directory not found: $TEMPLATE_BASE_DIR"
-            print_warn "Using default deploy template configuration"
+            print_warn "Template directory not found: $TEMPLATE_BASE_DIR, skipping deploy_template"
         fi
     fi
 
-    # Generate deploy_template section
+    # Generate deploy_template section (only when templates are provided)
     if [ -n "$DEPLOY_TEMPLATE_CONTENT" ]; then
         DEPLOY_TEMPLATE_SECTION="    deploy_template:
 ${DEPLOY_TEMPLATE_CONTENT}"
     else
-        DEPLOY_TEMPLATE_SECTION="    deploy_template:
-      kubernetes:
-        default:
-          replicas: 1
-          resources:
-            requests:
-              cpu: \"2\"
-              memory: \"8Gi\"
-            limits:
-              cpu: \"4\"
-              memory: \"16Gi\"
-
-      ssh:
-        default:
-          workers: 1
-          resources:
-            cpu: 4
-            memory: \"16Gi\""
+        DEPLOY_TEMPLATE_SECTION=""
     fi
 
     # Generate supported_tasks section
