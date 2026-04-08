@@ -598,21 +598,19 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
-	// Inject engine identity for metrics labeling (used by NeutreeRayStatLogger / _SanitizedRayStatLogger)
-	if endpoint.Spec.Engine != nil {
-		applicationEnv["ENGINE_NAME"] = endpoint.Spec.Engine.Engine
-		applicationEnv["ENGINE_VERSION"] = endpoint.Spec.Engine.Version
-	}
-
 	app.RuntimeEnv = map[string]interface{}{
 		"env_vars": applicationEnv,
 	}
 
-	// Generate runtime_env.container for engine version isolation (SSH clusters > v1.0.0).
-	// The engine image runs as a sibling container on the host via docker.sock.
-	// Clusters <= v1.0.0 run the engine inside ray_container directly.
+	// Features gated on new cluster version (> v1.0.0):
+	//   - ENGINE_NAME / ENGINE_VERSION env vars for metrics labeling
+	//   - runtime_env.container for engine version isolation
 	//
-	// Two container configs are produced:
+	// Old clusters (<= v1.0.0) run the engine inside ray_container directly and
+	// never had these env vars; injecting them unconditionally would cause a
+	// spurious serve-application diff during CP upgrades.
+	//
+	// Two container configs are produced for new clusters:
 	//   - baseConfig → app.RuntimeEnv["container"]: engine image + --rm only,
 	//     inherited by app_builder and Controller (no GPU required).
 	//   - backendConfig → app.Args["backend_container"]: full config with GPU
@@ -625,6 +623,12 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	}
 
 	if isNewCluster {
+		// Inject engine identity for metrics labeling (used by NeutreeRayStatLogger / _SanitizedRayStatLogger).
+		if endpoint.Spec.Engine != nil {
+			applicationEnv["ENGINE_NAME"] = endpoint.Spec.Engine.Engine
+			applicationEnv["ENGINE_VERSION"] = endpoint.Spec.Engine.Version
+		}
+
 		baseConfig, backendConfig, err := buildEngineContainerConfigs(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
 		if err != nil {
 			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build engine container config for endpoint %s", endpoint.Metadata.WorkspaceName())
