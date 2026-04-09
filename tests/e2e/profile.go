@@ -19,7 +19,8 @@ type Profile struct {
 	} `yaml:"auth"`
 
 	Testrail struct {
-		RunID    interface{} `yaml:"run_id"` // can be string or int
+		RunID    interface{} `yaml:"run_id"`  // can be string or int
+		PlanID   interface{} `yaml:"plan_id"` // can be string or int
 		URL      string      `yaml:"url"`
 		User     string      `yaml:"user"`
 		Password string      `yaml:"password"`
@@ -208,6 +209,20 @@ func profileTestrailRunID() string {
 
 	if profile.Testrail.RunID != nil {
 		return fmt.Sprintf("%v", profile.Testrail.RunID)
+	}
+
+	return ""
+}
+
+// profileTestrailPlanID returns the TestRail plan ID.
+// TESTRAIL_PLAN_ID env var takes precedence, then profile value.
+func profileTestrailPlanID() string {
+	if v := os.Getenv("TESTRAIL_PLAN_ID"); v != "" {
+		return v
+	}
+
+	if profile.Testrail.PlanID != nil {
+		return fmt.Sprintf("%v", profile.Testrail.PlanID)
 	}
 
 	return ""

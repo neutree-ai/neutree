@@ -32,8 +32,10 @@ var _ = AfterSuite(func() {
 })
 
 var _ = ReportAfterSuite("TestRail Reporter", func(report Report) {
+	trPlanID := profileTestrailPlanID()
 	trRunID := profileTestrailRunID()
-	if trRunID == "" {
+
+	if trPlanID == "" && trRunID == "" {
 		return
 	}
 
@@ -54,7 +56,16 @@ var _ = ReportAfterSuite("TestRail Reporter", func(report Report) {
 		}
 	}
 
-	if len(results) > 0 {
+	if len(results) == 0 {
+		return
+	}
+
+	// Plan ID takes priority over Run ID when both are configured.
+	if trPlanID != "" {
+		if err := ReportToTestRailPlan(trPlanID, results); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to report to TestRail plan: %v\n", err)
+		}
+	} else {
 		if err := ReportToTestRail(trRunID, results); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to report to TestRail: %v\n", err)
 		}
