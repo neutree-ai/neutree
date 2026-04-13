@@ -1,7 +1,7 @@
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 VERSION ?= $(shell git describe --tags --always --dirty)
 UI_VERSION ?= main
-CLUSTER_VERSION ?= v1.0.0
+CLUSTER_VERSION ?= v1.1.0
 LATEST ?= false
 
 IMAGE_REPO ?= docker.io
