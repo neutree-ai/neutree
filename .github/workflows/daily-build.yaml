@@ -21,9 +21,9 @@ jobs:
         id: create_nightly_tag
         run: |
           DATE=$(date +'%Y%m%d')
-          git tag v1.0.1-nightly-$DATE -m v1.0.1-nightly-$DATE
-          git push origin v1.0.1-nightly-$DATE
-          echo "tag=v1.0.1-nightly-$DATE" >> $GITHUB_OUTPUT
+          git tag v1.1.0-nightly-$DATE -m v1.1.0-nightly-$DATE
+          git push origin v1.1.0-nightly-$DATE
+          echo "tag=v1.1.0-nightly-$DATE" >> $GITHUB_OUTPUT
       - name: Trigger Workflow
         uses: actions/github-script@v6
         env:
