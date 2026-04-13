@@ -440,8 +440,11 @@ else
         TEMPLATE_BASE_DIR="$TEMPLATE_DIR"
         if [ -d "$TEMPLATE_BASE_DIR" ]; then
             print_info "Scanning template directory: $TEMPLATE_BASE_DIR"
-            DEPLOY_TEMPLATE_CONTENT=$(scan_and_generate_deploy_templates "$TEMPLATE_BASE_DIR")
-            if [ $? -ne 0 ] || [ -z "$DEPLOY_TEMPLATE_CONTENT" ]; then
+            if DEPLOY_TEMPLATE_CONTENT=$(scan_and_generate_deploy_templates "$TEMPLATE_BASE_DIR"); then
+                if [ -z "$DEPLOY_TEMPLATE_CONTENT" ]; then
+                    print_warn "No valid templates found in $TEMPLATE_BASE_DIR, skipping deploy_template"
+                fi
+            else
                 print_warn "No valid templates found in $TEMPLATE_BASE_DIR, skipping deploy_template"
                 DEPLOY_TEMPLATE_CONTENT=""
             fi
