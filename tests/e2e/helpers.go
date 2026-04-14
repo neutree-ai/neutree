@@ -2,15 +2,21 @@ package e2e
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/Masterminds/semver/v3"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // --- Shared state (set by setup, used by tests) ---
@@ -318,6 +324,354 @@ func StopLocalRegistry(containerID string) {
 // testRegistry returns the model registry name for tests.
 func testRegistry() string {
 	return "e2e-registry-" + Cfg.RunID
+}
+
+// testImageRegistry returns the image registry name for tests.
+func testImageRegistry() string {
+	return "e2e-image-registry-" + Cfg.RunID
+}
+
+// requireSSHEnv returns SSH cluster params from profile. ssh_private_key is returned as base64.
+func requireSSHEnv() (headIP, workerIPs, sshUser, sshPrivateKey string) {
+	headIP = profileSSHHeadIP()
+	if headIP == "" {
+		Skip("SSH head IP not configured in profile, skipping SSH cluster tests")
+	}
+
+	workerIPs = profileSSHWorkerIPs()
+
+	sshUser = profileSSHUser()
+	if sshUser == "" {
+		sshUser = "root"
+	}
+
+	sshPrivateKey = profileSSHPrivateKey()
+	if sshPrivateKey == "" {
+		Skip("SSH private key not configured in profile, skipping SSH cluster tests")
+	}
+
+	return headIP, workerIPs, sshUser, sshPrivateKey
+}
+
+// requireK8sEnv returns the base64-encoded kubeconfig from profile.
+func requireK8sEnv() string {
+	kubeconfig := profileKubeconfig()
+	if kubeconfig == "" {
+		Skip("Kubeconfig not configured in profile, skipping K8s cluster tests")
+	}
+
+	return kubeconfig
+}
+
+// requireImageRegistryEnv skips the test if image registry config is missing.
+func requireImageRegistryEnv() {
+	if profile.ImageRegistry.URL == "" {
+		Skip("ImageRegistry.URL not configured in profile")
+	}
+
+	if profile.ImageRegistry.Repository == "" {
+		Skip("ImageRegistry.Repository not configured in profile")
+	}
+}
+
+// --- Image registry setup/teardown ---
+
+var imageRegistryYAML string
+
+// SetupImageRegistry creates an image registry and waits for Connected phase.
+func SetupImageRegistry() {
+	if imageRegistryYAML != "" {
+		return // already set up
+	}
+
+	defaults := map[string]string{
+		"E2E_IMAGE_REGISTRY":          testImageRegistry(),
+		"E2E_WORKSPACE":               profileWorkspace(),
+		"E2E_IMAGE_REGISTRY_URL":      profile.ImageRegistry.URL,
+		"E2E_IMAGE_REGISTRY_REPO":     profile.ImageRegistry.Repository,
+		"E2E_IMAGE_REGISTRY_USERNAME": profile.ImageRegistry.Username,
+		"E2E_IMAGE_REGISTRY_PASSWORD": profile.ImageRegistry.Password,
+	}
+
+	var err error
+
+	imageRegistryYAML, err = renderTemplateToTempFile(
+		filepath.Join("testdata", "image-registry.yaml"), defaults,
+	)
+	Expect(err).NotTo(HaveOccurred(), "failed to render image registry template")
+
+	r := RunCLI("apply", "-f", imageRegistryYAML)
+	ExpectSuccess(r)
+
+	r = RunCLI("wait", "imageregistry", testImageRegistry(),
+		"-w", profileWorkspace(),
+		"--for", "jsonpath=.status.phase=Connected",
+		"--timeout", "2m",
+	)
+	ExpectSuccess(r)
+}
+
+// TeardownImageRegistry deletes the image registry and cleans up the temp YAML.
+func TeardownImageRegistry() {
+	if imageRegistryYAML != "" {
+		RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
+		os.Remove(imageRegistryYAML)
+		imageRegistryYAML = ""
+	}
+}
+
+// --- Cluster template rendering ---
+
+// renderSSHClusterYAML renders the SSH cluster template with overrides and returns the temp file path.
+func renderSSHClusterYAML(overrides map[string]string) string {
+	defaults := map[string]string{
+		"CLUSTER_NAME":            overrides["name"],
+		"CLUSTER_WORKSPACE":       profileWorkspace(),
+		"CLUSTER_IMAGE_REGISTRY":  valueOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":         valueOr(overrides, "version", profileClusterVersion()),
+		"CLUSTER_SSH_HEAD_IP":     overrides["head_ip"],
+		"CLUSTER_SSH_USER":        overrides["ssh_user"],
+		"CLUSTER_SSH_PRIVATE_KEY": overrides["ssh_private_key"],
+	}
+
+	if at := overrides["accelerator_type"]; at != "" {
+		defaults["CLUSTER_ACCELERATOR_TYPE_YAML"] = fmt.Sprintf("    accelerator_type: \"%s\"\n", at)
+	}
+
+	if mc := overrides["model_caches_yaml"]; mc != "" {
+		defaults["CLUSTER_MODEL_CACHES_YAML"] = mc
+	}
+
+	if workerIPs := overrides["worker_ips"]; workerIPs != "" {
+		var buf strings.Builder
+
+		buf.WriteString("        worker_ips:\n")
+
+		for _, ip := range strings.Split(workerIPs, ",") {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				fmt.Fprintf(&buf, "          - \"%s\"\n", ip)
+			}
+		}
+
+		defaults["CLUSTER_WORKER_IPS_YAML"] = buf.String()
+	}
+
+	path, err := renderTemplateToTempFile(filepath.Join("testdata", "ssh-cluster.yaml"), defaults)
+	Expect(err).NotTo(HaveOccurred(), "failed to render SSH cluster template")
+
+	return path
+}
+
+// renderK8sClusterYAML renders the K8s cluster template with overrides and returns the temp file path.
+func renderK8sClusterYAML(overrides map[string]string) string {
+	defaults := map[string]string{
+		"CLUSTER_NAME":            overrides["name"],
+		"CLUSTER_WORKSPACE":       profileWorkspace(),
+		"CLUSTER_IMAGE_REGISTRY":  valueOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":         valueOr(overrides, "version", profileClusterVersion()),
+		"CLUSTER_KUBECONFIG":      overrides["kubeconfig"],
+		"CLUSTER_ROUTER_REPLICAS": valueOr(overrides, "router_replicas", "1"),
+		"CLUSTER_ROUTER_CPU":      valueOr(overrides, "router_cpu", "1"),
+		"CLUSTER_ROUTER_MEMORY":   valueOr(overrides, "router_memory", "2Gi"),
+	}
+
+	if mc := overrides["model_caches_yaml"]; mc != "" {
+		defaults["CLUSTER_MODEL_CACHES_YAML"] = mc
+	}
+
+	path, err := renderTemplateToTempFile(filepath.Join("testdata", "k8s-cluster.yaml"), defaults)
+	Expect(err).NotTo(HaveOccurred(), "failed to render K8s cluster template")
+
+	return path
+}
+
+func valueOr(m map[string]string, key, fallback string) string {
+	if v, ok := m[key]; ok && v != "" {
+		return v
+	}
+
+	return fallback
+}
+
+// --- ClusterHelper ---
+
+// ClusterHelper encapsulates common parameters for cluster CLI operations.
+type ClusterHelper struct {
+	workspace string
+}
+
+// NewClusterHelper creates a ClusterHelper with the test workspace.
+func NewClusterHelper() *ClusterHelper {
+	return &ClusterHelper{
+		workspace: profileWorkspace(),
+	}
+}
+
+// Apply applies a YAML file with --force-update and removes the temp file afterwards.
+func (c *ClusterHelper) Apply(yamlFile string) CLIResult {
+	defer os.Remove(yamlFile)
+	return RunCLI("apply", "-f", yamlFile, "--force-update")
+}
+
+// Get retrieves cluster details as JSON.
+func (c *ClusterHelper) Get(name string) CLIResult {
+	return RunCLI("get", "cluster", name, "-w", c.workspace, "-o", "json")
+}
+
+// Delete deletes a cluster with --force.
+func (c *ClusterHelper) Delete(name string) CLIResult {
+	return RunCLI("delete", "cluster", name, "-w", c.workspace, "--force")
+}
+
+// DeleteGraceful deletes a cluster without --force (graceful shutdown).
+func (c *ClusterHelper) DeleteGraceful(name string) CLIResult {
+	return RunCLI("delete", "cluster", name, "-w", c.workspace)
+}
+
+// WaitForPhase waits for a cluster to reach the specified phase.
+func (c *ClusterHelper) WaitForPhase(name, phase, timeout string) CLIResult {
+	return RunCLI("wait", "cluster", name,
+		"-w", c.workspace,
+		"--for", fmt.Sprintf("jsonpath=.status.phase=%s", phase),
+		"--timeout", timeout,
+	)
+}
+
+// WaitForDelete waits for a cluster to be fully deleted.
+func (c *ClusterHelper) WaitForDelete(name, timeout string) CLIResult {
+	return RunCLI("wait", "cluster", name,
+		"-w", c.workspace,
+		"--for", "delete",
+		"--timeout", timeout,
+	)
+}
+
+// WaitForSpecChange polls until the observedSpecHash differs from oldHash or
+// the phase leaves Running, preventing the race where WaitForPhase("Running")
+// returns immediately before the controller processes a new apply.
+func (c *ClusterHelper) WaitForSpecChange(name, oldHash string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		r := c.Get(name)
+		if r.ExitCode == 0 {
+			cl := parseClusterJSON(r.Stdout)
+			if cl.Status.ObservedSpecHash != oldHash {
+				return
+			}
+
+			if cl.Status.Phase != v1.ClusterPhaseRunning {
+				return
+			}
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// EnsureDeleted deletes a cluster with --force, ignoring errors (for cleanup).
+func (c *ClusterHelper) EnsureDeleted(name string) {
+	c.Delete(name)
+}
+
+// --- Cluster JSON parsing ---
+
+func parseClusterJSON(stdout string) v1.Cluster {
+	var c v1.Cluster
+	ExpectWithOffset(1, json.Unmarshal([]byte(stdout), &c)).To(Succeed())
+
+	return c
+}
+
+// waitClusterErrorMessage polls until the cluster's error_message is non-empty or timeout.
+func waitClusterErrorMessage(ch *ClusterHelper, name string, timeout time.Duration) v1.Cluster {
+	deadline := time.Now().Add(timeout)
+
+	var c v1.Cluster
+
+	for time.Now().Before(deadline) {
+		r := ch.Get(name)
+		if r.ExitCode == 0 {
+			c = parseClusterJSON(r.Stdout)
+			if c.Status != nil && c.Status.ErrorMessage != "" {
+				return c
+			}
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+
+	return c
+}
+
+// engineVersionSupportsK8s returns true if the given engine version has K8s deployment templates.
+func engineVersionSupportsK8s(version string) bool {
+	minK8sVersion, _ := semver.NewVersion("0.11.0")
+
+	v, err := semver.NewVersion(version)
+	if err != nil {
+		return false
+	}
+
+	return !v.LessThan(minK8sVersion)
+}
+
+func getClusterFullJSON(name string) v1.Cluster {
+	r := RunCLI("get", "cluster", name, "-w", profileWorkspace(), "-o", "json")
+	ExpectSuccess(r)
+
+	return parseClusterJSON(r.Stdout)
+}
+
+// --- Endpoint helpers (new, used by cluster upgrade tests) ---
+
+// applyEndpointWithEnv creates an endpoint with custom env vars on the given cluster.
+func applyEndpointWithEnv(name, cluster, engineVersion string, env map[string]string) (yamlPath string) {
+	var envYAML string
+	if len(env) > 0 {
+		envYAML = "\n  env:"
+		for k, v := range env {
+			envYAML += fmt.Sprintf("\n    %s: \"%s\"", k, v)
+		}
+	}
+
+	// Inline engine args YAML generation (same logic as engineArgsYAML in endpoint_test.go).
+	raw := profileEngineArgs()
+	var argsLines []string
+	for _, pair := range strings.Split(raw, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if !ok || k == "" {
+			continue
+		}
+		argsLines = append(argsLines, fmt.Sprintf("      %s: %s", strings.TrimSpace(k), strings.TrimSpace(v)))
+	}
+	argsYAML := "\n" + strings.Join(argsLines, "\n")
+
+	defaults := map[string]string{
+		"E2E_ENDPOINT_NAME":       name,
+		"E2E_WORKSPACE":           profileWorkspace(),
+		"E2E_CLUSTER_NAME":        cluster,
+		"E2E_ENGINE_NAME":         profileEngineName(),
+		"E2E_ENGINE_VERSION":      engineVersion,
+		"E2E_MODEL_REGISTRY":      testRegistry(),
+		"E2E_MODEL_NAME":          profileModelName(),
+		"E2E_MODEL_VERSION":       profileModelVersion(),
+		"E2E_MODEL_TASK":          profileModelTask(),
+		"E2E_ACCELERATOR_TYPE":    profileAcceleratorType(),
+		"E2E_ACCELERATOR_PRODUCT": profileAcceleratorProduct(),
+		"E2E_ENGINE_ARGS_YAML":    argsYAML,
+		"E2E_ENV_YAML":            envYAML,
+	}
+
+	yamlPath, err := renderTemplateToTempFile(
+		filepath.Join("testdata", "endpoint.yaml"), defaults,
+	)
+	Expect(err).NotTo(HaveOccurred(), "failed to render endpoint template")
+
+	r := RunCLI("apply", "-f", yamlPath, "--force-update")
+	ExpectSuccess(r)
+
+	return yamlPath
 }
 
 // --- Template rendering ---

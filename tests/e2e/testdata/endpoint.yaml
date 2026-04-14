@@ -19,6 +19,6 @@ spec:
       type: ${E2E_ACCELERATOR_TYPE}
       product: ${E2E_ACCELERATOR_PRODUCT}
   variables:
-    engine_args:${E2E_ENGINE_ARGS_YAML}
+    engine_args:${E2E_ENGINE_ARGS_YAML}${E2E_ENV_YAML}
   replicas:
     num: 1

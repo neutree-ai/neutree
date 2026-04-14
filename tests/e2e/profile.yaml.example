@@ -34,13 +34,15 @@ model_registry:
 workspace: default
 
 cluster:
-  version: v1.0.0
-  upgrade_version: ""
+  version: v1.0.1
+  # old_version: for upgrade tests — the version to create before upgrading to cluster.version
+  old_version: ""
 
 engine:
   name: vllm
-  version: v0.8.5
-  version_b: v0.11.2
+  version: v0.11.2
+  # old_version: for multi-version isolation tests only
+  old_version: v0.8.5
 
 model:
   name: test-model
@@ -62,7 +64,7 @@ endpoint:
   cluster: ""
   accelerator_type: nvidia_gpu
   accelerator_product: ""
-  engine_args: "dtype=half"
+  engine_args: "dtype=half,gpu_memory_utilization=0.85"
   timeout: "10m"
 
 mock_upstream_host: host.docker.internal
