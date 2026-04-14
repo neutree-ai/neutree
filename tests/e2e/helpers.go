@@ -2,12 +2,16 @@ package e2e
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -469,4 +473,106 @@ func writeMultiDocYAML(paths ...string) string {
 	tmpFile.Close()
 
 	return tmpFile.Name()
+}
+
+// --- Auth helpers ---
+
+// createTestUser creates a user via the admin API and returns the user ID.
+// token must be an admin JWT (not an API key).
+func createTestUser(token, username, email, password string) string {
+	reqBody := map[string]string{
+		"username": username,
+		"email":    email,
+		"password": password,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequest(http.MethodPost,
+		strings.TrimRight(Cfg.ServerURL, "/")+"/api/v1/auth/admin/users",
+		bytes.NewReader(bodyBytes),
+	)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	ExpectWithOffset(1, resp.StatusCode).To(BeElementOf(http.StatusOK, http.StatusCreated),
+		"create user failed: %s", string(body))
+
+	var result map[string]any
+	ExpectWithOffset(1, json.Unmarshal(body, &result)).To(Succeed())
+
+	id, ok := result["id"].(string)
+	ExpectWithOffset(1, ok).To(BeTrue(), "missing id in create user response: %s", string(body))
+
+	return id
+}
+
+// deleteTestUser deletes a user via the admin API (best-effort, ignores errors).
+// token must be an admin JWT.
+func deleteTestUser(token, userID string) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequest(http.MethodDelete,
+		strings.TrimRight(Cfg.ServerURL, "/")+"/api/v1/auth/admin/users/"+userID,
+		nil,
+	)
+	if err != nil {
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+
+	resp.Body.Close()
+}
+
+// loginTestUser logs in via GoTrue password grant and returns the access token (JWT).
+func loginTestUser(email, password string) string {
+	reqBody := map[string]string{
+		"email":    email,
+		"password": password,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequest(http.MethodPost,
+		strings.TrimRight(Cfg.ServerURL, "/")+"/api/v1/auth/token?grant_type=password",
+		bytes.NewReader(bodyBytes),
+	)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	ExpectWithOffset(1, resp.StatusCode).To(Equal(http.StatusOK),
+		"login failed: %s", string(body))
+
+	var result map[string]any
+	ExpectWithOffset(1, json.Unmarshal(body, &result)).To(Succeed())
+
+	token, ok := result["access_token"].(string)
+	ExpectWithOffset(1, ok).To(BeTrue(), "missing access_token in login response: %s", string(body))
+
+	return token
 }
