@@ -6,3 +6,6 @@ metadata:
 spec:
   url: ${E2E_IMAGE_REGISTRY_URL}
   repository: ${E2E_IMAGE_REGISTRY_REPO}
+  authconfig:
+    username: ${E2E_IMAGE_REGISTRY_USERNAME}
+    password: ${E2E_IMAGE_REGISTRY_PASSWORD}
