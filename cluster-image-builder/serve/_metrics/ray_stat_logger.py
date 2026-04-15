@@ -5,11 +5,16 @@ from ray import serve
 from vllm.v1.metrics.ray_wrappers import (
     RayPrometheusStatLogger,
     RaySpecDecodingProm,
-    RayKVConnectorPrometheus,
     RayGaugeWrapper,
     RayCounterWrapper,
     RayHistogramWrapper,
 )
+
+# v0.19.0 renamed RayKVConnectorPrometheus → RayKVConnectorProm
+try:
+    from vllm.v1.metrics.ray_wrappers import RayKVConnectorProm as RayKVConnectorPrometheus
+except ImportError:
+    from vllm.v1.metrics.ray_wrappers import RayKVConnectorPrometheus
 
 logger = logging.getLogger("ray.serve")
 
