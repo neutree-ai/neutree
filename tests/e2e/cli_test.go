@@ -12,7 +12,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-var _ = Describe("CLI", Label("cli"), func() {
+var _ = Describe("CLI", Ordered, Label("cli"), func() {
 	BeforeAll(func() {
 		requireImageRegistryProfile()
 	})
