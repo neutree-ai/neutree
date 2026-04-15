@@ -519,9 +519,9 @@ func (c *ClusterHelper) Get(name string) CLIResult {
 	return RunCLI("get", "cluster", name, "-w", c.workspace, "-o", "json")
 }
 
-// Delete deletes a cluster with --force.
+// Delete deletes a cluster with --force --ignore-not-found.
 func (c *ClusterHelper) Delete(name string) CLIResult {
-	return RunCLI("delete", "cluster", name, "-w", c.workspace, "--force")
+	return RunCLI("delete", "cluster", name, "-w", c.workspace, "--force", "--ignore-not-found")
 }
 
 // DeleteGraceful deletes a cluster without --force (graceful shutdown).
@@ -569,9 +569,10 @@ func (c *ClusterHelper) WaitForSpecChange(name, oldHash string, timeout time.Dur
 	}
 }
 
-// EnsureDeleted deletes a cluster with --force, ignoring errors (for cleanup).
+// EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
 func (c *ClusterHelper) EnsureDeleted(name string) {
 	c.Delete(name)
+	c.WaitForDelete(name, "10m")
 }
 
 // --- Cluster JSON parsing ---
