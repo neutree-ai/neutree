@@ -50,7 +50,9 @@ COPY serve/_replica_scheduler ./serve/_replica_scheduler
 COPY serve/_utils ./serve/_utils
 COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
 COPY downloader ./downloader
-RUN uv pip install --system -r downloader/requirements.txt
+# NOTE: downloader/requirements.txt is NOT installed here.
+# The base engine image already ships a compatible huggingface-hub.
+# Installing it would risk downgrading transformers (e.g. gemma4 needs >=5.5.0).
 
 # Ensure "python" is in PATH (some base images only provide "python3")
 RUN ln -sf $(which python3) /usr/bin/python 2>/dev/null || true
