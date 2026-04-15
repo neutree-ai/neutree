@@ -214,6 +214,7 @@ class Backend:
 
             # v0.19.0: OpenAIServingChat requires OpenAIServingRender for
             # disaggregated chat request preprocessing.
+            # gemma4 (0.19.1.dev6): OpenAIServingRender adds reasoning_parser param
             openai_serving_render = OpenAIServingRender(
                 models.model_config,
                 models.renderer,
@@ -226,6 +227,7 @@ class Backend:
                 enable_auto_tools=self.enable_auto_tools,
                 exclude_tools_when_tool_choice_none=self.exclude_tools_when_tool_choice_none,
                 tool_parser=self.tool_parser,
+                reasoning_parser=self.reasoning_parser,
                 default_chat_template_kwargs=self.default_chat_template_kwargs,
                 log_error_stack=self.log_error_stack,
             )
