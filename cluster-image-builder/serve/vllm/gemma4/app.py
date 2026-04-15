@@ -291,45 +291,39 @@ class Backend:
 
         is_stream = payload.get("stream") is True
 
-        if isinstance(result, ErrorResponse):
+        if hasattr(result, 'error') and hasattr(result.error, 'message'):
             if is_stream:
                 logging.error(f"Error during chat completion: {result.error.message}")
-                async def error_generator():
-                    import json
-                    error_data = {
-                        "error": {
-                            "message": "Request processing failed",
-                            "type": "internal_server_error",
-                            "details": str(result.error.message)
-                        }
-                    }
-                    yield f"data: {json.dumps(error_data)}\n\n"
-                    yield "data: [DONE]\n\n"
-                return error_generator()
+            return {"error": {"message": result.error.message, "type": getattr(result.error, 'type', 'internal_server_error'), "code": getattr(result.error, 'code', 500)}}
 
-        return result
+        if is_stream:
+            return result
+
+        return result.model_dump() if hasattr(result, 'model_dump') else result
 
     async def generate_embeddings(self, payload: Any):
         await self._ensure_embedding()
         try:
-            # Validate and convert the payload to an EmbeddingCompletionRequest
             request = EmbeddingCompletionRequest(**payload)
         except (TypeError, ValueError) as e:
             logging.error(f"Invalid payload for EmbeddingCompletionRequest: {e}")
             return {"body": {"error": {"message": str(e), "type": "invalid_request_error", "code": 400}}, "status_code": 400}
-        # v0.19.0: ServingEmbedding.__call__ returns a starlette Response, not a Pydantic model.
+        # ServingEmbedding.__call__ returns a starlette Response
         response = await self.openai_serving_embedding(request, None)
-        body = json.loads(response.body)
+        try:
+            body = json.loads(response.body)
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+            logging.error(f"Failed to decode embedding response body: {e}")
+            return {"body": {"error": {"message": "Internal server error", "type": "server_error", "code": 500}}, "status_code": 500}
         return {"body": body, "status_code": response.status_code}
 
     async def rerank(self, payload: Any):
-        """
-        Rerank documents based on their relevance to a query.
-        Uses vLLM's native do_rerank method for maximum compatibility and performance.
-        """
         await self._ensure_score()
         request = RerankRequest(**payload)
-        return await self.openai_serving_score.do_rerank(request, None)
+        result = await self.openai_serving_score.do_rerank(request, None)
+        if hasattr(result, 'error') and hasattr(result.error, 'message'):
+            return {"error": {"message": result.error.message, "type": getattr(result.error, 'type', 'internal_server_error'), "code": getattr(result.error, 'code', 500)}}
+        return result.model_dump() if hasattr(result, 'model_dump') else result
 
     async def show_available_models(self):
         models = await self._ensure_models()
@@ -366,54 +360,63 @@ class Controller:
         stream = req_obj.get("stream", False)
 
         if stream:
-            # Get the streaming generator from the backend
             r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
 
+            # Peek at first chunk to detect errors without losing it.
             try:
                 first_chunk = await r.__anext__()
-                if isinstance(first_chunk, str) and "error" in first_chunk:
-                    import json
-                    error_data = json.loads(first_chunk.replace("data: ", "").strip())
-                    return JSONResponse(
-                        content=error_data["error"],
-                        status_code=400
-                    )
-            except:
-                pass
+            except StopAsyncIteration:
+                return JSONResponse(
+                    content={"error": {"message": "Empty response from backend", "type": "server_error"}},
+                    status_code=500)
+            except Exception as e:
+                logging.error(f"Streaming backend error: {e}")
+                return JSONResponse(
+                    content={"error": {"message": str(e), "type": "server_error"}},
+                    status_code=500)
+
+            # Backend returns dict with "error" key on failure
+            if isinstance(first_chunk, dict) and "error" in first_chunk:
+                code = first_chunk["error"].get("code", 400)
+                return JSONResponse(content=first_chunk, status_code=code)
+
+            # Chain first_chunk back so no data is lost
+            async def _chain_stream(first, rest):
+                yield first
+                async for chunk in rest:
+                    yield chunk
 
             return StreamingResponse(
-                content=r,
+                content=_chain_stream(first_chunk, r),
                 media_type="text/event-stream"
             )
         else:
-            # Handle non-streaming response as before
             result = await self.backend.options(stream=False).generate.remote(req_obj)
-            if isinstance(result, ErrorResponse):
-                return JSONResponse(content=result.model_dump(), status_code=result.error.code)
-            return JSONResponse(content=result.model_dump())
+            # Backend returns dict: either {"error": ...} or model_dump() result
+            if isinstance(result, dict) and "error" in result:
+                code = result["error"].get("code", 500)
+                return JSONResponse(content=result, status_code=code)
+            return JSONResponse(content=result)
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
-        """Embeddings endpoint for text-embedding models"""
         req_obj = await request.json()
-        # v0.19.0: Backend returns {"body": ..., "status_code": ...} dict
-        # because ServingEmbedding.__call__ returns a starlette Response.
         result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
         return JSONResponse(content=result["body"], status_code=result["status_code"])
 
     @app.post("/v1/rerank")
     async def rerank(self, request: Request):
-        """Rerank endpoint for cross-encoder/reranker models"""
         req_obj = await request.json()
         result = await self.backend.options(stream=False).rerank.remote(req_obj)
-        if isinstance(result, ErrorResponse):
-            return JSONResponse(content=result.model_dump(), status_code=result.error.code)
-        return JSONResponse(content=result.model_dump())
+        if isinstance(result, dict) and "error" in result:
+            code = result["error"].get("code", 500)
+            return JSONResponse(content=result, status_code=code)
+        return JSONResponse(content=result)
 
     @app.get("/v1/models")
     async def models(self, request: Request):
         result = await self.backend.show_available_models.remote()
-        return JSONResponse(content=result.model_dump())
+        return JSONResponse(content=result.model_dump() if hasattr(result, 'model_dump') else result)
 
     @app.get("/health")
     async def health(self):
