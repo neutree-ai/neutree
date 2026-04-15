@@ -90,25 +90,28 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 				}
 			}
 
-			By("Checking deployment labels")
-			deploys, err := k8sH.ListDeployments(ctx, namespace, "")
+			By("Checking deployment labels (neutree-managed only)")
+			deploys, err := k8sH.ListDeployments(ctx, namespace, "app.kubernetes.io/managed-by=neutree.ai")
 			Expect(err).NotTo(HaveOccurred())
+			Expect(deploys).NotTo(BeEmpty(), "should have at least one neutree-managed deployment")
 			for _, d := range deploys {
 				Expect(d.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "neutree.ai"),
 					"deployment %s should have managed-by label", d.Name)
 			}
 
-			By("Checking service labels")
-			svcs, err := k8sH.ListServices(ctx, namespace, "")
+			By("Checking service labels (neutree-managed only)")
+			svcs, err := k8sH.ListServices(ctx, namespace, "app.kubernetes.io/managed-by=neutree.ai")
 			Expect(err).NotTo(HaveOccurred())
+			Expect(svcs).NotTo(BeEmpty(), "should have at least one neutree-managed service")
 			for _, s := range svcs {
 				Expect(s.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "neutree.ai"),
 					"service %s should have managed-by label", s.Name)
 			}
 
-			By("Checking configmap labels")
-			cms, err := k8sH.ListConfigMaps(ctx, namespace, "")
+			By("Checking configmap labels (neutree-managed only)")
+			cms, err := k8sH.ListConfigMaps(ctx, namespace, "app.kubernetes.io/managed-by=neutree.ai")
 			Expect(err).NotTo(HaveOccurred())
+			Expect(cms).NotTo(BeEmpty(), "should have at least one neutree-managed configmap")
 			for _, cm := range cms {
 				Expect(cm.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "neutree.ai"),
 					"configmap %s should have managed-by label", cm.Name)
