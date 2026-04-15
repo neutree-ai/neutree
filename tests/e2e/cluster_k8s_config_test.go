@@ -71,29 +71,55 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			Expect(ns.Name).To(HavePrefix("neutree-cluster-"))
 		})
 
-		It("should have neutree labels on namespace", Label("C2612764"), func() {
+		It("should have neutree labels on all CR objects", Label("C2612764"), func() {
 			ctx := context.Background()
+
+			By("Checking namespace labels")
 			ns, err := k8sH.GetNamespace(ctx, namespace)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ns.Labels).To(HaveKeyWithValue("neutree.ai/neutree-cluster", clusterName))
 			Expect(ns.Labels).To(HaveKeyWithValue("neutree.ai/neutree-workspace", profileWorkspace()))
+
+			By("Checking imagePullSecret labels")
+			secrets, err := k8sH.ListSecrets(ctx, namespace, "")
+			Expect(err).NotTo(HaveOccurred())
+			for _, s := range secrets {
+				if s.Type == corev1.SecretTypeDockerConfigJson {
+					Expect(s.Labels).To(HaveKeyWithValue("neutree.ai/neutree-cluster", clusterName))
+					Expect(s.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "neutree.ai"))
+				}
+			}
+
+			By("Checking deployment labels")
+			deploys, err := k8sH.ListDeployments(ctx, namespace, "")
+			Expect(err).NotTo(HaveOccurred())
+			for _, d := range deploys {
+				Expect(d.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "neutree.ai"),
+					"deployment %s should have managed-by label", d.Name)
+			}
+
+			By("Checking service labels")
+			svcs, err := k8sH.ListServices(ctx, namespace, "")
+			Expect(err).NotTo(HaveOccurred())
+			for _, s := range svcs {
+				Expect(s.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "neutree.ai"),
+					"service %s should have managed-by label", s.Name)
+			}
+
+			By("Checking configmap labels")
+			cms, err := k8sH.ListConfigMaps(ctx, namespace, "")
+			Expect(err).NotTo(HaveOccurred())
+			for _, cm := range cms {
+				Expect(cm.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "neutree.ai"),
+					"configmap %s should have managed-by label", cm.Name)
+			}
 		})
 
 		It("should create imagePullSecret", Label("C2612762"), func() {
 			ctx := context.Background()
-			secrets, err := k8sH.ListSecrets(ctx, namespace, "")
-			Expect(err).NotTo(HaveOccurred())
-
-			hasImagePullSecret := false
-			for _, s := range secrets {
-				if s.Type == corev1.SecretTypeDockerConfigJson {
-					hasImagePullSecret = true
-
-					break
-				}
-			}
-
-			Expect(hasImagePullSecret).To(BeTrue())
+			s, err := k8sH.GetSecret(ctx, namespace, "image-pull-secret")
+			Expect(err).NotTo(HaveOccurred(), "image-pull-secret should exist")
+			Expect(s.Type).To(Equal(corev1.SecretTypeDockerConfigJson))
 		})
 
 		It("should create vmagent deployment", Label("C2612763"), func() {
@@ -105,41 +131,27 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 
 		It("should create vmagent-config ConfigMap", Label("C2623075"), func() {
 			ctx := context.Background()
-
-			cms, err := k8sH.ListConfigMaps(ctx, namespace, "")
-			Expect(err).NotTo(HaveOccurred())
-
-			found := false
-			for _, cm := range cms {
-				if cm.Name == "vmagent-config" {
-					found = true
-
-					break
-				}
-			}
-
-			Expect(found).To(BeTrue(), "vmagent-config ConfigMap should exist")
+			_, err := k8sH.GetConfigMap(ctx, namespace, "vmagent-config")
+			Expect(err).NotTo(HaveOccurred(), "vmagent-config ConfigMap should exist")
 		})
 
-		It("should create router deployment and router-service", Label("C2612779"), func() {
+		It("should create router resources (SA, Role, RoleBinding, Deployment, Service)", Label("C2612779"), func() {
 			ctx := context.Background()
 
-			_, err := k8sH.GetDeployment(ctx, namespace, "router")
-			Expect(err).NotTo(HaveOccurred(), "router deployment should exist")
+			_, err := k8sH.GetServiceAccount(ctx, namespace, "router-service-account")
+			Expect(err).NotTo(HaveOccurred(), "router ServiceAccount should exist")
 
-			svcs, err := k8sH.ListServices(ctx, namespace, "")
-			Expect(err).NotTo(HaveOccurred())
+			_, err = k8sH.GetRole(ctx, namespace, "router-pod-reader")
+			Expect(err).NotTo(HaveOccurred(), "router Role should exist")
 
-			found := false
-			for _, s := range svcs {
-				if s.Name == "router-service" {
-					found = true
+			_, err = k8sH.GetRoleBinding(ctx, namespace, "router-rolebinding")
+			Expect(err).NotTo(HaveOccurred(), "router RoleBinding should exist")
 
-					break
-				}
-			}
+			_, err = k8sH.GetDeployment(ctx, namespace, "router")
+			Expect(err).NotTo(HaveOccurred(), "router Deployment should exist")
 
-			Expect(found).To(BeTrue(), "router-service should exist")
+			_, err = k8sH.GetService(ctx, namespace, "router-service")
+			Expect(err).NotTo(HaveOccurred(), "router Service should exist")
 		})
 
 		It("should create deploy config CM for metrics component", Label("C2623075"), func() {
@@ -150,19 +162,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			c := parseClusterJSON(r.Stdout)
 			cmName := fmt.Sprintf("neutree-%s-metrics-config", c.Metadata.Name)
 
-			cms, err := k8sH.ListConfigMaps(ctx, namespace, "")
-			Expect(err).NotTo(HaveOccurred())
-
-			found := false
-			for _, cm := range cms {
-				if cm.Name == cmName {
-					found = true
-
-					break
-				}
-			}
-
-			Expect(found).To(BeTrue(), "deploy config CM %s should exist", cmName)
+			_, err := k8sH.GetConfigMap(ctx, namespace, cmName)
+			Expect(err).NotTo(HaveOccurred(), "deploy config CM %s should exist", cmName)
 		})
 
 		It("should create deploy config CM for router component", Label("C2623076"), func() {
@@ -173,19 +174,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			c := parseClusterJSON(r.Stdout)
 			cmName := fmt.Sprintf("neutree-%s-router-config", c.Metadata.Name)
 
-			cms, err := k8sH.ListConfigMaps(ctx, namespace, "")
-			Expect(err).NotTo(HaveOccurred())
-
-			found := false
-			for _, cm := range cms {
-				if cm.Name == cmName {
-					found = true
-
-					break
-				}
-			}
-
-			Expect(found).To(BeTrue(), "deploy config CM %s should exist", cmName)
+			_, err := k8sH.GetConfigMap(ctx, namespace, cmName)
+			Expect(err).NotTo(HaveOccurred(), "deploy config CM %s should exist", cmName)
 		})
 
 		It("should clean up namespace after deletion", Label("C2612851"), func() {
@@ -567,21 +557,33 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ClusterH.EnsureDeleted(clusterName)
 		})
 
-		It("should create PVC resource in K8s namespace", Label("C2612780"), func() {
-			k8sH := NewK8sHelper(kubeconfig)
-
+		It("should create PVC with correct spec (AccessModes, Size, VolumeMode) and cluster Running", Label("C2612780"), func() {
+			By("Verifying cluster is Running with PVC model cache")
 			r := ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			c := parseClusterJSON(r.Stdout)
+			Expect(c.Status.Phase).To(BeEquivalentTo("Running"))
+
+			By("Verifying PVC spec")
+			k8sH := NewK8sHelper(kubeconfig)
 			ns := ClusterNamespace(c.Metadata.Workspace, c.Metadata.Name, c.ID)
 
 			ctx := context.Background()
-			pvcs, err := k8sH.ListPVCs(ctx, ns, "")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pvcs).NotTo(BeEmpty(), "PVC should be created for model cache")
+			pvc, err := k8sH.GetPVC(ctx, ns, "models-cache-test-pvc-cache")
+			Expect(err).NotTo(HaveOccurred(), "PVC models-cache-test-pvc-cache should exist")
 
-			pvc := pvcs[0]
 			Expect(*pvc.Spec.StorageClassName).To(Equal(profile.ModelCache.PVCStorageClass))
+
+			Expect(pvc.Spec.AccessModes).To(ContainElement(corev1.ReadWriteMany),
+				"PVC default AccessModes should include ReadWriteMany")
+
+			storage := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+			Expect(storage.String()).To(Equal("10Gi"),
+				"PVC default size should be 10Gi")
+
+			filesystem := corev1.PersistentVolumeFilesystem
+			Expect(pvc.Spec.VolumeMode).To(Equal(&filesystem),
+				"PVC default volumeMode should be Filesystem")
 		})
 
 		It("should create modelcache-config ConfigMap", Label("C2623077"), func() {
@@ -606,13 +608,6 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			}
 
 			Expect(found).To(BeTrue(), "modelcache-config ConfigMap should exist")
-		})
-
-		It("should create cluster with PVC model cache", Label("C2612780"), func() {
-			r := ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			c := parseClusterJSON(r.Stdout)
-			Expect(c.Status.Phase).To(BeEquivalentTo("Running"))
 		})
 
 		It("should remove PVC model cache and reach Running", Label("C2612845"), func() {

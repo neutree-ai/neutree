@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -67,6 +68,41 @@ func (h *K8sHelper) ListDeployments(ctx context.Context, namespace, labelSelecto
 // GetDeployment retrieves a specific deployment.
 func (h *K8sHelper) GetDeployment(ctx context.Context, namespace, name string) (*appsv1.Deployment, error) {
 	return h.clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// GetService retrieves a specific service.
+func (h *K8sHelper) GetService(ctx context.Context, namespace, name string) (*corev1.Service, error) {
+	return h.clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// GetSecret retrieves a specific secret.
+func (h *K8sHelper) GetSecret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	return h.clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// GetConfigMap retrieves a specific configmap.
+func (h *K8sHelper) GetConfigMap(ctx context.Context, namespace, name string) (*corev1.ConfigMap, error) {
+	return h.clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// GetPVC retrieves a specific persistent volume claim.
+func (h *K8sHelper) GetPVC(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
+	return h.clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// GetServiceAccount retrieves a specific service account.
+func (h *K8sHelper) GetServiceAccount(ctx context.Context, namespace, name string) (*corev1.ServiceAccount, error) {
+	return h.clientset.CoreV1().ServiceAccounts(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// GetRole retrieves a specific role.
+func (h *K8sHelper) GetRole(ctx context.Context, namespace, name string) (*rbacv1.Role, error) {
+	return h.clientset.RbacV1().Roles(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// GetRoleBinding retrieves a specific role binding.
+func (h *K8sHelper) GetRoleBinding(ctx context.Context, namespace, name string) (*rbacv1.RoleBinding, error) {
+	return h.clientset.RbacV1().RoleBindings(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
 // ListServices lists services in a namespace with optional label selector.
