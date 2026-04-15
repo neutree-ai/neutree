@@ -326,6 +326,9 @@ func testRegistry() string {
 // This replaces the old approach of reading env vars for template expansion.
 func profileVarMap() map[string]string {
 	return map[string]string{
+		// Workspace
+		"E2E_WORKSPACE": profileWorkspace(),
+
 		// SSH
 		"E2E_SSH_HEAD_IP":     profileSSHHeadIP(),
 		"E2E_SSH_USER":        profileSSHUser(),
@@ -336,11 +339,14 @@ func profileVarMap() map[string]string {
 		"E2E_KUBECONFIG": profileKubeconfig(),
 
 		// Image registry
-		"E2E_IMAGE_REGISTRY_URL":  profile.ImageRegistry.URL,
-		"E2E_IMAGE_REGISTRY_REPO": profile.ImageRegistry.Repository,
+		"E2E_IMAGE_REGISTRY_URL":      profile.ImageRegistry.URL,
+		"E2E_IMAGE_REGISTRY_REPO":     profile.ImageRegistry.Repository,
+		"E2E_IMAGE_REGISTRY_USERNAME": profile.ImageRegistry.Username,
+		"E2E_IMAGE_REGISTRY_PASSWORD": profile.ImageRegistry.Password,
 
 		// Model registry
-		"E2E_MODEL_REGISTRY_URL": profile.ModelRegistry.URL,
+		"E2E_MODEL_REGISTRY_TYPE": profile.ModelRegistry.Type,
+		"E2E_MODEL_REGISTRY_URL":  profile.ModelRegistry.URL,
 
 		// Engine
 		"E2E_ENGINE_NAME":    profileEngineName(),
@@ -371,9 +377,9 @@ func renderTemplate(templatePath string, defaults map[string]string) (string, er
 	pvm := profileVarMap()
 
 	result := os.Expand(string(content), func(key string) string {
-		// 1. Caller-provided defaults take highest priority.
+		// 1. Caller-provided defaults take highest priority (including empty string).
 		if defaults != nil {
-			if v, ok := defaults[key]; ok && v != "" {
+			if v, ok := defaults[key]; ok {
 				return v
 			}
 		}
@@ -417,4 +423,50 @@ func renderTemplateToTempFile(templatePath string, defaults map[string]string) (
 	tmpFile.Close()
 
 	return tmpFile.Name(), nil
+}
+
+// requireImageRegistryProfile skips the test if image registry is not fully configured in profile.
+func requireImageRegistryProfile() {
+	if profile.ImageRegistry.URL == "" {
+		Skip("ImageRegistry.URL not configured in profile")
+	}
+
+	if profile.ImageRegistry.Repository == "" {
+		Skip("ImageRegistry.Repository not configured in profile")
+	}
+}
+
+// renderImageRegistryYAML renders an ImageRegistry YAML and returns the temp file path.
+func renderImageRegistryYAML(overrides map[string]string) string {
+	path, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+		"E2E_IMAGE_REGISTRY": overrides["name"],
+	})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	return path
+}
+
+// writeMultiDocYAML reads multiple rendered YAML temp files, concatenates them into
+// a single multi-document YAML file separated by "---", and returns the combined file path.
+// Callers are responsible for cleaning up the input files.
+func writeMultiDocYAML(paths ...string) string {
+	var parts []string
+
+	for _, p := range paths {
+		content, err := os.ReadFile(p)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to read %s", p)
+
+		parts = append(parts, string(content))
+	}
+
+	combined := strings.Join(parts, "---\n")
+
+	tmpFile, err := os.CreateTemp("", "e2e-multi-*.yaml")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	_, err = tmpFile.WriteString(combined)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	tmpFile.Close()
+
+	return tmpFile.Name()
 }

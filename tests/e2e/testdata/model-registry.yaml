@@ -4,5 +4,5 @@ metadata:
   name: ${E2E_MODEL_REGISTRY}
   workspace: ${E2E_WORKSPACE}
 spec:
-  type: bentoml
+  type: ${E2E_MODEL_REGISTRY_TYPE}
   url: ${E2E_MODEL_REGISTRY_URL}
