@@ -14,8 +14,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/Masterminds/semver/v3"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
@@ -605,18 +603,6 @@ func waitClusterErrorMessage(ch *ClusterHelper, name string, timeout time.Durati
 	return c
 }
 
-// engineVersionSupportsK8s returns true if the given engine version has K8s deployment templates.
-func engineVersionSupportsK8s(version string) bool {
-	minK8sVersion, _ := semver.NewVersion("0.11.0")
-
-	v, err := semver.NewVersion(version)
-	if err != nil {
-		return false
-	}
-
-	return !v.LessThan(minK8sVersion)
-}
-
 func getClusterFullJSON(name string) v1.Cluster {
 	r := RunCLI("get", "cluster", name, "-w", profileWorkspace(), "-o", "json")
 	ExpectSuccess(r)
@@ -638,14 +624,18 @@ func applyEndpointWithEnv(name, cluster, engineVersion string, env map[string]st
 
 	// Inline engine args YAML generation (same logic as engineArgsYAML in endpoint_test.go).
 	raw := profileEngineArgs()
+
 	var argsLines []string
+
 	for _, pair := range strings.Split(raw, ",") {
 		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
 		if !ok || k == "" {
 			continue
 		}
+
 		argsLines = append(argsLines, fmt.Sprintf("      %s: %s", strings.TrimSpace(k), strings.TrimSpace(v)))
 	}
+
 	argsYAML := "\n" + strings.Join(argsLines, "\n")
 
 	defaults := map[string]string{

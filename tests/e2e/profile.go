@@ -231,8 +231,6 @@ func profileClusterVersion() string {
 	return "v1.0.1"
 }
 
-func profileClusterOldVersion() string { return profile.Cluster.OldVersion }
-
 func profileEngineName() string {
 	if profile.Engine.Name != "" {
 		return profile.Engine.Name
