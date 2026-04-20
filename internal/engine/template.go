@@ -15,6 +15,9 @@ var vllmV0_17_1DeployTemplate string
 //go:embed vllm/v0.19.0/templates/kubernetes/default.yaml
 var vllmV0_19_0DeployTemplate string
 
+//go:embed vllm/v0.19.1/templates/kubernetes/default.yaml
+var vllmV0_19_1DeployTemplate string
+
 //go:embed vllm/gemma4/templates/kubernetes/default.yaml
 var vllmGemma4DeployTemplate string
 
@@ -41,6 +44,11 @@ func GetVLLMV0_19_0DeployTemplate() string {
 	return base64.StdEncoding.EncodeToString([]byte(vllmV0_19_0DeployTemplate))
 }
 
+// GetVLLMV0_19_1DeployTemplate returns the default deployment template for vLLM V0.19.1 engine
+func GetVLLMV0_19_1DeployTemplate() string {
+	return base64.StdEncoding.EncodeToString([]byte(vllmV0_19_1DeployTemplate))
+}
+
 // GetVLLMGemma4DeployTemplate returns the default deployment template for vLLM gemma4 engine
 func GetVLLMGemma4DeployTemplate() string {
 	return base64.StdEncoding.EncodeToString([]byte(vllmGemma4DeployTemplate))
@@ -51,6 +59,7 @@ var DeployTemplates = map[string]func() string{
 	"vllm-v0.11.2":     GetVLLMV0_11_2DeployTemplate,
 	"vllm-v0.17.1":     GetVLLMV0_17_1DeployTemplate,
 	"vllm-v0.19.0":     GetVLLMV0_19_0DeployTemplate,
+	"vllm-v0.19.1":     GetVLLMV0_19_1DeployTemplate,
 	"vllm-gemma4":      GetVLLMGemma4DeployTemplate,
 	"llama-cpp-v0.3.7": GetLlamaCppDefaultDeployTemplate,
 }
