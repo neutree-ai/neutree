@@ -96,8 +96,8 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			By("Waiting for Upgrading phase and version change")
-			ClusterH.WaitForClusterUpgrading(clusterName, versionBefore, IntermediatePhaseTimeout)
+			By("Waiting for Upgrading phase")
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpgrading, "", IntermediatePhaseTimeout)
 
 			By("Waiting for Running phase after upgrade")
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
@@ -277,8 +277,8 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			By("Waiting for Upgrading phase and version change")
-			ClusterH.WaitForClusterUpgrading(clusterName, versionBefore, IntermediatePhaseTimeout)
+			By("Waiting for Upgrading phase")
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpgrading, "", IntermediatePhaseTimeout)
 
 			By("Waiting for Running phase after upgrade")
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)

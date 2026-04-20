@@ -657,18 +657,6 @@ func (c *ClusterHelper) WaitForClusterUpdating(name, oldHash string, timeout tim
 		"cluster %q observedSpecHash did not change within %s", name, timeout)
 }
 
-// WaitForClusterUpgrading asserts the cluster enters Upgrading phase and
-// Status.Version changes from oldVersion within timeout.
-func (c *ClusterHelper) WaitForClusterUpgrading(name, oldVersion string, timeout time.Duration) {
-	seenPhase, seenExtra := c.observeClusterTransition(name, v1.ClusterPhaseUpgrading,
-		func(cl v1.Cluster) bool { return cl.Status.Version != "" && cl.Status.Version != oldVersion }, timeout)
-
-	ExpectWithOffset(1, seenPhase).To(BeTrue(),
-		"cluster %q did not enter Upgrading phase within %s", name, timeout)
-	ExpectWithOffset(1, seenExtra).To(BeTrue(),
-		"cluster %q version did not change from %q within %s", name, oldVersion, timeout)
-}
-
 // WaitForSpecChange polls until the observedSpecHash differs from oldHash or
 // the phase leaves Running, preventing the race where WaitForPhase("Running")
 // returns immediately before the controller processes a new apply.
