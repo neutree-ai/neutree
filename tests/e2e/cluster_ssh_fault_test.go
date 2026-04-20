@@ -82,7 +82,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			ExpectSuccess(r)
 
 			By("Waiting for cluster to enter Failed phase")
-			ClusterH.WaitForClusterFailed(clusterName, TerminalPhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseFailed, "", TerminalPhaseTimeout)
 
 			By("Waiting for auto-recovery to Running phase")
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)

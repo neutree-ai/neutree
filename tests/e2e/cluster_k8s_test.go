@@ -80,12 +80,17 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 		ExpectSuccess(r)
 	})
 
-	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848"), func() {
+	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848", "C2612847"), func() {
 		r := ClusterH.DeleteGraceful(clusterName)
 		ExpectSuccess(r)
 
-		ClusterH.WaitForClusterDeleting(clusterName, IntermediatePhaseTimeout)
+		By("Waiting for Deleting phase")
+		ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseDeleting, "", IntermediatePhaseTimeout)
 
+		By("Waiting for Deleted phase")
+		ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseDeleted, "", TerminalPhaseTimeout)
+
+		By("Waiting for full removal from list")
 		r = ClusterH.WaitForDelete(clusterName, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 

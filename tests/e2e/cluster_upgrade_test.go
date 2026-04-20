@@ -102,6 +102,13 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			By("Waiting for Running phase after upgrade")
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
+
+			By("Verifying Status.Version == " + newVersion)
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c = parseClusterJSON(r.Stdout)
+			Expect(c.Status.Version).To(Equal(newVersion),
+				"cluster Status.Version should equal new version after upgrade")
 		})
 	})
 
@@ -200,11 +207,12 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
-			By("Verifying cluster version updated")
+			By("Verifying Status.Version == " + newVersion)
 			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			c = parseClusterJSON(r.Stdout)
-			Expect(c.Status.Version).NotTo(Equal(versionBefore))
+			Expect(c.Status.Version).To(Equal(newVersion),
+				"cluster Status.Version should equal new version after upgrade")
 
 			By("Waiting for endpoint to recover after upgrade")
 			waitEndpointRunning(epName)
@@ -275,6 +283,13 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			By("Waiting for Running phase after upgrade")
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
+
+			By("Verifying Status.Version == " + newVersion)
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c = parseClusterJSON(r.Stdout)
+			Expect(c.Status.Version).To(Equal(newVersion),
+				"cluster Status.Version should equal new version after upgrade")
 		})
 	})
 
@@ -372,6 +387,13 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
+
+			By("Verifying Status.Version == " + newVersion)
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			c = parseClusterJSON(r.Stdout)
+			Expect(c.Status.Version).To(Equal(newVersion),
+				"cluster Status.Version should equal new version after upgrade")
 
 			waitEndpointRunning(epName)
 

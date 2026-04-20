@@ -614,29 +614,27 @@ func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, er
 	return last
 }
 
-// WaitForClusterUpdating polls at a short interval to capture the Updating
-// intermediate phase after an Apply, and asserts that both the Updating phase
-// was observed and observedSpecHash changed from oldHash within timeout.
-// Signals are tracked cumulatively so a sub-500ms Updating window is still
-// captured as long as a later tick shows spec hash changed.
-func (c *ClusterHelper) WaitForClusterUpdating(name, oldHash string, timeout time.Duration) {
+// observeClusterTransition polls at 500ms and reports whether both the target
+// phase and an extra signal (e.g., hash or version change) were observed
+// within timeout. Signals are tracked cumulatively so a sub-500ms phase
+// window is still captured as long as a later tick shows the extra signal.
+// Does not assert; callers decide how to report failures.
+func (c *ClusterHelper) observeClusterTransition(name string, phase v1.ClusterPhase, extra func(v1.Cluster) bool, timeout time.Duration) (seenPhase, seenExtra bool) {
 	deadline := time.Now().Add(timeout)
-	seenUpdating := false
-	specChanged := false
 
 	for time.Now().Before(deadline) {
 		r := c.Get(name)
 		if r.ExitCode == 0 {
 			cl := parseClusterJSON(r.Stdout)
-			if cl.Status.Phase == v1.ClusterPhaseUpdating {
-				seenUpdating = true
+			if cl.Status.Phase == phase {
+				seenPhase = true
 			}
 
-			if cl.Status.ObservedSpecHash != oldHash {
-				specChanged = true
+			if extra(cl) {
+				seenExtra = true
 			}
 
-			if seenUpdating && specChanged {
+			if seenPhase && seenExtra {
 				return
 			}
 		}
@@ -644,97 +642,31 @@ func (c *ClusterHelper) WaitForClusterUpdating(name, oldHash string, timeout tim
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	ExpectWithOffset(1, seenUpdating).To(BeTrue(),
+	return
+}
+
+// WaitForClusterUpdating asserts the cluster enters Updating phase and
+// observedSpecHash changes from oldHash within timeout.
+func (c *ClusterHelper) WaitForClusterUpdating(name, oldHash string, timeout time.Duration) {
+	seenPhase, seenExtra := c.observeClusterTransition(name, v1.ClusterPhaseUpdating,
+		func(cl v1.Cluster) bool { return cl.Status.ObservedSpecHash != oldHash }, timeout)
+
+	ExpectWithOffset(1, seenPhase).To(BeTrue(),
 		"cluster %q did not enter Updating phase within %s", name, timeout)
-	ExpectWithOffset(1, specChanged).To(BeTrue(),
+	ExpectWithOffset(1, seenExtra).To(BeTrue(),
 		"cluster %q observedSpecHash did not change within %s", name, timeout)
 }
 
-// WaitForClusterUpgrading polls at a short interval to capture the Upgrading
-// intermediate phase after an Apply that changes cluster version, and asserts
-// both the Upgrading phase was observed and Status.Version changed from
-// oldVersion within timeout.
+// WaitForClusterUpgrading asserts the cluster enters Upgrading phase and
+// Status.Version changes from oldVersion within timeout.
 func (c *ClusterHelper) WaitForClusterUpgrading(name, oldVersion string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	seenUpgrading := false
-	versionChanged := false
+	seenPhase, seenExtra := c.observeClusterTransition(name, v1.ClusterPhaseUpgrading,
+		func(cl v1.Cluster) bool { return cl.Status.Version != "" && cl.Status.Version != oldVersion }, timeout)
 
-	for time.Now().Before(deadline) {
-		r := c.Get(name)
-		if r.ExitCode == 0 {
-			cl := parseClusterJSON(r.Stdout)
-			if cl.Status.Phase == v1.ClusterPhaseUpgrading {
-				seenUpgrading = true
-			}
-
-			if cl.Status.Version != "" && cl.Status.Version != oldVersion {
-				versionChanged = true
-			}
-
-			if seenUpgrading && versionChanged {
-				return
-			}
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	ExpectWithOffset(1, seenUpgrading).To(BeTrue(),
+	ExpectWithOffset(1, seenPhase).To(BeTrue(),
 		"cluster %q did not enter Upgrading phase within %s", name, timeout)
-	ExpectWithOffset(1, versionChanged).To(BeTrue(),
+	ExpectWithOffset(1, seenExtra).To(BeTrue(),
 		"cluster %q version did not change from %q within %s", name, oldVersion, timeout)
-}
-
-// WaitForClusterFailed polls at a short interval to capture the Failed phase
-// when the cluster enters an abnormal state, and asserts the Failed phase was
-// observed within timeout.
-func (c *ClusterHelper) WaitForClusterFailed(name string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	seenFailed := false
-
-	for time.Now().Before(deadline) {
-		r := c.Get(name)
-		if r.ExitCode == 0 {
-			cl := parseClusterJSON(r.Stdout)
-			if cl.Status.Phase == v1.ClusterPhaseFailed {
-				seenFailed = true
-
-				return
-			}
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	ExpectWithOffset(1, seenFailed).To(BeTrue(),
-		"cluster %q did not enter Failed phase within %s", name, timeout)
-}
-
-// WaitForClusterDeleting polls at a short interval to capture the Deleting
-// intermediate phase after a delete, and asserts the Deleting phase was
-// observed within timeout.
-func (c *ClusterHelper) WaitForClusterDeleting(name string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	seenDeleting := false
-
-	for time.Now().Before(deadline) {
-		r := c.Get(name)
-		if r.ExitCode != 0 {
-			break
-		}
-
-		cl := parseClusterJSON(r.Stdout)
-		if cl.Status.Phase == v1.ClusterPhaseDeleting {
-			seenDeleting = true
-
-			return
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	ExpectWithOffset(1, seenDeleting).To(BeTrue(),
-		"cluster %q did not enter Deleting phase within %s", name, timeout)
 }
 
 // WaitForSpecChange polls until the observedSpecHash differs from oldHash or
