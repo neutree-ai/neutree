@@ -21,6 +21,9 @@ jwtSecret: ""
 # It is recommended to change it quickly after installation.
 adminPassword: ""
 
+# Feature gates for alpha/beta features (format: "Feature1=true,Feature2=false")
+featureGates: ""
+
 system:
   grafana:
     url: ""
