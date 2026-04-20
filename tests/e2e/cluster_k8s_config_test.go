@@ -423,6 +423,14 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			kubeconfig  string
 		)
 
+		// fakeNFSServer is an RFC 5737 TEST-NET-1 address, guaranteed unroutable.
+		// Used as the initial NFS server so C2612840 can observe an update to
+		// the real profile.ModelCache.NFSServer without needing a second real
+		// server in the profile. model_caches.name is immutable (validation
+		// error 10206), so the only field we can legitimately change here is
+		// the NFS server address.
+		const fakeNFSServer = "192.0.2.1"
+
 		BeforeAll(func() {
 			kubeconfig = requireK8sEnv()
 
@@ -433,7 +441,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			clusterName = "e2e-k8s-mc-edit-" + Cfg.RunID
 
 			nfsCacheYAML := fmt.Sprintf("    model_caches:\n      - name: test-cache\n        nfs:\n          server: \"%s\"\n          path: \"%s\"",
-				profile.ModelCache.NFSServer,
+				fakeNFSServer,
 				profile.ModelCache.NFSPath)
 
 			yaml := renderK8sClusterYAML(map[string]string{
@@ -458,7 +466,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
-			nfsCacheYAML := fmt.Sprintf("    model_caches:\n      - name: test-cache-updated\n        nfs:\n          server: \"%s\"\n          path: \"%s\"",
+			// Switch from the fake initial server to the real one from profile.
+			nfsCacheYAML := fmt.Sprintf("    model_caches:\n      - name: test-cache\n        nfs:\n          server: \"%s\"\n          path: \"%s\"",
 				profile.ModelCache.NFSServer, profile.ModelCache.NFSPath)
 
 			yaml := renderK8sClusterYAML(map[string]string{
