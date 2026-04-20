@@ -78,7 +78,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 		})
 
 		It("should enter Failed and auto-recover after head Ray processes are stopped", Label("C2644067", "C2613102"), func() {
-			r := RunSSH(sshUser, headIP, sshKeyFile, "docker exec ray_container ray stop --force || true")
+			r := RunSSH(sshUser, headIP, sshKeyFile, "docker exec ray_container ray stop")
 			ExpectSuccess(r)
 
 			By("Waiting for cluster to enter Failed phase")
