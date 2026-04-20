@@ -706,7 +706,6 @@ func parseClusterJSON(stdout string) v1.Cluster {
 	return c
 }
 
-
 func getClusterFullJSON(name string) v1.Cluster {
 	r := RunCLI("get", "cluster", name, "-w", profileWorkspace(), "-o", "json")
 	ExpectSuccess(r)
