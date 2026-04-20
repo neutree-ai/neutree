@@ -61,7 +61,12 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 	})
 
 	It("should show Updating then Running on spec change", Label("C2642277"), func() {
-		r := ClusterH.Get(clusterName)
+		// Safety net for --test-filter runs that skip the preceding "transition
+		// to Running" case: ensure the cluster is Running before reading Status.
+		r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+		ExpectSuccess(r)
+
+		r = ClusterH.Get(clusterName)
 		ExpectSuccess(r)
 		oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
@@ -81,7 +86,10 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 	})
 
 	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848", "C2612847"), func() {
-		r := ClusterH.DeleteGraceful(clusterName)
+		r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+		ExpectSuccess(r)
+
+		r = ClusterH.DeleteGraceful(clusterName)
 		ExpectSuccess(r)
 
 		By("Waiting for Deleting phase")

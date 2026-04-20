@@ -560,8 +560,11 @@ func (c *ClusterHelper) WaitForDelete(name string, timeout time.Duration) CLIRes
 }
 
 // checkClusterStatus compares the observed cluster status against phase and
-// errMatch rule. errMatch == "" requires error_message to be empty, otherwise
-// error_message must contain errMatch. Returns nil when the cluster matches.
+// an optional error_message substring. errMatch == "" skips the error_message
+// check (some phases like Upgrading use error_message as a progress log, not
+// a real error). When callers need "error_message must be empty", they should
+// chain an explicit Expect(BeEmpty()) on the returned cluster.
+// Returns nil when the cluster matches.
 func checkClusterStatus(cl v1.Cluster, phase v1.ClusterPhase, errMatch string) error {
 	if cl.Status == nil {
 		return fmt.Errorf("status is nil")
@@ -571,11 +574,7 @@ func checkClusterStatus(cl v1.Cluster, phase v1.ClusterPhase, errMatch string) e
 		return fmt.Errorf("phase=%q, want %q", cl.Status.Phase, phase)
 	}
 
-	if errMatch == "" {
-		if cl.Status.ErrorMessage != "" {
-			return fmt.Errorf("error_message=%q, want empty", cl.Status.ErrorMessage)
-		}
-	} else if !strings.Contains(cl.Status.ErrorMessage, errMatch) {
+	if errMatch != "" && !strings.Contains(cl.Status.ErrorMessage, errMatch) {
 		return fmt.Errorf("error_message=%q, want contains %q", cl.Status.ErrorMessage, errMatch)
 	}
 
@@ -593,9 +592,10 @@ func (c *ClusterHelper) observeCluster(name string) (v1.Cluster, error) {
 	return parseClusterJSON(r.Stdout), nil
 }
 
-// EventuallyInPhase asserts that within timeout the cluster reaches phase and
-// error_message matches errMatch ("" means must be empty, otherwise must
-// contain the substring). Polls at 500ms. Returns the last observed cluster.
+// EventuallyInPhase asserts that within timeout the cluster reaches phase.
+// errMatch == "" skips the error_message check; a non-empty errMatch requires
+// error_message to contain the substring. Polls at 500ms. Returns the last
+// observed cluster.
 func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, errMatch string, timeout time.Duration) v1.Cluster {
 	var last v1.Cluster
 
