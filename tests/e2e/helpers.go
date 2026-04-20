@@ -545,6 +545,184 @@ func (c *ClusterHelper) WaitForDelete(name, timeout string) CLIResult {
 	)
 }
 
+// checkClusterStatus compares the observed cluster status against phase and
+// errMatch rule. errMatch == "" requires error_message to be empty, otherwise
+// error_message must contain errMatch. Returns nil when the cluster matches.
+func checkClusterStatus(cl v1.Cluster, phase v1.ClusterPhase, errMatch string) error {
+	if cl.Status == nil {
+		return fmt.Errorf("status is nil")
+	}
+
+	if cl.Status.Phase != phase {
+		return fmt.Errorf("phase=%q, want %q", cl.Status.Phase, phase)
+	}
+
+	if errMatch == "" {
+		if cl.Status.ErrorMessage != "" {
+			return fmt.Errorf("error_message=%q, want empty", cl.Status.ErrorMessage)
+		}
+	} else if !strings.Contains(cl.Status.ErrorMessage, errMatch) {
+		return fmt.Errorf("error_message=%q, want contains %q", cl.Status.ErrorMessage, errMatch)
+	}
+
+	return nil
+}
+
+// observeCluster fetches and parses the cluster, returning (cluster, error).
+// error is non-nil when the CLI call fails so the caller can skip this tick.
+func (c *ClusterHelper) observeCluster(name string) (v1.Cluster, error) {
+	r := c.Get(name)
+	if r.ExitCode != 0 {
+		return v1.Cluster{}, fmt.Errorf("get cluster %q exit %d", name, r.ExitCode)
+	}
+
+	return parseClusterJSON(r.Stdout), nil
+}
+
+// EventuallyInPhase asserts that within timeout the cluster reaches phase and
+// error_message matches errMatch ("" means must be empty, otherwise must
+// contain the substring). Polls at 500ms. Returns the last observed cluster.
+func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, errMatch string, timeout time.Duration) v1.Cluster {
+	var last v1.Cluster
+
+	EventuallyWithOffset(1, func() error {
+		cl, err := c.observeCluster(name)
+		if err != nil {
+			return err
+		}
+
+		last = cl
+
+		return checkClusterStatus(cl, phase, errMatch)
+	}, timeout, 500*time.Millisecond).Should(Succeed(),
+		"cluster %q should reach phase %q (errMatch=%q) within %s", name, phase, errMatch, timeout)
+
+	return last
+}
+
+// WaitForClusterUpdating polls at a short interval to capture the Updating
+// intermediate phase after an Apply, and asserts that both the Updating phase
+// was observed and observedSpecHash changed from oldHash within timeout.
+// Signals are tracked cumulatively so a sub-500ms Updating window is still
+// captured as long as a later tick shows spec hash changed.
+func (c *ClusterHelper) WaitForClusterUpdating(name, oldHash string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	seenUpdating := false
+	specChanged := false
+
+	for time.Now().Before(deadline) {
+		r := c.Get(name)
+		if r.ExitCode == 0 {
+			cl := parseClusterJSON(r.Stdout)
+			if cl.Status.Phase == v1.ClusterPhaseUpdating {
+				seenUpdating = true
+			}
+
+			if cl.Status.ObservedSpecHash != oldHash {
+				specChanged = true
+			}
+
+			if seenUpdating && specChanged {
+				return
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	ExpectWithOffset(1, seenUpdating).To(BeTrue(),
+		"cluster %q did not enter Updating phase within %s", name, timeout)
+	ExpectWithOffset(1, specChanged).To(BeTrue(),
+		"cluster %q observedSpecHash did not change within %s", name, timeout)
+}
+
+// WaitForClusterUpgrading polls at a short interval to capture the Upgrading
+// intermediate phase after an Apply that changes cluster version, and asserts
+// both the Upgrading phase was observed and Status.Version changed from
+// oldVersion within timeout.
+func (c *ClusterHelper) WaitForClusterUpgrading(name, oldVersion string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	seenUpgrading := false
+	versionChanged := false
+
+	for time.Now().Before(deadline) {
+		r := c.Get(name)
+		if r.ExitCode == 0 {
+			cl := parseClusterJSON(r.Stdout)
+			if cl.Status.Phase == v1.ClusterPhaseUpgrading {
+				seenUpgrading = true
+			}
+
+			if cl.Status.Version != "" && cl.Status.Version != oldVersion {
+				versionChanged = true
+			}
+
+			if seenUpgrading && versionChanged {
+				return
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	ExpectWithOffset(1, seenUpgrading).To(BeTrue(),
+		"cluster %q did not enter Upgrading phase within %s", name, timeout)
+	ExpectWithOffset(1, versionChanged).To(BeTrue(),
+		"cluster %q version did not change from %q within %s", name, oldVersion, timeout)
+}
+
+// WaitForClusterFailed polls at a short interval to capture the Failed phase
+// when the cluster enters an abnormal state, and asserts the Failed phase was
+// observed within timeout.
+func (c *ClusterHelper) WaitForClusterFailed(name string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	seenFailed := false
+
+	for time.Now().Before(deadline) {
+		r := c.Get(name)
+		if r.ExitCode == 0 {
+			cl := parseClusterJSON(r.Stdout)
+			if cl.Status.Phase == v1.ClusterPhaseFailed {
+				seenFailed = true
+
+				return
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	ExpectWithOffset(1, seenFailed).To(BeTrue(),
+		"cluster %q did not enter Failed phase within %s", name, timeout)
+}
+
+// WaitForClusterDeleting polls at a short interval to capture the Deleting
+// intermediate phase after a delete, and asserts the Deleting phase was
+// observed within timeout.
+func (c *ClusterHelper) WaitForClusterDeleting(name string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	seenDeleting := false
+
+	for time.Now().Before(deadline) {
+		r := c.Get(name)
+		if r.ExitCode != 0 {
+			break
+		}
+
+		cl := parseClusterJSON(r.Stdout)
+		if cl.Status.Phase == v1.ClusterPhaseDeleting {
+			seenDeleting = true
+
+			return
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	ExpectWithOffset(1, seenDeleting).To(BeTrue(),
+		"cluster %q did not enter Deleting phase within %s", name, timeout)
+}
+
 // WaitForSpecChange polls until the observedSpecHash differs from oldHash or
 // the phase leaves Running, preventing the race where WaitForPhase("Running")
 // returns immediately before the controller processes a new apply.
@@ -582,26 +760,6 @@ func parseClusterJSON(stdout string) v1.Cluster {
 	return c
 }
 
-// waitClusterErrorMessage polls until the cluster's error_message is non-empty or timeout.
-func waitClusterErrorMessage(ch *ClusterHelper, name string, timeout time.Duration) v1.Cluster {
-	deadline := time.Now().Add(timeout)
-
-	var c v1.Cluster
-
-	for time.Now().Before(deadline) {
-		r := ch.Get(name)
-		if r.ExitCode == 0 {
-			c = parseClusterJSON(r.Stdout)
-			if c.Status != nil && c.Status.ErrorMessage != "" {
-				return c
-			}
-		}
-
-		time.Sleep(5 * time.Second)
-	}
-
-	return c
-}
 
 func getClusterFullJSON(name string) v1.Cluster {
 	r := RunCLI("get", "cluster", name, "-w", profileWorkspace(), "-o", "json")

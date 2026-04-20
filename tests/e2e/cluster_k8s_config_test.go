@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"), func() {
@@ -131,17 +132,23 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			Expect(s.Type).To(Equal(corev1.SecretTypeDockerConfigJson))
 		})
 
-		It("should create vmagent deployment", Label("C2612763"), func() {
+		It("should create vmagent observability resources (Deployment, ConfigMap, SA, Role, RoleBinding)", Label("C2612763"), func() {
 			ctx := context.Background()
 
 			_, err := k8sH.GetDeployment(ctx, namespace, "vmagent")
 			Expect(err).NotTo(HaveOccurred(), "vmagent deployment should exist")
-		})
 
-		It("should create vmagent-config ConfigMap", Label("C2623075"), func() {
-			ctx := context.Background()
-			_, err := k8sH.GetConfigMap(ctx, namespace, "vmagent-config")
+			_, err = k8sH.GetConfigMap(ctx, namespace, "vmagent-config")
 			Expect(err).NotTo(HaveOccurred(), "vmagent-config ConfigMap should exist")
+
+			_, err = k8sH.GetServiceAccount(ctx, namespace, "vmagent-service-account")
+			Expect(err).NotTo(HaveOccurred(), "vmagent ServiceAccount should exist")
+
+			_, err = k8sH.GetRole(ctx, namespace, "vmagent-pod-reader")
+			Expect(err).NotTo(HaveOccurred(), "vmagent Role should exist")
+
+			_, err = k8sH.GetRoleBinding(ctx, namespace, "vmagent-rolebinding")
+			Expect(err).NotTo(HaveOccurred(), "vmagent RoleBinding should exist")
 		})
 
 		It("should create router resources (SA, Role, RoleBinding, Deployment, Service)", Label("C2612779"), func() {
@@ -602,21 +609,11 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 			c := parseClusterJSON(r.Stdout)
 			ns := ClusterNamespace(c.Metadata.Workspace, c.Metadata.Name, c.ID)
+			cmName := fmt.Sprintf("neutree-%s-modelcache-config", c.Metadata.Name)
 
 			ctx := context.Background()
-			cms, err := k8sH.ListConfigMaps(ctx, ns, "")
-			Expect(err).NotTo(HaveOccurred())
-
-			found := false
-			for _, cm := range cms {
-				if strings.Contains(cm.Name, "modelcache-config") {
-					found = true
-
-					break
-				}
-			}
-
-			Expect(found).To(BeTrue(), "modelcache-config ConfigMap should exist")
+			_, err := k8sH.GetConfigMap(ctx, ns, cmName)
+			Expect(err).NotTo(HaveOccurred(), "deploy config CM %s should exist", cmName)
 		})
 
 		It("should remove PVC model cache and reach Running", Label("C2612845"), func() {
@@ -653,9 +650,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			c := waitClusterErrorMessage(ClusterH, clusterName, 90*time.Second)
-			Expect(c.Status.Phase).To(BeEquivalentTo("Initializing"))
-			Expect(c.Status.ErrorMessage).NotTo(BeEmpty())
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "failed to create REST config", 90*time.Second)
 		})
 	})
 })

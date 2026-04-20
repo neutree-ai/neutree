@@ -98,18 +98,31 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 				cachePath = "/opt/neutree/model-cache"
 			}
 
-			r := RunSSH(sshUser, headIP, sshKeyFile,
-				fmt.Sprintf("stat -c '%%a %%u %%g' %s 2>/dev/null || echo 'NOT_FOUND'", cachePath))
-			ExpectSuccess(r)
-			Expect(r.Stdout).NotTo(ContainSubstring("NOT_FOUND"),
-				"model cache directory %s should exist", cachePath)
+			nodes := []string{headIP}
+			for _, ip := range strings.Split(workerIPs, ",") {
+				ip = strings.TrimSpace(ip)
+				if ip != "" {
+					nodes = append(nodes, ip)
+				}
+			}
 
-			fields := strings.Fields(strings.TrimSpace(r.Stdout))
-			Expect(len(fields)).To(BeNumerically(">=", 1),
-				"stat output should contain permission mode, got: %s", r.Stdout)
-			mode := fields[0]
-			Expect(mode).NotTo(Equal("000"),
-				"model cache directory should have non-zero permissions, got %s", mode)
+			for _, ip := range nodes {
+				r := RunSSH(sshUser, ip, sshKeyFile,
+					fmt.Sprintf("stat -c '%%a %%u %%g' %s 2>/dev/null || echo 'NOT_FOUND'", cachePath))
+				ExpectSuccess(r)
+				Expect(r.Stdout).NotTo(ContainSubstring("NOT_FOUND"),
+					"model cache directory %s should exist on node %s", cachePath, ip)
+
+				fields := strings.Fields(strings.TrimSpace(r.Stdout))
+				Expect(fields).To(HaveLen(3),
+					"stat output on node %s should be '<mode> <uid> <gid>', got: %s", ip, r.Stdout)
+				Expect(fields[0]).To(Equal("755"),
+					"model cache directory on node %s should have mode 755", ip)
+				Expect(fields[1]).To(Equal("0"),
+					"model cache directory on node %s should be owned by root (uid 0)", ip)
+				Expect(fields[2]).To(Equal("0"),
+					"model cache directory on node %s should be owned by root group (gid 0)", ip)
+			}
 		})
 
 		It("should clean up ray_container after deletion", Label("C2612850"), func() {
@@ -325,42 +338,31 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			apps, err := mcRayH.GetServeApplications()
 			Expect(err).NotTo(HaveOccurred())
 
+			appName := fmt.Sprintf("%s_%s", profileWorkspace(), epName)
+			appStatus, ok := apps.Applications[appName]
+			Expect(ok).To(BeTrue(), "Ray Serve application %q should exist", appName)
+			Expect(appStatus.DeployedAppConfig).NotTo(BeNil(),
+				"application %q should have DeployedAppConfig", appName)
+			Expect(appStatus.DeployedAppConfig.Args).NotTo(BeNil(),
+				"application %q should have Args", appName)
+
+			bc, ok := appStatus.DeployedAppConfig.Args["backend_container"]
+			Expect(ok).To(BeTrue(), "application %q args should contain backend_container", appName)
+
+			bcMap, ok := bc.(map[string]any)
+			Expect(ok).To(BeTrue(), "backend_container should be a map")
+
+			runOpts, ok := bcMap["run_options"]
+			Expect(ok).To(BeTrue(), "backend_container should contain run_options")
+
+			runOptsSlice, ok := runOpts.([]any)
+			Expect(ok).To(BeTrue(), "run_options should be a list")
+
 			found := false
-			for _, appStatus := range apps.Applications {
-				if appStatus.DeployedAppConfig == nil || appStatus.DeployedAppConfig.Args == nil {
-					continue
-				}
+			for _, opt := range runOptsSlice {
+				if optStr, isStr := opt.(string); isStr && strings.Contains(optStr, profile.ModelCache.HostPath) {
+					found = true
 
-				bc, ok := appStatus.DeployedAppConfig.Args["backend_container"]
-				if !ok {
-					continue
-				}
-
-				bcMap, isMap := bc.(map[string]interface{})
-				if !isMap {
-					continue
-				}
-
-				runOpts, ok := bcMap["run_options"]
-				if !ok {
-					continue
-				}
-
-				runOptsSlice, isList := runOpts.([]interface{})
-				if !isList {
-					continue
-				}
-
-				for _, opt := range runOptsSlice {
-					optStr, isStr := opt.(string)
-					if isStr && strings.Contains(optStr, profile.ModelCache.HostPath) {
-						found = true
-
-						break
-					}
-				}
-
-				if found {
 					break
 				}
 			}

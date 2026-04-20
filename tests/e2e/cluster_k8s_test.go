@@ -74,66 +74,17 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 		r = ClusterH.Apply(yaml)
 		ExpectSuccess(r)
 
-		seenUpdating := false
-		deadline := time.Now().Add(30 * time.Second)
-
-		for time.Now().Before(deadline) {
-			r = ClusterH.Get(clusterName)
-			if r.ExitCode == 0 {
-				c := parseClusterJSON(r.Stdout)
-				if c.Status.Phase == "Updating" {
-					seenUpdating = true
-
-					break
-				}
-
-				if c.Status.Phase == "Running" && c.Status.ObservedSpecHash != oldHash {
-					break
-				}
-			}
-
-			time.Sleep(2 * time.Second)
-		}
-
-		if !seenUpdating {
-			GinkgoWriter.Printf("WARNING: Updating phase was too fast to capture (< 2s polling interval)\n")
-		}
+		ClusterH.WaitForClusterUpdating(clusterName, oldHash, 60*time.Second)
 
 		r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
 		ExpectSuccess(r)
-
-		r = ClusterH.Get(clusterName)
-		ExpectSuccess(r)
-		newHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
-		Expect(newHash).NotTo(Equal(oldHash))
 	})
 
 	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848"), func() {
 		r := ClusterH.DeleteGraceful(clusterName)
 		ExpectSuccess(r)
 
-		seenDeleting := false
-		deadline := time.Now().Add(30 * time.Second)
-
-		for time.Now().Before(deadline) {
-			r = ClusterH.Get(clusterName)
-			if r.ExitCode != 0 {
-				break
-			}
-
-			c := parseClusterJSON(r.Stdout)
-			if c.Status.Phase == "Deleting" {
-				seenDeleting = true
-
-				break
-			}
-
-			time.Sleep(2 * time.Second)
-		}
-
-		if !seenDeleting {
-			GinkgoWriter.Printf("WARNING: Deleting phase was too fast to capture\n")
-		}
+		ClusterH.WaitForClusterDeleting(clusterName, 30*time.Second)
 
 		r = ClusterH.WaitForDelete(clusterName, "10m")
 		ExpectSuccess(r)

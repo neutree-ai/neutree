@@ -94,40 +94,12 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			By("Polling for Upgrading phase")
-			seenUpgrading := false
-			deadline := time.Now().Add(60 * time.Second)
-			for time.Now().Before(deadline) {
-				r = ClusterH.Get(clusterName)
-				if r.ExitCode == 0 {
-					c = parseClusterJSON(r.Stdout)
-					if c.Status.Phase == "Upgrading" {
-						seenUpgrading = true
-
-						break
-					}
-
-					if c.Status.Phase == "Running" && c.Status.Version == newVersion {
-						break
-					}
-				}
-
-				time.Sleep(1 * time.Second)
-			}
+			By("Waiting for Upgrading phase and version change")
+			ClusterH.WaitForClusterUpgrading(clusterName, versionBefore, 60*time.Second)
 
 			By("Waiting for Running phase after upgrade")
 			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
 			ExpectSuccess(r)
-
-			By("Verifying version changed")
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			c = parseClusterJSON(r.Stdout)
-			Expect(c.Status.Version).NotTo(Equal(versionBefore))
-
-			if !seenUpgrading {
-				GinkgoWriter.Printf("WARNING: Upgrading phase was not captured (transition too fast)\n")
-			}
 		})
 	})
 
@@ -295,38 +267,12 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			seenUpgrading := false
-			deadline := time.Now().Add(60 * time.Second)
-			for time.Now().Before(deadline) {
-				r = ClusterH.Get(clusterName)
-				if r.ExitCode == 0 {
-					c = parseClusterJSON(r.Stdout)
-					if c.Status.Phase == "Upgrading" {
-						seenUpgrading = true
-
-						break
-					}
-
-					if c.Status.Phase == "Running" && c.Status.Version == newVersion {
-						break
-					}
-				}
-
-				time.Sleep(1 * time.Second)
-			}
+			By("Waiting for Upgrading phase and version change")
+			ClusterH.WaitForClusterUpgrading(clusterName, versionBefore, 60*time.Second)
 
 			By("Waiting for Running phase after upgrade")
 			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
 			ExpectSuccess(r)
-
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			c = parseClusterJSON(r.Stdout)
-			Expect(c.Status.Version).NotTo(Equal(versionBefore))
-
-			if !seenUpgrading {
-				GinkgoWriter.Printf("WARNING: Upgrading phase was not captured (transition too fast)\n")
-			}
 		})
 	})
 

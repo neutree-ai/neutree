@@ -55,22 +55,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 	})
 
 	It("should show Initializing immediately after creation", Label("C2612656"), func() {
-		r := ClusterH.Get(clusterName)
-		ExpectSuccess(r)
-		c := parseClusterJSON(r.Stdout)
-
-		phase := v1.ClusterPhase("")
-		if c.Status != nil {
-			phase = c.Status.Phase
-		}
-
-		if phase == v1.ClusterPhase("Running") {
-			GinkgoWriter.Printf("WARNING: cluster already Running, Initializing phase was too fast to capture\n")
-		} else {
-			Expect(phase).To(BeElementOf(
-				v1.ClusterPhase(""), v1.ClusterPhase("Initializing")),
-				"cluster should be in empty or Initializing, got %s", phase)
-		}
+		ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "", 30*time.Second)
 	})
 
 	It("should transition to Running", Label("C2613101"), func() {
@@ -113,60 +98,20 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		r = ClusterH.Apply(yaml)
 		ExpectSuccess(r)
 
-		By("Polling for Updating intermediate phase")
-		seenUpdating := false
-		deadline := time.Now().Add(60 * time.Second)
-		for time.Now().Before(deadline) {
-			r = ClusterH.Get(clusterName)
-			if r.ExitCode == 0 {
-				c := parseClusterJSON(r.Stdout)
-				if c.Status.Phase == "Updating" {
-					seenUpdating = true
-
-					break
-				}
-
-				if c.Status.ObservedSpecHash != oldHash {
-					break
-				}
-			}
-			time.Sleep(1 * time.Second)
-		}
+		By("Waiting for Updating phase and spec change")
+		ClusterH.WaitForClusterUpdating(clusterName, oldHash, 60*time.Second)
 
 		By("Waiting for Running phase")
 		r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
 		ExpectSuccess(r)
-
-		r = ClusterH.Get(clusterName)
-		ExpectSuccess(r)
-		newHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
-		Expect(newHash).NotTo(Equal(oldHash))
-
-		if !seenUpdating {
-			GinkgoWriter.Printf("WARNING: Updating phase was not captured (transition too fast for 1s poll interval)\n")
-		}
 	})
 
 	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848", "C2612847"), func() {
 		r := ClusterH.DeleteGraceful(clusterName)
 		ExpectSuccess(r)
 
-		By("Polling for Deleting intermediate phase")
-		seenDeleting := false
-		deadline := time.Now().Add(30 * time.Second)
-		for time.Now().Before(deadline) {
-			r = ClusterH.Get(clusterName)
-			if r.ExitCode != 0 {
-				break
-			}
-			c := parseClusterJSON(r.Stdout)
-			if c.Status.Phase == "Deleting" {
-				seenDeleting = true
-
-				break
-			}
-			time.Sleep(1 * time.Second)
-		}
+		By("Waiting for Deleting phase")
+		ClusterH.WaitForClusterDeleting(clusterName, 30*time.Second)
 
 		By("Waiting for full deletion")
 		r = ClusterH.WaitForDelete(clusterName, "10m")
@@ -175,9 +120,5 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		r = RunCLI("get", "cluster", "-w", profileWorkspace())
 		ExpectSuccess(r)
 		Expect(r.Stdout).NotTo(ContainSubstring(clusterName))
-
-		if !seenDeleting {
-			GinkgoWriter.Printf("WARNING: Deleting phase was not captured (transition too fast for 1s poll interval)\n")
-		}
 	})
 })
