@@ -650,7 +650,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "failed to create REST config", IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "failed to create REST config", TerminalPhaseTimeout)
 		})
 	})
 })

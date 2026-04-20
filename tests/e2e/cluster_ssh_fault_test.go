@@ -82,7 +82,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			ExpectSuccess(r)
 
 			By("Waiting for cluster to enter Failed phase")
-			ClusterH.WaitForClusterFailed(clusterName, IntermediatePhaseTimeout)
+			ClusterH.WaitForClusterFailed(clusterName, TerminalPhaseTimeout)
 
 			By("Waiting for auto-recovery to Running phase")
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
@@ -117,7 +117,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "connection failed", IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "connection failed", TerminalPhaseTimeout)
 		})
 
 		It("should stay Initializing when head node IP is unreachable", Label("C2613145"), func() {
@@ -135,7 +135,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "connection failed", IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "connection failed", TerminalPhaseTimeout)
 		})
 
 		It("should stay Initializing when worker node IPs are unreachable", Label("C2613146"), func() {
@@ -154,7 +154,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "connection failed", IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "connection failed", TerminalPhaseTimeout)
 		})
 
 		It("should stay Initializing when image registry is unreachable from nodes", Label("C2613149"), func() {
@@ -190,7 +190,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "not ready", IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "not ready", TerminalPhaseTimeout)
 		})
 
 		It("should stay Initializing when image registry reference is invalid", Label("C2612657"), func() {
@@ -210,7 +210,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "not found", IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "not found", TerminalPhaseTimeout)
 		})
 	})
 })

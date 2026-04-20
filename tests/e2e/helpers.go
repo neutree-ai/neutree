@@ -25,10 +25,12 @@ var cliBinary string
 // Cluster phase timeouts shared across E2E tests.
 //
 //   - IntermediatePhaseTimeout applies to transient phases (Initializing,
-//     Updating, Upgrading, Deleting, Failed) where the controller is expected
-//     to act within seconds.
-//   - TerminalPhaseTimeout applies to stable phases (Running, Deleted) where
-//     the full reconciliation or teardown may take minutes.
+//     Updating, Upgrading, Deleting) on the happy path, where the controller
+//     is expected to act within seconds.
+//   - TerminalPhaseTimeout applies to stable phases (Running, Deleted) and
+//     to fault / anomaly scenarios where the controller must surface an
+//     underlying failure (SSH / TCP timeout, unreachable image registry,
+//     Ray health-check before Failed), both of which can take minutes.
 const (
 	IntermediatePhaseTimeout = 30 * time.Second
 	TerminalPhaseTimeout     = 10 * time.Minute
