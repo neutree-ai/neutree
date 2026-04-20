@@ -8,6 +8,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // requireOldVersion returns the old version for upgrade tests, or skips.
@@ -65,7 +67,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			ExpectSuccess(r)
 
 			By("Waiting for Running phase")
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -95,10 +97,10 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			ExpectSuccess(r)
 
 			By("Waiting for Upgrading phase and version change")
-			ClusterH.WaitForClusterUpgrading(clusterName, versionBefore, 60*time.Second)
+			ClusterH.WaitForClusterUpgrading(clusterName, versionBefore, IntermediatePhaseTimeout)
 
 			By("Waiting for Running phase after upgrade")
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 	})
@@ -142,7 +144,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			ExpectSuccess(r)
 
 			By("Waiting for cluster Running")
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -192,10 +194,10 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
 			By("Waiting for cluster Running after upgrade")
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			By("Verifying cluster version updated")
@@ -241,7 +243,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			ExpectSuccess(r)
 
 			By("Waiting for Running phase")
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -268,10 +270,10 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			ExpectSuccess(r)
 
 			By("Waiting for Upgrading phase and version change")
-			ClusterH.WaitForClusterUpgrading(clusterName, versionBefore, 60*time.Second)
+			ClusterH.WaitForClusterUpgrading(clusterName, versionBefore, IntermediatePhaseTimeout)
 
 			By("Waiting for Running phase after upgrade")
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 	})
@@ -311,7 +313,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			ExpectSuccess(r)
 
 			By("Waiting for cluster Running")
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			k8sH = NewK8sHelper(kubeconfig)
@@ -366,9 +368,9 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			waitEndpointRunning(epName)

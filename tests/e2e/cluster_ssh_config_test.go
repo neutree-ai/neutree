@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"), func() {
@@ -62,7 +63,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -129,7 +130,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r := ClusterH.DeleteGraceful(clusterName)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForDelete(clusterName, "10m")
+			r = ClusterH.WaitForDelete(clusterName, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			r = RunSSH(sshUser, headIP, sshKeyFile,
@@ -196,7 +197,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -221,9 +222,9 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			r = ClusterH.Get(clusterName)
@@ -249,9 +250,9 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			r = ClusterH.Get(clusterName)
@@ -308,7 +309,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			By("Deploying endpoint on model-cache cluster")

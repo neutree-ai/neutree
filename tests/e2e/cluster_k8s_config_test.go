@@ -50,7 +50,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			k8sH = NewK8sHelper(kubeconfig)
@@ -201,7 +201,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.DeleteGraceful(clusterName)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForDelete(clusterName, "10m")
+			r = ClusterH.WaitForDelete(clusterName, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			k8sH.WaitForNamespaceDeleted(ctx, namespace, 2*time.Minute)
@@ -234,9 +234,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yamlB)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForPhase(clusterA, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterA, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
-			r = ClusterH.WaitForPhase(clusterB, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterB, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			r = ClusterH.Get(clusterA)
@@ -283,7 +283,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			k8sH = NewK8sHelper(kubeconfig)
@@ -312,9 +312,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			ctx := context.Background()
@@ -340,9 +340,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			ctx := context.Background()
@@ -369,9 +369,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			ctx := context.Background()
@@ -445,7 +445,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -469,9 +469,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -491,9 +491,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -512,9 +512,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -530,9 +530,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 	})
@@ -565,7 +565,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 
@@ -628,9 +628,9 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, 60*time.Second)
+			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
 
-			r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 		})
 	})
@@ -650,7 +650,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "failed to create REST config", 90*time.Second)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "failed to create REST config", IntermediatePhaseTimeout)
 		})
 	})
 })

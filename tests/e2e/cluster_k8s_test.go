@@ -1,10 +1,10 @@
 package e2e
 
 import (
-	"time"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "lifecycle"), func() {
@@ -45,7 +45,7 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 	})
 
 	It("should transition to Running", Label("C2613101"), func() {
-		r := ClusterH.WaitForPhase(clusterName, "Running", "10m")
+		r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 
 		r = ClusterH.Get(clusterName)
@@ -74,9 +74,9 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 		r = ClusterH.Apply(yaml)
 		ExpectSuccess(r)
 
-		ClusterH.WaitForClusterUpdating(clusterName, oldHash, 60*time.Second)
+		ClusterH.WaitForClusterUpdating(clusterName, oldHash, IntermediatePhaseTimeout)
 
-		r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+		r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 	})
 
@@ -84,9 +84,9 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 		r := ClusterH.DeleteGraceful(clusterName)
 		ExpectSuccess(r)
 
-		ClusterH.WaitForClusterDeleting(clusterName, 30*time.Second)
+		ClusterH.WaitForClusterDeleting(clusterName, IntermediatePhaseTimeout)
 
-		r = ClusterH.WaitForDelete(clusterName, "10m")
+		r = ClusterH.WaitForDelete(clusterName, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 
 		r = RunCLI("get", "cluster", "-w", profileWorkspace())

@@ -22,6 +22,18 @@ import (
 // cliBinary holds the path to the compiled neutree-cli binary.
 var cliBinary string
 
+// Cluster phase timeouts shared across E2E tests.
+//
+//   - IntermediatePhaseTimeout applies to transient phases (Initializing,
+//     Updating, Upgrading, Deleting, Failed) where the controller is expected
+//     to act within seconds.
+//   - TerminalPhaseTimeout applies to stable phases (Running, Deleted) where
+//     the full reconciliation or teardown may take minutes.
+const (
+	IntermediatePhaseTimeout = 30 * time.Second
+	TerminalPhaseTimeout     = 10 * time.Minute
+)
+
 // --- Suite setup / teardown ---
 
 // BuildCLI compiles the neutree-cli binary to a temp directory.
@@ -528,20 +540,20 @@ func (c *ClusterHelper) DeleteGraceful(name string) CLIResult {
 }
 
 // WaitForPhase waits for a cluster to reach the specified phase.
-func (c *ClusterHelper) WaitForPhase(name, phase, timeout string) CLIResult {
+func (c *ClusterHelper) WaitForPhase(name string, phase v1.ClusterPhase, timeout time.Duration) CLIResult {
 	return RunCLI("wait", "cluster", name,
 		"-w", c.workspace,
 		"--for", fmt.Sprintf("jsonpath=.status.phase=%s", phase),
-		"--timeout", timeout,
+		"--timeout", timeout.String(),
 	)
 }
 
 // WaitForDelete waits for a cluster to be fully deleted.
-func (c *ClusterHelper) WaitForDelete(name, timeout string) CLIResult {
+func (c *ClusterHelper) WaitForDelete(name string, timeout time.Duration) CLIResult {
 	return RunCLI("wait", "cluster", name,
 		"-w", c.workspace,
 		"--for", "delete",
-		"--timeout", timeout,
+		"--timeout", timeout.String(),
 	)
 }
 
@@ -748,7 +760,7 @@ func (c *ClusterHelper) WaitForSpecChange(name, oldHash string, timeout time.Dur
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
 func (c *ClusterHelper) EnsureDeleted(name string) {
 	c.Delete(name)
-	c.WaitForDelete(name, "10m")
+	c.WaitForDelete(name, TerminalPhaseTimeout)
 }
 
 // --- Cluster JSON parsing ---

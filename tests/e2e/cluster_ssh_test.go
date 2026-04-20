@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"strings"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -55,11 +54,11 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 	})
 
 	It("should show Initializing immediately after creation", Label("C2612656"), func() {
-		ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "", 30*time.Second)
+		ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "", IntermediatePhaseTimeout)
 	})
 
 	It("should transition to Running", Label("C2613101"), func() {
-		r := ClusterH.WaitForPhase(clusterName, "Running", "10m")
+		r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 
 		r = ClusterH.Get(clusterName)
@@ -99,10 +98,10 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		ExpectSuccess(r)
 
 		By("Waiting for Updating phase and spec change")
-		ClusterH.WaitForClusterUpdating(clusterName, oldHash, 60*time.Second)
+		ClusterH.WaitForClusterUpdating(clusterName, oldHash, IntermediatePhaseTimeout)
 
 		By("Waiting for Running phase")
-		r = ClusterH.WaitForPhase(clusterName, "Running", "10m")
+		r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 	})
 
@@ -111,10 +110,10 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		ExpectSuccess(r)
 
 		By("Waiting for Deleting phase")
-		ClusterH.WaitForClusterDeleting(clusterName, 30*time.Second)
+		ClusterH.WaitForClusterDeleting(clusterName, IntermediatePhaseTimeout)
 
 		By("Waiting for full deletion")
-		r = ClusterH.WaitForDelete(clusterName, "10m")
+		r = ClusterH.WaitForDelete(clusterName, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 
 		r = RunCLI("get", "cluster", "-w", profileWorkspace())
