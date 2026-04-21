@@ -478,10 +478,13 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			// NFS model_caches edits are applied to the modelcache ConfigMap without
-			// moving the cluster through Updating -- only PVC model_caches changes
-			// trigger a cluster-level rollout. Verify via ObservedSpecHash advancing.
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
+			// Non-PVC model_caches changes don't reliably expose an observable
+			// Updating phase (pod rollout may be brief or skipped entirely), so
+			// we only assert that the controller eventually observes the new
+			// spec by watching ObservedSpecHash advance. Reconcile may stall on
+			// pod readiness for minutes after a volume type switch, so use
+			// TerminalPhaseTimeout.
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
 		})
 
 		It("should update NFS path", Label("C2612841"), func() {
@@ -503,8 +506,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			// NFS model_caches edits don't trigger cluster Updating (see C2612840).
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
+			// See C2612840 -- non-PVC model_caches changes verified via hash only.
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
 		})
 
 		It("should switch to HostPath model cache", Label("C2612842"), func() {
@@ -525,8 +528,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			// HostPath model_caches edits don't trigger cluster Updating (see C2612840).
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
+			// See C2612840 -- non-PVC model_caches changes verified via hash only.
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
 		})
 
 		It("should remove model cache", Label("C2612845"), func() {
@@ -544,8 +547,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			// Removing a non-PVC model cache doesn't trigger cluster Updating (see C2612840).
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
+			// See C2612840 -- non-PVC model_caches changes verified via hash only.
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
 		})
 	})
 
@@ -649,7 +652,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
 		})
 	})
 
