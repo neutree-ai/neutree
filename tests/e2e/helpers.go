@@ -727,12 +727,13 @@ func getClusterFullJSON(name string) v1.Cluster {
 // applyEndpointWithEnv creates an endpoint with custom env vars on the given cluster.
 func applyEndpointWithEnv(name, cluster, engineVersion string, env map[string]string) (yamlPath string) {
 	// EndpointSpec.Env is a sibling of Variables under spec (not nested
-	// inside variables), so envYAML lives at col 2 (`env:`) with entries at
-	// col 4. The template injects ${E2E_ENV_YAML} after the last spec field
-	// so the rendered document becomes `...num: 1\n  env:\n    k: "v"`.
+	// inside variables). Template ${E2E_ENV_YAML} occupies its own line
+	// after spec.replicas, so envYAML contributes a clean block at col 2
+	// (`env:`) with entries at col 4. Empty env expands to an empty line
+	// which YAML tolerates.
 	var envYAML string
 	if len(env) > 0 {
-		envYAML = "\n  env:"
+		envYAML = "  env:"
 		for k, v := range env {
 			envYAML += fmt.Sprintf("\n    %s: \"%s\"", k, v)
 		}
