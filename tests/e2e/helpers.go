@@ -726,11 +726,14 @@ func getClusterFullJSON(name string) v1.Cluster {
 
 // applyEndpointWithEnv creates an endpoint with custom env vars on the given cluster.
 func applyEndpointWithEnv(name, cluster, engineVersion string, env map[string]string) (yamlPath string) {
+	// envYAML is substituted after `spec.variables.engine_args:` (col 4 for
+	// `variables`, col 6 for per-arg key), so `env` itself must be at col 4
+	// as a sibling of `engine_args`, and its entries at col 6.
 	var envYAML string
 	if len(env) > 0 {
-		envYAML = "\n  env:"
+		envYAML = "\n    env:"
 		for k, v := range env {
-			envYAML += fmt.Sprintf("\n    %s: \"%s\"", k, v)
+			envYAML += fmt.Sprintf("\n      %s: \"%s\"", k, v)
 		}
 	}
 
