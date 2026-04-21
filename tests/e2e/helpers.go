@@ -592,9 +592,21 @@ func checkClusterStatus(cl v1.Cluster, phase v1.ClusterPhase, errMatch string) e
 
 // observeCluster fetches and parses the cluster, returning (cluster, error).
 // error is non-nil when the CLI call fails so the caller can skip this tick.
+//
+// Special case for the Deleted phase: once the resource is GC'd it cannot be
+// retrieved, but the SSH cluster delete flow only stays in Deleted for a few
+// hundred milliseconds before GC — faster than the 500ms poll interval. A
+// "not found" read is treated as a synthetic Deleted sighting so callers
+// watching for Deleted don't miss the transient phase. Any caller watching
+// for a non-Deleted phase will see a phase mismatch and keep polling as
+// normal.
 func (c *ClusterHelper) observeCluster(name string) (v1.Cluster, error) {
 	r := c.Get(name)
 	if r.ExitCode != 0 {
+		if strings.Contains(r.Stdout, "not found") || strings.Contains(r.Stderr, "not found") {
+			return v1.Cluster{Status: &v1.ClusterStatus{Phase: v1.ClusterPhaseDeleted}}, nil
+		}
+
 		return v1.Cluster{}, fmt.Errorf("get cluster %q exit %d", name, r.ExitCode)
 	}
 
