@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -514,17 +515,29 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 
 			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
-			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
+			preC := parseClusterJSON(r.Stdout)
+			oldHash := preC.Status.ObservedSpecHash
+
+			debugDumpClusterState("C2612842 pre-Apply", preC)
 
 			hostPathYAML := "    model_caches:\n      - name: test-cache\n        host_path:\n          path: /opt/neutree/model-cache-test"
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yamlPath := renderK8sClusterYAML(map[string]string{
 				"name":              clusterName,
 				"kubeconfig":        kubeconfig,
 				"model_caches_yaml": hostPathYAML,
 			})
-			r = ClusterH.Apply(yaml)
+			if raw, err := os.ReadFile(yamlPath); err == nil {
+				fmt.Fprintf(GinkgoWriter, "[C2612842 debug] rendered PATCH YAML:\n%s\n", string(raw))
+			}
+
+			r = ClusterH.Apply(yamlPath)
 			ExpectSuccess(r)
+			fmt.Fprintf(GinkgoWriter, "[C2612842 debug] Apply CLI stdout:\n%s\n", r.Stdout)
+
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			debugDumpClusterState("C2612842 post-Apply-immediate", parseClusterJSON(r.Stdout))
 
 			// See C2612840 -- non-PVC model_caches changes verified via hash only.
 			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
