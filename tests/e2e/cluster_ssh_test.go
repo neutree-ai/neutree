@@ -114,7 +114,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 
-		r = ClusterH.DeleteGraceful(clusterName)
+		r = ClusterH.DeleteAsync(clusterName)
 		ExpectSuccess(r)
 
 		By("Waiting for Deleting phase")

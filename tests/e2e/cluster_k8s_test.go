@@ -89,7 +89,7 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 		r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 
-		r = ClusterH.DeleteGraceful(clusterName)
+		r = ClusterH.DeleteAsync(clusterName)
 		ExpectSuccess(r)
 
 		By("Waiting for Deleting phase")
