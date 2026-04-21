@@ -1,8 +1,6 @@
 package e2e
 
 import (
-	"strings"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -36,15 +34,16 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
 		clusterName = "e2e-ssh-" + Cfg.RunID
 
+		// Deliberately omit worker_ips at creation so C2642277 can add them
+		// later to trigger a real spec change.
 		yaml := renderSSHClusterYAML(map[string]string{
 			"name":            clusterName,
 			"head_ip":         headIP,
-			"worker_ips":      workerIPs,
 			"ssh_user":        sshUser,
 			"ssh_private_key": sshPrivateKey,
 		})
 
-		By("Applying SSH cluster")
+		By("Applying SSH cluster (head-only)")
 		r := ClusterH.Apply(yaml)
 		ExpectSuccess(r)
 	})
@@ -70,12 +69,8 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		Expect(c.Status.ObservedSpecHash).NotTo(BeEmpty())
 		Expect(c.Status.ReadyNodes).To(BeNumerically(">=", c.Status.DesiredNodes))
 
-		expectedNodes := 1
-		if workerIPs != "" {
-			expectedNodes += len(strings.Split(workerIPs, ","))
-		}
-
-		Expect(c.Status.DesiredNodes).To(Equal(expectedNodes))
+		// BeforeAll creates a head-only cluster, so DesiredNodes == 1 here.
+		Expect(c.Status.DesiredNodes).To(Equal(1))
 		Expect(c.Status.DashboardURL).NotTo(BeEmpty())
 		Expect(c.Status.ErrorMessage).To(BeEmpty())
 		Expect(c.Status.ResourceInfo).NotTo(BeNil())
@@ -91,13 +86,14 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		ExpectSuccess(r)
 		oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
+		// Add worker nodes — a real spec change since BeforeAll created a
+		// head-only cluster.
 		yaml := renderSSHClusterYAML(map[string]string{
-			"name":             clusterName,
-			"head_ip":          headIP,
-			"worker_ips":       workerIPs,
-			"ssh_user":         sshUser,
-			"ssh_private_key":  sshPrivateKey,
-			"accelerator_type": "cpu",
+			"name":            clusterName,
+			"head_ip":         headIP,
+			"worker_ips":      workerIPs,
+			"ssh_user":        sshUser,
+			"ssh_private_key": sshPrivateKey,
 		})
 		r = ClusterH.Apply(yaml)
 		ExpectSuccess(r)
