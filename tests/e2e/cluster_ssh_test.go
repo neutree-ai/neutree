@@ -11,7 +11,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 	var ClusterH *ClusterHelper
 
 	BeforeAll(func() {
-		requireImageRegistryEnv()
+		requireImageRegistryProfile()
 
 		By("Setting up image registry")
 		SetupImageRegistry()
@@ -31,7 +31,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 	)
 
 	BeforeAll(func() {
-		headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
+		headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
 		clusterName = "e2e-ssh-" + Cfg.RunID
 
 		// Deliberately omit worker_ips at creation so C2642277 can add them

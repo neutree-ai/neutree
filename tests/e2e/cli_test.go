@@ -25,7 +25,7 @@ var _ = Describe("CLI", Ordered, Label("cli"), func() {
 			irName := "e2e-cli-ir-" + Cfg.RunID
 			clusterName := "e2e-cli-cls-" + Cfg.RunID
 
-			headIP, _, sshUser, sshPrivateKey := requireSSHEnv()
+			headIP, _, sshUser, sshPrivateKey := requireSSHProfile()
 
 			DeferCleanup(func() {
 				RunCLI("delete", "cluster", clusterName, "-w", profileWorkspace(), "--force", "--ignore-not-found")
@@ -322,7 +322,7 @@ spec: {}
 			irName := "e2e-cli-delf-ir-" + Cfg.RunID
 			clusterName := "e2e-cli-delf-cls-" + Cfg.RunID
 
-			headIP, _, sshUser, sshPrivateKey := requireSSHEnv()
+			headIP, _, sshUser, sshPrivateKey := requireSSHProfile()
 
 			// Multi-doc: ImageRegistry(priority 1) + Cluster(priority 2).
 			irPath := renderImageRegistryYAML(map[string]string{"name": irName})

@@ -15,7 +15,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 	var ClusterH *ClusterHelper
 
 	BeforeAll(func() {
-		requireImageRegistryEnv()
+		requireImageRegistryProfile()
 
 		By("Setting up image registry")
 		SetupImageRegistry()
@@ -39,7 +39,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 		)
 
 		BeforeAll(func() {
-			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
+			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
 			if len(profile.SSHNodes) == 0 || profile.SSHNodes[0].KeyFile == "" {
 				Skip("SSH key file path not configured in profile")
 			}
@@ -180,7 +180,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 		)
 
 		BeforeAll(func() {
-			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
+			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
 			if workerIPs == "" {
 				Skip("No worker IPs configured, skipping worker edit tests")
 			}
@@ -282,7 +282,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 				Skip("ModelCache.HostPath not configured in profile")
 			}
 
-			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
+			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
 			if len(profile.SSHNodes) == 0 || profile.SSHNodes[0].KeyFile == "" {
 				Skip("SSH key file path not configured in profile")
 			}

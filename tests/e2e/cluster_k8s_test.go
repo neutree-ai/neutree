@@ -11,7 +11,7 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 	var ClusterH *ClusterHelper
 
 	BeforeAll(func() {
-		requireImageRegistryEnv()
+		requireImageRegistryProfile()
 
 		By("Setting up image registry")
 		SetupImageRegistry()
@@ -28,7 +28,7 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 	)
 
 	BeforeAll(func() {
-		kubeconfig = requireK8sEnv()
+		kubeconfig = requireK8sProfile()
 		clusterName = "e2e-k8s-" + Cfg.RunID
 
 		yaml := renderK8sClusterYAML(map[string]string{

@@ -30,7 +30,11 @@ func requireOldVersion() string {
 // the compatibility window is valid again and the tests run.
 func skipIfEndpointIncompatibleOldCluster(oldVersion string) {
 	lt, err := semver.LessThan(oldVersion, "v1.0.1")
-	if err == nil && lt {
+	if err != nil {
+		Fail("invalid cluster.old_version " + oldVersion + ": " + err.Error())
+	}
+
+	if lt {
 		Skip("cluster old_version " + oldVersion + " (<=v1.0.0) does not support the current engine old_version, skipping endpoint-compat tests")
 	}
 }
@@ -39,7 +43,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 	var ClusterH *ClusterHelper
 
 	BeforeAll(func() {
-		requireImageRegistryEnv()
+		requireImageRegistryProfile()
 
 		By("Setting up image registry")
 		SetupImageRegistry()
@@ -63,7 +67,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		)
 
 		BeforeAll(func() {
-			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
+			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
 			oldVersion = requireOldVersion()
 			clusterName = "e2e-ssh-upg-" + Cfg.RunID
 
@@ -140,7 +144,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		)
 
 		BeforeAll(func() {
-			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
+			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
 			oldVersion = requireOldVersion()
 			skipIfEndpointIncompatibleOldCluster(oldVersion)
 
@@ -252,7 +256,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		)
 
 		BeforeAll(func() {
-			kubeconfig = requireK8sEnv()
+			kubeconfig = requireK8sProfile()
 			oldVersion = requireOldVersion()
 			clusterName = "e2e-k8s-upg-" + Cfg.RunID
 
@@ -322,7 +326,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		)
 
 		BeforeAll(func() {
-			kubeconfig = requireK8sEnv()
+			kubeconfig = requireK8sProfile()
 			oldVersion = requireOldVersion()
 			if profileModelName() == "" {
 				Skip("Model name not configured in profile, skipping K8s upgrade endpoint compat tests")

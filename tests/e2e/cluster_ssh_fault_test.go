@@ -13,7 +13,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 	var ClusterH *ClusterHelper
 
 	BeforeAll(func() {
-		requireImageRegistryEnv()
+		requireImageRegistryProfile()
 
 		By("Setting up image registry")
 		SetupImageRegistry()
@@ -37,7 +37,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 		)
 
 		BeforeAll(func() {
-			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
+			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
 			if len(profile.SSHNodes) == 0 || profile.SSHNodes[0].KeyFile == "" {
 				Skip("SSH key file path not configured in profile")
 			}
@@ -121,7 +121,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 		})
 
 		It("should stay Initializing when head node IP is unreachable", Label("C2613145"), func() {
-			_, _, sshUser, sshPrivateKey := requireSSHEnv()
+			_, _, sshUser, sshPrivateKey := requireSSHProfile()
 
 			clusterName := "e2e-ssh-badip-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
@@ -139,7 +139,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 		})
 
 		It("should stay Initializing when worker node IPs are unreachable", Label("C2613146"), func() {
-			headIP, _, sshUser, sshPrivateKey := requireSSHEnv()
+			headIP, _, sshUser, sshPrivateKey := requireSSHProfile()
 
 			clusterName := "e2e-ssh-badwkr-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
@@ -158,7 +158,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 		})
 
 		It("should stay Initializing when image registry is unreachable from nodes", Label("C2613149"), func() {
-			headIP, _, sshUser, sshPrivateKey := requireSSHEnv()
+			headIP, _, sshUser, sshPrivateKey := requireSSHProfile()
 
 			clusterName := "e2e-ssh-badreg-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
@@ -194,7 +194,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 		})
 
 		It("should stay Initializing when image registry reference is invalid", Label("C2612657"), func() {
-			headIP, workerIPs, sshUser, sshPrivateKey := requireSSHEnv()
+			headIP, workerIPs, sshUser, sshPrivateKey := requireSSHProfile()
 
 			clusterName := "e2e-bad-dep-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })

@@ -17,7 +17,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 	var ClusterH *ClusterHelper
 
 	BeforeAll(func() {
-		requireImageRegistryEnv()
+		requireImageRegistryProfile()
 
 		By("Setting up image registry")
 		SetupImageRegistry()
@@ -39,7 +39,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		)
 
 		BeforeAll(func() {
-			kubeconfig = requireK8sEnv()
+			kubeconfig = requireK8sProfile()
 			clusterName = "e2e-k8s-verify-" + Cfg.RunID
 
 			yaml := renderK8sClusterYAML(map[string]string{
@@ -213,7 +213,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 	Describe("Multi-Cluster Isolation", Label("isolation"), func() {
 
 		It("should create different namespaces for two clusters on same K8s", Label("C2614157"), func() {
-			kubeconfig := requireK8sEnv()
+			kubeconfig := requireK8sProfile()
 
 			clusterA := "e2e-k8s-iso-a-" + Cfg.RunID
 			clusterB := "e2e-k8s-iso-b-" + Cfg.RunID
@@ -269,7 +269,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		)
 
 		BeforeAll(func() {
-			kubeconfig = requireK8sEnv()
+			kubeconfig = requireK8sProfile()
 			clusterName = "e2e-k8s-rt-edit-" + Cfg.RunID
 
 			yaml := renderK8sClusterYAML(map[string]string{
@@ -432,7 +432,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		const fakeNFSServer = "192.0.2.1"
 
 		BeforeAll(func() {
-			kubeconfig = requireK8sEnv()
+			kubeconfig = requireK8sProfile()
 
 			if profile.ModelCache.NFSServer == "" {
 				Skip("ModelCache.NFSServer not configured in profile")
@@ -555,7 +555,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		)
 
 		BeforeAll(func() {
-			kubeconfig = requireK8sEnv()
+			kubeconfig = requireK8sProfile()
 
 			if profile.ModelCache.PVCStorageClass == "" {
 				Skip("ModelCache.PVCStorageClass not configured in profile")

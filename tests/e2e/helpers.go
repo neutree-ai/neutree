@@ -343,8 +343,8 @@ func testImageRegistry() string {
 	return "e2e-image-registry-" + Cfg.RunID
 }
 
-// requireSSHEnv returns SSH cluster params from profile. ssh_private_key is returned as base64.
-func requireSSHEnv() (headIP, workerIPs, sshUser, sshPrivateKey string) {
+// requireSSHProfile returns SSH cluster params from profile. ssh_private_key is returned as base64.
+func requireSSHProfile() (headIP, workerIPs, sshUser, sshPrivateKey string) {
 	headIP = profileSSHHeadIP()
 	if headIP == "" {
 		Skip("SSH head IP not configured in profile, skipping SSH cluster tests")
@@ -365,25 +365,14 @@ func requireSSHEnv() (headIP, workerIPs, sshUser, sshPrivateKey string) {
 	return headIP, workerIPs, sshUser, sshPrivateKey
 }
 
-// requireK8sEnv returns the base64-encoded kubeconfig from profile.
-func requireK8sEnv() string {
+// requireK8sProfile returns the base64-encoded kubeconfig from profile.
+func requireK8sProfile() string {
 	kubeconfig := profileKubeconfig()
 	if kubeconfig == "" {
 		Skip("Kubeconfig not configured in profile, skipping K8s cluster tests")
 	}
 
 	return kubeconfig
-}
-
-// requireImageRegistryEnv skips the test if image registry config is missing.
-func requireImageRegistryEnv() {
-	if profile.ImageRegistry.URL == "" {
-		Skip("ImageRegistry.URL not configured in profile")
-	}
-
-	if profile.ImageRegistry.Repository == "" {
-		Skip("ImageRegistry.Repository not configured in profile")
-	}
 }
 
 // --- Image registry setup/teardown ---
@@ -639,22 +628,17 @@ func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, er
 // the phase leaves Running, preventing the race where WaitForPhase("Running")
 // returns immediately before the controller processes a new apply.
 func (c *ClusterHelper) WaitForSpecChange(name, oldHash string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	EventuallyWithOffset(1, func() bool {
 		r := c.Get(name)
-		if r.ExitCode == 0 {
-			cl := parseClusterJSON(r.Stdout)
-			if cl.Status.ObservedSpecHash != oldHash {
-				return
-			}
-
-			if cl.Status.Phase != v1.ClusterPhaseRunning {
-				return
-			}
+		if r.ExitCode != 0 {
+			return false
 		}
 
-		time.Sleep(2 * time.Second)
-	}
+		cl := parseClusterJSON(r.Stdout)
+
+		return cl.Status.ObservedSpecHash != oldHash || cl.Status.Phase != v1.ClusterPhaseRunning
+	}, timeout, 2*time.Second).Should(BeTrue(),
+		"cluster %q should observe a new spec hash or leave Running within %s (oldHash=%q)", name, timeout, oldHash)
 }
 
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
