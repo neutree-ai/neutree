@@ -478,13 +478,11 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			// Non-PVC model_caches changes don't reliably expose an observable
-			// Updating phase (pod rollout may be brief or skipped entirely), so
-			// we only assert that the controller eventually observes the new
-			// spec by watching ObservedSpecHash advance. Reconcile may stall on
-			// pod readiness for minutes after a volume type switch, so use
-			// TerminalPhaseTimeout.
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
+			// Non-PVC model_caches edits are no-ops at cluster-level reconcile
+			// (Router/Metrics/ModelCache reconcile don't read NFS/HostPath), so
+			// the controller should observe the new spec and write an updated
+			// ObservedSpecHash within one reconcile cycle. Verify via hash.
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
 		It("should update NFS path", Label("C2612841"), func() {
@@ -507,7 +505,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 
 			// See C2612840 -- non-PVC model_caches changes verified via hash only.
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
 		It("should switch to HostPath model cache", Label("C2612842"), func() {
@@ -529,7 +527,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 
 			// See C2612840 -- non-PVC model_caches changes verified via hash only.
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
 		It("should remove model cache", Label("C2612845"), func() {
@@ -548,7 +546,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 
 			// See C2612840 -- non-PVC model_caches changes verified via hash only.
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 	})
 
@@ -652,7 +650,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, TerminalPhaseTimeout)
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 	})
 

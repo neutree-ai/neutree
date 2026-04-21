@@ -626,10 +626,8 @@ func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, er
 
 // EventuallyObservedSpecHashAdvanced polls the cluster until Status.ObservedSpecHash
 // differs from oldHash or the timeout fires. Use after Apply to confirm the
-// controller has observed a new spec. The hash is only written when reconcile
-// succeeds and phase is Running, so for changes that make the cluster briefly
-// unhealthy (e.g. non-PVC model_caches edits that require pod rollout), the
-// hash may take minutes to advance -- pass TerminalPhaseTimeout in that case.
+// controller has observed the new spec. The hash is only written when phase
+// reaches Running, so any reconcile error path will keep the hash pinned.
 func (c *ClusterHelper) EventuallyObservedSpecHashAdvanced(name, oldHash string, timeout time.Duration) {
 	EventuallyWithOffset(1, func() string {
 		r := c.Get(name)
