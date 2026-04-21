@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/semver"
 )
 
 // requireOldVersion returns the old version for upgrade tests, or skips.
@@ -19,6 +20,19 @@ func requireOldVersion() string {
 	}
 
 	return profile.Cluster.OldVersion
+}
+
+// skipIfEndpointIncompatibleOldCluster skips the endpoint-compatibility tests
+// when the profile's cluster old_version is <= v1.0.0. Clusters at that version
+// ship a Ray/engine base that does not support the current Engine.OldVersion
+// (e.g. v0.11.2), so deploying the endpoint on the pre-upgrade cluster fails
+// with an irrelevant incompatibility error. Once old_version moves past v1.0.0
+// the compatibility window is valid again and the tests run.
+func skipIfEndpointIncompatibleOldCluster(oldVersion string) {
+	lt, err := semver.LessThan(oldVersion, "v1.0.1")
+	if err == nil && lt {
+		Skip("cluster old_version " + oldVersion + " (<=v1.0.0) does not support the current engine old_version, skipping endpoint-compat tests")
+	}
 }
 
 var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func() {
@@ -128,6 +142,8 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		BeforeAll(func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHEnv()
 			oldVersion = requireOldVersion()
+			skipIfEndpointIncompatibleOldCluster(oldVersion)
+
 			if profileModelName() == "" {
 				Skip("Model name not configured in profile, skipping upgrade endpoint compat tests")
 			}
