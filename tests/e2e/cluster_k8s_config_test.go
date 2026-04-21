@@ -508,21 +508,13 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
-		// KNOWN-FAILING: hits a chain of two CP bugs when switching model_cache
-		// type (NFS -> HostPath):
-		//
-		//   1. `handlePatchWithBackfill` in internal/routes/proxies/resource_proxy.go
-		//      walks the current DB resource and creates an empty map for every
-		//      nested key missing from the PATCH body. PATCHing HostPath over
-		//      an NFS spec leaves `"nfs":{}` in the stored spec.
-		//   2. enterprise `ResourceSpecSignMiddleware` signs the original
-		//      (clean) body; `ResourceSpecSignVerifyHook` runs on each reconcile
-		//      and recomputes the signature from the corrupted DB spec. Signatures
-		//      mismatch, the beforeReconcileHook returns early, the reconcile
-		//      loop never runs, phase/hash never advance, the test times out.
-		//
-		// Keep the case as-is so the failure stays visible until both CP issues
-		// are resolved (tracked separately). See memory bug-cp-backfill-middleware.md.
+		// KNOWN-FAILING: `handlePatchWithBackfill` in
+		// internal/routes/proxies/resource_proxy.go walks the current DB
+		// resource and creates an empty map for every nested key missing from
+		// the PATCH body. PATCHing HostPath over an NFS spec leaves `"nfs":{}`
+		// in the stored spec, which downstream reconcile refuses to act on so
+		// the hash never advances and this case times out. Keeping the test
+		// live so the failure stays visible until the backfill bug is fixed.
 		It("should switch to HostPath model cache", Label("C2612842"), func() {
 			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
