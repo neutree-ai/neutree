@@ -478,14 +478,10 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
-
-			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
-			ExpectSuccess(r)
-
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
+			// NFS model_caches edits are applied to the modelcache ConfigMap without
+			// moving the cluster through Updating -- only PVC model_caches changes
+			// trigger a cluster-level rollout. Verify via ObservedSpecHash advancing.
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
 		It("should update NFS path", Label("C2612841"), func() {
@@ -507,14 +503,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
-
-			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
-			ExpectSuccess(r)
-
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
+			// NFS model_caches edits don't trigger cluster Updating (see C2612840).
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
 		It("should switch to HostPath model cache", Label("C2612842"), func() {
@@ -535,14 +525,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
-
-			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
-			ExpectSuccess(r)
-
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
+			// HostPath model_caches edits don't trigger cluster Updating (see C2612840).
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
 		It("should remove model cache", Label("C2612845"), func() {
@@ -560,14 +544,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
-
-			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
-			ExpectSuccess(r)
-
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
+			// Removing a non-PVC model cache doesn't trigger cluster Updating (see C2612840).
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 	})
 
@@ -665,14 +643,13 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
+			// PVC model_caches changes trigger a cluster-level rollout (unlike NFS/HostPath).
 			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
+			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 	})
 

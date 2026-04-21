@@ -624,6 +624,24 @@ func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, er
 	return last
 }
 
+// EventuallyObservedSpecHashAdvanced polls the cluster until Status.ObservedSpecHash
+// differs from oldHash or the timeout fires. Use after Apply to confirm the
+// controller has observed a new spec when the change does not trigger a phase
+// transition (e.g. NFS/HostPath model_caches edits are applied to the modelcache
+// ConfigMap without moving the cluster through Updating). The hash is written
+// asynchronously and may briefly lag behind the Apply.
+func (c *ClusterHelper) EventuallyObservedSpecHashAdvanced(name, oldHash string, timeout time.Duration) {
+	EventuallyWithOffset(1, func() string {
+		r := c.Get(name)
+		if r.ExitCode != 0 {
+			return oldHash
+		}
+
+		return parseClusterJSON(r.Stdout).Status.ObservedSpecHash
+	}, timeout, 500*time.Millisecond).ShouldNot(Equal(oldHash),
+		"cluster %q Status.ObservedSpecHash should advance from %q within %s", name, oldHash, timeout)
+}
+
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
 func (c *ClusterHelper) EnsureDeleted(name string) {
 	c.Delete(name)
