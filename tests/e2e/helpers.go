@@ -635,49 +635,6 @@ func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, er
 	return last
 }
 
-// observeClusterTransition polls at 500ms and reports whether both the target
-// phase and an extra signal (e.g., hash or version change) were observed
-// within timeout. Signals are tracked cumulatively so a sub-500ms phase
-// window is still captured as long as a later tick shows the extra signal.
-// Does not assert; callers decide how to report failures.
-func (c *ClusterHelper) observeClusterTransition(name string, phase v1.ClusterPhase, extra func(v1.Cluster) bool, timeout time.Duration) (seenPhase, seenExtra bool) {
-	deadline := time.Now().Add(timeout)
-
-	for time.Now().Before(deadline) {
-		r := c.Get(name)
-		if r.ExitCode == 0 {
-			cl := parseClusterJSON(r.Stdout)
-			if cl.Status.Phase == phase {
-				seenPhase = true
-			}
-
-			if extra(cl) {
-				seenExtra = true
-			}
-
-			if seenPhase && seenExtra {
-				return
-			}
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	return
-}
-
-// WaitForClusterUpdating asserts the cluster enters Updating phase and
-// observedSpecHash changes from oldHash within timeout.
-func (c *ClusterHelper) WaitForClusterUpdating(name, oldHash string, timeout time.Duration) {
-	seenPhase, seenExtra := c.observeClusterTransition(name, v1.ClusterPhaseUpdating,
-		func(cl v1.Cluster) bool { return cl.Status.ObservedSpecHash != oldHash }, timeout)
-
-	ExpectWithOffset(1, seenPhase).To(BeTrue(),
-		"cluster %q did not enter Updating phase within %s", name, timeout)
-	ExpectWithOffset(1, seenExtra).To(BeTrue(),
-		"cluster %q observedSpecHash did not change within %s", name, timeout)
-}
-
 // WaitForSpecChange polls until the observedSpecHash differs from oldHash or
 // the phase leaves Running, preventing the race where WaitForPhase("Running")
 // returns immediately before the controller processes a new apply.

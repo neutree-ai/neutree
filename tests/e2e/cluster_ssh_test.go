@@ -98,12 +98,18 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		r = ClusterH.Apply(yaml)
 		ExpectSuccess(r)
 
-		By("Waiting for Updating phase and spec change")
-		ClusterH.WaitForClusterUpdating(clusterName, oldHash, IntermediatePhaseTimeout)
+		By("Waiting for Updating phase")
+		ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 		By("Waiting for Running phase")
 		r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 		ExpectSuccess(r)
+
+		By("Verifying observedSpecHash advanced after update")
+		r = ClusterH.Get(clusterName)
+		ExpectSuccess(r)
+		Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash),
+			"observedSpecHash should change after a successful update")
 	})
 
 	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848"), func() {
