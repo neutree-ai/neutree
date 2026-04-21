@@ -508,13 +508,6 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
-		// KNOWN-FAILING: `handlePatchWithBackfill` in
-		// internal/routes/proxies/resource_proxy.go walks the current DB
-		// resource and creates an empty map for every nested key missing from
-		// the PATCH body. PATCHing HostPath over an NFS spec leaves `"nfs":{}`
-		// in the stored spec, which downstream reconcile refuses to act on so
-		// the hash never advances and this case times out. Keeping the test
-		// live so the failure stays visible until the backfill bug is fixed.
 		It("should switch to HostPath model cache", Label("C2612842"), func() {
 			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
