@@ -106,7 +106,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		ExpectSuccess(r)
 	})
 
-	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848", "C2612847"), func() {
+	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848"), func() {
 		r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 		ExpectSuccess(r)
 
