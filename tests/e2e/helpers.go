@@ -629,53 +629,15 @@ func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, er
 // controller has observed the new spec. The hash is only written when phase
 // reaches Running, so any reconcile error path will keep the hash pinned.
 func (c *ClusterHelper) EventuallyObservedSpecHashAdvanced(name, oldHash string, timeout time.Duration) {
-	var (
-		lastHash  string
-		lastPhase v1.ClusterPhase
-		polls     int
-	)
-
 	EventuallyWithOffset(1, func() string {
 		r := c.Get(name)
 		if r.ExitCode != 0 {
-			fmt.Fprintf(GinkgoWriter, "[hash-poll] cluster=%s Get failed ExitCode=%d\n", name, r.ExitCode)
 			return oldHash
 		}
 
-		cl := parseClusterJSON(r.Stdout)
-
-		polls++
-		if cl.Status.ObservedSpecHash != lastHash || cl.Status.Phase != lastPhase {
-			fmt.Fprintf(GinkgoWriter, "[hash-poll] cluster=%s poll=%d hash=%s phase=%s err=%q\n",
-				name, polls, cl.Status.ObservedSpecHash, cl.Status.Phase, cl.Status.ErrorMessage)
-			lastHash = cl.Status.ObservedSpecHash
-			lastPhase = cl.Status.Phase
-		}
-
-		return cl.Status.ObservedSpecHash
+		return parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 	}, timeout, 500*time.Millisecond).ShouldNot(Equal(oldHash),
 		"cluster %q Status.ObservedSpecHash should advance from %q within %s", name, oldHash, timeout)
-}
-
-// debugDumpClusterState prints cluster hash/phase/model_caches to GinkgoWriter.
-// Use for investigating hash-advance failures; strip once the test is green.
-func debugDumpClusterState(label string, c v1.Cluster) {
-	mcJSON := "<nil>"
-	if c.Spec != nil && c.Spec.Config != nil {
-		if b, err := json.Marshal(c.Spec.Config.ModelCaches); err == nil {
-			mcJSON = string(b)
-		}
-	}
-
-	fmt.Fprintf(GinkgoWriter,
-		"[%s] hash=%s phase=%s lastTransition=%s errMsg=%q model_caches=%s\n",
-		label,
-		c.Status.ObservedSpecHash,
-		c.Status.Phase,
-		c.Status.LastTransitionTime,
-		c.Status.ErrorMessage,
-		mcJSON,
-	)
 }
 
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).

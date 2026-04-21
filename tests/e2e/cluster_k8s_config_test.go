@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -509,35 +508,38 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
 		})
 
+		// KNOWN-FAILING: hits a chain of two CP bugs when switching model_cache
+		// type (NFS -> HostPath):
+		//
+		//   1. `handlePatchWithBackfill` in internal/routes/proxies/resource_proxy.go
+		//      walks the current DB resource and creates an empty map for every
+		//      nested key missing from the PATCH body. PATCHing HostPath over
+		//      an NFS spec leaves `"nfs":{}` in the stored spec.
+		//   2. enterprise `ResourceSpecSignMiddleware` signs the original
+		//      (clean) body; `ResourceSpecSignVerifyHook` runs on each reconcile
+		//      and recomputes the signature from the corrupted DB spec. Signatures
+		//      mismatch, the beforeReconcileHook returns early, the reconcile
+		//      loop never runs, phase/hash never advance, the test times out.
+		//
+		// Keep the case as-is so the failure stays visible until both CP issues
+		// are resolved (tracked separately). See memory bug-cp-backfill-middleware.md.
 		It("should switch to HostPath model cache", Label("C2612842"), func() {
 			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
 			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
-			preC := parseClusterJSON(r.Stdout)
-			oldHash := preC.Status.ObservedSpecHash
-
-			debugDumpClusterState("C2612842 pre-Apply", preC)
+			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
 			hostPathYAML := "    model_caches:\n      - name: test-cache\n        host_path:\n          path: /opt/neutree/model-cache-test"
 
-			yamlPath := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]string{
 				"name":              clusterName,
 				"kubeconfig":        kubeconfig,
 				"model_caches_yaml": hostPathYAML,
 			})
-			if raw, err := os.ReadFile(yamlPath); err == nil {
-				fmt.Fprintf(GinkgoWriter, "[C2612842 debug] rendered PATCH YAML:\n%s\n", string(raw))
-			}
-
-			r = ClusterH.Apply(yamlPath)
+			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
-			fmt.Fprintf(GinkgoWriter, "[C2612842 debug] Apply CLI stdout:\n%s\n", r.Stdout)
-
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			debugDumpClusterState("C2612842 post-Apply-immediate", parseClusterJSON(r.Stdout))
 
 			// See C2612840 -- non-PVC model_caches changes verified via hash only.
 			ClusterH.EventuallyObservedSpecHashAdvanced(clusterName, oldHash, IntermediatePhaseTimeout)
