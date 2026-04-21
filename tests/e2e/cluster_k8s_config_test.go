@@ -299,9 +299,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 
 		It("should update router CPU and verify K8s deployment", Label("C2612833"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
-			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
 			yaml := renderK8sClusterYAML(map[string]string{
 				"name":          clusterName,
@@ -312,7 +311,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
@@ -327,9 +326,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 
 		It("should update router memory and verify K8s deployment", Label("C2612835"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
-			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
 			yaml := renderK8sClusterYAML(map[string]string{
 				"name":          clusterName,
@@ -340,7 +338,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
@@ -355,9 +353,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 
 		It("should update router replicas and verify K8s deployment", Label("C2612837"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
-			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
 			yaml := renderK8sClusterYAML(map[string]string{
 				"name":            clusterName,
@@ -369,7 +366,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
@@ -462,7 +459,10 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 
 		It("should update NFS server config", Label("C2612840"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
@@ -478,14 +478,21 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
 		})
 
 		It("should update NFS path", Label("C2612841"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
@@ -500,14 +507,21 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
 		})
 
 		It("should switch to HostPath model cache", Label("C2612842"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
@@ -521,14 +535,21 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
 		})
 
 		It("should remove model cache", Label("C2612845"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
@@ -539,10 +560,14 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
 		})
 	})
 
@@ -626,7 +651,10 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 
 		It("should remove PVC model cache and reach Running", Label("C2612845"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
@@ -637,10 +665,14 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash))
 		})
 	})
 

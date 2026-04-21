@@ -624,23 +624,6 @@ func (c *ClusterHelper) EventuallyInPhase(name string, phase v1.ClusterPhase, er
 	return last
 }
 
-// WaitForSpecChange polls until the observedSpecHash differs from oldHash or
-// the phase leaves Running, preventing the race where WaitForPhase("Running")
-// returns immediately before the controller processes a new apply.
-func (c *ClusterHelper) WaitForSpecChange(name, oldHash string, timeout time.Duration) {
-	EventuallyWithOffset(1, func() bool {
-		r := c.Get(name)
-		if r.ExitCode != 0 {
-			return false
-		}
-
-		cl := parseClusterJSON(r.Stdout)
-
-		return cl.Status.ObservedSpecHash != oldHash || cl.Status.Phase != v1.ClusterPhaseRunning
-	}, timeout, 2*time.Second).Should(BeTrue(),
-		"cluster %q should observe a new spec hash or leave Running within %s (oldHash=%q)", name, timeout, oldHash)
-}
-
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
 func (c *ClusterHelper) EnsureDeleted(name string) {
 	c.Delete(name)

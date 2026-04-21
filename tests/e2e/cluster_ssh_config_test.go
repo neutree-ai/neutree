@@ -206,11 +206,13 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 		})
 
 		It("should add worker node and reach Running", Label("C2612830"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			c := parseClusterJSON(r.Stdout)
 			oldNodes := c.Status.DesiredNodes
-			oldHash := c.Status.ObservedSpecHash
 
 			yaml := renderSSHClusterYAML(map[string]string{
 				"name":            clusterName,
@@ -222,7 +224,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
@@ -235,11 +237,13 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 		})
 
 		It("should remove worker node and reach Running", Label("C2612831"), func() {
-			r := ClusterH.Get(clusterName)
+			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			c := parseClusterJSON(r.Stdout)
 			oldNodes := c.Status.DesiredNodes
-			oldHash := c.Status.ObservedSpecHash
 
 			yaml := renderSSHClusterYAML(map[string]string{
 				"name":            clusterName,
@@ -250,7 +254,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpdating, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)

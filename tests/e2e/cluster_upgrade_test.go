@@ -200,13 +200,6 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		})
 
 		It("should upgrade cluster and recover endpoint", Label("C2642233"), func() {
-			r := ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			c := parseClusterJSON(r.Stdout)
-			versionBefore := c.Status.Version
-			oldHash := c.Status.ObservedSpecHash
-			Expect(versionBefore).NotTo(BeEmpty())
-
 			newVersion := profileClusterVersion()
 
 			By("Applying cluster with new version " + newVersion)
@@ -218,10 +211,11 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 				"ssh_user":        sshUser,
 				"ssh_private_key": sshPrivateKey,
 			})
-			r = ClusterH.Apply(yaml)
+			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			By("Waiting for Upgrading phase")
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpgrading, "", IntermediatePhaseTimeout)
 
 			By("Waiting for cluster Running after upgrade")
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
@@ -230,7 +224,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			By("Verifying Status.Version == " + newVersion)
 			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
-			c = parseClusterJSON(r.Stdout)
+			c := parseClusterJSON(r.Stdout)
 			Expect(c.Status.Version).To(Equal(newVersion),
 				"cluster Status.Version should equal new version after upgrade")
 
@@ -387,11 +381,6 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 
 			Expect(generationBefore).NotTo(BeEmpty(), "should have at least one endpoint deployment")
 
-			r := ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			c := parseClusterJSON(r.Stdout)
-			oldHash := c.Status.ObservedSpecHash
-
 			newVersion := profileClusterVersion()
 
 			By("Applying cluster with new version " + newVersion)
@@ -400,10 +389,11 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 				"version":    newVersion,
 				"kubeconfig": kubeconfig,
 			})
-			r = ClusterH.Apply(yaml)
+			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.WaitForSpecChange(clusterName, oldHash, IntermediatePhaseTimeout)
+			By("Waiting for Upgrading phase")
+			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseUpgrading, "", IntermediatePhaseTimeout)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
@@ -411,7 +401,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			By("Verifying Status.Version == " + newVersion)
 			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
-			c = parseClusterJSON(r.Stdout)
+			c := parseClusterJSON(r.Stdout)
 			Expect(c.Status.Version).To(Equal(newVersion),
 				"cluster Status.Version should equal new version after upgrade")
 
