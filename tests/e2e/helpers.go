@@ -537,8 +537,11 @@ func (c *ClusterHelper) Delete(name string) CLIResult {
 }
 
 // DeleteGraceful deletes a cluster without --force (graceful shutdown).
+// Uses --wait=false so the CLI returns immediately after issuing the delete;
+// otherwise the CLI blocks until the resource is fully gone and callers cannot
+// observe the intermediate Deleting phase.
 func (c *ClusterHelper) DeleteGraceful(name string) CLIResult {
-	return RunCLI("delete", "cluster", name, "-w", c.workspace)
+	return RunCLI("delete", "cluster", name, "-w", c.workspace, "--wait=false")
 }
 
 // WaitForPhase waits for a cluster to reach the specified phase.
