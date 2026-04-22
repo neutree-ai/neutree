@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -14,6 +17,8 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/openai/openai-go"
 	openaioption "github.com/openai/openai-go/option"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // --- ExternalEndpoint setup / teardown ---
@@ -114,8 +119,8 @@ func waitForUpstreamRequest() (last *RecordedRequest, body map[string]any) {
 
 var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func() {
 	var (
-		serviceURL     string
-		oaiClient      openai.Client
+		serviceURL      string
+		oaiClient       openai.Client
 		anthropicClient anthropic.Client
 	)
 
@@ -147,7 +152,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 	})
 
 	Describe("Create", Label("create"), func() {
-		It("should reach Running phase and generate service_url", Label("C2635095"), func() {
+		It("should reach Running phase and generate service_url", Label("C2642173"), func() {
 			Expect(serviceURL).NotTo(BeEmpty())
 
 			expectedPath := fmt.Sprintf("/workspace/%s/external-endpoint/%s", profileWorkspace(), testEEName())
@@ -156,7 +161,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 	})
 
 	Describe("OpenAI Compatibility", Label("openai"), func() {
-		It("should return exposed model names via OpenAI SDK", Label("C2635096"), func() {
+		It("should return exposed model names via OpenAI SDK", Label("C2642174"), func() {
 			page, err := oaiClient.Models.List(context.Background())
 			Expect(err).NotTo(HaveOccurred())
 
@@ -170,7 +175,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(modelIDs).NotTo(ContainElement("gpt-4o"))
 		})
 
-		It("should route chat completion to correct upstream and rewrite model via OpenAI SDK", Label("C2635097"), func() {
+		It("should route chat completion to correct upstream and rewrite model via OpenAI SDK", Label("C2642175"), func() {
 			mockUpstream.ClearRequests()
 
 			completion, err := oaiClient.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
@@ -190,7 +195,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 				"upstream should receive the real model name, not the exposed name")
 		})
 
-		It("should return 400 for unmapped model", Label("C2635101"), func() {
+		It("should return 400 for unmapped model", Label("C2642179"), func() {
 			_, err := oaiClient.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 				Model: "nonexistent-model",
 				Messages: []openai.ChatCompletionMessageParamUnion{
@@ -201,7 +206,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(err.Error()).To(ContainSubstring("400"))
 		})
 
-		It("should forward configured Authorization header to upstream", Label("C2635100"), func() {
+		It("should forward configured Authorization header to upstream", Label("C2642178"), func() {
 			mockUpstream.ClearRequests()
 
 			_, err := oaiClient.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
@@ -219,7 +224,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 	})
 
 	Describe("Anthropic Compatibility", Label("anthropic"), func() {
-		It("should return model list via Anthropic SDK", Label("C2635099"), func() {
+		It("should return model list via Anthropic SDK", Label("C2642177"), func() {
 			page, err := anthropicClient.Models.List(context.Background(), anthropic.ModelListParams{})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -231,7 +236,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(modelIDs).To(ContainElements("fast", "smart"))
 		})
 
-		It("should handle non-stream Messages via Anthropic SDK", Label("C2635098"), func() {
+		It("should handle non-stream Messages via Anthropic SDK", Label("C2642176"), func() {
 			mockUpstream.ClearRequests()
 
 			msg, err := anthropicClient.Messages.New(context.Background(), anthropic.MessageNewParams{
@@ -260,7 +265,7 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(len(messages)).To(BeNumerically(">", 0))
 		})
 
-		It("should handle stream Messages via Anthropic SDK", Label("C2635189"), func() {
+		It("should handle stream Messages via Anthropic SDK", Label("C2642180"), func() {
 			mockUpstream.ClearRequests()
 
 			stream := anthropicClient.Messages.NewStreaming(context.Background(), anthropic.MessageNewParams{
@@ -289,6 +294,220 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(last.Path).To(Equal("/v1/chat/completions"))
 			Expect(upstreamReq["model"]).To(Equal("gpt-4o"))
 			Expect(upstreamReq["stream"]).To(BeTrue())
+		})
+	})
+
+	// Credential masking is implemented by stripping the credential field entirely
+	// from API responses (not masking with ***). Both GET and LIST should not return
+	// the credential field at all.
+	Describe("Credential Masking", Label("credential"), func() {
+		It("should strip credential from CLI GET/LIST output", Label("C2642210"), func() {
+			By("Verifying GET JSON strips credential")
+			r := RunCLI("get", "ExternalEndpoint", testEEName(), "-w", profileWorkspace(), "-o", "json")
+			ExpectSuccess(r)
+
+			Expect(r.Stdout).NotTo(ContainSubstring(mockAuthToken),
+				"raw credential token must not appear in GET JSON output")
+			Expect(r.Stdout).NotTo(ContainSubstring("credential"),
+				"credential field should not exist in GET JSON output")
+
+			By("Verifying LIST JSON strips credential")
+			r = RunCLI("get", "ExternalEndpoint", "-w", profileWorkspace(), "-o", "json")
+			ExpectSuccess(r)
+
+			Expect(r.Stdout).NotTo(ContainSubstring(mockAuthToken),
+				"raw credential token must not appear in LIST JSON output")
+			Expect(r.Stdout).NotTo(ContainSubstring("credential"),
+				"credential field should not exist in LIST JSON output")
+
+			By("Verifying GET YAML strips credential")
+			r = RunCLI("get", "ExternalEndpoint", testEEName(), "-w", profileWorkspace(), "-o", "yaml")
+			ExpectSuccess(r)
+
+			Expect(r.Stdout).NotTo(ContainSubstring(mockAuthToken),
+				"raw credential token must not appear in YAML output")
+			Expect(r.Stdout).NotTo(ContainSubstring("credential"),
+				"credential field should not exist in YAML output")
+		})
+	})
+
+	Describe("CLI Lifecycle", Label("lifecycle"), func() {
+		It("should apply, get, and delete ExternalEndpoint via CLI", Label("C2642212"), func() {
+			eeName := "e2e-ee-lifecycle-" + Cfg.RunID
+
+			By("Applying ExternalEndpoint via CLI")
+			eeYAML := fmt.Sprintf(`apiVersion: v1
+kind: ExternalEndpoint
+metadata:
+  name: %s
+  workspace: %s
+spec:
+  upstreams:
+    - upstream:
+        url: http://example.com
+      model_mapping:
+        test-model: test-model
+`, eeName, profileWorkspace())
+
+			tmpFile, err := os.CreateTemp("", "e2e-ee-lifecycle-*.yaml")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = tmpFile.WriteString(eeYAML)
+			Expect(err).NotTo(HaveOccurred())
+			tmpFile.Close()
+			defer os.Remove(tmpFile.Name())
+
+			r := RunCLI("apply", "-f", tmpFile.Name())
+			ExpectSuccess(r)
+			Expect(r.Stdout).To(ContainSubstring("created"))
+
+			By("Getting ExternalEndpoint via CLI and verifying fields")
+			r = RunCLI("get", "ExternalEndpoint", eeName, "-w", profileWorkspace(), "-o", "json")
+			ExpectSuccess(r)
+
+			var ee v1.ExternalEndpoint
+			Expect(json.Unmarshal([]byte(r.Stdout), &ee)).To(Succeed())
+			Expect(ee.Metadata).NotTo(BeNil())
+			Expect(ee.Metadata.Name).To(Equal(eeName))
+			Expect(ee.Metadata.Workspace).To(Equal(profileWorkspace()))
+
+			By("Deleting ExternalEndpoint via CLI")
+			r = RunCLI("delete", "ExternalEndpoint", eeName, "-w", profileWorkspace(), "--force")
+			ExpectSuccess(r)
+
+			By("Verifying ExternalEndpoint is deleted")
+			r = RunCLI("get", "ExternalEndpoint", eeName, "-w", profileWorkspace())
+			ExpectFailed(r)
+		})
+	})
+
+	Describe("Credentials API", Label("credentials-api"), func() {
+		It("should return credential for admin via credentials endpoint", Label("C2644056"), func() {
+			By("Logging in as admin to get JWT")
+			jwt := loginTestUser(profile.Auth.Email, profile.Auth.Password)
+			Expect(jwt).NotTo(BeEmpty())
+
+			url := fmt.Sprintf("%s/api/v1/credentials/external_endpoints?metadata->>workspace=eq.%s&metadata->>name=eq.%s",
+				strings.TrimRight(Cfg.ServerURL, "/"),
+				profileWorkspace(),
+				testEEName(),
+			)
+
+			client := &http.Client{Timeout: 30 * time.Second}
+			req, err := http.NewRequest(http.MethodGet, url, nil)
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Authorization", "Bearer "+jwt)
+
+			resp, err := client.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(resp.StatusCode).To(Equal(http.StatusOK),
+				"credentials endpoint should return 200, got body: %s", string(body))
+
+			// The credentials API should return the actual credential for authorized users
+			Expect(string(body)).To(ContainSubstring(mockAuthToken),
+				"admin credentials endpoint should return the actual credential")
+		})
+
+		It("should return 403 for user without read-credentials permission", Label("C2644057"), func() {
+			testUserName := "e2e-nocred-" + Cfg.RunID
+			testEmail := testUserName + "@e2e-test.local"
+			testPassword := "E2eTest!Pass123"
+			roleName := "e2e-role-nocred-" + Cfg.RunID
+			var userID string
+
+			By("Logging in as admin to get JWT for user management")
+			adminJWT := loginTestUser(profile.Auth.Email, profile.Auth.Password)
+			Expect(adminJWT).NotTo(BeEmpty())
+
+			DeferCleanup(func() {
+				if userID != "" {
+					deleteTestUser(adminJWT, userID)
+				}
+
+				RunCLI("delete", "roleassignment", testUserName+"-ra",
+					"-w", profileWorkspace(), "--force", "--ignore-not-found")
+				RunCLI("delete", "role", roleName,
+					"-w", profileWorkspace(),
+					"--force", "--ignore-not-found")
+			})
+
+			By("Creating a test user via admin API")
+			userID = createTestUser(adminJWT, testUserName, testEmail, testPassword)
+			Expect(userID).NotTo(BeEmpty(), "user creation should return a user ID")
+
+			By("Creating a role WITHOUT external_endpoint:read-credentials")
+			roleYAML := fmt.Sprintf(`apiVersion: v1
+kind: Role
+metadata:
+  name: %s
+  workspace: %s
+spec:
+  permissions:
+    - "external_endpoint:read"
+    - "cluster:read"
+`, roleName, profileWorkspace())
+
+			tmpFile, err := os.CreateTemp("", "e2e-role-*.yaml")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = tmpFile.WriteString(roleYAML)
+			Expect(err).NotTo(HaveOccurred())
+			tmpFile.Close()
+			defer os.Remove(tmpFile.Name())
+
+			r := RunCLI("apply", "-f", tmpFile.Name())
+			ExpectSuccess(r)
+
+			By("Assigning role to user")
+			raYAML := fmt.Sprintf(`apiVersion: v1
+kind: RoleAssignment
+metadata:
+  name: %s
+spec:
+  user_id: "%s"
+  role: "%s"
+  workspace: "%s"
+`, testUserName+"-ra", userID, roleName, profileWorkspace())
+
+			tmpFile2, err := os.CreateTemp("", "e2e-ra-*.yaml")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = tmpFile2.WriteString(raYAML)
+			Expect(err).NotTo(HaveOccurred())
+			tmpFile2.Close()
+			defer os.Remove(tmpFile2.Name())
+
+			r = RunCLI("apply", "-f", tmpFile2.Name())
+			ExpectSuccess(r)
+
+			By("Logging in as the test user to get JWT")
+			jwt := loginTestUser(testEmail, testPassword)
+			Expect(jwt).NotTo(BeEmpty(), "login should return an access token")
+
+			By("Calling credentials API with non-admin JWT")
+			credURL := fmt.Sprintf("%s/api/v1/credentials/external_endpoints?metadata->>workspace=eq.%s&metadata->>name=eq.%s",
+				strings.TrimRight(Cfg.ServerURL, "/"),
+				profileWorkspace(),
+				testEEName(),
+			)
+
+			client := &http.Client{Timeout: 30 * time.Second}
+			req, err := http.NewRequest(http.MethodGet, credURL, nil)
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Authorization", "Bearer "+jwt)
+
+			resp, err := client.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(resp.StatusCode).To(Equal(http.StatusForbidden),
+				"credentials endpoint should return 403 for user without read-credentials permission, got body: %s",
+				string(body))
 		})
 	})
 })
