@@ -23,3 +23,8 @@ spec:
   replicas:
     num: 1
 ${E2E_ENV_YAML}
+  deployment_options:
+    scheduler:
+      load_factor: 1.25
+      type: consistent_hash
+      virtual_nodes: 150

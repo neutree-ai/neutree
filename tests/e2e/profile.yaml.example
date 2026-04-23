@@ -74,3 +74,21 @@ model_cache:
   nfs_server: ""
   nfs_path: ""
   pvc_storage_class: ""
+
+# Control plane deploy/cleanup/upgrade tests
+control_plane:
+  api_port: 3000
+  version: ""
+  archive_url: ""
+  mirror_registry: ""
+  registry_project: ""
+  # docker-compose mode
+  host: ""
+  ssh_user: root
+  ssh_key: ~/.ssh/id_rsa
+  compose_dir: /home/neutree/
+  # kubernetes mode
+  kubeconfig: ""
+  k8s_namespace: neutree-e2e
+  # upgrade tests (leave old_version empty to skip)
+  old_version: ""

@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-)
 
-const defaultModelVersion = "latest"
+	v1 "github.com/neutree-ai/neutree/api/v1"
+)
 
 // Profile represents the test-infra standard profile format (snake_case).
 type Profile struct {
@@ -96,10 +96,30 @@ type Profile struct {
 		PVCStorageClass string `yaml:"pvc_storage_class"`
 	} `yaml:"model_cache"`
 
+	ControlPlane struct {
+		Host            string `yaml:"host"`
+		SSHUser         string `yaml:"ssh_user"`
+		SSHKey          string `yaml:"ssh_key"`
+		ComposeDir      string `yaml:"compose_dir"`
+		Kubeconfig      string `yaml:"kubeconfig"`
+		K8sNamespace    string `yaml:"k8s_namespace"`
+		APIPort         int    `yaml:"api_port"`
+		Version         string `yaml:"version"`
+		ArchiveURL      string `yaml:"archive_url"`
+		MirrorRegistry  string `yaml:"mirror_registry"`
+		RegistryProject string `yaml:"registry_project"`
+		OldVersion      string `yaml:"old_version"`
+	} `yaml:"control_plane"`
+
 	// Computed fields (populated by LoadProfile, not from YAML directly)
-	sshHeadPrivateKeyBase64 string // base64-encoded content of SSHNodes[0].KeyFile
-	sshWorkerIPs            string // comma-separated worker IPs
-	kubeconfigBase64        string // base64-encoded content of Kubernetes.Kubeconfig
+	sshHeadPrivateKeyBase64 string
+	sshWorkerIPs            string
+	kubeconfigBase64        string
+	cpSSHKeyPath            string
+	cpCLIURL                string
+	cpChartURL              string
+	cpOfflineImageURL       string
+	cpOldCLIURL             string
 }
 
 // profile is the package-level profile instance, populated by LoadProfile().
@@ -159,6 +179,46 @@ func LoadProfile() error {
 		}
 
 		profile.kubeconfigBase64 = base64.StdEncoding.EncodeToString(kcData)
+	}
+
+	// Control plane: expand paths and set defaults.
+	if profile.ControlPlane.SSHKey != "" {
+		profile.cpSSHKeyPath = expandHome(profile.ControlPlane.SSHKey)
+	}
+
+	if profile.ControlPlane.SSHUser == "" {
+		profile.ControlPlane.SSHUser = "root"
+	}
+
+	if profile.ControlPlane.ComposeDir == "" {
+		profile.ControlPlane.ComposeDir = "/home/neutree"
+	}
+
+	if profile.ControlPlane.Kubeconfig != "" {
+		profile.ControlPlane.Kubeconfig = expandHome(profile.ControlPlane.Kubeconfig)
+	}
+
+	if profile.ControlPlane.APIPort == 0 {
+		profile.ControlPlane.APIPort = 3000
+	}
+
+	if profile.ControlPlane.K8sNamespace == "" {
+		profile.ControlPlane.K8sNamespace = "neutree-e2e"
+	}
+
+	if base := profile.ControlPlane.ArchiveURL; base != "" {
+		base = strings.TrimRight(base, "/")
+		ver := profile.ControlPlane.Version
+
+		if ver != "" {
+			profile.cpCLIURL = fmt.Sprintf("%s/%s/neutree-cli-amd64", base, ver)
+			profile.cpChartURL = fmt.Sprintf("%s/%s/neutree-%s.tgz", base, ver, ver)
+			profile.cpOfflineImageURL = fmt.Sprintf("%s/%s/neutree-controlplane-%s-amd64.tar.gz", base, ver, ver)
+		}
+
+		if oldVer := profile.ControlPlane.OldVersion; oldVer != "" {
+			profile.cpOldCLIURL = fmt.Sprintf("%s/%s/neutree-cli-amd64", base, oldVer)
+		}
 	}
 
 	return nil
@@ -236,7 +296,7 @@ func profileEngineName() string {
 		return profile.Engine.Name
 	}
 
-	return "vllm"
+	return v1.EngineNameVLLM
 }
 
 func profileEngineVersion() string {
@@ -265,7 +325,7 @@ func profileModelVersion() string {
 		return profile.Model.Version
 	}
 
-	return defaultModelVersion
+	return v1.LatestVersion
 }
 
 func profileModelTask() string {
@@ -310,7 +370,7 @@ func profileEmbeddingModelVersion() string {
 		return profile.EmbeddingModel.Version
 	}
 
-	return defaultModelVersion
+	return v1.LatestVersion
 }
 
 func profileRerankModelName() string { return profile.RerankModel.Name }
@@ -319,7 +379,7 @@ func profileRerankModelVersion() string {
 		return profile.RerankModel.Version
 	}
 
-	return defaultModelVersion
+	return v1.LatestVersion
 }
 
 func profileMockUpstreamHost() string {
@@ -329,6 +389,24 @@ func profileMockUpstreamHost() string {
 
 	return "host.docker.internal"
 }
+
+// --- Control Plane accessors ---
+
+func profileCPHost() string            { return profile.ControlPlane.Host }
+func profileCPSSHUser() string         { return profile.ControlPlane.SSHUser }
+func profileCPSSHKeyPath() string      { return profile.cpSSHKeyPath }
+func profileCPComposeDir() string      { return profile.ControlPlane.ComposeDir }
+func profileCPAPIPort() int            { return profile.ControlPlane.APIPort }
+func profileCPVersion() string         { return profile.ControlPlane.Version }
+func profileCPCLIURL() string          { return profile.cpCLIURL }
+func profileCPChartURL() string        { return profile.cpChartURL }
+func profileCPMirrorRegistry() string  { return profile.ControlPlane.MirrorRegistry }
+func profileCPRegistryProject() string { return profile.ControlPlane.RegistryProject }
+func profileCPOfflineImageURL() string { return profile.cpOfflineImageURL }
+func profileCPKubeconfig() string      { return profile.ControlPlane.Kubeconfig }
+func profileCPK8sNamespace() string    { return profile.ControlPlane.K8sNamespace }
+func profileCPOldVersion() string      { return profile.ControlPlane.OldVersion }
+func profileCPOldCLIURL() string       { return profile.cpOldCLIURL }
 
 // expandHome replaces leading ~ with $HOME.
 func expandHome(path string) string {
