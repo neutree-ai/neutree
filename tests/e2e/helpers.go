@@ -974,51 +974,7 @@ func createAPIKey(serverURL, jwt, workspace, name string) string {
 	return apiKey.Status.SkValue
 }
 
-// --- Branch additions (ported on top of main): endpoint/inference/accelerator helpers ---
-
-// WaitForSpecChange polls until the observedSpecHash differs from oldHash or
-// the phase leaves Running, indicating the controller has started processing the new spec.
-// This prevents the race condition where WaitForPhase("Running") returns immediately
-// because the cluster is still Running before the controller processes the apply.
-func (c *ClusterHelper) WaitForSpecChange(name, oldHash string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		r := c.Get(name)
-		if r.ExitCode == 0 {
-			cl := parseClusterJSON(r.Stdout)
-			if cl.Status.ObservedSpecHash != oldHash {
-				return
-			}
-
-			if cl.Status.Phase != v1.ClusterPhaseRunning {
-				return
-			}
-		}
-
-		time.Sleep(2 * time.Second)
-	}
-}
-
-// waitClusterErrorMessage polls until the cluster's error_message is non-empty or timeout.
-func waitClusterErrorMessage(ch *ClusterHelper, name string, timeout time.Duration) v1.Cluster {
-	deadline := time.Now().Add(timeout)
-
-	var c v1.Cluster
-
-	for time.Now().Before(deadline) {
-		r := ch.Get(name)
-		if r.ExitCode == 0 {
-			c = parseClusterJSON(r.Stdout)
-			if c.Status != nil && c.Status.ErrorMessage != "" {
-				return c
-			}
-		}
-
-		time.Sleep(5 * time.Second)
-	}
-
-	return c
-}
+// --- Endpoint/inference/accelerator helpers ---
 
 // engineVersionSupportsK8s returns true if the given engine version has K8s deployment templates.
 // K8s deployment support starts from v0.11.0 for vLLM.
@@ -1162,46 +1118,104 @@ func engineArgsYAML() string {
 	return "\n" + strings.Join(lines, "\n")
 }
 
-// applyEndpointOnCluster renders and applies an endpoint on a specific cluster.
-func applyEndpointOnCluster(name, cluster, engineVersion string) (yamlPath string) {
-	accType, accProduct := getClusterAccelerator(cluster)
-
-	defaults := map[string]string{
-		"E2E_ENDPOINT_NAME":       name,
-		"E2E_WORKSPACE":           profileWorkspace(),
-		"E2E_CLUSTER_NAME":        cluster,
-		"E2E_ENGINE_NAME":         profileEngineName(),
-		"E2E_ENGINE_VERSION":      engineVersion,
-		"E2E_MODEL_REGISTRY":      testRegistry(),
-		"E2E_MODEL_NAME":          profileModelName(),
-		"E2E_MODEL_VERSION":       profileModelVersion(),
-		"E2E_MODEL_TASK":          profileModelTask(),
-		"E2E_ACCELERATOR_TYPE":    accType,
-		"E2E_ACCELERATOR_PRODUCT": accProduct,
-		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
-		"E2E_ENV_YAML":            "",
-	}
-
-	yamlPath, err := renderTemplateToTempFile(
-		filepath.Join("testdata", "endpoint.yaml"), defaults,
-	)
-	Expect(err).NotTo(HaveOccurred(), "failed to render endpoint template")
-
-	r := RunCLI("apply", "-f", yamlPath, "--force-update")
-	ExpectSuccess(r)
-
-	return yamlPath
+// endpointOpts holds configurable fields for applyEndpoint.
+type endpointOpts struct {
+	engineName    string
+	engineVersion string
+	model         string
+	modelVersion  string
+	task          string
+	engineArgs    string
+	gpu           string
+	cpu           string
+	memory        string
+	accType       string
+	accProduct    string
+	env           map[string]string
+	forceUpdate   bool
 }
 
-// applyEndpointWithEnv creates an endpoint with custom env vars on the given cluster.
-func applyEndpointWithEnv(name, cluster, engineVersion string, env map[string]string) (yamlPath string) {
-	accType, accProduct := getClusterAccelerator(cluster)
+// EndpointOption configures a single field of endpointOpts.
+type EndpointOption func(*endpointOpts)
+
+func withEngineVersion(v string) EndpointOption {
+	return func(o *endpointOpts) { o.engineVersion = v }
+}
+
+func withEngine(name, version string) EndpointOption {
+	return func(o *endpointOpts) {
+		o.engineName = name
+		o.engineVersion = version
+	}
+}
+
+func withAccelerator(accType, accProduct string) EndpointOption {
+	return func(o *endpointOpts) {
+		o.accType = accType
+		o.accProduct = accProduct
+	}
+}
+
+func withModel(name, version string) EndpointOption {
+	return func(o *endpointOpts) {
+		o.model = name
+		o.modelVersion = version
+	}
+}
+
+func withTask(task string) EndpointOption {
+	return func(o *endpointOpts) { o.task = task }
+}
+
+func withEngineArgs(args string) EndpointOption {
+	return func(o *endpointOpts) { o.engineArgs = args }
+}
+
+func withGPU(n string) EndpointOption {
+	return func(o *endpointOpts) { o.gpu = n }
+}
+
+func withCPU(cpu string) EndpointOption {
+	return func(o *endpointOpts) { o.cpu = cpu }
+}
+
+func withMemory(memory string) EndpointOption {
+	return func(o *endpointOpts) { o.memory = memory }
+}
+
+func withEnv(env map[string]string) EndpointOption {
+	return func(o *endpointOpts) { o.env = env }
+}
+
+func withoutForceUpdate() EndpointOption {
+	return func(o *endpointOpts) { o.forceUpdate = false }
+}
+
+// renderEndpoint renders the endpoint YAML template and returns the temp file path.
+func renderEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath string) {
+	o := &endpointOpts{
+		engineName:    profileEngineName(),
+		engineVersion: profileEngineVersion(),
+		model:         profileModelName(),
+		modelVersion:  profileModelVersion(),
+		task:          profileModelTask(),
+		engineArgs:    engineArgsYAML(),
+		gpu:           "1",
+		forceUpdate:   true,
+	}
+	for _, fn := range opts {
+		fn(o)
+	}
+
+	if o.accType == "" || o.accProduct == "" {
+		o.accType, o.accProduct = getClusterAccelerator(cluster)
+	}
 
 	var envYAML string
-	if len(env) > 0 {
-		envYAML = "\n  env:"
-		for k, v := range env {
-			envYAML += fmt.Sprintf("\n    %s: \"%s\"", k, v)
+	if len(o.env) > 0 {
+		envYAML = "  env:\n"
+		for k, v := range o.env {
+			envYAML += fmt.Sprintf("    %s: \"%s\"\n", k, v)
 		}
 	}
 
@@ -1209,97 +1223,42 @@ func applyEndpointWithEnv(name, cluster, engineVersion string, env map[string]st
 		"E2E_ENDPOINT_NAME":       name,
 		"E2E_WORKSPACE":           profileWorkspace(),
 		"E2E_CLUSTER_NAME":        cluster,
-		"E2E_ENGINE_NAME":         profileEngineName(),
-		"E2E_ENGINE_VERSION":      engineVersion,
+		"E2E_ENGINE_NAME":         o.engineName,
+		"E2E_ENGINE_VERSION":      o.engineVersion,
 		"E2E_MODEL_REGISTRY":      testRegistry(),
-		"E2E_MODEL_NAME":          profileModelName(),
-		"E2E_MODEL_VERSION":       profileModelVersion(),
-		"E2E_MODEL_TASK":          profileModelTask(),
-		"E2E_ACCELERATOR_TYPE":    accType,
-		"E2E_ACCELERATOR_PRODUCT": accProduct,
-		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
+		"E2E_MODEL_NAME":          o.model,
+		"E2E_MODEL_VERSION":       o.modelVersion,
+		"E2E_MODEL_TASK":          o.task,
+		"E2E_ACCELERATOR_TYPE":    o.accType,
+		"E2E_ACCELERATOR_PRODUCT": o.accProduct,
+		"E2E_GPU":                 o.gpu,
+		"E2E_CPU":                 o.cpu,
+		"E2E_MEMORY":              o.memory,
+		"E2E_ENGINE_ARGS_YAML":    o.engineArgs,
 		"E2E_ENV_YAML":            envYAML,
 	}
 
-	yamlPath, err := renderTemplateToTempFile(
-		filepath.Join("testdata", "endpoint.yaml"), defaults,
-	)
+	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), defaults)
 	Expect(err).NotTo(HaveOccurred(), "failed to render endpoint template")
 
-	r := RunCLI("apply", "-f", yamlPath, "--force-update")
-	ExpectSuccess(r)
-
 	return yamlPath
 }
 
-// applyFailingEndpoint creates an endpoint with a non-existent model to trigger failure.
-func applyFailingEndpoint(name, cluster string) (yamlPath string) {
-	accType, accProduct := getClusterAccelerator(cluster)
+// applyEndpoint renders and applies an endpoint on a cluster.
+func applyEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath string) {
+	yamlPath = renderEndpoint(name, cluster, opts...)
 
-	defaults := map[string]string{
-		"E2E_ENDPOINT_NAME":       name,
-		"E2E_WORKSPACE":           profileWorkspace(),
-		"E2E_CLUSTER_NAME":        cluster,
-		"E2E_ENGINE_NAME":         profileEngineName(),
-		"E2E_ENGINE_VERSION":      profileEngineVersion(),
-		"E2E_MODEL_REGISTRY":      testRegistry(),
-		"E2E_MODEL_NAME":          "non-existent-model-" + Cfg.RunID,
-		"E2E_MODEL_VERSION":       "v0.0.0",
-		"E2E_MODEL_TASK":          profileModelTask(),
-		"E2E_ACCELERATOR_TYPE":    accType,
-		"E2E_ACCELERATOR_PRODUCT": accProduct,
-		"E2E_ENGINE_ARGS_YAML":    engineArgsYAML(),
-		"E2E_ENV_YAML":            "",
+	o := &endpointOpts{forceUpdate: true}
+	for _, fn := range opts {
+		fn(o)
 	}
 
-	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), defaults)
-	Expect(err).NotTo(HaveOccurred())
-
-	r := RunCLI("apply", "-f", yamlPath)
-	ExpectSuccess(r)
-
-	return yamlPath
-}
-
-// applyEndpointWithTask renders the endpoint template with custom model/task and applies it.
-func applyEndpointWithTask(name, cluster, engineVersion, model, modelVer, task string, extraEngineArgs ...string) (yamlPath string) {
-	var buf strings.Builder
-
-	buf.WriteString(engineArgsYAML())
-
-	for _, pair := range extraEngineArgs {
-		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
-		if ok && k != "" {
-			fmt.Fprintf(&buf, "\n      %s: %s", strings.TrimSpace(k), strings.TrimSpace(v))
-		}
+	args := []string{"apply", "-f", yamlPath}
+	if o.forceUpdate {
+		args = append(args, "--force-update")
 	}
 
-	argsYAML := buf.String()
-
-	accType, accProduct := getClusterAccelerator(cluster)
-
-	defaults := map[string]string{
-		"E2E_ENDPOINT_NAME":       name,
-		"E2E_WORKSPACE":           profileWorkspace(),
-		"E2E_CLUSTER_NAME":        cluster,
-		"E2E_ENGINE_NAME":         profileEngineName(),
-		"E2E_ENGINE_VERSION":      engineVersion,
-		"E2E_MODEL_REGISTRY":      testRegistry(),
-		"E2E_MODEL_NAME":          model,
-		"E2E_MODEL_VERSION":       modelVer,
-		"E2E_MODEL_TASK":          task,
-		"E2E_ACCELERATOR_TYPE":    accType,
-		"E2E_ACCELERATOR_PRODUCT": accProduct,
-		"E2E_ENGINE_ARGS_YAML":    argsYAML,
-		"E2E_ENV_YAML":            "",
-	}
-
-	yamlPath, err := renderTemplateToTempFile(
-		filepath.Join("testdata", "endpoint.yaml"), defaults,
-	)
-	Expect(err).NotTo(HaveOccurred())
-
-	r := RunCLI("apply", "-f", yamlPath, "--force-update")
+	r := RunCLI(args...)
 	ExpectSuccess(r)
 
 	return yamlPath
@@ -1312,35 +1271,8 @@ func allSchemaTypesEngineArgsYAML() string {
       max_model_len: 4096
       gpu_memory_utilization: 0.85
       enforce_eager: true
-      override_generation_config: '{}'`
-}
-
-// applyEndpointAllSchemaTypes creates an endpoint with engine_args covering all schema data types.
-func applyEndpointAllSchemaTypes(name, cluster string) string {
-	accType, accProduct := getClusterAccelerator(cluster)
-
-	defaults := map[string]string{
-		"E2E_ENDPOINT_NAME":       name,
-		"E2E_WORKSPACE":           profileWorkspace(),
-		"E2E_CLUSTER_NAME":        cluster,
-		"E2E_ENGINE_NAME":         profileEngineName(),
-		"E2E_ENGINE_VERSION":      profileEngineVersion(),
-		"E2E_MODEL_REGISTRY":      testRegistry(),
-		"E2E_MODEL_NAME":          profileModelName(),
-		"E2E_MODEL_VERSION":       profileModelVersion(),
-		"E2E_MODEL_TASK":          profileModelTask(),
-		"E2E_ACCELERATOR_TYPE":    accType,
-		"E2E_ACCELERATOR_PRODUCT": accProduct,
-		"E2E_ENGINE_ARGS_YAML":    allSchemaTypesEngineArgsYAML(),
-	}
-
-	yamlPath, err := renderTemplateToTempFile("testdata/endpoint.yaml", defaults)
-	Expect(err).NotTo(HaveOccurred())
-
-	r := RunCLI("apply", "-f", yamlPath, "--force-update")
-	ExpectSuccess(r)
-
-	return yamlPath
+      seed: 42
+      override_generation_config: '{"temperature": 0.8}'`
 }
 
 // waitEndpointRunning waits for an endpoint to reach Running phase.
@@ -1431,40 +1363,6 @@ func inferChat(serviceURL, prompt string) (int, string) {
 	})
 }
 
-// inferChatSafe is like inferChat but returns -1 on connection errors instead of failing.
-func inferChatSafe(serviceURL, prompt string) (int, string) {
-	payload, _ := json.Marshal(map[string]any{
-		"model": profileModelName(),
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens": 16,
-	})
-
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(serviceURL, "/")+"/v1/chat/completions",
-		strings.NewReader(string(payload)),
-	)
-	if err != nil {
-		return -1, err.Error()
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", bearerAPIKey())
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return -1, err.Error()
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	return resp.StatusCode, string(body)
-}
-
 func inferEmbedding(serviceURL, model, input string) (int, string) {
 	return doInferenceRequest(serviceURL, "/v1/embeddings", map[string]any{
 		"model": model,
@@ -1478,67 +1376,4 @@ func inferRerank(serviceURL, model, query string, documents []string) (int, stri
 		"query":     query,
 		"documents": documents,
 	})
-}
-
-// --- Engine version helpers ---
-
-// requireEngineVersion checks if a specific engine version is available via CLI.
-func requireEngineVersion(engine, version string) { //nolint:unparam // engine may vary in future
-	r := RunCLI("get", "engine", engine, "-o", "json")
-	if r.ExitCode != 0 || !strings.Contains(r.Stdout, version) {
-		Skip(fmt.Sprintf("Engine %s %s not available, skipping", engine, version))
-	}
-}
-
-// bearerAPIKey returns the API key with "Bearer " prefix for Authorization headers.
-func bearerAPIKey() string {
-	if strings.HasPrefix(Cfg.APIKey, "Bearer ") {
-		return Cfg.APIKey
-	}
-
-	return "Bearer " + Cfg.APIKey
-}
-
-// createAPIKey creates an API key on the server via PostgREST RPC using a JWT token.
-// Returns the sk_xxx value.
-func createAPIKey(serverURL, jwt, workspace, name string) string {
-	reqBody := map[string]any{
-		"p_workspace": workspace,
-		"p_name":      name,
-		"p_quota":     100000,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(serverURL, "/")+"/api/v1/rpc/create_api_key",
-		strings.NewReader(string(bodyBytes)),
-	)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+jwt)
-
-	resp, err := client.Do(req)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	ExpectWithOffset(1, resp.StatusCode).To(Equal(http.StatusOK),
-		"create_api_key RPC failed: %s", string(body))
-
-	var result map[string]any
-	ExpectWithOffset(1, json.Unmarshal(body, &result)).To(Succeed())
-
-	status, ok := result["status"].(map[string]any)
-	ExpectWithOffset(1, ok).To(BeTrue(), "missing status in create_api_key response: %s", string(body))
-
-	skValue, ok := status["sk_value"].(string)
-	ExpectWithOffset(1, ok).To(BeTrue(), "missing sk_value in create_api_key response: %s", string(body))
-	ExpectWithOffset(1, skValue).NotTo(BeEmpty())
-
-	return skValue
 }

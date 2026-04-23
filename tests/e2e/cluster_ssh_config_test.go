@@ -317,7 +317,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			ExpectSuccess(r)
 
 			By("Deploying endpoint on model-cache cluster")
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
+			yamlPath := applyEndpoint(epName, clusterName)
 			defer os.Remove(yamlPath)
 			waitEndpointRunning(epName)
 		})

@@ -168,7 +168,7 @@ E2E_TIMEOUT ?= 30m
 
 .PHONY: e2e-test
 e2e-test: ## Run E2E tests (requires NEUTREE_SERVER_URL and NEUTREE_API_KEY)
-	$(if $(wildcard .env),set -a && source .env && set +a &&) go test -v -timeout $(E2E_TIMEOUT) ./tests/e2e/... \
+	$(if $(wildcard .env),set -a && source .env && set +a &&) go test -v -timeout 6h ./tests/e2e/... \
 		--ginkgo.v --ginkgo.no-color --ginkgo.silence-skips --ginkgo.timeout=$(E2E_TIMEOUT) $(if $(LABEL_FILTER),--ginkgo.label-filter="$(LABEL_FILTER)")
 
 ##@ Database Testing

@@ -36,7 +36,6 @@ workspace: default
 cluster:
   version: v1.0.1
   # old_version: for upgrade tests — the version to create before upgrading to cluster.version
-  # If not set, upgrade tests are skipped.
   old_version: ""
 
 engine:
@@ -67,31 +66,6 @@ endpoint:
   timeout: "10m"
 
 mock_upstream_host: host.docker.internal
-
-# Control plane deploy/cleanup tests
-control_plane:
-  deploy_mode: docker-compose    # docker-compose | kubernetes
-  api_port: 3000
-  version: ""                    # CP version for --version flag (e.g. v1.0.1)
-  cli_url: ""                    # URL to download CLI binary (enterprise); if empty, compile from source
-  chart_url: ""                  # URL to download helm chart .tgz (enterprise); if empty, use local chart
-  mirror_registry: ""            # mirror registry for --mirror-registry (e.g. registry.example.com:5000)
-  registry_project: ""           # registry project for --registry-project (e.g. neutree-ai)
-  offline_image_url: ""          # URL to offline image archive (leave empty to skip offline tests)
-
-  # docker-compose mode (leave host empty to skip VM deploy tests)
-  host: ""
-  ssh_user: root
-  ssh_key: ~/.ssh/id_rsa
-  compose_dir: /home/neutree/    # neutree-cli working directory on VM
-
-  # kubernetes mode (leave kubeconfig empty to skip K8s deploy tests)
-  kubeconfig: ""                 # path to kubeconfig for CP K8s cluster
-  k8s_namespace: neutree-e2e    # helm install namespace
-
-  # upgrade tests (leave old_version empty to skip)
-  old_version: ""                # old CP version (e.g. v1.0.0) for upgrade tests
-  old_cli_url: ""                # URL to download old version neutree-cli binary
 
 model_cache:
   host_path: /data/models

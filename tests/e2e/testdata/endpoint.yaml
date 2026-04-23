@@ -14,15 +14,17 @@ spec:
     version: ${E2E_MODEL_VERSION}
     task: ${E2E_MODEL_TASK}
   resources:
-    gpu: "1"
+    cpu: "${E2E_CPU}"
+    memory: "${E2E_MEMORY}"
+    gpu: "${E2E_GPU}"
     accelerator:
       type: ${E2E_ACCELERATOR_TYPE}
       product: ${E2E_ACCELERATOR_PRODUCT}
   variables:
     engine_args:${E2E_ENGINE_ARGS_YAML}
+${E2E_ENV_YAML}
   replicas:
     num: 1
-${E2E_ENV_YAML}
   deployment_options:
     scheduler:
       load_factor: 1.25

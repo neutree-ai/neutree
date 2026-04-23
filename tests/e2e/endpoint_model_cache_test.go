@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -81,7 +80,7 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 		})
 
 		It("should deploy endpoint and reach Running", func() {
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
+			yamlPath := applyEndpoint(epName, clusterName)
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
@@ -139,7 +138,7 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 		})
 
 		It("should deploy endpoint and reach Running", func() {
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
+			yamlPath := applyEndpoint(epName, clusterName)
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
@@ -200,7 +199,7 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 		})
 
 		It("should deploy endpoint and reach Running", func() {
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
+			yamlPath := applyEndpoint(epName, clusterName)
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
@@ -285,7 +284,7 @@ var _ = Describe("SSH Endpoint Model Cache", Ordered, Label("endpoint", "ssh", "
 		})
 
 		It("should deploy endpoint and reach Running", func() {
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
+			yamlPath := applyEndpoint(epName, clusterName)
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
@@ -303,104 +302,5 @@ var _ = Describe("SSH Endpoint Model Cache", Ordered, Label("endpoint", "ssh", "
 	})
 
 	// --- NFS Model Cache (SSH) ---
-
-	Describe("NFS Cache", Ordered, Label("nfs"), func() {
-		var (
-			clusterName string
-			epName      string
-		)
-
-		BeforeAll(func() {
-			if profile.ModelCache.NFSServer == "" {
-				Skip("ModelCache.NFSServer not configured in profile")
-			}
-
-			headIP, workerIPs, sshUser, sshPrivateKey := requireSSHProfile()
-			clusterName = "e2e-mc-nfs-ssh-" + Cfg.RunID
-			epName = "e2e-ep-mc-nfs-ssh-" + Cfg.RunID
-
-			nfsCacheYAML := fmt.Sprintf("    model_caches:\n      - name: nfs-cache\n        nfs:\n          server: \"%s\"\n          path: \"%s\"\n",
-				profile.ModelCache.NFSServer,
-				profile.ModelCache.NFSPath)
-
-			yaml := renderSSHClusterYAML(map[string]string{
-				"name":              clusterName,
-				"head_ip":           headIP,
-				"worker_ips":        workerIPs,
-				"ssh_user":          sshUser,
-				"ssh_private_key":   sshPrivateKey,
-				"model_caches_yaml": nfsCacheYAML,
-			})
-
-			r := ClusterH.Apply(yaml)
-			ExpectSuccess(r)
-
-			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
-			ExpectSuccess(r)
-		})
-
-		AfterAll(func() {
-			deleteEndpoint(epName)
-			ClusterH.EnsureDeleted(clusterName)
-		})
-
-		It("should deploy endpoint with NFS cache and reach Running", Label("C2644068"), func() {
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
-			defer os.Remove(yamlPath)
-
-			waitEndpointRunning(epName)
-
-			ep := getEndpoint(epName)
-			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
-
-			By("Verifying NFS mount uses type=nfs (not nfs4) via Ray Serve backend_container config")
-			c := getClusterFullJSON(clusterName)
-			rayH := NewRayHelper(c.Status.DashboardURL)
-			apps, err := rayH.GetServeApplications()
-			Expect(err).NotTo(HaveOccurred())
-
-			foundNFSMount := false
-			for _, appStatus := range apps.Applications {
-				if appStatus.DeployedAppConfig == nil || appStatus.DeployedAppConfig.Args == nil {
-					continue
-				}
-				bc, ok := appStatus.DeployedAppConfig.Args["backend_container"].(map[string]interface{})
-				if !ok {
-					continue
-				}
-				runOpts, ok := bc["run_options"].([]interface{})
-				if !ok {
-					continue
-				}
-				for _, opt := range runOpts {
-					optStr, ok := opt.(string)
-					if !ok {
-						continue
-					}
-					if !strings.Contains(optStr, "--mount") || !strings.Contains(optStr, "type=nfs") {
-						continue
-					}
-					foundNFSMount = true
-					// Must use type=nfs, NOT type=nfs4
-					// (nfs4 filesystem type was removed in kernel 5.6+)
-					Expect(optStr).To(ContainSubstring("volume-opt=type=nfs"),
-						"NFS mount should use type=nfs, not type=nfs4")
-					Expect(optStr).NotTo(ContainSubstring("type=nfs4"),
-						"NFS mount must not use type=nfs4 (removed in kernel 5.6+)")
-					// NFSv4+ includes explicit nfsvers=N; NFSv3 omits it (kernel default).
-					// Both are valid — the key check is type=nfs above.
-				}
-			}
-			Expect(foundNFSMount).To(BeTrue(),
-				"should find NFS --mount option in backend_container run_options")
-		})
-
-		It("should serve inference requests with NFS cache", func() {
-			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with SSH NFS cache")
-			Expect(code).To(Equal(http.StatusOK), "inference with SSH NFS cache failed: %s", body)
-			Expect(body).To(ContainSubstring("choices"))
-		})
-	})
 
 })

@@ -53,13 +53,13 @@ type Profile struct {
 
 	Cluster struct {
 		Version    string `yaml:"version"`
-		OldVersion string `yaml:"old_version"` // for upgrade tests: the version to create before upgrading
+		OldVersion string `yaml:"old_version"`
 	} `yaml:"cluster"`
 
 	Engine struct {
 		Name       string `yaml:"name"`
 		Version    string `yaml:"version"`
-		OldVersion string `yaml:"old_version"` // for multi-version isolation tests only
+		OldVersion string `yaml:"old_version"`
 	} `yaml:"engine"`
 
 	Model struct {
@@ -273,8 +273,6 @@ func profileEngineName() string {
 	return "vllm"
 }
 
-// profileEngineVersion returns the primary engine version (default: v0.11.2).
-// Used by all endpoint deployments.
 func profileEngineVersion() string {
 	if profile.Engine.Version != "" {
 		return profile.Engine.Version
@@ -283,7 +281,6 @@ func profileEngineVersion() string {
 	return "v0.11.2"
 }
 
-// profileEngineOldVersion returns the old engine version for multi-version isolation tests (default: v0.8.5).
 func profileEngineOldVersion() string {
 	if profile.Engine.OldVersion != "" {
 		return profile.Engine.OldVersion

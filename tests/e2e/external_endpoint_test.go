@@ -87,17 +87,12 @@ func getEEServiceURL() string {
 	r := RunCLI("get", "ExternalEndpoint", testEEName(), "-w", profileWorkspace(), "-o", "json")
 	ExpectSuccess(r)
 
-	var ee map[string]any
+	var ee v1.ExternalEndpoint
 	Expect(json.Unmarshal([]byte(r.Stdout), &ee)).To(Succeed())
+	Expect(ee.Status).NotTo(BeNil(), "missing status in EE response")
+	Expect(ee.Status.ServiceURL).NotTo(BeEmpty(), "missing service_url in EE status")
 
-	status, ok := ee["status"].(map[string]any)
-	Expect(ok).To(BeTrue(), "missing status in EE response")
-
-	serviceURL, ok := status["service_url"].(string)
-	Expect(ok).To(BeTrue(), "missing service_url in EE status")
-	Expect(serviceURL).NotTo(BeEmpty())
-
-	return serviceURL
+	return ee.Status.ServiceURL
 }
 
 // waitForUpstreamRequest waits for the mock upstream to receive a request,

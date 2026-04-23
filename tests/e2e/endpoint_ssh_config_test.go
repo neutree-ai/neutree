@@ -5,20 +5,53 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 )
 
-// rayH is package-level so the All Schema Types Describe can also use it.
-var rayH *RayHelper
-
 var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "config"), func() {
-	var clusterName string
+	var (
+		clusterName string
+		rayH        *RayHelper
+	)
 
 	BeforeAll(func() {
 		if profileModelName() == "" {
 			Skip("Model name not configured in profile, skipping SSH endpoint config tests")
 		}
 
-		clusterName = setupSSHCluster("e2e-epcfg-ssh-")
+		requireImageRegistryProfile()
+
+		By("Setting up image registry")
+		SetupImageRegistry()
+
+		headIP, workerIPs, sshUser, sshPrivateKey := requireSSHProfile()
+		clusterName = "e2e-epcfg-ssh-" + Cfg.RunID
+
+		modelCachePath := profile.ModelCache.HostPath
+		if modelCachePath == "" {
+			modelCachePath = "/data/models"
+		}
+		modelCacheYAML := "    model_caches:\n      - name: e2e-cache\n        host_path:\n          path: \"" + modelCachePath + "\"\n"
+
+		yaml := renderSSHClusterYAML(map[string]string{
+			"name":              clusterName,
+			"head_ip":           headIP,
+			"worker_ips":        workerIPs,
+			"ssh_user":          sshUser,
+			"ssh_private_key":   sshPrivateKey,
+			"model_caches_yaml": modelCacheYAML,
+		})
+
+		ch := NewClusterHelper()
+
+		By("Applying SSH cluster: " + clusterName)
+		r := ch.Apply(yaml)
+		ExpectSuccess(r)
+
+		By("Waiting for cluster Running")
+		ch.EventuallyInPhase(clusterName, v1.ClusterPhaseRunning, "", TerminalPhaseTimeout)
 
 		By("Setting up model registry")
 		SetupModelRegistry()
@@ -37,15 +70,39 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 	// --- Config Verification via Ray Dashboard ---
 
 	Describe("Config Verification", Ordered, func() {
-		var epName string
+		var (
+			epName     string
+			appConfig  *dashboard.RayServeApplication
+			backendDep RuntimeDeployment
+			ctrlDep    RuntimeDeployment
+		)
 
 		BeforeAll(func() {
 			epName = "e2e-ep-ssh-cfg-" + Cfg.RunID
 
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
+			yamlPath := applyEndpoint(epName, clusterName, withEnv(map[string]string{
+				"E2E_TEST_KEY": "e2e_test_value",
+			}))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
+
+			By("Fetching Ray Serve application config")
+			appName := profileWorkspace() + "_" + epName
+			var err error
+			appConfig, err = rayH.GetApplicationConfig(appName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(appConfig).NotTo(BeNil(), "application %s should exist", appName)
+
+			By("Fetching runtime deployments")
+			deps, err := rayH.GetAppRuntimeDeployments(profileWorkspace(), epName)
+			Expect(err).NotTo(HaveOccurred())
+
+			var ok bool
+			backendDep, ok = deps["Backend"]
+			Expect(ok).To(BeTrue(), "Backend deployment should exist")
+			ctrlDep, ok = deps["Controller"]
+			Expect(ok).To(BeTrue(), "Controller deployment should exist")
 		})
 
 		AfterAll(func() {
@@ -55,246 +112,88 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		})
 
 		It("should have correct model config in Ray Serve", Label("C2613404"), func() {
-			appName := profileWorkspace() + "_" + epName
-			apps, err := rayH.GetServeApplications()
-			Expect(err).NotTo(HaveOccurred())
+			model, ok := appConfig.Args["model"].(map[string]any)
+			Expect(ok).To(BeTrue(), "args.model should be a map")
 
-			appStatus, ok := apps.Applications[appName]
-			Expect(ok).To(BeTrue(), "application %s should exist", appName)
-			Expect(appStatus.DeployedAppConfig).NotTo(BeNil())
-			Expect(appStatus.DeployedAppConfig.Args).NotTo(BeNil())
-
-			model, ok := appStatus.DeployedAppConfig.Args["model"]
-			Expect(ok).To(BeTrue(), "args should have model")
-
-			modelMap, isMap := model.(map[string]interface{})
-			Expect(isMap).To(BeTrue())
-
-			nameVal, ok := modelMap["name"].(string)
-			Expect(ok).To(BeTrue())
-			Expect(nameVal).To(ContainSubstring(profileModelName()),
+			Expect(model["name"]).To(ContainSubstring(profileModelName()),
 				"model.name should contain %s", profileModelName())
-
-			taskVal, ok := modelMap["task"].(string)
-			Expect(ok).To(BeTrue(), "model should have task field")
-			Expect(taskVal).NotTo(BeEmpty(), "model.task should not be empty")
+			Expect(model["task"]).NotTo(BeEmpty(), "model.task should not be empty")
 		})
 
 		It("should have correct engine import_path", Label("C2613446"), func() {
-			appName := profileWorkspace() + "_" + epName
-			apps, err := rayH.GetServeApplications()
-			Expect(err).NotTo(HaveOccurred())
-
-			appStatus, ok := apps.Applications[appName]
-			Expect(ok).To(BeTrue(), "application %s should exist", appName)
-			Expect(appStatus.DeployedAppConfig).NotTo(BeNil())
-			Expect(appStatus.DeployedAppConfig.ImportPath).NotTo(BeEmpty(),
-				"import_path should not be empty")
-			Expect(appStatus.DeployedAppConfig.ImportPath).To(ContainSubstring(profileEngineName()),
+			Expect(appConfig.ImportPath).NotTo(BeEmpty())
+			Expect(appConfig.ImportPath).To(ContainSubstring(profileEngineName()),
 				"import_path should contain engine name %s", profileEngineName())
 		})
 
 		It("should have correct replica count", Label("C2613402"), func() {
-			appName := profileWorkspace() + "_" + epName
-
-			By("Checking application config (args.deployment_options)")
-			apps, err := rayH.GetServeApplications()
-			Expect(err).NotTo(HaveOccurred())
-
-			appStatus, ok := apps.Applications[appName]
-			Expect(ok).To(BeTrue(), "application %s should exist", appName)
-			Expect(appStatus.DeployedAppConfig).NotTo(BeNil())
-
-			depOpts, ok := appStatus.DeployedAppConfig.Args["deployment_options"]
+			By("Checking application config (args.deployment_options.backend.num_replicas)")
+			depOpts, ok := appConfig.Args["deployment_options"].(map[string]any)
 			Expect(ok).To(BeTrue(), "args should have deployment_options")
 
-			depOptsMap, isMap := depOpts.(map[string]interface{})
-			Expect(isMap).To(BeTrue())
-
-			backend, ok := depOptsMap["backend"]
+			backend, ok := depOpts["backend"].(map[string]any)
 			Expect(ok).To(BeTrue(), "deployment_options should have backend")
 
-			backendMap, isMap := backend.(map[string]interface{})
-			Expect(isMap).To(BeTrue())
-
-			numReplicas, ok := backendMap["num_replicas"]
-			Expect(ok).To(BeTrue(), "backend should have num_replicas")
-
-			replicas, isFloat := numReplicas.(float64)
-			Expect(isFloat).To(BeTrue())
-			Expect(int64(replicas)).To(Equal(int64(1)),
+			Expect(backend["num_replicas"]).To(BeNumerically("==", 1),
 				"args.deployment_options.backend.num_replicas should be 1")
 
-			By("Checking runtime deployment config (deployments.Backend)")
-			deps, err := rayH.GetAppRuntimeDeployments(profileWorkspace(), epName)
-			Expect(err).NotTo(HaveOccurred())
-
-			backend2, ok := deps["Backend"]
-			Expect(ok).To(BeTrue(), "Backend deployment should exist")
-
-			runtimeReplicas, err := backend2.DeploymentConfig.NumReplicas.Float64()
+			By("Checking runtime deployment config")
+			runtimeReplicas, err := backendDep.DeploymentConfig.NumReplicas.Float64()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(int64(runtimeReplicas)).To(Equal(int64(1)),
 				"Backend deployment_config.num_replicas should be 1")
 		})
 
 		It("should have model cache paths in config", Label("C2613405"), func() {
-			appName := profileWorkspace() + "_" + epName
-			apps, err := rayH.GetServeApplications()
-			Expect(err).NotTo(HaveOccurred())
+			model, ok := appConfig.Args["model"].(map[string]any)
+			Expect(ok).To(BeTrue(), "args.model should be a map")
 
-			appStatus, ok := apps.Applications[appName]
-			Expect(ok).To(BeTrue(), "application %s should exist", appName)
-			Expect(appStatus.DeployedAppConfig).NotTo(BeNil())
-
-			model, ok := appStatus.DeployedAppConfig.Args["model"]
-			Expect(ok).To(BeTrue(), "args should have model")
-
-			modelMap, isMap := model.(map[string]interface{})
-			Expect(isMap).To(BeTrue())
-
-			path, ok := modelMap["path"]
-			Expect(ok).To(BeTrue(), "model should have path")
-			Expect(path).NotTo(BeEmpty())
+			Expect(model).To(HaveKey("path"), "model should have path")
+			Expect(model["path"]).NotTo(BeEmpty())
 		})
 
 		It("should have model registry_path in config", Label("C2613406"), func() {
-			appName := profileWorkspace() + "_" + epName
-			apps, err := rayH.GetServeApplications()
-			Expect(err).NotTo(HaveOccurred())
+			model, ok := appConfig.Args["model"].(map[string]any)
+			Expect(ok).To(BeTrue(), "args.model should be a map")
 
-			appStatus, ok := apps.Applications[appName]
-			Expect(ok).To(BeTrue(), "application %s should exist", appName)
-			Expect(appStatus.DeployedAppConfig).NotTo(BeNil())
-
-			model, ok := appStatus.DeployedAppConfig.Args["model"]
-			Expect(ok).To(BeTrue(), "args should have model")
-
-			modelMap, isMap := model.(map[string]interface{})
-			Expect(isMap).To(BeTrue())
-
-			regPath, ok := modelMap["registry_path"]
-			Expect(ok).To(BeTrue(), "model should have registry_path")
-			Expect(regPath).NotTo(BeEmpty())
+			Expect(model).To(HaveKey("registry_path"), "model should have registry_path")
+			Expect(model["registry_path"]).NotTo(BeEmpty())
 		})
 
 		It("should have GPU resource config", Label("C2613399"), func() {
-			deps, err := rayH.GetAppRuntimeDeployments(profileWorkspace(), epName)
-			Expect(err).NotTo(HaveOccurred())
-
-			backend, ok := deps["Backend"]
-			Expect(ok).To(BeTrue(), "Backend deployment should exist")
-			Expect(backend.DeploymentConfig.RayActorOptions.NumGPUs).To(BeNumerically(">", 0),
+			Expect(backendDep.DeploymentConfig.RayActorOptions.NumGPUs).To(BeNumerically(">", 0),
 				"Backend should have num_gpus > 0")
 		})
 
 		It("should have CPU config", Label("C2613388"), func() {
-			deps, err := rayH.GetAppRuntimeDeployments(profileWorkspace(), epName)
-			Expect(err).NotTo(HaveOccurred())
-
-			controller, ok := deps["Controller"]
-			Expect(ok).To(BeTrue(), "Controller deployment should exist")
-			Expect(controller.DeploymentConfig.RayActorOptions.NumCPUs).To(BeNumerically(">", 0),
+			Expect(ctrlDep.DeploymentConfig.RayActorOptions.NumCPUs).To(BeNumerically(">", 0),
 				"Controller should have num_cpus > 0")
 		})
 
 		It("should have memory config", Label("C2613397"), func() {
-			deps, err := rayH.GetAppRuntimeDeployments(profileWorkspace(), epName)
-			Expect(err).NotTo(HaveOccurred())
-
-			backend, ok := deps["Backend"]
-			Expect(ok).To(BeTrue(), "Backend deployment should exist")
-			Expect(backend.DeploymentConfig.RayActorOptions.Memory).To(BeNumerically(">=", 0),
+			Expect(backendDep.DeploymentConfig.RayActorOptions.Memory).To(BeNumerically(">=", 0),
 				"Backend should have memory >= 0")
 		})
 
 		It("should have accelerator type in resources", Label("C2613401"), func() {
-			deps, err := rayH.GetAppRuntimeDeployments(profileWorkspace(), epName)
-			Expect(err).NotTo(HaveOccurred())
-
-			backend, ok := deps["Backend"]
-			Expect(ok).To(BeTrue(), "Backend deployment should exist")
-			Expect(backend.DeploymentConfig.RayActorOptions.NumGPUs).To(Equal(1.0),
+			Expect(backendDep.DeploymentConfig.RayActorOptions.NumGPUs).To(Equal(1.0),
 				"Backend should have num_gpus=1 matching endpoint spec")
-			Expect(backend.DeploymentConfig.RayActorOptions.Resources).NotTo(BeEmpty(),
+			Expect(backendDep.DeploymentConfig.RayActorOptions.Resources).NotTo(BeEmpty(),
 				"Backend should have accelerator resources")
 		})
 
 		It("should have backend_container for engine isolation", func() {
-			appName := profileWorkspace() + "_" + epName
-			apps, err := rayH.GetServeApplications()
-			Expect(err).NotTo(HaveOccurred())
-
-			appStatus, ok := apps.Applications[appName]
-			Expect(ok).To(BeTrue(), "application %s should exist", appName)
-			Expect(appStatus.DeployedAppConfig).NotTo(BeNil())
-			Expect(appStatus.DeployedAppConfig.Args).To(HaveKey("backend_container"))
-		})
-	})
-
-	// --- Env Vars Propagation ---
-
-	Describe("Env Vars Propagation", Ordered, Label("env"), func() {
-		var envEpName string
-
-		BeforeAll(func() {
-			envEpName = "e2e-ep-ssh-env-" + Cfg.RunID
+			Expect(appConfig.Args).To(HaveKey("backend_container"))
 		})
 
-		AfterAll(func() {
-			if envEpName != "" {
-				deleteEndpoint(envEpName)
-			}
-		})
+		It("should have env vars propagated to Ray Serve runtime_env", Label("C2644064"), func() {
+			Expect(appConfig.RuntimeEnv).NotTo(BeNil(), "runtime_env should not be nil")
 
-		It("should deploy with env vars and reach Running", Label("C2644064"), func() {
-			testEnv := map[string]string{
-				"E2E_TEST_KEY": "e2e_test_value",
-			}
+			envVars, ok := appConfig.RuntimeEnv["env_vars"].(map[string]any)
+			Expect(ok).To(BeTrue(), "runtime_env should have env_vars map")
 
-			yamlPath := applyEndpointWithEnv(envEpName, clusterName, profileEngineVersion(), testEnv)
-			defer os.Remove(yamlPath)
-
-			waitEndpointRunning(envEpName)
-
-			ep := getEndpoint(envEpName)
-			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
-
-			// Verify inference works with custom env vars
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with env vars")
-			Expect(code).To(Equal(200), "inference with env vars failed: %s", body)
-
-			By("Verifying env vars propagated to Ray Serve runtime_env")
-			apps, err := rayH.GetServeApplications()
-			Expect(err).NotTo(HaveOccurred())
-
-			found := false
-			for _, appStatus := range apps.Applications {
-				if appStatus.DeployedAppConfig == nil {
-					continue
-				}
-				runtimeEnv := appStatus.DeployedAppConfig.RuntimeEnv
-				if runtimeEnv == nil {
-					continue
-				}
-				envVars, ok := runtimeEnv["env_vars"]
-				if !ok {
-					continue
-				}
-				envMap, ok := envVars.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if val, ok := envMap["E2E_TEST_KEY"]; ok {
-					Expect(val).To(Equal("e2e_test_value"),
-						"E2E_TEST_KEY should be propagated to runtime_env.env_vars")
-					found = true
-
-					break
-				}
-			}
-			Expect(found).To(BeTrue(),
-				"should find E2E_TEST_KEY in Ray Serve runtime_env.env_vars")
+			Expect(envVars).To(HaveKeyWithValue("E2E_TEST_KEY", "e2e_test_value"),
+				"E2E_TEST_KEY should be propagated to runtime_env.env_vars")
 		})
 	})
 
@@ -314,37 +213,11 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		})
 
 		It("should deploy with serving-only engine_arg ignored", Label("C2644063"), func() {
-			accType, accProduct := getClusterAccelerator(clusterName)
+			servingArgs := engineArgsYAML() + "\n      response_role: assistant"
 
-			// response_role is a serving-only param in vLLM, should be ignored during engine init.
-			// Reaching Running is a sufficient assertion here: vLLM engine startup will fail
-			// if an unrecognized non-serving parameter is passed. Serving-only params
-			// (response_role, chat_template, etc.) are stripped before engine init, so
-			// Running proves the param was correctly classified and ignored.
-			servingArgsYAML := engineArgsYAML() + "\n      response_role: assistant"
-
-			defaults := map[string]string{
-				"E2E_ENDPOINT_NAME":       servingEpName,
-				"E2E_WORKSPACE":           profileWorkspace(),
-				"E2E_CLUSTER_NAME":        clusterName,
-				"E2E_ENGINE_NAME":         profileEngineName(),
-				"E2E_ENGINE_VERSION":      profileEngineVersion(),
-				"E2E_MODEL_REGISTRY":      testRegistry(),
-				"E2E_MODEL_NAME":          profileModelName(),
-				"E2E_MODEL_VERSION":       profileModelVersion(),
-				"E2E_MODEL_TASK":          profileModelTask(),
-				"E2E_ACCELERATOR_TYPE":    accType,
-				"E2E_ACCELERATOR_PRODUCT": accProduct,
-				"E2E_ENGINE_ARGS_YAML":    servingArgsYAML,
-				"E2E_ENV_YAML":            "",
-			}
-
-			yamlPath, err := renderTemplateToTempFile("testdata/endpoint.yaml", defaults)
-			Expect(err).NotTo(HaveOccurred())
+			yamlPath := applyEndpoint(servingEpName, clusterName,
+				withEngineArgs(servingArgs))
 			defer os.Remove(yamlPath)
-
-			r := RunCLI("apply", "-f", yamlPath, "--force-update")
-			ExpectSuccess(r)
 
 			waitEndpointRunning(servingEpName)
 
@@ -369,7 +242,7 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		})
 
 		It("should deploy with all schema data types in engine_args", Label("C2642245", "C2644062"), func() {
-			yamlPath := applyEndpointAllSchemaTypes(schemaEpName, clusterName)
+			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgsYAML()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(schemaEpName)
