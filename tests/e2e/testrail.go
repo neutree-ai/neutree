@@ -29,6 +29,7 @@ type CaseResult struct {
 // the TESTRAIL_RUN_ID env var first, then falls back to the profile value.
 // Cases not present in the run are filtered out to avoid API errors.
 // If any credentials are missing, it silently skips reporting.
+// Cases not present in the run are filtered out to avoid API errors.
 func ReportToTestRail(runID string, caseResults []CaseResult) error {
 	url := profile.Testrail.URL
 	user := profile.Testrail.User
