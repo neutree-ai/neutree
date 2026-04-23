@@ -15,5 +15,6 @@ spec:
         replicas: ${CLUSTER_ROUTER_REPLICAS}
         version: "${CLUSTER_VERSION}"
         resources:
-          cpu: "1"
-          memory: 2Gi
+          cpu: "${CLUSTER_ROUTER_CPU}"
+          memory: ${CLUSTER_ROUTER_MEMORY}
+${CLUSTER_MODEL_CACHES_YAML}

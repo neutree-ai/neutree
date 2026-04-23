@@ -52,14 +52,14 @@ type Profile struct {
 	Workspace string `yaml:"workspace"`
 
 	Cluster struct {
-		Version        string `yaml:"version"`
-		UpgradeVersion string `yaml:"upgrade_version"`
+		Version    string `yaml:"version"`
+		OldVersion string `yaml:"old_version"`
 	} `yaml:"cluster"`
 
 	Engine struct {
-		Name     string `yaml:"name"`
-		Version  string `yaml:"version"`
-		VersionB string `yaml:"version_b"`
+		Name       string `yaml:"name"`
+		Version    string `yaml:"version"`
+		OldVersion string `yaml:"old_version"`
 	} `yaml:"engine"`
 
 	Model struct {
@@ -228,10 +228,8 @@ func profileClusterVersion() string {
 		return profile.Cluster.Version
 	}
 
-	return "v1.0.0"
+	return "v1.0.1"
 }
-
-func profileClusterUpgradeVersion() string { return profile.Cluster.UpgradeVersion }
 
 func profileEngineName() string {
 	if profile.Engine.Name != "" {
@@ -246,15 +244,18 @@ func profileEngineVersion() string {
 		return profile.Engine.Version
 	}
 
-	return "v0.8.5"
+	return "v0.11.2"
 }
 
-func profileEngineVersionB() string {
-	if profile.Engine.VersionB != "" {
-		return profile.Engine.VersionB
+// profileEngineVersionB is an alias for profileEngineOldVersion (backward compat).
+func profileEngineVersionB() string { return profileEngineOldVersion() }
+
+func profileEngineOldVersion() string {
+	if profile.Engine.OldVersion != "" {
+		return profile.Engine.OldVersion
 	}
 
-	return "v0.11.2"
+	return "v0.8.5"
 }
 
 func profileModelName() string { return profile.Model.Name }
@@ -292,7 +293,7 @@ func profileEngineArgs() string {
 		return profile.Endpoint.EngineArgs
 	}
 
-	return "dtype=half"
+	return "dtype=half,gpu_memory_utilization=0.85"
 }
 
 func profileEndpointTimeout() string {

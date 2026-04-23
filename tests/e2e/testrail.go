@@ -27,8 +27,8 @@ type CaseResult struct {
 // It reads connection info (URL, user, password) from the profile struct.
 // runID is resolved by the caller via profileTestrailRunID(), which checks
 // the TESTRAIL_RUN_ID env var first, then falls back to the profile value.
-// If any credentials are missing, it silently skips reporting.
 // Cases not present in the run are filtered out to avoid API errors.
+// If any credentials are missing, it silently skips reporting.
 func ReportToTestRail(runID string, caseResults []CaseResult) error {
 	url := profile.Testrail.URL
 	user := profile.Testrail.User
@@ -101,6 +101,7 @@ func ReportToTestRail(runID string, caseResults []CaseResult) error {
 
 	if len(payload.Results) == 0 {
 		fmt.Println("No matching cases to report to TestRail")
+
 		return nil
 	}
 

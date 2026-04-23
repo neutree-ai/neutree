@@ -8,7 +8,7 @@ spec:
   image_registry: ${CLUSTER_IMAGE_REGISTRY}
   version: "${CLUSTER_VERSION}"
   config:
-    ssh_config:
+${CLUSTER_ACCELERATOR_TYPE_YAML}${CLUSTER_MODEL_CACHES_YAML}    ssh_config:
       provider:
         type: ssh
         head_ip: "${CLUSTER_SSH_HEAD_IP}"

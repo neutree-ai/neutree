@@ -22,3 +22,4 @@ spec:
     engine_args:${E2E_ENGINE_ARGS_YAML}
   replicas:
     num: 1
+${E2E_ENV_YAML}
