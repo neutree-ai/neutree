@@ -26,6 +26,11 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 		return nil, err
 	}
 
+	sglangV0_5_10EngineSchema, err := GetSGLangV0_5_10EngineSchema()
+	if err != nil {
+		return nil, err
+	}
+
 	engines := []*v1.Engine{
 		{
 			APIVersion: "v1",
@@ -112,6 +117,37 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 					},
 				},
 				SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
+			},
+		},
+		{
+			APIVersion: "v1",
+			Kind:       "Engine",
+			Metadata: &v1.Metadata{
+				Name: v1.EngineNameSGLang,
+			},
+			Spec: &v1.EngineSpec{
+				Versions: []*v1.EngineVersion{
+					{
+						Version:      "v0.5.10",
+						ValuesSchema: sglangV0_5_10EngineSchema,
+						Images: map[string]*v1.EngineImage{
+							"nvidia_gpu": {
+								ImageName: "lmsysorg/sglang",
+								Tag:       "v0.5.10",
+							},
+							v1.SSHImageKeyPrefix + "nvidia_gpu": {
+								ImageName: "neutree/engine-sglang",
+								Tag:       "v0.5.10-ray2.53.0",
+							},
+						},
+						DeployTemplate: map[string]map[string]string{
+							"kubernetes": {
+								"default": GetSGLangV0_5_10DeployTemplate(),
+							},
+						},
+					},
+				},
+				SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask},
 			},
 		},
 	}

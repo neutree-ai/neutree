@@ -43,3 +43,13 @@ func TestGetLlamaCppDefaultEngineSchema(t *testing.T) {
 		t.Fatal("expected schema to be non-nil")
 	}
 }
+
+func TestGetSGLangV0_5_10EngineSchema(t *testing.T) {
+	schema, err := GetSGLangV0_5_10EngineSchema()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if schema == nil {
+		t.Fatal("expected schema to be non-nil")
+	}
+}
