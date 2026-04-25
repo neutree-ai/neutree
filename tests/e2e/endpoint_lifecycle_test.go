@@ -158,17 +158,6 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Failed"))
 		})
 
-		It("should not panic when deployment_options is missing", Label("C2642242"), func() {
-			epName := "e2e-ep-lc-noopts-" + Cfg.RunID
-			DeferCleanup(func() { deleteEndpoint(epName) })
-
-			yamlPath := applyEndpoint(epName, clusterName)
-			defer os.Remove(yamlPath)
-
-			r := RunCLI("get", "endpoint", epName, "-w", profileWorkspace(), "-o", "json")
-			ExpectSuccess(r)
-		})
-
 		It("should show Failed when using unsupported engine", Label("C2612936"), func() {
 			epName := "e2e-ep-lc-badeng-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })

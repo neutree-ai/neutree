@@ -1220,9 +1220,11 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 	}
 
 	resourcesYAML := fmt.Sprintf("    gpu: \"%s\"\n", o.gpu)
+
 	if o.cpu != "" {
 		resourcesYAML += fmt.Sprintf("    cpu: \"%s\"\n", o.cpu)
 	}
+
 	if o.memory != "" {
 		resourcesYAML += fmt.Sprintf("    memory: \"%s\"\n", o.memory)
 	}
@@ -1323,10 +1325,12 @@ func parseEndpointJSON(stdout string) v1.Endpoint {
 
 // --- Inference helpers ---
 
-// doInferenceRequest sends a JSON POST to the given URL path and returns (status_code, body).
-func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, string) {
+// doInferenceRequest sends a JSON POST to the given URL path and returns (status_code, body, error).
+func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, string, error) {
 	payloadBytes, err := json.Marshal(reqBody)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	if err != nil {
+		return 0, "", err
+	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 
@@ -1334,7 +1338,10 @@ func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, s
 		strings.TrimRight(serviceURL, "/")+path,
 		strings.NewReader(string(payloadBytes)),
 	)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	if err != nil {
+		return 0, "", err
+	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	authValue := Cfg.APIKey
@@ -1345,16 +1352,20 @@ func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, s
 	req.Header.Set("Authorization", authValue)
 
 	resp, err := client.Do(req)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	if err != nil {
+		return 0, "", err
+	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	if err != nil {
+		return 0, "", err
+	}
 
-	return resp.StatusCode, string(body)
+	return resp.StatusCode, string(body), nil
 }
 
-func inferChat(serviceURL, prompt string) (int, string) {
+func inferChat(serviceURL, prompt string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/chat/completions", map[string]any{
 		"model": profileModelName(),
 		"messages": []map[string]string{
@@ -1364,14 +1375,14 @@ func inferChat(serviceURL, prompt string) (int, string) {
 	})
 }
 
-func inferEmbedding(serviceURL, model, input string) (int, string) {
+func inferEmbedding(serviceURL, model, input string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/embeddings", map[string]any{
 		"model": model,
 		"input": input,
 	})
 }
 
-func inferRerank(serviceURL, model, query string, documents []string) (int, string) {
+func inferRerank(serviceURL, model, query string, documents []string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/rerank", map[string]any{
 		"model":     model,
 		"query":     query,

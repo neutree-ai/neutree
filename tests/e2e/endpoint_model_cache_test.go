@@ -91,7 +91,8 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 
 		It("should serve inference requests", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with NFS cache")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with NFS cache")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference with NFS cache failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
@@ -149,7 +150,8 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 
 		It("should serve inference requests", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with HostPath cache")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with HostPath cache")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference with HostPath cache failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
@@ -210,7 +212,8 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 
 		It("should serve inference requests", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with PVC cache")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with PVC cache")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference with PVC cache failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
@@ -295,12 +298,11 @@ var _ = Describe("SSH Endpoint Model Cache", Ordered, Label("endpoint", "ssh", "
 
 		It("should serve inference requests", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with SSH HostPath cache")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with SSH HostPath cache")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference with SSH HostPath cache failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
 	})
-
-	// --- NFS Model Cache (SSH) ---
 
 })

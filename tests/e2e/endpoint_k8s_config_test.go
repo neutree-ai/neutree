@@ -498,7 +498,8 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 
 		It("should serve inference with all-types config", func() {
 			ep := getEndpoint(schemaEpName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello schema types")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello schema types")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(200), "inference failed: %s", body)
 		})
 	})

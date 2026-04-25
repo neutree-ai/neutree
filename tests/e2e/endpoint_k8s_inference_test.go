@@ -57,7 +57,8 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 
 		It("should serve inference requests", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
@@ -66,13 +67,14 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 			ep := getEndpoint(epName)
 
 			By("Sending request with non-existent model name")
-			code, body := doInferenceRequest(ep.Status.ServiceURL, "/v1/chat/completions", map[string]any{
+			code, body, err := doInferenceRequest(ep.Status.ServiceURL, "/v1/chat/completions", map[string]any{
 				"model": "non-existent-model-name",
 				"messages": []map[string]string{
 					{"role": "user", "content": "hello"},
 				},
 				"max_tokens": 8,
 			})
+			Expect(err).NotTo(HaveOccurred())
 
 			Expect(code).To(BeElementOf(http.StatusBadRequest, http.StatusNotFound),
 				"request with wrong model name should return 400 or 404, got %d, body: %s", code, body)
@@ -128,10 +130,12 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 			epA := getEndpoint(epNameA)
 			epB := getEndpoint(epNameB)
 
-			codeA, bodyA := inferChat(epA.Status.ServiceURL, "Hello")
+			codeA, bodyA, err := inferChat(epA.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(codeA).To(Equal(http.StatusOK), "inference on ep-A failed: %s", bodyA)
 
-			codeB, bodyB := inferChat(epB.Status.ServiceURL, "Hello")
+			codeB, bodyB, err := inferChat(epB.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(codeB).To(Equal(http.StatusOK), "inference on ep-B failed: %s", bodyB)
 		})
 	})
@@ -166,7 +170,8 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 
 		It("should serve inference with tp=2", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with TP=2")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with TP=2")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference with tp=2 failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
@@ -200,7 +205,8 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 			waitEndpointRunning(epName)
 
 			ep := getEndpoint(epName)
-			code, body := inferEmbedding(ep.Status.ServiceURL, profileEmbeddingModelName(), "Hello world")
+			code, body, err := inferEmbedding(ep.Status.ServiceURL, profileEmbeddingModelName(), "Hello world")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "embedding inference failed: %s", body)
 
 			var resp map[string]any
@@ -236,8 +242,9 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 			waitEndpointRunning(epName)
 
 			ep := getEndpoint(epName)
-			code, body := inferRerank(ep.Status.ServiceURL, profileRerankModelName(),
+			code, body, err := inferRerank(ep.Status.ServiceURL, profileRerankModelName(),
 				"What is the capital of France?", []string{"Paris is the capital of France.", "Berlin is in Germany."})
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "rerank inference failed: %s", body)
 
 			var resp map[string]any

@@ -58,7 +58,8 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 
 		It("should serve inference requests", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
@@ -67,13 +68,14 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			ep := getEndpoint(epName)
 
 			By("Sending request with non-existent model name")
-			code, body := doInferenceRequest(ep.Status.ServiceURL, "/v1/chat/completions", map[string]any{
+			code, body, err := doInferenceRequest(ep.Status.ServiceURL, "/v1/chat/completions", map[string]any{
 				"model": "non-existent-model-name",
 				"messages": []map[string]string{
 					{"role": "user", "content": "hello"},
 				},
 				"max_tokens": 8,
 			})
+			Expect(err).NotTo(HaveOccurred())
 
 			Expect(code).To(BeElementOf(http.StatusBadRequest, http.StatusNotFound),
 				"request with wrong model name should return 400 or 404, got %d, body: %s", code, body)
@@ -117,10 +119,12 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			epA := getEndpoint(epNameA)
 			epB := getEndpoint(epNameB)
 
-			codeA, bodyA := inferChat(epA.Status.ServiceURL, "Hello")
+			codeA, bodyA, err := inferChat(epA.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(codeA).To(Equal(http.StatusOK), "inference on ep-A failed: %s", bodyA)
 
-			codeB, bodyB := inferChat(epB.Status.ServiceURL, "Hello")
+			codeB, bodyB, err := inferChat(epB.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(codeB).To(Equal(http.StatusOK), "inference on ep-B failed: %s", bodyB)
 		})
 
@@ -132,7 +136,8 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			epB := getEndpoint(epNameB)
 			Expect(epB.Status.Phase).To(BeEquivalentTo("Running"))
 
-			codeB, bodyB := inferChat(epB.Status.ServiceURL, "Hello after delete")
+			codeB, bodyB, err := inferChat(epB.Status.ServiceURL, "Hello after delete")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(codeB).To(Equal(http.StatusOK), "inference on ep-B after deleting ep-A failed: %s", bodyB)
 		})
 	})
@@ -168,33 +173,25 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			By("Verifying tensor_parallel_size=2 in Ray Serve config")
 			c := getClusterFullJSON(clusterName)
 			rayH := NewRayHelper(c.Status.DashboardURL)
-			apps, err := rayH.GetServeApplications()
+
+			appName := profileWorkspace() + "_" + epName
+			appConfig, err := rayH.GetApplicationConfig(appName)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(appConfig).NotTo(BeNil(), "application %s should exist", appName)
 
-			found := false
-			for _, appStatus := range apps.Applications {
-				if appStatus.DeployedAppConfig == nil || appStatus.DeployedAppConfig.Args == nil {
-					continue
-				}
-				engineArgs, ok := appStatus.DeployedAppConfig.Args["engine_args"].(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if tp, ok := engineArgs["tensor_parallel_size"]; ok {
-					// JSON numbers unmarshal as float64
-					Expect(tp).To(BeNumerically("==", 2),
-						"tensor_parallel_size should be 2 (user-specified value)")
-					found = true
+			engineArgs, ok := appConfig.Args["engine_args"].(map[string]interface{})
+			Expect(ok).To(BeTrue(), "engine_args should exist")
 
-					break
-				}
-			}
-			Expect(found).To(BeTrue(), "should find tensor_parallel_size in Ray Serve engine_args")
+			tp, ok := engineArgs["tensor_parallel_size"]
+			Expect(ok).To(BeTrue(), "tensor_parallel_size should exist in engine_args")
+			Expect(tp).To(BeNumerically("==", 2),
+				"tensor_parallel_size should be 2 (user-specified value)")
 		})
 
 		It("should serve inference with tp=2", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with TP=2")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with TP=2")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference with tp=2 failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
@@ -225,33 +222,26 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
 
 			// Verify inference works
-			code, body := inferChat(ep.Status.ServiceURL, "Hello auto-TP")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello auto-TP")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference with auto-TP failed: %s", body)
 
 			By("Verifying tensor_parallel_size auto-set to GPU count (2) in Ray Serve config")
 			c := getClusterFullJSON(clusterName)
 			rayH := NewRayHelper(c.Status.DashboardURL)
-			apps, err := rayH.GetServeApplications()
+
+			appName := profileWorkspace() + "_" + epName
+			appConfig, err := rayH.GetApplicationConfig(appName)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(appConfig).NotTo(BeNil(), "application %s should exist", appName)
 
-			found := false
-			for _, appStatus := range apps.Applications {
-				if appStatus.DeployedAppConfig == nil || appStatus.DeployedAppConfig.Args == nil {
-					continue
-				}
-				engineArgs, ok := appStatus.DeployedAppConfig.Args["engine_args"].(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if tp, ok := engineArgs["tensor_parallel_size"]; ok {
-					Expect(tp).To(BeNumerically("==", 2),
-						"tensor_parallel_size should be auto-set to GPU count (2)")
-					found = true
+			engineArgs, ok := appConfig.Args["engine_args"].(map[string]interface{})
+			Expect(ok).To(BeTrue(), "engine_args should exist")
 
-					break
-				}
-			}
-			Expect(found).To(BeTrue(), "should find tensor_parallel_size in Ray Serve engine_args")
+			tp, ok := engineArgs["tensor_parallel_size"]
+			Expect(ok).To(BeTrue(), "tensor_parallel_size should exist in engine_args")
+			Expect(tp).To(BeNumerically("==", 2),
+				"tensor_parallel_size should be auto-set to GPU count (2)")
 		})
 	})
 
@@ -282,7 +272,8 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			waitEndpointRunning(epName)
 
 			ep := getEndpoint(epName)
-			code, body := inferEmbedding(ep.Status.ServiceURL, profileEmbeddingModelName(), "Hello world")
+			code, body, err := inferEmbedding(ep.Status.ServiceURL, profileEmbeddingModelName(), "Hello world")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "embedding inference failed: %s", body)
 
 			var resp map[string]any
@@ -318,8 +309,9 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			waitEndpointRunning(epName)
 
 			ep := getEndpoint(epName)
-			code, body := inferRerank(ep.Status.ServiceURL, profileRerankModelName(),
+			code, body, err := inferRerank(ep.Status.ServiceURL, profileRerankModelName(),
 				"What is the capital of France?", []string{"Paris is the capital of France.", "Berlin is in Germany."})
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "rerank inference failed: %s", body)
 
 			var resp map[string]any

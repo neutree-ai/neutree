@@ -280,7 +280,8 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 
 		It("should serve inference with all-types config", func() {
 			ep := getEndpoint(schemaEpName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello with all schema types")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with all schema types")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(200), "inference failed: %s", body)
 		})
 	})

@@ -395,7 +395,7 @@ func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k
 
 		By("Creating SSH endpoint with old engine version")
 		if profileModelName() != "" && canDeploySSHEndpoint() {
-			yamlPath := applyEndpointOnCluster(sshEp, sshCluster, profileEngineOldVersion())
+			yamlPath := applyEndpoint(sshEp, sshCluster, withEngineVersion(profileEngineOldVersion()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(sshEp)
@@ -421,7 +421,7 @@ func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k
 
 		By("Creating K8s endpoint with old engine version")
 		if profileModelName() != "" && canDeployK8sEndpoint() {
-			yamlPath := applyEndpointOnCluster(k8sEp, k8sCluster, profileEngineOldVersion())
+			yamlPath := applyEndpoint(k8sEp, k8sCluster, withEngineVersion(profileEngineOldVersion()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(k8sEp)

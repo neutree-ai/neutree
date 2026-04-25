@@ -14,7 +14,8 @@ spec:
     version: ${E2E_MODEL_VERSION}
     task: ${E2E_MODEL_TASK}
   resources:
-${E2E_RESOURCES_YAML}    accelerator:
+${E2E_RESOURCES_YAML}
+    accelerator:
       type: ${E2E_ACCELERATOR_TYPE}
       product: ${E2E_ACCELERATOR_PRODUCT}
   variables:
