@@ -1,0 +1,70 @@
+ARG RAY_COMMIT
+ARG COMMON_WORKDIR=/app
+ARG RAY_REPO
+ARG ENGINE_BASE_IMAGE=lmsysorg/sglang:v0.5.10
+ARG ENGINE_VERSION_DIR=v0_5_10
+ARG RAY_BUILD_BASE_IMAGE="quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee"
+
+# --- Ray source fetch ---
+FROM alpine/git:v2.47.2 AS ray_fetch
+ARG RAY_REPO
+ARG RAY_COMMIT
+ARG COMMON_WORKDIR
+WORKDIR ${COMMON_WORKDIR}
+RUN git clone ${RAY_REPO} \
+	    && cd ray \
+	    && git checkout ${RAY_COMMIT}
+
+# --- Ray wheel build ---
+FROM ${RAY_BUILD_BASE_IMAGE} AS build_ray
+ARG COMMON_WORKDIR
+ARG RAY_COMMIT
+ENV BUILDKITE_COMMIT=${RAY_COMMIT}
+ENV TRAVIS_COMMIT=${BUILDKITE_COMMIT}
+ENV BUILD_ONE_PYTHON_ONLY=py312
+ENV RAY_DISABLE_EXTRA_CPP=1
+WORKDIR /ray
+COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
+RUN /ray/python/build-wheel-manylinux2014.sh
+
+# --- Engine image ---
+FROM ${ENGINE_BASE_IMAGE}
+
+ENV HOME=/home/ray
+WORKDIR ${HOME}
+
+# Install Ray neutree fork (same version as cluster image).
+# The wheel is built for py312 (see BUILD_ONE_PYTHON_ONLY above); the SGLang
+# base image must provide a py312-compatible interpreter.
+# --break-system-packages bypasses PEP 668 (the Debian-based base image marks
+# the system Python as externally-managed); intentional inside this dedicated
+# engine container.
+RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
+    cd /install \
+    && whl=$(ls .whl/*.whl) \
+    && pip install --no-cache-dir --break-system-packages "${whl}[serve,cgraph]"
+
+# Install common serve-layer dependencies
+RUN --mount=type=bind,src=requirements,target=requirements \
+    pip install --no-cache-dir --break-system-packages -r requirements/common.txt
+
+# Copy Neutree serve layer code (shared + specified engine version only)
+ARG ENGINE_VERSION_DIR
+COPY serve/_metrics ./serve/_metrics
+COPY serve/_replica_scheduler ./serve/_replica_scheduler
+COPY serve/_utils ./serve/_utils
+COPY serve/sglang/${ENGINE_VERSION_DIR} ./serve/sglang/${ENGINE_VERSION_DIR}
+COPY downloader ./downloader
+# Intentionally do NOT install downloader/requirements.txt: SGLang base
+# already ships compatible huggingface_hub/transformers versions, and
+# re-resolving against downloader's <1.0 hf_hub upper bound would
+# downgrade hf_hub past the API surface SGLang's transformers needs
+# (e.g. is_offline_mode), breaking Backend startup.
+
+# Ensure "python" is in PATH (some base images only provide "python3")
+RUN ln -sf $(which python3) /usr/bin/python 2>/dev/null || true
+
+# Reset ENTRYPOINT from base image (sglang base image sets python -m sglang.launch_server)
+# so that Ray can execute its own commands in this container.
+ENTRYPOINT []
+CMD ["/bin/bash"]
