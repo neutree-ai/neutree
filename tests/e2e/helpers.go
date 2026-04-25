@@ -1191,8 +1191,8 @@ func withoutForceUpdate() EndpointOption {
 	return func(o *endpointOpts) { o.forceUpdate = false }
 }
 
-// renderEndpoint renders the endpoint YAML template and returns the temp file path.
-func renderEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath string) {
+// renderEndpoint renders the endpoint YAML template and returns the temp file path and resolved options.
+func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endpointOpts) {
 	o := &endpointOpts{
 		engineName:    profileEngineName(),
 		engineVersion: profileEngineVersion(),
@@ -1219,6 +1219,14 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath stri
 		}
 	}
 
+	resourcesYAML := fmt.Sprintf("    gpu: \"%s\"\n", o.gpu)
+	if o.cpu != "" {
+		resourcesYAML += fmt.Sprintf("    cpu: \"%s\"\n", o.cpu)
+	}
+	if o.memory != "" {
+		resourcesYAML += fmt.Sprintf("    memory: \"%s\"\n", o.memory)
+	}
+
 	defaults := map[string]string{
 		"E2E_ENDPOINT_NAME":       name,
 		"E2E_WORKSPACE":           profileWorkspace(),
@@ -1231,9 +1239,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath stri
 		"E2E_MODEL_TASK":          o.task,
 		"E2E_ACCELERATOR_TYPE":    o.accType,
 		"E2E_ACCELERATOR_PRODUCT": o.accProduct,
-		"E2E_GPU":                 o.gpu,
-		"E2E_CPU":                 o.cpu,
-		"E2E_MEMORY":              o.memory,
+		"E2E_RESOURCES_YAML":      resourcesYAML,
 		"E2E_ENGINE_ARGS_YAML":    o.engineArgs,
 		"E2E_ENV_YAML":            envYAML,
 	}
@@ -1241,17 +1247,12 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath stri
 	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), defaults)
 	Expect(err).NotTo(HaveOccurred(), "failed to render endpoint template")
 
-	return yamlPath
+	return yamlPath, o
 }
 
 // applyEndpoint renders and applies an endpoint on a cluster.
 func applyEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath string) {
-	yamlPath = renderEndpoint(name, cluster, opts...)
-
-	o := &endpointOpts{forceUpdate: true}
-	for _, fn := range opts {
-		fn(o)
-	}
+	yamlPath, o := renderEndpoint(name, cluster, opts...)
 
 	args := []string{"apply", "-f", yamlPath}
 	if o.forceUpdate {

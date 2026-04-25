@@ -100,8 +100,12 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 		})
 
 		AfterAll(func() {
-			deleteEndpoint(epNameA)
-			deleteEndpoint(epNameB)
+			if epNameA != "" {
+				deleteEndpoint(epNameA)
+			}
+			if epNameB != "" {
+				deleteEndpoint(epNameB)
+			}
 		})
 
 		It("should run two endpoints with different engine versions", func() {

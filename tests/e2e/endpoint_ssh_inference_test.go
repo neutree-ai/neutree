@@ -99,10 +99,10 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 		It("should run two endpoints with different engine versions", Label("C2642251"), func() {
 			yamlA := applyEndpoint(epNameA, clusterName, withEngineVersion(profileEngineOldVersion()))
 			defer os.Remove(yamlA)
+			waitEndpointRunning(epNameA)
+
 			yamlB := applyEndpoint(epNameB, clusterName)
 			defer os.Remove(yamlB)
-
-			waitEndpointRunning(epNameA)
 			waitEndpointRunning(epNameB)
 
 			epA := getEndpoint(epNameA)

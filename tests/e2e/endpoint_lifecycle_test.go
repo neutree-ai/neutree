@@ -83,12 +83,14 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			os.Remove(yamlPath)
 			waitEndpointRunning(epName)
 
-			RunCLI("delete", "endpoint", epName, "-w", profileWorkspace())
-			RunCLI("wait", "endpoint", epName,
+			r := RunCLI("delete", "endpoint", epName, "-w", profileWorkspace())
+			ExpectSuccess(r)
+			r = RunCLI("wait", "endpoint", epName,
 				"-w", profileWorkspace(),
 				"--for", "delete",
 				"--timeout", "5m",
 			)
+			ExpectSuccess(r)
 
 			yamlPath = applyEndpoint(epName, clusterName)
 			defer os.Remove(yamlPath)
@@ -217,7 +219,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				By("Testing " + tc.label)
 				epName := "e2e-ep-lc-badacc-type-" + Cfg.RunID
 
-				yamlPath := renderEndpoint(epName, clusterName,
+				yamlPath, _ := renderEndpoint(epName, clusterName,
 					withAccelerator(accType, tc.value))
 				r := RunCLI("apply", "-f", yamlPath)
 				os.Remove(yamlPath)

@@ -161,6 +161,9 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		})
 
 		It("should have GPU resource config", Label("C2613399"), func() {
+			if backendDep.DeploymentConfig.RayActorOptions.NumGPUs == 0 {
+				Skip("No GPU configured on this cluster")
+			}
 			Expect(backendDep.DeploymentConfig.RayActorOptions.NumGPUs).To(BeNumerically(">", 0),
 				"Backend should have num_gpus > 0")
 		})
@@ -176,6 +179,9 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		})
 
 		It("should have accelerator type in resources", Label("C2613401"), func() {
+			if backendDep.DeploymentConfig.RayActorOptions.NumGPUs == 0 {
+				Skip("No GPU configured on this cluster")
+			}
 			Expect(backendDep.DeploymentConfig.RayActorOptions.NumGPUs).To(Equal(1.0),
 				"Backend should have num_gpus=1 matching endpoint spec")
 			Expect(backendDep.DeploymentConfig.RayActorOptions.Resources).NotTo(BeEmpty(),

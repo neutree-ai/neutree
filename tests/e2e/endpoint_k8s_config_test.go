@@ -486,6 +486,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--max_model_len"), "integer")
 				Expect(argsStr).To(ContainSubstring("--gpu_memory_utilization"), "number/float")
 				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean")
+				Expect(argsStr).To(ContainSubstring("--seed"), "integer")
 				Expect(argsStr).To(ContainSubstring("--override_generation_config"), "object/JSON")
 				found = true
 
