@@ -11,8 +11,9 @@ on:
           - vllm
           - llama-cpp
           - sglang
+          - sglang-deepseek-v4
       engine_version:
-        description: "engine version (e.g: v0.11.2 for vllm, v0.3.7 for llama-cpp, v0.5.10 for sglang)"
+        description: "engine version (e.g: v0.11.2 for vllm, v0.3.7 for llama-cpp, v0.5.10 for sglang, deepseek-v4-hopper for sglang-deepseek-v4)"
         required: true
         type: string
       ray_version:
@@ -49,6 +50,7 @@ jobs:
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_SGLANG_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_SGLANG_DEEPSEEK_V4_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_VERSION: ${{ github.event.inputs.ray_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
   push-manifests:
@@ -75,4 +77,5 @@ jobs:
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_SGLANG_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_SGLANG_DEEPSEEK_V4_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}

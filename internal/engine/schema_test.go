@@ -53,3 +53,13 @@ func TestGetSGLangV0_5_10EngineSchema(t *testing.T) {
 		t.Fatal("expected schema to be non-nil")
 	}
 }
+
+func TestGetSGLangDeepseekV4HopperEngineSchema(t *testing.T) {
+	schema, err := GetSGLangDeepseekV4HopperEngineSchema()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if schema == nil {
+		t.Fatal("expected schema to be non-nil")
+	}
+}

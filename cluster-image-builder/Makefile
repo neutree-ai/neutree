@@ -26,6 +26,10 @@ ENGINE_SGLANG_BASE_IMAGE_REPO ?= lmsysorg/sglang
 ENGINE_SGLANG_VERSION ?= v0.5.10
 ENGINE_SGLANG_BASE_IMAGE_TAG ?= $(ENGINE_SGLANG_VERSION)
 ENGINE_SGLANG_DIR_VERSION ?= $(shell echo $(ENGINE_SGLANG_VERSION) | sed 's/-.*//' | tr '.' '_')
+# DeepSeek-V4 Hopper variant: separate from the v0.5.10 mainline because the
+# upstream image tag and the Neutree serve directory both use a non-semver name.
+ENGINE_SGLANG_DEEPSEEK_V4_VERSION ?= deepseek-v4-hopper
+ENGINE_SGLANG_DEEPSEEK_V4_DIR ?= deepseek_v4_hopper
 RAY_SHORT_VERSION ?= ray2.53.0
 
 .PHONY: docker-build
@@ -66,6 +70,11 @@ docker-build-engine-sglang: prepare ## Build the SGLang engine image (NVIDIA)
 	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_SGLANG_BASE_IMAGE_REPO):$(ENGINE_SGLANG_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_SGLANG_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		-f Dockerfile.engine-sglang -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_VERSION)-$(RAY_SHORT_VERSION) .
 
+.PHONY: docker-build-engine-sglang-deepseek-v4
+docker-build-engine-sglang-deepseek-v4: prepare ## Build the SGLang DeepSeek-V4 (Hopper) engine image
+	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_SGLANG_BASE_IMAGE_REPO):$(ENGINE_SGLANG_DEEPSEEK_V4_VERSION) --build-arg ENGINE_VERSION_DIR=$(ENGINE_SGLANG_DEEPSEEK_V4_DIR) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.engine-sglang -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_DEEPSEEK_V4_VERSION)-$(RAY_SHORT_VERSION) .
+
 .PHONY: docker-push
 docker-push: ## Run docker-push-* targets for all the images
 	$(MAKE) ARCH=$(ARCH) $(addprefix docker-push-,$(ACCELERATORS))
@@ -94,6 +103,10 @@ docker-push-engine-llama-cpp: ## Push the llama-cpp-python engine image
 docker-push-engine-sglang: ## Push the SGLang engine image (NVIDIA)
 	docker push $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_VERSION)-$(RAY_SHORT_VERSION)
 
+.PHONY: docker-push-engine-sglang-deepseek-v4
+docker-push-engine-sglang-deepseek-v4: ## Push the SGLang DeepSeek-V4 (Hopper) engine image
+	docker push $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_DEEPSEEK_V4_VERSION)-$(RAY_SHORT_VERSION)
+
 .PHONY: docker-push-manifest-engine-vllm
 docker-push-manifest-engine-vllm: ## Push the vLLM engine manifest image
 	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-vllm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION)~g")
@@ -105,6 +118,10 @@ docker-push-manifest-engine-llama-cpp: ## Push the llama-cpp engine manifest ima
 .PHONY: docker-push-manifest-engine-sglang
 docker-push-manifest-engine-sglang: ## Push the SGLang engine manifest image
 	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_VERSION)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-sglang:$(ENGINE_SGLANG_VERSION)-$(RAY_SHORT_VERSION)~g")
+
+.PHONY: docker-push-manifest-engine-sglang-deepseek-v4
+docker-push-manifest-engine-sglang-deepseek-v4: ## Push the SGLang DeepSeek-V4 (Hopper) manifest image
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_DEEPSEEK_V4_VERSION)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-sglang:$(ENGINE_SGLANG_DEEPSEEK_V4_VERSION)-$(RAY_SHORT_VERSION)~g")
 
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ACCELERATORS))

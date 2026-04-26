@@ -31,6 +31,11 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 		return nil, err
 	}
 
+	sglangDeepseekV4HopperEngineSchema, err := GetSGLangDeepseekV4HopperEngineSchema()
+	if err != nil {
+		return nil, err
+	}
+
 	engines := []*v1.Engine{
 		{
 			APIVersion: "v1",
@@ -143,6 +148,29 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
 								"default": GetSGLangV0_5_10DeployTemplate(),
+							},
+						},
+					},
+					{
+						// DeepSeek-V4 Hopper variant — non-semver version string so the
+						// orchestrator's import-path builder falls back to using the full
+						// name, routing to serve.sglang.deepseek_v4_hopper.app:app_builder
+						// instead of the shared v0.5.10 path.
+						Version:      "deepseek-v4-hopper",
+						ValuesSchema: sglangDeepseekV4HopperEngineSchema,
+						Images: map[string]*v1.EngineImage{
+							"nvidia_gpu": {
+								ImageName: "lmsysorg/sglang",
+								Tag:       "deepseek-v4-hopper",
+							},
+							v1.SSHImageKeyPrefix + "nvidia_gpu": {
+								ImageName: "neutree/engine-sglang",
+								Tag:       "deepseek-v4-hopper-ray2.53.0",
+							},
+						},
+						DeployTemplate: map[string]map[string]string{
+							"kubernetes": {
+								"default": GetSGLangDeepseekV4HopperDeployTemplate(),
 							},
 						},
 					},

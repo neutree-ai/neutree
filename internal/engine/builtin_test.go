@@ -52,17 +52,23 @@ func TestGetBuiltinEngines(t *testing.T) {
 		}
 	}
 
-	// Verify sglang v0.5.10 has both nvidia_gpu (k8s) and ssh_nvidia_gpu (static cluster) images
+	// Verify each registered sglang version (v0.5.10 mainline + deepseek-v4-hopper
+	// variant) has both nvidia_gpu (k8s) and ssh_nvidia_gpu (static cluster) images
 	// plus a kubernetes deploy template
+	wantSGLangVersions := map[string]bool{
+		"v0.5.10":            false,
+		"deepseek-v4-hopper": false,
+	}
 	for _, e := range engines {
 		if e.Metadata.Name != "sglang" {
 			continue
 		}
 
 		for _, v := range e.Spec.Versions {
-			if v.Version != "v0.5.10" {
+			if _, want := wantSGLangVersions[v.Version]; !want {
 				continue
 			}
+			wantSGLangVersions[v.Version] = true
 
 			if _, ok := v.Images["nvidia_gpu"]; !ok {
 				t.Errorf("sglang %s missing nvidia_gpu image", v.Version)
@@ -77,6 +83,11 @@ func TestGetBuiltinEngines(t *testing.T) {
 			} else if _, ok := k8sTemplates["default"]; !ok {
 				t.Errorf("sglang %s missing default kubernetes deploy template", v.Version)
 			}
+		}
+	}
+	for ver, found := range wantSGLangVersions {
+		if !found {
+			t.Errorf("sglang version %q not registered", ver)
 		}
 	}
 }

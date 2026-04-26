@@ -21,6 +21,9 @@ var llamaCppV0_3_7EngineSchema []byte
 //go:embed sglang/v0.5.10/schema.json
 var sglangV0_5_10EngineSchema []byte
 
+//go:embed sglang/deepseek-v4-hopper/schema.json
+var sglangDeepseekV4HopperEngineSchema []byte
+
 // GetVLLMV0_8_5EngineSchema returns the parsed JSON schema for vLLM V0.8.5 engine
 func GetVLLMV0_8_5EngineSchema() (map[string]interface{}, error) {
 	var schema map[string]interface{}
@@ -70,13 +73,25 @@ func GetSGLangV0_5_10EngineSchema() (map[string]interface{}, error) {
 	return schema, nil
 }
 
+// GetSGLangDeepseekV4HopperEngineSchema returns the parsed JSON schema for the
+// SGLang DeepSeek-V4 Hopper variant engine.
+func GetSGLangDeepseekV4HopperEngineSchema() (map[string]interface{}, error) {
+	var schema map[string]interface{}
+	if err := json.Unmarshal(sglangDeepseekV4HopperEngineSchema, &schema); err != nil {
+		return nil, fmt.Errorf("failed to parse SGLang deepseek-v4-hopper engine schema: %w", err)
+	}
+
+	return schema, nil
+}
+
 // EngineSchemas contains all available engine schemas
 var EngineSchemas = map[string]func() (map[string]interface{}, error){
 	"vllm-v0.8.5":      GetVLLMV0_8_5EngineSchema,
 	"llama-cpp-v0.3.7": GetLlamaCppDefaultEngineSchema,
 	"vllm-v0.11.2":     GetVLLMV0_11_2EngineSchema,
 	"vllm-v0.17.1":     GetVLLMV0_17_1EngineSchema,
-	"sglang-v0.5.10":   GetSGLangV0_5_10EngineSchema,
+	"sglang-v0.5.10":               GetSGLangV0_5_10EngineSchema,
+	"sglang-deepseek-v4-hopper":    GetSGLangDeepseekV4HopperEngineSchema,
 }
 
 // GetEngineSchema returns the schema for a specific engine
