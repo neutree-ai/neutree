@@ -102,8 +102,14 @@ spec:
           - --served-model-name
           - {{ .ModelArgs.serve_name }}
           {{- if .EngineArgs }}
+          {{- /*
+            Convert snake_case engine arg keys (from schema) to SGLang's
+            kebab-case CLI flags. Unlike vLLM, SGLang only registers
+            hyphenated long options (e.g. --tp-size, --tensor-parallel-size),
+            so '--tp_size' would be rejected as 'unrecognized arguments'.
+          */ -}}
           {{- range $key, $value := .EngineArgs }}
-          - --{{ $key }}
+          - --{{ replace "_" "-" $key }}
       {{- if ne (printf "%v" $value) "true"}}
           - "{{ $value }}"
       {{- end }}
