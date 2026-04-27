@@ -182,7 +182,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		})
 
 		It("should deploy endpoint on initial cluster", func() {
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineOldVersion())
+			yamlPath := applyEndpoint(epName, clusterName, withEngineVersion(profileEngineOldVersion()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
@@ -362,7 +362,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		})
 
 		It("should deploy endpoint on initial cluster", func() {
-			yamlPath := applyEndpointOnCluster(epName, clusterName, profileEngineVersion())
+			yamlPath := applyEndpoint(epName, clusterName)
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
@@ -437,8 +437,8 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			Expect(generationBefore).NotTo(BeEmpty())
 
 			By("Updating endpoint config with new env var")
-			yamlPath := applyEndpointWithEnv(epName, clusterName, profileEngineVersion(),
-				map[string]string{"E2E_UPGRADE_MARKER": "true"})
+			yamlPath := applyEndpoint(epName, clusterName,
+				withEnv(map[string]string{"E2E_UPGRADE_MARKER": "true"}))
 			defer os.Remove(yamlPath)
 
 			By("Waiting for deployment generation to increase")
