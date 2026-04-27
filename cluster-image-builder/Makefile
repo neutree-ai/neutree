@@ -28,8 +28,10 @@ RAY_SHORT_VERSION ?= ray2.53.0
 # Empty (default) keeps the upstream tag unchanged. Setting e.g. "1" produces
 # tags like "v0.11.2-neutree1-ray2.53.0" while base image, ENGINE_VERSION_DIR,
 # and pip install version still resolve to the upstream version.
+# Use = (recursive) so the value is re-evaluated each time it is referenced,
+# removing any ordering dependency on ENGINE_PATCH_SUFFIX.
 ENGINE_PATCH_SUFFIX ?=
-ENGINE_PATCH_TAG := $(if $(ENGINE_PATCH_SUFFIX),-neutree$(ENGINE_PATCH_SUFFIX))
+ENGINE_PATCH_TAG = $(if $(ENGINE_PATCH_SUFFIX),-neutree$(ENGINE_PATCH_SUFFIX))
 
 .PHONY: docker-build
 docker-build: ## Run docker-build-* targets for all the images
