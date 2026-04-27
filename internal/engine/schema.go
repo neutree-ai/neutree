@@ -21,6 +21,9 @@ var vllmV0_19_0EngineSchema []byte
 //go:embed vllm/v0.19.1/schema.json
 var vllmV0_19_1EngineSchema []byte
 
+//go:embed vllm/v0.20.0rc1/schema.json
+var vllmV0_20_0rc1EngineSchema []byte
+
 //go:embed vllm/gemma4/schema.json
 var vllmGemma4EngineSchema []byte
 
@@ -86,6 +89,16 @@ func GetVLLMV0_19_1EngineSchema() (map[string]interface{}, error) {
 	return schema, nil
 }
 
+// GetVLLMV0_20_0rc1EngineSchema returns the parsed JSON schema for vLLM V0.20.0rc1 engine
+func GetVLLMV0_20_0rc1EngineSchema() (map[string]interface{}, error) {
+	var schema map[string]interface{}
+	if err := json.Unmarshal(vllmV0_20_0rc1EngineSchema, &schema); err != nil {
+		return nil, fmt.Errorf("failed to parse vLLM V0.20.0rc1 engine schema: %w", err)
+	}
+
+	return schema, nil
+}
+
 // GetVLLMGemma4EngineSchema returns the parsed JSON schema for vLLM gemma4 engine
 func GetVLLMGemma4EngineSchema() (map[string]interface{}, error) {
 	var schema map[string]interface{}
@@ -104,6 +117,7 @@ var EngineSchemas = map[string]func() (map[string]interface{}, error){
 	"vllm-v0.17.1":     GetVLLMV0_17_1EngineSchema,
 	"vllm-v0.19.0":     GetVLLMV0_19_0EngineSchema,
 	"vllm-v0.19.1":     GetVLLMV0_19_1EngineSchema,
+	"vllm-v0.20.0rc1":  GetVLLMV0_20_0rc1EngineSchema,
 	"vllm-gemma4":      GetVLLMGemma4EngineSchema,
 }
 
