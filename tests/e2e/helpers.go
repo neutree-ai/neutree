@@ -940,11 +940,63 @@ func deleteTestUser(token, userID string) {
 	resp.Body.Close()
 }
 
+// --- Control Plane helpers (auth, API key, inference) ---
+
 // loginTestUser logs in via GoTrue password grant and returns the access token (JWT).
-func loginTestUser(email, password string) string {
-	reqBody := map[string]string{
+// If serverURL is empty, Cfg.ServerURL is used.
+func loginTestUser(serverURL, email, password string) (string, error) {
+	if serverURL == "" {
+		serverURL = Cfg.ServerURL
+	}
+
+	bodyBytes, err := json.Marshal(map[string]string{
 		"email":    email,
 		"password": password,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	resp, err := client.Post(
+		strings.TrimRight(serverURL, "/")+"/api/v1/auth/token?grant_type=password",
+		"application/json",
+		strings.NewReader(string(bodyBytes)),
+	)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("login failed (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("invalid login response: %w", err)
+	}
+
+	token, ok := result["access_token"].(string)
+	if !ok || token == "" {
+		return "", fmt.Errorf("missing access_token in login response: %s", string(body))
+	}
+
+	return token, nil
+}
+
+// createAPIKey creates an API key on the server via PostgREST RPC using a JWT token.
+func createAPIKey(serverURL, jwt, workspace, name string) string {
+	reqBody := map[string]any{
+		"p_workspace": workspace,
+		"p_name":      name,
+		"p_quota":     100000,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -953,11 +1005,12 @@ func loginTestUser(email, password string) string {
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(Cfg.ServerURL, "/")+"/api/v1/auth/token?grant_type=password",
-		bytes.NewReader(bodyBytes),
+		strings.TrimRight(serverURL, "/")+"/api/v1/rpc/create_api_key",
+		strings.NewReader(string(bodyBytes)),
 	)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+jwt)
 
 	resp, err := client.Do(req)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
@@ -966,13 +1019,15 @@ func loginTestUser(email, password string) string {
 	body, err := io.ReadAll(resp.Body)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
 	ExpectWithOffset(1, resp.StatusCode).To(Equal(http.StatusOK),
-		"login failed: %s", string(body))
+		"create_api_key RPC failed: %s", string(body))
 
-	var result map[string]any
-	ExpectWithOffset(1, json.Unmarshal(body, &result)).To(Succeed())
+	var apiKey v1.ApiKey
+	ExpectWithOffset(1, json.Unmarshal(body, &apiKey)).To(Succeed(),
+		"failed to parse create_api_key response: %s", string(body))
+	ExpectWithOffset(1, apiKey.Status).NotTo(BeNil(),
+		"create_api_key response missing status: %s", string(body))
+	ExpectWithOffset(1, apiKey.Status.SkValue).NotTo(BeEmpty(),
+		"create_api_key response missing sk_value: %s", string(body))
 
-	token, ok := result["access_token"].(string)
-	ExpectWithOffset(1, ok).To(BeTrue(), "missing access_token in login response: %s", string(body))
-
-	return token
+	return apiKey.Status.SkValue
 }

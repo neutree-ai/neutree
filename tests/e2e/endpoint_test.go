@@ -175,9 +175,11 @@ func applyEndpointWithTask(name, engineVersion, model, modelVer, task string, ex
 // --- Inference helpers ---
 
 // doInferenceRequest sends a JSON POST to the given URL path and returns (status_code, body).
-func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, string) {
+func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, string, error) {
 	payloadBytes, err := json.Marshal(reqBody)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to marshal inference request")
+	if err != nil {
+		return 0, "", err
+	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 
@@ -185,22 +187,29 @@ func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, s
 		strings.TrimRight(serviceURL, "/")+path,
 		strings.NewReader(string(payloadBytes)),
 	)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to create inference request")
+	if err != nil {
+		return 0, "", err
+	}
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+Cfg.APIKey)
 
 	resp, err := client.Do(req)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "inference request failed")
+	if err != nil {
+		return 0, "", err
+	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to read inference response")
+	if err != nil {
+		return 0, "", err
+	}
 
-	return resp.StatusCode, string(body)
+	return resp.StatusCode, string(body), nil
 }
 
-// inferChat sends a chat completion request and returns (status_code, body).
-func inferChat(serviceURL, prompt string) (int, string) {
+// inferChat sends a chat completion request.
+func inferChat(serviceURL, prompt string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/chat/completions", map[string]any{
 		"model": profileModelName(),
 		"messages": []map[string]string{
@@ -210,16 +219,16 @@ func inferChat(serviceURL, prompt string) (int, string) {
 	})
 }
 
-// inferEmbedding sends an embedding request and returns (status_code, body).
-func inferEmbedding(serviceURL, model, input string) (int, string) {
+// inferEmbedding sends an embedding request.
+func inferEmbedding(serviceURL, model, input string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/embeddings", map[string]any{
 		"model": model,
 		"input": input,
 	})
 }
 
-// inferRerank sends a rerank request and returns (status_code, body).
-func inferRerank(serviceURL, model, query string, documents []string) (int, string) {
+// inferRerank sends a rerank request.
+func inferRerank(serviceURL, model, query string, documents []string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/rerank", map[string]any{
 		"model":     model,
 		"query":     query,
@@ -285,7 +294,8 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 		It("should serve inference requests", func() {
 			ep := getEndpoint(epName)
-			code, body := inferChat(ep.Status.ServiceURL, "Hello")
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "inference failed: %s", body)
 			Expect(body).To(ContainSubstring("choices"))
 		})
@@ -325,11 +335,13 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 			epA := getEndpoint(epNameA)
 			epB := getEndpoint(epNameB)
 
-			codeA, bodyA := inferChat(epA.Status.ServiceURL, "Hello")
+			codeA, bodyA, err := inferChat(epA.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(codeA).To(Equal(http.StatusOK), "inference on ep-A failed: %s", bodyA)
 			Expect(bodyA).To(ContainSubstring("choices"))
 
-			codeB, bodyB := inferChat(epB.Status.ServiceURL, "Hello")
+			codeB, bodyB, err := inferChat(epB.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(codeB).To(Equal(http.StatusOK), "inference on ep-B failed: %s", bodyB)
 			Expect(bodyB).To(ContainSubstring("choices"))
 		})
@@ -366,7 +378,8 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 		It("should serve embedding requests", func() {
 			ep := getEndpoint(epName)
-			code, body := inferEmbedding(ep.Status.ServiceURL, profileEmbeddingModelName(), "Hello world")
+			code, body, err := inferEmbedding(ep.Status.ServiceURL, profileEmbeddingModelName(), "Hello world")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "embedding inference failed: %s", body)
 
 			var resp map[string]any
@@ -388,10 +401,11 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 
 		It("should serve batch embedding requests", func() {
 			ep := getEndpoint(epName)
-			code, body := doInferenceRequest(ep.Status.ServiceURL, "/v1/embeddings", map[string]any{
+			code, body, err := doInferenceRequest(ep.Status.ServiceURL, "/v1/embeddings", map[string]any{
 				"model": profileEmbeddingModelName(),
 				"input": []string{"Hello world", "Goodbye world"},
 			})
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "batch embedding inference failed: %s", body)
 
 			var resp map[string]any
@@ -439,8 +453,9 @@ var _ = Describe("Endpoint", Ordered, Label("endpoint"), func() {
 				"Berlin is the capital of Germany.",
 				"London is the capital of the United Kingdom.",
 			}
-			code, body := inferRerank(ep.Status.ServiceURL, profileRerankModelName(),
+			code, body, err := inferRerank(ep.Status.ServiceURL, profileRerankModelName(),
 				"What is the capital of France?", documents)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(http.StatusOK), "rerank inference failed: %s", body)
 
 			var resp map[string]any

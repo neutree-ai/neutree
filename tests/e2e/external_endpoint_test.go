@@ -383,7 +383,8 @@ spec:
 	Describe("Credentials API", Label("credentials-api"), func() {
 		It("should return credential for admin via credentials endpoint", Label("C2644056"), func() {
 			By("Logging in as admin to get JWT")
-			jwt := loginTestUser(profile.Auth.Email, profile.Auth.Password)
+			jwt, err := loginTestUser("", profile.Auth.Email, profile.Auth.Password)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(jwt).NotTo(BeEmpty())
 
 			url := fmt.Sprintf("%s/api/v1/credentials/external_endpoints?metadata->>workspace=eq.%s&metadata->>name=eq.%s",
@@ -420,7 +421,8 @@ spec:
 			var userID string
 
 			By("Logging in as admin to get JWT for user management")
-			adminJWT := loginTestUser(profile.Auth.Email, profile.Auth.Password)
+			adminJWT, err := loginTestUser("", profile.Auth.Email, profile.Auth.Password)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(adminJWT).NotTo(BeEmpty())
 
 			DeferCleanup(func() {
@@ -483,7 +485,8 @@ spec:
 			ExpectSuccess(r)
 
 			By("Logging in as the test user to get JWT")
-			jwt := loginTestUser(testEmail, testPassword)
+			jwt, err := loginTestUser("", testEmail, testPassword)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(jwt).NotTo(BeEmpty(), "login should return an access token")
 
 			By("Calling credentials API with non-admin JWT")
