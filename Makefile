@@ -325,6 +325,12 @@ ENGINE_PACKAGE_OUTPUT_DIR ?= dist
 ENGINE_BASE_DIR := internal/engine
 ENGINE_NAME ?= vllm
 ENGINE_VERSION ?= v0.11.2
+# ENGINE_DIR_VERSION strips any prerelease/build suffix (e.g. -neutree1, -beta,
+# -cu130) from ENGINE_VERSION so schema.json / templates lookups always resolve
+# to the upstream version directory under internal/engine/<name>/. The full
+# ENGINE_VERSION (with suffix) is still passed to the script via -v so the
+# manifest's version field carries the patch identifier.
+ENGINE_DIR_VERSION = $(shell echo $(ENGINE_VERSION) | sed 's/-.*//')
 ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:v0.11.2-ray2.53.0
 ENGINE_TASKS ?= text-generation,text-embedding,text-rerank
 ENGINE_DESCRIPTION ?= $(ENGINE_NAME) inference engine
@@ -337,8 +343,8 @@ build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENG
 		-v $(ENGINE_VERSION) \
 		-i "$(ENGINE_IMAGES)" \
 		-s "$(ENGINE_TASKS)" \
-		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/schema.json) \
-		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/templates) \
+		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json) \
+		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
 		-o $(ENGINE_NAME)-$(ENGINE_VERSION).tar.gz \
 		-d "$(ENGINE_DESCRIPTION)"
 
@@ -350,8 +356,8 @@ build-engine-manifest: ## Build engine manifest only (no Docker image export, co
 		-v $(ENGINE_VERSION) \
 		-i "$(ENGINE_IMAGES)" \
 		-s "$(ENGINE_TASKS)" \
-		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/schema.json) \
-		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_VERSION)/templates) \
+		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json) \
+		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
 		-d "$(ENGINE_DESCRIPTION)"
 
 .PHONY: sync-images-list
