@@ -20,6 +20,9 @@ ENGINE_VLLM_BASE_IMAGE_REPO ?= vllm/vllm-openai
 ENGINE_VLLM_ROCM_BASE_IMAGE_REPO ?= vllm/vllm-openai-rocm
 ENGINE_VLLM_VERSION ?= v0.11.2
 ENGINE_VLLM_DIR_VERSION ?= $(shell echo $(ENGINE_VLLM_VERSION) | sed 's/-.*//' | tr '.' '_')
+# Defaults to ENGINE_VLLM_VERSION; override when the upstream base image tag
+# differs from the Neutree engine version (e.g. deepseekv4 → deepseekv4-cu129)
+ENGINE_VLLM_BASE_IMAGE_TAG ?= $(ENGINE_VLLM_VERSION)
 ENGINE_LLAMA_CPP_VERSION ?= v0.3.7
 ENGINE_LLAMA_CPP_DIR_VERSION ?= $(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/-.*//' | tr '.' '_')
 RAY_SHORT_VERSION ?= ray2.53.0
@@ -44,12 +47,12 @@ docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
 
 .PHONY: docker-build-engine-vllm
 docker-build-engine-vllm: prepare ## Build the vLLM engine image (NVIDIA)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_VERSION) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-vllm-rocm
 docker-build-engine-vllm-rocm: prepare ## Build the vLLM engine image (ROCm)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_VERSION) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-llama-cpp
