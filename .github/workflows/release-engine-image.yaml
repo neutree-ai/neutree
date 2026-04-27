@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: "ray2.53.0"
+      engine_patch_suffix:
+        description: "optional Neutree patch number (e.g. '1' produces tag <engine_version>-neutree1-<ray_short_version>); empty keeps the upstream tag"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   build-amd64-image:
@@ -49,6 +54,7 @@ jobs:
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_VERSION: ${{ github.event.inputs.ray_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
   push-manifests:
     runs-on: ["serve-builder","X64"]
     name: merge and push manifests
@@ -73,3 +79,4 @@ jobs:
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
