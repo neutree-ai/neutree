@@ -31,7 +31,7 @@ RAY_SHORT_VERSION ?= ray2.53.0
 # Use = (recursive) so the value is re-evaluated each time it is referenced,
 # removing any ordering dependency on ENGINE_PATCH_SUFFIX.
 ENGINE_PATCH_SUFFIX ?=
-ENGINE_PATCH_TAG = $(if $(ENGINE_PATCH_SUFFIX),-neutree$(ENGINE_PATCH_SUFFIX))
+ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-neutree$(strip $(ENGINE_PATCH_SUFFIX)))
 
 .PHONY: docker-build
 docker-build: ## Run docker-build-* targets for all the images
