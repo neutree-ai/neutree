@@ -105,6 +105,59 @@ class _FakeRawRequest:
         return False
 
 
+def _normalize_tool_calls(payload: Any) -> None:
+    """Coerce ``choices[].message.tool_calls`` / ``choices[].delta.tool_calls``
+    from ``None`` to ``[]`` in-place.
+
+    Some downstream consumers (notably the Kong gateway in front of Neutree)
+    reject responses where ``tool_calls`` is ``null`` while OpenAI clients
+    expect either an array or the field to be absent. SGLang emits ``null``
+    when no tools are invoked, so normalise to an empty array to keep the
+    gateway happy.
+    """
+    if not isinstance(payload, dict):
+        return
+    for choice in payload.get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        msg = choice.get("message")
+        if isinstance(msg, dict) and msg.get("tool_calls") is None:
+            msg["tool_calls"] = []
+        delta = choice.get("delta")
+        if isinstance(delta, dict) and delta.get("tool_calls") is None:
+            delta["tool_calls"] = []
+
+
+def _normalize_sse_chunk(chunk: str) -> str:
+    """Apply ``_normalize_tool_calls`` to the JSON payload of an SSE
+    ``data: {...}`` frame and return the rewritten chunk.
+
+    Pass through ``data: [DONE]`` and any non-JSON / non-data payloads
+    unchanged so we don't risk corrupting framing.
+    """
+    if "data:" not in chunk:
+        return chunk
+
+    out_lines = []
+    rewritten = False
+    for line in chunk.split("\n"):
+        if line.startswith("data: "):
+            body = line[6:]
+            if body and body != "[DONE]":
+                try:
+                    payload = json.loads(body)
+                except (TypeError, ValueError):
+                    out_lines.append(line)
+                    continue
+                if isinstance(payload, dict):
+                    _normalize_tool_calls(payload)
+                    line = "data: " + json.dumps(payload)
+                    rewritten = True
+        out_lines.append(line)
+
+    return "\n".join(out_lines) if rewritten else chunk
+
+
 def _extract_serializable(result) -> Any:
     """Convert a serving-handler result to a Ray-serialisable Python value."""
     try:
@@ -131,13 +184,14 @@ async def _iter_response_body(result) -> AsyncGenerator[str, None]:
     """Yield SSE chunks (as strings) from a serving-handler StreamingResponse.
 
     Bytes chunks are decoded so the result can be safely sent over the Ray
-    actor boundary as Python strings.
+    actor boundary as Python strings. Each ``data:`` frame is rewritten so
+    ``tool_calls`` is never ``null`` (see ``_normalize_tool_calls``).
     """
     if isinstance(result, StreamingResponse):
         async for chunk in result.body_iterator:
             if isinstance(chunk, bytes):
                 chunk = chunk.decode("utf-8")
-            yield chunk
+            yield _normalize_sse_chunk(chunk)
         return
 
     # If the handler returned an error response (ORJSONResponse) instead of
@@ -154,6 +208,8 @@ async def _iter_response_body(result) -> AsyncGenerator[str, None]:
         pass
 
     data = result.model_dump() if hasattr(result, "model_dump") else result
+    if isinstance(data, dict):
+        _normalize_tool_calls(data)
     yield f"data: {json.dumps(data)}\n\n"
     yield "data: [DONE]\n\n"
 
@@ -165,9 +221,12 @@ def _to_json_response(result) -> JSONResponse:
         if result.get("object") == "error":
             status = result.get("code", 400)
             return JSONResponse(content=result, status_code=status)
+        _normalize_tool_calls(result)
         return JSONResponse(content=result)
     if hasattr(result, "model_dump"):
-        return JSONResponse(content=result.model_dump())
+        data = result.model_dump()
+        _normalize_tool_calls(data)
+        return JSONResponse(content=data)
     return JSONResponse(content=result)
 
 
