@@ -46,6 +46,11 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 		return nil, err
 	}
 
+	vllmDeepseekV4EngineSchema, err := GetVLLMDeepseekV4EngineSchema()
+	if err != nil {
+		return nil, err
+	}
+
 	engines := []*v1.Engine{
 		{
 			APIVersion: "v1",
@@ -187,6 +192,21 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
 								"default": GetVLLMGemma4DeployTemplate(),
+							},
+						},
+					},
+					{
+						Version:      "deepseekv4",
+						ValuesSchema: vllmDeepseekV4EngineSchema,
+						Images: map[string]*v1.EngineImage{
+							"nvidia_gpu": {
+								ImageName: "neutree/engine-vllm",
+								Tag:       "deepseekv4-ray2.53.0",
+							},
+						},
+						DeployTemplate: map[string]map[string]string{
+							"kubernetes": {
+								"default": GetVLLMDeepseekV4DeployTemplate(),
 							},
 						},
 					},

@@ -1,0 +1,544 @@
+import os
+import enum
+import logging
+import time
+import json
+from typing import Dict, Optional, Any, AsyncGenerator, List
+
+from fastapi import FastAPI, Request
+from starlette.responses import StreamingResponse, JSONResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
+from starlette_context.plugins import RequestIdPlugin
+from starlette_context.middleware import RawContextMiddleware
+from fastapi.middleware import Middleware
+
+from ray import serve
+from ray.serve import Application
+from ray.serve.config import RequestRouterConfig
+from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
+
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.v1.engine.async_llm import AsyncLLM
+# v0.19.0: same module paths as v0.17.1 for protocol/serving classes
+from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
+from vllm.entrypoints.openai.engine.protocol import ErrorResponse, ErrorInfo
+from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
+from vllm.entrypoints.openai.models.protocol import BaseModelPath
+from vllm.entrypoints.openai.models.serving import OpenAIServingModels
+from vllm.entrypoints.pooling.embed.protocol import EmbeddingCompletionRequest
+from vllm.entrypoints.pooling.embed.serving import ServingEmbedding
+# v0.20.0rc1: pooling.score → pooling.scoring (module path renamed)
+from vllm.entrypoints.pooling.scoring.protocol import RerankRequest
+from vllm.entrypoints.pooling.scoring.serving import ServingScores
+# v0.19.0+: render serving for disaggregated chat preprocessing
+from vllm.entrypoints.serve.render.serving import OpenAIServingRender
+
+from downloader import get_downloader, build_request_from_model_args
+from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
+from serve._utils import coerce_args, filter_engine_args
+from serve._utils.runtime_env import build_backend_runtime_env
+
+
+class SchedulerType(str, enum.Enum):
+    POW2 = "pow2"
+    STATIC_HASH = "static_hash"
+    CONSISTENT_HASH = "consistent_hash"
+
+
+# Mapping from scheduler type to request router class path
+SCHEDULER_CLASS_PATHS = {
+    SchedulerType.STATIC_HASH: "serve._replica_scheduler.static_hash_scheduler:StaticHashReplicaScheduler",
+    SchedulerType.CONSISTENT_HASH: "serve._replica_scheduler.chwbl_scheduler:ConsistentHashReplicaScheduler",
+}
+
+
+@serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})
+class Backend:
+    def __init__(self,
+                 # Model config parameters
+                 model_registry_type: str,
+                 model_name: str,
+                 model_version: str,
+                 model_file: str = "",
+                 model_task: str = "",
+                 model_registry_path: str = "",
+                 model_path: str = "",
+                 model_serve_name: str = "",
+                 **engine_kwargs):
+        """
+        Backend deployment for vLLM inference.
+
+        Args:
+            model_registry_type: Type of model registry ("bentoml" or "hugging-face")
+            model_name: Name of the model in the registry
+            model_version: Version of the model
+            model_file: Specific model file name (for bentoml)
+            model_task: Task type (e.g., "text-generation", "text-embedding", "text-rerank")
+            **engine_kwargs: Additional keyword arguments passed directly to AsyncEngineArgs
+        """
+        backend, dl_req = build_request_from_model_args({
+            "registry_type": model_registry_type,
+            "name": model_name,
+            "version": model_version,
+            "file": model_file,
+            "task": model_task,
+            "registry_path": model_registry_path,
+            "path": model_path,
+        })
+
+        downloader = get_downloader(backend)
+        print(f"[Backend] Downloading model using backend={backend} from source={dl_req.source} to dest={dl_req.dest}")
+        downloader.download(dl_req.source, dl_req.dest, credentials=dl_req.credentials,
+                            recursive=dl_req.recursive, overwrite=dl_req.overwrite,
+                            retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
+        print(f"[Backend] Model download completed.")
+
+        self.model_id = model_serve_name
+        self.model_task = model_task
+
+        # Extract FrontendArgs BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors.
+        # FrontendArgs are NOT engine parameters — they configure the Serving layer (chat, embedding, score).
+        # If left in engine_kwargs, they would be passed to AsyncEngineArgs and cause TypeError.
+
+        # Tool calling configuration
+        self.tool_parser = engine_kwargs.pop("tool_call_parser", None)
+        self.enable_auto_tools = engine_kwargs.pop("enable_auto_tool_choice", False)
+        if self.tool_parser:
+            self.enable_auto_tools = True
+        self.exclude_tools_when_tool_choice_none = engine_kwargs.pop("exclude_tools_when_tool_choice_none", False)
+
+        # Reasoning configuration (read but don't pop - engine needs these too)
+        self.reasoning_parser = engine_kwargs.get("reasoning_parser", None)
+
+        # Chat template parameters
+        self.chat_template = engine_kwargs.pop("chat_template", None)
+        self.chat_template_content_format = engine_kwargs.pop("chat_template_content_format", "auto")
+        self.trust_request_chat_template = engine_kwargs.pop("trust_request_chat_template", False)
+        _raw_kwargs = engine_kwargs.pop("default_chat_template_kwargs", None)
+        # Coerce JSON string → dict, following the same pattern as coerce_args().
+        if isinstance(_raw_kwargs, str):
+            try:
+                parsed = json.loads(_raw_kwargs)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            if isinstance(parsed, dict):
+                _raw_kwargs = parsed
+            else:
+                print(f"[Backend] WARNING: default_chat_template_kwargs is not a valid JSON dict: {_raw_kwargs!r}, ignoring")
+                _raw_kwargs = None
+        elif _raw_kwargs is not None and not isinstance(_raw_kwargs, dict):
+            print(f"[Backend] WARNING: default_chat_template_kwargs must be a dict or JSON object string, got {type(_raw_kwargs).__name__}; ignoring")
+            _raw_kwargs = None
+        self.default_chat_template_kwargs = _raw_kwargs
+
+        # Chat/serving behavior parameters
+        self.response_role = engine_kwargs.pop("response_role", "assistant")
+        self.enable_prompt_tokens_details = engine_kwargs.pop("enable_prompt_tokens_details", False)
+        self.return_tokens_as_token_ids = engine_kwargs.pop("return_tokens_as_token_ids", False)
+        self.enable_force_include_usage = engine_kwargs.pop("enable_force_include_usage", False)
+
+        # Logging/debugging parameters
+        self.enable_log_outputs = engine_kwargs.pop("enable_log_outputs", False)
+        self.enable_log_deltas = engine_kwargs.pop("enable_log_deltas", True)
+        self.log_error_stack = engine_kwargs.pop("log_error_stack", False)
+
+        # v0.20.0rc1: ServingScores.enable_flash_late_interaction (default True).
+        # Disabled by default in Ray Serve mode since the API server has no GPU.
+        self.enable_flash_late_interaction = engine_kwargs.pop("enable_flash_late_interaction", False)
+
+        # FrontendArgs not used in Ray Serve mode (pop to prevent AsyncEngineArgs errors)
+        engine_kwargs.pop("tool_parser_plugin", None)
+        engine_kwargs.pop("tool_server", None)
+        engine_kwargs.pop("tokens_only", None)
+        engine_kwargs.pop("enable_server_load_tracking", None)
+        engine_kwargs.pop("enable_tokenizer_info_endpoint", None)
+
+        # v0.17.1+: --task removed, replaced by --runner/--convert (both default "auto").
+        # vLLM auto-detects the correct mode from model architecture.
+
+        # merge engine args
+        # NOTE: enable_prefix_caching is intentionally NOT set here.
+        # vLLM v0.8.0+ (V1 engine) defaults to True for generate models.
+        # vLLM v0.12.0+ uses ModelConfig.is_prefix_caching_supported for
+        # smart per-model-type defaults (e.g. False for encoder-only/hybrid).
+        # Letting vLLM decide avoids overriding those intelligent defaults
+        # and keeps behavior consistent with the Kubernetes deployment path.
+        args = dict(
+            model=model_path,
+            served_model_name=self.model_id,
+            disable_log_stats=False,
+        )
+
+        args.update(engine_kwargs)
+
+        # Coerce JSON string values to native types based on AsyncEngineArgs field
+        # annotations. This handles the SSH/Ray path where users may provide JSON
+        # values as strings (e.g. '{"temperature": 0.5}' instead of a native dict),
+        # since unlike the K8s CLI path there is no argparse layer to do json.loads.
+        coerce_args(args, AsyncEngineArgs)
+
+        # Drop any keys not recognised by AsyncEngineArgs (e.g. serving-only
+        # params that were read but not popped) to prevent TypeError on init.
+        filter_engine_args(args, AsyncEngineArgs)
+
+        engine_args = AsyncEngineArgs(
+            **args
+        )
+
+        self.engine = AsyncLLM.from_engine_args(
+            engine_args,
+            stat_loggers=[NeutreeRayStatLogger],
+        )
+        self.model_config = None
+        self.openai_serving_chat = None
+        self.openai_serving_embedding = None
+        self.openai_serving_score = None
+        self.openai_serving_models = None
+
+    def _ensure_model_config(self):
+        if self.model_config is None:
+            self.model_config = self.engine.model_config
+        return self.model_config
+
+    async def _ensure_models(self):
+        if self.openai_serving_models is None:
+            self._ensure_model_config()
+            self.openai_serving_models = OpenAIServingModels(
+                self.engine,
+                [BaseModelPath(name=self.engine.model_config.served_model_name,
+                               model_path=self.engine.model_config.served_model_name)]
+            )
+        return self.openai_serving_models
+
+    async def _ensure_chat(self):
+        if self.openai_serving_chat is None:
+            self._ensure_model_config()
+            models = await self._ensure_models()
+
+            # v0.20.0rc1: OpenAIServingRender removed io_processor positional param;
+            # OpenAIServingModels no longer exposes .io_processor attribute.
+            openai_serving_render = OpenAIServingRender(
+                models.model_config,
+                models.renderer,
+                models.registry,
+                request_logger=None,
+                chat_template=self.chat_template,
+                chat_template_content_format=self.chat_template_content_format,
+                trust_request_chat_template=self.trust_request_chat_template,
+                enable_auto_tools=self.enable_auto_tools,
+                exclude_tools_when_tool_choice_none=self.exclude_tools_when_tool_choice_none,
+                tool_parser=self.tool_parser,
+                reasoning_parser=self.reasoning_parser,
+                default_chat_template_kwargs=self.default_chat_template_kwargs,
+                log_error_stack=self.log_error_stack,
+            )
+
+            self.openai_serving_chat = OpenAIServingChat(
+                self.engine,
+                models,
+                self.response_role,
+                openai_serving_render=openai_serving_render,
+                request_logger=None,
+                chat_template=self.chat_template,
+                chat_template_content_format=self.chat_template_content_format,
+                trust_request_chat_template=self.trust_request_chat_template,
+                return_tokens_as_token_ids=self.return_tokens_as_token_ids,
+                enable_auto_tools=self.enable_auto_tools,
+                exclude_tools_when_tool_choice_none=self.exclude_tools_when_tool_choice_none,
+                tool_parser=self.tool_parser,
+                reasoning_parser=self.reasoning_parser,
+                enable_prompt_tokens_details=self.enable_prompt_tokens_details,
+                enable_force_include_usage=self.enable_force_include_usage,
+                enable_log_outputs=self.enable_log_outputs,
+                enable_log_deltas=self.enable_log_deltas,
+                default_chat_template_kwargs=self.default_chat_template_kwargs,
+            )
+        return self.openai_serving_chat
+
+    async def _ensure_embedding(self):
+        if self.openai_serving_embedding is None:
+            self._ensure_model_config()
+            models = await self._ensure_models()
+            # v0.19.0: ServingEmbedding (renamed from OpenAIServingEmbedding)
+            # inherits from PoolingServing with a different constructor signature.
+            self.openai_serving_embedding = ServingEmbedding(
+                self.engine,
+                models,
+                request_logger=None,
+                chat_template=self.chat_template,
+                chat_template_content_format=self.chat_template_content_format,
+                trust_request_chat_template=self.trust_request_chat_template,
+                return_tokens_as_token_ids=self.return_tokens_as_token_ids,
+                log_error_stack=self.log_error_stack,
+            )
+        return self.openai_serving_embedding
+
+    async def _ensure_score(self):
+        if self.openai_serving_score is None:
+            self._ensure_model_config()
+            models = await self._ensure_models()
+            # v0.20.0rc1: ServingScores now inherits PoolingServing.
+            # score_template / log_error_stack moved to PoolingServingBase kwargs.
+            # New: enable_flash_late_interaction (default True; disabled here for Ray Serve).
+            self.openai_serving_score = ServingScores(
+                self.engine,
+                models,
+                request_logger=None,
+                log_error_stack=self.log_error_stack,
+                enable_flash_late_interaction=self.enable_flash_late_interaction,
+            )
+        return self.openai_serving_score
+
+    async def generate(self, payload: Any):
+        await self._ensure_chat()
+        result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
+
+        is_stream = payload.get("stream") is True
+
+        if hasattr(result, 'error') and hasattr(result.error, 'message'):
+            if is_stream:
+                logging.error(f"Error during chat completion: {result.error.message}")
+            return {"error": {"message": result.error.message, "type": getattr(result.error, 'type', 'internal_server_error'), "code": getattr(result.error, 'code', 500)}}
+
+        if is_stream:
+            return result
+
+        return result.model_dump() if hasattr(result, 'model_dump') else result
+
+    async def generate_embeddings(self, payload: Any):
+        await self._ensure_embedding()
+        try:
+            request = EmbeddingCompletionRequest(**payload)
+        except (TypeError, ValueError) as e:
+            logging.error(f"Invalid payload for EmbeddingCompletionRequest: {e}")
+            return {"body": {"error": {"message": str(e), "type": "invalid_request_error", "code": 400}}, "status_code": 400}
+        # ServingEmbedding.__call__ returns a starlette Response
+        response = await self.openai_serving_embedding(request, None)
+        try:
+            body = json.loads(response.body)
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+            logging.error(f"Failed to decode embedding response body: {e}")
+            return {"body": {"error": {"message": "Internal server error", "type": "server_error", "code": 500}}, "status_code": 500}
+        return {"body": body, "status_code": response.status_code}
+
+    async def rerank(self, payload: Any):
+        await self._ensure_score()
+        request = RerankRequest(**payload)
+        # v0.20.0rc1: do_rerank() removed. ServingScores.__call__ dispatches on
+        # isinstance(ctx.request, RerankRequest) and returns a starlette Response.
+        response = await self.openai_serving_score(request, None)
+        try:
+            body = json.loads(response.body)
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+            logging.error(f"Failed to decode rerank response body: {e}")
+            return {"body": {"error": {"message": "Internal server error", "type": "server_error", "code": 500}}, "status_code": 500}
+        return {"body": body, "status_code": response.status_code}
+
+    async def show_available_models(self):
+        models = await self._ensure_models()
+        return await models.show_available_models()
+
+
+app = FastAPI()
+app.add_middleware(RawContextMiddleware, plugins=(RequestIdPlugin(),))
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@serve.deployment(ray_actor_options={"num_cpus": 0.1})
+@serve.ingress(app)
+class Controller:
+    def __init__(self, backend: DeploymentHandle):
+        """
+        Controller deployment that handles HTTP routing and calls the backend.
+
+        Args:
+            backend: Handle to the Backend deployment
+        """
+        self.backend = backend
+        print("[Controller] Initialized with backend handle")
+
+    @app.post("/v1/chat/completions")
+    async def chat(self, request: Request):
+        req_obj = await request.json()
+        stream = req_obj.get("stream", False)
+
+        if stream:
+            r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
+
+            # Peek at first chunk to detect errors without losing it.
+            try:
+                first_chunk = await r.__anext__()
+            except StopAsyncIteration:
+                return JSONResponse(
+                    content={"error": {"message": "Empty response from backend", "type": "server_error"}},
+                    status_code=500)
+            except Exception as e:
+                logging.error(f"Streaming backend error: {e}")
+                return JSONResponse(
+                    content={"error": {"message": str(e), "type": "server_error"}},
+                    status_code=500)
+
+            # Backend returns dict with "error" key on failure
+            if isinstance(first_chunk, dict) and "error" in first_chunk:
+                code = first_chunk["error"].get("code", 400)
+                return JSONResponse(content=first_chunk, status_code=code)
+
+            # Chain first_chunk back so no data is lost
+            async def _chain_stream(first, rest):
+                yield first
+                async for chunk in rest:
+                    yield chunk
+
+            return StreamingResponse(
+                content=_chain_stream(first_chunk, r),
+                media_type="text/event-stream"
+            )
+        else:
+            result = await self.backend.options(stream=False).generate.remote(req_obj)
+            # Backend returns dict: either {"error": ...} or model_dump() result
+            if isinstance(result, dict) and "error" in result:
+                code = result["error"].get("code", 500)
+                return JSONResponse(content=result, status_code=code)
+            return JSONResponse(content=result)
+
+    @app.post("/v1/embeddings")
+    async def embeddings(self, request: Request):
+        req_obj = await request.json()
+        result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
+        return JSONResponse(content=result["body"], status_code=result["status_code"])
+
+    @app.post("/v1/rerank")
+    async def rerank(self, request: Request):
+        req_obj = await request.json()
+        # v0.20.0rc1: Backend returns {"body": ..., "status_code": ...} dict
+        # because ServingScores.__call__ now returns a starlette Response.
+        result = await self.backend.options(stream=False).rerank.remote(req_obj)
+        return JSONResponse(content=result["body"], status_code=result["status_code"])
+
+    @app.get("/v1/models")
+    async def models(self, request: Request):
+        result = await self.backend.show_available_models.remote()
+        return JSONResponse(content=result.model_dump() if hasattr(result, 'model_dump') else result)
+
+    @app.get("/health")
+    async def health(self):
+        return {"status": "ok"}
+
+
+def _build_request_router_config(scheduler_config: Dict[str, Any]) -> Optional[RequestRouterConfig]:
+    """Build RequestRouterConfig based on scheduler configuration.
+
+    Args:
+        scheduler_config: Dictionary containing scheduler configuration with keys:
+            - type: SchedulerType (pow2, static_hash, consistent_hash)
+            - virtual_nodes: Number of virtual nodes for consistent hash (default: 100)
+            - load_factor: Load factor for bounded load (default: 1.25)
+            - max_user_messages_for_cache: Number of user messages for cache key (default: 2)
+
+    Returns:
+        RequestRouterConfig if custom scheduler is specified, None for default POW2.
+    """
+    scheduler_type = scheduler_config.get('type', SchedulerType.POW2)
+
+    # Use default POW2 scheduler
+    if scheduler_type == SchedulerType.POW2:
+        print(f"[app_builder] Using default POW2 scheduler")
+        return None
+
+    # Get the custom router class path
+    router_class_path = SCHEDULER_CLASS_PATHS.get(scheduler_type)
+    if not router_class_path:
+        print(f"[app_builder] Unknown scheduler type: {scheduler_type}, using default POW2")
+        return None
+
+    # Build kwargs for the custom router
+    router_kwargs = {}
+    if scheduler_type == SchedulerType.CONSISTENT_HASH:
+        router_kwargs = {
+            "virtual_nodes_per_replica": scheduler_config.get('virtual_nodes', 100),
+            "load_factor": scheduler_config.get('load_factor', 1.25),
+            "max_user_messages_for_cache": scheduler_config.get('max_user_messages_for_cache', 2),
+        }
+
+    print(f"[app_builder] Using custom scheduler: {scheduler_type}, class: {router_class_path}, kwargs: {router_kwargs}")
+
+    return RequestRouterConfig(
+        request_router_class=router_class_path,
+        request_router_kwargs=router_kwargs,
+    )
+
+
+def app_builder(args: Dict[str, Any]) -> Application:
+    """
+    Application builder function that configures and returns the Backend and Controller deployments.
+    """
+    # Extract configuration sections
+    model = args.get('model', {})
+    deployment_options = args.get('deployment_options', {})
+    engine_args = args.get('engine_args', {})  # vLLM-specific engine arguments
+
+    # Extract backend deployment options
+    backend_options = deployment_options.get('backend', {})
+    controller_options = deployment_options.get('controller', {})
+
+    # Extract scheduler configuration and build RequestRouterConfig
+    scheduler_config = deployment_options.get('scheduler', {})
+    request_router_config = _build_request_router_config(scheduler_config)
+
+    # Build backend deployment options
+    backend_deploy_options = {
+        "max_ongoing_requests": backend_options.get('max_ongoing_requests', 100),
+        "num_replicas": backend_options.get('num_replicas', 1),
+        "ray_actor_options": {
+            "num_cpus": backend_options.get('num_cpus', 1),
+            "num_gpus": backend_options.get('num_gpus', 1),
+            "memory": backend_options.get('memory', None),
+            "resources": backend_options.get('resources', {})
+        }
+    }
+
+    # Add request_router_config if custom scheduler is specified
+    if request_router_config is not None:
+        backend_deploy_options["request_router_config"] = request_router_config
+
+    # Override Backend's runtime_env.container with the full config (GPU options,
+    # volume mounts, NFS) so only Backend replicas require GPU nodes.
+    # Ray replaces "container" per-key, so this must be self-contained.
+    backend_container = args.get('backend_container')
+    if backend_container:
+        backend_deploy_options["ray_actor_options"]["runtime_env"] = \
+            build_backend_runtime_env(backend_container)
+
+    # Configure backend deployment
+    backend_deployment = Backend.options(**backend_deploy_options).bind(
+        model_registry_type=model.get('registry_type'),
+        model_name=model.get('name'),
+        model_version=model.get('version'),
+        model_file=model.get('file', ''),
+        model_task=model.get('task'),
+        model_registry_path=model.get('registry_path', ''),
+        model_path=model.get('path', ''),
+        model_serve_name=model.get('serve_name', ''),
+        # Pass all other engine args directly through
+        **engine_args
+    )
+
+    # Configure controller deployment
+    controller_deployment = Controller.options(
+        max_ongoing_requests=backend_options.get('max_ongoing_requests', 100) * backend_options.get('num_replicas', 1),
+        num_replicas=controller_options.get('num_replicas', 1),
+        ray_actor_options={
+            "num_cpus": controller_options.get('num_cpus', 0.1),
+            "num_gpus": controller_options.get('num_gpus', 0)
+        }
+    ).bind(
+        backend=backend_deployment,
+    )
+
+    return controller_deployment

@@ -27,6 +27,9 @@ var vllmV0_20_0rc1EngineSchema []byte
 //go:embed vllm/gemma4/schema.json
 var vllmGemma4EngineSchema []byte
 
+//go:embed vllm/deepseekv4/schema.json
+var vllmDeepseekV4EngineSchema []byte
+
 //go:embed llama-cpp/v0.3.7/schema.json
 var llamaCppV0_3_7EngineSchema []byte
 
@@ -109,6 +112,16 @@ func GetVLLMGemma4EngineSchema() (map[string]interface{}, error) {
 	return schema, nil
 }
 
+// GetVLLMDeepseekV4EngineSchema returns the parsed JSON schema for vLLM deepseekv4 engine
+func GetVLLMDeepseekV4EngineSchema() (map[string]interface{}, error) {
+	var schema map[string]interface{}
+	if err := json.Unmarshal(vllmDeepseekV4EngineSchema, &schema); err != nil {
+		return nil, fmt.Errorf("failed to parse vLLM deepseekv4 engine schema: %w", err)
+	}
+
+	return schema, nil
+}
+
 // EngineSchemas contains all available engine schemas
 var EngineSchemas = map[string]func() (map[string]interface{}, error){
 	"vllm-v0.8.5":      GetVLLMV0_8_5EngineSchema,
@@ -119,6 +132,7 @@ var EngineSchemas = map[string]func() (map[string]interface{}, error){
 	"vllm-v0.19.1":     GetVLLMV0_19_1EngineSchema,
 	"vllm-v0.20.0rc1":  GetVLLMV0_20_0rc1EngineSchema,
 	"vllm-gemma4":      GetVLLMGemma4EngineSchema,
+	"vllm-deepseekv4":  GetVLLMDeepseekV4EngineSchema,
 }
 
 // GetEngineSchema returns the schema for a specific engine

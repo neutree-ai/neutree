@@ -24,6 +24,9 @@ var vllmV0_20_0rc1DeployTemplate string
 //go:embed vllm/gemma4/templates/kubernetes/default.yaml
 var vllmGemma4DeployTemplate string
 
+//go:embed vllm/deepseekv4/templates/kubernetes/default.yaml
+var vllmDeepseekV4DeployTemplate string
+
 //go:embed llama-cpp/v0.3.7/templates/kubernetes/default.yaml
 var llamaCppDefaultDeployTemplate string
 
@@ -62,6 +65,11 @@ func GetVLLMGemma4DeployTemplate() string {
 	return base64.StdEncoding.EncodeToString([]byte(vllmGemma4DeployTemplate))
 }
 
+// GetVLLMDeepseekV4DeployTemplate returns the default deployment template for vLLM deepseekv4 engine
+func GetVLLMDeepseekV4DeployTemplate() string {
+	return base64.StdEncoding.EncodeToString([]byte(vllmDeepseekV4DeployTemplate))
+}
+
 // DeployTemplates contains all available deployment templates
 var DeployTemplates = map[string]func() string{
 	"vllm-v0.11.2":     GetVLLMV0_11_2DeployTemplate,
@@ -70,6 +78,7 @@ var DeployTemplates = map[string]func() string{
 	"vllm-v0.19.1":     GetVLLMV0_19_1DeployTemplate,
 	"vllm-v0.20.0rc1":  GetVLLMV0_20_0rc1DeployTemplate,
 	"vllm-gemma4":      GetVLLMGemma4DeployTemplate,
+	"vllm-deepseekv4":  GetVLLMDeepseekV4DeployTemplate,
 	"llama-cpp-v0.3.7": GetLlamaCppDefaultDeployTemplate,
 }
 
