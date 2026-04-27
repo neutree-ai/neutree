@@ -105,6 +105,72 @@ class _FakeRawRequest:
         return False
 
 
+def _extract_serializable(result) -> Any:
+    """Convert a serving-handler result to a Ray-serialisable Python value."""
+    try:
+        from fastapi.responses import ORJSONResponse
+        if isinstance(result, ORJSONResponse):
+            import orjson
+            return orjson.loads(result.body)
+    except ImportError:
+        pass
+
+    if isinstance(result, StreamingResponse):
+        raise RuntimeError(
+            "Non-streaming request returned StreamingResponse — "
+            "verify stream=False in the payload."
+        )
+
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+
+    return result
+
+
+async def _iter_response_body(result) -> AsyncGenerator[str, None]:
+    """Yield SSE chunks (as strings) from a serving-handler StreamingResponse.
+
+    Bytes chunks are decoded so the result can be safely sent over the Ray
+    actor boundary as Python strings.
+    """
+    if isinstance(result, StreamingResponse):
+        async for chunk in result.body_iterator:
+            if isinstance(chunk, bytes):
+                chunk = chunk.decode("utf-8")
+            yield chunk
+        return
+
+    # If the handler returned an error response (ORJSONResponse) instead of
+    # streaming, wrap it as a single SSE error frame followed by [DONE].
+    try:
+        from fastapi.responses import ORJSONResponse
+        if isinstance(result, ORJSONResponse):
+            import orjson
+            error_data = orjson.loads(result.body)
+            yield f"data: {json.dumps(error_data)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+    except ImportError:
+        pass
+
+    data = result.model_dump() if hasattr(result, "model_dump") else result
+    yield f"data: {json.dumps(data)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+def _to_json_response(result) -> JSONResponse:
+    """Wrap a backend-returned serialisable value in a JSONResponse."""
+    if isinstance(result, dict):
+        # SGLang error payloads use object='error' and include an HTTP code.
+        if result.get("object") == "error":
+            status = result.get("code", 400)
+            return JSONResponse(content=result, status_code=status)
+        return JSONResponse(content=result)
+    if hasattr(result, "model_dump"):
+        return JSONResponse(content=result.model_dump())
+    return JSONResponse(content=result)
+
+
 @serve.deployment(
     ray_actor_options={"num_cpus": 1, "num_gpus": 1},
     graceful_shutdown_timeout_s=30,
@@ -389,72 +455,6 @@ class Controller:
     @app.get("/health")
     async def health(self):
         return {"status": "ok"}
-
-
-def _extract_serializable(result) -> Any:
-    """Convert a serving-handler result to a Ray-serialisable Python value."""
-    try:
-        from fastapi.responses import ORJSONResponse
-        if isinstance(result, ORJSONResponse):
-            import orjson
-            return orjson.loads(result.body)
-    except ImportError:
-        pass
-
-    if isinstance(result, StreamingResponse):
-        raise RuntimeError(
-            "Non-streaming request returned StreamingResponse — "
-            "verify stream=False in the payload."
-        )
-
-    if hasattr(result, "model_dump"):
-        return result.model_dump()
-
-    return result
-
-
-async def _iter_response_body(result) -> AsyncGenerator[str, None]:
-    """Yield SSE chunks (as strings) from a serving-handler StreamingResponse.
-
-    Bytes chunks are decoded so the result can be safely sent over the Ray
-    actor boundary as Python strings.
-    """
-    if isinstance(result, StreamingResponse):
-        async for chunk in result.body_iterator:
-            if isinstance(chunk, bytes):
-                chunk = chunk.decode("utf-8")
-            yield chunk
-        return
-
-    # If the handler returned an error response (ORJSONResponse) instead of
-    # streaming, wrap it as a single SSE error frame followed by [DONE].
-    try:
-        from fastapi.responses import ORJSONResponse
-        if isinstance(result, ORJSONResponse):
-            import orjson
-            error_data = orjson.loads(result.body)
-            yield f"data: {json.dumps(error_data)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-    except ImportError:
-        pass
-
-    data = result.model_dump() if hasattr(result, "model_dump") else result
-    yield f"data: {json.dumps(data)}\n\n"
-    yield "data: [DONE]\n\n"
-
-
-def _to_json_response(result) -> JSONResponse:
-    """Wrap a backend-returned serialisable value in a JSONResponse."""
-    if isinstance(result, dict):
-        # SGLang error payloads use object='error' and include an HTTP code.
-        if result.get("object") == "error":
-            status = result.get("code", 400)
-            return JSONResponse(content=result, status_code=status)
-        return JSONResponse(content=result)
-    if hasattr(result, "model_dump"):
-        return JSONResponse(content=result.model_dump())
-    return JSONResponse(content=result)
 
 
 def app_builder(args: Dict[str, Any]) -> Application:
