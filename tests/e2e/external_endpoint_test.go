@@ -290,6 +290,84 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(upstreamReq["model"]).To(Equal("gpt-4o"))
 			Expect(upstreamReq["stream"]).To(BeTrue())
 		})
+
+		// NEU-428: when an OpenAI-compatible upstream returns "tool_calls": null
+		// (a JSON null sentinel rather than a missing field), the Anthropic
+		// conversion path used to crash with
+		//   bad argument #1 to 'ipairs' (table expected, got userdata)
+		// because cjson decodes JSON null to a userdata sentinel that is truthy
+		// in Lua. The fix is to gate ipairs() with the existing is_table() helper
+		// in handler.lua. These two cases reproduce the bug and lock in the fix.
+		Context("when upstream emits tool_calls: null", Label("tool-calls-null"), func() {
+			BeforeEach(func() {
+				mockUpstream.SetEmitNullToolCalls(true)
+				mockUpstream.ClearRequests()
+			})
+
+			AfterEach(func() {
+				mockUpstream.SetEmitNullToolCalls(false)
+			})
+
+			It("should handle non-stream Messages without ipairs failure", Label("C2649427"), func() {
+				msg, err := anthropicClient.Messages.New(context.Background(), anthropic.MessageNewParams{
+					Model:     "fast",
+					MaxTokens: 100,
+					Messages: []anthropic.MessageParam{
+						anthropic.NewUserMessage(anthropic.NewTextBlock("hello tool_calls null")),
+					},
+				})
+				Expect(err).NotTo(HaveOccurred(),
+					"Anthropic conversion must not fail when upstream returns tool_calls: null")
+
+				Expect(string(msg.Role)).To(Equal("assistant"))
+				Expect(string(msg.Type)).To(Equal("message"))
+				Expect(len(msg.Content)).To(BeNumerically(">", 0))
+				Expect(msg.StopReason).To(Equal(anthropic.StopReasonEndTurn))
+				Expect(msg.Usage.InputTokens).To(BeNumerically(">", 0))
+
+				// No tool_use blocks should be emitted because there is no real
+				// tool call — only an explicit null sentinel from the upstream.
+				for _, block := range msg.Content {
+					Expect(string(block.Type)).NotTo(Equal("tool_use"),
+						"null tool_calls must not produce a tool_use block")
+				}
+
+				last, _ := waitForUpstreamRequest()
+				Expect(last.Path).To(Equal("/v1/chat/completions"))
+				Expect(last.Body).To(ContainSubstring(`"tool_calls":null`),
+					"sanity check: mock upstream must actually emit tool_calls: null")
+			})
+
+			It("should handle stream Messages without ipairs failure", Label("C2649428"), func() {
+				stream := anthropicClient.Messages.NewStreaming(context.Background(), anthropic.MessageNewParams{
+					Model:     "smart",
+					MaxTokens: 100,
+					Messages: []anthropic.MessageParam{
+						anthropic.NewUserMessage(anthropic.NewTextBlock("hello stream tool_calls null")),
+					},
+				})
+				defer stream.Close()
+
+				var message anthropic.Message
+				for stream.Next() {
+					event := stream.Current()
+					err := message.Accumulate(event)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				// Key assertion: body_filter must not abort the stream on null
+				// tool_calls deltas. Pre-fix, this returns a body_filter error
+				// and the stream is truncated.
+				Expect(stream.Err()).NotTo(HaveOccurred(),
+					"stream must complete cleanly when chunks contain delta.tool_calls: null")
+
+				Expect(string(message.Role)).To(Equal("assistant"))
+				Expect(len(message.Content)).To(BeNumerically(">", 0))
+
+				last, upstreamReq := waitForUpstreamRequest()
+				Expect(last.Path).To(Equal("/v1/chat/completions"))
+				Expect(upstreamReq["stream"]).To(BeTrue())
+			})
+		})
 	})
 
 	// Credential masking is implemented by stripping the credential field entirely
