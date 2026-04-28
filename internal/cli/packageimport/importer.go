@@ -333,8 +333,8 @@ func validateModelTasks(em *EngineMetadata) error {
 		parts = append(parts, b.where+`=`+strconv.Quote(b.task))
 	}
 
-	return fmt.Errorf("unknown model task value(s) — only %q, %q, %q are accepted: %s",
-		v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask,
+	return fmt.Errorf("unknown model task value(s) — only %v are accepted: %s",
+		v1.KnownModelTasks(),
 		strings.Join(parts, "; "))
 }
 
@@ -362,10 +362,15 @@ func aggregateSupportedTasks(em *EngineMetadata) []string {
 	return out
 }
 
-// unionStrings returns existing extended with each non-empty trimmed entry of
-// incoming that is not already present. existing's order is preserved; new
-// entries are appended in incoming order. Returns nil only when both inputs
-// produce no kept entries.
+// unionStrings returns existing extended with each entry from incoming that
+// (a) is not whitespace-only and (b) is not already present in existing.
+// Strings are stored verbatim — no leading/trailing whitespace is stripped
+// from kept entries; trimming is used only to detect "empty" entries to skip.
+// existing's order is preserved as-is (existing duplicates and any leading/
+// trailing whitespace in existing entries are kept untouched — this helper
+// is intentionally non-destructive); new entries are appended in incoming
+// order. Returns existing's value (which may be nil) when no incoming entries
+// are kept.
 func unionStrings(existing, incoming []string) []string {
 	seen := make(map[string]struct{}, len(existing)+len(incoming))
 	out := existing

@@ -315,3 +315,41 @@ func TestEngineVersion_SupportsAccelerator(t *testing.T) {
 		})
 	}
 }
+
+func TestIsKnownModelTask(t *testing.T) {
+	tests := []struct {
+		task string
+		want bool
+	}{
+		{"text-generation", true},
+		{"text-embedding", true},
+		{"text-rerank", true},
+		{"chat", false},
+		{"", false},
+		{" text-generation", false}, // leading whitespace not silently accepted
+		{"TEXT-GENERATION", false},  // case sensitive
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.task, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsKnownModelTask(tt.task))
+		})
+	}
+}
+
+func TestKnownModelTasks(t *testing.T) {
+	got := KnownModelTasks()
+
+	// Stable sorted order — protects callers that render the set in error
+	// messages from observing different orderings across runs.
+	assert.Equal(t, []string{
+		TextEmbeddingModelTask,
+		TextGenerationModelTask,
+		TextRerankModelTask,
+	}, got)
+
+	// Length matches IsKnownModelTask truth table.
+	for _, task := range got {
+		assert.True(t, IsKnownModelTask(task), "KnownModelTasks must list a known task: %q", task)
+	}
+}

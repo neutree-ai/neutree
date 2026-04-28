@@ -3,6 +3,7 @@ package v1
 import (
 	"encoding/base64"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -35,6 +36,21 @@ var knownModelTasks = map[string]struct{}{
 func IsKnownModelTask(task string) bool {
 	_, ok := knownModelTasks[task]
 	return ok
+}
+
+// KnownModelTasks returns the canonical set of task identifiers in a stable
+// sorted order. Single source of truth shared by IsKnownModelTask and any
+// caller that needs to render the accepted set (e.g. error messages),
+// preventing drift between validation and what we tell users is accepted.
+func KnownModelTasks() []string {
+	tasks := make([]string, 0, len(knownModelTasks))
+	for t := range knownModelTasks {
+		tasks = append(tasks, t)
+	}
+
+	sort.Strings(tasks)
+
+	return tasks
 }
 
 // EngineVersion represents a specific version of an engine with its configuration schema,
