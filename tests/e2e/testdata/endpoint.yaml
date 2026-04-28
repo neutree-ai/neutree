@@ -22,7 +22,7 @@ ${E2E_RESOURCES_YAML}
     engine_args:${E2E_ENGINE_ARGS_YAML}
 ${E2E_ENV_YAML}
   replicas:
-    num: 1
+    num: ${E2E_REPLICAS_NUM}
   deployment_options:
     scheduler:
       load_factor: 1.25

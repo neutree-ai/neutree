@@ -21,6 +21,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -260,38 +261,130 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 	return nil
 }
 
+// PauseEndpoint scales the endpoint's K8s deployment to zero replicas.
+//
+// NEU-421: pause does not need ModelRegistry/Engine/ImageRegistry — the
+// existing K8s deployment already has the rendered manifest. We GET it and
+// merge-patch spec.replicas to 0. This decouples pause from model availability
+// so a paused endpoint converges to Paused even after the model has been
+// removed.
+//
+// TODO: Like getEndpointStats, this currently assumes a single Deployment per
+// endpoint. When supporting multi-kind deploy modes (P/D = N Deployments,
+// TP+PP = LeaderWorkerSet), pause + status reporting should be extended
+// together — see project-pd-same-host-phase1 design doc.
 func (k *kubernetesOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
-	ctx, err := k.prepareOrchestratorContext(endpoint)
+	ctx, err := k.prepareOrchestratorContextLite(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare orchestrator context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
-	if err := k.validateDependencies(ctx); err != nil {
-		return errors.Wrapf(err, "failed to validate dependencies for endpoint %s", endpoint.Metadata.WorkspaceName())
+	if err := k.validateClusterForLite(ctx); err != nil {
+		return errors.Wrapf(err, "failed to validate cluster for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
-	ctx.logger.V(4).Info("Pausing by reapplying with zero replicas")
+	ctx.logger.V(4).Info("Pausing endpoint by patching replicas to 0")
 
-	err = k.createEndpoint(ctx)
-	if err != nil {
+	if err := k.pauseEndpoint(ctx); err != nil {
 		return errors.Wrapf(err, "failed to pause endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
 	return nil
 }
 
+// DeleteEndpoint deletes the endpoint's K8s resources via the deployer's
+// last-applied snapshot (stored in a ConfigMap by Apply).
+//
+// NEU-421: delete does not need ModelRegistry/Engine/ImageRegistry. The
+// deployer's configStore.Get loads the last-applied manifest list directly,
+// so deletion can proceed even when those dependencies have been removed.
 func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
-	// delete endpoint should not validate dependencies
-	ctx, err := k.prepareOrchestratorContext(endpoint)
+	ctx, err := k.prepareOrchestratorContextLite(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare orchestrator context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
+	if err := k.validateClusterForLite(ctx); err != nil {
+		return errors.Wrapf(err, "failed to validate cluster for endpoint %s", endpoint.Metadata.WorkspaceName())
+	}
+
 	ctx.logger.V(4).Info("Deleting endpoint")
 
-	err = k.deleteEndpoint(ctx)
-	if err != nil {
+	if err := k.deleteEndpoint(ctx); err != nil {
 		return errors.Wrapf(err, "failed to delete endpoint %s", endpoint.Metadata.WorkspaceName())
+	}
+
+	return nil
+}
+
+// prepareOrchestratorContextLite is the pause/delete equivalent of
+// prepareOrchestratorContext: it fetches only what those operations actually
+// need (cluster + ctrlClient) and skips ModelRegistry/Engine/ImageRegistry
+// lookups so a removed model registry does not block convergence to
+// Paused/Deleted.
+func (k *kubernetesOrchestrator) prepareOrchestratorContextLite(endpoint *v1.Endpoint) (*OrchestratorContext, error) {
+	deployedCluster, err := getEndpointDeployCluster(k.storage, endpoint)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get deploy cluster")
+	}
+
+	ctrlClient, err := util.GetClientFromCluster(deployedCluster)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get kubernetes client")
+	}
+
+	return &OrchestratorContext{
+		Cluster:   deployedCluster,
+		Endpoint:  endpoint,
+		ctrClient: ctrlClient,
+		logger:    klog.LoggerWithValues(klog.Background(), "endpoint", endpoint.Metadata.WorkspaceName()),
+	}, nil
+}
+
+// validateClusterForLite enforces the subset of validateDependencies that
+// pause/delete still need: cluster must exist, be Running, and be a K8s
+// cluster. Other dependency checks (engine, model registry, image registry)
+// are intentionally skipped — they are not required to scale or delete the
+// existing K8s objects.
+func (k *kubernetesOrchestrator) validateClusterForLite(ctx *OrchestratorContext) error {
+	if ctx.Cluster.Status == nil || ctx.Cluster.Status.Phase != v1.ClusterPhaseRunning {
+		return errors.Errorf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
+	}
+
+	if ctx.Cluster.Spec.Type != v1.KubernetesClusterType {
+		return errors.Errorf("deploy cluster %s is not kubernetes type", ctx.Cluster.Metadata.WorkspaceName())
+	}
+
+	return nil
+}
+
+// pauseEndpoint patches the endpoint's existing Deployment to spec.replicas=0.
+// Idempotent: returns nil when the deployment is already at 0 replicas or
+// when the deployment does not exist (already paused / never deployed).
+func (k *kubernetesOrchestrator) pauseEndpoint(ctx *OrchestratorContext) error {
+	namespace := util.ClusterNamespace(ctx.Cluster)
+
+	dep := &appsv1.Deployment{}
+	if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
+		Namespace: namespace,
+		Name:      ctx.Endpoint.Metadata.Name,
+	}, dep); err != nil {
+		if apierrors.IsNotFound(err) {
+			ctx.logger.V(4).Info("Deployment not found, treating pause as no-op")
+			return nil
+		}
+
+		return errors.Wrapf(err, "failed to get deployment for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+	}
+
+	if dep.Spec.Replicas != nil && *dep.Spec.Replicas == 0 {
+		ctx.logger.V(4).Info("Deployment already at replicas=0, treating pause as no-op")
+		return nil
+	}
+
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"replicas":0}}`))
+	if err := ctx.ctrClient.Patch(context.Background(), dep, patch); err != nil {
+		return errors.Wrapf(err, "failed to patch endpoint %s replicas to 0", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
 	return nil
