@@ -427,7 +427,7 @@ var _ = Describe("Engine", Ordered, func() {
 				Name:           name,
 				Version:        "v1.0.0",
 				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
-				SupportedTasks: []string{"text-generation", "embedding"},
+				SupportedTasks: []string{"text-generation", "text-embedding"},
 			})
 			defer os.Remove(pkg)
 
@@ -437,8 +437,8 @@ var _ = Describe("Engine", Ordered, func() {
 			r = EngineH.Get(name)
 			ExpectSuccess(r)
 			e := parseEngineJSON(r.Stdout)
-			Expect(e.Spec.SupportedTasks).To(ConsistOf("text-generation", "embedding"))
-			Expect(e.Spec.Versions[0].SupportedTasks).To(ConsistOf("text-generation", "embedding"))
+			Expect(e.Spec.SupportedTasks).To(ConsistOf("text-generation", "text-embedding"))
+			Expect(e.Spec.Versions[0].SupportedTasks).To(ConsistOf("text-generation", "text-embedding"))
 		})
 
 		// NEU-427: TestRail C2649201
@@ -450,7 +450,7 @@ var _ = Describe("Engine", Ordered, func() {
 				Name:           name,
 				Version:        "v1.0.0",
 				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
-				SupportedTasks: []string{"chat"},
+				SupportedTasks: []string{"text-generation"},
 			})
 			defer os.Remove(pkg1)
 			r := EngineH.ImportSkipImage(pkg1)
@@ -458,13 +458,13 @@ var _ = Describe("Engine", Ordered, func() {
 
 			r = EngineH.Get(name)
 			ExpectSuccess(r)
-			Expect(parseEngineJSON(r.Stdout).Spec.SupportedTasks).To(ConsistOf("chat"))
+			Expect(parseEngineJSON(r.Stdout).Spec.SupportedTasks).To(ConsistOf("text-generation"))
 
 			pkg2 := buildEnginePackage(engineManifest{
 				Name:           name,
 				Version:        "v2.0.0",
 				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v2.0.0"}},
-				SupportedTasks: []string{"embedding"},
+				SupportedTasks: []string{"text-embedding"},
 			})
 			defer os.Remove(pkg2)
 			r = EngineH.ImportSkipImage(pkg2)
@@ -473,9 +473,9 @@ var _ = Describe("Engine", Ordered, func() {
 			r = EngineH.Get(name)
 			ExpectSuccess(r)
 			tasks := parseEngineJSON(r.Stdout).Spec.SupportedTasks
-			Expect(tasks).To(ConsistOf("chat", "embedding"))
+			Expect(tasks).To(ConsistOf("text-generation", "text-embedding"))
 			// Existing-first ordering: union must not drop or reorder existing tasks.
-			Expect(tasks[0]).To(Equal("chat"))
+			Expect(tasks[0]).To(Equal("text-generation"))
 		})
 
 		It("should add a new engine version via CLI import", Label("C2613216"), func() {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/docker/docker/api/types/registry"
@@ -182,6 +184,15 @@ func (i *Importer) registerEngines(ctx context.Context, opts *ImportOptions, man
 	if len(manifest.Engines) > 0 {
 		klog.Infof("Engines to import: %d", len(manifest.Engines))
 
+		// Reject unknown task identifiers up-front so partial DB writes never
+		// happen. We validate every engine in the manifest before touching any.
+		for _, engine := range manifest.Engines {
+			if err := validateModelTasks(engine); err != nil {
+				result.Errors = append(result.Errors, err)
+				return result, err
+			}
+		}
+
 		for _, engine := range manifest.Engines {
 			if err := i.updateEngine(ctx, engine, opts); err != nil {
 				result.Errors = append(result.Errors, err)
@@ -269,6 +280,57 @@ func (i *Importer) validateOptions(opts *ImportOptions) error {
 	}
 
 	return nil
+}
+
+// validateModelTasks rejects an EngineMetadata whose top-level or any per-version
+// supported_tasks contains an identifier not in v1.IsKnownModelTask. All
+// offending values are collected so the user gets one error listing every
+// problem instead of fixing them one at a time. Empty / whitespace-only values
+// are silently tolerated (aggregateSupportedTasks skips them downstream).
+func validateModelTasks(em *EngineMetadata) error {
+	if em == nil {
+		return nil
+	}
+
+	type bad struct {
+		where string
+		task  string
+	}
+	var bads []bad
+
+	for _, t := range em.SupportedTasks {
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		if !v1.IsKnownModelTask(t) {
+			bads = append(bads, bad{where: "engines[" + em.Name + "].supported_tasks", task: t})
+		}
+	}
+	for _, v := range em.EngineVersions {
+		if v == nil {
+			continue
+		}
+		for _, t := range v.SupportedTasks {
+			if strings.TrimSpace(t) == "" {
+				continue
+			}
+			if !v1.IsKnownModelTask(t) {
+				bads = append(bads, bad{where: "engines[" + em.Name + "].engine_versions[" + v.Version + "].supported_tasks", task: t})
+			}
+		}
+	}
+
+	if len(bads) == 0 {
+		return nil
+	}
+
+	parts := make([]string, 0, len(bads))
+	for _, b := range bads {
+		parts = append(parts, b.where+`=`+strconv.Quote(b.task))
+	}
+	return fmt.Errorf("unknown model task value(s) — only %q, %q, %q are accepted: %s",
+		v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask,
+		strings.Join(parts, "; "))
 }
 
 // aggregateSupportedTasks unions the manifest top-level supported_tasks with each

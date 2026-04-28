@@ -71,12 +71,110 @@ func TestAggregateSupportedTasks(t *testing.T) {
 			},
 			want: []string{"a", "b", "c"},
 		},
+		{
+			name: "tolerates a nil EngineVersion entry in the slice",
+			em: &EngineMetadata{
+				SupportedTasks: []string{"a"},
+				EngineVersions: []*v1.EngineVersion{
+					nil,
+					{Version: "v1", SupportedTasks: []string{"b"}},
+				},
+			},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "second version cannot reorder tasks that the first already introduced",
+			em: &EngineMetadata{
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{"a", "b"}},
+					{Version: "v2", SupportedTasks: []string{"b", "c"}},
+				},
+			},
+			want: []string{"a", "b", "c"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := aggregateSupportedTasks(tt.em)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestValidateModelTasks(t *testing.T) {
+	tests := []struct {
+		name        string
+		em          *EngineMetadata
+		expectError bool
+		errorParts  []string // substrings that must appear in the error message
+	}{
+		{
+			name: "all known tasks at top + version → ok",
+			em: &EngineMetadata{
+				Name:           "vllm",
+				SupportedTasks: []string{v1.TextGenerationModelTask},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{v1.TextEmbeddingModelTask, v1.TextRerankModelTask}},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "empty everywhere → ok (validation does not require any tasks)",
+			em: &EngineMetadata{
+				Name: "vllm",
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "unknown task at top-level → error names the offending value",
+			em: &EngineMetadata{
+				Name:           "vllm",
+				SupportedTasks: []string{"chat"},
+			},
+			expectError: true,
+			errorParts:  []string{"chat", "engines[vllm]"},
+		},
+		{
+			name: "unknown task at version-level → error names version + value",
+			em: &EngineMetadata{
+				Name: "vllm",
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1.0.0", SupportedTasks: []string{"text-generation", "embedding"}},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"embedding", "v1.0.0"},
+		},
+		{
+			name: "multiple unknown values are all reported",
+			em: &EngineMetadata{
+				Name:           "vllm",
+				SupportedTasks: []string{"chat"},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1.0.0", SupportedTasks: []string{"speech"}},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"chat", "speech"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateModelTasks(tt.em)
+			if !tt.expectError {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, part := range tt.errorParts {
+				assert.Contains(t, err.Error(), part)
+			}
 		})
 	}
 }
