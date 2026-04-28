@@ -137,11 +137,13 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 
 	Describe("Error Handling", Label("error"), func() {
 
-		// NEU-421 R4: contract change — config errors no longer flip to Failed.
-		// The orchestrator surfaces Deploying with a specific reason via
-		// status.errorMessage so the operator can act on the cause. Failed
-		// remains reserved for observed-Failed states (CrashLoopBackOff etc.).
-		It("should show Deploying with errorMessage when model does not exist", Label("C2612944"), func() {
+		// NEU-421 R4 contract refinement: only configuration errors that
+		// short-circuit BEFORE deployment creation flip to Deploying. Cases
+		// where the deployment IS created with bogus content (bad model name,
+		// bad version, mismatched accelerator) still converge to Failed via
+		// observed pod state (CrashLoop / Unschedulable). Engine-not-found is
+		// the only one in this file that short-circuits in prepareCtx.
+		It("should show Failed when model does not exist", Label("C2612944"), func() {
 			epName := "e2e-ep-lc-fail-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })
 
@@ -149,10 +151,10 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				withModel("non-existent-model-"+Cfg.RunID, "v0.0.0"), withoutForceUpdate())
 			defer os.Remove(yamlPath)
 
-			waitEndpointDeployingWithError(epName, "model")
+			waitEndpointFailed(epName)
 		})
 
-		It("should show Deploying with errorMessage when model version does not exist", Label("C2613501"), func() {
+		It("should show Failed when model version does not exist", Label("C2613501"), func() {
 			epName := "e2e-ep-lc-badver-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })
 
@@ -160,7 +162,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				withModel(profileModelName(), "v99.99.99-nonexistent"))
 			defer os.Remove(yamlPath)
 
-			waitEndpointDeployingWithError(epName, "version")
+			waitEndpointFailed(epName)
 		})
 
 		// TODO: C2613502 needs to run on SSH cluster — K8s pod stays Pending instead of Failed
@@ -203,7 +205,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			waitEndpointDeployingWithError(epName, "engine")
 		})
 
-		It("should show Deploying with errorMessage when no matching accelerator product", Label("C2613503"), func() {
+		It("should show Failed when no matching accelerator product", Label("C2613503"), func() {
 			epName := "e2e-ep-lc-badacc-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })
 
@@ -213,7 +215,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				withAccelerator(accType, "NONEXISTENT-GPU-9999"))
 			defer os.Remove(yamlPath)
 
-			waitEndpointDeployingWithError(epName, "accelerator")
+			waitEndpointFailed(epName)
 		})
 
 		It("should show Failed when deployment is unhealthy", Label("C2642243"), func() {
