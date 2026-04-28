@@ -1,26 +1,40 @@
 apiVersion: v1
 kind: Endpoint
 metadata:
-  name: ${E2E_ENDPOINT_NAME}
-  workspace: ${E2E_WORKSPACE}
+  name: {{ .E2E_ENDPOINT_NAME }}
+  workspace: {{ .E2E_WORKSPACE }}
 spec:
-  cluster: ${E2E_CLUSTER_NAME}
+  cluster: {{ .E2E_CLUSTER_NAME }}
   engine:
-    engine: ${E2E_ENGINE_NAME}
-    version: ${E2E_ENGINE_VERSION}
+    engine: {{ .E2E_ENGINE_NAME }}
+    version: {{ .E2E_ENGINE_VERSION }}
   model:
-    registry: ${E2E_MODEL_REGISTRY}
-    name: ${E2E_MODEL_NAME}
-    version: ${E2E_MODEL_VERSION}
-    task: ${E2E_MODEL_TASK}
+    registry: {{ .E2E_MODEL_REGISTRY }}
+    name: {{ .E2E_MODEL_NAME }}
+    version: {{ .E2E_MODEL_VERSION }}
+    task: {{ .E2E_MODEL_TASK }}
   resources:
-${E2E_RESOURCES_YAML}
+    gpu: "{{ .E2E_GPU }}"
+{{- if .E2E_CPU }}
+    cpu: "{{ .E2E_CPU }}"
+{{- end }}
+{{- if .E2E_MEMORY }}
+    memory: "{{ .E2E_MEMORY }}"
+{{- end }}
     accelerator:
-      type: ${E2E_ACCELERATOR_TYPE}
-      product: ${E2E_ACCELERATOR_PRODUCT}
+      type: {{ .E2E_ACCELERATOR_TYPE }}
+      product: {{ .E2E_ACCELERATOR_PRODUCT }}
   variables:
-    engine_args:${E2E_ENGINE_ARGS_YAML}
-${E2E_ENV_YAML}
+    engine_args:
+{{- range .E2E_ENGINE_ARGS }}
+      {{ .Key }}: {{ .Value }}
+{{- end }}
+{{- if .E2E_ENV }}
+  env:
+{{- range $k, $v := .E2E_ENV }}
+    {{ $k }}: "{{ $v }}"
+{{- end }}
+{{- end }}
   replicas:
     num: 1
   deployment_options:

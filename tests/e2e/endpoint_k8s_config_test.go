@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 
@@ -37,15 +36,13 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		if modelCachePath == "" {
 			modelCachePath = "/data/models"
 		}
-		modelCacheYAML := fmt.Sprintf(`    model_caches:
-      - name: e2e-cache
-        host_path:
-          path: "%s"`, modelCachePath)
 
-		yaml := renderK8sClusterYAML(map[string]string{
-			"name":              clusterName,
-			"kubeconfig":        kubeconfig,
-			"model_caches_yaml": modelCacheYAML,
+		yaml := renderK8sClusterYAML(map[string]any{
+			"name":       clusterName,
+			"kubeconfig": kubeconfig,
+			"model_caches": []ModelCache{
+				{Name: "e2e-cache", Mode: "host_path", HostPath: modelCachePath},
+			},
 		})
 
 		ch := NewClusterHelper()
@@ -204,7 +201,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 					continue
 				}
 
-				envMap := map[string]string{}
+				envMap := map[string]any{}
 				for _, e := range c.Env {
 					envMap[e.Name] = e.Value
 				}
@@ -458,7 +455,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 
 		It("should deploy with all schema data types", Label("C2642246"), func() {
-			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgsYAML()))
+			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgs()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(schemaEpName)

@@ -33,15 +33,16 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		if modelCachePath == "" {
 			modelCachePath = "/data/models"
 		}
-		modelCacheYAML := "    model_caches:\n      - name: e2e-cache\n        host_path:\n          path: \"" + modelCachePath + "\"\n"
 
-		yaml := renderSSHClusterYAML(map[string]string{
-			"name":              clusterName,
-			"head_ip":           headIP,
-			"worker_ips":        workerIPs,
-			"ssh_user":          sshUser,
-			"ssh_private_key":   sshPrivateKey,
-			"model_caches_yaml": modelCacheYAML,
+		yaml := renderSSHClusterYAML(map[string]any{
+			"name":            clusterName,
+			"head_ip":         headIP,
+			"worker_ips":      workerIPs,
+			"ssh_user":        sshUser,
+			"ssh_private_key": sshPrivateKey,
+			"model_caches": []ModelCache{
+				{Name: "e2e-cache", Mode: "host_path", HostPath: modelCachePath},
+			},
 		})
 
 		ch := NewClusterHelper()
@@ -219,7 +220,7 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		})
 
 		It("should deploy with serving-only engine_arg ignored", Label("C2644063"), func() {
-			servingArgs := engineArgsYAML() + "\n      response_role: assistant"
+			servingArgs := append(engineArgs(), EngineArg{Key: "response_role", Value: "assistant"})
 
 			yamlPath := applyEndpoint(servingEpName, clusterName,
 				withEngineArgs(servingArgs))
@@ -248,7 +249,7 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		})
 
 		It("should deploy with all schema data types in engine_args", Label("C2642245", "C2644062"), func() {
-			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgsYAML()))
+			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgs()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(schemaEpName)
