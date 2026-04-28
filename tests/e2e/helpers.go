@@ -1326,25 +1326,39 @@ func waitEndpointPaused(name string) {
 	ExpectSuccess(r)
 }
 
+// observedEndpointStatus is a small struct used by waitEndpointDeployingWithError
+// so each field can be asserted independently — avoids fragile substring
+// matching on a concatenated string.
+type observedEndpointStatus struct {
+	Phase   string
+	ErrMsg  string
+	HasData bool
+}
+
 // waitEndpointDeployingWithError polls until the endpoint reaches Deploying
 // phase AND its status.errorMessage contains errSubstr. NEU-421 R4: replaces
 // the previous "config error -> Failed" pattern (C2612944 etc.). The
 // orchestrator surfaces Deploying with a specific error reason; the operator
 // reads the reason to act on it.
 func waitEndpointDeployingWithError(name, errSubstr string) {
-	EventuallyWithOffset(1, func() (string, error) {
+	EventuallyWithOffset(1, func() observedEndpointStatus {
 		r := RunCLI("get", "endpoint", name, "-w", profileWorkspace(), "-o", "json")
 		if r.ExitCode != 0 {
-			return "", fmt.Errorf("get endpoint %s failed: %s", name, r.Stderr)
+			return observedEndpointStatus{}
 		}
 		ep := parseEndpointJSON(r.Stdout)
 		if ep.Status == nil {
-			return "", nil
+			return observedEndpointStatus{}
 		}
-		return string(ep.Status.Phase) + "|" + ep.Status.ErrorMessage, nil
+		return observedEndpointStatus{
+			Phase:   string(ep.Status.Phase),
+			ErrMsg:  ep.Status.ErrorMessage,
+			HasData: true,
+		}
 	}, profileEndpointTimeout(), 10*time.Second).Should(SatisfyAll(
-		ContainSubstring("Deploying|"),
-		ContainSubstring(errSubstr),
+		HaveField("HasData", BeTrue()),
+		HaveField("Phase", Equal("Deploying")),
+		HaveField("ErrMsg", ContainSubstring(errSubstr)),
 	), "endpoint %s should reach Deploying with errorMessage containing %q", name, errSubstr)
 }
 

@@ -340,6 +340,10 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
+			// R4 invariant: when observed retrieval fails AND syncErr is nil,
+			// neither signal carries reliable information — preserve the last
+			// known status by skipping UpdateEndpoint entirely. The mock
+			// asserts no UpdateEndpoint call by simply not declaring one.
 			name: "get actual status failed will not update status",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
