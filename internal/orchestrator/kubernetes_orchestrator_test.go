@@ -2700,6 +2700,24 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			expectError:   false,
 		},
 		{
+			// NEU-421: paused-from-start (e.g., applied with replicas=0 and
+			// the orchestrator's pause logic sees no deployment to scale,
+			// so no deployment was ever created). The previous logic
+			// reported Deploying("not found"); the Paused check now runs
+			// before the !exists check.
+			name: "return Paused for paused endpoint when deployment does not exist (NEU-421)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Spec.Replicas.Num = pointer.Int(0)
+				return ep
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).WithDeploymentNotFound()
+			},
+			expectedPhase: v1.EndpointPhasePAUSED,
+			expectError:   false,
+		},
+		{
 			name: "return Running for deployment with all replicas ready",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()

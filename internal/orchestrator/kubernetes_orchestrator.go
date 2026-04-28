@@ -481,6 +481,17 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		}, nil
 	}
 
+	// NEU-421: paused check goes BEFORE !exists. A paused-from-start endpoint
+	// (replicas=0 on first apply) has no deployment by design — that is
+	// already the Paused steady state, not "deployment missing". Mirrors
+	// Ray.GetEndpointStatus which orders these checks the same way.
+	isPaused := IsEndpointPaused(endpoint)
+	if isPaused && !exists {
+		return &v1.EndpointStatus{
+			Phase: v1.EndpointPhasePAUSED,
+		}, nil
+	}
+
 	if !exists {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDEPLOYING,
@@ -494,7 +505,6 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		return nil, errors.Wrapf(err, "failed to get pods for deployment %s", dep.Name)
 	}
 
-	isPaused := IsEndpointPaused(endpoint)
 	if isPaused {
 		if len(pods) == 0 {
 			return &v1.EndpointStatus{
