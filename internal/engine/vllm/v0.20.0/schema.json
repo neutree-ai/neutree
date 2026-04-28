@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "title": "vLLM v0.20.0rc1 Engine Configuration",
-  "description": "Configuration schema for vLLM v0.20.0rc1 engine parameters",
+  "title": "vLLM v0.20.0 Engine Configuration",
+  "description": "Configuration schema for vLLM v0.20.0 engine parameters",
   "properties": {
     "model": {
       "type": "string",
