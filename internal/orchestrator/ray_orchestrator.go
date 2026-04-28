@@ -175,20 +175,49 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 	return o.createOrUpdate(ctx)
 }
 
+// PauseEndpoint removes the endpoint's Ray Serve application, which is how
+// SSH/Ray clusters represent "scaled to zero". Idempotent: missing app => no-op.
+//
+// NEU-421: pause does not need ModelRegistry/Engine/ImageRegistry. We only
+// fetch the deploy cluster (for dashboard URL) and reuse the existing
+// deleteEndpoint(ctx) inner method which only depends on cluster + endpoint
+// + rayService.
 func (o *RayOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
-	ctx, err := o.prepareOrchestratorContext(endpoint)
+	ctx, err := o.prepareOrchestratorContextLite(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
 	ctx.logger.V(4).Info("Pausing endpoint by deleting from Ray Serve")
 
-	err = o.deleteEndpoint(ctx)
-	if err != nil {
+	if err := o.deleteEndpoint(ctx); err != nil {
 		return errors.Wrapf(err, "failed to pause endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
 	return nil
+}
+
+// prepareOrchestratorContextLite is the pause/delete equivalent of
+// prepareOrchestratorContext: it fetches only what those operations actually
+// need (deploy cluster + dashboard service) and skips
+// ModelRegistry/Engine/ImageRegistry lookups so a removed model registry does
+// not block convergence to Paused/Deleted.
+func (o *RayOrchestrator) prepareOrchestratorContextLite(endpoint *v1.Endpoint) (*OrchestratorContext, error) {
+	deployedCluster, err := getEndpointDeployCluster(o.storage, endpoint)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get deploy cluster")
+	}
+
+	if deployedCluster.Status == nil || deployedCluster.Status.DashboardURL == "" {
+		return nil, errors.New("dashboard URL is not configured in cluster status")
+	}
+
+	return &OrchestratorContext{
+		Cluster:    deployedCluster,
+		Endpoint:   endpoint,
+		rayService: dashboard.NewDashboardService(deployedCluster.Status.DashboardURL),
+		logger:     klog.LoggerWithValues(klog.Background(), "endpoint", endpoint.Metadata.WorkspaceName()),
+	}, nil
 }
 
 func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
@@ -254,9 +283,14 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 }
 
 // DeleteEndpoint removes an endpoint from Ray Serve.
+//
+// NEU-421: delete does not need ModelRegistry/Engine/ImageRegistry for new
+// clusters (>v1.0.0). For old SSH clusters (<=v1.0.0) we still try to
+// disconnect the NFS mount, but tolerate ErrResourceNotFound — if the
+// registry has already been removed, the SSH-side mount is orphaned and
+// continuing the delete is the correct outcome.
 func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
-	// delete endpoint should not validate dependencies
-	ctx, err := o.prepareOrchestratorContext(endpoint)
+	ctx, err := o.prepareOrchestratorContextLite(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
@@ -269,9 +303,17 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	}
 
 	if !isNew {
-		err = o.connectSSHClusterEndpointModel(*ctx.ModelRegistry, *ctx.Endpoint, disconnect)
-		if err != nil {
-			return errors.Wrapf(err, "failed to disconnect model registry before deleting endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+		modelRegistry, mErr := getEndpointModelRegistry(o.storage, endpoint)
+		switch {
+		case mErr == nil:
+			if dErr := o.connectSSHClusterEndpointModel(*modelRegistry, *endpoint, disconnect); dErr != nil {
+				return errors.Wrapf(dErr, "failed to disconnect model registry before deleting endpoint %s", endpoint.Metadata.WorkspaceName())
+			}
+		case errors.Is(mErr, storage.ErrResourceNotFound):
+			ctx.logger.Info("Model registry already removed; skipping SSH-side NFS disconnect (best-effort)",
+				"registry", endpoint.Spec.Model.Registry)
+		default:
+			return errors.Wrap(mErr, "failed to get model registry for endpoint disconnect")
 		}
 	}
 

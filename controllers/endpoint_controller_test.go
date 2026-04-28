@@ -284,7 +284,9 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			name: "process reconcile error without force delete",
+			// R4 fallback: when observed status retrieval fails AND we're
+			// deleting AND syncErr is set, surface as Deleting + syncErr.
+			name: "process reconcile error without force delete (observed unavailable, fallback to Deleting)",
 			input: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
@@ -292,6 +294,8 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 			inputErr: testErr,
 			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				// observed retrieval fails: cluster not found
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
 				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
 					return ep.Status != nil &&
 						ep.Status.Phase == v1.EndpointPhaseDELETING &&
@@ -300,12 +304,16 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			name: "process reconcile error without force delete and with deletion timestamp",
+			// R4 fallback: when observed status retrieval fails AND not deleting
+			// AND syncErr is set, surface as Failed + syncErr.
+			name: "process reconcile error without deletion (observed unavailable, fallback to Failed)",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
 			},
 			inputErr: testErr,
 			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				// observed retrieval fails: cluster not found
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
 				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
 					return ep.Status != nil &&
 						ep.Status.Phase == v1.EndpointPhaseFAILED &&
@@ -342,6 +350,72 @@ func Test_UpdateStatusOnError(t *testing.T) {
 				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
 					Phase: v1.EndpointPhaseFAILED,
 				}, assert.AnError)
+			},
+		},
+
+		// NEU-421 R4: phase derived from observed reality even when sync errored.
+		// syncErr is recorded into ErrorMessage so the operator still sees the
+		// failed reconcile reason, but the phase reflects what the orchestrator
+		// reports — mirroring how cluster controller decouples phase from err.
+		{
+			name: "R4: observed Running with sync error -> Running phase, syncErr in errorMessage",
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: testErr,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase: v1.EndpointPhaseRUNNING,
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseRUNNING &&
+						ep.Status.ErrorMessage == "test error"
+				})).Return(nil)
+			},
+		},
+		{
+			name: "R4: observed Paused with sync error from PauseEndpoint -> Paused phase",
+			// NEU-421 bug fix: pause failed because of model registry, but
+			// orchestrator reports Paused (replicas=0, no pods); we surface
+			// Paused, not Failed.
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: errors.New("failed to pause: model registry not found"),
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase: v1.EndpointPhasePAUSED,
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhasePAUSED &&
+						ep.Status.ErrorMessage == "failed to pause: model registry not found"
+				})).Return(nil)
+			},
+		},
+		{
+			name: "R4: observed errorMessage takes precedence over syncErr when both present",
+			// e.g., observed reports Deploying with a specific reason; we
+			// preserve that and don't overwrite with syncErr — observed
+			// is more specific and actionable.
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: testErr,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase:        v1.EndpointPhaseDEPLOYING,
+					ErrorMessage: "Endpoint deploying in progress: ContainerCreating",
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseDEPLOYING &&
+						ep.Status.ErrorMessage == "Endpoint deploying in progress: ContainerCreating"
+				})).Return(nil)
 			},
 		},
 	}

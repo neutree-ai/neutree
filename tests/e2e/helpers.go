@@ -1218,6 +1218,8 @@ type endpointOpts struct {
 	accProduct    string
 	env           map[string]string
 	forceUpdate   bool
+	replicas      int
+	replicasSet   bool
 }
 
 // EndpointOption configures a single field of endpointOpts.
@@ -1276,6 +1278,15 @@ func withoutForceUpdate() EndpointOption {
 	return func(o *endpointOpts) { o.forceUpdate = false }
 }
 
+// withReplicas overrides the default spec.replicas.num (which is 1 in the
+// template). Use withReplicas(0) to apply a paused endpoint (NEU-421).
+func withReplicas(num int) EndpointOption {
+	return func(o *endpointOpts) {
+		o.replicas = num
+		o.replicasSet = true
+	}
+}
+
 // renderEndpoint renders the endpoint YAML template and returns the temp file path and resolved options.
 func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endpointOpts) {
 	o := &endpointOpts{
@@ -1302,6 +1313,11 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		o.accType, o.accProduct = getClusterAccelerator(cluster)
 	}
 
+	replicasNum := 1
+	if o.replicasSet {
+		replicasNum = o.replicas
+	}
+
 	data := map[string]any{
 		"E2E_ENDPOINT_NAME":       name,
 		"E2E_WORKSPACE":           profileWorkspace(),
@@ -1319,6 +1335,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		"E2E_MEMORY":              o.memory,
 		"E2E_ENGINE_ARGS":         o.engineArgs,
 		"E2E_ENV":                 o.env,
+		"E2E_REPLICAS_NUM":        replicasNum,
 	}
 
 	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), data)
@@ -1394,6 +1411,39 @@ func waitEndpointFailed(name string) {
 		"--timeout", profileEndpointTimeout(),
 	)
 	ExpectSuccess(r)
+}
+
+// waitEndpointPaused waits for an endpoint to reach Paused phase. NEU-421:
+// used for "should reach Paused even when model registry is missing".
+func waitEndpointPaused(name string) {
+	r := RunCLI("wait", "endpoint", name,
+		"-w", profileWorkspace(),
+		"--for", "jsonpath=.status.phase=Paused",
+		"--timeout", profileEndpointTimeout(),
+	)
+	ExpectSuccess(r)
+}
+
+// waitEndpointDeployingWithError polls until the endpoint reaches Deploying
+// phase AND its status.errorMessage contains errSubstr. NEU-421 R4: replaces
+// the previous "config error -> Failed" pattern (C2612944 etc.). The
+// orchestrator surfaces Deploying with a specific error reason; the operator
+// reads the reason to act on it.
+func waitEndpointDeployingWithError(name, errSubstr string) {
+	EventuallyWithOffset(1, func() (string, error) {
+		r := RunCLI("get", "endpoint", name, "-w", profileWorkspace(), "-o", "json")
+		if r.ExitCode != 0 {
+			return "", fmt.Errorf("get endpoint %s failed: %s", name, r.Stderr)
+		}
+		ep := parseEndpointJSON(r.Stdout)
+		if ep.Status == nil {
+			return "", nil
+		}
+		return string(ep.Status.Phase) + "|" + ep.Status.ErrorMessage, nil
+	}, profileEndpointTimeout(), 10*time.Second).Should(SatisfyAll(
+		ContainSubstring("Deploying|"),
+		ContainSubstring(errSubstr),
+	), "endpoint %s should reach Deploying with errorMessage containing %q", name, errSubstr)
 }
 
 // getEndpoint retrieves endpoint details as JSON.
