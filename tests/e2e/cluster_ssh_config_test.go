@@ -32,7 +32,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 		var (
 			clusterName   string
 			headIP        string
-			workerIPs     string
+			workerIPs     []string
 			sshUser       string
 			sshPrivateKey string
 			sshKeyFile    string
@@ -46,7 +46,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			sshKeyFile = expandHome(profile.SSHNodes[0].KeyFile)
 			clusterName = "e2e-ssh-verify-" + Cfg.RunID
 
-			overrides := map[string]string{
+			overrides := map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"worker_ips":      workerIPs,
@@ -55,7 +55,9 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			}
 
 			if profile.ModelCache.HostPath != "" {
-				overrides["model_caches_yaml"] = fmt.Sprintf("    model_caches:\n      - name: hp-cache\n        host_path:\n          path: \"%s\"\n", profile.ModelCache.HostPath)
+				overrides["model_caches"] = []ModelCache{
+					{Name: "hp-cache", Mode: "host_path", HostPath: profile.ModelCache.HostPath},
+				}
 			}
 
 			yaml := renderSSHClusterYAML(overrides)
@@ -77,19 +79,12 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			ExpectSuccess(r)
 			Expect(r.Stdout).To(ContainSubstring("ray_container"))
 
-			if workerIPs != "" {
-				for _, ip := range strings.Split(workerIPs, ",") {
-					ip = strings.TrimSpace(ip)
-					if ip == "" {
-						continue
-					}
-
-					r = RunSSH(sshUser, ip, sshKeyFile,
-						"docker ps --filter name=ray_container --format '{{.Names}}'")
-					ExpectSuccess(r)
-					Expect(r.Stdout).To(ContainSubstring("ray_container"),
-						"ray_container should be running on worker %s", ip)
-				}
+			for _, ip := range workerIPs {
+				r = RunSSH(sshUser, ip, sshKeyFile,
+					"docker ps --filter name=ray_container --format '{{.Names}}'")
+				ExpectSuccess(r)
+				Expect(r.Stdout).To(ContainSubstring("ray_container"),
+					"ray_container should be running on worker %s", ip)
 			}
 		})
 
@@ -99,13 +94,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 				cachePath = "/opt/neutree/model-cache"
 			}
 
-			nodes := []string{headIP}
-			for _, ip := range strings.Split(workerIPs, ",") {
-				ip = strings.TrimSpace(ip)
-				if ip != "" {
-					nodes = append(nodes, ip)
-				}
-			}
+			nodes := append([]string{headIP}, workerIPs...)
 
 			for _, ip := range nodes {
 				r := RunSSH(sshUser, ip, sshKeyFile,
@@ -138,19 +127,12 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			ExpectSuccess(r)
 			Expect(r.Stdout).NotTo(ContainSubstring("ray_container"))
 
-			if workerIPs != "" {
-				for _, ip := range strings.Split(workerIPs, ",") {
-					ip = strings.TrimSpace(ip)
-					if ip == "" {
-						continue
-					}
-
-					r = RunSSH(sshUser, ip, sshKeyFile,
-						"docker ps -a --filter name=ray_container --format '{{.Names}}'")
-					ExpectSuccess(r)
-					Expect(r.Stdout).NotTo(ContainSubstring("ray_container"),
-						"ray_container should be cleaned up from worker %s", ip)
-				}
+			for _, ip := range workerIPs {
+				r = RunSSH(sshUser, ip, sshKeyFile,
+					"docker ps -a --filter name=ray_container --format '{{.Names}}'")
+				ExpectSuccess(r)
+				Expect(r.Stdout).NotTo(ContainSubstring("ray_container"),
+					"ray_container should be cleaned up from worker %s", ip)
 			}
 		})
 
@@ -174,20 +156,20 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 		var (
 			clusterName   string
 			headIP        string
-			workerIPs     string
+			workerIPs     []string
 			sshUser       string
 			sshPrivateKey string
 		)
 
 		BeforeAll(func() {
 			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
-			if workerIPs == "" {
+			if len(workerIPs) == 0 {
 				Skip("No worker IPs configured, skipping worker edit tests")
 			}
 
 			clusterName = "e2e-ssh-edit-" + Cfg.RunID
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"ssh_user":        sshUser,
@@ -214,7 +196,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			c := parseClusterJSON(r.Stdout)
 			oldNodes := c.Status.DesiredNodes
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"worker_ips":      workerIPs,
@@ -245,7 +227,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			c := parseClusterJSON(r.Stdout)
 			oldNodes := c.Status.DesiredNodes
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"ssh_user":        sshUser,
@@ -275,7 +257,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			clusterName   string
 			epName        string
 			headIP        string
-			workerIPs     string
+			workerIPs     []string
 			sshUser       string
 			sshPrivateKey string
 			sshKeyFile    string
@@ -298,16 +280,15 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			By("Setting up model registry")
 			SetupModelRegistry()
 
-			hostPathYAML := fmt.Sprintf("    model_caches:\n      - name: test-cache\n        host_path:\n          path: \"%s\"\n",
-				profile.ModelCache.HostPath)
-
-			yaml := renderSSHClusterYAML(map[string]string{
-				"name":              clusterName,
-				"head_ip":           headIP,
-				"worker_ips":        workerIPs,
-				"ssh_user":          sshUser,
-				"ssh_private_key":   sshPrivateKey,
-				"model_caches_yaml": hostPathYAML,
+			yaml := renderSSHClusterYAML(map[string]any{
+				"name":            clusterName,
+				"head_ip":         headIP,
+				"worker_ips":      workerIPs,
+				"ssh_user":        sshUser,
+				"ssh_private_key": sshPrivateKey,
+				"model_caches": []ModelCache{
+					{Name: "test-cache", Mode: "host_path", HostPath: profile.ModelCache.HostPath},
+				},
 			})
 
 			r := ClusterH.Apply(yaml)

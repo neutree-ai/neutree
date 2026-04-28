@@ -30,7 +30,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 		var (
 			clusterName   string
 			headIP        string
-			workerIPs     string
+			workerIPs     []string
 			sshUser       string
 			sshPrivateKey string
 			sshKeyFile    string
@@ -44,7 +44,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			sshKeyFile = expandHome(profile.SSHNodes[0].KeyFile)
 			clusterName = "e2e-ssh-fault-" + Cfg.RunID
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"worker_ips":      workerIPs,
@@ -108,7 +108,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			clusterName := "e2e-ssh-badkey-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"ssh_user":        "root",
@@ -126,7 +126,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			clusterName := "e2e-ssh-badip-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         "198.51.100.1",
 				"ssh_user":        sshUser,
@@ -144,7 +144,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			clusterName := "e2e-ssh-badwkr-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"worker_ips":      "198.51.100.2,198.51.100.3",
@@ -164,7 +164,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
 
 			badRegistryName := "e2e-bad-registry-" + Cfg.RunID
-			defaults := map[string]string{
+			defaults := map[string]any{
 				"E2E_IMAGE_REGISTRY":      badRegistryName,
 				"E2E_WORKSPACE":           profileWorkspace(),
 				"E2E_IMAGE_REGISTRY_URL":  "198.51.100.99:5000",
@@ -180,7 +180,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 				RunCLI("delete", "-f", yamlPath, "--force", "--ignore-not-found")
 			})
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"ssh_user":        sshUser,
@@ -199,7 +199,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			clusterName := "e2e-bad-dep-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
 				"worker_ips":      workerIPs,

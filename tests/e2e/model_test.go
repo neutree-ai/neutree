@@ -18,7 +18,7 @@ var registryYAML string
 // SetupModelRegistry creates a model registry from the YAML template
 // and waits for it to reach Connected phase.
 func SetupModelRegistry() {
-	defaults := map[string]string{
+	defaults := map[string]any{
 		"E2E_MODEL_REGISTRY":     testRegistry(),
 		"E2E_WORKSPACE":          profileWorkspace(),
 		"E2E_MODEL_REGISTRY_URL": profile.ModelRegistry.URL,

@@ -34,7 +34,7 @@ var _ = Describe("CLI", Ordered, Label("cli"), func() {
 
 			// Multi-doc YAML in REVERSE dependency order: Cluster(2) before ImageRegistry(1).
 			// CLI apply sorts by KindPriority: ImageRegistry first, then Cluster.
-			clusterPath := renderSSHClusterYAML(map[string]string{
+			clusterPath := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"image_registry":  irName,
 				"head_ip":         headIP,
@@ -42,7 +42,7 @@ var _ = Describe("CLI", Ordered, Label("cli"), func() {
 				"ssh_private_key": sshPrivateKey,
 			})
 
-			irPath := renderImageRegistryYAML(map[string]string{
+			irPath := renderImageRegistryYAML(map[string]any{
 				"name": irName,
 			})
 
@@ -84,7 +84,7 @@ var _ = Describe("CLI", Ordered, Label("cli"), func() {
 			})
 
 			// Create resource first.
-			irDefaults := map[string]string{
+			irDefaults := map[string]any{
 				"E2E_IMAGE_REGISTRY":      name,
 				"E2E_IMAGE_REGISTRY_REPO": "original-repo",
 			}
@@ -166,7 +166,7 @@ spec: {}
 			irName2 = "e2e-cli-get-2-" + Cfg.RunID
 
 			for _, name := range []string{irName1, irName2} {
-				yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+				yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
 					"E2E_IMAGE_REGISTRY": name,
 				})
 				Expect(err).NotTo(HaveOccurred())
@@ -240,7 +240,7 @@ spec: {}
 				RunCLI("delete", "imageregistry", name, "-w", profileWorkspace(), "--force", "--ignore-not-found")
 			})
 
-			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
 				"E2E_IMAGE_REGISTRY": name,
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -261,7 +261,7 @@ spec: {}
 		It("should exit 0 when waiting for delete and resource is deleted", Label("C2642190"), func() {
 			name := "e2e-cli-waitdel-" + Cfg.RunID
 
-			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
 				"E2E_IMAGE_REGISTRY": name,
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -300,7 +300,7 @@ spec: {}
 		It("should delete a single resource", Label("C2642192"), func() {
 			name := "e2e-cli-del-" + Cfg.RunID
 
-			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
 				"E2E_IMAGE_REGISTRY": name,
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -325,8 +325,8 @@ spec: {}
 			headIP, _, sshUser, sshPrivateKey := requireSSHProfile()
 
 			// Multi-doc: ImageRegistry(priority 1) + Cluster(priority 2).
-			irPath := renderImageRegistryYAML(map[string]string{"name": irName})
-			clusterPath := renderSSHClusterYAML(map[string]string{
+			irPath := renderImageRegistryYAML(map[string]any{"name": irName})
+			clusterPath := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"image_registry":  irName,
 				"head_ip":         headIP,

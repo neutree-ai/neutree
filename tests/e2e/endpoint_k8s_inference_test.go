@@ -69,7 +69,7 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 			By("Sending request with non-existent model name")
 			code, body, err := doInferenceRequest(ep.Status.ServiceURL, "/v1/chat/completions", map[string]any{
 				"model": "non-existent-model-name",
-				"messages": []map[string]string{
+				"messages": []map[string]any{
 					{"role": "user", "content": "hello"},
 				},
 				"max_tokens": 8,
@@ -156,7 +156,7 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 		})
 
 		It("should deploy with tp=2 (gpu=2) and reach Running", Label("C2613759"), func() {
-			tpArgs := engineArgsYAML() + "\n      tensor_parallel_size: 2"
+			tpArgs := append(engineArgs(), EngineArg{Key: "tensor_parallel_size", Value: "2"})
 			yamlPath := applyEndpoint(epName, clusterName,
 				withGPU("2"), withEngineArgs(tpArgs))
 			defer os.Remove(yamlPath)

@@ -25,7 +25,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 	var (
 		clusterName   string
 		headIP        string
-		workerIPs     string
+		workerIPs     []string
 		sshUser       string
 		sshPrivateKey string
 	)
@@ -36,7 +36,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 
 		// Deliberately omit worker_ips at creation so C2642277 can add them
 		// later to trigger a real spec change.
-		yaml := renderSSHClusterYAML(map[string]string{
+		yaml := renderSSHClusterYAML(map[string]any{
 			"name":            clusterName,
 			"head_ip":         headIP,
 			"ssh_user":        sshUser,
@@ -88,7 +88,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 
 		// Add worker nodes — a real spec change since BeforeAll created a
 		// head-only cluster.
-		yaml := renderSSHClusterYAML(map[string]string{
+		yaml := renderSSHClusterYAML(map[string]any{
 			"name":            clusterName,
 			"head_ip":         headIP,
 			"worker_ips":      workerIPs,

@@ -21,7 +21,7 @@ var _ = Describe("Image Registry", Label("image-registry"), func() {
 
 			Expect(rawURL).NotTo(BeEmpty(), "stripped registry URL should not be empty")
 
-			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
 				"E2E_IMAGE_REGISTRY":     name,
 				"E2E_IMAGE_REGISTRY_URL": rawURL,
 			})
@@ -66,7 +66,7 @@ var _ = Describe("Image Registry", Label("image-registry"), func() {
 			})
 
 			By("Creating image registry WITHOUT credentials")
-			noAuthPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+			noAuthPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
 				"E2E_IMAGE_REGISTRY":          noAuthName,
 				"E2E_IMAGE_REGISTRY_USERNAME": "",
 				"E2E_IMAGE_REGISTRY_PASSWORD": "",
@@ -86,7 +86,7 @@ var _ = Describe("Image Registry", Label("image-registry"), func() {
 			ExpectFailed(r)
 
 			By("Creating image registry WITH credentials")
-			authPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+			authPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
 				"E2E_IMAGE_REGISTRY": authName,
 			})
 			Expect(err).NotTo(HaveOccurred())

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: RoleAssignment
+metadata:
+  name: {{ .E2E_RA_NAME }}
+spec:
+  user_id: "{{ .E2E_RA_USER_ID }}"
+  role: "{{ .E2E_RA_ROLE }}"
+  workspace: "{{ .E2E_RA_WORKSPACE }}"

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"text/template"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -20,6 +21,30 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
+
+// ModelCache describes one model cache entry for cluster spec.config.model_caches.
+// Mode selects which sub-block the template renders.
+type ModelCache struct {
+	Name string
+	Mode string // "host_path" | "nfs" | "pvc"
+
+	// host_path mode
+	HostPath string
+
+	// nfs mode
+	NFSServer string
+	NFSPath   string
+
+	// pvc mode
+	PVCStorageClass string
+	PVCStorage      string
+}
+
+// EngineArg is a single key/value pair for endpoint spec.variables.engine_args.
+type EngineArg struct {
+	Key   string
+	Value string
+}
 
 // --- Shared state (set by setup, used by tests) ---
 
@@ -348,13 +373,21 @@ func testImageRegistry() string {
 }
 
 // requireSSHProfile returns SSH cluster params from profile. ssh_private_key is returned as base64.
-func requireSSHProfile() (headIP, workerIPs, sshUser, sshPrivateKey string) {
+// workerIPs is returned as a slice (already split from comma-separated form).
+func requireSSHProfile() (headIP string, workerIPs []string, sshUser, sshPrivateKey string) {
 	headIP = profileSSHHeadIP()
 	if headIP == "" {
 		Skip("SSH head IP not configured in profile, skipping SSH cluster tests")
 	}
 
-	workerIPs = profileSSHWorkerIPs()
+	if raw := profileSSHWorkerIPs(); raw != "" {
+		for _, ip := range strings.Split(raw, ",") {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				workerIPs = append(workerIPs, ip)
+			}
+		}
+	}
 
 	sshUser = profileSSHUser()
 	if sshUser == "" {
@@ -389,7 +422,7 @@ func SetupImageRegistry() {
 		return // already set up
 	}
 
-	defaults := map[string]string{
+	defaults := map[string]any{
 		"E2E_IMAGE_REGISTRY":          testImageRegistry(),
 		"E2E_WORKSPACE":               profileWorkspace(),
 		"E2E_IMAGE_REGISTRY_URL":      profile.ImageRegistry.URL,
@@ -428,72 +461,85 @@ func TeardownImageRegistry() {
 // --- Cluster template rendering ---
 
 // renderSSHClusterYAML renders the SSH cluster template with overrides and returns the temp file path.
-func renderSSHClusterYAML(overrides map[string]string) string {
-	defaults := map[string]string{
-		"CLUSTER_NAME":            overrides["name"],
-		"CLUSTER_WORKSPACE":       profileWorkspace(),
-		"CLUSTER_IMAGE_REGISTRY":  valueOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":         valueOr(overrides, "version", profileClusterVersion()),
-		"CLUSTER_SSH_HEAD_IP":     overrides["head_ip"],
-		"CLUSTER_SSH_USER":        overrides["ssh_user"],
-		"CLUSTER_SSH_PRIVATE_KEY": overrides["ssh_private_key"],
+//
+// Recognized overrides keys:
+//   - "name"            (string)         cluster name
+//   - "image_registry"  (string)         defaults to testImageRegistry()
+//   - "version"         (string)         defaults to profileClusterVersion()
+//   - "head_ip"         (string)
+//   - "ssh_user"        (string)
+//   - "ssh_private_key" (string)
+//   - "worker_ips"      ([]string)       worker IP list (template-rendered as range)
+//   - "accelerator_type"(string)         optional
+//   - "model_caches"    ([]ModelCache)   optional, template-rendered per Mode
+func renderSSHClusterYAML(overrides map[string]any) string {
+	data := map[string]any{
+		"CLUSTER_NAME":             stringOr(overrides, "name", ""),
+		"CLUSTER_WORKSPACE":        profileWorkspace(),
+		"CLUSTER_IMAGE_REGISTRY":   stringOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":          stringOr(overrides, "version", profileClusterVersion()),
+		"CLUSTER_SSH_HEAD_IP":      stringOr(overrides, "head_ip", ""),
+		"CLUSTER_SSH_USER":         stringOr(overrides, "ssh_user", ""),
+		"CLUSTER_SSH_PRIVATE_KEY":  stringOr(overrides, "ssh_private_key", ""),
+		"CLUSTER_ACCELERATOR_TYPE": stringOr(overrides, "accelerator_type", ""),
+		"CLUSTER_MODEL_CACHES":     anySliceOr[ModelCache](overrides, "model_caches", nil),
+		"CLUSTER_WORKER_IPS":       anySliceOr[string](overrides, "worker_ips", nil),
 	}
 
-	if at := overrides["accelerator_type"]; at != "" {
-		defaults["CLUSTER_ACCELERATOR_TYPE_YAML"] = fmt.Sprintf("    accelerator_type: \"%s\"\n", at)
-	}
-
-	if mc := overrides["model_caches_yaml"]; mc != "" {
-		defaults["CLUSTER_MODEL_CACHES_YAML"] = mc
-	}
-
-	if workerIPs := overrides["worker_ips"]; workerIPs != "" {
-		var buf strings.Builder
-
-		buf.WriteString("        worker_ips:\n")
-
-		for _, ip := range strings.Split(workerIPs, ",") {
-			ip = strings.TrimSpace(ip)
-			if ip != "" {
-				fmt.Fprintf(&buf, "          - \"%s\"\n", ip)
-			}
-		}
-
-		defaults["CLUSTER_WORKER_IPS_YAML"] = buf.String()
-	}
-
-	path, err := renderTemplateToTempFile(filepath.Join("testdata", "ssh-cluster.yaml"), defaults)
+	path, err := renderTemplateToTempFile(filepath.Join("testdata", "ssh-cluster.yaml"), data)
 	Expect(err).NotTo(HaveOccurred(), "failed to render SSH cluster template")
 
 	return path
 }
 
 // renderK8sClusterYAML renders the K8s cluster template with overrides and returns the temp file path.
-func renderK8sClusterYAML(overrides map[string]string) string {
-	defaults := map[string]string{
-		"CLUSTER_NAME":            overrides["name"],
+//
+// Recognized overrides keys:
+//   - "name"             (string)
+//   - "image_registry"   (string)         defaults to testImageRegistry()
+//   - "version"          (string)         defaults to profileClusterVersion()
+//   - "kubeconfig"       (string)
+//   - "router_replicas"  (string)         defaults to "1"
+//   - "router_cpu"       (string)         defaults to "1"
+//   - "router_memory"    (string)         defaults to "2Gi"
+//   - "model_caches"     ([]ModelCache)   optional
+func renderK8sClusterYAML(overrides map[string]any) string {
+	data := map[string]any{
+		"CLUSTER_NAME":            stringOr(overrides, "name", ""),
 		"CLUSTER_WORKSPACE":       profileWorkspace(),
-		"CLUSTER_IMAGE_REGISTRY":  valueOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":         valueOr(overrides, "version", profileClusterVersion()),
-		"CLUSTER_KUBECONFIG":      overrides["kubeconfig"],
-		"CLUSTER_ROUTER_REPLICAS": valueOr(overrides, "router_replicas", "1"),
-		"CLUSTER_ROUTER_CPU":      valueOr(overrides, "router_cpu", "1"),
-		"CLUSTER_ROUTER_MEMORY":   valueOr(overrides, "router_memory", "2Gi"),
+		"CLUSTER_IMAGE_REGISTRY":  stringOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":         stringOr(overrides, "version", profileClusterVersion()),
+		"CLUSTER_KUBECONFIG":      stringOr(overrides, "kubeconfig", ""),
+		"CLUSTER_ROUTER_REPLICAS": stringOr(overrides, "router_replicas", "1"),
+		"CLUSTER_ROUTER_CPU":      stringOr(overrides, "router_cpu", "1"),
+		"CLUSTER_ROUTER_MEMORY":   stringOr(overrides, "router_memory", "2Gi"),
+		"CLUSTER_MODEL_CACHES":    anySliceOr[ModelCache](overrides, "model_caches", nil),
 	}
 
-	if mc := overrides["model_caches_yaml"]; mc != "" {
-		defaults["CLUSTER_MODEL_CACHES_YAML"] = mc
-	}
-
-	path, err := renderTemplateToTempFile(filepath.Join("testdata", "k8s-cluster.yaml"), defaults)
+	path, err := renderTemplateToTempFile(filepath.Join("testdata", "k8s-cluster.yaml"), data)
 	Expect(err).NotTo(HaveOccurred(), "failed to render K8s cluster template")
 
 	return path
 }
 
-func valueOr(m map[string]string, key, fallback string) string {
-	if v, ok := m[key]; ok && v != "" {
-		return v
+// stringOr returns m[key] as string, falling back to fallback if missing or empty.
+func stringOr(m map[string]any, key, fallback string) string {
+	if v, ok := m[key]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+
+	return fallback
+}
+
+// anySliceOr returns m[key] coerced to []T. If the value is missing, nil, or
+// not assignable to []T, fallback is returned.
+func anySliceOr[T any](m map[string]any, key string, fallback []T) []T {
+	if v, ok := m[key]; ok && v != nil {
+		if s, ok := v.([]T); ok {
+			return s
+		}
 	}
 
 	return fallback
@@ -710,46 +756,69 @@ func profileVarMap() map[string]string {
 	}
 }
 
-// renderTemplate reads a template file and expands ${VAR} references
-// using the provided defaults map as primary source, then falling back
-// to the profile variable map, then to infrastructure env vars
-// (NEUTREE_SERVER_URL, NEUTREE_API_KEY, TESTRAIL_RUN_ID).
-func renderTemplate(templatePath string, defaults map[string]string) (string, error) {
+// renderTemplate reads a template file and renders it via text/template, using
+// the merged data map (caller > profile > env). Strict missing-key errors so
+// callers must provide every variable referenced in the template.
+func renderTemplate(templatePath string, data map[string]any) (string, error) {
 	content, err := os.ReadFile(templatePath)
 	if err != nil {
 		return "", err
 	}
 
-	pvm := profileVarMap()
+	tmpl, err := template.New(filepath.Base(templatePath)).
+		Option("missingkey=error").
+		Parse(string(content))
+	if err != nil {
+		return "", fmt.Errorf("parse template %s: %w", templatePath, err)
+	}
 
-	result := os.Expand(string(content), func(key string) string {
-		// 1. Caller-provided defaults take highest priority (including empty string).
-		if defaults != nil {
-			if v, ok := defaults[key]; ok {
-				return v
-			}
+	merged := mergeData(data, profileVarMap(), infraEnvVars())
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, merged); err != nil {
+		return "", fmt.Errorf("execute template %s: %w", templatePath, err)
+	}
+
+	return buf.String(), nil
+}
+
+// mergeData merges data with priority: caller > profile > env. Empty profile/env
+// values are skipped (so defaults can fall through), but caller values are kept
+// even when empty so callers can explicitly override profile to "".
+func mergeData(callerData map[string]any, profileVars, envVars map[string]string) map[string]any {
+	out := map[string]any{}
+
+	for k, v := range envVars {
+		if v != "" {
+			out[k] = v
 		}
+	}
 
-		// 2. Profile-derived values.
-		if v, ok := pvm[key]; ok && v != "" {
-			return v
+	for k, v := range profileVars {
+		if v != "" {
+			out[k] = v
 		}
+	}
 
-		// 3. For infrastructure env vars (server URL, API key), fall back to os env.
-		switch key {
-		case "NEUTREE_SERVER_URL", "NEUTREE_API_KEY", "TESTRAIL_RUN_ID":
-			return os.Getenv(key)
-		}
+	for k, v := range callerData {
+		out[k] = v
+	}
 
-		return ""
-	})
+	return out
+}
 
-	return result, nil
+// infraEnvVars returns infrastructure-level env vars that templates may reference.
+func infraEnvVars() map[string]string {
+	return map[string]string{
+		"NEUTREE_SERVER_URL": os.Getenv("NEUTREE_SERVER_URL"),
+		"NEUTREE_API_KEY":    os.Getenv("NEUTREE_API_KEY"),
+		"TESTRAIL_RUN_ID":    os.Getenv("TESTRAIL_RUN_ID"),
+	}
 }
 
 // renderTemplateToTempFile renders a template and writes the result to a temp file.
-func renderTemplateToTempFile(templatePath string, defaults map[string]string) (string, error) {
-	rendered, err := renderTemplate(templatePath, defaults)
+func renderTemplateToTempFile(templatePath string, data map[string]any) (string, error) {
+	rendered, err := renderTemplate(templatePath, data)
 	if err != nil {
 		return "", err
 	}
@@ -783,9 +852,12 @@ func requireImageRegistryProfile() {
 }
 
 // renderImageRegistryYAML renders an ImageRegistry YAML and returns the temp file path.
-func renderImageRegistryYAML(overrides map[string]string) string {
-	path, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
-		"E2E_IMAGE_REGISTRY": overrides["name"],
+//
+// Recognized overrides keys:
+//   - "name" (string)
+func renderImageRegistryYAML(overrides map[string]any) string {
+	path, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
+		"E2E_IMAGE_REGISTRY": stringOr(overrides, "name", ""),
 	})
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
@@ -1040,7 +1112,7 @@ func setupSSHCluster(prefix string) (clusterName string) {
 	headIP, workerIPs, sshUser, sshPrivateKey := requireSSHProfile()
 	clusterName = prefix + Cfg.RunID
 
-	yaml := renderSSHClusterYAML(map[string]string{
+	yaml := renderSSHClusterYAML(map[string]any{
 		"name":            clusterName,
 		"head_ip":         headIP,
 		"worker_ips":      workerIPs,
@@ -1072,7 +1144,7 @@ func setupK8sCluster(prefix string) (clusterName string) {
 	kubeconfig := requireK8sProfile()
 	clusterName = prefix + Cfg.RunID
 
-	yaml := renderK8sClusterYAML(map[string]string{
+	yaml := renderK8sClusterYAML(map[string]any{
 		"name":       clusterName,
 		"kubeconfig": kubeconfig,
 	})
@@ -1101,10 +1173,12 @@ func teardownCluster(clusterName string) {
 
 // --- Endpoint helpers ---
 
-// engineArgsYAML returns a YAML snippet for spec.variables.engine_args.
-func engineArgsYAML() string {
+// engineArgs parses profile engine_args ("k=v,k2=v2,...") into a structured slice
+// for direct injection into the endpoint template via {{range}}.
+func engineArgs() []EngineArg {
 	raw := profileEngineArgs()
-	var lines []string
+
+	var args []EngineArg
 
 	for _, pair := range strings.Split(raw, ",") {
 		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
@@ -1112,10 +1186,10 @@ func engineArgsYAML() string {
 			continue
 		}
 
-		lines = append(lines, fmt.Sprintf("      %s: %s", strings.TrimSpace(k), strings.TrimSpace(v)))
+		args = append(args, EngineArg{Key: strings.TrimSpace(k), Value: strings.TrimSpace(v)})
 	}
 
-	return "\n" + strings.Join(lines, "\n")
+	return args
 }
 
 // endpointOpts holds configurable fields for applyEndpoint.
@@ -1125,7 +1199,7 @@ type endpointOpts struct {
 	model         string
 	modelVersion  string
 	task          string
-	engineArgs    string
+	engineArgs    []EngineArg
 	gpu           string
 	cpu           string
 	memory        string
@@ -1167,7 +1241,7 @@ func withTask(task string) EndpointOption {
 	return func(o *endpointOpts) { o.task = task }
 }
 
-func withEngineArgs(args string) EndpointOption {
+func withEngineArgs(args []EngineArg) EndpointOption {
 	return func(o *endpointOpts) { o.engineArgs = args }
 }
 
@@ -1199,7 +1273,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		model:         profileModelName(),
 		modelVersion:  profileModelVersion(),
 		task:          profileModelTask(),
-		engineArgs:    engineArgsYAML(),
+		engineArgs:    engineArgs(),
 		gpu:           "1",
 		forceUpdate:   true,
 	}
@@ -1211,25 +1285,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		o.accType, o.accProduct = getClusterAccelerator(cluster)
 	}
 
-	var envYAML string
-	if len(o.env) > 0 {
-		envYAML = "  env:\n"
-		for k, v := range o.env {
-			envYAML += fmt.Sprintf("    %s: \"%s\"\n", k, v)
-		}
-	}
-
-	resourcesYAML := fmt.Sprintf("    gpu: \"%s\"\n", o.gpu)
-
-	if o.cpu != "" {
-		resourcesYAML += fmt.Sprintf("    cpu: \"%s\"\n", o.cpu)
-	}
-
-	if o.memory != "" {
-		resourcesYAML += fmt.Sprintf("    memory: \"%s\"\n", o.memory)
-	}
-
-	defaults := map[string]string{
+	data := map[string]any{
 		"E2E_ENDPOINT_NAME":       name,
 		"E2E_WORKSPACE":           profileWorkspace(),
 		"E2E_CLUSTER_NAME":        cluster,
@@ -1241,12 +1297,14 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		"E2E_MODEL_TASK":          o.task,
 		"E2E_ACCELERATOR_TYPE":    o.accType,
 		"E2E_ACCELERATOR_PRODUCT": o.accProduct,
-		"E2E_RESOURCES_YAML":      resourcesYAML,
-		"E2E_ENGINE_ARGS_YAML":    o.engineArgs,
-		"E2E_ENV_YAML":            envYAML,
+		"E2E_GPU":                 o.gpu,
+		"E2E_CPU":                 o.cpu,
+		"E2E_MEMORY":              o.memory,
+		"E2E_ENGINE_ARGS":         o.engineArgs,
+		"E2E_ENV":                 o.env,
 	}
 
-	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), defaults)
+	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), data)
 	Expect(err).NotTo(HaveOccurred(), "failed to render endpoint template")
 
 	return yamlPath, o
@@ -1267,15 +1325,16 @@ func applyEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath strin
 	return yamlPath
 }
 
-// allSchemaTypesEngineArgsYAML returns an engine_args YAML snippet covering multiple JSON Schema data types.
-func allSchemaTypesEngineArgsYAML() string {
-	return `
-      dtype: half
-      max_model_len: 4096
-      gpu_memory_utilization: 0.85
-      enforce_eager: true
-      seed: 42
-      override_generation_config: '{"temperature": 0.8}'`
+// allSchemaTypesEngineArgs returns an engine_args slice covering multiple JSON Schema data types.
+func allSchemaTypesEngineArgs() []EngineArg {
+	return []EngineArg{
+		{Key: "dtype", Value: "half"},
+		{Key: "max_model_len", Value: "4096"},
+		{Key: "gpu_memory_utilization", Value: "0.85"},
+		{Key: "enforce_eager", Value: "true"},
+		{Key: "seed", Value: "42"},
+		{Key: "override_generation_config", Value: `'{"temperature": 0.8}'`},
+	}
 }
 
 // waitEndpointRunning waits for an endpoint to reach Running phase.
