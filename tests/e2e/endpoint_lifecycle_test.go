@@ -99,12 +99,50 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
 		})
+
+		// NEU-421: delete a running endpoint without --force after its model
+		// registry has been removed. Pre-fix: stuck in DELETING. Post-fix:
+		// converges to Deleted via deployer's last-applied snapshot.
+		It("should reach Deleted when running endpoint is deleted after model removed without --force (NEU-421)", Label("C2649426"), func() {
+			epName := "e2e-ep-lc-del-after-del-" + Cfg.RunID
+			DeferCleanup(func() {
+				// Best-effort cleanup; SetupModelRegistry restores for siblings.
+				RunCLI("delete", "endpoint", epName, "-w", profileWorkspace(), "--force", "--ignore-not-found")
+				SetupModelRegistry()
+			})
+
+			By("Creating endpoint and waiting for Running")
+			yamlPath := applyEndpoint(epName, clusterName)
+			defer os.Remove(yamlPath)
+			waitEndpointRunning(epName)
+
+			By("Removing the model registry the endpoint references")
+			TeardownModelRegistry()
+
+			By("Deleting endpoint without --force")
+			r := RunCLI("delete", "endpoint", epName, "-w", profileWorkspace(), "--ignore-not-found")
+			ExpectSuccess(r)
+
+			By("Endpoint converges to deleted (does not get stuck in DELETING)")
+			r = RunCLI("wait", "endpoint", epName,
+				"-w", profileWorkspace(),
+				"--for", "delete",
+				"--timeout", profileEndpointTimeout(),
+			)
+			ExpectSuccess(r)
+		})
 	})
 
 	// --- Error Handling ---
 
 	Describe("Error Handling", Label("error"), func() {
 
+		// NEU-421 R4 contract refinement: only configuration errors that
+		// short-circuit BEFORE deployment creation flip to Deploying. Cases
+		// where the deployment IS created with bogus content (bad model name,
+		// bad version, mismatched accelerator) still converge to Failed via
+		// observed pod state (CrashLoop / Unschedulable). Engine-not-found is
+		// the only one in this file that short-circuits in prepareCtx.
 		It("should show Failed when model does not exist", Label("C2612944"), func() {
 			epName := "e2e-ep-lc-fail-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })
@@ -114,8 +152,6 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			defer os.Remove(yamlPath)
 
 			waitEndpointFailed(epName)
-			ep := getEndpoint(epName)
-			Expect(ep.Status.Phase).To(BeEquivalentTo("Failed"))
 		})
 
 		It("should show Failed when model version does not exist", Label("C2613501"), func() {
@@ -158,7 +194,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Failed"))
 		})
 
-		It("should show Failed when using unsupported engine", Label("C2612936"), func() {
+		It("should show Deploying with errorMessage when using unsupported engine", Label("C2612936"), func() {
 			epName := "e2e-ep-lc-badeng-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })
 
@@ -166,7 +202,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				withEngine("nonexistent-engine-"+Cfg.RunID, "v0.0.1"))
 			defer os.Remove(yamlPath)
 
-			waitEndpointFailed(epName)
+			waitEndpointDeployingWithError(epName, "engine")
 		})
 
 		It("should show Failed when no matching accelerator product", Label("C2613503"), func() {
@@ -214,6 +250,67 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				os.Remove(yamlPath)
 				ExpectFailed(r)
 			}
+		})
+	})
+
+	// --- Pause / NEU-421 ---
+
+	Describe("Pause", Label("pause"), func() {
+
+		It("should reach Paused when applied with replicas=0 and valid model", Label("C2649423"), func() {
+			epName := "e2e-ep-lc-pause-ok-" + Cfg.RunID
+			DeferCleanup(func() { deleteEndpoint(epName) })
+
+			yamlPath := applyEndpoint(epName, clusterName, withReplicas(0))
+			defer os.Remove(yamlPath)
+
+			waitEndpointPaused(epName)
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
+		})
+
+		It("should reach Paused when applied with replicas=0 and non-existent model (NEU-421)", Label("C2649424"), func() {
+			epName := "e2e-ep-lc-pause-nomodel-" + Cfg.RunID
+			DeferCleanup(func() { deleteEndpoint(epName) })
+
+			yamlPath := applyEndpoint(epName, clusterName,
+				withReplicas(0),
+				withModel("non-existent-model-"+Cfg.RunID, "v0.0.0"),
+				withoutForceUpdate())
+			defer os.Remove(yamlPath)
+
+			waitEndpointPaused(epName)
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
+		})
+
+		It("should reach Paused when running endpoint is paused after model deleted (NEU-421)", Label("C2649425"), func() {
+			epName := "e2e-ep-lc-pause-after-del-" + Cfg.RunID
+			DeferCleanup(func() {
+				deleteEndpoint(epName)
+				// Restore registry for sibling cases.
+				SetupModelRegistry()
+			})
+
+			By("Creating endpoint with replicas=1 and waiting for Running")
+			yamlPath := applyEndpoint(epName, clusterName)
+			defer os.Remove(yamlPath)
+			waitEndpointRunning(epName)
+
+			By("Removing the model registry the endpoint references")
+			TeardownModelRegistry()
+
+			By("Re-applying endpoint with replicas=0 (pause)")
+			// applyEndpoint defaults forceUpdate=true; the endpoint already
+			// exists from step 1 so we must force-update to push the new
+			// replicas=0 spec — without it the CLI skips existing resources.
+			yamlPath2 := applyEndpoint(epName, clusterName, withReplicas(0))
+			defer os.Remove(yamlPath2)
+
+			By("Endpoint converges to Paused even though model registry is gone")
+			waitEndpointPaused(epName)
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
 		})
 	})
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.openly.dev/pointy"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -2578,4 +2579,92 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			mockDashboard.AssertExpectations(t)
 		})
 	}
+}
+
+// TestRayOrchestrator_prepareOrchestratorContextLite_ToleratesMissingDeps
+// verifies that the new lite preparation does NOT fetch
+// engine/model-registry/image-registry from storage. NEU-421: this is the
+// piece that lets pause/delete on Ray succeed when the model registry
+// has been removed.
+func TestRayOrchestrator_prepareOrchestratorContextLite_ToleratesMissingDeps(t *testing.T) {
+	// dashboard.NewDashboardService is a package-level mockable factory used
+	// by other tests in this package (line 220, 2550) without restoration.
+	// Pin it for this test so the result does not leak in from previous runs.
+	prevFactory := dashboard.NewDashboardService
+	mockDashboard := dashboardmocks.NewMockDashboardService(t)
+	dashboard.NewDashboardService = func(string) dashboard.DashboardService { return mockDashboard }
+	t.Cleanup(func() { dashboard.NewDashboardService = prevFactory })
+
+	cluster := v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster"},
+		Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
+		Status: &v1.ClusterStatus{
+			Phase:        v1.ClusterPhaseRunning,
+			DashboardURL: "http://127.0.0.1:8265",
+		},
+	}
+
+	mockStorage := storagemocks.NewMockStorage(t)
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+	// Intentionally do NOT mock ListEngine / ListModelRegistry / ListImageRegistry:
+	// if the lite path calls them, mockery will fail the test on AssertExpectations.
+
+	o := &RayOrchestrator{cluster: &cluster, storage: mockStorage}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+		Spec: &v1.EndpointSpec{
+			Cluster:  "test-cluster",
+			Replicas: v1.ReplicaSpec{Num: pointy.Int(0)},
+			Model:    &v1.ModelSpec{Registry: "removed-registry", Name: "anything"},
+		},
+	}
+
+	ctx, err := o.prepareOrchestratorContextLite(endpoint)
+	require.NoError(t, err)
+	require.NotNil(t, ctx)
+	assert.NotNil(t, ctx.Cluster)
+	assert.NotNil(t, ctx.rayService)
+	assert.Nil(t, ctx.ModelRegistry, "lite path must not fetch ModelRegistry")
+	assert.Nil(t, ctx.Engine, "lite path must not fetch Engine")
+	assert.Nil(t, ctx.ImageRegistry, "lite path must not fetch ImageRegistry")
+
+	// Negative assertions — confirm the unlisted methods were never called.
+	mockStorage.AssertNotCalled(t, "ListEngine", mock.Anything)
+	mockStorage.AssertNotCalled(t, "ListModelRegistry", mock.Anything)
+	mockStorage.AssertNotCalled(t, "ListImageRegistry", mock.Anything)
+}
+
+func TestRayOrchestrator_prepareOrchestratorContextLite_ClusterNotFound(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
+
+	o := &RayOrchestrator{storage: mockStorage}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+		Spec:     &v1.EndpointSpec{Cluster: "missing-cluster"},
+	}
+
+	_, err := o.prepareOrchestratorContextLite(endpoint)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deploy cluster")
+}
+
+func TestRayOrchestrator_prepareOrchestratorContextLite_NoDashboardURL(t *testing.T) {
+	cluster := v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster"},
+		Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
+		Status:   &v1.ClusterStatus{Phase: v1.ClusterPhaseRunning, DashboardURL: ""},
+	}
+	mockStorage := storagemocks.NewMockStorage(t)
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+
+	o := &RayOrchestrator{storage: mockStorage}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+		Spec:     &v1.EndpointSpec{Cluster: "test-cluster"},
+	}
+
+	_, err := o.prepareOrchestratorContextLite(endpoint)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dashboard URL")
 }

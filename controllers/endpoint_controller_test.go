@@ -284,7 +284,9 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			name: "process reconcile error without force delete",
+			// R4 fallback: when observed status retrieval fails AND we're
+			// deleting AND syncErr is set, surface as Deleting + syncErr.
+			name: "process reconcile error without force delete (observed unavailable, fallback to Deleting)",
 			input: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
@@ -292,6 +294,8 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 			inputErr: testErr,
 			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				// observed retrieval fails: cluster not found
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
 				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
 					return ep.Status != nil &&
 						ep.Status.Phase == v1.EndpointPhaseDELETING &&
@@ -300,12 +304,16 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			name: "process reconcile error without force delete and with deletion timestamp",
+			// R4 fallback: when observed status retrieval fails AND not deleting
+			// AND syncErr is set, surface as Failed + syncErr.
+			name: "process reconcile error without deletion (observed unavailable, fallback to Failed)",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
 			},
 			inputErr: testErr,
 			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				// observed retrieval fails: cluster not found
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
 				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
 					return ep.Status != nil &&
 						ep.Status.Phase == v1.EndpointPhaseFAILED &&
@@ -332,6 +340,10 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
+			// R4 invariant: when observed retrieval fails AND syncErr is nil,
+			// neither signal carries reliable information — preserve the last
+			// known status by skipping UpdateEndpoint entirely. The mock
+			// asserts no UpdateEndpoint call by simply not declaring one.
 			name: "get actual status failed will not update status",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
@@ -342,6 +354,96 @@ func Test_UpdateStatusOnError(t *testing.T) {
 				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
 					Phase: v1.EndpointPhaseFAILED,
 				}, assert.AnError)
+			},
+		},
+
+		// NEU-421 R4: phase derived from observed reality even when sync errored.
+		// syncErr is recorded into ErrorMessage so the operator still sees the
+		// failed reconcile reason, but the phase reflects what the orchestrator
+		// reports — mirroring how cluster controller decouples phase from err.
+		{
+			name: "R4: observed Running with sync error -> Running phase, syncErr in errorMessage",
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: testErr,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase: v1.EndpointPhaseRUNNING,
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseRUNNING &&
+						ep.Status.ErrorMessage == "test error"
+				})).Return(nil)
+			},
+		},
+		{
+			name: "R4: observed Paused with sync error from PauseEndpoint -> Paused phase",
+			// NEU-421 bug fix: pause failed because of model registry, but
+			// orchestrator reports Paused (replicas=0, no pods); we surface
+			// Paused, not Failed.
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: errors.New("failed to pause: model registry not found"),
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase: v1.EndpointPhasePAUSED,
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhasePAUSED &&
+						ep.Status.ErrorMessage == "failed to pause: model registry not found"
+				})).Return(nil)
+			},
+		},
+		{
+			// R4 (refined per e2e finding): syncErr replaces observed
+			// errorMessage because syncErr is the actionable root cause
+			// ("engine not found"), while observed errorMessage is the
+			// downstream symptom ("deployment not found in namespace").
+			// Aligned with ClusterController.updateStatus.
+			name: "R4: syncErr replaces observed errorMessage when both present",
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: testErr,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase:        v1.EndpointPhaseDEPLOYING,
+					ErrorMessage: "Endpoint deploying in progress: deployment not found",
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseDEPLOYING &&
+						ep.Status.ErrorMessage == "test error"
+				})).Return(nil)
+			},
+		},
+		{
+			// R4: when syncErr is nil but observed reports an in-progress
+			// reason, keep the observed errorMessage so operators see what
+			// the orchestrator is currently doing.
+			name: "R4: observed errorMessage preserved when syncErr is nil",
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: nil,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase:        v1.EndpointPhaseDEPLOYING,
+					ErrorMessage: "Endpoint deploying in progress: ContainerCreating",
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseDEPLOYING &&
+						ep.Status.ErrorMessage == "Endpoint deploying in progress: ContainerCreating"
+				})).Return(nil)
 			},
 		},
 	}

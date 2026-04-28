@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -2699,6 +2700,24 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			expectError:   false,
 		},
 		{
+			// NEU-421: paused-from-start (e.g., applied with replicas=0 and
+			// the orchestrator's pause logic sees no deployment to scale,
+			// so no deployment was ever created). The previous logic
+			// reported Deploying("not found"); the Paused check now runs
+			// before the !exists check.
+			name: "return Paused for paused endpoint when deployment does not exist (NEU-421)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Spec.Replicas.Num = pointer.Int(0)
+				return ep
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).WithDeploymentNotFound()
+			},
+			expectedPhase: v1.EndpointPhasePAUSED,
+			expectError:   false,
+		},
+		{
 			name: "return Running for deployment with all replicas ready",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()
@@ -2859,4 +2878,138 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			fakeClient.AssertExpectations()
 		})
 	}
+}
+
+// makePauseTestCtx builds a minimal OrchestratorContext for pause/delete tests:
+// only fields that pauseEndpoint / deleteEndpoint actually read.
+func makePauseTestCtx(ctrlClient client.Client, name string) *OrchestratorContext {
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+		Status:   &v1.ClusterStatus{Phase: v1.ClusterPhaseRunning},
+	}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: name, Workspace: "default"},
+		Spec: &v1.EndpointSpec{
+			Cluster:  "test-cluster",
+			Replicas: v1.ReplicaSpec{Num: pointer.Int(0)},
+		},
+	}
+	return &OrchestratorContext{
+		Cluster:   cluster,
+		Endpoint:  endpoint,
+		ctrClient: ctrlClient,
+		logger:    klogTestLogger(),
+	}
+}
+
+// createTestDeployment seeds a Deployment in the namespace pauseEndpoint /
+// deleteEndpoint will look at — i.e. util.ClusterNamespace(ctx.Cluster) — so
+// the test does not depend on FakeK8sClient.WithDeployment's hard-coded
+// "test-namespace".
+func createTestDeployment(t *testing.T, fakeClient *FakeK8sClient, ctx *OrchestratorContext, name string, replicas int32) {
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: util.ClusterNamespace(ctx.Cluster),
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"endpoint": name}},
+		},
+	}
+	require.NoError(t, fakeClient.Create(context.Background(), dep))
+}
+
+func TestKubernetesOrchestrator_pauseEndpoint(t *testing.T) {
+	const name = "chat-model"
+
+	tests := []struct {
+		name             string
+		seedReplicas     *int32 // nil => no deployment
+		expectError      bool
+		expectedReplicas *int32
+	}{
+		{
+			name:             "patches replicas to 0 when deployment exists with replicas=1",
+			seedReplicas:     int32Ptr(1),
+			expectError:      false,
+			expectedReplicas: int32Ptr(0),
+		},
+		{
+			name:             "no-op when deployment is already at replicas=0",
+			seedReplicas:     int32Ptr(0),
+			expectError:      false,
+			expectedReplicas: int32Ptr(0),
+		},
+		{
+			name:             "no-op when deployment does not exist",
+			seedReplicas:     nil,
+			expectError:      false,
+			expectedReplicas: nil, // no deployment to inspect
+		},
+		{
+			name: "succeeds even when storage has no model registry (NEU-421 repro)",
+			// pauseEndpoint must not touch storage / model registry — only K8s API
+			seedReplicas:     int32Ptr(2),
+			expectError:      false,
+			expectedReplicas: int32Ptr(0),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := NewFakeK8sClient(t)
+			ctx := makePauseTestCtx(fakeClient, name)
+			if tt.seedReplicas != nil {
+				createTestDeployment(t, fakeClient, ctx, name, *tt.seedReplicas)
+			}
+
+			o := &kubernetesOrchestrator{}
+			err := o.pauseEndpoint(ctx)
+			if tt.expectError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			if tt.expectedReplicas == nil {
+				return
+			}
+
+			dep := &appsv1.Deployment{}
+			getErr := fakeClient.Get(context.Background(),
+				client.ObjectKey{Namespace: util.ClusterNamespace(ctx.Cluster), Name: name},
+				dep)
+			require.NoError(t, getErr)
+			require.NotNil(t, dep.Spec.Replicas)
+			assert.Equal(t, *tt.expectedReplicas, *dep.Spec.Replicas)
+		})
+	}
+}
+
+// TestKubernetesOrchestrator_deleteEndpoint_NoConfigStore verifies that the
+// delete path does not depend on ModelRegistry/Engine/ImageRegistry; it relies
+// only on the deployer's ConfigMap-backed last-applied snapshot. NEU-421: this
+// allows DeleteEndpoint to succeed even when the model registry has been
+// removed.
+func TestKubernetesOrchestrator_deleteEndpoint_NoConfigStore(t *testing.T) {
+	fakeClient := NewFakeK8sClient(t)
+	ctx := makePauseTestCtx(fakeClient, "chat-model")
+
+	o := &kubernetesOrchestrator{}
+	// With no last-applied ConfigMap and no deployment, delete is a no-op
+	// (idempotent). It must not return error and must not require ModelRegistry.
+	require.NoError(t, o.deleteEndpoint(ctx))
+}
+
+func int32Ptr(v int32) *int32 { return &v }
+
+// klogTestLogger returns the default klog logger. This matches the same
+// idiom production code uses (klog.Background()); it is NOT silenced —
+// klog still emits according to its global configuration. We rely on the
+// default klog config for tests being quiet enough; replace with a discard
+// logger if test output ever becomes noisy.
+func klogTestLogger() klog.Logger {
+	return klog.Background()
 }
