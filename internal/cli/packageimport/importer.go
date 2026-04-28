@@ -302,18 +302,22 @@ func validateModelTasks(em *EngineMetadata) error {
 		if strings.TrimSpace(t) == "" {
 			continue
 		}
+
 		if !v1.IsKnownModelTask(t) {
 			bads = append(bads, bad{where: "engines[" + em.Name + "].supported_tasks", task: t})
 		}
 	}
+
 	for _, v := range em.EngineVersions {
 		if v == nil {
 			continue
 		}
+
 		for _, t := range v.SupportedTasks {
 			if strings.TrimSpace(t) == "" {
 				continue
 			}
+
 			if !v1.IsKnownModelTask(t) {
 				bads = append(bads, bad{where: "engines[" + em.Name + "].engine_versions[" + v.Version + "].supported_tasks", task: t})
 			}
@@ -328,6 +332,7 @@ func validateModelTasks(em *EngineMetadata) error {
 	for _, b := range bads {
 		parts = append(parts, b.where+`=`+strconv.Quote(b.task))
 	}
+
 	return fmt.Errorf("unknown model task value(s) — only %q, %q, %q are accepted: %s",
 		v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask,
 		strings.Join(parts, "; "))
@@ -343,14 +348,17 @@ func aggregateSupportedTasks(em *EngineMetadata) []string {
 	if em == nil {
 		return nil
 	}
-	var out []string
-	out = unionStrings(out, em.SupportedTasks)
+
+	out := unionStrings(nil, em.SupportedTasks)
+
 	for _, v := range em.EngineVersions {
 		if v == nil {
 			continue
 		}
+
 		out = unionStrings(out, v.SupportedTasks)
 	}
+
 	return out
 }
 
@@ -361,19 +369,24 @@ func aggregateSupportedTasks(em *EngineMetadata) []string {
 func unionStrings(existing, incoming []string) []string {
 	seen := make(map[string]struct{}, len(existing)+len(incoming))
 	out := existing
+
 	for _, s := range existing {
 		seen[s] = struct{}{}
 	}
+
 	for _, s := range incoming {
 		if strings.TrimSpace(s) == "" {
 			continue
 		}
+
 		if _, ok := seen[s]; ok {
 			continue
 		}
+
 		seen[s] = struct{}{}
 		out = append(out, s)
 	}
+
 	return out
 }
 
