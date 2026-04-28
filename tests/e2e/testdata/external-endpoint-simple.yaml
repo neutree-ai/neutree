@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ExternalEndpoint
+metadata:
+  name: {{ .E2E_EE_NAME }}
+  workspace: {{ .E2E_WORKSPACE }}
+spec:
+  upstreams:
+    - upstream:
+        url: {{ .E2E_EE_UPSTREAM_URL }}
+      model_mapping:
+        {{ .E2E_EE_MODEL_KEY }}: {{ .E2E_EE_MODEL_VALUE }}

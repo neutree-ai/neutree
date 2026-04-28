@@ -48,7 +48,7 @@ func TeardownMockUpstream() {
 
 // SetupExternalEndpoint creates an ExternalEndpoint from the YAML template.
 func SetupExternalEndpoint() {
-	defaults := map[string]string{
+	defaults := map[string]any{
 		"E2E_EE_NAME":           testEEName(),
 		"E2E_WORKSPACE":         profileWorkspace(),
 		"E2E_MOCK_UPSTREAM_URL": mockUpstream.ExternalURL(),
@@ -331,27 +331,17 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			eeName := "e2e-ee-lifecycle-" + Cfg.RunID
 
 			By("Applying ExternalEndpoint via CLI")
-			eeYAML := fmt.Sprintf(`apiVersion: v1
-kind: ExternalEndpoint
-metadata:
-  name: %s
-  workspace: %s
-spec:
-  upstreams:
-    - upstream:
-        url: http://example.com
-      model_mapping:
-        test-model: test-model
-`, eeName, profileWorkspace())
-
-			tmpFile, err := os.CreateTemp("", "e2e-ee-lifecycle-*.yaml")
+			yamlPath, err := renderTemplateToTempFile("testdata/external-endpoint-simple.yaml", map[string]any{
+				"E2E_EE_NAME":         eeName,
+				"E2E_WORKSPACE":       profileWorkspace(),
+				"E2E_EE_UPSTREAM_URL": "http://example.com",
+				"E2E_EE_MODEL_KEY":    "test-model",
+				"E2E_EE_MODEL_VALUE":  "test-model",
+			})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = tmpFile.WriteString(eeYAML)
-			Expect(err).NotTo(HaveOccurred())
-			tmpFile.Close()
-			defer os.Remove(tmpFile.Name())
+			defer os.Remove(yamlPath)
 
-			r := RunCLI("apply", "-f", tmpFile.Name())
+			r := RunCLI("apply", "-f", yamlPath)
 			ExpectSuccess(r)
 			Expect(r.Stdout).To(ContainSubstring("created"))
 
@@ -437,46 +427,31 @@ spec:
 			Expect(userID).NotTo(BeEmpty(), "user creation should return a user ID")
 
 			By("Creating a role WITHOUT external_endpoint:read-credentials")
-			roleYAML := fmt.Sprintf(`apiVersion: v1
-kind: Role
-metadata:
-  name: %s
-  workspace: %s
-spec:
-  permissions:
-    - "external_endpoint:read"
-    - "cluster:read"
-`, roleName, profileWorkspace())
-
-			tmpFile, err := os.CreateTemp("", "e2e-role-*.yaml")
+			rolePath, err := renderTemplateToTempFile("testdata/role.yaml", map[string]any{
+				"E2E_ROLE_NAME": roleName,
+				"E2E_WORKSPACE": profileWorkspace(),
+				"E2E_ROLE_PERMISSIONS": []string{
+					"external_endpoint:read",
+					"cluster:read",
+				},
+			})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = tmpFile.WriteString(roleYAML)
-			Expect(err).NotTo(HaveOccurred())
-			tmpFile.Close()
-			defer os.Remove(tmpFile.Name())
+			defer os.Remove(rolePath)
 
-			r := RunCLI("apply", "-f", tmpFile.Name())
+			r := RunCLI("apply", "-f", rolePath)
 			ExpectSuccess(r)
 
 			By("Assigning role to user")
-			raYAML := fmt.Sprintf(`apiVersion: v1
-kind: RoleAssignment
-metadata:
-  name: %s
-spec:
-  user_id: "%s"
-  role: "%s"
-  workspace: "%s"
-`, testUserName+"-ra", userID, roleName, profileWorkspace())
-
-			tmpFile2, err := os.CreateTemp("", "e2e-ra-*.yaml")
+			raPath, err := renderTemplateToTempFile("testdata/role-assignment.yaml", map[string]any{
+				"E2E_RA_NAME":      testUserName + "-ra",
+				"E2E_RA_USER_ID":   userID,
+				"E2E_RA_ROLE":      roleName,
+				"E2E_RA_WORKSPACE": profileWorkspace(),
+			})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = tmpFile2.WriteString(raYAML)
-			Expect(err).NotTo(HaveOccurred())
-			tmpFile2.Close()
-			defer os.Remove(tmpFile2.Name())
+			defer os.Remove(raPath)
 
-			r = RunCLI("apply", "-f", tmpFile2.Name())
+			r = RunCLI("apply", "-f", raPath)
 			ExpectSuccess(r)
 
 			By("Logging in as the test user to get JWT")

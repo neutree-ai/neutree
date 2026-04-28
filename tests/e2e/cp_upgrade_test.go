@@ -344,7 +344,7 @@ var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgra
 func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k8sEp string) {
 	By("Creating image registry")
 
-	irPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]string{
+	irPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
 		"E2E_IMAGE_REGISTRY": irName,
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -363,7 +363,7 @@ func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k
 
 	By("Creating model registry")
 
-	mrPath, err := renderTemplateToTempFile("testdata/model-registry.yaml", map[string]string{
+	mrPath, err := renderTemplateToTempFile("testdata/model-registry.yaml", map[string]any{
 		"E2E_MODEL_REGISTRY": mrName,
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -376,7 +376,7 @@ func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k
 	By("Creating SSH cluster with old cluster version")
 	if profileSSHHeadIP() != "" {
 		headIP, workerIPs, sshUser, sshPrivateKey := requireSSHProfile()
-		yaml := renderSSHClusterYAML(map[string]string{
+		yaml := renderSSHClusterYAML(map[string]any{
 			"name":            sshCluster,
 			"image_registry":  irName,
 			"version":         profile.Cluster.OldVersion,
@@ -405,7 +405,7 @@ func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k
 	By("Creating K8s cluster with old cluster version")
 	if profileKubeconfig() != "" {
 		kubeconfig := requireK8sProfile()
-		yaml := renderK8sClusterYAML(map[string]string{
+		yaml := renderK8sClusterYAML(map[string]any{
 			"name":           k8sCluster,
 			"image_registry": irName,
 			"version":        profile.Cluster.OldVersion,

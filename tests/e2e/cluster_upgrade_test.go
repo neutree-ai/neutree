@@ -60,7 +60,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		var (
 			clusterName   string
 			headIP        string
-			workerIPs     string
+			workerIPs     []string
 			sshUser       string
 			sshPrivateKey string
 			oldVersion    string
@@ -71,7 +71,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			oldVersion = requireOldVersion()
 			clusterName = "e2e-ssh-upg-" + Cfg.RunID
 
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"version":         oldVersion,
 				"head_ip":         headIP,
@@ -103,7 +103,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			newVersion := profileClusterVersion()
 
 			By("Applying with new version " + newVersion)
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"version":         newVersion,
 				"head_ip":         headIP,
@@ -137,7 +137,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			clusterName   string
 			epName        string
 			headIP        string
-			workerIPs     string
+			workerIPs     []string
 			sshUser       string
 			sshPrivateKey string
 			oldVersion    string
@@ -159,7 +159,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			SetupModelRegistry()
 
 			By("Creating SSH cluster with old version " + oldVersion)
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"version":         oldVersion,
 				"head_ip":         headIP,
@@ -204,7 +204,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			newVersion := profileClusterVersion()
 
 			By("Applying cluster with new version " + newVersion)
-			yaml := renderSSHClusterYAML(map[string]string{
+			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"version":         newVersion,
 				"head_ip":         headIP,
@@ -256,7 +256,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			oldVersion = requireOldVersion()
 			clusterName = "e2e-k8s-upg-" + Cfg.RunID
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":       clusterName,
 				"version":    oldVersion,
 				"kubeconfig": kubeconfig,
@@ -285,7 +285,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			newVersion := profileClusterVersion()
 
 			By("Applying with new version " + newVersion)
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":       clusterName,
 				"version":    newVersion,
 				"kubeconfig": kubeconfig,
@@ -335,7 +335,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			SetupModelRegistry()
 
 			By("Creating K8s cluster with old version " + oldVersion)
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":       clusterName,
 				"version":    oldVersion,
 				"kubeconfig": kubeconfig,
@@ -386,7 +386,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			newVersion := profileClusterVersion()
 
 			By("Applying cluster with new version " + newVersion)
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":       clusterName,
 				"version":    newVersion,
 				"kubeconfig": kubeconfig,

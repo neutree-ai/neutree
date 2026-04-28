@@ -31,7 +31,7 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 		kubeconfig = requireK8sProfile()
 		clusterName = "e2e-k8s-" + Cfg.RunID
 
-		yaml := renderK8sClusterYAML(map[string]string{
+		yaml := renderK8sClusterYAML(map[string]any{
 			"name":       clusterName,
 			"kubeconfig": kubeconfig,
 		})
@@ -70,7 +70,7 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 		ExpectSuccess(r)
 		oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
-		yaml := renderK8sClusterYAML(map[string]string{
+		yaml := renderK8sClusterYAML(map[string]any{
 			"name":            clusterName,
 			"kubeconfig":      kubeconfig,
 			"image_registry":  testImageRegistry(),
