@@ -193,10 +193,14 @@ func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, syncErr error
 		return
 	}
 
-	// Observed retrieval succeeded. Phase comes from observed; merge syncErr
-	// into ErrorMessage only when observed has not already set a more specific
-	// reason (e.g., "Endpoint deploying in progress: ContainerCreating").
-	if syncErr != nil && observed.ErrorMessage == "" {
+	// Observed retrieval succeeded. Phase comes from observed; ErrorMessage
+	// follows the cluster controller pattern: when syncErr is present it
+	// replaces observed.ErrorMessage because syncErr is the actionable root
+	// cause (e.g., "engine not found"), while observed.ErrorMessage is
+	// usually a downstream symptom (e.g., "deployment not found in namespace").
+	// When syncErr is nil, observed.ErrorMessage is kept as-is so operators
+	// still see in-progress diagnostics like "ContainerCreating".
+	if syncErr != nil {
 		observed.ErrorMessage = FormatErrorForStatus(syncErr)
 	}
 

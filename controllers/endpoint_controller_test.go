@@ -401,14 +401,38 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			name: "R4: observed errorMessage takes precedence over syncErr when both present",
-			// e.g., observed reports Deploying with a specific reason; we
-			// preserve that and don't overwrite with syncErr — observed
-			// is more specific and actionable.
+			// R4 (refined per e2e finding): syncErr replaces observed
+			// errorMessage because syncErr is the actionable root cause
+			// ("engine not found"), while observed errorMessage is the
+			// downstream symptom ("deployment not found in namespace").
+			// Aligned with ClusterController.updateStatus.
+			name: "R4: syncErr replaces observed errorMessage when both present",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
 			},
 			inputErr: testErr,
+			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
+				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
+					Phase:        v1.EndpointPhaseDEPLOYING,
+					ErrorMessage: "Endpoint deploying in progress: deployment not found",
+				}, nil)
+				s.On("UpdateEndpoint", "1", mock.MatchedBy(func(ep *v1.Endpoint) bool {
+					return ep.Status != nil &&
+						ep.Status.Phase == v1.EndpointPhaseDEPLOYING &&
+						ep.Status.ErrorMessage == "test error"
+				})).Return(nil)
+			},
+		},
+		{
+			// R4: when syncErr is nil but observed reports an in-progress
+			// reason, keep the observed errorMessage so operators see what
+			// the orchestrator is currently doing.
+			name: "R4: observed errorMessage preserved when syncErr is nil",
+			input: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			inputErr: nil,
 			mockSetup: func(s *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{}}, nil)
 				o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{
