@@ -384,6 +384,7 @@ func unionStrings(existing, incoming []string) []string {
 		}
 
 		seen[s] = struct{}{}
+
 		out = append(out, s)
 	}
 
