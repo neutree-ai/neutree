@@ -304,6 +304,7 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 
 	if !isNew {
 		modelRegistry, mErr := getEndpointModelRegistry(o.storage, endpoint)
+
 		switch {
 		case mErr == nil:
 			if dErr := o.connectSSHClusterEndpointModel(*modelRegistry, *endpoint, disconnect); dErr != nil {
