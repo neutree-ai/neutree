@@ -99,6 +99,38 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
 		})
+
+		// NEU-421: delete a running endpoint without --force after its model
+		// registry has been removed. Pre-fix: stuck in DELETING. Post-fix:
+		// converges to Deleted via deployer's last-applied snapshot.
+		It("should reach Deleted when running endpoint is deleted after model removed without --force (NEU-421)", Label("C2649426"), func() {
+			epName := "e2e-ep-lc-del-after-del-" + Cfg.RunID
+			DeferCleanup(func() {
+				// Best-effort cleanup; SetupModelRegistry restores for siblings.
+				RunCLI("delete", "endpoint", epName, "-w", profileWorkspace(), "--force", "--ignore-not-found")
+				SetupModelRegistry()
+			})
+
+			By("Creating endpoint and waiting for Running")
+			yamlPath := applyEndpoint(epName, clusterName)
+			defer os.Remove(yamlPath)
+			waitEndpointRunning(epName)
+
+			By("Removing the model registry the endpoint references")
+			TeardownModelRegistry()
+
+			By("Deleting endpoint without --force")
+			r := RunCLI("delete", "endpoint", epName, "-w", profileWorkspace(), "--ignore-not-found")
+			ExpectSuccess(r)
+
+			By("Endpoint converges to deleted (does not get stuck in DELETING)")
+			r = RunCLI("wait", "endpoint", epName,
+				"-w", profileWorkspace(),
+				"--for", "delete",
+				"--timeout", profileEndpointTimeout(),
+			)
+			ExpectSuccess(r)
+		})
 	})
 
 	// --- Error Handling ---
@@ -274,40 +306,6 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			waitEndpointPaused(epName)
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
-		})
-	})
-
-	// --- Delete / NEU-421 ---
-
-	Describe("Delete with missing model", Label("delete-after-model-removed"), func() {
-
-		It("should reach Deleted when running endpoint is deleted after model removed without --force (NEU-421)", Label("C2649426"), func() {
-			epName := "e2e-ep-lc-del-after-del-" + Cfg.RunID
-			DeferCleanup(func() {
-				// Best-effort cleanup; SetupModelRegistry restores for siblings.
-				RunCLI("delete", "endpoint", epName, "-w", profileWorkspace(), "--force", "--ignore-not-found")
-				SetupModelRegistry()
-			})
-
-			By("Creating endpoint and waiting for Running")
-			yamlPath := applyEndpoint(epName, clusterName)
-			defer os.Remove(yamlPath)
-			waitEndpointRunning(epName)
-
-			By("Removing the model registry the endpoint references")
-			TeardownModelRegistry()
-
-			By("Deleting endpoint without --force")
-			r := RunCLI("delete", "endpoint", epName, "-w", profileWorkspace(), "--ignore-not-found")
-			ExpectSuccess(r)
-
-			By("Endpoint converges to deleted (does not get stuck in DELETING)")
-			r = RunCLI("wait", "endpoint", epName,
-				"-w", profileWorkspace(),
-				"--for", "delete",
-				"--timeout", profileEndpointTimeout(),
-			)
-			ExpectSuccess(r)
 		})
 	})
 
