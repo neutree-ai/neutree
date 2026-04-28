@@ -4,9 +4,129 @@ import (
 	"os"
 	"testing"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAggregateSupportedTasks(t *testing.T) {
+	tests := []struct {
+		name string
+		em   *EngineMetadata
+		want []string
+	}{
+		{
+			name: "nil top + nil versions returns nil",
+			em: &EngineMetadata{
+				SupportedTasks: nil,
+				EngineVersions: nil,
+			},
+			want: nil,
+		},
+		{
+			name: "empty everywhere returns nil",
+			em: &EngineMetadata{
+				SupportedTasks: []string{},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{}},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "top-level only",
+			em: &EngineMetadata{
+				SupportedTasks: []string{"a", "b"},
+			},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "version-level only with dedup across versions, preserves first occurrence",
+			em: &EngineMetadata{
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{"a"}},
+					{Version: "v2", SupportedTasks: []string{"b", "a"}},
+				},
+			},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "top + versions, top takes precedence in ordering",
+			em: &EngineMetadata{
+				SupportedTasks: []string{"a"},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{"b", "a"}},
+					{Version: "v2", SupportedTasks: []string{"c"}},
+				},
+			},
+			want: []string{"a", "b", "c"},
+		},
+		{
+			name: "skips empty and whitespace-only strings",
+			em: &EngineMetadata{
+				SupportedTasks: []string{"a", "", "  ", "b"},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{"", "c"}},
+				},
+			},
+			want: []string{"a", "b", "c"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := aggregateSupportedTasks(tt.em)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestUnionStrings(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []string
+		incoming []string
+		want     []string
+	}{
+		{
+			name:     "both nil returns nil",
+			existing: nil,
+			incoming: nil,
+			want:     nil,
+		},
+		{
+			name:     "preserves existing order, appends only new uniques",
+			existing: []string{"chat", "embedding"},
+			incoming: []string{"embedding", "rerank", "chat"},
+			want:     []string{"chat", "embedding", "rerank"},
+		},
+		{
+			name:     "empty existing returns dedup of incoming",
+			existing: nil,
+			incoming: []string{"a", "b", "a"},
+			want:     []string{"a", "b"},
+		},
+		{
+			name:     "empty incoming returns existing as-is",
+			existing: []string{"a", "b"},
+			incoming: nil,
+			want:     []string{"a", "b"},
+		},
+		{
+			name:     "skips empty/whitespace from incoming",
+			existing: []string{"a"},
+			incoming: []string{"", "  ", "b"},
+			want:     []string{"a", "b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unionStrings(tt.existing, tt.incoming)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestIsManifestFile(t *testing.T) {
 	tests := []struct {

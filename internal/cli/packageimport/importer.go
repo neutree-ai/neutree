@@ -271,6 +271,50 @@ func (i *Importer) validateOptions(opts *ImportOptions) error {
 	return nil
 }
 
+// aggregateSupportedTasks unions the manifest top-level supported_tasks with each
+// engine_versions[*].supported_tasks. The build script (build-engine-package.sh)
+// only emits version-level supported_tasks; the parser does not aggregate; so the
+// importer is responsible for producing the engine-level union. Order: top-level
+// first, then version-level by version order. Duplicates and empty/whitespace
+// entries are skipped while preserving first-occurrence order.
+func aggregateSupportedTasks(em *EngineMetadata) []string {
+	if em == nil {
+		return nil
+	}
+	var out []string
+	out = unionStrings(out, em.SupportedTasks)
+	for _, v := range em.EngineVersions {
+		if v == nil {
+			continue
+		}
+		out = unionStrings(out, v.SupportedTasks)
+	}
+	return out
+}
+
+// unionStrings returns existing extended with each non-empty trimmed entry of
+// incoming that is not already present. existing's order is preserved; new
+// entries are appended in incoming order. Returns nil only when both inputs
+// produce no kept entries.
+func unionStrings(existing, incoming []string) []string {
+	seen := make(map[string]struct{}, len(existing)+len(incoming))
+	out := existing
+	for _, s := range existing {
+		seen[s] = struct{}{}
+	}
+	for _, s := range incoming {
+		if strings.TrimSpace(s) == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
 // updateEngine updates the engine with the new version
 func (i *Importer) updateEngine(_ context.Context, engineMetadata *EngineMetadata, opts *ImportOptions) error {
 	newEngine := &v1.Engine{
@@ -282,7 +326,7 @@ func (i *Importer) updateEngine(_ context.Context, engineMetadata *EngineMetadat
 		},
 		Spec: &v1.EngineSpec{
 			Versions:       engineMetadata.EngineVersions,
-			SupportedTasks: engineMetadata.SupportedTasks,
+			SupportedTasks: aggregateSupportedTasks(engineMetadata),
 		},
 	}
 
@@ -323,6 +367,14 @@ func (i *Importer) updateEngine(_ context.Context, engineMetadata *EngineMetadat
 			existedEngine.Spec.Versions = append(existedEngine.Spec.Versions, newVersion)
 		}
 	}
+
+	// Union newly imported tasks into the existing engine's SupportedTasks.
+	// We never drop tasks already on the existing engine (NEU-427): users may
+	// have set them via prior imports or hand-patched the resource.
+	existedEngine.Spec.SupportedTasks = unionStrings(
+		existedEngine.Spec.SupportedTasks,
+		aggregateSupportedTasks(engineMetadata),
+	)
 
 	return i.apiClient.Engines.Update(existedEngine.GetID(), existedEngine)
 }
