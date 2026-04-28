@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: "ray2.53.0"
+      engine_patch_suffix:
+        description: "optional alphanumeric patch identifier appended to the output tag (e.g. '1' produces <engine_version>-neutree1-<ray_short_version>); allowed chars [a-zA-Z0-9._-]; empty keeps the upstream tag"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   build-amd64-image:
@@ -31,6 +36,11 @@ jobs:
     name: build amd64 engine image
     steps:
       - uses: actions/checkout@v2
+      - name: Validate engine_patch_suffix
+        if: ${{ github.event.inputs.engine_patch_suffix != '' }}
+        run: |
+          printf '%s\n' "${{ github.event.inputs.engine_patch_suffix }}" | grep -qE '^[a-zA-Z0-9._-]+$' \
+            || { echo "engine_patch_suffix must match [a-zA-Z0-9._-]+"; exit 1; }
       - name: Login docker
         uses: docker/login-action@v2
         with:
@@ -49,6 +59,7 @@ jobs:
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_VERSION: ${{ github.event.inputs.ray_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
   push-manifests:
     runs-on: ["serve-builder","X64"]
     name: merge and push manifests
@@ -73,3 +84,4 @@ jobs:
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}

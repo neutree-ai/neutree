@@ -24,6 +24,15 @@ ENGINE_LLAMA_CPP_VERSION ?= v0.3.7
 ENGINE_LLAMA_CPP_DIR_VERSION ?= $(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/-.*//' | tr '.' '_')
 RAY_SHORT_VERSION ?= ray2.53.0
 
+# Optional Neutree-side patch suffix appended only to the output image tag.
+# Empty (default) keeps the upstream tag unchanged. Setting e.g. "1" produces
+# tags like "v0.11.2-neutree1-ray2.53.0" while base image, ENGINE_VERSION_DIR,
+# and pip install version still resolve to the upstream version.
+# Use = (recursive) so the value is re-evaluated each time it is referenced,
+# removing any ordering dependency on ENGINE_PATCH_SUFFIX.
+ENGINE_PATCH_SUFFIX ?=
+ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-neutree$(strip $(ENGINE_PATCH_SUFFIX)))
+
 .PHONY: docker-build
 docker-build: ## Run docker-build-* targets for all the images
 	$(MAKE) ARCH=$(ARCH) $(addprefix docker-build-,$(ACCELERATORS))
@@ -45,17 +54,17 @@ docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
 .PHONY: docker-build-engine-vllm
 docker-build-engine-vllm: prepare ## Build the vLLM engine image (NVIDIA)
 	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_VERSION) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION) .
+		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-vllm-rocm
 docker-build-engine-vllm-rocm: prepare ## Build the vLLM engine image (ROCm)
 	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_VERSION) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION) .
+		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-llama-cpp
 docker-build-engine-llama-cpp: prepare ## Build the llama-cpp-python engine image
 	docker build --build-arg LLAMA_CPP_VERSION=$(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/^v//') --build-arg ENGINE_VERSION_DIR=$(ENGINE_LLAMA_CPP_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-llama-cpp -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION) .
+		-f Dockerfile.engine-llama-cpp -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-push
 docker-push: ## Run docker-push-* targets for all the images
@@ -71,23 +80,23 @@ docker-push-amd-gpu: ## Push the AMD GPU image
 
 .PHONY: docker-push-engine-vllm
 docker-push-engine-vllm: ## Push the vLLM engine image (NVIDIA)
-	docker push $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-engine-vllm-rocm
 docker-push-engine-vllm-rocm: ## Push the vLLM engine image (ROCm)
-	docker push $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-engine-llama-cpp
 docker-push-engine-llama-cpp: ## Push the llama-cpp-python engine image
-	docker push $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-manifest-engine-vllm
 docker-push-manifest-engine-vllm: ## Push the vLLM engine manifest image
-	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-vllm:$(ENGINE_VLLM_VERSION)-$(RAY_SHORT_VERSION)~g")
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-vllm:$(ENGINE_VLLM_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)~g")
 
 .PHONY: docker-push-manifest-engine-llama-cpp
 docker-push-manifest-engine-llama-cpp: ## Push the llama-cpp engine manifest image
-	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION)~g")
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)~g")
 
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ACCELERATORS))
