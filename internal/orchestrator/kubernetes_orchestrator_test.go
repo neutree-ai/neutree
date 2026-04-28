@@ -2987,7 +2987,11 @@ func TestKubernetesOrchestrator_deleteEndpoint_NoConfigStore(t *testing.T) {
 
 func int32Ptr(v int32) *int32 { return &v }
 
-// klogTestLogger returns a klog.Logger suitable for tests (no-op).
+// klogTestLogger returns the default klog logger. This matches the same
+// idiom production code uses (klog.Background()); it is NOT silenced —
+// klog still emits according to its global configuration. We rely on the
+// default klog config for tests being quiet enough; replace with a discard
+// logger if test output ever becomes noisy.
 func klogTestLogger() klog.Logger {
 	return klog.Background()
 }

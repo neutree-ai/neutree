@@ -2587,6 +2587,14 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 // piece that lets pause/delete on Ray succeed when the model registry
 // has been removed.
 func TestRayOrchestrator_prepareOrchestratorContextLite_ToleratesMissingDeps(t *testing.T) {
+	// dashboard.NewDashboardService is a package-level mockable factory used
+	// by other tests in this package (line 220, 2550) without restoration.
+	// Pin it for this test so the result does not leak in from previous runs.
+	prevFactory := dashboard.NewDashboardService
+	mockDashboard := dashboardmocks.NewMockDashboardService(t)
+	dashboard.NewDashboardService = func(string) dashboard.DashboardService { return mockDashboard }
+	t.Cleanup(func() { dashboard.NewDashboardService = prevFactory })
+
 	cluster := v1.Cluster{
 		Metadata: &v1.Metadata{Name: "test-cluster"},
 		Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
