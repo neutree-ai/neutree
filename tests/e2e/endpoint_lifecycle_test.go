@@ -301,7 +301,10 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			TeardownModelRegistry()
 
 			By("Re-applying endpoint with replicas=0 (pause)")
-			yamlPath2 := applyEndpoint(epName, clusterName, withReplicas(0), withoutForceUpdate())
+			// applyEndpoint defaults forceUpdate=true; the endpoint already
+			// exists from step 1 so we must force-update to push the new
+			// replicas=0 spec — without it the CLI skips existing resources.
+			yamlPath2 := applyEndpoint(epName, clusterName, withReplicas(0))
 			defer os.Remove(yamlPath2)
 
 			By("Endpoint converges to Paused even though model registry is gone")
