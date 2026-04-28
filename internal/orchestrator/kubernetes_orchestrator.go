@@ -298,14 +298,15 @@ func (k *kubernetesOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
 // NEU-421: delete does not need ModelRegistry/Engine/ImageRegistry. The
 // deployer's configStore.Get loads the last-applied manifest list directly,
 // so deletion can proceed even when those dependencies have been removed.
+//
+// Intentionally does NOT call validateClusterForLite — delete must remain
+// permissive on degraded clusters (matches the pre-NEU-421 contract:
+// validateDependencies was always skipped for the delete path; the fallback
+// is the force-delete annotation handled in the controller).
 func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	ctx, err := k.prepareOrchestratorContextLite(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare orchestrator context for endpoint %s", endpoint.Metadata.WorkspaceName())
-	}
-
-	if err := k.validateClusterForLite(ctx); err != nil {
-		return errors.Wrapf(err, "failed to validate cluster for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
 	ctx.logger.V(4).Info("Deleting endpoint")
