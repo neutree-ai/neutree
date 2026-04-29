@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 )
 
 // RecordedRequest stores key parts of an HTTP request received by MockUpstream.
@@ -25,6 +26,18 @@ type MockUpstream struct {
 
 	mu       sync.Mutex
 	requests []RecordedRequest
+
+	// emitNullToolCalls makes the mock include "tool_calls": null in chat
+	// completion responses (both non-stream message and stream deltas) to
+	// reproduce the cjson.null userdata bug in the Anthropic conversion path.
+	emitNullToolCalls atomic.Bool
+}
+
+// SetEmitNullToolCalls toggles whether chat completion responses explicitly
+// include "tool_calls": null. Tests that need the original happy-path payload
+// must reset this back to false (e.g. in AfterEach).
+func (m *MockUpstream) SetEmitNullToolCalls(v bool) {
+	m.emitNullToolCalls.Store(v)
 }
 
 // StartMockUpstream creates and starts a MockUpstream on a random port.
@@ -148,6 +161,14 @@ func (m *MockUpstream) handleChatCompletions(w http.ResponseWriter, r *http.Requ
 }
 
 func (m *MockUpstream) writeChatJSON(w http.ResponseWriter, model string) {
+	message := map[string]any{
+		"role":    "assistant",
+		"content": "Hello from mock upstream!",
+	}
+	if m.emitNullToolCalls.Load() {
+		message["tool_calls"] = json.RawMessage("null")
+	}
+
 	resp := map[string]any{
 		"id":      "chatcmpl-mock-001",
 		"object":  "chat.completion",
@@ -155,11 +176,8 @@ func (m *MockUpstream) writeChatJSON(w http.ResponseWriter, model string) {
 		"created": 1700000000,
 		"choices": []map[string]any{
 			{
-				"index": 0,
-				"message": map[string]any{
-					"role":    "assistant",
-					"content": "Hello from mock upstream!",
-				},
+				"index":         0,
+				"message":       message,
 				"finish_reason": "stop",
 			},
 		},
@@ -185,13 +203,22 @@ func (m *MockUpstream) writeChatStream(w http.ResponseWriter, model string) {
 		return
 	}
 
+	delta1 := map[string]any{"role": "assistant"}
+	delta2 := map[string]any{"content": "Hello from mock!"}
+	delta3 := map[string]any{}
+	if m.emitNullToolCalls.Load() {
+		delta1["tool_calls"] = json.RawMessage("null")
+		delta2["tool_calls"] = json.RawMessage("null")
+		delta3["tool_calls"] = json.RawMessage("null")
+	}
+
 	chunks := []map[string]any{
 		// chunk 1: role
 		{
 			"id": "chatcmpl-mock-stream", "object": "chat.completion.chunk",
 			"model": model, "created": 1700000000,
 			"choices": []map[string]any{
-				{"index": 0, "delta": map[string]any{"role": "assistant"}},
+				{"index": 0, "delta": delta1},
 			},
 		},
 		// chunk 2: content
@@ -199,7 +226,7 @@ func (m *MockUpstream) writeChatStream(w http.ResponseWriter, model string) {
 			"id": "chatcmpl-mock-stream", "object": "chat.completion.chunk",
 			"model": model, "created": 1700000000,
 			"choices": []map[string]any{
-				{"index": 0, "delta": map[string]any{"content": "Hello from mock!"}},
+				{"index": 0, "delta": delta2},
 			},
 		},
 		// chunk 3: finish + usage
@@ -207,7 +234,7 @@ func (m *MockUpstream) writeChatStream(w http.ResponseWriter, model string) {
 			"id": "chatcmpl-mock-stream", "object": "chat.completion.chunk",
 			"model": model, "created": 1700000000,
 			"choices": []map[string]any{
-				{"index": 0, "delta": map[string]any{}, "finish_reason": "stop"},
+				{"index": 0, "delta": delta3, "finish_reason": "stop"},
 			},
 			"usage": map[string]any{
 				"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14,

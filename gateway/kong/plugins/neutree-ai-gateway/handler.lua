@@ -241,7 +241,7 @@ local function convert_tool_choice(tc)
 end
 
 local function convert_tools(tools)
-    if tools == nil then return nil end
+    if not is_table(tools) then return nil end
     local result = {}
     for i, tool in ipairs(tools) do
         result[i] = {
@@ -465,7 +465,7 @@ local function convert_response(openai_resp, request_model)
         }
     end
 
-    if message.tool_calls then
+    if is_table(message.tool_calls) then
         for _, tc in ipairs(message.tool_calls) do
             local input = {}
             if tc["function"] and tc["function"].arguments then
@@ -780,7 +780,7 @@ local function handle_anthropic_stream_body()
             output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_text(0, delta.content))
         end
 
-        if delta.tool_calls then
+        if is_table(delta.tool_calls) then
             for _, tc in ipairs(delta.tool_calls) do
                 local tc_index = tc.index or 0
                 if tc_index ~= ctx.current_tool_index then
