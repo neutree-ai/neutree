@@ -241,7 +241,7 @@ local function convert_tool_choice(tc)
 end
 
 local function convert_tools(tools)
-    if tools == nil then return nil end
+    if not is_table(tools) then return nil end
     local result = {}
     for i, tool in ipairs(tools) do
         result[i] = {
