@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Neutree pre-commit hook. Activate once with `make install-hooks`.
+# Gates:
+#   1. gofmt                       — format check
+#   2. go vet                      — static analysis
+#   3. architecture boundaries     — import-direction rules (scripts/check-boundaries.sh)
+#   4. dual-path + migration pairs — invariants (scripts/check-dual-path.sh, check-migration-pairs.sh)
+#   5. golangci-lint (incremental) — linter on staged files
+#   6. go test -short              — affected packages only
+#
+# Skip with `git commit --no-verify` only in emergencies.
+set -e
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+# ── Gate 1: gofmt ──
+echo "[1/6] gofmt..."
+FMT=$(gofmt -l . 2>/dev/null | grep -vE '^(vendor|bin|out|tmp|.*/mocks)/' || true)
+if [ -n "$FMT" ]; then
+  echo "❌ gofmt violations:"
+  echo "$FMT" | sed 's/^/   /'
+  echo "   ✅ FIX: run 'make fmt'"
+  exit 1
+fi
+
+# ── Gate 2: go vet ──
+echo "[2/6] go vet..."
+if ! go vet ./... >/tmp/neutree-vet.log 2>&1; then
+  echo "❌ go vet failed:"
+  sed 's/^/   /' /tmp/neutree-vet.log
+  echo "   ✅ FIX: address the vet errors above"
+  exit 1
+fi
+
+# ── Gate 3: architecture boundaries ──
+echo "[3/6] architecture boundaries..."
+bash scripts/check-boundaries.sh
+
+# ── Gate 4: dual-path (warning) + migration pairs (error) ──
+echo "[4/6] dual-path check + migration pairs..."
+bash scripts/check-dual-path.sh
+bash scripts/check-migration-pairs.sh
+
+# ── Gate 5: golangci-lint (incremental) ──
+echo "[5/6] golangci-lint (incremental)..."
+CHANGED_GO=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' | grep -v '/mocks/' | head -50 || true)
+if [ -n "$CHANGED_GO" ]; then
+  if [ -x ./bin/golangci-lint ]; then
+    if ! ./bin/golangci-lint run --new-from-rev=HEAD --timeout=120s; then
+      echo "   ✅ FIX: see contributing/coding-standards.md#lint-error-cheatsheet"
+      exit 1
+    fi
+  else
+    echo "   (skipped: ./bin/golangci-lint not present — run 'make lint' once to install it)"
+  fi
+fi
+
+# ── Gate 6: go test -short on affected packages ──
+echo "[6/6] go test -short on affected packages..."
+if [ -n "$CHANGED_GO" ]; then
+  PKGS=$(echo "$CHANGED_GO" | xargs -n1 dirname 2>/dev/null | sort -u | grep -vE '(^tests/e2e|/mocks$|^db/dbtest)' | sed 's|^|./|' || true)
+  if [ -n "$PKGS" ]; then
+    # shellcheck disable=SC2086
+    if ! go test -short -count=1 $PKGS; then
+      echo "   ✅ FIX: see test output above; run affected tests locally with 'go test -short <pkg>'"
+      exit 1
+    fi
+  fi
+fi
+
+echo "✅ pre-commit OK"

@@ -67,6 +67,13 @@ help: ## Display this help.
 
 all: build
 
+.PHONY: install-hooks
+install-hooks: ## Enable .githooks as local git hooks (run once per clone)
+	git config core.hooksPath .githooks
+	chmod +x .githooks/pre-commit
+	chmod +x scripts/check-boundaries.sh scripts/check-dual-path.sh scripts/check-migration-pairs.sh
+	@echo "Git hooks installed. Pre-commit will run on every 'git commit'."
+
 build: test build-neutree-core build-neutree-cli build-neutree-api
 
 build-neutree-core:
@@ -266,6 +273,14 @@ release-chart: sync-deploy-manifests ## Build the chart to publish with a releas
 MOCKERY := $(shell pwd)/bin/mockery
 mockery: ## Download mockery if not yet.
 	$(call go-get-tool,$(MOCKERY),github.com/vektra/mockery/v2@v2.53.3)
+
+DEADCODE := $(shell pwd)/bin/deadcode
+deadcode-tool: ## Download deadcode if not yet.
+	$(call go-get-tool,$(DEADCODE),golang.org/x/tools/cmd/deadcode@latest)
+
+.PHONY: deadcode
+deadcode: deadcode-tool $(RELEASE_DIR) ## Scan for unreachable functions (informational; does not fail)
+	$(DEADCODE) ./... | tee $(RELEASE_DIR)/deadcode.txt || true
 
 .PHONY: mockgen
 mockgen: mockery
