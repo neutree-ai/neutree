@@ -41,9 +41,10 @@ scripts/dashboard/output
 cluster-image-builder/downloader
 scripts/builder/dist
 
-claude.md
-
-# local agents
+# local agents (CLAUDE.md is tracked; .claude/ local state is not)
 .agents/
 .claude/
 skills-lock.json
+
+# worktrees are created per-feature and never committed
+.worktrees/
