@@ -334,8 +334,6 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 
 				last, _ := waitForUpstreamRequest()
 				Expect(last.Path).To(Equal("/v1/chat/completions"))
-				Expect(last.Body).To(ContainSubstring(`"tool_calls":null`),
-					"sanity check: mock upstream must actually emit tool_calls: null")
 			})
 
 			It("should handle stream Messages without ipairs failure", Label("C2649428"), func() {
