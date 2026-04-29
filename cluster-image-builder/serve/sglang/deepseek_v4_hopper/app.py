@@ -235,6 +235,47 @@ def _to_json_response(result) -> JSONResponse:
     return JSONResponse(content=result)
 
 
+def _patch_sglang_signal_handler() -> None:
+    """Skip SIGQUIT registration when running outside the main thread.
+
+    SGLang's ``_set_envs_and_config`` registers a SIGQUIT handler unconditionally,
+    which raises ``ValueError: signal only works in main thread of the main
+    interpreter`` when an Engine is constructed inside a Ray Serve actor (Ray
+    runs deployment ``__init__`` on a worker thread).
+
+    Upstream fix: sgl-project/sglang PR #18752 (commit 119c91cb8) — guards the
+    registration with ``threading.current_thread() is threading.main_thread()``.
+    Once this variant's image rebases onto an SGLang release containing that
+    fix, this patch (and its call site in ``Backend.__init__``) can be removed.
+
+    The patch is idempotent (marker attribute) and only swaps ``signal.signal``
+    for the duration of the wrapped call, so other modules' signal usage is
+    unaffected.
+    """
+    import signal as _signal
+    import threading
+    from sglang.srt.entrypoints import engine as _engine
+
+    if getattr(_engine._set_envs_and_config, "_sglang_signal_patched", False):
+        return
+
+    _orig = _engine._set_envs_and_config
+
+    def _safe(*args, **kwargs):
+        if threading.current_thread() is threading.main_thread():
+            return _orig(*args, **kwargs)
+        real = _signal.signal
+        _signal.signal = lambda signum, handler: None
+        try:
+            return _orig(*args, **kwargs)
+        finally:
+            _signal.signal = real
+
+    _safe._sglang_signal_patched = True
+    _engine._set_envs_and_config = _safe
+    logger.info("[app] Patched sglang._set_envs_and_config for non-main-thread signal safety.")
+
+
 @serve.deployment(
     ray_actor_options={"num_cpus": 1, "num_gpus": 1},
     graceful_shutdown_timeout_s=30,
@@ -313,6 +354,7 @@ class Backend:
         coerce_args(args, ServerArgs)
         filter_engine_args(args, ServerArgs)
 
+        _patch_sglang_signal_handler()
         from sglang.srt.entrypoints.engine import Engine
 
         logger.info(
