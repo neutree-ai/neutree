@@ -64,7 +64,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    restart: on-failure
+    restart: always
     healthcheck:
       test:
         [
