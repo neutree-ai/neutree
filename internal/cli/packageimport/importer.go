@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/docker/docker/api/types/registry"
@@ -182,6 +184,15 @@ func (i *Importer) registerEngines(ctx context.Context, opts *ImportOptions, man
 	if len(manifest.Engines) > 0 {
 		klog.Infof("Engines to import: %d", len(manifest.Engines))
 
+		// Reject unknown task identifiers up-front so partial DB writes never
+		// happen. We validate every engine in the manifest before touching any.
+		for _, engine := range manifest.Engines {
+			if err := validateModelTasks(engine); err != nil {
+				result.Errors = append(result.Errors, err)
+				return result, err
+			}
+		}
+
 		for _, engine := range manifest.Engines {
 			if err := i.updateEngine(ctx, engine, opts); err != nil {
 				result.Errors = append(result.Errors, err)
@@ -271,6 +282,120 @@ func (i *Importer) validateOptions(opts *ImportOptions) error {
 	return nil
 }
 
+// validateModelTasks rejects an EngineMetadata whose top-level or any per-version
+// supported_tasks contains an identifier not in v1.IsKnownModelTask. All
+// offending values are collected so the user gets one error listing every
+// problem instead of fixing them one at a time. Empty / whitespace-only values
+// are silently tolerated (aggregateSupportedTasks skips them downstream).
+func validateModelTasks(em *EngineMetadata) error {
+	if em == nil {
+		return nil
+	}
+
+	type bad struct {
+		where string
+		task  string
+	}
+	var bads []bad
+
+	for _, t := range em.SupportedTasks {
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+
+		if !v1.IsKnownModelTask(t) {
+			bads = append(bads, bad{where: "engines[" + em.Name + "].supported_tasks", task: t})
+		}
+	}
+
+	for _, v := range em.EngineVersions {
+		if v == nil {
+			continue
+		}
+
+		for _, t := range v.SupportedTasks {
+			if strings.TrimSpace(t) == "" {
+				continue
+			}
+
+			if !v1.IsKnownModelTask(t) {
+				bads = append(bads, bad{where: "engines[" + em.Name + "].engine_versions[" + v.Version + "].supported_tasks", task: t})
+			}
+		}
+	}
+
+	if len(bads) == 0 {
+		return nil
+	}
+
+	parts := make([]string, 0, len(bads))
+	for _, b := range bads {
+		parts = append(parts, b.where+`=`+strconv.Quote(b.task))
+	}
+
+	return fmt.Errorf("unknown model task value(s) — only %v are accepted: %s",
+		v1.KnownModelTasks(),
+		strings.Join(parts, "; "))
+}
+
+// aggregateSupportedTasks unions the manifest top-level supported_tasks with each
+// engine_versions[*].supported_tasks. The build script (build-engine-package.sh)
+// only emits version-level supported_tasks; the parser does not aggregate; so the
+// importer is responsible for producing the engine-level union. Order: top-level
+// first, then version-level by version order. Duplicates and empty/whitespace
+// entries are skipped while preserving first-occurrence order.
+func aggregateSupportedTasks(em *EngineMetadata) []string {
+	if em == nil {
+		return nil
+	}
+
+	out := unionStrings(nil, em.SupportedTasks)
+
+	for _, v := range em.EngineVersions {
+		if v == nil {
+			continue
+		}
+
+		out = unionStrings(out, v.SupportedTasks)
+	}
+
+	return out
+}
+
+// unionStrings returns existing extended with each entry from incoming that
+// (a) is not whitespace-only and (b) is not already present in existing.
+// Strings are stored verbatim — no leading/trailing whitespace is stripped
+// from kept entries; trimming is used only to detect "empty" entries to skip.
+// existing's order is preserved as-is (existing duplicates and any leading/
+// trailing whitespace in existing entries are kept untouched — this helper
+// is intentionally non-destructive); new entries are appended in incoming
+// order. Returns existing's value (which may be nil) when no incoming entries
+// are kept.
+func unionStrings(existing, incoming []string) []string {
+	seen := make(map[string]struct{}, len(existing)+len(incoming))
+	out := existing
+
+	for _, s := range existing {
+		seen[s] = struct{}{}
+	}
+
+	for _, s := range incoming {
+		if strings.TrimSpace(s) == "" {
+			continue
+		}
+
+		if _, ok := seen[s]; ok {
+			continue
+		}
+
+		seen[s] = struct{}{}
+
+		out = append(out, s)
+	}
+
+	return out
+}
+
 // updateEngine updates the engine with the new version
 func (i *Importer) updateEngine(_ context.Context, engineMetadata *EngineMetadata, opts *ImportOptions) error {
 	newEngine := &v1.Engine{
@@ -282,7 +407,7 @@ func (i *Importer) updateEngine(_ context.Context, engineMetadata *EngineMetadat
 		},
 		Spec: &v1.EngineSpec{
 			Versions:       engineMetadata.EngineVersions,
-			SupportedTasks: engineMetadata.SupportedTasks,
+			SupportedTasks: aggregateSupportedTasks(engineMetadata),
 		},
 	}
 
@@ -323,6 +448,14 @@ func (i *Importer) updateEngine(_ context.Context, engineMetadata *EngineMetadat
 			existedEngine.Spec.Versions = append(existedEngine.Spec.Versions, newVersion)
 		}
 	}
+
+	// Union newly imported tasks into the existing engine's SupportedTasks.
+	// We never drop tasks already on the existing engine (NEU-427): users may
+	// have set them via prior imports or hand-patched the resource.
+	existedEngine.Spec.SupportedTasks = unionStrings(
+		existedEngine.Spec.SupportedTasks,
+		aggregateSupportedTasks(engineMetadata),
+	)
 
 	return i.apiClient.Engines.Update(existedEngine.GetID(), existedEngine)
 }

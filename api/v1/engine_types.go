@@ -3,6 +3,7 @@ package v1
 import (
 	"encoding/base64"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,39 @@ const (
 	EngineNameVLLM     = "vllm"
 	EngineNameLlamaCpp = "llama-cpp"
 )
+
+// knownModelTasks is the canonical set of task identifiers consumed by Neutree
+// engine deploy templates (vLLM / llama-cpp). Values outside this set are
+// silently ignored by the templates and must be rejected at ingestion time
+// (see internal/cli/packageimport for import-side enforcement).
+var knownModelTasks = map[string]struct{}{
+	TextGenerationModelTask: {},
+	TextEmbeddingModelTask:  {},
+	TextRerankModelTask:     {},
+}
+
+// IsKnownModelTask reports whether task is one of the values understood by
+// Neutree's engine deploy templates. Use this at any boundary that ingests
+// user-supplied task identifiers (CLI imports, API server validation).
+func IsKnownModelTask(task string) bool {
+	_, ok := knownModelTasks[task]
+	return ok
+}
+
+// KnownModelTasks returns the canonical set of task identifiers in a stable
+// sorted order. Single source of truth shared by IsKnownModelTask and any
+// caller that needs to render the accepted set (e.g. error messages),
+// preventing drift between validation and what we tell users is accepted.
+func KnownModelTasks() []string {
+	tasks := make([]string, 0, len(knownModelTasks))
+	for t := range knownModelTasks {
+		tasks = append(tasks, t)
+	}
+
+	sort.Strings(tasks)
+
+	return tasks
+}
 
 // EngineVersion represents a specific version of an engine with its configuration schema,
 // deployment templates, and supported accelerators.

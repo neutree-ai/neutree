@@ -4,9 +4,227 @@ import (
 	"os"
 	"testing"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAggregateSupportedTasks(t *testing.T) {
+	tests := []struct {
+		name string
+		em   *EngineMetadata
+		want []string
+	}{
+		{
+			name: "nil top + nil versions returns nil",
+			em: &EngineMetadata{
+				SupportedTasks: nil,
+				EngineVersions: nil,
+			},
+			want: nil,
+		},
+		{
+			name: "empty everywhere returns nil",
+			em: &EngineMetadata{
+				SupportedTasks: []string{},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{}},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "top-level only",
+			em: &EngineMetadata{
+				SupportedTasks: []string{"a", "b"},
+			},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "version-level only with dedup across versions, preserves first occurrence",
+			em: &EngineMetadata{
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{"a"}},
+					{Version: "v2", SupportedTasks: []string{"b", "a"}},
+				},
+			},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "top + versions, top takes precedence in ordering",
+			em: &EngineMetadata{
+				SupportedTasks: []string{"a"},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{"b", "a"}},
+					{Version: "v2", SupportedTasks: []string{"c"}},
+				},
+			},
+			want: []string{"a", "b", "c"},
+		},
+		{
+			name: "skips empty and whitespace-only strings",
+			em: &EngineMetadata{
+				SupportedTasks: []string{"a", "", "  ", "b"},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{"", "c"}},
+				},
+			},
+			want: []string{"a", "b", "c"},
+		},
+		{
+			name: "tolerates a nil EngineVersion entry in the slice",
+			em: &EngineMetadata{
+				SupportedTasks: []string{"a"},
+				EngineVersions: []*v1.EngineVersion{
+					nil,
+					{Version: "v1", SupportedTasks: []string{"b"}},
+				},
+			},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "second version cannot reorder tasks that the first already introduced",
+			em: &EngineMetadata{
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{"a", "b"}},
+					{Version: "v2", SupportedTasks: []string{"b", "c"}},
+				},
+			},
+			want: []string{"a", "b", "c"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := aggregateSupportedTasks(tt.em)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestValidateModelTasks(t *testing.T) {
+	tests := []struct {
+		name        string
+		em          *EngineMetadata
+		expectError bool
+		errorParts  []string // substrings that must appear in the error message
+	}{
+		{
+			name: "all known tasks at top + version → ok",
+			em: &EngineMetadata{
+				Name:           "vllm",
+				SupportedTasks: []string{v1.TextGenerationModelTask},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", SupportedTasks: []string{v1.TextEmbeddingModelTask, v1.TextRerankModelTask}},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "empty everywhere → ok (validation does not require any tasks)",
+			em: &EngineMetadata{
+				Name: "vllm",
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "unknown task at top-level → error names the offending value",
+			em: &EngineMetadata{
+				Name:           "vllm",
+				SupportedTasks: []string{"chat"},
+			},
+			expectError: true,
+			errorParts:  []string{"chat", "engines[vllm]"},
+		},
+		{
+			name: "unknown task at version-level → error names version + value",
+			em: &EngineMetadata{
+				Name: "vllm",
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1.0.0", SupportedTasks: []string{"text-generation", "embedding"}},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"embedding", "v1.0.0"},
+		},
+		{
+			name: "multiple unknown values are all reported",
+			em: &EngineMetadata{
+				Name:           "vllm",
+				SupportedTasks: []string{"chat"},
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1.0.0", SupportedTasks: []string{"speech"}},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"chat", "speech"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateModelTasks(tt.em)
+			if !tt.expectError {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, part := range tt.errorParts {
+				assert.Contains(t, err.Error(), part)
+			}
+		})
+	}
+}
+
+func TestUnionStrings(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []string
+		incoming []string
+		want     []string
+	}{
+		{
+			name:     "both nil returns nil",
+			existing: nil,
+			incoming: nil,
+			want:     nil,
+		},
+		{
+			name:     "preserves existing order, appends only new uniques",
+			existing: []string{"chat", "embedding"},
+			incoming: []string{"embedding", "rerank", "chat"},
+			want:     []string{"chat", "embedding", "rerank"},
+		},
+		{
+			name:     "empty existing returns dedup of incoming",
+			existing: nil,
+			incoming: []string{"a", "b", "a"},
+			want:     []string{"a", "b"},
+		},
+		{
+			name:     "empty incoming returns existing as-is",
+			existing: []string{"a", "b"},
+			incoming: nil,
+			want:     []string{"a", "b"},
+		},
+		{
+			name:     "skips empty/whitespace from incoming",
+			existing: []string{"a"},
+			incoming: []string{"", "  ", "b"},
+			want:     []string{"a", "b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unionStrings(tt.existing, tt.incoming)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestIsManifestFile(t *testing.T) {
 	tests := []struct {

@@ -415,6 +415,69 @@ var _ = Describe("Engine", Ordered, func() {
 			Expect(e.Spec.Versions[0].Images).To(HaveKey("nvidia_gpu"))
 		})
 
+		// NEU-427: TestRail C2649200
+		It("should populate Engine.Spec.SupportedTasks from version-level supported_tasks on create", Label("C2649200"), func() {
+			name := "e2e-engine-tasks-create"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			// buildEnginePackage emits supported_tasks at engine_versions[0] level
+			// (mimics scripts/builder/build-engine-package.sh shape) — no engine
+			// top-level supported_tasks. Pre-fix this leaves Engine.Spec.SupportedTasks empty.
+			pkg := buildEnginePackage(engineManifest{
+				Name:           name,
+				Version:        "v1.0.0",
+				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
+				SupportedTasks: []string{"text-generation", "text-embedding"},
+			})
+			defer os.Remove(pkg)
+
+			r := EngineH.ImportSkipImage(pkg)
+			ExpectSuccess(r)
+
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			e := parseEngineJSON(r.Stdout)
+			Expect(e.Spec.SupportedTasks).To(ConsistOf("text-generation", "text-embedding"))
+			Expect(e.Spec.Versions[0].SupportedTasks).To(ConsistOf("text-generation", "text-embedding"))
+		})
+
+		// NEU-427: TestRail C2649201
+		It("should union version-level supported_tasks into existing Engine.Spec.SupportedTasks on re-import", Label("C2649201"), func() {
+			name := "e2e-engine-tasks-union"
+			DeferCleanup(EngineH.EnsureDeleted, name)
+
+			pkg1 := buildEnginePackage(engineManifest{
+				Name:           name,
+				Version:        "v1.0.0",
+				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v1.0.0"}},
+				SupportedTasks: []string{"text-generation"},
+			})
+			defer os.Remove(pkg1)
+			r := EngineH.ImportSkipImage(pkg1)
+			ExpectSuccess(r)
+
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			Expect(parseEngineJSON(r.Stdout).Spec.SupportedTasks).To(ConsistOf("text-generation"))
+
+			pkg2 := buildEnginePackage(engineManifest{
+				Name:           name,
+				Version:        "v2.0.0",
+				Images:         map[string][2]string{"nvidia_gpu": {"e2e/engine-cuda", "v2.0.0"}},
+				SupportedTasks: []string{"text-embedding"},
+			})
+			defer os.Remove(pkg2)
+			r = EngineH.ImportSkipImage(pkg2)
+			ExpectSuccess(r)
+
+			r = EngineH.Get(name)
+			ExpectSuccess(r)
+			tasks := parseEngineJSON(r.Stdout).Spec.SupportedTasks
+			Expect(tasks).To(ConsistOf("text-generation", "text-embedding"))
+			// Existing-first ordering: union must not drop or reorder existing tasks.
+			Expect(tasks[0]).To(Equal("text-generation"))
+		})
+
 		It("should add a new engine version via CLI import", Label("C2613216"), func() {
 			name := "e2e-engine-newver"
 			DeferCleanup(EngineH.EnsureDeleted, name)
