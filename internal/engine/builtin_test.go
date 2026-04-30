@@ -66,8 +66,18 @@ func TestGetBuiltinEngines(t *testing.T) {
 		if v.Version != "v0.5.10" {
 			t.Errorf("sglang version: got %q, want %q", v.Version, "v0.5.10")
 		}
-		if _, ok := v.Images["nvidia_gpu"]; !ok {
+		nvidiaImg, ok := v.Images["nvidia_gpu"]
+		if !ok {
 			t.Errorf("sglang %s missing nvidia_gpu image", v.Version)
+		} else {
+			// Lock the tag scheme so a Makefile bump or builtin.go drift never
+			// silently routes traffic to a stale image.
+			if got, want := nvidiaImg.Tag, v.Version+"-ray2.53.0"; got != want {
+				t.Errorf("sglang %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
+			}
+			if got, want := nvidiaImg.ImageName, "neutree/engine-sglang"; got != want {
+				t.Errorf("sglang %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
+			}
 		}
 		if _, ok := v.Images["amd_gpu"]; ok {
 			t.Errorf("sglang %s should not register amd_gpu in v1.1.0 (image deferred until AMD test cluster is available)", v.Version)

@@ -335,7 +335,7 @@ class Backend:
 
     async def chat_completion(self, payload: Dict[str, Any]) -> Any:
         from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
-        payload["stream"] = False
+        payload = {**payload, "stream": False}
         result = await self._ensure_chat().handle_request(
             ChatCompletionRequest(**payload), _FakeRawRequest()
         )
@@ -343,7 +343,7 @@ class Backend:
 
     async def chat_completion_stream(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
         from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
-        payload["stream"] = True
+        payload = {**payload, "stream": True}
         result = await self._ensure_chat().handle_request(
             ChatCompletionRequest(**payload), _FakeRawRequest()
         )
@@ -352,7 +352,7 @@ class Backend:
 
     async def completion(self, payload: Dict[str, Any]) -> Any:
         from sglang.srt.entrypoints.openai.protocol import CompletionRequest
-        payload["stream"] = False
+        payload = {**payload, "stream": False}
         result = await self._ensure_completion().handle_request(
             CompletionRequest(**payload), _FakeRawRequest()
         )
@@ -360,7 +360,7 @@ class Backend:
 
     async def completion_stream(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
         from sglang.srt.entrypoints.openai.protocol import CompletionRequest
-        payload["stream"] = True
+        payload = {**payload, "stream": True}
         result = await self._ensure_completion().handle_request(
             CompletionRequest(**payload), _FakeRawRequest()
         )
@@ -456,9 +456,14 @@ class Controller:
             "data": [{
                 "id": info["served_model_name"],
                 "object": "model",
+                # `created` is a UNIX timestamp; older OpenAI Python SDK versions
+                # access this field unconditionally, so emit a zero rather than
+                # omit it. Real model creation time is not tracked here.
+                "created": 0,
                 "owned_by": "neutree",
                 "permission": [],
                 "root": info["model_path"],
+                "parent": None,
                 "max_model_len": info.get("context_len"),
             }],
         })

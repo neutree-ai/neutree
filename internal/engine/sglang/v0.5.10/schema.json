@@ -38,6 +38,10 @@
       "default": false,
       "description": "Run the model as an embedding (or reranker) model rather than a generative one."
     },
+    "served-model-name": {
+      "type": "string",
+      "description": "Override the model name reported by /v1/models and used as the chat-completion response.model. The K8s deploy template auto-supplies this from ModelArgs.serve_name; setting it via engine_args wins by argparse last-flag semantics."
+    },
     "mem-fraction-static": {
       "type": "number",
       "minimum": 0.1,
@@ -94,11 +98,6 @@
       "type": "boolean",
       "default": false,
       "description": "Disable padding for CUDA graphs."
-    },
-    "cuda-graph-bs": {
-      "type": "array",
-      "items": { "type": "integer", "minimum": 1 },
-      "description": "Batch sizes to capture CUDA graphs for. Empty means SGLang chooses."
     },
     "cuda-graph-max-bs": {
       "type": "integer",

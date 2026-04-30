@@ -61,8 +61,8 @@ func TestGetSGLangV0_5_10EngineSchema(t *testing.T) {
 	}
 	for _, key := range []string{
 		"tp-size", "mem-fraction-static", "dtype", "is-embedding",
-		"attention-backend", "cuda-graph-bs", "preferred-sampling-params",
-		"json-model-override-args", "tool-call-parser",
+		"attention-backend", "cuda-graph-max-bs", "preferred-sampling-params",
+		"json-model-override-args", "tool-call-parser", "served-model-name",
 	} {
 		if _, ok := props[key].(map[string]interface{}); !ok {
 			t.Errorf("schema missing required property %q", key)
