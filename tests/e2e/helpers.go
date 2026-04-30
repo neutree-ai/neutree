@@ -1278,6 +1278,27 @@ func allSchemaTypesEngineArgsYAML() string {
       override_generation_config: '{"temperature": 0.8}'`
 }
 
+// allSchemaTypesEngineArgsYAMLSGLang returns an engine_args YAML snippet for the SGLang engine
+// covering int / float / bool / string / string-enum / array-of-int / object / nested-object.
+//
+// All values are runtime-only (no LoRA adapters, no model-behavior dependencies, no
+// Hopper-only attention backends). The served-model-name override doubles as the
+// end-to-end probe: a chat response whose .model field equals this value proves the
+// schema -> K8s template -> CLI -> ServerArgs chain delivered every flag intact.
+func allSchemaTypesEngineArgsYAMLSGLang() string {
+	return `
+      tp-size: 1
+      mem-fraction-static: 0.85
+      disable-cuda-graph: true
+      dtype: auto
+      chunked-prefill-size: 8192
+      served-model-name: neu-sglang-test
+      attention-backend: torch_native
+      cuda-graph-bs: '[1, 2, 4]'
+      preferred-sampling-params: '{"temperature": 0.7, "top_p": 0.9}'
+      json-model-override-args: '{"max_position_embeddings": 32768}'`
+}
+
 // waitEndpointRunning waits for an endpoint to reach Running phase.
 func waitEndpointRunning(name string) {
 	r := RunCLI("wait", "endpoint", name,
