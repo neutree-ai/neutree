@@ -1290,9 +1290,11 @@ func allSchemaTypesEngineArgsYAML() string {
 // which is declared `nargs="+"` in argparse. Neutree's K8s template renders engine_args
 // as a single `--<key> "<value>"` pair, which can only deliver one token per flag.
 // Forcing a JSON array string through that path would feed argparse `int("[1,")` and
-// crash the engine. Until the template grows multi-token rendering, array types are
-// covered at the unit-test layer (internal/util/render_sglang_test.go and
-// internal/engine/schema_test.go) but not exercised in e2e.
+// crash the engine. Array types are therefore intentionally absent from this matrix;
+// supporting them is gated on the K8s template growing multi-token rendering and is
+// tracked as a follow-up to NEU-429. Object/dict types still flow through correctly
+// because the orchestrator's escapeEngineArgsForTemplate JSON-encodes maps into a
+// single quoted token before reaching the template.
 func allSchemaTypesEngineArgsYAMLSGLang() string {
 	return `
       tp-size: 1

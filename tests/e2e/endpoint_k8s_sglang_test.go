@@ -206,7 +206,7 @@ var _ = Describe("K8s SGLang Endpoint", Ordered, Label("endpoint", "k8s", "sglan
 			}
 		})
 
-		It("should accept int/float/bool/string/enum/array/object engine_args end-to-end", Label("C2649562"), func() {
+		It("should accept int/float/bool/string/enum/object/nested-object engine_args end-to-end", Label("C2649562"), func() {
 			yamlPath := applyEndpoint(epName, clusterName,
 				withEngine("sglang", "v0.5.10"),
 				withEngineArgs(allSchemaTypesEngineArgsYAMLSGLang()))
