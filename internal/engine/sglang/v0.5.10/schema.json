@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "SGLang v0.5.10 Engine Configuration",
+  "description": "Configuration schema for SGLang v0.5.10 engine_args. Field names match SGLang launch_server CLI flag names verbatim (kebab-case) so values flow through to argparse without transformation. Source of truth: SGLang ServerArgs at the v0.5.10 release.",
+  "properties": {
+    "tp-size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Tensor parallel size. Number of GPUs across which model tensors are sharded."
+    },
+    "dp-size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Data parallel size. Number of independent replicas of the model."
+    },
+    "pp-size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Pipeline parallel size. Number of pipeline stages."
+    },
+    "dtype": {
+      "type": "string",
+      "enum": ["auto", "half", "float16", "bfloat16", "float", "float32"],
+      "default": "auto",
+      "description": "Data type for model weights and activations."
+    },
+    "trust-remote-code": {
+      "type": "boolean",
+      "default": false,
+      "description": "Trust remote code from Hugging Face hub."
+    },
+    "is-embedding": {
+      "type": "boolean",
+      "default": false,
+      "description": "Run the model as an embedding (or reranker) model rather than a generative one."
+    },
+    "mem-fraction-static": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 1.0,
+      "description": "Fraction of GPU memory reserved for static allocation (model weights, KV cache pool)."
+    },
+    "max-running-requests": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Upper bound on concurrent in-flight requests."
+    },
+    "max-total-tokens": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum total tokens (prompt + generation) the engine will allocate KV cache for."
+    },
+    "max-prefill-tokens": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum tokens processed in a single prefill batch."
+    },
+    "chunked-prefill-size": {
+      "type": "integer",
+      "description": "Chunk size for chunked-prefill. -1 disables chunking."
+    },
+    "schedule-policy": {
+      "type": "string",
+      "enum": ["lpm", "random", "fcfs", "dfs-weight"],
+      "default": "fcfs",
+      "description": "Request scheduling policy."
+    },
+    "schedule-conservativeness": {
+      "type": "number",
+      "minimum": 0.0,
+      "default": 1.0,
+      "description": "Multiplier on memory headroom estimate; lower is more aggressive."
+    },
+    "attention-backend": {
+      "type": "string",
+      "enum": ["torch_native", "flashinfer", "fa3", "triton"],
+      "description": "Attention backend implementation."
+    },
+    "sampling-backend": {
+      "type": "string",
+      "enum": ["pytorch", "flashinfer"],
+      "description": "Sampling backend implementation."
+    },
+    "disable-cuda-graph": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable CUDA graph capture (useful for debugging or unsupported models)."
+    },
+    "disable-cuda-graph-padding": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable padding for CUDA graphs."
+    },
+    "cuda-graph-bs": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 },
+      "description": "Batch sizes to capture CUDA graphs for. Empty means SGLang chooses."
+    },
+    "cuda-graph-max-bs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum batch size to capture CUDA graphs for."
+    },
+    "quantization": {
+      "type": "string",
+      "enum": ["awq", "gptq", "fp8", "blockwise_int8", "modelopt", "w8a8_int8", "marlin", "gguf"],
+      "description": "Weight quantization scheme."
+    },
+    "preferred-sampling-params": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Default sampling params applied when client request omits them. Passed as JSON object."
+    },
+    "json-model-override-args": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Override fields on the Hugging Face model config (e.g. max_position_embeddings, rope_scaling). Passed as JSON object."
+    },
+    "chat-template": {
+      "type": "string",
+      "description": "Override chat template (Jinja string or built-in name like 'chatml')."
+    },
+    "tool-call-parser": {
+      "type": "string",
+      "enum": ["llama3", "mistral", "qwen25", "deepseekv3", "pythonic"],
+      "description": "Parser for tool/function-call output during streaming."
+    },
+    "reasoning-parser": {
+      "type": "string",
+      "enum": ["deepseek-r1", "qwen3", "qwen3-thinking"],
+      "description": "Parser for reasoning content (thinking traces) during streaming."
+    },
+    "log-requests": {
+      "type": "boolean",
+      "default": false,
+      "description": "Log each incoming request body to stdout."
+    },
+    "enable-metrics": {
+      "type": "boolean",
+      "default": false,
+      "description": "Expose Prometheus metrics on /metrics."
+    },
+    "stream-output": {
+      "type": "boolean",
+      "default": true,
+      "description": "Allow streaming responses."
+    }
+  },
+  "additionalProperties": false
+}
