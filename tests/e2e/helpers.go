@@ -1278,6 +1278,37 @@ func allSchemaTypesEngineArgsYAML() string {
       override_generation_config: '{"temperature": 0.8}'`
 }
 
+// allSchemaTypesEngineArgsYAMLSGLang returns an engine_args YAML snippet for the SGLang engine
+// covering int / float / bool / string / string-enum / object / nested-object.
+//
+// All values are runtime-only (no LoRA adapters, no model-behavior dependencies, no
+// Hopper-only attention backends). The served-model-name override doubles as the
+// end-to-end probe: a chat response whose .model field equals this value proves the
+// schema -> K8s template -> CLI -> ServerArgs chain delivered every flag intact.
+//
+// Note on array coverage: SGLang's only array-shaped CLI flag is `--cuda-graph-bs`,
+// which is declared `nargs="+"` in argparse. Neutree's K8s template renders engine_args
+// as a single `--<key> "<value>"` pair, which can only deliver one token per flag.
+// Forcing a JSON array string through that path would feed argparse `int("[1,")` and
+// crash the engine. Array types are therefore intentionally absent from this matrix;
+// supporting them is gated on the K8s template growing multi-token rendering and is
+// tracked as a follow-up to NEU-429. Object/dict types still flow through correctly
+// because the orchestrator's escapeEngineArgsForTemplate JSON-encodes maps into a
+// single quoted token before reaching the template.
+func allSchemaTypesEngineArgsYAMLSGLang() string {
+	return `
+      tp-size: 1
+      mem-fraction-static: 0.85
+      disable-cuda-graph: true
+      dtype: auto
+      chunked-prefill-size: 8192
+      served-model-name: neu-sglang-test
+      attention-backend: torch_native
+      cuda-graph-max-bs: 4
+      preferred-sampling-params: '{"temperature": 0.7, "top_p": 0.9}'
+      json-model-override-args: '{"max_position_embeddings": 32768}'`
+}
+
 // waitEndpointRunning waits for an endpoint to reach Running phase.
 func waitEndpointRunning(name string) {
 	r := RunCLI("wait", "endpoint", name,
