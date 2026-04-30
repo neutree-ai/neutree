@@ -20,6 +20,9 @@ ENGINE_VLLM_BASE_IMAGE_REPO ?= vllm/vllm-openai
 ENGINE_VLLM_ROCM_BASE_IMAGE_REPO ?= vllm/vllm-openai-rocm
 ENGINE_VLLM_VERSION ?= v0.11.2
 ENGINE_VLLM_DIR_VERSION ?= $(shell echo $(ENGINE_VLLM_VERSION) | sed 's/-.*//' | tr '.' '_')
+ENGINE_VLLM_OMNI_BASE_IMAGE_REPO ?= vllm/vllm-omni
+ENGINE_VLLM_OMNI_VERSION ?= v0.18.0
+ENGINE_VLLM_OMNI_DIR_VERSION ?= $(shell echo $(ENGINE_VLLM_OMNI_VERSION) | sed 's/-.*//' | tr '.' '_')
 ENGINE_LLAMA_CPP_VERSION ?= v0.3.7
 ENGINE_LLAMA_CPP_DIR_VERSION ?= $(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/-.*//' | tr '.' '_')
 RAY_SHORT_VERSION ?= ray2.53.0
@@ -57,6 +60,11 @@ docker-build-engine-llama-cpp: prepare ## Build the llama-cpp-python engine imag
 	docker build --build-arg LLAMA_CPP_VERSION=$(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/^v//') --build-arg ENGINE_VERSION_DIR=$(ENGINE_LLAMA_CPP_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		-f Dockerfile.engine-llama-cpp -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION) .
 
+.PHONY: docker-build-engine-vllm-omni
+docker-build-engine-vllm-omni: prepare ## Build the vLLM-Omni engine image (NVIDIA, SSH cluster mode)
+	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_OMNI_BASE_IMAGE_REPO):$(ENGINE_VLLM_OMNI_VERSION) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_OMNI_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.engine-vllm-omni -t $(NEUTREE_ENGINE_IMAGE)-vllm-omni:$(ENGINE_VLLM_OMNI_VERSION)-$(RAY_SHORT_VERSION) .
+
 .PHONY: docker-push
 docker-push: ## Run docker-push-* targets for all the images
 	$(MAKE) ARCH=$(ARCH) $(addprefix docker-push-,$(ACCELERATORS))
@@ -80,6 +88,10 @@ docker-push-engine-vllm-rocm: ## Push the vLLM engine image (ROCm)
 .PHONY: docker-push-engine-llama-cpp
 docker-push-engine-llama-cpp: ## Push the llama-cpp-python engine image
 	docker push $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)-$(RAY_SHORT_VERSION)
+
+.PHONY: docker-push-engine-vllm-omni
+docker-push-engine-vllm-omni: ## Push the vLLM-Omni engine image
+	docker push $(NEUTREE_ENGINE_IMAGE)-vllm-omni:$(ENGINE_VLLM_OMNI_VERSION)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-manifest-engine-vllm
 docker-push-manifest-engine-vllm: ## Push the vLLM engine manifest image
