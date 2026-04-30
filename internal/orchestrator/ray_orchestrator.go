@@ -816,7 +816,12 @@ func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, app
 	// Old clusters (<= v1.0.0) use RAY_kill_child_processes_on_worker_exit_with_raylet_subreaper which causes
 	// parent processes to lose child exit codes, breaking vLLM's P2P check. For those clusters, skip the check.
 	// New clusters (> v1.0.0) use RAY_process_group_cleanup_enabled which doesn't have this issue.
-	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameVLLM {
+	// vllm-omni inherits vLLM's underlying inference engine, so the same P2P
+	// check semantics apply. Both engines need VLLM_SKIP_P2P_CHECK on old
+	// clusters that lose child exit codes.
+	if endpoint.Spec != nil && endpoint.Spec.Engine != nil &&
+		(endpoint.Spec.Engine.Engine == v1.EngineNameVLLM ||
+			endpoint.Spec.Engine.Engine == v1.EngineNameVLLMOmni) {
 		if deployedCluster.Spec != nil && deployedCluster.Spec.Version != "" {
 			isNew, err := semver.LessThan("v1.0.0", deployedCluster.Spec.Version)
 			if err == nil && !isNew {

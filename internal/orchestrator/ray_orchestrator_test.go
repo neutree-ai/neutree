@@ -2029,6 +2029,40 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.1"}},
 			expectedEnvs:    map[string]string{},
 		},
+		{
+			name: "vllm-omni engine on old cluster sets VLLM_SKIP_P2P_CHECK",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "vllm-omni-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: "vllm-omni",
+					},
+				},
+			},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.0"}},
+			expectedEnvs: map[string]string{
+				"VLLM_SKIP_P2P_CHECK": "1",
+			},
+		},
+		{
+			name: "vllm-omni engine on new cluster does not set VLLM_SKIP_P2P_CHECK",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "vllm-omni-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: "vllm-omni",
+					},
+				},
+			},
+			deployedCluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.0.1"}},
+			expectedEnvs:    map[string]string{},
+		},
 	}
 
 	for _, tt := range tests {

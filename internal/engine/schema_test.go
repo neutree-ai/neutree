@@ -43,3 +43,23 @@ func TestGetLlamaCppDefaultEngineSchema(t *testing.T) {
 		t.Fatal("expected schema to be non-nil")
 	}
 }
+
+func TestGetVLLMOmniV0_18_0EngineSchema(t *testing.T) {
+	schema, err := GetVLLMOmniV0_18_0EngineSchema()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if schema == nil {
+		t.Fatal("expected schema to be non-nil")
+	}
+
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected schema.properties to be an object")
+	}
+	for _, key := range []string{"omni", "output_modalities", "worker_backend", "ray_address", "deploy_config"} {
+		if _, exists := props[key]; !exists {
+			t.Errorf("vllm-omni schema missing required property: %s", key)
+		}
+	}
+}

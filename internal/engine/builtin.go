@@ -26,6 +26,11 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 		return nil, err
 	}
 
+	vllmOmniV0_18_0EngineSchema, err := GetVLLMOmniV0_18_0EngineSchema()
+	if err != nil {
+		return nil, err
+	}
+
 	engines := []*v1.Engine{
 		{
 			APIVersion: "v1",
@@ -112,6 +117,33 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 					},
 				},
 				SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
+			},
+		},
+		{
+			APIVersion: "v1",
+			Kind:       "Engine",
+			Metadata: &v1.Metadata{
+				Name: v1.EngineNameVLLMOmni,
+			},
+			// Phase 1: SSH cluster mode only. Only the ssh_-prefixed image is
+			// registered and no Kubernetes deploy template is provided. Attempts
+			// to deploy on Kubernetes will fail at image lookup with a clear
+			// "image not found for accelerator" error, naturally guarding
+			// against accidental K8s use until Phase 2 lands the K8s template.
+			Spec: &v1.EngineSpec{
+				Versions: []*v1.EngineVersion{
+					{
+						Version:      "v0.18.0",
+						ValuesSchema: vllmOmniV0_18_0EngineSchema,
+						Images: map[string]*v1.EngineImage{
+							v1.SSHImageKeyPrefix + "nvidia_gpu": {
+								ImageName: "neutree/engine-vllm-omni",
+								Tag:       "v0.18.0-ray2.53.0",
+							},
+						},
+					},
+				},
+				SupportedTasks: []string{v1.TextGenerationModelTask},
 			},
 		},
 	}

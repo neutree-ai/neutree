@@ -17,6 +17,7 @@ const (
 	// Engine name constants
 	EngineNameVLLM     = "vllm"
 	EngineNameLlamaCpp = "llama-cpp"
+	EngineNameVLLMOmni = "vllm-omni"
 )
 
 // EngineVersion represents a specific version of an engine with its configuration schema,
