@@ -42,6 +42,10 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Deadcode scan (informational, does not fail the build)
+        continue-on-error: true
+        run: make deadcode
+
       - name: Upload Coverage report to CodeCov
         uses: codecov/codecov-action@v1.0.15
         with:

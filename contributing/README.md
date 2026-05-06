@@ -2,6 +2,16 @@
 
 Engineering guide for human contributors and AI agents. Start here, then open the specific file you need.
 
+## First-time Setup
+
+After cloning the repo, install the local git hooks:
+
+```bash
+make install-hooks
+```
+
+This enables the pre-commit gate (`gofmt` / `go vet` / architecture boundaries / migration-pair check / incremental lint / short tests on affected packages).
+
 ## Playbooks
 
 Step-by-step checklists for the two highest-cost additions:
