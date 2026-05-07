@@ -20,8 +20,21 @@ def _get_field_annotations(model_class: type) -> Dict[str, Any]:
     if dataclasses.is_dataclass(model_class):
         try:
             return typing.get_type_hints(model_class)
-        except Exception:
-            return {}
+        except Exception as exc:
+            # get_type_hints() is all-or-nothing: if any field annotation
+            # references a name missing at runtime (e.g. vLLM v0.20.0
+            # AsyncEngineArgs missing a TYPE_CHECKING fallback alias), the
+            # whole result is lost. Fall back to __dataclass_fields__ which
+            # holds the raw declared types without re-evaluating annotations.
+            # filter_engine_args only needs the keyset; coerce_args degrades
+            # to a pass-through for fields whose annotation is a raw string.
+            logger.warning(
+                "_get_field_annotations: typing.get_type_hints(%r) failed (%s); "
+                "falling back to __dataclass_fields__",
+                model_class,
+                exc,
+            )
+            return {f.name: f.type for f in dataclasses.fields(model_class)}
 
     return {}
 
