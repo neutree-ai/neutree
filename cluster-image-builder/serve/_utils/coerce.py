@@ -4,10 +4,65 @@ import dataclasses
 import functools
 import json
 import logging
+import re
 import typing
 from typing import Any, Dict, Union
 
 logger = logging.getLogger("ray.serve")
+
+# CPython NameError message format: "name 'X' is not defined".
+# Format has been stable since at least 3.5 and is shared by PyPy.
+_NAMEERROR_NAME_RE = re.compile(r"name '([^']+)' is not defined")
+
+# Bound on the iterative recovery loop. Real engine arg classes leak at most
+# a handful of TYPE_CHECKING-only aliases; 64 is an order of magnitude past
+# anything realistic and still finite.
+_RECOVERY_MAX_ITERS = 64
+
+
+def _recover_type_hints(model_class: type) -> Dict[str, Any]:
+    """Resolve a dataclass's field annotations even when ``typing.get_type_hints``
+    raises ``NameError`` due to TYPE_CHECKING-only aliases that lack a runtime
+    ``= Any`` fallback (e.g. vLLM v0.20.0 ``OnlineQuantizationConfigArgs``).
+
+    Strategy: keep retrying ``get_type_hints`` with ``localns`` populated by the
+    names ``NameError`` reports as missing, each bound to ``Any``. Bounded loop;
+    if a non-NameError exception interrupts, or the regex fails to extract a
+    name, fall back to ``dataclasses.fields()`` which preserves the keyset
+    (filter_engine_args still works) but loses real type objects (coerce_args
+    degrades to pass-through).
+    """
+    extras: Dict[str, Any] = {}
+    last_err: BaseException | None = None
+    for _ in range(_RECOVERY_MAX_ITERS):
+        try:
+            return typing.get_type_hints(model_class, localns=extras)
+        except NameError as exc:
+            last_err = exc
+            match = _NAMEERROR_NAME_RE.search(str(exc))
+            if match is None:
+                break
+            missing = match.group(1)
+            if missing in extras:
+                # Same name keeps failing — defensive break to avoid spinning
+                # if get_type_hints surfaces a NameError it can't recover from
+                # even with the alias supplied.
+                break
+            extras[missing] = Any
+        except Exception as exc:
+            last_err = exc
+            break
+
+    logger.warning(
+        "_get_field_annotations: typing.get_type_hints(%r) recovery failed (%s); "
+        "falling back to __dataclass_fields__ (coerce_args will degrade)",
+        model_class,
+        last_err,
+    )
+    try:
+        return {f.name: f.type for f in dataclasses.fields(model_class)}
+    except Exception:
+        return {}
 
 
 @functools.lru_cache(maxsize=None)
@@ -16,7 +71,7 @@ def _get_field_annotations(model_class: type) -> Dict[str, Any]:
 
     Cached per-class: ``coerce_args`` and ``filter_engine_args`` both call this
     once per replica startup, so caching avoids redundant introspection work and
-    keeps the fallback warning at most once per (class, replica). Returned dict
+    keeps the recovery warning at most once per (class, replica). Returned dict
     is treated as read-only by callers.
     """
     # Pydantic model / pydantic dataclass
@@ -28,14 +83,14 @@ def _get_field_annotations(model_class: type) -> Dict[str, Any]:
     if dataclasses.is_dataclass(model_class):
         try:
             return typing.get_type_hints(model_class)
+        except NameError:
+            # ``get_type_hints`` is all-or-nothing: one bad field invalidates
+            # the whole result. Try to recover by feeding ``Any`` as a stub
+            # for each missing name reported by NameError, then re-running.
+            # When this succeeds, every other field returns a real type
+            # object so coerce_args keeps full JSON-string coercion.
+            return _recover_type_hints(model_class)
         except Exception as exc:
-            # get_type_hints() is all-or-nothing: if any field annotation
-            # references a name missing at runtime (e.g. vLLM v0.20.0
-            # AsyncEngineArgs missing a TYPE_CHECKING fallback alias), the
-            # whole result is lost. Fall back to __dataclass_fields__ which
-            # holds the raw declared types without re-evaluating annotations.
-            # filter_engine_args only needs the keyset; coerce_args degrades
-            # to a pass-through for fields whose annotation is a raw string.
             logger.warning(
                 "_get_field_annotations: typing.get_type_hints(%r) failed (%s); "
                 "falling back to __dataclass_fields__",

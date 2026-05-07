@@ -159,11 +159,10 @@ class _BrokenTypeHintsArgs:
 class _AllStringAnnotationsArgs:
     """Closer simulation of the production vLLM v0.20.0 case: every annotation
     is stored as a string (as ``from __future__ import annotations`` would
-    produce module-wide), and one references an undefined name so
-    ``get_type_hints`` raises. Under the fallback path every ``f.type`` is a
-    raw string, which means ``coerce_args`` cannot coerce *any* dict/list
-    field — the safety-net is restored but JSON-string coercion degrades
-    across the board.
+    produce module-wide), and one references an undefined name so a naive
+    ``typing.get_type_hints()`` call raises. The Option B recovery path injects
+    ``Any`` for the missing name and re-runs, so callers see real type objects
+    for every annotation and ``coerce_args`` keeps full JSON-string coercion.
     """
 
     name: "str" = ""
@@ -233,17 +232,18 @@ class TestFilterEngineArgs:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _get_field_annotations fallback (NEU-433)
+# Tests for _get_field_annotations recovery (NEU-433, Option B)
 # ---------------------------------------------------------------------------
 
 
-class TestGetFieldAnnotationsFallback:
-    def test_returns_field_names_when_get_type_hints_raises(self, caplog):
-        """When ``typing.get_type_hints`` raises on a dataclass, fall back
-        to ``dataclasses.fields()`` so the field-name keyset is preserved.
-        Also asserts the diagnostic warning fires — that warning is the
-        operator's primary signal to investigate the engine image.
+class TestGetFieldAnnotationsRecovery:
+    def test_recovers_real_type_objects_via_localns_injection(self, caplog):
+        """When ``typing.get_type_hints`` raises ``NameError`` on a
+        TYPE_CHECKING-only alias, the recovery loop injects ``Any`` for the
+        missing name and re-runs. Healthy fields keep their real type objects
+        so downstream consumers (``coerce_args``) keep full functionality.
         """
+        # Sanity: the fixture really triggers the failure mode we care about.
         with pytest.raises(NameError):
             typing.get_type_hints(_BrokenTypeHintsArgs)
         _get_field_annotations.cache_clear()
@@ -252,25 +252,17 @@ class TestGetFieldAnnotationsFallback:
             result = _get_field_annotations(_BrokenTypeHintsArgs)
 
         assert set(result.keys()) == {"model", "max_model_len", "quantization_config"}
-        assert "falling back to __dataclass_fields__" in caplog.text
+        # Healthy fields recover real type objects, not raw strings.
+        assert result["model"] is str
+        assert result["max_model_len"] is int
+        # Recovery succeeded → no fallback warning emitted.
+        assert "falling back to __dataclass_fields__" not in caplog.text
 
-    def test_coerce_args_degrades_silently_under_fallback(self):
-        """Under the fallback path ``f.type`` is a raw string rather than a
-        real type object, so dict/list coercion silently degrades to a
-        pass-through. Acceptable trade-off documented in NEU-433: better
-        than the prior behaviour where the entire safety net no-opped.
-        """
-        _get_field_annotations.cache_clear()
-        args = {"quantization_config": '{"key": "value"}'}
-        coerce_args(args, _BrokenTypeHintsArgs)
-        # No exception, no coercion — value passes through untouched.
-        assert args["quantization_config"] == '{"key": "value"}'
-
-    def test_coerce_args_full_degradation_when_all_annotations_are_strings(self):
-        """Closer to the real production path: every annotation is a string,
-        so even healthy dict/list fields lose their JSON-string coercion when
-        the fallback fires. The safety-net is preserved (next test confirms
-        that for filter_engine_args), but coerce_args is a pass-through.
+    def test_coerce_args_recovers_dict_and_list_coercion(self):
+        """Under Option B every healthy annotation resolves to a real type
+        object, so dict/list JSON-string coercion still works on the
+        SSH/Ray path even when one field's annotation referenced a missing
+        TYPE_CHECKING alias.
         """
         _get_field_annotations.cache_clear()
         args = {
@@ -278,16 +270,13 @@ class TestGetFieldAnnotationsFallback:
             "items": '["a", "b"]',
         }
         coerce_args(args, _AllStringAnnotationsArgs)
-        # Fallback path: f.type is a raw string for every field, so
-        # _wants_dict_or_list returns False for all of them and JSON strings
-        # pass through untouched. This is the documented degradation.
-        assert args["config"] == '{"temperature": 0.5}'
-        assert args["items"] == '["a", "b"]'
+        # Healthy fields decoded — Option B preserves their real types.
+        assert args["config"] == {"temperature": 0.5}
+        assert args["items"] == ["a", "b"]
 
-    def test_filter_engine_args_keyset_intact_when_all_annotations_are_strings(self):
-        """The complementary half of the trade-off: even with every annotation
-        a string, ``filter_engine_args`` still gets the field-name keyset and
-        strips unknown keys. This is what the NEU-433 fix actually buys.
+    def test_filter_engine_args_strips_unknowns_under_recovery(self):
+        """``filter_engine_args`` still gets the full field-name keyset
+        after recovery, so unknown keys are stripped as designed.
         """
         _get_field_annotations.cache_clear()
         args = {
@@ -296,4 +285,36 @@ class TestGetFieldAnnotationsFallback:
             "bogus": 42,
         }
         filter_engine_args(args, _AllStringAnnotationsArgs)
+        # filter only strips unknowns; it doesn't coerce — values stay as-is.
         assert args == {"name": "model-x", "config": '{"temperature": 0.5}'}
+
+    def test_falls_back_to_fields_when_recovery_cannot_extract_name(
+        self, monkeypatch, caplog
+    ):
+        """If the NameError message format is unrecognisable (theoretical
+        future Python change, or another exception type altogether) the
+        function still degrades gracefully: ``dataclasses.fields()`` is
+        called so ``filter_engine_args`` keeps the keyset, while
+        ``coerce_args`` falls back to a pass-through. This pins the last-
+        resort safety behaviour against future Python releases.
+        """
+        _get_field_annotations.cache_clear()
+
+        original = typing.get_type_hints
+
+        def fake_get_type_hints(*args, **kwargs):
+            # Raise NameError with a non-standard message so the regex misses.
+            raise NameError("unrecognised wording about a missing name")
+
+        monkeypatch.setattr(typing, "get_type_hints", fake_get_type_hints)
+
+        with caplog.at_level(logging.WARNING, logger="ray.serve"):
+            result = _get_field_annotations(_BrokenTypeHintsArgs)
+
+        # Keyset preserved through dataclasses.fields() last-resort fallback.
+        assert set(result.keys()) == {"model", "max_model_len", "quantization_config"}
+        # Recovery failed warning emitted so operators know coerce degraded.
+        assert "falling back to __dataclass_fields__" in caplog.text
+
+        # Restore for any subsequent tests.
+        monkeypatch.setattr(typing, "get_type_hints", original)
