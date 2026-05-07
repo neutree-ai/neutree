@@ -28,6 +28,19 @@ generation).
   str | bool | None       -> ["string", "boolean"]   (genuine union, kept)
   str | list[str] | None  -> ["string", "array"]     (genuine union, kept)
 
+**Limitations**:
+
+- ``required[]`` is intentionally not emitted; downstream validators
+  must enforce required-field semantics elsewhere. A field annotated
+  ``int | None`` with default ``None`` is rendered without a
+  ``"default"`` key (matches the existing schema convention).
+- ``Annotated[X, ...]`` is unwrapped to ``X`` only when the primary
+  ``typing.get_type_hints(include_extras=False)`` path succeeds; on
+  fallback to raw ``__annotations__``, ``Annotated`` is unwrapped one
+  level via ``__metadata__`` introspection.
+- Heterogeneous tuples (``tuple[int, str]``) are treated as
+  homogeneous (``items`` derived from the first element).
+
 Usage::
 
     # Default: AsyncEngineArgs + FrontendArgs, write to internal/engine path
@@ -85,6 +98,13 @@ def _python_to_json_type(tp: Any) -> dict[str, Any] | None:
     Returns ``None`` when the type cannot be confidently translated (caller
     falls back to ``{"type": "object"}`` and surfaces a warning).
     """
+    # Strip Annotated[X, ...] -> X. The primary path uses get_type_hints
+    # with include_extras=False which already strips Annotated, but the
+    # fallback raw-__annotations__ path preserves it; harden here.
+    if hasattr(tp, "__metadata__"):
+        meta_args = typing.get_args(tp)
+        if meta_args:
+            tp = meta_args[0]
     inner, _ = _strip_optional(tp)
 
     if typing.get_origin(inner) is typing.Literal:
@@ -189,7 +209,12 @@ def _help_texts_via_argparse(args_classes: Iterable[type]) -> dict[str, str]:
         parser = _ap.ArgumentParser(add_help=False)
         try:
             adder(parser)
-        except Exception:
+        except Exception as exc:
+            sys.stderr.write(
+                f"INFO: failed to extract help text from "
+                f"{cls.__module__}.{cls.__name__}.add_cli_args(): {exc}; "
+                "schema descriptions for that class will be empty\n"
+            )
             continue
         for action in parser._actions:  # type: ignore[attr-defined]
             if not action.dest or action.dest == "help":
@@ -256,6 +281,8 @@ def build_schema(
 
     properties: dict[str, dict[str, Any]] = {}
     todo_fields: list[str] = []
+    field_origin: dict[str, type] = {}
+    duplicates_dropped: list[tuple[str, type, type]] = []
 
     for cls in args_classes:
         hints = hints_per_class[cls]
@@ -264,6 +291,7 @@ def build_schema(
         for field in dataclasses.fields(cls):
             name = field.name
             if name in properties:
+                duplicates_dropped.append((name, field_origin[name], cls))
                 continue  # primary class precedence
             tp = hints.get(name, field.type)
             schema_type = _python_to_json_type(tp)
@@ -283,6 +311,7 @@ def build_schema(
             if help_text:
                 entry["description"] = help_text
             properties[name] = entry
+            field_origin[name] = cls
 
     schema: dict[str, Any] = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -298,6 +327,16 @@ def build_schema(
             + ", ".join(sorted(todo_fields))
             + "\n"
         )
+    if duplicates_dropped:
+        sys.stderr.write(
+            "INFO: dropped duplicate fields (kept first definition): "
+            + ", ".join(
+                f"{name} (kept from {kept.__name__}, "
+                f"dropped from {dropped.__name__})"
+                for name, kept, dropped in duplicates_dropped
+            )
+            + "\n"
+        )
     return schema
 
 
@@ -305,9 +344,11 @@ def _detect_vllm_version() -> str:
     try:
         import vllm  # type: ignore
 
-        v = getattr(vllm, "__version__", "unknown")
+        v = getattr(vllm, "__version__", None)
     except Exception:
-        return "unknown"
+        return "(unknown)"
+    if not v:
+        return "(unknown)"
     return v if v.startswith("v") else f"v{v}"
 
 
@@ -319,29 +360,21 @@ def _is_primitive(value: Any) -> bool:
     return isinstance(value, (str, int, float, bool)) or value is None
 
 
-def _is_simple_object(value: Any) -> bool:
-    """``items`` payloads with a single ``{"type": "..."}`` key get inlined."""
-    return (
-        isinstance(value, dict)
-        and len(value) == 1
-        and "type" in value
-        and isinstance(value["type"], str)
-    )
-
-
 def _emit(value: Any, indent: int) -> str:
     """Custom JSON emitter matching the existing schema convention.
 
-    Top-level objects use 2-space indent, but ``enum`` / ``default`` /
-    simple ``items`` arrays-and-objects stay on a single line for
-    readability.
+    Top-level objects use 2-space indent. Primitive arrays (``enum`` /
+    ``default``) stay on a single line for readability. Object dicts —
+    including single-key ``items`` payloads like ``{"type": "string"}``
+    — are always rendered across multiple lines, matching the formatting
+    of the existing hand-written schemas under
+    ``internal/engine/<engine>/<version>/schema.json`` so ``--check``
+    does not produce noise from cosmetic diffs.
     """
     pad = " " * indent
     if isinstance(value, dict):
         if not value:
             return "{}"
-        if _is_simple_object(value):
-            return _format_value(value)
         lines = ["{"]
         keys = list(value.keys())
         for i, key in enumerate(keys):
@@ -354,8 +387,6 @@ def _emit(value: Any, indent: int) -> str:
         if not value:
             return "[]"
         if all(_is_primitive(v) for v in value):
-            return _format_value(value)
-        if all(_is_simple_object(v) for v in value):
             return _format_value(value)
         lines = ["["]
         for i, v in enumerate(value):
