@@ -274,14 +274,6 @@ MOCKERY := $(shell pwd)/bin/mockery
 mockery: ## Download mockery if not yet.
 	$(call go-get-tool,$(MOCKERY),github.com/vektra/mockery/v2@v2.53.3)
 
-DEADCODE := $(shell pwd)/bin/deadcode
-deadcode-tool: ## Download deadcode if not yet.
-	$(call go-get-tool,$(DEADCODE),golang.org/x/tools/cmd/deadcode@v0.34.0)
-
-.PHONY: deadcode
-deadcode: deadcode-tool $(RELEASE_DIR) ## Scan for unreachable functions (informational; does not fail)
-	$(DEADCODE) ./... | tee $(RELEASE_DIR)/deadcode.txt || true
-
 .PHONY: mockgen
 mockgen: mockery
 	@for dir in $(MOCKERY_OUTPUT_DIRS); do \
