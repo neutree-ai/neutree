@@ -49,6 +49,9 @@ COPY serve/_metrics ./serve/_metrics
 COPY serve/_replica_scheduler ./serve/_replica_scheduler
 COPY serve/_utils ./serve/_utils
 COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
+# Copy downloader sources only; do NOT `pip install` downloader/requirements.txt.
+# Its huggingface-hub<1.0 pin would downgrade the newer huggingface_hub already
+# shipped by the vllm base image, breaking newer transformers releases.
 COPY downloader ./downloader
 
 # Ensure "python" is in PATH (some base images only provide "python3")
