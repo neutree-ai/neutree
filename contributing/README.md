@@ -18,8 +18,8 @@ Step-by-step checklists for the two highest-cost additions:
 
 | Goal | Entry point | Checklist |
 |------|-------------|-----------|
-| Add a new inference engine version | `internal/engine/<name>/<version>/` + `cluster-image-builder/serve/<name>/<version>/` | 9 steps — [`playbooks.md#adding-a-new-engine-version`](playbooks.md#adding-a-new-engine-version) |
-| Add a new resource type | `api/v1/` → `db/migrations/` → `controllers/` → `internal/routes/proxies/` | 11 steps — [`playbooks.md#adding-a-new-resource-type`](playbooks.md#adding-a-new-resource-type) |
+| Add a new version to an existing engine | `internal/engine/<name>/<version>/` + `cluster-image-builder/serve/<name>/<version>/` | 9 steps + verify — [`playbooks.md#adding-a-new-version-to-an-existing-engine`](playbooks.md#adding-a-new-version-to-an-existing-engine) |
+| Add a new resource type | `api/v1/` → `db/migrations/` → `controllers/` → `internal/routes/proxies/` | 12 steps + verify — [`playbooks.md#adding-a-new-resource-type`](playbooks.md#adding-a-new-resource-type) |
 
 For everything else, open the relevant file under [Files in this Directory](#files-in-this-directory).
 
