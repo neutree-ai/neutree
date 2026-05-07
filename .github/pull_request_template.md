@@ -6,6 +6,10 @@
 
 <!-- Why this change. One paragraph. -->
 
+## Changes
+
+<!-- Bulleted list of what's in scope so reviewers can pick where to focus. -->
+
 ## Test Plan
 
 - [ ] E2E (if affected): paste run summary (pass/fail + duration), otherwise "not affected"
