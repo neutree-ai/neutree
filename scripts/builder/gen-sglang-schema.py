@@ -259,12 +259,19 @@ def build_schema(
     merge_classes: list[type],
     title: str,
     description: str,
+    exclude_patterns: list[re.Pattern[str]] | None = None,
 ) -> dict[str, Any]:
+    """``exclude_patterns`` are compiled regex objects; any field whose name
+    matches any pattern (via ``re.fullmatch``) is dropped from the output
+    schema. Generic escape hatch for caller-driven pruning without
+    hard-coding the list in the script.
+    """
     args_classes: list[type] = [primary_class] + list(merge_classes)
     hints_per_class = {cls: _resolve_hints(cls) for cls in args_classes}
     helps = _help_texts_via_argparse(args_classes)
 
     properties: dict[str, dict[str, Any]] = {}
+    excluded_fields: list[tuple[str, str]] = []
     todo_fields: list[str] = []
     field_origin: dict[str, type] = {}
     duplicates_dropped: list[tuple[str, type, type]] = []
@@ -278,6 +285,14 @@ def build_schema(
             if name in properties:
                 duplicates_dropped.append((name, field_origin[name], cls))
                 continue  # primary class precedence
+            if exclude_patterns:
+                matched = next(
+                    (p for p in exclude_patterns if p.fullmatch(name)),
+                    None,
+                )
+                if matched is not None:
+                    excluded_fields.append((name, matched.pattern))
+                    continue
             tp = hints.get(name, field.type)
             schema_type = _python_to_json_type(tp)
             if schema_type is None:
@@ -324,6 +339,15 @@ def build_schema(
             )
             + "\n"
         )
+    if excluded_fields:
+        by_pattern: dict[str, list[str]] = {}
+        for name, pattern in excluded_fields:
+            by_pattern.setdefault(pattern, []).append(name)
+        for pattern, names in sorted(by_pattern.items()):
+            sys.stderr.write(
+                f"INFO: --exclude-regex {pattern!r} dropped "
+                f"{len(names)} field(s): {', '.join(sorted(names))}\n"
+            )
     return schema
 
 
@@ -412,6 +436,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--exclude-regex",
+        dest="exclude_patterns",
+        action="append",
+        metavar="REGEX",
+        help=(
+            "Exclude fields whose name fully matches this regex. Repeat "
+            "for multiple patterns. Useful for pruning HTTP-server / "
+            "gateway-only fields when running under Ray Serve."
+        ),
+    )
+    parser.add_argument(
         "--output",
         "-o",
         help="Output path. Default: stdout.",
@@ -450,11 +485,20 @@ def main(argv: list[str] | None = None) -> int:
         or f"Configuration schema for SGLang {detected} engine parameters"
     )
 
+    exclude_patterns: list[re.Pattern[str]] = []
+    for raw in args.exclude_patterns or []:
+        try:
+            exclude_patterns.append(re.compile(raw))
+        except re.error as exc:
+            sys.stderr.write(f"ERROR: invalid --exclude-regex {raw!r}: {exc}\n")
+            return 2
+
     schema = build_schema(
         primary_class=primary_class,
         merge_classes=merge_classes,
         title=title,
         description=description,
+        exclude_patterns=exclude_patterns or None,
     )
     rendered = render_schema(schema)
 
