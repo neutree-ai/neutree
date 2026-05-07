@@ -270,10 +270,12 @@ def build_schema(
                 todo_fields.append(name)
             entry: dict[str, Any] = dict(schema_type)
             default_value, has_default = _resolve_default(field)
-            if has_default and not (
-                isinstance(default_value, (dict, list, set, tuple))
-                and not default_value
-            ):
+            if has_default:
+                # Preserve empty-collection defaults (`{}` / `[]`): the
+                # existing hand-written schemas emit them for fields like
+                # `hf_overrides`, `limit_mm_per_prompt`, and dropping
+                # them would silently change the configured default for
+                # downstream JSON-Schema validators.
                 if isinstance(default_value, (set, frozenset)):
                     default_value = sorted(default_value)
                 entry["default"] = default_value
