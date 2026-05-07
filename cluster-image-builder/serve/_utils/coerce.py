@@ -1,6 +1,7 @@
 """Shared utilities for Neutree Ray Serve applications."""
 
 import dataclasses
+import functools
 import json
 import logging
 import typing
@@ -9,8 +10,15 @@ from typing import Any, Dict, Union
 logger = logging.getLogger("ray.serve")
 
 
+@functools.lru_cache(maxsize=None)
 def _get_field_annotations(model_class: type) -> Dict[str, Any]:
-    """Extract field name → annotation mapping from Pydantic models or standard dataclasses."""
+    """Extract field name → annotation mapping from Pydantic models or standard dataclasses.
+
+    Cached per-class: ``coerce_args`` and ``filter_engine_args`` both call this
+    once per replica startup, so caching avoids redundant introspection work and
+    keeps the fallback warning at most once per (class, replica). Returned dict
+    is treated as read-only by callers.
+    """
     # Pydantic model / pydantic dataclass
     pydantic_fields = getattr(model_class, '__pydantic_fields__', None)
     if pydantic_fields is not None:
@@ -34,7 +42,10 @@ def _get_field_annotations(model_class: type) -> Dict[str, Any]:
                 model_class,
                 exc,
             )
-            return {f.name: f.type for f in dataclasses.fields(model_class)}
+            try:
+                return {f.name: f.type for f in dataclasses.fields(model_class)}
+            except Exception:
+                return {}
 
     return {}
 
