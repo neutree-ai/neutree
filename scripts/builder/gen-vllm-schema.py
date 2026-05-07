@@ -181,16 +181,32 @@ def _resolve_default(field: dataclasses.Field) -> tuple[Any, bool]:
     Honors both ``default`` and ``default_factory``. ``None`` defaults are
     treated as "no default" so the schema stays compact and matches the
     convention of the existing hand-written schemas.
+
+    Custom-class default values (whether from ``default`` or
+    ``default_factory()``) that are not JSON-serializable are also
+    treated as "no default": real-world vLLM dataclasses use
+    ``default_factory=EPLBConfig`` and similar config objects whose
+    string repr would otherwise crash ``json.dumps`` and produce no
+    schema at all. Falling back to "no default" lets the field still
+    appear in the schema with its translated type.
     """
+    candidate: Any
     if field.default is not dataclasses.MISSING:
-        return field.default, field.default is not None
-    if field.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
+        candidate = field.default
+    elif field.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
         try:
-            v = field.default_factory()  # type: ignore[misc]
+            candidate = field.default_factory()  # type: ignore[misc]
         except Exception:
             return None, False
-        return v, v is not None
-    return None, False
+    else:
+        return None, False
+    if candidate is None:
+        return None, False
+    try:
+        json.dumps(candidate)
+    except (TypeError, ValueError):
+        return None, False
+    return candidate, True
 
 
 def _help_texts_via_argparse(args_classes: Iterable[type]) -> dict[str, str]:

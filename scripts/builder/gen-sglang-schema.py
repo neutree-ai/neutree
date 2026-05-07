@@ -164,15 +164,30 @@ def _python_to_json_type(tp: Any) -> dict[str, Any] | None:
 
 
 def _resolve_default(field: dataclasses.Field) -> tuple[Any, bool]:
+    """Return ``(default_value, has_default)``.
+
+    Honors both ``default`` and ``default_factory``. ``None`` and
+    non-JSON-serializable defaults are treated as "no default" so the
+    field still appears in the schema with its translated type instead
+    of crashing the json.dumps step downstream.
+    """
+    candidate: Any
     if field.default is not dataclasses.MISSING:
-        return field.default, field.default is not None
-    if field.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
+        candidate = field.default
+    elif field.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
         try:
-            v = field.default_factory()  # type: ignore[misc]
+            candidate = field.default_factory()  # type: ignore[misc]
         except Exception:
             return None, False
-        return v, v is not None
-    return None, False
+    else:
+        return None, False
+    if candidate is None:
+        return None, False
+    try:
+        json.dumps(candidate)
+    except (TypeError, ValueError):
+        return None, False
+    return candidate, True
 
 
 def _help_texts_via_argparse(args_classes: Iterable[type]) -> dict[str, str]:
