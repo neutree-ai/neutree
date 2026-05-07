@@ -157,18 +157,18 @@ type fakeObject struct {
 	workspace string
 }
 
-func (f *fakeObject) GetKind() string                     { return f.kind }
-func (f *fakeObject) SetKind(string)                      {}
-func (f *fakeObject) GetName() string                     { return f.name }
-func (f *fakeObject) GetWorkspace() string                { return f.workspace }
-func (f *fakeObject) GetLabels() map[string]string        { return nil }
-func (f *fakeObject) SetLabels(map[string]string)         {}
-func (f *fakeObject) GetAnnotations() map[string]string   { return nil }
-func (f *fakeObject) SetAnnotations(map[string]string)    {}
-func (f *fakeObject) GetCreationTimestamp() string         { return "" }
-func (f *fakeObject) GetUpdateTimestamp() string           { return "" }
-func (f *fakeObject) GetDeletionTimestamp() string         { return "" }
-func (f *fakeObject) GetMetadata() interface{}             { return nil }
-func (f *fakeObject) GetSpec() interface{}                 { return nil }
-func (f *fakeObject) GetStatus() interface{}               { return nil }
-func (f *fakeObject) GetID() string                        { return "" }
+func (f *fakeObject) GetKind() string                   { return f.kind }
+func (f *fakeObject) SetKind(string)                    {}
+func (f *fakeObject) GetName() string                   { return f.name }
+func (f *fakeObject) GetWorkspace() string              { return f.workspace }
+func (f *fakeObject) GetLabels() map[string]string      { return nil }
+func (f *fakeObject) SetLabels(map[string]string)       {}
+func (f *fakeObject) GetAnnotations() map[string]string { return nil }
+func (f *fakeObject) SetAnnotations(map[string]string)  {}
+func (f *fakeObject) GetCreationTimestamp() string      { return "" }
+func (f *fakeObject) GetUpdateTimestamp() string        { return "" }
+func (f *fakeObject) GetDeletionTimestamp() string      { return "" }
+func (f *fakeObject) GetMetadata() interface{}          { return nil }
+func (f *fakeObject) GetSpec() interface{}              { return nil }
+func (f *fakeObject) GetStatus() interface{}            { return nil }
+func (f *fakeObject) GetID() string                     { return "" }

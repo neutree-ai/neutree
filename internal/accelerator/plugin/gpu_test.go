@@ -38,8 +38,8 @@ func TestGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 
 func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 	tests := []struct {
-		name                    string
-		mockSetup               func(*commandmocks.MockExecutor)
+		name                     string
+		mockSetup                func(*commandmocks.MockExecutor)
 		expectedAcceleratorCount int
 	}{
 		{

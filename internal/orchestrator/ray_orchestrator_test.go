@@ -1570,9 +1570,9 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 		},
 		{
-			name:     "falls back to generic key when SSH key missing",
-			endpoint: gpuEndpoint("v0.12.0"),
-			engine:   defaultEngine,
+			name:          "falls back to generic key when SSH key missing",
+			endpoint:      gpuEndpoint("v0.12.0"),
+			engine:        defaultEngine,
 			imageRegistry: defaultImageRegistry,
 			expectedImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
 			expectedBaseOptions: []string{
@@ -1688,26 +1688,26 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                       string
-		endpoint                   *v1.Endpoint
-		cluster                    *v1.Cluster
-		engine                     *v1.Engine
-		imageRegistry              *v1.ImageRegistry
-		setupMgr                   func(t *testing.T) *acceleratormocks.MockManager
-		expectContainer            bool
-		expectedContainerImage     string
-		expectedBaseRunOptions     []string
-		expectedBackendRunOptions  []string
-		expectedEngineName         string
-		expectedEngineVersion      string
+		name                      string
+		endpoint                  *v1.Endpoint
+		cluster                   *v1.Cluster
+		engine                    *v1.Engine
+		imageRegistry             *v1.ImageRegistry
+		setupMgr                  func(t *testing.T) *acceleratormocks.MockManager
+		expectContainer           bool
+		expectedContainerImage    string
+		expectedBaseRunOptions    []string
+		expectedBackendRunOptions []string
+		expectedEngineName        string
+		expectedEngineVersion     string
 	}{
 		{
 			name: "new GPU cluster generates container and backend_container",
 			endpoint: &v1.Endpoint{
 				Metadata: &v1.Metadata{Workspace: "default", Name: "test-ep"},
 				Spec: &v1.EndpointSpec{
-					Engine:  &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
-					Model:   &v1.ModelSpec{Name: "test-model", Task: v1.TextGenerationModelTask},
+					Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.12.0"},
+					Model:  &v1.ModelSpec{Name: "test-model", Task: v1.TextGenerationModelTask},
 					Resources: &v1.ResourceSpec{
 						Accelerator: map[string]string{v1.AcceleratorTypeKey: nvidiaGPU},
 					},
@@ -1799,14 +1799,14 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 			cluster: &v1.Cluster{
 				Spec: &v1.ClusterSpec{Version: "v1.0.1"},
 			},
-			engine:                 cpuEngine,
-			imageRegistry:          defaultImageRegistry,
-			expectContainer:        true,
-			expectedContainerImage: "registry.example.com/neutree/engine-llama-cpp:v0.3.7-ray2.53.0",
-			expectedBaseRunOptions: []string{"--rm"},
+			engine:                    cpuEngine,
+			imageRegistry:             defaultImageRegistry,
+			expectContainer:           true,
+			expectedContainerImage:    "registry.example.com/neutree/engine-llama-cpp:v0.3.7-ray2.53.0",
+			expectedBaseRunOptions:    []string{"--rm"},
 			expectedBackendRunOptions: []string{"--rm"},
-			expectedEngineName:     "llama-cpp",
-			expectedEngineVersion:  "v0.3.7",
+			expectedEngineName:        "llama-cpp",
+			expectedEngineVersion:     "v0.3.7",
 		},
 	}
 

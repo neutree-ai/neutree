@@ -99,7 +99,7 @@ func TestEngineVersion_GetImageForSSHAccelerator(t *testing.T) {
 			name: "SSH-specific image exists, returns SSH image",
 			engineVersion: &EngineVersion{
 				Images: map[string]*EngineImage{
-					"nvidia_gpu":              genericImage,
+					"nvidia_gpu":                     genericImage,
 					SSHImageKeyPrefix + "nvidia_gpu": sshImage,
 				},
 			},
@@ -265,10 +265,10 @@ func TestEngineVersion_GetSupportedAccelerators(t *testing.T) {
 			engineVersion: &EngineVersion{
 				Version: "v0.11.2",
 				Images: map[string]*EngineImage{
-					"nvidia_gpu":                         {ImageName: "vllm/vllm-openai", Tag: "v0.11.2"},
-					SSHImageKeyPrefix + "nvidia_gpu":     {ImageName: "neutree/engine-vllm", Tag: "v0.11.2-ray2.53.0"},
-					"cpu":                                {ImageName: "neutree/llama-cpp-python", Tag: "v0.3.7"},
-					SSHImageKeyPrefix + "cpu":            {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
+					"nvidia_gpu":                     {ImageName: "vllm/vllm-openai", Tag: "v0.11.2"},
+					SSHImageKeyPrefix + "nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.11.2-ray2.53.0"},
+					"cpu":                            {ImageName: "neutree/llama-cpp-python", Tag: "v0.3.7"},
+					SSHImageKeyPrefix + "cpu":        {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
 				},
 			},
 			expectedCount: 2,

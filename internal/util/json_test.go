@@ -184,10 +184,10 @@ func TestKongPluginConfigStability(t *testing.T) {
 			{
 				"scheme":        "http",
 				"host":          "10.255.1.136",
-				"port":          8000,                           // int, not float64
+				"port":          8000, // int, not float64
 				"path":          "/default/endpoint",
-				"model_mapping": map[string]string(nil),        // Go nil map
-				"auth_header":   nil,                           // Go nil
+				"model_mapping": map[string]string(nil), // Go nil map
+				"auth_header":   nil,                    // Go nil
 			},
 		},
 	}
