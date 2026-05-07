@@ -81,7 +81,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 			epName = "e2e-ep-k8s-cfg-" + Cfg.RunID
 
 			yamlPath := applyEndpoint(epName, clusterName,
-				withCPU("1"), withMemory("2"),
+				withCPU("4"), withMemory("8"),
 				withEnv(map[string]string{
 					"E2E_TEST_KEY": "e2e_test_value",
 				}))
