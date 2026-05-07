@@ -147,7 +147,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
-				"worker_ips":      "198.51.100.2,198.51.100.3",
+				"worker_ips":      []string{"198.51.100.2", "198.51.100.3"},
 				"ssh_user":        sshUser,
 				"ssh_private_key": sshPrivateKey,
 			})

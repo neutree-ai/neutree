@@ -533,16 +533,23 @@ func stringOr(m map[string]any, key, fallback string) string {
 	return fallback
 }
 
-// anySliceOr returns m[key] coerced to []T. If the value is missing, nil, or
-// not assignable to []T, fallback is returned.
+// anySliceOr returns m[key] coerced to []T. If the value is missing or nil,
+// fallback is returned. If the value is present but NOT assignable to []T,
+// the test fails loudly — silent fallback would hide caller-side type errors
+// (e.g. passing a comma-separated string for a key that expects []string).
 func anySliceOr[T any](m map[string]any, key string, fallback []T) []T {
-	if v, ok := m[key]; ok && v != nil {
-		if s, ok := v.([]T); ok {
-			return s
-		}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return fallback
 	}
 
-	return fallback
+	s, ok := v.([]T)
+	if !ok {
+		Fail(fmt.Sprintf("anySliceOr: key %q expects []%T, got %T (value: %v)",
+			key, *new(T), v, v))
+	}
+
+	return s
 }
 
 // --- ClusterHelper ---
