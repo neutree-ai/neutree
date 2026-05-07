@@ -74,11 +74,6 @@ install-hooks: ## Enable .githooks as local git hooks (run once per clone)
 	chmod +x scripts/check-boundaries.sh scripts/check-migration-pairs.sh
 	@echo "Git hooks installed. Pre-commit will run on every 'git commit'."
 
-.PHONY: structural-check
-structural-check: ## Architecture boundaries + migration pairs (CI mirror of pre-commit gates 3-4)
-	bash scripts/check-boundaries.sh
-	bash scripts/check-migration-pairs.sh $(MIGRATION_DIFF_BASE)
-
 build: test build-neutree-core build-neutree-cli build-neutree-api
 
 build-neutree-core:
