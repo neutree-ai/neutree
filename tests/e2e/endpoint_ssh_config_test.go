@@ -220,7 +220,7 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		})
 
 		It("should deploy with serving-only engine_arg ignored", Label("C2644063"), func() {
-			servingArgs := append(engineArgs(), EngineArg{Key: "response_role", Value: "assistant"})
+			servingArgs := append(engineArgs(profileEngineName()), EngineArg{Key: "response_role", Value: "assistant"})
 
 			yamlPath := applyEndpoint(servingEpName, clusterName,
 				withEngineArgs(servingArgs))
@@ -282,6 +282,89 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 		It("should serve inference with all-types config", func() {
 			ep := getEndpoint(schemaEpName)
 			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with all schema types")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(200), "inference failed: %s", body)
+		})
+	})
+
+	// --- SGLang All Schema Types ---
+	//
+	// Mirrors the vLLM "All Schema Types Engine Args" block above: deploy with
+	// a multi-type engine_args YAML, assert each value reaches the engine via
+	// Ray Serve's app config (SSH always goes through Ray Serve), then exercise
+	// inference end-to-end.
+
+	Describe("SGLang All Schema Types Engine Args", Ordered, Label("schema", "sglang"), func() {
+		var schemaEpName string
+
+		BeforeAll(func() {
+			schemaEpName = "e2e-ep-ssh-sglang-schema-" + Cfg.RunID
+		})
+
+		AfterAll(func() {
+			if schemaEpName != "" {
+				deleteEndpoint(schemaEpName)
+			}
+		})
+
+		It("should deploy SGLang with all schema data types in engine_args", Label("C2649562"), func() {
+			yamlPath := applyEndpoint(schemaEpName, clusterName,
+				withEngine(v1.EngineNameSGLang, profileEngineVersionFor(v1.EngineNameSGLang)),
+				withEngineArgs(allSchemaTypesEngineArgsSGLang()))
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(schemaEpName)
+
+			ep := getEndpoint(schemaEpName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
+		})
+
+		It("should have engine_args reflected in Ray Serve config", func() {
+			appName := profileWorkspace() + "_" + schemaEpName
+			apps, err := rayH.GetServeApplications()
+			Expect(err).NotTo(HaveOccurred())
+
+			appStatus, ok := apps.Applications[appName]
+			Expect(ok).To(BeTrue(), "application %s should exist", appName)
+			Expect(appStatus.DeployedAppConfig).NotTo(BeNil())
+			Expect(appStatus.DeployedAppConfig.Args).NotTo(BeNil())
+
+			engineArgs, ok := appStatus.DeployedAppConfig.Args["engine_args"]
+			Expect(ok).To(BeTrue(), "args should have engine_args")
+
+			eaMap, isMap := engineArgs.(map[string]interface{})
+			Expect(isMap).To(BeTrue(), "engine_args should be a map")
+
+			// Verify every key/value from allSchemaTypesEngineArgsSGLang
+			// reaches Ray Serve intact, covering int / float / bool / string /
+			// string-enum / object-as-JSON-string types.
+			Expect(eaMap).To(HaveKey("tp_size"))
+			Expect(eaMap["tp_size"]).To(BeNumerically("==", 1), "integer")
+
+			Expect(eaMap).To(HaveKey("mem_fraction_static"))
+			Expect(eaMap["mem_fraction_static"]).To(BeNumerically("~", 0.85, 1e-9), "number/float")
+
+			Expect(eaMap).To(HaveKeyWithValue("disable_cuda_graph", true), "boolean")
+			Expect(eaMap).To(HaveKeyWithValue("dtype", "auto"), "string enum")
+
+			Expect(eaMap).To(HaveKey("chunked_prefill_size"))
+			Expect(eaMap["chunked_prefill_size"]).To(BeNumerically("==", 8192), "integer")
+
+			Expect(eaMap).To(HaveKeyWithValue("served_model_name", "neu-sglang-test"), "string")
+			Expect(eaMap).To(HaveKeyWithValue("attention_backend", "torch_native"), "string enum")
+
+			Expect(eaMap).To(HaveKey("cuda_graph_max_bs"))
+			Expect(eaMap["cuda_graph_max_bs"]).To(BeNumerically("==", 4), "integer")
+
+			Expect(eaMap).To(HaveKeyWithValue("preferred_sampling_params",
+				`{"temperature": 0.7, "top_p": 0.9}`), "object/JSON string")
+			Expect(eaMap).To(HaveKeyWithValue("json_model_override_args",
+				`{"max_position_embeddings": 32768}`), "object/JSON string")
+		})
+
+		It("should serve inference with all-types config", func() {
+			ep := getEndpoint(schemaEpName)
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello SGLang with all schema types")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(200), "inference failed: %s", body)
 		})

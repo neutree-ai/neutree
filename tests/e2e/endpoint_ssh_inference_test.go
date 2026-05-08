@@ -159,7 +159,7 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 
 		// C2642267 step 2-3: multi-GPU TP deploy + inference
 		It("should deploy with tp=2 (gpu=2) and reach Running", Label("C2613759", "C2642248", "C2642267"), func() {
-			tpArgs := append(engineArgs(), EngineArg{Key: "tensor_parallel_size", Value: "2"})
+			tpArgs := append(engineArgs(profileEngineName()), EngineArg{Key: "tensor_parallel_size", Value: "2"})
 			yamlPath := applyEndpoint(epName, clusterName,
 				withGPU("2"), withEngineArgs(tpArgs))
 			defer os.Remove(yamlPath)
@@ -320,4 +320,168 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 		})
 	})
 
+	// --- SGLang cases ---
+	//
+	// Co-located with the vLLM/default-engine inference cases above so they
+	// share one cluster + model registry. Filter via
+	// --ginkgo.label-filter='endpoint && ssh && sglang' to run only these.
+
+	Describe("SGLang Chat Completion", Ordered, Label("inference", "chat", "sglang"), func() {
+		var epName string
+
+		BeforeAll(func() {
+			epName = "e2e-sglang-ssh-chat-" + Cfg.RunID
+		})
+
+		AfterAll(func() {
+			if epName != "" {
+				deleteEndpoint(epName)
+			}
+		})
+
+		It("should deploy SGLang endpoint and serve chat completion", Label("C2649559"), func() {
+			yamlPath := applyEndpoint(epName, clusterName,
+				withEngine("sglang", profileEngineVersionFor("sglang")))
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(epName)
+
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
+			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
+
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(http.StatusOK), "chat completion failed: %s", body)
+			Expect(body).To(ContainSubstring("choices"))
+		})
+	})
+
+	Describe("SGLang Embedding", Ordered, Label("inference", "embedding", "sglang"), func() {
+		var epName string
+
+		BeforeAll(func() {
+			if profileEmbeddingModelName() == "" {
+				Skip("embedding_model.name not configured in profile, skipping")
+			}
+			epName = "e2e-sglang-ssh-embed-" + Cfg.RunID
+		})
+
+		AfterAll(func() {
+			if epName != "" {
+				deleteEndpoint(epName)
+			}
+		})
+
+		It("should deploy SGLang embedding endpoint and serve /v1/embeddings", Label("C2649560"), func() {
+			yamlPath := applyEndpoint(epName, clusterName,
+				withEngine("sglang", profileEngineVersionFor("sglang")),
+				withModel(profileEmbeddingModelName(), profileEmbeddingModelVersion()),
+				withTask("text-embedding"))
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(epName)
+
+			ep := getEndpoint(epName)
+			code, body, err := inferEmbedding(ep.Status.ServiceURL, profileEmbeddingModelName(), "Hello world")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(http.StatusOK), "embedding inference failed: %s", body)
+
+			var resp map[string]any
+			Expect(json.Unmarshal([]byte(body), &resp)).To(Succeed())
+			Expect(resp).To(HaveKey("data"))
+		})
+	})
+
+	// SGLang multi-type engine_args forwarding lives in
+	// endpoint_ssh_config_test.go alongside vLLM's "All Schema Types Engine
+	// Args" — same Ray-Serve-app-config verification style.
+
+	Describe("SGLang Tensor Parallel TP=2", Ordered, Label("inference", "tp2", "sglang"), func() {
+		var epName string
+
+		BeforeAll(func() {
+			epName = "e2e-sglang-ssh-tp2-" + Cfg.RunID
+		})
+
+		AfterAll(func() {
+			if epName != "" {
+				deleteEndpoint(epName)
+			}
+		})
+
+		It("should deploy SGLang with tp_size=2 (gpu=2) and reach Running", Label("C2649563"), func() {
+			tpArgs := []EngineArg{{Key: "tp_size", Value: "2"}}
+			yamlPath := applyEndpoint(epName, clusterName,
+				withEngine("sglang", profileEngineVersionFor("sglang")),
+				withGPU("2"), withEngineArgs(tpArgs))
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(epName)
+
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
+			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
+
+			By("Verifying tp_size=2 in Ray Serve config")
+			cluster := getClusterFullJSON(clusterName)
+			rayH := NewRayHelper(cluster.Status.DashboardURL)
+
+			appName := profileWorkspace() + "_" + epName
+			appConfig, err := rayH.GetApplicationConfig(appName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(appConfig).NotTo(BeNil(), "application %s should exist", appName)
+
+			engineArgs, ok := appConfig.Args["engine_args"].(map[string]interface{})
+			Expect(ok).To(BeTrue(), "engine_args should exist")
+
+			tp, ok := engineArgs["tp_size"]
+			Expect(ok).To(BeTrue(), "tp_size should exist in engine_args")
+			Expect(tp).To(BeNumerically("==", 2),
+				"tp_size should be 2 (user-specified value)")
+		})
+	})
+
+	Describe("SGLang Auto Tensor Parallel", Ordered, Label("inference", "auto-tp", "sglang"), func() {
+		var epName string
+
+		BeforeAll(func() {
+			epName = "e2e-sglang-ssh-autotp-" + Cfg.RunID
+		})
+
+		AfterAll(func() {
+			if epName != "" {
+				deleteEndpoint(epName)
+			}
+		})
+
+		It("should auto-set tp_size to GPU count when not specified", Label("C2649564"), func() {
+			yamlPath := applyEndpoint(epName, clusterName,
+				withEngine("sglang", profileEngineVersionFor("sglang")),
+				withGPU("2"))
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(epName)
+
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
+
+			By("Verifying tp_size auto-set to GPU count (2) in Ray Serve config")
+			cluster := getClusterFullJSON(clusterName)
+			rayH := NewRayHelper(cluster.Status.DashboardURL)
+
+			appName := profileWorkspace() + "_" + epName
+			appConfig, err := rayH.GetApplicationConfig(appName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(appConfig).NotTo(BeNil(), "application %s should exist", appName)
+
+			engineArgs, ok := appConfig.Args["engine_args"].(map[string]interface{})
+			Expect(ok).To(BeTrue(), "engine_args should exist")
+
+			tp, ok := engineArgs["tp_size"]
+			Expect(ok).To(BeTrue(), "tp_size should be auto-set in engine_args")
+			Expect(tp).To(BeNumerically("==", 2),
+				"tp_size should be auto-set to GPU count (2)")
+		})
+	})
 })

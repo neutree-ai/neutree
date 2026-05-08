@@ -104,11 +104,18 @@ func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVa
 	}
 }
 
-// setVLLMTensorParallelDefault auto-sets tensor-parallel-size = GPU count for vLLM
-// when GPU > 1 and is a whole number. Must be called after user engine_args are merged,
-// because users may provide the key in either hyphen or underscore format.
-func setVLLMTensorParallelDefault(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
-	if engine.Metadata.Name != v1.EngineNameVLLM || endpoint.Spec.Resources == nil {
+// setEngineTensorParallelDefault auto-sets the engine's tensor-parallel-size
+// arg = GPU count when GPU > 1 and is a whole number. Must be called after
+// user engine_args are merged, because users may provide the key in either
+// hyphen or underscore format. The K8s template applies sprig
+// `replace "_" "-"` at render time so both forms map to the same CLI flag.
+func setEngineTensorParallelDefault(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
+	if endpoint.Spec.Resources == nil {
+		return
+	}
+
+	tpKey := engineTPArgKey(engine.Metadata.Name)
+	if tpKey == "" {
 		return
 	}
 
@@ -117,11 +124,12 @@ func setVLLMTensorParallelDefault(data *DeploymentManifestVariables, endpoint *v
 		return
 	}
 
-	_, hasDash := data.EngineArgs["tensor-parallel-size"]
-	_, hasUnderscore := data.EngineArgs["tensor_parallel_size"]
+	dashKey := strings.ReplaceAll(tpKey, "_", "-")
+	_, hasDash := data.EngineArgs[dashKey]
+	_, hasUnderscore := data.EngineArgs[tpKey]
 
 	if !hasDash && !hasUnderscore {
-		data.EngineArgs["tensor_parallel_size"] = int(gpuCount)
+		data.EngineArgs[tpKey] = int(gpuCount)
 	}
 }
 
@@ -137,9 +145,10 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 		}
 	}
 
-	// Auto-set vLLM tensor-parallel-size after user args are merged,
-	// so we can detect user-provided values in either key format.
-	setVLLMTensorParallelDefault(data, endpoint, engine)
+	// Auto-set tensor-parallel-size after user args are merged, so we can
+	// detect user-provided values in either key format. Applies to engines
+	// that expose a TP arg (vLLM / SGLang).
+	setEngineTensorParallelDefault(data, endpoint, engine)
 
 	// Prepare engine arg values for YAML double-quoted template rendering.
 	// Handles native maps, unescaped JSON strings, and pre-escaped strings.

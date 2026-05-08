@@ -1,0 +1,66 @@
+{
+  "name": "SGLang to Neutree",
+  "description": "Convert open-source SGLang Dashboard to Neutree-integrated version",
+  "source_file": "sglang-upstream/grafana.json",
+  "output_file": "output/sglang_grafana_dashboard.json",
+  "uid": "sglang",
+  "keep_datasource_variable": true,
+
+  "filter_rules": [
+    {
+      "name": "drop_existing_model_name_filter",
+      "description": "Strip the upstream {model_name=~\"$model_name\"} filter so we can replace it with Neutree multi-dimensional filters in the next rule",
+      "pattern": "\\{model_name=~\"\\$model_name\"\\}",
+      "replacement": "",
+      "is_regex": true
+    },
+    {
+      "name": "inject_neutree_filters",
+      "description": "Append Neutree multi-tenant filters to every sglang_<name>(_<word>)* metric reference. Matches both unfiltered and filter-stripped forms; the look-ahead guards against double-injection on metrics that are already followed by an opening brace.",
+      "pattern": "(sglang_[a-zA-Z0-9_]+)(?!\\{)",
+      "replacement": "\\1{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}",
+      "is_regex": true
+    }
+  ],
+
+  "custom_rules": [],
+
+  "variables": [
+    {
+      "name": "Application",
+      "label": "Application",
+      "query": "label_values(application)",
+      "multi": true,
+      "include_all": true,
+      "all_value": ".*",
+      "variable_type": "query"
+    },
+    {
+      "name": "Deployment",
+      "label": "Deployment",
+      "query": "label_values(deployment)",
+      "multi": true,
+      "include_all": true,
+      "all_value": ".*",
+      "variable_type": "query"
+    },
+    {
+      "name": "Replica",
+      "label": "Replica",
+      "query": "label_values(replica)",
+      "multi": true,
+      "include_all": true,
+      "all_value": ".*",
+      "variable_type": "query"
+    },
+    {
+      "name": "Cluster",
+      "label": "Cluster",
+      "query": "label_values(neutree_cluster)",
+      "multi": true,
+      "include_all": true,
+      "all_value": ".*",
+      "variable_type": "query"
+    }
+  ]
+}

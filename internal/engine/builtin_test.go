@@ -2,6 +2,8 @@ package engine
 
 import (
 	"testing"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func TestGetBuiltinEngines(t *testing.T) {
@@ -10,8 +12,8 @@ func TestGetBuiltinEngines(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(engines) != 2 {
-		t.Fatalf("expected 2 built-in engines, got %d", len(engines))
+	if len(engines) != 3 {
+		t.Fatalf("expected 3 built-in engines, got %d", len(engines))
 	}
 
 	engineNames := make(map[string]bool)
@@ -25,6 +27,10 @@ func TestGetBuiltinEngines(t *testing.T) {
 
 	if !engineNames["llama-cpp"] {
 		t.Error("expected llama-cpp engine to be registered")
+	}
+
+	if !engineNames["sglang"] {
+		t.Error("expected sglang engine to be registered")
 	}
 
 	// Verify vllm versions have nvidia_gpu image and deploy template
@@ -44,6 +50,57 @@ func TestGetBuiltinEngines(t *testing.T) {
 				} else if _, ok := k8sTemplates["default"]; !ok {
 					t.Errorf("vllm %s missing default kubernetes deploy template", v.Version)
 				}
+			}
+		}
+	}
+
+	// Verify sglang v0.5.10 has nvidia_gpu image, k8s default template, and supported tasks (rerank excluded).
+	for _, e := range engines {
+		if e.Metadata.Name != "sglang" {
+			continue
+		}
+
+		if got, want := len(e.Spec.Versions), 1; got != want {
+			t.Errorf("sglang versions: got %d, want %d", got, want)
+		}
+
+		v := e.Spec.Versions[0]
+		if v.Version != "v0.5.10" {
+			t.Errorf("sglang version: got %q, want %q", v.Version, "v0.5.10")
+		}
+		nvidiaImg, ok := v.Images["nvidia_gpu"]
+		if !ok {
+			t.Errorf("sglang %s missing nvidia_gpu image", v.Version)
+		} else {
+			// Lock the tag scheme so a Makefile bump or builtin.go drift never
+			// silently routes traffic to a stale image.
+			if got, want := nvidiaImg.Tag, v.Version+"-ray2.53.0"; got != want {
+				t.Errorf("sglang %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
+			}
+			if got, want := nvidiaImg.ImageName, "neutree/engine-sglang"; got != want {
+				t.Errorf("sglang %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
+			}
+		}
+		if _, ok := v.Images["amd_gpu"]; ok {
+			t.Errorf("sglang %s should not register amd_gpu (no AMD test cluster available)", v.Version)
+		}
+		if k8sTemplates, ok := v.DeployTemplate["kubernetes"]; !ok {
+			t.Errorf("sglang %s missing kubernetes deploy template", v.Version)
+		} else if _, ok := k8sTemplates["default"]; !ok {
+			t.Errorf("sglang %s missing default kubernetes deploy template", v.Version)
+		}
+
+		wantTasks := map[string]bool{"text-generation": true, "text-embedding": true}
+		for _, task := range e.Spec.SupportedTasks {
+			delete(wantTasks, task)
+		}
+		if len(wantTasks) != 0 {
+			t.Errorf("sglang missing supported tasks: %v", wantTasks)
+		}
+
+		for _, task := range e.Spec.SupportedTasks {
+			if task == v1.TextRerankModelTask {
+				t.Errorf("sglang must not advertise text-rerank")
 			}
 		}
 	}

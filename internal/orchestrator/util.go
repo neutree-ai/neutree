@@ -17,6 +17,23 @@ import (
 
 const acceleratorTypeCPU = "cpu"
 
+// engineTPArgKey returns the underscore-form engine_args key the engine
+// uses for tensor parallel size. vLLM uses `tensor_parallel_size`; SGLang's
+// ServerArgs dataclass field is `tp_size`. Returns "" when the engine
+// doesn't take a TP arg (e.g. llama-cpp single-process). Shared by both the
+// Ray (SSH cluster) and Kubernetes orchestrators so the auto-TP rule is
+// defined exactly once.
+func engineTPArgKey(engineName string) string {
+	switch engineName {
+	case v1.EngineNameVLLM:
+		return "tensor_parallel_size"
+	case v1.EngineNameSGLang:
+		return "tp_size"
+	default:
+		return ""
+	}
+}
+
 func getEndpointDeployCluster(s storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, error) { //nolint:unparam
 	clusterFilter := []storage.Filter{
 		{

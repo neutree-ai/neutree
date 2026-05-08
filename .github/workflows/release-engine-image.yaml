@@ -1,5 +1,10 @@
 name: release-engine-image
 
+# This workflow only builds NVIDIA-accelerated images. ROCm targets exist in
+# the Makefile (docker-build-engine-vllm-rocm, docker-build-engine-sglang-rocm)
+# and can be invoked manually for ad-hoc builds, but the workflow does not
+# expose them yet — see the follow-up ticket for splitting into per-engine
+# workflows with first-class accelerator + base-image-tag overrides.
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +15,9 @@ on:
         options:
           - vllm
           - llama-cpp
+          - sglang
       engine_version:
-        description: "engine version (e.g: v0.11.2 for vllm, v0.3.7 for llama-cpp)"
+        description: "engine version (e.g: v0.11.2 for vllm, v0.3.7 for llama-cpp, v0.5.10 for sglang)"
         required: true
         type: string
       ray_version:
@@ -57,6 +63,7 @@ jobs:
           ARCH: amd64
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_SGLANG_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_VERSION: ${{ github.event.inputs.ray_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
@@ -83,5 +90,6 @@ jobs:
           ALL_ARCH: amd64
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_SGLANG_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}

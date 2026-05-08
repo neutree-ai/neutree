@@ -18,6 +18,7 @@ const (
 	// Engine name constants
 	EngineNameVLLM     = "vllm"
 	EngineNameLlamaCpp = "llama-cpp"
+	EngineNameSGLang   = "sglang"
 )
 
 // knownModelTasks is the canonical set of task identifiers consumed by Neutree

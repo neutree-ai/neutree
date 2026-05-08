@@ -1180,10 +1180,14 @@ func teardownCluster(clusterName string) {
 
 // --- Endpoint helpers ---
 
-// engineArgs parses profile engine_args ("k=v,k2=v2,...") into a structured slice
-// for direct injection into the endpoint template via {{range}}.
-func engineArgs() []EngineArg {
-	raw := profileEngineArgs()
+// engineArgs parses the named engine's profile engine_args
+// ("k=v,k2=v2,...") into a structured slice for direct injection into the
+// endpoint template via {{range}}.
+func engineArgs(engineName string) []EngineArg {
+	raw := profileEngineArgsFor(engineName)
+	if raw == "" {
+		return nil
+	}
 
 	var args []EngineArg
 
@@ -1280,12 +1284,18 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		model:         profileModelName(),
 		modelVersion:  profileModelVersion(),
 		task:          profileModelTask(),
-		engineArgs:    engineArgs(),
-		gpu:           "1",
-		forceUpdate:   true,
+		// engineArgs intentionally left nil here. Resolved AFTER opts run
+		// so withEngine can change engineName first and the per-engine
+		// profile lookup picks the right engine's args.
+		gpu:         "1",
+		forceUpdate: true,
 	}
 	for _, fn := range opts {
 		fn(o)
+	}
+
+	if len(o.engineArgs) == 0 {
+		o.engineArgs = engineArgs(o.engineName)
 	}
 
 	if o.accType == "" || o.accProduct == "" {
@@ -1341,6 +1351,28 @@ func allSchemaTypesEngineArgs() []EngineArg {
 		{Key: "enforce_eager", Value: "true"},
 		{Key: "seed", Value: "42"},
 		{Key: "override_generation_config", Value: `'{"temperature": 0.8}'`},
+	}
+}
+
+// allSchemaTypesEngineArgsSGLang returns an engine_args slice for the SGLang
+// engine covering int / float / bool / string / string-enum / object /
+// nested-object. Keys use ServerArgs dataclass field names (underscore form);
+// the K8s template applies sprig replace "_" "-" so the CLI side sees kebab.
+// Array types are intentionally absent — SGLang's only array-shaped CLI flag
+// is `--cuda-graph-bs` (nargs="+"), which the single-token K8s template can't
+// render.
+func allSchemaTypesEngineArgsSGLang() []EngineArg {
+	return []EngineArg{
+		{Key: "tp_size", Value: "1"},
+		{Key: "mem_fraction_static", Value: "0.85"},
+		{Key: "disable_cuda_graph", Value: "true"},
+		{Key: "dtype", Value: "auto"},
+		{Key: "chunked_prefill_size", Value: "8192"},
+		{Key: "served_model_name", Value: "neu-sglang-test"},
+		{Key: "attention_backend", Value: "torch_native"},
+		{Key: "cuda_graph_max_bs", Value: "4"},
+		{Key: "preferred_sampling_params", Value: `'{"temperature": 0.7, "top_p": 0.9}'`},
+		{Key: "json_model_override_args", Value: `'{"max_position_embeddings": 32768}'`},
 	}
 }
 
@@ -1441,6 +1473,7 @@ func inferChat(serviceURL, prompt string) (int, string, error) {
 	})
 }
 
+//nolint:unparam // input is a fixture-style literal across callers by design;
 func inferEmbedding(serviceURL, model, input string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/embeddings", map[string]any{
 		"model": model,
@@ -1448,6 +1481,7 @@ func inferEmbedding(serviceURL, model, input string) (int, string, error) {
 	})
 }
 
+//nolint:unparam // query is a fixture-style literal across callers by design;
 func inferRerank(serviceURL, model, query string, documents []string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/rerank", map[string]any{
 		"model":     model,
