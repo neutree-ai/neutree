@@ -1,0 +1,81 @@
+name: release-engine-image-llama-cpp
+
+# llama-cpp-python is CPU-only on the Neutree side, so this workflow has no
+# accelerator input. Add an accelerator dimension here only when llama-cpp
+# starts shipping accelerator-specific upstream variants.
+on:
+  workflow_dispatch:
+    inputs:
+      engine_version:
+        description: "llama-cpp-python version (e.g. v0.3.7)"
+        required: true
+        type: string
+      ray_version:
+        description: "the ray version branch/tag to build from"
+        required: false
+        type: string
+        default: "ray-2.53.0-neutree"
+      ray_short_version:
+        description: "ray short version for image tag (e.g: ray2.53.0)"
+        required: false
+        type: string
+        default: "ray2.53.0"
+      engine_patch_suffix:
+        description: "optional alphanumeric patch identifier appended to the output tag (e.g. '1' produces <engine_version>-neutree1-<ray_short_version>); allowed chars [a-zA-Z0-9._-]; empty keeps the upstream tag"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  build-amd64-image:
+    runs-on: ["serve-builder","X64"]
+    name: build amd64 llama-cpp engine image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Validate engine_patch_suffix
+        if: ${{ github.event.inputs.engine_patch_suffix != '' }}
+        run: |
+          printf '%s\n' "${{ github.event.inputs.engine_patch_suffix }}" | grep -qE '^[a-zA-Z0-9._-]+$' \
+            || { echo "engine_patch_suffix must match [a-zA-Z0-9._-]+"; exit 1; }
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: build and push engine image
+        run: |
+          cd cluster-image-builder
+          make docker-build-engine-llama-cpp docker-push-engine-llama-cpp
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+          ARCH: amd64
+          ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
+          RAY_VERSION: ${{ github.event.inputs.ray_version }}
+          RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
+  push-manifests:
+    runs-on: ["serve-builder","X64"]
+    name: merge and push llama-cpp manifests
+    needs:
+      - build-amd64-image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: push manifests
+        run: |
+          cd cluster-image-builder
+          make docker-push-manifest-engine-llama-cpp
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+          ALL_ARCH: amd64
+          ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
+          RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}

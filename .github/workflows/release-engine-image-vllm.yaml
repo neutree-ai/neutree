@@ -1,25 +1,24 @@
-name: release-engine-image
+name: release-engine-image-vllm
 
-# This workflow only builds NVIDIA-accelerated images. ROCm targets exist in
-# the Makefile (docker-build-engine-vllm-rocm, docker-build-engine-sglang-rocm)
-# and can be invoked manually for ad-hoc builds, but the workflow does not
-# expose them yet — see the follow-up ticket for splitting into per-engine
-# workflows with first-class accelerator + base-image-tag overrides.
 on:
   workflow_dispatch:
     inputs:
-      engine:
-        description: "engine name"
+      accelerator:
+        description: "accelerator type"
         required: true
         type: choice
         options:
-          - vllm
-          - llama-cpp
-          - sglang
+          - nvidia
+          - rocm
       engine_version:
-        description: "engine version (e.g: v0.11.2 for vllm, v0.3.7 for llama-cpp, v0.5.10 for sglang)"
+        description: "vLLM engine version (e.g. v0.11.2)"
         required: true
         type: string
+      base_image_tag_override:
+        description: "optional override for the upstream vLLM base image tag (default: <engine_version>); use to point at non-standard upstream tags such as dev builds without editing the Makefile"
+        required: false
+        type: string
+        default: ""
       ray_version:
         description: "the ray version branch/tag to build from"
         required: false
@@ -39,7 +38,7 @@ on:
 jobs:
   build-amd64-image:
     runs-on: ["serve-builder","X64"]
-    name: build amd64 engine image
+    name: build amd64 vllm engine image
     steps:
       - uses: actions/checkout@v2
       - name: Validate engine_patch_suffix
@@ -53,23 +52,31 @@ jobs:
           registry: ${{ secrets.SERVE_IMAGE_REPO }}
           username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: Resolve make target suffix
+        id: target
+        run: |
+          if [ "${{ github.event.inputs.accelerator }}" = "rocm" ]; then
+            echo "suffix=-rocm" >> "$GITHUB_OUTPUT"
+          else
+            echo "suffix=" >> "$GITHUB_OUTPUT"
+          fi
       - name: build and push engine image
         run: |
           cd cluster-image-builder
-          make docker-build-engine-${{ github.event.inputs.engine }} docker-push-engine-${{ github.event.inputs.engine }}
+          make docker-build-engine-vllm${{ steps.target.outputs.suffix }} docker-push-engine-vllm${{ steps.target.outputs.suffix }}
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
           ARCH: amd64
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
-          ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
-          ENGINE_SGLANG_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_VLLM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
+          ENGINE_VLLM_ROCM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
           RAY_VERSION: ${{ github.event.inputs.ray_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
   push-manifests:
     runs-on: ["serve-builder","X64"]
-    name: merge and push manifests
+    name: merge and push vllm manifests
     needs:
       - build-amd64-image
     steps:
@@ -80,16 +87,22 @@ jobs:
           registry: ${{ secrets.SERVE_IMAGE_REPO }}
           username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: Resolve manifest target suffix
+        id: target
+        run: |
+          if [ "${{ github.event.inputs.accelerator }}" = "rocm" ]; then
+            echo "suffix=-rocm" >> "$GITHUB_OUTPUT"
+          else
+            echo "suffix=" >> "$GITHUB_OUTPUT"
+          fi
       - name: push manifests
         run: |
           cd cluster-image-builder
-          make docker-push-manifest-engine-${{ github.event.inputs.engine }}
+          make docker-push-manifest-engine-vllm${{ steps.target.outputs.suffix }}
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
           ALL_ARCH: amd64
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
-          ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
-          ENGINE_SGLANG_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
