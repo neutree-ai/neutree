@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -35,9 +37,15 @@ type DeploymentInfo struct {
 	Replicas []ReplicaInfo `json:"replicas"`
 }
 
-// ReplicaInfo represents replica information
+// ReplicaInfo represents replica information.
+//
+// Failed marks a synthesized replica recovered from the Ray state API
+// after Ray Serve removed the actor from the live applications response;
+// only stderr / stdout log types are available in that case (no
+// log_file_path means the application log file cannot be addressed).
 type ReplicaInfo struct {
 	ReplicaID string    `json:"replica_id"`
+	Failed    bool      `json:"failed,omitempty"`
 	Logs      []LogInfo `json:"logs"`
 }
 
@@ -349,6 +357,15 @@ func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace
 			})
 		}
 
+		if len(replicas) == 0 {
+			failed, err := findFailedActorForDeployment(dashboard.NewDashboardService(dashboardURL), appName, deploymentName)
+			if err != nil {
+				klog.Warningf("failed to look up DEAD actors for %s/%s: %v", appName, deploymentName, err)
+			} else if failed != nil {
+				replicas = append(replicas, buildFailedReplicaInfo(workspace, endpointName, replicaShortIDFromActor(failed)))
+			}
+		}
+
 		response.Deployments = append(response.Deployments, DeploymentInfo{
 			Name:     deploymentName,
 			Replicas: replicas,
@@ -356,6 +373,132 @@ func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace
 	}
 
 	return response, nil
+}
+
+// extractReplicaShortID parses a Ray Serve actor name of the form
+// "SERVE_REPLICA::<app>#<deployment>#<short_id>" and returns short_id.
+// Returns "" if the name does not have at least one '#' separator or
+// ends with one.
+func extractReplicaShortID(actorName string) string {
+	idx := strings.LastIndex(actorName, "#")
+	if idx < 0 || idx+1 >= len(actorName) {
+		return ""
+	}
+
+	return actorName[idx+1:]
+}
+
+// replicaShortIDFromActor returns the short_id parsed from actor.Name,
+// falling back to actor_id when the name does not match the Ray Serve
+// convention.
+func replicaShortIDFromActor(a *dashboard.Actor) string {
+	if id := extractReplicaShortID(a.Name); id != "" {
+		return id
+	}
+
+	return a.ActorID
+}
+
+// listFailedActorsForDeployment fetches DEAD actors that belong to the
+// given Ray Serve <app>:<deployment> from the dashboard state API.
+func listFailedActorsForDeployment(svc dashboard.DashboardService, appName, deploymentName string) ([]dashboard.Actor, error) {
+	className := fmt.Sprintf("ServeReplica:%s:%s", appName, deploymentName)
+	resp, err := svc.ListActors([]dashboard.ActorFilter{
+		{Key: "class_name", Predicate: "=", Value: className},
+		{Key: "state", Predicate: "=", Value: "DEAD"},
+	}, true, 100)
+
+	if err != nil {
+		return nil, fmt.Errorf("list actors %s: %w", className, err)
+	}
+
+	return resp.Data.Result.Result, nil
+}
+
+// findFailedActorForDeployment returns the DEAD actor with the highest
+// actor_id (lexicographic order, which approximates the most recent
+// allocation by Ray's GCS), or nil if none exist.
+func findFailedActorForDeployment(svc dashboard.DashboardService, appName, deploymentName string) (*dashboard.Actor, error) {
+	actors, err := listFailedActorsForDeployment(svc, appName, deploymentName)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(actors) == 0 {
+		return nil, nil
+	}
+
+	pick := 0
+	for i := 1; i < len(actors); i++ {
+		if actors[i].ActorID > actors[pick].ActorID {
+			pick = i
+		}
+	}
+
+	a := actors[pick]
+
+	return &a, nil
+}
+
+// findFailedActorByReplicaID returns the DEAD actor whose name encodes
+// the requested replica_id, or nil if no DEAD actor matches.
+func findFailedActorByReplicaID(svc dashboard.DashboardService, appName, deploymentName, replicaID string) (*dashboard.Actor, error) {
+	actors, err := listFailedActorsForDeployment(svc, appName, deploymentName)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range actors {
+		if extractReplicaShortID(actors[i].Name) == replicaID {
+			return &actors[i], nil
+		}
+	}
+
+	return nil, nil
+}
+
+// lookupFailedActorAcrossDeployments scans every deployment in the live
+// Ray Serve applications response for a DEAD actor whose name encodes
+// the requested replica_id. Returns the first match, or (nil, nil) when
+// no DEAD actor matches in any deployment.
+func lookupFailedActorAcrossDeployments(
+	svc dashboard.DashboardService,
+	appName string,
+	deployments map[string]RayDeployment,
+	replicaID string,
+) (*dashboard.Actor, error) {
+	for deploymentName := range deployments {
+		actor, err := findFailedActorByReplicaID(svc, appName, deploymentName, replicaID)
+		if err != nil {
+			return nil, err
+		}
+
+		if actor != nil {
+			return actor, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// buildFailedReplicaInfo synthesizes a ReplicaInfo for a DEAD actor
+// recovered from the state API. Only stderr / stdout log types are
+// exposed because the application log file path is not retained in
+// the actor table once Ray Serve has removed the replica.
+func buildFailedReplicaInfo(workspace, endpointName, replicaID string) ReplicaInfo {
+	mkLog := func(t string) LogInfo {
+		return LogInfo{
+			Type:        t,
+			URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/%s", workspace, endpointName, replicaID, t),
+			DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/%s?download=true", workspace, endpointName, replicaID, t),
+		}
+	}
+
+	return ReplicaInfo{
+		ReplicaID: replicaID,
+		Failed:    true,
+		Logs:      []LogInfo{mkLog("stderr"), mkLog("stdout")},
+	}
 }
 
 // getK8sLogSources gets log sources from Kubernetes cluster
@@ -456,31 +599,53 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 		}
 	}
 
-	if replica == nil {
-		return fmt.Errorf("replica %s not found", replicaID)
-	}
-
-	// Build log URL based on log type
+	// Build log URL based on log type. When the replica is not in the
+	// live applications response (Ray Serve removed the failed actor),
+	// fall back to the state API to recover the actor_id.
 	var logURL string
 
-	switch logType {
-	case "application":
-		// Remove leading slash from log file path if present
-		logFilePath := replica.LogFilePath
-		if len(logFilePath) > 0 && logFilePath[0] == '/' {
-			logFilePath = logFilePath[1:]
+	if replica != nil {
+		switch logType {
+		case "application":
+			// Remove leading slash from log file path if present
+			logFilePath := replica.LogFilePath
+			if len(logFilePath) > 0 && logFilePath[0] == '/' {
+				logFilePath = logFilePath[1:]
+			}
+
+			logURL = fmt.Sprintf("%s/api/v0/logs/file?node_id=%s&filename=%s&lines=%d&format=text",
+				dashboardURL, replica.NodeID, logFilePath, lines)
+		case "stderr":
+			logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=err&lines=%d&format=text",
+				dashboardURL, replica.ActorID, lines)
+		case "stdout":
+			logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=out&lines=%d&format=text",
+				dashboardURL, replica.ActorID, lines)
+		default:
+			return fmt.Errorf("unsupported log type: %s", logType)
+		}
+	} else {
+		failedActor, err := lookupFailedActorAcrossDeployments(dashboard.NewDashboardService(dashboardURL), appName, app.Deployments, replicaID)
+		if err != nil {
+			return err
 		}
 
-		logURL = fmt.Sprintf("%s/api/v0/logs/file?node_id=%s&filename=%s&lines=%d&format=text",
-			dashboardURL, replica.NodeID, logFilePath, lines)
-	case "stderr":
-		logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=err&lines=%d&format=text",
-			dashboardURL, replica.ActorID, lines)
-	case "stdout":
-		logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=out&lines=%d&format=text",
-			dashboardURL, replica.ActorID, lines)
-	default:
-		return fmt.Errorf("unsupported log type: %s", logType)
+		if failedActor == nil {
+			return fmt.Errorf("replica %s not found", replicaID)
+		}
+
+		switch logType {
+		case "stderr":
+			logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=err&lines=%d&format=text",
+				dashboardURL, failedActor.ActorID, lines)
+		case "stdout":
+			logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=out&lines=%d&format=text",
+				dashboardURL, failedActor.ActorID, lines)
+		case "application":
+			return fmt.Errorf("application log is unavailable for failed replica %s; use stderr or stdout", replicaID)
+		default:
+			return fmt.Errorf("unsupported log type: %s", logType)
+		}
 	}
 
 	// Fetch logs
