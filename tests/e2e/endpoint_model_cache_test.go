@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 
@@ -53,18 +52,12 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 			clusterName = "e2e-mc-nfs-k8s-" + Cfg.RunID
 			epName = "e2e-ep-mc-nfs-" + Cfg.RunID
 
-			nfsCacheYAML := fmt.Sprintf(`    model_caches:
-      - name: nfs-cache
-        nfs:
-          server: "%s"
-          path: "%s"`,
-				profile.ModelCache.NFSServer,
-				profile.ModelCache.NFSPath)
-
-			yaml := renderK8sClusterYAML(map[string]string{
-				"name":              clusterName,
-				"kubeconfig":        kubeconfig,
-				"model_caches_yaml": nfsCacheYAML,
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+				"model_caches": []ModelCache{
+					{Name: "nfs-cache", Mode: "nfs", NFSServer: profile.ModelCache.NFSServer, NFSPath: profile.ModelCache.NFSPath},
+				},
 			})
 
 			r := ClusterH.Apply(yaml)
@@ -115,15 +108,12 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 			clusterName = "e2e-mc-hp-k8s-" + Cfg.RunID
 			epName = "e2e-ep-mc-hp-" + Cfg.RunID
 
-			hostPathYAML := fmt.Sprintf(`    model_caches:
-      - name: hp-cache
-        host_path:
-          path: "%s"`, profile.ModelCache.HostPath)
-
-			yaml := renderK8sClusterYAML(map[string]string{
-				"name":              clusterName,
-				"kubeconfig":        kubeconfig,
-				"model_caches_yaml": hostPathYAML,
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+				"model_caches": []ModelCache{
+					{Name: "hp-cache", Mode: "host_path", HostPath: profile.ModelCache.HostPath},
+				},
 			})
 
 			r := ClusterH.Apply(yaml)
@@ -174,18 +164,12 @@ var _ = Describe("K8s Endpoint Model Cache", Ordered, Label("endpoint", "k8s", "
 			clusterName = "e2e-mc-pvc-k8s-" + Cfg.RunID
 			epName = "e2e-ep-mc-pvc-" + Cfg.RunID
 
-			pvcYAML := fmt.Sprintf(`    model_caches:
-      - name: pvc-cache
-        pvc:
-          storageClassName: "%s"
-          resources:
-            requests:
-              storage: 10Gi`, profile.ModelCache.PVCStorageClass)
-
-			yaml := renderK8sClusterYAML(map[string]string{
-				"name":              clusterName,
-				"kubeconfig":        kubeconfig,
-				"model_caches_yaml": pvcYAML,
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+				"model_caches": []ModelCache{
+					{Name: "pvc-cache", Mode: "pvc", PVCStorageClass: profile.ModelCache.PVCStorageClass, PVCStorage: "10Gi"},
+				},
 			})
 
 			r := ClusterH.Apply(yaml)
@@ -262,16 +246,15 @@ var _ = Describe("SSH Endpoint Model Cache", Ordered, Label("endpoint", "ssh", "
 			clusterName = "e2e-mc-hp-ssh-" + Cfg.RunID
 			epName = "e2e-ep-mc-hp-ssh-" + Cfg.RunID
 
-			hostPathYAML := fmt.Sprintf("    model_caches:\n      - name: hp-cache\n        host_path:\n          path: \"%s\"\n",
-				profile.ModelCache.HostPath)
-
-			yaml := renderSSHClusterYAML(map[string]string{
-				"name":              clusterName,
-				"head_ip":           headIP,
-				"worker_ips":        workerIPs,
-				"ssh_user":          sshUser,
-				"ssh_private_key":   sshPrivateKey,
-				"model_caches_yaml": hostPathYAML,
+			yaml := renderSSHClusterYAML(map[string]any{
+				"name":            clusterName,
+				"head_ip":         headIP,
+				"worker_ips":      workerIPs,
+				"ssh_user":        sshUser,
+				"ssh_private_key": sshPrivateKey,
+				"model_caches": []ModelCache{
+					{Name: "hp-cache", Mode: "host_path", HostPath: profile.ModelCache.HostPath},
+				},
 			})
 
 			r := ClusterH.Apply(yaml)

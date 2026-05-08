@@ -42,7 +42,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			kubeconfig = requireK8sProfile()
 			clusterName = "e2e-k8s-verify-" + Cfg.RunID
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":       clusterName,
 				"kubeconfig": kubeconfig,
 			})
@@ -222,13 +222,13 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 				ClusterH.EnsureDeleted(clusterB)
 			})
 
-			yamlA := renderK8sClusterYAML(map[string]string{
+			yamlA := renderK8sClusterYAML(map[string]any{
 				"name": clusterA, "kubeconfig": kubeconfig,
 			})
 			r := ClusterH.Apply(yamlA)
 			ExpectSuccess(r)
 
-			yamlB := renderK8sClusterYAML(map[string]string{
+			yamlB := renderK8sClusterYAML(map[string]any{
 				"name": clusterB, "kubeconfig": kubeconfig,
 			})
 			r = ClusterH.Apply(yamlB)
@@ -272,7 +272,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			kubeconfig = requireK8sProfile()
 			clusterName = "e2e-k8s-rt-edit-" + Cfg.RunID
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":            clusterName,
 				"kubeconfig":      kubeconfig,
 				"router_cpu":      "1",
@@ -302,7 +302,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":          clusterName,
 				"kubeconfig":    kubeconfig,
 				"router_cpu":    "500m",
@@ -329,7 +329,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":          clusterName,
 				"kubeconfig":    kubeconfig,
 				"router_cpu":    "500m",
@@ -356,7 +356,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			r := ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":            clusterName,
 				"kubeconfig":      kubeconfig,
 				"router_cpu":      "500m",
@@ -378,7 +378,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 
 		It("should reject invalid router CPU value", Label("C2612834"), func() {
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":          clusterName,
 				"kubeconfig":    kubeconfig,
 				"router_cpu":    "invalid-cpu",
@@ -389,7 +389,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 
 		It("should reject invalid router memory value", Label("C2612836"), func() {
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":          clusterName,
 				"kubeconfig":    kubeconfig,
 				"router_cpu":    "500m",
@@ -400,7 +400,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 
 		It("should reject invalid router replicas value", Label("C2612838"), func() {
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":            clusterName,
 				"kubeconfig":      kubeconfig,
 				"router_cpu":      "500m",
@@ -437,14 +437,12 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 
 			clusterName = "e2e-k8s-mc-edit-" + Cfg.RunID
 
-			nfsCacheYAML := fmt.Sprintf("    model_caches:\n      - name: test-cache\n        nfs:\n          server: \"%s\"\n          path: \"%s\"",
-				fakeNFSServer,
-				profile.ModelCache.NFSPath)
-
-			yaml := renderK8sClusterYAML(map[string]string{
-				"name":              clusterName,
-				"kubeconfig":        kubeconfig,
-				"model_caches_yaml": nfsCacheYAML,
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+				"model_caches": []ModelCache{
+					{Name: "test-cache", Mode: "nfs", NFSServer: fakeNFSServer, NFSPath: profile.ModelCache.NFSPath},
+				},
 			})
 
 			r := ClusterH.Apply(yaml)
@@ -467,13 +465,12 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
 			// Switch from the fake initial server to the real one from profile.
-			nfsCacheYAML := fmt.Sprintf("    model_caches:\n      - name: test-cache\n        nfs:\n          server: \"%s\"\n          path: \"%s\"",
-				profile.ModelCache.NFSServer, profile.ModelCache.NFSPath)
-
-			yaml := renderK8sClusterYAML(map[string]string{
-				"name":              clusterName,
-				"kubeconfig":        kubeconfig,
-				"model_caches_yaml": nfsCacheYAML,
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+				"model_caches": []ModelCache{
+					{Name: "test-cache", Mode: "nfs", NFSServer: profile.ModelCache.NFSServer, NFSPath: profile.ModelCache.NFSPath},
+				},
 			})
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
@@ -493,13 +490,12 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
-			nfsCacheYAML := fmt.Sprintf("    model_caches:\n      - name: test-cache\n        nfs:\n          server: \"%s\"\n          path: \"%s/subdir\"",
-				profile.ModelCache.NFSServer, profile.ModelCache.NFSPath)
-
-			yaml := renderK8sClusterYAML(map[string]string{
-				"name":              clusterName,
-				"kubeconfig":        kubeconfig,
-				"model_caches_yaml": nfsCacheYAML,
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+				"model_caches": []ModelCache{
+					{Name: "test-cache", Mode: "nfs", NFSServer: profile.ModelCache.NFSServer, NFSPath: profile.ModelCache.NFSPath + "/subdir"},
+				},
 			})
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
@@ -516,12 +512,12 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
-			hostPathYAML := "    model_caches:\n      - name: test-cache\n        host_path:\n          path: /opt/neutree/model-cache-test"
-
-			yaml := renderK8sClusterYAML(map[string]string{
-				"name":              clusterName,
-				"kubeconfig":        kubeconfig,
-				"model_caches_yaml": hostPathYAML,
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+				"model_caches": []ModelCache{
+					{Name: "test-cache", Mode: "host_path", HostPath: "/opt/neutree/model-cache-test"},
+				},
 			})
 			r = ClusterH.Apply(yaml)
 			ExpectSuccess(r)
@@ -538,7 +534,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":       clusterName,
 				"kubeconfig": kubeconfig,
 			})
@@ -567,12 +563,12 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 
 			clusterName = "e2e-k8s-mc-pvc-" + Cfg.RunID
 
-			pvcYAML := fmt.Sprintf("    model_caches:\n      - name: test-pvc-cache\n        pvc:\n          storageClassName: \"%s\"\n          resources:\n            requests:\n              storage: 10Gi", profile.ModelCache.PVCStorageClass)
-
-			yaml := renderK8sClusterYAML(map[string]string{
-				"name":              clusterName,
-				"kubeconfig":        kubeconfig,
-				"model_caches_yaml": pvcYAML,
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":       clusterName,
+				"kubeconfig": kubeconfig,
+				"model_caches": []ModelCache{
+					{Name: "test-pvc-cache", Mode: "pvc", PVCStorageClass: profile.ModelCache.PVCStorageClass, PVCStorage: "10Gi"},
+				},
 			})
 
 			r := ClusterH.Apply(yaml)
@@ -637,7 +633,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 			oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":       clusterName,
 				"kubeconfig": kubeconfig,
 			})
@@ -662,7 +658,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			clusterName := "e2e-k8s-badcfg-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
 
-			yaml := renderK8sClusterYAML(map[string]string{
+			yaml := renderK8sClusterYAML(map[string]any{
 				"name":       clusterName,
 				"kubeconfig": base64.StdEncoding.EncodeToString([]byte("invalid-kubeconfig-yaml")),
 			})

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Role
+metadata:
+  name: {{ .E2E_ROLE_NAME }}
+  workspace: {{ .E2E_WORKSPACE }}
+spec:
+  permissions:
+{{- range .E2E_ROLE_PERMISSIONS }}
+    - "{{ . }}"
+{{- end }}
