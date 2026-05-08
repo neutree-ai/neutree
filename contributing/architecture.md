@@ -1,16 +1,16 @@
 # Architecture
 
-> Neutree's static architecture: tech stack, directory layout, deployment modes, and resource model. This is the "map" — for testing, standards, invariants, or playbooks see the sibling files in `contributing/`.
+> Neutree's static architecture: tech stack, directory layout, deployment modes, and resource model. This is the "map" — for testing, standards, database rules, or playbooks see the sibling files in `contributing/`.
 
 ## Tech Stack
 
-- **Language**: Go 1.23
+- **Language**: Go
 - **HTTP framework**: Gin
-- **Database**: PostgreSQL 15 + PostgREST
+- **Database**: PostgreSQL + PostgREST
 - **Auth**: Supabase GoTrue (JWT / OAuth)
 - **CLI**: Cobra
 - **Controller framework**: controller-runtime (used by `neutree-core`)
-- **Cluster management**: native Kubernetes 1.26+ (K8s mode) / Ray over SSH (static-node mode)
+- **Cluster management**: native Kubernetes (K8s mode) / Ray over SSH (static-node mode)
 - **Endpoint orchestration**: Kubernetes Deployment (K8s mode) / Ray Application (static-node mode)
 - **API gateway**: Kong
 - **Observability**: VictoriaMetrics, Grafana, Vector
@@ -25,10 +25,7 @@ cmd/
 
 api/v1/                 # Core API type definitions (pure types; must not import internal/ or controllers/)
 
-controllers/            # 12 Kubernetes-style resource controllers (+ base_controller.go)
-                        # cluster, endpoint, external_endpoint, engine, image_registry,
-                        # model_registry, model_catalog, workspace, role, role_assignment,
-                        # api_key, user_profile
+controllers/            # Kubernetes-style resource controllers (one per resource type, + base_controller.go)
 
 internal/
   orchestrator/         # Endpoint orchestration (K8s Deployment / Ray Application)
@@ -89,7 +86,7 @@ scripts/
   dashboard/            # Grafana dashboard sync
 
 docs/                   # Product / feature design docs (public)
-contributing/           # Engineering how-to (this file + testing / coding-standards / invariants / database / playbooks)
+contributing/           # Engineering how-to (this file + testing / coding-standards / database / playbooks)
 ```
 
 ## Layered Architecture
@@ -142,7 +139,7 @@ make e2e-test           # E2E (requires NEUTREE_SERVER_URL + NEUTREE_API_KEY)
 make lint               # golangci-lint (see contributing/coding-standards.md)
 make fmt                # go fmt
 make vet                # go vet
-make mockgen            # Regenerate mocks (mockery v2.53.3)
+make mockgen            # Regenerate mocks (mockery)
 
 # Release
 make release            # Binaries + Helm chart
@@ -180,7 +177,7 @@ Two control-plane processes connect directly to PostgREST; they do not call each
 ```
 HTTP CRUD path:    Client (UI/CLI) → neutree-api → PostgREST ⇄ PostgreSQL
 
-Reconcile path:    neutree-core (12 controllers) ⇄ PostgREST ⇄ PostgreSQL
+Reconcile path:    neutree-core (controllers) ⇄ PostgREST ⇄ PostgreSQL
                                         ↓
                            Orchestrators (K8s / Ray-SSH)
                                         ↓
