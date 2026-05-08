@@ -115,12 +115,11 @@ Every step is required — a missed wiring step usually produces a resource that
     - **Only if the resource sits on the inference request path** (current set: `endpoint`, `external_endpoint`, `api_key`). For everything else, skip this step.
     - If a new Kong plugin is needed: `gateway/kong/plugins/<plugin>/`.
 
-11. **CLI commands:** every verb subcommand needs a branch for the new resource.
+11. **CLI commands:** every resource-aware verb subcommand needs a branch for the new resource.
     - `cmd/neutree-cli/app/cmd/apply/apply.go`
     - `cmd/neutree-cli/app/cmd/get/get.go`
     - `cmd/neutree-cli/app/cmd/delete/delete.go`
     - `cmd/neutree-cli/app/cmd/wait/wait.go`
-    - `cmd/neutree-cli/app/cmd/cleanup/` if the resource is e2e-managed.
     - "Add CLI commands" as one bullet has historically led to half-wired CLIs (resource visible to `apply` but not `get`).
 
 12. **E2E coverage:** `tests/e2e/<resource>_test.go` with an independent Ginkgo label so the suite can target it. See [`testing.md#e2e`](testing.md) for label conventions and the `endpoint && lifecycle` timeout caveat.
