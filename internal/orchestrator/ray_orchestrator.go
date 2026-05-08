@@ -594,7 +594,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
-	setVLLMDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
+	setDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
 
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
@@ -646,10 +646,18 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	return app, nil
 }
 
-// setVLLMDefaultTensorParallelSize auto-sets tensor_parallel_size = GPU count in engine_args
-// for vLLM engine when GPU > 1 and is a whole number. Skips if user already configured it.
-func setVLLMDefaultTensorParallelSize(endpoint *v1.Endpoint, app *dashboard.RayServeApplication, numGPUs float64) {
-	if endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != v1.EngineNameVLLM {
+// setDefaultTensorParallelSize auto-sets the tensor-parallel field in
+// engine_args to GPU count when GPU > 1 and is a whole number. Skips if the
+// engine doesn't take a TP arg or if the user already configured it (in
+// either underscore or kebab form — users sometimes copy CLI flag names
+// verbatim).
+func setDefaultTensorParallelSize(endpoint *v1.Endpoint, app *dashboard.RayServeApplication, numGPUs float64) {
+	if endpoint.Spec.Engine == nil {
+		return
+	}
+
+	tpKey := engineTPArgKey(endpoint.Spec.Engine.Engine)
+	if tpKey == "" {
 		return
 	}
 
@@ -662,10 +670,17 @@ func setVLLMDefaultTensorParallelSize(endpoint *v1.Endpoint, app *dashboard.RayS
 		engineArgs = make(map[string]interface{})
 	}
 
-	if _, exists := engineArgs["tensor_parallel_size"]; !exists {
-		engineArgs["tensor_parallel_size"] = int(numGPUs)
-		app.Args["engine_args"] = engineArgs
+	if _, hasUnderscore := engineArgs[tpKey]; hasUnderscore {
+		return
 	}
+
+	dashKey := strings.ReplaceAll(tpKey, "_", "-")
+	if _, hasDash := engineArgs[dashKey]; hasDash {
+		return
+	}
+
+	engineArgs[tpKey] = int(numGPUs)
+	app.Args["engine_args"] = engineArgs
 }
 
 // buildEngineContainerConfigs constructs two runtime_env.container configs for

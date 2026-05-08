@@ -9,7 +9,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const defaultModelVersion = "latest"
+const (
+	defaultModelVersion = "latest"
+	// defaultEngineName is the engine looked up by helpers that don't take an
+	// explicit engine name (renderEndpoint default, profileEngineVersion, etc.).
+	// Tests that target a different engine pass it via withEngine(name, version).
+	defaultEngineName = "vllm"
+)
+
+// EngineProfile carries per-engine configuration loaded from the test profile
+// under engines.<name>.
+type EngineProfile struct {
+	Version    string `yaml:"version"`
+	OldVersion string `yaml:"old_version"`
+	// EngineArgs is a comma-separated `k=v` list that engineArgsYAML expands
+	// into a YAML snippet under spec.variables.engine_args. Empty (or missing)
+	// means rely on the engine's built-in defaults.
+	EngineArgs string `yaml:"engine_args"`
+}
 
 // Profile represents the test-infra standard profile format (snake_case).
 type Profile struct {
@@ -56,11 +73,13 @@ type Profile struct {
 		OldVersion string `yaml:"old_version"`
 	} `yaml:"cluster"`
 
-	Engine struct {
-		Name       string `yaml:"name"`
-		Version    string `yaml:"version"`
-		OldVersion string `yaml:"old_version"`
-	} `yaml:"engine"`
+	// Engines holds per-engine configuration keyed by engine name (e.g. "vllm",
+	// "sglang", "llama-cpp"). The default engine for tests that don't pass an
+	// explicit withEngine option is "vllm" (see defaultEngineName below). Each
+	// entry carries its own version, optional old_version (for multi-version
+	// isolation tests), and engine_args, so adding a new engine is one yaml
+	// block — no Go struct change required.
+	Engines map[string]EngineProfile `yaml:"engines"`
 
 	Model struct {
 		Name    string `yaml:"name"`
@@ -80,8 +99,7 @@ type Profile struct {
 	} `yaml:"rerank_model"`
 
 	Endpoint struct {
-		EngineArgs string `yaml:"engine_args"`
-		Timeout    string `yaml:"timeout"`
+		Timeout string `yaml:"timeout"`
 	} `yaml:"endpoint"`
 
 	MockUpstreamHost string `yaml:"mock_upstream_host"`
@@ -265,28 +283,44 @@ func profileClusterVersion() string {
 	return "v1.0.1"
 }
 
-func profileEngineName() string {
-	if profile.Engine.Name != "" {
-		return profile.Engine.Name
-	}
+// profileEngineName returns the implicit-default engine name. With the
+// per-engine profile shape (engines.<name>) the selector concept is gone;
+// tests that target a specific engine pass it via withEngine(name, ...).
+func profileEngineName() string { return defaultEngineName }
 
-	return "vllm"
-}
+// profileEngineVersion returns the version for the default engine. Tests that
+// target a different engine should call profileEngineVersionFor(name) or pass
+// the version explicitly via withEngine(name, version).
+func profileEngineVersion() string { return profileEngineVersionFor(defaultEngineName) }
 
-func profileEngineVersion() string {
-	if profile.Engine.Version != "" {
-		return profile.Engine.Version
-	}
-
-	return "v0.11.2"
-}
-
+// profileEngineOldVersion returns the old-version for the default engine,
+// used by the multi-version isolation test on vLLM.
 func profileEngineOldVersion() string {
-	if profile.Engine.OldVersion != "" {
-		return profile.Engine.OldVersion
+	v := profile.Engines[defaultEngineName].OldVersion
+	if v != "" {
+		return v
 	}
 
 	return "v0.8.5"
+}
+
+// profileEngineVersionFor returns the configured version for the named engine,
+// falling back to a per-engine baked-in default when the profile entry is empty.
+func profileEngineVersionFor(name string) string {
+	if v := profile.Engines[name].Version; v != "" {
+		return v
+	}
+
+	switch name {
+	case "vllm":
+		return "v0.11.2"
+	case "sglang":
+		return "v0.5.10"
+	case "llama-cpp":
+		return "v0.3.7"
+	}
+
+	return ""
 }
 
 func profileModelName() string { return profile.Model.Name }
@@ -307,12 +341,21 @@ func profileModelTask() string {
 	return "text-generation"
 }
 
-func profileEngineArgs() string {
-	if profile.Endpoint.EngineArgs != "" {
-		return profile.Endpoint.EngineArgs
+// profileEngineArgsFor returns the comma-separated engine_args string
+// configured for the named engine. Falls back to vLLM's permissive defaults
+// for the default engine (so existing vLLM tests keep working without a
+// profile change) and to empty for other engines (let the engine apply its
+// own built-in defaults).
+func profileEngineArgsFor(name string) string {
+	if v := profile.Engines[name].EngineArgs; v != "" {
+		return v
 	}
 
-	return "dtype=half,gpu_memory_utilization=0.85"
+	if name == defaultEngineName {
+		return "dtype=half,gpu_memory_utilization=0.85"
+	}
+
+	return ""
 }
 
 func profileEndpointTimeout() string {

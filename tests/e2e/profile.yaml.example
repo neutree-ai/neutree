@@ -38,11 +38,22 @@ cluster:
   # old_version: for upgrade tests — the version to create before upgrading to cluster.version
   old_version: ""
 
-engine:
-  name: vllm
-  version: v0.11.2
-  # old_version: for multi-version isolation tests only
-  old_version: v0.8.5
+# Per-engine configuration. Default engine for tests that don't pass an
+# explicit withEngine() option is "vllm". Tests that target a specific engine
+# (e.g. SGLang K8s suite uses withEngine("sglang", "v0.5.10")) pull from the
+# corresponding entry below. Empty / missing entries fall back to baked-in
+# defaults inside profile.go.
+engines:
+  vllm:
+    version: v0.11.2
+    old_version: v0.8.5            # multi-version isolation test (vLLM only)
+    engine_args: "dtype=half,gpu_memory_utilization=0.85"
+  sglang:
+    version: v0.5.10
+    engine_args: ""                # empty → SGLang uses its built-in defaults
+  llama-cpp:
+    version: v0.3.7
+    engine_args: ""
 
 model:
   name: test-model
@@ -62,7 +73,7 @@ rerank_model:
 
 endpoint:
   # accelerator_type and accelerator_product are auto-detected from cluster status
-  engine_args: "dtype=half,gpu_memory_utilization=0.85"
+  # engine_args has moved into engines.<name>.engine_args (see top of file).
   timeout: "10m"
 
 mock_upstream_host: host.docker.internal

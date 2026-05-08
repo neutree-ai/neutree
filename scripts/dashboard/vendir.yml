@@ -15,3 +15,12 @@ directories:
       url: https://github.com/vllm-project/vllm.git
       ref: v0.8.5
     newRootPath: examples/online_serving/prometheus_grafana
+- path: sglang-upstream
+  contents:
+  - path: .
+    git:
+      url: https://github.com/sgl-project/sglang.git
+      ref: v0.5.10
+    newRootPath: examples/monitoring/grafana/dashboards/json
+    includePaths:
+    - sglang-dashboard.json

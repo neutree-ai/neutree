@@ -1854,7 +1854,7 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 	}
 }
 
-func TestEndpointToApplication_VLLMTensorParallelSize(t *testing.T) {
+func TestEndpointToApplication_TensorParallelSize(t *testing.T) {
 	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
 
 	modelRegistry := &v1.ModelRegistry{
@@ -1864,7 +1864,7 @@ func TestEndpointToApplication_VLLMTensorParallelSize(t *testing.T) {
 	}
 	deployedCluster := &v1.Cluster{}
 
-	makeEndpoint := func(gpu string, variables map[string]interface{}) *v1.Endpoint {
+	makeEndpoint := func(engineName, engineVersion, gpu string, variables map[string]interface{}) *v1.Endpoint {
 		ep := &v1.Endpoint{
 			Metadata: &v1.Metadata{
 				Workspace: "test",
@@ -1872,8 +1872,8 @@ func TestEndpointToApplication_VLLMTensorParallelSize(t *testing.T) {
 			},
 			Spec: &v1.EndpointSpec{
 				Engine: &v1.EndpointEngineSpec{
-					Engine:  "vllm",
-					Version: "v0.11.2",
+					Engine:  engineName,
+					Version: engineVersion,
 				},
 				Resources: &v1.ResourceSpec{
 					GPU: &gpu,
@@ -1893,43 +1893,144 @@ func TestEndpointToApplication_VLLMTensorParallelSize(t *testing.T) {
 
 	tests := []struct {
 		name                    string
+		engineName              string
+		engineVersion           string
+		tpKey                   string
 		gpu                     string
 		variables               map[string]interface{}
 		expectedTensorParallel  interface{}
 		expectEngineArgsPresent bool
 	}{
+		// vLLM cases
 		{
-			name:                    "GPU=4 should auto-set tensor_parallel_size=4",
+			name:                    "vllm GPU=4 should auto-set tensor_parallel_size=4",
+			engineName:              v1.EngineNameVLLM,
+			engineVersion:           "v0.11.2",
+			tpKey:                   "tensor_parallel_size",
 			gpu:                     "4",
 			variables:               nil,
 			expectedTensorParallel:  4,
 			expectEngineArgsPresent: true,
 		},
 		{
-			name:                    "GPU=2 should auto-set tensor_parallel_size=2",
+			name:                    "vllm GPU=2 should auto-set tensor_parallel_size=2",
+			engineName:              v1.EngineNameVLLM,
+			engineVersion:           "v0.11.2",
+			tpKey:                   "tensor_parallel_size",
 			gpu:                     "2",
 			variables:               nil,
 			expectedTensorParallel:  2,
 			expectEngineArgsPresent: true,
 		},
 		{
-			name:                    "GPU=1 should not set tensor_parallel_size",
+			name:                    "vllm GPU=1 should not set tensor_parallel_size",
+			engineName:              v1.EngineNameVLLM,
+			engineVersion:           "v0.11.2",
+			tpKey:                   "tensor_parallel_size",
 			gpu:                     "1",
 			variables:               nil,
 			expectEngineArgsPresent: false,
 		},
 		{
-			name:                    "fractional GPU should not set tensor_parallel_size",
+			name:                    "vllm fractional GPU should not set tensor_parallel_size",
+			engineName:              v1.EngineNameVLLM,
+			engineVersion:           "v0.11.2",
+			tpKey:                   "tensor_parallel_size",
 			gpu:                     "2.5",
 			variables:               nil,
 			expectEngineArgsPresent: false,
 		},
 		{
-			name: "user-provided tensor_parallel_size should not be overridden",
-			gpu:  "4",
+			name:          "vllm user-provided tensor_parallel_size should not be overridden",
+			engineName:    v1.EngineNameVLLM,
+			engineVersion: "v0.11.2",
+			tpKey:         "tensor_parallel_size",
+			gpu:           "4",
 			variables: map[string]interface{}{
 				"engine_args": map[string]interface{}{
 					"tensor_parallel_size": 2,
+				},
+			},
+			expectedTensorParallel:  2,
+			expectEngineArgsPresent: true,
+		},
+		// SGLang cases — ServerArgs dataclass field is `tp_size` (not vLLM's
+		// `tensor_parallel_size`), see engineTPArgKey in ray_orchestrator.go.
+		{
+			name:                    "sglang GPU=4 should auto-set tp_size=4",
+			engineName:              v1.EngineNameSGLang,
+			engineVersion:           "v0.5.10",
+			tpKey:                   "tp_size",
+			gpu:                     "4",
+			variables:               nil,
+			expectedTensorParallel:  4,
+			expectEngineArgsPresent: true,
+		},
+		{
+			name:                    "sglang GPU=2 should auto-set tp_size=2",
+			engineName:              v1.EngineNameSGLang,
+			engineVersion:           "v0.5.10",
+			tpKey:                   "tp_size",
+			gpu:                     "2",
+			variables:               nil,
+			expectedTensorParallel:  2,
+			expectEngineArgsPresent: true,
+		},
+		{
+			name:                    "sglang GPU=1 should not set tp_size",
+			engineName:              v1.EngineNameSGLang,
+			engineVersion:           "v0.5.10",
+			tpKey:                   "tp_size",
+			gpu:                     "1",
+			variables:               nil,
+			expectEngineArgsPresent: false,
+		},
+		{
+			name:                    "sglang fractional GPU should not set tp_size",
+			engineName:              v1.EngineNameSGLang,
+			engineVersion:           "v0.5.10",
+			tpKey:                   "tp_size",
+			gpu:                     "2.5",
+			variables:               nil,
+			expectEngineArgsPresent: false,
+		},
+		{
+			name:          "sglang user-provided tp_size should not be overridden",
+			engineName:    v1.EngineNameSGLang,
+			engineVersion: "v0.5.10",
+			tpKey:         "tp_size",
+			gpu:           "4",
+			variables: map[string]interface{}{
+				"engine_args": map[string]interface{}{
+					"tp_size": 2,
+				},
+			},
+			expectedTensorParallel:  2,
+			expectEngineArgsPresent: true,
+		},
+		{
+			name:          "vllm user-provided kebab tensor-parallel-size should not be overridden",
+			engineName:    v1.EngineNameVLLM,
+			engineVersion: "v0.11.2",
+			tpKey:         "tensor-parallel-size",
+			gpu:           "4",
+			variables: map[string]interface{}{
+				"engine_args": map[string]interface{}{
+					"tensor-parallel-size": 2,
+				},
+			},
+			expectedTensorParallel:  2,
+			expectEngineArgsPresent: true,
+		},
+		{
+			name:          "sglang user-provided kebab tp-size should not be overridden",
+			engineName:    v1.EngineNameSGLang,
+			engineVersion: "v0.5.10",
+			tpKey:         "tp-size",
+			gpu:           "4",
+			variables: map[string]interface{}{
+				"engine_args": map[string]interface{}{
+					"tp-size": 2,
 				},
 			},
 			expectedTensorParallel:  2,
@@ -1943,17 +2044,18 @@ func TestEndpointToApplication_VLLMTensorParallelSize(t *testing.T) {
 			mgr.EXPECT().GetConverter(nvidiaGPU).
 				Return(plugin.NewGPUConverter(), true)
 
-			app, err := EndpointToApplication(makeEndpoint(tt.gpu, tt.variables), deployedCluster, modelRegistry, nil, nil, mgr)
+			app, err := EndpointToApplication(makeEndpoint(tt.engineName, tt.engineVersion, tt.gpu, tt.variables),
+				deployedCluster, modelRegistry, nil, nil, mgr)
 			assert.NoError(t, err)
 
 			engineArgs, hasEngineArgs := app.Args["engine_args"].(map[string]interface{})
 			if tt.expectEngineArgsPresent {
 				assert.True(t, hasEngineArgs, "engine_args should be present")
-				assert.Equal(t, tt.expectedTensorParallel, engineArgs["tensor_parallel_size"])
+				assert.Equal(t, tt.expectedTensorParallel, engineArgs[tt.tpKey])
 			} else {
 				if hasEngineArgs {
-					_, hasTensorParallel := engineArgs["tensor_parallel_size"]
-					assert.False(t, hasTensorParallel, "tensor_parallel_size should not be set")
+					_, hasTensorParallel := engineArgs[tt.tpKey]
+					assert.False(t, hasTensorParallel, "%s should not be set", tt.tpKey)
 				}
 			}
 		})

@@ -1521,6 +1521,114 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 			},
 			expectedArgs: map[string]interface{}{},
 		},
+		{
+			name: "sglang engine with GPU > 1 should auto-set tp_size",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("4"),
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"tp_size": 4,
+			},
+		},
+		{
+			name: "sglang engine with GPU <= 1 should not set tp_size",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("1"),
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{},
+		},
+		{
+			name: "sglang engine fractional GPU should not set tp_size",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("2.5"),
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{},
+		},
+		{
+			name: "sglang engine user-provided kebab tp-size prevents default",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("4"),
+					},
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"tp-size": "2",
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"tp-size": "2",
+			},
+		},
+		{
+			name: "sglang engine user-provided underscore key prevents default",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("4"),
+					},
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"tp_size": "1",
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"tp_size": "1",
+			},
+		},
+		{
+			name: "sglang engine with nil resources should not set tp_size",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{},
+			},
+			expectedArgs: map[string]interface{}{},
+		},
 	}
 
 	for _, tt := range tests {

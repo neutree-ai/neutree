@@ -500,4 +500,79 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 			Expect(code).To(Equal(200), "inference failed: %s", body)
 		})
 	})
+
+	// --- SGLang All Schema Types ---
+	//
+	// Mirrors the vLLM "All Schema Types Engine Args" block above: deploy with
+	// a multi-type engine_args YAML, assert each value reaches the engine as
+	// a container CLI flag (kebab-case via the K8s template's `_` → `-`
+	// conversion), then exercise inference end-to-end.
+
+	Describe("SGLang All Schema Types Engine Args", Ordered, Label("config", "schema", "sglang"), func() {
+		var schemaEpName string
+
+		BeforeAll(func() {
+			schemaEpName = "e2e-ep-k8s-sglang-schema-" + Cfg.RunID
+		})
+
+		AfterAll(func() {
+			if schemaEpName != "" {
+				deleteEndpoint(schemaEpName)
+			}
+		})
+
+		It("should deploy SGLang with all schema data types", Label("C2649562"), func() {
+			yamlPath := applyEndpoint(schemaEpName, clusterName,
+				withEngine("sglang", profileEngineVersionFor("sglang")),
+				withEngineArgs(allSchemaTypesEngineArgsSGLang()))
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(schemaEpName)
+
+			ep := getEndpoint(schemaEpName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
+		})
+
+		It("should have all engine_args as container CLI flags", func() {
+			ctx := context.Background()
+			d, err := k8sH.GetDeployment(ctx, namespace, schemaEpName)
+			Expect(err).NotTo(HaveOccurred(), "should find endpoint deployment %s", schemaEpName)
+
+			found := false
+
+			for _, c := range d.Spec.Template.Spec.Containers {
+				if c.Name != v1.EngineNameSGLang {
+					continue
+				}
+
+				allArgs := append(c.Command, c.Args...)
+				argsStr := strings.Join(allArgs, " ")
+
+				// SGLang's K8s template converts underscore engine_args keys to
+				// kebab-case CLI flags (sprig replace "_" "-"); assert kebab.
+				Expect(argsStr).To(ContainSubstring("--tp-size"), "integer")
+				Expect(argsStr).To(ContainSubstring("--mem-fraction-static"), "number/float")
+				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean")
+				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
+				Expect(argsStr).To(ContainSubstring("--chunked-prefill-size"), "integer")
+				Expect(argsStr).To(ContainSubstring("--served-model-name"), "string")
+				Expect(argsStr).To(ContainSubstring("--attention-backend"), "string enum")
+				Expect(argsStr).To(ContainSubstring("--cuda-graph-max-bs"), "integer")
+				Expect(argsStr).To(ContainSubstring("--preferred-sampling-params"), "object/JSON")
+				Expect(argsStr).To(ContainSubstring("--json-model-override-args"), "object/JSON")
+				found = true
+
+				break
+			}
+
+			Expect(found).To(BeTrue(), "should find sglang container in schema endpoint deployment")
+		})
+
+		It("should serve inference with all-types config", func() {
+			ep := getEndpoint(schemaEpName)
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello SGLang schema types")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(200), "inference failed: %s", body)
+		})
+	})
 })
