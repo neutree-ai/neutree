@@ -9,8 +9,8 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/model_registry/bentoml"
 	"github.com/neutree-ai/neutree/internal/nfs"
-	"github.com/neutree-ai/neutree/pkg/model_registry/bentoml"
 )
 
 func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options ListOption) []v1.GeneralModel {

@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/model_registry"
-	modelregistrymocks "github.com/neutree-ai/neutree/pkg/model_registry/mocks"
+	"github.com/neutree-ai/neutree/internal/model_registry"
+	modelregistrymocks "github.com/neutree-ai/neutree/internal/model_registry/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
