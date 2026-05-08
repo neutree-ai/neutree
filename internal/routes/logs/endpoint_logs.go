@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,7 +57,15 @@ type LogInfo struct {
 	DownloadURL string `json:"download_url"`
 }
 
-// RayApplicationsResponse represents Ray Dashboard API response structure
+// RayApplicationsResponse represents Ray Dashboard API response structure.
+//
+// TODO(NEU-423 follow-up): these RayApplicationsResponse / RayApplication /
+// RayDeployment / RayReplica types and the inline httpClient.Get for
+// /api/serve/applications/ predate the rule that "Ray dashboard API types
+// and calls live in internal/ray/dashboard/". The new failed-actor lookup
+// follows the rule (see internal/ray/dashboard/actors.go); migrating these
+// older types is out of scope for the bug fix and tracked separately to
+// keep the change minimal.
 type RayApplicationsResponse struct {
 	Applications map[string]RayApplication `json:"applications"`
 }
@@ -358,6 +367,10 @@ func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace
 		}
 
 		if len(replicas) == 0 {
+			// State-API fallback failure is non-fatal here: log-sources should
+			// still return whatever live deployments exist with empty replicas.
+			// streamRayLogs takes the opposite stance and propagates the error,
+			// because a failing log stream cannot return partial output.
 			failed, err := findFailedActorForDeployment(dashboard.NewDashboardService(dashboardURL), appName, deploymentName)
 			if err != nil {
 				klog.Warningf("failed to look up DEAD actors for %s/%s: %v", appName, deploymentName, err)
@@ -401,6 +414,11 @@ func replicaShortIDFromActor(a *dashboard.Actor) string {
 
 // listFailedActorsForDeployment fetches DEAD actors that belong to the
 // given Ray Serve <app>:<deployment> from the dashboard state API.
+//
+// limit=100 is intentional: the goal is to give the user the most recent
+// few failures, not the full history. A deployment that has flapped more
+// than 100 times within Ray's actor-table retention window will trim the
+// oldest records, which is acceptable.
 func listFailedActorsForDeployment(svc dashboard.DashboardService, appName, deploymentName string) ([]dashboard.Actor, error) {
 	className := fmt.Sprintf("ServeReplica:%s:%s", appName, deploymentName)
 	resp, err := svc.ListActors([]dashboard.ActorFilter{
@@ -466,13 +484,25 @@ func findFailedActorByReplicaID(svc dashboard.DashboardService, appName, deploym
 // Ray Serve applications response for a DEAD actor whose name encodes
 // the requested replica_id. Returns the first match, or (nil, nil) when
 // no DEAD actor matches in any deployment.
+//
+// Deployment names are sorted before iteration so multi-deployment apps
+// (e.g. P/D, prefill+decode) get a deterministic search order. This
+// matters less today (one deployment per endpoint) but pre-empts
+// nondeterministic behavior the moment that assumption breaks.
 func lookupFailedActorAcrossDeployments(
 	svc dashboard.DashboardService,
 	appName string,
 	deployments map[string]RayDeployment,
 	replicaID string,
 ) (*dashboard.Actor, error) {
-	for deploymentName := range deployments {
+	names := make([]string, 0, len(deployments))
+	for n := range deployments {
+		names = append(names, n)
+	}
+
+	sort.Strings(names)
+
+	for _, deploymentName := range names {
 		actor, err := findFailedActorByReplicaID(svc, appName, deploymentName, replicaID)
 		if err != nil {
 			return nil, err

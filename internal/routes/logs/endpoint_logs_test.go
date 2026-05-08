@@ -1491,5 +1491,6 @@ func TestStreamRayLogs_FailedActor_NotFoundReturnsError(t *testing.T) {
 	err := streamRayLogs(c, cluster, mockHTTPClient, "default", "ep", "missing-replica", "stderr", 500)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	assert.Contains(t, err.Error(), "replica missing-replica not found",
+		"error must name the missing replica so the user can correlate it with their request")
 }
