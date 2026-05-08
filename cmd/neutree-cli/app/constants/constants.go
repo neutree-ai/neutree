@@ -1,25 +1,9 @@
+// Package constants holds CLI-only deployment-shape strings used by
+// neutree-cli launch. Cross-cutting infrastructure facts that the cluster
+// side also needs (component image versions) live in
+// internal/componentversion to keep cluster-side packages from depending
+// upward into cmd/.
 package constants
-
-// victoriametrics constants
-const (
-	VictoriaMetricsVersion        = "v1.115.0"
-	VictoriaMetricsClusterVersion = VictoriaMetricsVersion + "-cluster"
-)
-
-// grafana constants
-const (
-	GrafanaVersion = "11.5.3"
-)
-
-// vector constants
-const (
-	VectorVersion = "0.47.0-debian"
-)
-
-// kong constants
-const (
-	KongVersion = "3.9"
-)
 
 // deploy type
 const (

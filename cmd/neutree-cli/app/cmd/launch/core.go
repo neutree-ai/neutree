@@ -12,6 +12,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch/manifests"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
+	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -164,11 +165,11 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		"DbPassword":             options.dbPassword,
 		"MetricsRemoteWriteURL":  options.metricsRemoteWriteURL,
 		"GrafanaURL":             options.grafanaURL,
-		"VictoriaMetricsVersion": constants.VictoriaMetricsVersion,
+		"VictoriaMetricsVersion": componentversion.VictoriaMetrics,
 		"NeutreeVersion":         options.version,
 		"JwtToken":               *jwtToken,
-		"VectorVersion":          constants.VectorVersion,
-		"KongVersion":            constants.KongVersion,
+		"VectorVersion":          componentversion.Vector,
+		"KongVersion":            componentversion.Kong,
 		"NodeIP":                 options.nodeIP,
 		"AdminPassword":          options.adminPassword,
 	}
