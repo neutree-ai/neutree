@@ -27,7 +27,7 @@ The two trees use different conventions. Mismatching them produces a build that 
 
 3. **Add the K8s deploy template:** `internal/engine/<engine>/<version>/templates/kubernetes/default.yaml`.
    - The path must match the `//go:embed` directive you'll add in step 5 character-for-character. A typo here surfaces only at compile time of step 5.
-   - SSH mode does not consume this template — Ray Serve runs the app directly from the image. See [`architecture.md`](architecture.md) for the dual-orchestration split.
+   - SSH mode does not consume this template — Ray Serve runs the app directly from the image. See [`architecture-neutree-core.md#cluster-modes`](architecture-neutree-core.md#cluster-modes) for the dual-orchestration split.
 
 4. **Create the serve app:** `cluster-image-builder/serve/<engine>/<version>/app.py` (underscore-engine, underscore-version). The directory name must match the value `ENGINE_<NAME>_DIR_VERSION` resolves to in the Makefile — verify with `make -C cluster-image-builder docker-build-engine-<engine> ENGINE_<NAME>_VERSION=v0.X.Y -n` before committing.
 

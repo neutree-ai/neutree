@@ -1,6 +1,10 @@
 # Architecture
 
-> Neutree's static architecture: tech stack, directory layout, deployment modes, and resource model. This is the "map" — for testing, standards, database rules, or playbooks see the sibling files in `contributing/`.
+> Neutree's static architecture: cross-cutting tech stack, layout, layering, and resource model. For per-component depth (request lifecycle, reconcile loop, deploy flow) see:
+>
+> - [`architecture-neutree-api.md`](architecture-neutree-api.md) — REST API server (Gin)
+> - [`architecture-neutree-core.md`](architecture-neutree-core.md) — Control-plane controllers
+> - [`architecture-neutree-cli.md`](architecture-neutree-cli.md) — Local deployment CLI
 
 ## Tech Stack
 
@@ -18,76 +22,32 @@
 ## Project Layout
 
 ```
-cmd/
-  neutree-api/          # REST API server (Gin)
-  neutree-core/         # Control-plane controllers
-  neutree-cli/          # Local deployment CLI
-
-api/v1/                 # Core API type definitions (pure types; must not import internal/ or controllers/)
-
-controllers/            # Kubernetes-style resource controllers (one per resource type, + base_controller.go)
-
-internal/
-  orchestrator/         # Endpoint orchestration (K8s Deployment / Ray Application)
-  cluster/              # Cluster lifecycle (K8s & SSH/Ray)
-  engine/               # Inference engine management (vLLM, llama.cpp, ...)
-  gateway/              # Kong AI gateway integration
-  auth/                 # GoTrue client (login, token issue/refresh)
-  middleware/           # HTTP middlewares (JWT verification, api-key-to-JWT)
-  routes/               # API route handlers & proxies
-  accelerator/          # GPU / accelerator plugins (NVIDIA, AMD)
-  ray/                  # Ray dashboard client & helpers
-  registry/             # Image registry integration
-  observability/        # Metrics / logging config
-  cli/                  # CLI helpers shared across neutree-cli commands
-  deploy/               # Control-plane deploy/launch helpers (used by neutree-cli)
-  nfs/                  # NFS model-cache helpers
-  cron/                 # Scheduled jobs
-  semver/, util/, utils/, version/   # Small shared utilities
-
-pkg/
-  storage/              # PostgREST storage layer
-  model_registry/       # HuggingFace & file model registries
-  command_runner/       # SSH / Docker / K8s command execution
-  command/              # Command abstractions
-  client/               # External API clients
-  scheme/               # Type scheme registration
-
-db/
-  migrations/           # Up/down paired migrations (NNN_*.{up,down}.sql)
-  dbtest/               # DB integration tests (RLS, triggers)
-  seed/                 # Seed data for test / local
-  init-scripts/         # Bootstrap SQL
-  docker-compose.test.yml
-
+cmd/                    # Three components — neutree-api / neutree-core / neutree-cli (see per-component docs)
+api/v1/                 # L0 — pure resource type definitions
+controllers/            # L3 — Kubernetes-style reconcilers (one per resource type)
+internal/               # L2 — business logic
+pkg/                    # L1 — reusable utilities (consume L0 types only)
+db/                     # Migrations (paired up/down) + integration tests + seed
 tests/e2e/              # Ginkgo + Gomega E2E suite
-
-cluster-image-builder/  # Engine/runtime image build pipeline
-  serve/                # Python serve apps per engine/version (vLLM, llama.cpp)
-  accelerator/          # GPU accelerator helpers
-  Dockerfile.engine-*   # Per-engine images
-
-gateway/kong/
-  plugins/              # Kong Lua plugins (⚠️ not linted)
-
-python/neutree/
-  downloader/           # HuggingFace + local model downloaders
-
-deploy/
-  chart/                # Helm chart
-  docker/               # Docker compose
-
-observability/
-  grafana/              # Dashboards source
-  vmagent/              # VictoriaMetrics agent configs
-
-scripts/
-  builder/              # Engine package builder (build-engine-package.sh)
-  dashboard/            # Grafana dashboard sync
-
+cluster-image-builder/  # Engine/runtime image build pipeline (Python serve apps + Dockerfiles)
+gateway/kong/plugins/   # Kong Lua plugins (⚠️ not linted)
+python/neutree/         # Python model downloaders
+deploy/                 # Helm chart + Docker Compose
+observability/          # Grafana / vmagent source configs
+scripts/                # Engine package builder + dashboard sync
 docs/                   # Product / feature design docs (public)
-contributing/           # Engineering how-to (this file + testing / coding-standards / database / playbooks)
+contributing/           # Engineering how-to (this file + sibling docs)
 ```
+
+Subdirectories worth calling out (the rest are self-explanatory or rarely touched):
+
+| Path | Why |
+|------|-----|
+| `internal/orchestrator/` | Endpoint orchestration — `kubernetes_orchestrator*.go` vs `ray_orchestrator.go`. Dual-path concern; see [`architecture-neutree-core.md#cluster-modes`](architecture-neutree-core.md#cluster-modes). |
+| `internal/cluster/` | Cluster lifecycle — `kubernetes_cluster.go` vs `ray_ssh_cluster.go` + `ray_ssh_operation.go`. Same dual-path concern. |
+| `internal/routes/` | Terminal HTTP layer — see boundary rule **R5** below. |
+| `internal/accelerator/plugin/` | Vendor plugin pairs (NVIDIA / AMD); see [`architecture-neutree-core.md#vendor-plugin-pairs`](architecture-neutree-core.md#vendor-plugin-pairs). |
+| `pkg/scheme/` | Type-registration framework; exempt from the layered hierarchy. |
 
 ## Layered Architecture
 
@@ -145,31 +105,6 @@ make mockgen            # Regenerate mocks (mockery)
 make release            # Binaries + Helm chart
 ```
 
-## Controller Pattern
-
-Neutree models every resource with the Kubernetes controller pattern, using the controller-runtime framework inside `neutree-core`.
-
-- Controllers continuously reconcile **Spec** (desired state, user-written) against **Status** (observed state, controller-written).
-- **Idempotent**: controllers must be safe to run repeatedly; a second pass on the same inputs must not cause extra side effects.
-- **Soft delete**: resources are first marked with `deletion_timestamp`, the controller runs cleanup, then the row is permanently removed.
-- **Spec/Status separation**: users write only Spec; Status is owned by the controller and never mutated by clients.
-
-## Cluster Modes
-
-Two deployment topologies share the same `Cluster` resource API, selected via `spec.config`:
-
-1. **Kubernetes mode**: cluster lifecycle is delegated to the native Kubernetes control plane. Neutree installs only the inference infrastructure (router, metrics collector) in a dedicated namespace. Endpoints run as native Kubernetes Deployments. Code paths: `internal/orchestrator/kubernetes_orchestrator*.go`, `internal/cluster/kubernetes_cluster.go`.
-2. **Static-node mode**: Ray over SSH provisions the cluster (each Ray node runs inside a Docker container). Endpoints deploy as Ray Applications on top of Ray Serve. Code paths: `internal/orchestrator/ray_orchestrator.go`, `internal/cluster/ray_ssh_cluster.go` + `ray_ssh_operation.go`.
-
-Endpoint-level changes that touch one mode often need a parallel change in the other; reviewers should verify both during code review.
-
-## Vendor Plugin Pairs
-
-`internal/accelerator/plugin/gpu.go` (NVIDIA) and `internal/accelerator/plugin/amd_gpu.go` implement the same accelerator interface with vendor-specific details. A change to one must be evaluated against:
-
-- The other vendor implementation.
-- `internal/accelerator/plugin/client.go` and `plugin.go` — the shared interface layer that frequently needs updates when vendor-specific logic changes.
-
 ## Data Flow
 
 Two control-plane processes connect directly to PostgREST; they do not call each other:
@@ -187,6 +122,8 @@ Inference path:    Client → Kong Gateway → Endpoints
 ```
 
 `neutree-api` exposes CRUD over HTTP and proxies to PostgREST. `neutree-core` is an independent process that reads/writes the same PostgREST and reconciles desired state by driving the orchestrators. Inference traffic bypasses both control-plane processes and goes through Kong directly.
+
+For per-component internals (route topology, reconcile loop shape, CLI subcommand map) see the per-component docs linked at the top of this file.
 
 ## Core Resource Types
 

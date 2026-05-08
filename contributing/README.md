@@ -27,7 +27,10 @@ For everything else, open the relevant file under [Files in this Directory](#fil
 
 | File | Scope |
 |------|-------|
-| [`architecture.md`](architecture.md) | Tech stack, project layout, layered architecture, controller pattern, cluster modes (incl. dual orchestration path), vendor plugin pairs, data flow, core resource types |
+| [`architecture.md`](architecture.md) | Tech stack, project layout, layered architecture (R1–R5), data flow, core resource types — cross-cutting only |
+| [`architecture-neutree-api.md`](architecture-neutree-api.md) | neutree-api process role, route topology, authentication |
+| [`architecture-neutree-core.md`](architecture-neutree-core.md) | neutree-core process role, controller pattern (idempotent / spec-status / soft-delete), reconcile cadence, cluster modes, vendor plugin pairs |
+| [`architecture-neutree-cli.md`](architecture-neutree-cli.md) | neutree-cli process role, subcommand groups, authentication, deploy mode, engine package import |
 | [`testing.md`](testing.md) | Unit (testify + mockery), Python co-location, DB integration, E2E (Ginkgo), impl/test file pairs |
 | [`coding-standards.md`](coding-standards.md) | golangci-lint rules, import organization, commit convention, lint fix cheatsheet |
 | [`database.md`](database.md) | PostgREST + RLS model, migration rules (incl. pairing), auth token layers, common errors |
