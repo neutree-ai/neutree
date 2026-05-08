@@ -40,9 +40,16 @@ type ActorsListResult struct {
 	Result             []Actor `json:"result"`
 }
 
-// Actor mirrors Ray's ActorState schema (snake_case via
-// preserving_proto_field_name=True). DeathCause only populates when
-// detail=true is sent in the request.
+// Actor mirrors fields exposed by Ray's state API for actors. Field names
+// follow the snake_case used by Ray (preserving_proto_field_name=True).
+//
+// StartTime / EndTime come from the underlying GCS ActorTableData protobuf
+// (start_time / end_time, unix ms) — they pass through the JSON even though
+// they are not listed in the public ActorState docstring. They are required
+// to identify the most recently created actor for a Serve deployment after
+// Ray Serve has removed the failed replica from /api/serve/applications/.
+//
+// DeathCause only populates when detail=true is sent in the request.
 type Actor struct {
 	ActorID    string                 `json:"actor_id"`
 	ClassName  string                 `json:"class_name"`
@@ -50,6 +57,8 @@ type Actor struct {
 	Name       string                 `json:"name"`
 	NodeID     string                 `json:"node_id"`
 	PID        int                    `json:"pid"`
+	StartTime  int64                  `json:"start_time"`
+	EndTime    int64                  `json:"end_time"`
 	DeathCause map[string]interface{} `json:"death_cause,omitempty"`
 }
 

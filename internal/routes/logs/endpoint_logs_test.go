@@ -1284,7 +1284,7 @@ func TestGetRayLogSources_FailedActor_FallbackToDashboardActors(t *testing.T) {
 	assert.True(t, logTypes["stdout"], "failed replica should expose stdout log")
 }
 
-func TestGetRayLogSources_FailedActor_PicksHighestActorIDByLexOrder(t *testing.T) {
+func TestGetRayLogSources_FailedActor_PicksMostRecentByStartTime(t *testing.T) {
 	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
 	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
 
@@ -1306,13 +1306,16 @@ func TestGetRayLogSources_FailedActor_PicksHighestActorIDByLexOrder(t *testing.T
 		Header:     make(http.Header),
 	}, nil).Once()
 
+	// start_time comes from the GCS ActorTableData protobuf (unix ms).
+	// The mock here intentionally puts the highest actor_id on the
+	// oldest start_time to prove start_time wins over actor_id ordering.
 	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
 		Data: dashboard.ActorsResponseData{
 			Result: dashboard.ActorsListResult{
 				Result: []dashboard.Actor{
-					{ActorID: "actor-aaa", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#oldshort"},
-					{ActorID: "actor-zzz", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#newshort"},
-					{ActorID: "actor-mmm", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#midshort"},
+					{ActorID: "actor-zzz", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#oldshort", StartTime: 1000},
+					{ActorID: "actor-mmm", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#midshort", StartTime: 2000},
+					{ActorID: "actor-aaa", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#newshort", StartTime: 3000},
 				},
 			},
 		},
@@ -1324,7 +1327,47 @@ func TestGetRayLogSources_FailedActor_PicksHighestActorIDByLexOrder(t *testing.T
 	require.Len(t, resp.Deployments, 1)
 	require.Len(t, resp.Deployments[0].Replicas, 1)
 	assert.Equal(t, "newshort", resp.Deployments[0].Replicas[0].ReplicaID,
-		"should pick the actor with highest actor_id (lexicographic) which corresponds to the most recent allocation")
+		"should pick the actor with highest start_time, even when its actor_id is lexicographically lowest")
+}
+
+func TestGetRayLogSources_FailedActor_StartTimeTieBrokenByActorID(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	mockHTTPClient.On("Get", mock.Anything).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{"applications":{"default_ep":{"deployments":{"d":{"replicas":[]}}}}}`)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{
+			Result: dashboard.ActorsListResult{
+				Result: []dashboard.Actor{
+					{ActorID: "actor-aaa", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#aaa-short", StartTime: 5000},
+					{ActorID: "actor-zzz", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#zzz-short", StartTime: 5000},
+				},
+			},
+		},
+	}, nil).Once()
+
+	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "ep")
+
+	require.NoError(t, err)
+	require.Len(t, resp.Deployments[0].Replicas, 1)
+	assert.Equal(t, "zzz-short", resp.Deployments[0].Replicas[0].ReplicaID,
+		"with equal start_time, fall back to higher actor_id for deterministic output")
 }
 
 func TestGetRayLogSources_FailedActor_NoDeadActors_ReturnsEmptyReplicas(t *testing.T) {

@@ -415,9 +415,10 @@ func listFailedActorsForDeployment(svc dashboard.DashboardService, appName, depl
 	return resp.Data.Result.Result, nil
 }
 
-// findFailedActorForDeployment returns the DEAD actor with the highest
-// actor_id (lexicographic order, which approximates the most recent
-// allocation by Ray's GCS), or nil if none exist.
+// findFailedActorForDeployment returns the most recently started DEAD actor
+// for the deployment, or nil if none exist. "Most recent" is decided by
+// the actor's start_time (unix ms from GCS ActorTableData); ties fall back
+// to actor_id lexicographic order so the result is still deterministic.
 func findFailedActorForDeployment(svc dashboard.DashboardService, appName, deploymentName string) (*dashboard.Actor, error) {
 	actors, err := listFailedActorsForDeployment(svc, appName, deploymentName)
 	if err != nil {
@@ -429,8 +430,12 @@ func findFailedActorForDeployment(svc dashboard.DashboardService, appName, deplo
 	}
 
 	pick := 0
+
 	for i := 1; i < len(actors); i++ {
-		if actors[i].ActorID > actors[pick].ActorID {
+		switch {
+		case actors[i].StartTime > actors[pick].StartTime:
+			pick = i
+		case actors[i].StartTime == actors[pick].StartTime && actors[i].ActorID > actors[pick].ActorID:
 			pick = i
 		}
 	}
