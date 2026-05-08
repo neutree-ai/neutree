@@ -117,11 +117,8 @@ func neutreeAPIRequest(method, path string) ([]byte, int) {
 	req, err := http.NewRequest(method, url, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	authValue := Cfg.APIKey
-	if !strings.HasPrefix(authValue, "Bearer ") {
-		authValue = "Bearer " + authValue
-	}
-	req.Header.Set("Authorization", authValue)
+	// neutree-api accepts the raw API key; only Kong/inference endpoints expect "Bearer <key>".
+	req.Header.Set("Authorization", Cfg.APIKey)
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
