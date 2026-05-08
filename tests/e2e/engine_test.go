@@ -141,7 +141,7 @@ func parseEngineJSON(stdout string) engineJSON {
 type engineManifest struct {
 	Name           string
 	Version        string
-	Images         map[string][2]string         // accelerator -> [imageName, tag]
+	Images         map[string][2]string // accelerator -> [imageName, tag]
 	ValuesSchema   map[string]any
 	DeployTemplate map[string]map[string]string // clusterType -> mode -> content
 	SupportedTasks []string
@@ -153,11 +153,11 @@ type engineManifest struct {
 func buildEnginePackage(m engineManifest) string {
 	// Build manifest YAML as nested maps for json/yaml marshal.
 	type imageEntry struct {
-		accel    string
-		name     string
-		tag      string
-		tarFile  string
-		tarData  []byte
+		accel   string
+		name    string
+		tag     string
+		tarFile string
+		tarData []byte
 	}
 
 	var images []imageEntry
@@ -961,4 +961,3 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 	})
 })
-

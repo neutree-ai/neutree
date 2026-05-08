@@ -23,13 +23,13 @@ func (f *fakeObject) GetLabels() map[string]string      { return nil }
 func (f *fakeObject) SetLabels(map[string]string)       {}
 func (f *fakeObject) GetAnnotations() map[string]string { return nil }
 func (f *fakeObject) SetAnnotations(map[string]string)  {}
-func (f *fakeObject) GetCreationTimestamp() string       { return "" }
-func (f *fakeObject) GetUpdateTimestamp() string         { return "" }
-func (f *fakeObject) GetDeletionTimestamp() string       { return "" }
-func (f *fakeObject) GetMetadata() any           { return nil }
-func (f *fakeObject) GetSpec() any               { return nil }
-func (f *fakeObject) GetStatus() any             { return nil }
-func (f *fakeObject) GetID() string                      { return "" }
+func (f *fakeObject) GetCreationTimestamp() string      { return "" }
+func (f *fakeObject) GetUpdateTimestamp() string        { return "" }
+func (f *fakeObject) GetDeletionTimestamp() string      { return "" }
+func (f *fakeObject) GetMetadata() any                  { return nil }
+func (f *fakeObject) GetSpec() any                      { return nil }
+func (f *fakeObject) GetStatus() any                    { return nil }
+func (f *fakeObject) GetID() string                     { return "" }
 
 func TestPriorityOf(t *testing.T) {
 	tests := []struct {

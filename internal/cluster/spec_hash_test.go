@@ -99,8 +99,8 @@ func TestComputeClusterSpecHash_SpecChangeProducesDifferentHash(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		mutate  func(s *v1.ClusterSpec)
+		name   string
+		mutate func(s *v1.ClusterSpec)
 	}{
 		{
 			name: "version change",

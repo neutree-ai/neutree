@@ -428,4 +428,3 @@ func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k
 		}
 	}
 }
-

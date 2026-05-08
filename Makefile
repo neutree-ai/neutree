@@ -67,6 +67,13 @@ help: ## Display this help.
 
 all: build
 
+.PHONY: install-hooks
+install-hooks: ## Enable .githooks as local git hooks (run once per clone)
+	git config core.hooksPath .githooks
+	chmod +x .githooks/pre-commit
+	chmod +x scripts/check-boundaries.sh scripts/check-migration-pairs.sh
+	@echo "Git hooks installed. Pre-commit will run on every 'git commit'."
+
 build: test build-neutree-core build-neutree-cli build-neutree-api
 
 build-neutree-core:
