@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -60,18 +58,12 @@ type LogInfo struct {
 // RayApplicationsResponse represents Ray Dashboard API response structure.
 //
 // TODO: Ray dashboard API types and calls belong in `internal/ray/dashboard/`,
-// not in the routes layer. The following items here violate that and should
-// move:
-//   - Types: RayApplicationsResponse, RayApplication, RayDeployment, RayReplica
-//   - Inline `httpClient.Get("/api/serve/applications/")` in getRayLogSources
-//     and streamRayLogs (should go through `dashboard.Client.doRequest`)
-//   - Ray-domain helpers (Ray Serve naming + DEAD-actor ranking, no
-//     routes-layer concerns): extractReplicaShortID, replicaShortIDFromActor,
-//     listFailedActorsForDeployment, findFailedActorForDeployment,
-//     findFailedActorByReplicaID, lookupFailedActorAcrossDeployments
-//
-// buildFailedReplicaInfo stays in this file: it constructs the public API
-// response shape (ReplicaInfo), which is a routes-layer concern.
+// not in the routes layer. These types (RayApplicationsResponse,
+// RayApplication, RayDeployment, RayReplica) and the inline
+// `httpClient.Get("/api/serve/applications/")` calls in getRayLogSources
+// and streamRayLogs should be replaced with a typed
+// `dashboard.GetServeApplicationsForLogs` (or equivalent) so callers go
+// through `dashboard.Client.doRequest` instead of hand-rolled HTTP.
 type RayApplicationsResponse struct {
 	Applications map[string]RayApplication `json:"applications"`
 }
@@ -377,11 +369,11 @@ func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace
 			// still return whatever live deployments exist with empty replicas.
 			// streamRayLogs takes the opposite stance and propagates the error,
 			// because a failing log stream cannot return partial output.
-			failed, err := findFailedActorForDeployment(dashboard.NewDashboardService(dashboardURL), appName, deploymentName)
+			failed, err := dashboard.FindFailedActorForDeployment(dashboard.NewDashboardService(dashboardURL), appName, deploymentName)
 			if err != nil {
 				klog.Warningf("failed to look up DEAD actors for %s/%s: %v", appName, deploymentName, err)
 			} else if failed != nil {
-				replicas = append(replicas, buildFailedReplicaInfo(workspace, endpointName, replicaShortIDFromActor(failed)))
+				replicas = append(replicas, buildFailedReplicaInfo(workspace, endpointName, dashboard.ReplicaShortIDFromActor(failed)))
 			}
 		}
 
@@ -392,144 +384,6 @@ func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace
 	}
 
 	return response, nil
-}
-
-// extractReplicaShortID parses a Ray Serve actor name of the form
-// "SERVE_REPLICA::<app>#<deployment>#<short_id>" and returns short_id.
-// Returns "" if the name does not have at least one '#' separator or
-// ends with one.
-func extractReplicaShortID(actorName string) string {
-	idx := strings.LastIndex(actorName, "#")
-	if idx < 0 || idx+1 >= len(actorName) {
-		return ""
-	}
-
-	return actorName[idx+1:]
-}
-
-// replicaShortIDFromActor returns the short_id parsed from actor.Name,
-// falling back to actor_id when the name does not match the Ray Serve
-// convention.
-func replicaShortIDFromActor(a *dashboard.Actor) string {
-	if id := extractReplicaShortID(a.Name); id != "" {
-		return id
-	}
-
-	return a.ActorID
-}
-
-// listFailedActorsForDeployment fetches DEAD actors that belong to the
-// given Ray Serve <app>:<deployment> from the dashboard state API.
-//
-// limit=100 is intentional: the goal is to give the user the most recent
-// few failures, not the full history. A deployment that has flapped more
-// than 100 times within Ray's actor-table retention window will trim the
-// oldest records, which is acceptable.
-func listFailedActorsForDeployment(svc dashboard.DashboardService, appName, deploymentName string) ([]dashboard.Actor, error) {
-	className := fmt.Sprintf("ServeReplica:%s:%s", appName, deploymentName)
-	resp, err := svc.ListActors([]dashboard.ActorFilter{
-		{Key: "class_name", Predicate: "=", Value: className},
-		{Key: "state", Predicate: "=", Value: "DEAD"},
-	}, true, 100)
-
-	if err != nil {
-		return nil, fmt.Errorf("list actors %s: %w", className, err)
-	}
-
-	return resp.Data.Result.Result, nil
-}
-
-// findFailedActorForDeployment returns the most recently started DEAD actor
-// for the deployment, or nil if none exist. "Most recent" is decided by
-// the actor's start_time (unix ms from GCS ActorTableData); ties fall back
-// to actor_id lexicographic order so the result is still deterministic.
-func findFailedActorForDeployment(svc dashboard.DashboardService, appName, deploymentName string) (*dashboard.Actor, error) {
-	actors, err := listFailedActorsForDeployment(svc, appName, deploymentName)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(actors) == 0 {
-		return nil, nil
-	}
-
-	pick := 0
-
-	for i := 1; i < len(actors); i++ {
-		switch {
-		case actors[i].StartTime > actors[pick].StartTime:
-			pick = i
-		case actors[i].StartTime == actors[pick].StartTime && actors[i].ActorID > actors[pick].ActorID:
-			pick = i
-		}
-	}
-
-	a := actors[pick]
-
-	return &a, nil
-}
-
-// findFailedActorByReplicaID returns the DEAD actor whose name encodes
-// the requested replica_id, or nil if no DEAD actor matches.
-//
-// Match priority:
-//  1. extractReplicaShortID(actor.Name) == replicaID — the canonical
-//     Ray Serve naming `SERVE_REPLICA::<app>#<deployment>#<short_id>`.
-//  2. actor.ActorID == replicaID — covers the degenerate case where
-//     getRayLogSources synthesized a ReplicaInfo using actor_id as
-//     the replica_id (replicaShortIDFromActor falls back to actor_id
-//     when actor.Name does not match the Ray naming convention). This
-//     keeps the synthesize → click → fetch round-trip resolvable even
-//     when Ray returns an unconventionally named actor.
-func findFailedActorByReplicaID(svc dashboard.DashboardService, appName, deploymentName, replicaID string) (*dashboard.Actor, error) {
-	actors, err := listFailedActorsForDeployment(svc, appName, deploymentName)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range actors {
-		if extractReplicaShortID(actors[i].Name) == replicaID || actors[i].ActorID == replicaID {
-			return &actors[i], nil
-		}
-	}
-
-	return nil, nil
-}
-
-// lookupFailedActorAcrossDeployments scans every deployment in the live
-// Ray Serve applications response for a DEAD actor whose name encodes
-// the requested replica_id. Returns the first match, or (nil, nil) when
-// no DEAD actor matches in any deployment.
-//
-// Deployment names are sorted before iteration so the search order is
-// deterministic across calls — Go map iteration order is randomized,
-// which would otherwise make the result depend on map seed when an app
-// has multiple deployments (e.g. P/D, prefill+decode).
-func lookupFailedActorAcrossDeployments(
-	svc dashboard.DashboardService,
-	appName string,
-	deployments map[string]RayDeployment,
-	replicaID string,
-) (*dashboard.Actor, error) {
-	names := make([]string, 0, len(deployments))
-	for n := range deployments {
-		names = append(names, n)
-	}
-
-	sort.Strings(names)
-
-	for _, deploymentName := range names {
-		actor, err := findFailedActorByReplicaID(svc, appName, deploymentName, replicaID)
-		if err != nil {
-			return nil, err
-		}
-
-		if actor != nil {
-			return actor, nil
-		}
-	}
-
-	return nil, nil
 }
 
 // buildFailedReplicaInfo synthesizes a ReplicaInfo for a DEAD actor
@@ -676,7 +530,14 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 			return fmt.Errorf("unsupported log type: %s", logType)
 		}
 	} else {
-		failedActor, err := lookupFailedActorAcrossDeployments(dashboard.NewDashboardService(dashboardURL), appName, app.Deployments, replicaID)
+		deploymentNames := make([]string, 0, len(app.Deployments))
+		for n := range app.Deployments {
+			deploymentNames = append(deploymentNames, n)
+		}
+
+		failedActor, err := dashboard.LookupFailedActorAcrossDeployments(
+			dashboard.NewDashboardService(dashboardURL), appName, deploymentNames, replicaID,
+		)
 		if err != nil {
 			return err
 		}

@@ -1160,42 +1160,15 @@ func TestHandleGetLogs_K8sCluster_Success(t *testing.T) {
 	mockStorage.AssertExpectations(t)
 }
 
-// ===== Failed-actor fallback (NEU-423) =====
-
-func TestExtractReplicaShortID(t *testing.T) {
-	tests := []struct {
-		name     string
-		actor    string
-		expected string
-	}{
-		{
-			name:     "well-formed serve replica name",
-			actor:    "SERVE_REPLICA::default_test#deploy-1#abc123",
-			expected: "abc123",
-		},
-		{
-			name:     "name with no hash",
-			actor:    "weird-name",
-			expected: "",
-		},
-		{
-			name:     "name ending with hash returns empty",
-			actor:    "SERVE_REPLICA::a#b#",
-			expected: "",
-		},
-		{
-			name:     "empty name",
-			actor:    "",
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, extractReplicaShortID(tt.actor))
-		})
-	}
-}
+// ===== Failed-actor fallback integration tests =====
+//
+// Pure helper tests for the dashboard package functions
+// (ExtractReplicaShortID, ReplicaShortIDFromActor, FindFailedActor*,
+// LookupFailedActorAcrossDeployments) live in
+// internal/ray/dashboard/serve_replica_test.go. The tests here verify
+// the routes-layer integration: getRayLogSources synthesizing a
+// failed=true ReplicaInfo, streamRayLogs resolving a recovered
+// actor_id, and the error path users see when no DEAD actor matches.
 
 func TestGetRayLogSources_FailedActor_FallbackToDashboardActors(t *testing.T) {
 	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
@@ -1282,92 +1255,6 @@ func TestGetRayLogSources_FailedActor_FallbackToDashboardActors(t *testing.T) {
 	}
 	assert.True(t, logTypes["stderr"], "failed replica should expose stderr log")
 	assert.True(t, logTypes["stdout"], "failed replica should expose stdout log")
-}
-
-func TestGetRayLogSources_FailedActor_PicksMostRecentByStartTime(t *testing.T) {
-	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
-	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
-
-	originalFactory := dashboard.NewDashboardService
-	defer func() { dashboard.NewDashboardService = originalFactory }()
-	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
-		return mockDashboardSvc
-	}
-
-	cluster := &v1.Cluster{
-		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
-		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
-	}
-
-	appsResponse := `{"applications":{"default_ep":{"deployments":{"d":{"replicas":[]}}}}}`
-	mockHTTPClient.On("Get", mock.Anything).Return(&http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(strings.NewReader(appsResponse)),
-		Header:     make(http.Header),
-	}, nil).Once()
-
-	// start_time comes from the GCS ActorTableData protobuf (unix ms).
-	// The mock here intentionally puts the highest actor_id on the
-	// oldest start_time to prove start_time wins over actor_id ordering.
-	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
-		Data: dashboard.ActorsResponseData{
-			Result: dashboard.ActorsListResult{
-				Result: []dashboard.Actor{
-					{ActorID: "actor-zzz", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#oldshort", StartTime: 1000},
-					{ActorID: "actor-mmm", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#midshort", StartTime: 2000},
-					{ActorID: "actor-aaa", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#newshort", StartTime: 3000},
-				},
-			},
-		},
-	}, nil).Once()
-
-	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "ep")
-
-	require.NoError(t, err)
-	require.Len(t, resp.Deployments, 1)
-	require.Len(t, resp.Deployments[0].Replicas, 1)
-	assert.Equal(t, "newshort", resp.Deployments[0].Replicas[0].ReplicaID,
-		"should pick the actor with highest start_time, even when its actor_id is lexicographically lowest")
-}
-
-func TestGetRayLogSources_FailedActor_StartTimeTieBrokenByActorID(t *testing.T) {
-	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
-	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
-
-	originalFactory := dashboard.NewDashboardService
-	defer func() { dashboard.NewDashboardService = originalFactory }()
-	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
-		return mockDashboardSvc
-	}
-
-	cluster := &v1.Cluster{
-		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
-		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
-	}
-
-	mockHTTPClient.On("Get", mock.Anything).Return(&http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(strings.NewReader(`{"applications":{"default_ep":{"deployments":{"d":{"replicas":[]}}}}}`)),
-		Header:     make(http.Header),
-	}, nil).Once()
-
-	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
-		Data: dashboard.ActorsResponseData{
-			Result: dashboard.ActorsListResult{
-				Result: []dashboard.Actor{
-					{ActorID: "actor-aaa", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#aaa-short", StartTime: 5000},
-					{ActorID: "actor-zzz", State: "DEAD", Name: "SERVE_REPLICA::default_ep#d#zzz-short", StartTime: 5000},
-				},
-			},
-		},
-	}, nil).Once()
-
-	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "ep")
-
-	require.NoError(t, err)
-	require.Len(t, resp.Deployments[0].Replicas, 1)
-	assert.Equal(t, "zzz-short", resp.Deployments[0].Replicas[0].ReplicaID,
-		"with equal start_time, fall back to higher actor_id for deterministic output")
 }
 
 func TestGetRayLogSources_FailedActor_NoDeadActors_ReturnsEmptyReplicas(t *testing.T) {
