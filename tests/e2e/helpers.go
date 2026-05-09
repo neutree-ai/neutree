@@ -1415,42 +1415,6 @@ func waitEndpointPaused(name string) {
 	ExpectSuccess(r)
 }
 
-// observedEndpointStatus is a small struct used by waitEndpointDeployingWithError
-// so each field can be asserted independently — avoids fragile substring
-// matching on a concatenated string.
-type observedEndpointStatus struct {
-	Phase   string
-	ErrMsg  string
-	HasData bool
-}
-
-// waitEndpointDeployingWithError polls until the endpoint reaches Deploying
-// phase AND its status.errorMessage contains errSubstr. Used for config
-// errors that short-circuit before deployment creation: the orchestrator
-// surfaces Deploying with a specific reason in errorMessage so the operator
-// can act on the cause.
-func waitEndpointDeployingWithError(name, errSubstr string) {
-	EventuallyWithOffset(1, func() observedEndpointStatus {
-		r := RunCLI("get", "endpoint", name, "-w", profileWorkspace(), "-o", "json")
-		if r.ExitCode != 0 {
-			return observedEndpointStatus{}
-		}
-		ep := parseEndpointJSON(r.Stdout)
-		if ep.Status == nil {
-			return observedEndpointStatus{}
-		}
-		return observedEndpointStatus{
-			Phase:   string(ep.Status.Phase),
-			ErrMsg:  ep.Status.ErrorMessage,
-			HasData: true,
-		}
-	}, profileEndpointTimeout(), 10*time.Second).Should(SatisfyAll(
-		HaveField("HasData", BeTrue()),
-		HaveField("Phase", Equal("Deploying")),
-		HaveField("ErrMsg", ContainSubstring(errSubstr)),
-	), "endpoint %s should reach Deploying with errorMessage containing %q", name, errSubstr)
-}
-
 // getEndpoint retrieves endpoint details as JSON.
 func getEndpoint(name string) v1.Endpoint {
 	r := RunCLI("get", "endpoint", name, "-w", profileWorkspace(), "-o", "json")

@@ -141,28 +141,18 @@ func (c *EndpointController) performDeletion(obj *v1.Endpoint) error {
 	return nil
 }
 
-// updateStatusOnError reconciles the endpoint's persisted status from two
-// signals: (1) syncErr — the error returned by sync(), and (2) the orchestrator's
-// observed reality.
-//
-// Aligned with ClusterController.updateStatus + DetermineClusterPhase:
-// phase is derived from observed reality; syncErr replaces ErrorMessage when
-// non-nil so the operator sees the actionable root cause instead of the
-// downstream symptom. Falls back to syncErr-driven Failed/Deleting only
-// when the observed status itself can't be retrieved (cluster unreachable
-// etc.).
-func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, syncErr error) {
+func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, err error) {
 	isForceDelete := v1.IsForceDelete(obj.GetAnnotations())
 	isDelete := obj.GetDeletionTimestamp() != ""
 
-	// Force-delete short-circuits to Deleted regardless of error or observed
-	// state — it is an explicit operator override.
+	// If it's a force delete, mark as deleted immediately
 	if isDelete && isForceDelete {
-		LogForceDeletionWarning(isForceDelete, "endpoint", obj.Metadata.Workspace, obj.Metadata.Name, syncErr)
+		LogForceDeletionWarning(isForceDelete, "endpoint", obj.Metadata.Workspace, obj.Metadata.Name, err)
 
 		status := c.formatStatus(v1.EndpointPhaseDELETED, nil)
 
-		if updateErr := c.updateStatus(obj, status); updateErr != nil {
+		updateErr := c.updateStatus(obj, status)
+		if updateErr != nil {
 			klog.Errorf("failed to update endpoint %s status: %v",
 				obj.Metadata.WorkspaceName(), updateErr)
 		}
@@ -170,43 +160,35 @@ func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, syncErr error
 		return
 	}
 
-	// Always try observed reality first.
-	observed, observedErr := c.getActualStatus(obj)
-	if observedErr != nil {
-		klog.Errorf("failed to get actual status for endpoint %s: %v",
-			obj.Metadata.WorkspaceName(), observedErr)
+	// If there's an error from sync, mark as failed
+	if err != nil {
+		status := c.formatStatus(v1.EndpointPhaseFAILED, err)
+		// If it's during deletion, mark as deleting
+		if isDelete {
+			status = c.formatStatus(v1.EndpointPhaseDELETING, err)
+		}
 
-		// Fallback: when we cannot observe, the only signal left is syncErr.
-		// Surface it as Failed (or Deleting during deletion) so the operator
-		// at least sees what went wrong.
-		if syncErr != nil {
-			phase := v1.EndpointPhaseFAILED
-			if isDelete {
-				phase = v1.EndpointPhaseDELETING
-			}
-
-			if updateErr := c.updateStatus(obj, c.formatStatus(phase, syncErr)); updateErr != nil {
-				klog.Errorf("failed to update endpoint %s status: %v",
-					obj.Metadata.WorkspaceName(), updateErr)
-			}
+		updateErr := c.updateStatus(obj, status)
+		if updateErr != nil {
+			klog.Errorf("failed to update endpoint %s status: %v",
+				obj.Metadata.WorkspaceName(), updateErr)
 		}
 
 		return
 	}
 
-	// Observed retrieval succeeded. Phase comes from observed; ErrorMessage
-	// follows the cluster controller pattern: when syncErr is present it
-	// replaces observed.ErrorMessage because syncErr is the actionable root
-	// cause (e.g., "engine not found"), while observed.ErrorMessage is
-	// usually a downstream symptom (e.g., "deployment not found in namespace").
-	// When syncErr is nil, observed.ErrorMessage is kept as-is so operators
-	// still see in-progress diagnostics like "ContainerCreating".
-	if syncErr != nil {
-		observed.ErrorMessage = FormatErrorForStatus(syncErr)
+	// No error from sync, get actual status from orchestrator
+	status, err := c.getActualStatus(obj)
+	if err != nil {
+		klog.Errorf("failed to get actual status for endpoint %s: %v",
+			obj.Metadata.WorkspaceName(), err)
+		return
 	}
 
-	if c.shouldUpdateStatus(obj, observed) {
-		if updateErr := c.updateStatus(obj, observed); updateErr != nil {
+	// Update if status changed
+	if c.shouldUpdateStatus(obj, status) {
+		updateErr := c.updateStatus(obj, status)
+		if updateErr != nil {
 			klog.Errorf("failed to update endpoint %s status: %v",
 				obj.Metadata.WorkspaceName(), updateErr)
 		}

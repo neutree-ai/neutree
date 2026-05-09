@@ -137,12 +137,6 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 
 	Describe("Error Handling", Label("error"), func() {
 
-		// Configuration errors that short-circuit BEFORE deployment creation
-		// surface as Deploying with a specific errorMessage. Cases where the
-		// deployment IS created with bogus content (bad model name, bad
-		// version, mismatched accelerator) still converge to Failed via
-		// observed pod state (CrashLoop / Unschedulable). Engine-not-found is
-		// the only one in this file that short-circuits in prepareCtx.
 		It("should show Failed when model does not exist", Label("C2612944"), func() {
 			epName := "e2e-ep-lc-fail-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })
@@ -196,7 +190,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Failed"))
 		})
 
-		It("should show Deploying with errorMessage when using unsupported engine", Label("C2612936"), func() {
+		It("should show Failed when using unsupported engine", Label("C2612936"), func() {
 			epName := "e2e-ep-lc-badeng-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })
 
@@ -204,7 +198,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				withEngine("nonexistent-engine-"+Cfg.RunID, "v0.0.1"))
 			defer os.Remove(yamlPath)
 
-			waitEndpointDeployingWithError(epName, "engine")
+			waitEndpointFailed(epName)
 		})
 
 		It("should show Failed when no matching accelerator product", Label("C2613503"), func() {
