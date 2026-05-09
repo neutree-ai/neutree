@@ -23,10 +23,10 @@ var _ = Describe("SSH Endpoint Failure Logs", Ordered, Label("endpoint", "ssh", 
 	var clusterName string
 
 	BeforeAll(func() {
-		if profileModelName() == "" {
-			Skip("Model name not configured in profile, skipping SSH endpoint failure-log tests")
-		}
-
+		// This test passes a non-existent model name via withModel(...),
+		// so it does not depend on profile.model.name being set. Profile
+		// gating is delegated to setupSSHCluster (SSH nodes + image
+		// registry) and SetupModelRegistry (model registry config).
 		clusterName = setupSSHCluster("e2e-ep-ssh-fail-")
 
 		By("Setting up model registry")

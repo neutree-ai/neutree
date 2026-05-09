@@ -465,6 +465,16 @@ func findFailedActorForDeployment(svc dashboard.DashboardService, appName, deplo
 
 // findFailedActorByReplicaID returns the DEAD actor whose name encodes
 // the requested replica_id, or nil if no DEAD actor matches.
+//
+// Match priority:
+//  1. extractReplicaShortID(actor.Name) == replicaID — the canonical
+//     Ray Serve naming `SERVE_REPLICA::<app>#<deployment>#<short_id>`.
+//  2. actor.ActorID == replicaID — covers the degenerate case where
+//     getRayLogSources synthesized a ReplicaInfo using actor_id as
+//     the replica_id (replicaShortIDFromActor falls back to actor_id
+//     when actor.Name does not match the Ray naming convention). This
+//     keeps the synthesize → click → fetch round-trip resolvable even
+//     when Ray returns an unconventionally named actor.
 func findFailedActorByReplicaID(svc dashboard.DashboardService, appName, deploymentName, replicaID string) (*dashboard.Actor, error) {
 	actors, err := listFailedActorsForDeployment(svc, appName, deploymentName)
 	if err != nil {
@@ -472,7 +482,7 @@ func findFailedActorByReplicaID(svc dashboard.DashboardService, appName, deploym
 	}
 
 	for i := range actors {
-		if extractReplicaShortID(actors[i].Name) == replicaID {
+		if extractReplicaShortID(actors[i].Name) == replicaID || actors[i].ActorID == replicaID {
 			return &actors[i], nil
 		}
 	}

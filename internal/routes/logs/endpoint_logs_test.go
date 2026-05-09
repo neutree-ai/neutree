@@ -1494,3 +1494,59 @@ func TestStreamRayLogs_FailedActor_NotFoundReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "replica missing-replica not found",
 		"error must name the missing replica so the user can correlate it with their request")
 }
+
+func TestStreamRayLogs_FailedActor_ResolvesByActorIDFallback(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "/api/serve/applications/")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{"applications":{"default_ep":{"deployments":{"d":{"replicas":[]}}}}}`)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	// The DEAD actor has an unconventional Name (no '#' separator), so
+	// extractReplicaShortID returns "" and getRayLogSources would have
+	// synthesized a ReplicaInfo with replica_id=actor_id. The click-back
+	// flow must still resolve via the ActorID fallback path.
+	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{
+			Result: dashboard.ActorsListResult{
+				Result: []dashboard.Actor{
+					{ActorID: "weirdactor-id", State: "DEAD", NodeID: "node-y", Name: "non-conventional-actor-name"},
+				},
+			},
+		},
+	}, nil).Once()
+
+	logContent := "actor stderr content\n"
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "actor_id=weirdactor-id")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(logContent)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	err := streamRayLogs(c, cluster, mockHTTPClient, "default", "ep", "weirdactor-id", "stderr", 500)
+
+	require.NoError(t, err)
+	assert.Equal(t, logContent, w.Body.String())
+}
