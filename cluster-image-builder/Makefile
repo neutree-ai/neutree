@@ -28,14 +28,19 @@ ENGINE_VLLM_BASE_IMAGE_TAG ?= $(ENGINE_VLLM_VERSION)
 ENGINE_VLLM_ROCM_BASE_IMAGE_TAG ?= $(ENGINE_VLLM_VERSION)
 ENGINE_LLAMA_CPP_VERSION ?= v0.3.7
 ENGINE_LLAMA_CPP_DIR_VERSION ?= $(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/-.*//' | tr '.' '_')
-# SGLang base image. ENGINE_SGLANG_VERSION is the upstream tag prefix used as
-# the *Neutree* image tag prefix (per design doc 4.x): for NVIDIA pull
-# lmsysorg/sglang:<ENGINE_SGLANG_BASE_IMAGE_TAG> (defaults to
-# ENGINE_SGLANG_VERSION); for ROCm pull lmsysorg/sglang:<ENGINE_SGLANG_ROCM_TAG>
-# (preserves the rocm720-mi30x suffix in the resulting Neutree image tag, e.g.
-# v0.5.10-rocm720-mi30x-ray2.53.0). Both base-image tags are overridable so
-# release workflows can point at MI355x or other variants without editing the
-# Makefile.
+# SGLang base image. ENGINE_SGLANG_VERSION is the default value for both the
+# upstream pull tag and the Neutree output image tag prefix; the actual
+# variables consumed by the recipes are:
+#   - NVIDIA: pull lmsysorg/sglang:<ENGINE_SGLANG_BASE_IMAGE_TAG> and tag the
+#     output engine-sglang:<ENGINE_SGLANG_BASE_IMAGE_TAG>-... (both default to
+#     ENGINE_SGLANG_VERSION).
+#   - ROCm: pull lmsysorg/sglang:<ENGINE_SGLANG_ROCM_TAG> and tag the output
+#     engine-sglang:<ENGINE_SGLANG_ROCM_TAG>-... (defaults to
+#     <ENGINE_SGLANG_VERSION>-rocm720-mi30x), preserving the variant suffix in
+#     the resulting Neutree tag, e.g. v0.5.10-rocm720-mi30x-ray2.53.0.
+# Both base-image tags are overridable so release workflows can point at
+# MI355x or other variants without editing the Makefile; with overrides set,
+# the variant suffix flows through to the Neutree output tag too.
 ENGINE_SGLANG_BASE_IMAGE_REPO ?= lmsysorg/sglang
 ENGINE_SGLANG_VERSION ?= v0.5.10
 ENGINE_SGLANG_BASE_IMAGE_TAG ?= $(ENGINE_SGLANG_VERSION)
