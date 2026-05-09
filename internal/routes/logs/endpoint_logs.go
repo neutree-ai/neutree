@@ -59,13 +59,27 @@ type LogInfo struct {
 
 // RayApplicationsResponse represents Ray Dashboard API response structure.
 //
-// TODO(NEU-423 follow-up): these RayApplicationsResponse / RayApplication /
-// RayDeployment / RayReplica types and the inline httpClient.Get for
-// /api/serve/applications/ predate the rule that "Ray dashboard API types
-// and calls live in internal/ray/dashboard/". The new failed-actor lookup
-// follows the rule (see internal/ray/dashboard/actors.go); migrating these
-// older types is out of scope for the bug fix and tracked separately to
-// keep the change minimal.
+// TODO(NEU-423 follow-up): consolidate Ray API handling under
+// `internal/ray/dashboard/`. The migration scope includes:
+//
+//  1. The four legacy types here (RayApplicationsResponse, RayApplication,
+//     RayDeployment, RayReplica) plus the inline `httpClient.Get` call for
+//     `/api/serve/applications/` in `getRayLogSources` / `streamRayLogs` —
+//     these predate the rule that "Ray dashboard API types and calls live
+//     in `internal/ray/dashboard/`".
+//  2. The Ray-domain helpers added by this PR — `extractReplicaShortID`,
+//     `replicaShortIDFromActor`, `listFailedActorsForDeployment`,
+//     `findFailedActorForDeployment`, `findFailedActorByReplicaID`,
+//     `lookupFailedActorAcrossDeployments` — which encode Ray Serve naming
+//     conventions and DEAD-actor ranking. They belong next to
+//     `internal/ray/dashboard/actors.go`, not in the routes layer.
+//
+// `buildFailedReplicaInfo` stays here because it constructs neutree's API
+// response shape (`ReplicaInfo`), not Ray-domain output.
+//
+// Out of scope for the NEU-423 bug fix to keep the change minimal; tracked
+// in memory `improvement-ray-dashboard-consolidation.md` for the next PR
+// that touches this file or `internal/ray/dashboard/`.
 type RayApplicationsResponse struct {
 	Applications map[string]RayApplication `json:"applications"`
 }
