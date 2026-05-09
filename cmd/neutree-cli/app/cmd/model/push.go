@@ -12,8 +12,8 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
+	"github.com/neutree-ai/neutree/internal/model_registry/bentoml"
 	"github.com/neutree-ai/neutree/pkg/client"
-	"github.com/neutree-ai/neutree/pkg/model_registry/bentoml"
 )
 
 func NewPushCmd() *cobra.Command {

@@ -5,7 +5,7 @@ package mocks
 import (
 	io "io"
 
-	model_registry "github.com/neutree-ai/neutree/pkg/model_registry"
+	model_registry "github.com/neutree-ai/neutree/internal/model_registry"
 	mock "github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"

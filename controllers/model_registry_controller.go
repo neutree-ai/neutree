@@ -7,7 +7,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/model_registry"
+	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 

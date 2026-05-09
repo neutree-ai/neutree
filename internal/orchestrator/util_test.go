@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
-	"github.com/neutree-ai/neutree/pkg/model_registry"
-	modelregistrymocks "github.com/neutree-ai/neutree/pkg/model_registry/mocks"
+	"github.com/neutree-ai/neutree/internal/model_registry"
+	modelregistrymocks "github.com/neutree-ai/neutree/internal/model_registry/mocks"
 )
 
 func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {

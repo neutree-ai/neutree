@@ -29,11 +29,8 @@ imports_into() {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # R1: pkg/ (L1) must not import internal/ (L2).
-# Grandfathered: pkg/model_registry/file_based.go imports internal/nfs.
-#   Resolve by promoting internal/nfs to pkg/nfs, or by injecting the helper through an interface.
 # ─────────────────────────────────────────────────────────────────────────────
-R1=$(imports_into pkg/ 'github\.com/neutree-ai/neutree/internal/' \
-  | grep -vxF 'pkg/model_registry/file_based.go' || true)
+R1=$(imports_into pkg/ 'github\.com/neutree-ai/neutree/internal/' || true)
 if [ -n "$R1" ]; then
   echo "$R1" | sed 's/^/   /'
   report \
@@ -144,13 +141,8 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # R8: internal/ (L2) must not import controllers/ (L3) or cmd/ (L4).
-# Grandfathered: internal/cluster/component/metrics/manifests.go imports
-#   cmd/neutree-cli/app/constants. Resolve by lifting the shared constants
-#   into internal/ (or pkg/) so cli and the metrics manifests reference a
-#   single source instead of cli being the constants owner.
 # ─────────────────────────────────────────────────────────────────────────────
-R8=$(imports_into internal/ 'github\.com/neutree-ai/neutree/(controllers|cmd)' \
-  | grep -vxF 'internal/cluster/component/metrics/manifests.go' || true)
+R8=$(imports_into internal/ 'github\.com/neutree-ai/neutree/(controllers|cmd)' || true)
 if [ -n "$R8" ]; then
   echo "$R8" | sed 's/^/   /'
   report \

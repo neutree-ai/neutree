@@ -14,11 +14,11 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/model_registry"
+	modelregistrymocks "github.com/neutree-ai/neutree/internal/model_registry/mocks"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/internal/util"
-	"github.com/neutree-ai/neutree/pkg/model_registry"
-	modelregistrymocks "github.com/neutree-ai/neutree/pkg/model_registry/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 

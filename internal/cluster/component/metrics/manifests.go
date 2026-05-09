@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
+	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -355,7 +355,7 @@ type MetricsManifestVariables struct {
 // buildManifestVariables creates the data structure for rendering manifests
 func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 	// Default values for metrics component
-	version := constants.VictoriaMetricsVersion
+	version := componentversion.VictoriaMetrics
 	replicas := 1
 	resources := map[string]string{
 		"cpu":    "100m",
