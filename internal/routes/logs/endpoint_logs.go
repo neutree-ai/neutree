@@ -59,27 +59,19 @@ type LogInfo struct {
 
 // RayApplicationsResponse represents Ray Dashboard API response structure.
 //
-// TODO(NEU-423 follow-up): consolidate Ray API handling under
-// `internal/ray/dashboard/`. The migration scope includes:
+// TODO: Ray dashboard API types and calls belong in `internal/ray/dashboard/`,
+// not in the routes layer. The following items here violate that and should
+// move:
+//   - Types: RayApplicationsResponse, RayApplication, RayDeployment, RayReplica
+//   - Inline `httpClient.Get("/api/serve/applications/")` in getRayLogSources
+//     and streamRayLogs (should go through `dashboard.Client.doRequest`)
+//   - Ray-domain helpers (Ray Serve naming + DEAD-actor ranking, no
+//     routes-layer concerns): extractReplicaShortID, replicaShortIDFromActor,
+//     listFailedActorsForDeployment, findFailedActorForDeployment,
+//     findFailedActorByReplicaID, lookupFailedActorAcrossDeployments
 //
-//  1. The four legacy types here (RayApplicationsResponse, RayApplication,
-//     RayDeployment, RayReplica) plus the inline `httpClient.Get` call for
-//     `/api/serve/applications/` in `getRayLogSources` / `streamRayLogs` —
-//     these predate the rule that "Ray dashboard API types and calls live
-//     in `internal/ray/dashboard/`".
-//  2. The Ray-domain helpers added by this PR — `extractReplicaShortID`,
-//     `replicaShortIDFromActor`, `listFailedActorsForDeployment`,
-//     `findFailedActorForDeployment`, `findFailedActorByReplicaID`,
-//     `lookupFailedActorAcrossDeployments` — which encode Ray Serve naming
-//     conventions and DEAD-actor ranking. They belong next to
-//     `internal/ray/dashboard/actors.go`, not in the routes layer.
-//
-// `buildFailedReplicaInfo` stays here because it constructs neutree's API
-// response shape (`ReplicaInfo`), not Ray-domain output.
-//
-// Out of scope for the NEU-423 bug fix to keep the change minimal; tracked
-// in memory `improvement-ray-dashboard-consolidation.md` for the next PR
-// that touches this file or `internal/ray/dashboard/`.
+// buildFailedReplicaInfo stays in this file: it constructs the public API
+// response shape (ReplicaInfo), which is a routes-layer concern.
 type RayApplicationsResponse struct {
 	Applications map[string]RayApplication `json:"applications"`
 }
@@ -509,10 +501,10 @@ func findFailedActorByReplicaID(svc dashboard.DashboardService, appName, deploym
 // the requested replica_id. Returns the first match, or (nil, nil) when
 // no DEAD actor matches in any deployment.
 //
-// Deployment names are sorted before iteration so multi-deployment apps
-// (e.g. P/D, prefill+decode) get a deterministic search order. This
-// matters less today (one deployment per endpoint) but pre-empts
-// nondeterministic behavior the moment that assumption breaks.
+// Deployment names are sorted before iteration so the search order is
+// deterministic across calls — Go map iteration order is randomized,
+// which would otherwise make the result depend on map seed when an app
+// has multiple deployments (e.g. P/D, prefill+decode).
 func lookupFailedActorAcrossDeployments(
 	svc dashboard.DashboardService,
 	appName string,

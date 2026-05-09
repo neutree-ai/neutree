@@ -90,17 +90,16 @@ var _ = Describe("SSH Endpoint Failure Logs", Ordered, Label("endpoint", "ssh", 
 		Expect(failedReplicaID).NotTo(BeEmpty())
 
 		// Proof-of-wiring assertion: the stream must carry Ray's per-actor metadata
-		// headers (":job_id:" + ":actor_name:..."), proving we recovered the right
-		// DEAD actor and reached its stderr file via /api/v0/logs/file?actor_id=...
-		// before Ray Serve garbage-collected the live applications response.
+		// headers (":job_id:" + ":actor_name:..."), proving the recovered DEAD
+		// actor's stderr file was reachable via /api/v0/logs/file?actor_id=...
 		//
-		// We deliberately don't assert traceback content: whether the actor's
+		// Traceback content is intentionally not asserted: whether the actor's
 		// stderr contains a Python traceback depends on the failure mode. The
-		// "model not in registry" repro path used here is caught by Ray Serve
-		// at the framework layer, so the actor dies before printing user code.
-		// Failure modes that DO traceback (bad engine_args, OOM, missing CUDA)
-		// would surface them through the same wired path; manual verification
-		// of those scenarios is part of the PR test plan.
+		// "model not in registry" repro used here is caught by Ray Serve at the
+		// framework layer, so the actor dies before any user code runs. Failure
+		// modes that do produce a traceback (bad engine_args, OOM, missing CUDA)
+		// surface it through the same wiring; this assertion validates the
+		// wiring rather than the traceback content.
 		body := getEndpointReplicaLog(epName, failedReplicaID, "stderr", 500)
 		Expect(body).NotTo(BeEmpty(), "stderr body should not be empty for failed replica")
 		Expect(body).To(SatisfyAll(
