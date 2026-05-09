@@ -284,7 +284,7 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			// R4 fallback: when observed status retrieval fails AND we're
+			// Fallback: when observed status retrieval fails AND we're
 			// deleting AND syncErr is set, surface as Deleting + syncErr.
 			name: "process reconcile error without force delete (observed unavailable, fallback to Deleting)",
 			input: func() *v1.Endpoint {
@@ -304,7 +304,7 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			// R4 fallback: when observed status retrieval fails AND not deleting
+			// Fallback: when observed status retrieval fails AND not deleting
 			// AND syncErr is set, surface as Failed + syncErr.
 			name: "process reconcile error without deletion (observed unavailable, fallback to Failed)",
 			input: func() *v1.Endpoint {
@@ -340,7 +340,7 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			// R4 invariant: when observed retrieval fails AND syncErr is nil,
+			// Invariant: when observed retrieval fails AND syncErr is nil,
 			// neither signal carries reliable information — preserve the last
 			// known status by skipping UpdateEndpoint entirely. The mock
 			// asserts no UpdateEndpoint call by simply not declaring one.
@@ -357,12 +357,8 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 
-		// NEU-421 R4: phase derived from observed reality even when sync errored.
-		// syncErr is recorded into ErrorMessage so the operator still sees the
-		// failed reconcile reason, but the phase reflects what the orchestrator
-		// reports — mirroring how cluster controller decouples phase from err.
 		{
-			name: "R4: observed Running with sync error -> Running phase, syncErr in errorMessage",
+			name: "observed Running with sync error -> Running phase, syncErr in errorMessage",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
 			},
@@ -380,10 +376,10 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			name: "R4: observed Paused with sync error from PauseEndpoint -> Paused phase",
-			// NEU-421 bug fix: pause failed because of model registry, but
-			// orchestrator reports Paused (replicas=0, no pods); we surface
+			// Pause that fails on a missing model registry still lets the
+			// orchestrator observe Paused (replicas=0, no pods); we surface
 			// Paused, not Failed.
+			name: "observed Paused with sync error from PauseEndpoint -> Paused phase",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
 			},
@@ -401,12 +397,11 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			// R4 (refined per e2e finding): syncErr replaces observed
-			// errorMessage because syncErr is the actionable root cause
-			// ("engine not found"), while observed errorMessage is the
-			// downstream symptom ("deployment not found in namespace").
-			// Aligned with ClusterController.updateStatus.
-			name: "R4: syncErr replaces observed errorMessage when both present",
+			// syncErr replaces observed errorMessage because syncErr is the
+			// actionable root cause ("engine not found"), while observed
+			// errorMessage is the downstream symptom ("deployment not found
+			// in namespace"). Aligned with ClusterController.updateStatus.
+			name: "syncErr replaces observed errorMessage when both present",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
 			},
@@ -425,10 +420,10 @@ func Test_UpdateStatusOnError(t *testing.T) {
 			},
 		},
 		{
-			// R4: when syncErr is nil but observed reports an in-progress
-			// reason, keep the observed errorMessage so operators see what
-			// the orchestrator is currently doing.
-			name: "R4: observed errorMessage preserved when syncErr is nil",
+			// When syncErr is nil but observed reports an in-progress reason,
+			// keep the observed errorMessage so operators see what the
+			// orchestrator is currently doing.
+			name: "observed errorMessage preserved when syncErr is nil",
 			input: func() *v1.Endpoint {
 				return newEndpoint()
 			},

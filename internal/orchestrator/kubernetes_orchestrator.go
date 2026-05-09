@@ -263,16 +263,14 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 
 // PauseEndpoint scales the endpoint's K8s deployment to zero replicas.
 //
-// NEU-421: pause does not need ModelRegistry/Engine/ImageRegistry — the
-// existing K8s deployment already has the rendered manifest. We GET it and
-// merge-patch spec.replicas to 0. This decouples pause from model availability
-// so a paused endpoint converges to Paused even after the model has been
-// removed.
+// Pause does not need ModelRegistry/Engine/ImageRegistry — the existing K8s
+// deployment already has the rendered manifest, so this just GETs it and
+// merge-patches spec.replicas to 0. A paused endpoint therefore converges to
+// Paused even when the model has been removed.
 //
-// TODO: Like getEndpointStats, this currently assumes a single Deployment per
-// endpoint. When supporting multi-kind deploy modes (P/D = N Deployments,
-// TP+PP = LeaderWorkerSet), pause + status reporting should be extended
-// together — see project-pd-same-host-phase1 design doc.
+// TODO: like getEndpointStats, this currently assumes a single Deployment per
+// endpoint. Multi-kind deploy modes (multiple Deployments, LeaderWorkerSet)
+// will need pause + status reporting extended together.
 func (k *kubernetesOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
 	ctx, err := k.prepareOrchestratorContextLite(endpoint)
 	if err != nil {
@@ -295,14 +293,13 @@ func (k *kubernetesOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
 // DeleteEndpoint deletes the endpoint's K8s resources via the deployer's
 // last-applied snapshot (stored in a ConfigMap by Apply).
 //
-// NEU-421: delete does not need ModelRegistry/Engine/ImageRegistry. The
-// deployer's configStore.Get loads the last-applied manifest list directly,
-// so deletion can proceed even when those dependencies have been removed.
+// Delete does not need ModelRegistry/Engine/ImageRegistry: configStore.Get
+// returns the last-applied manifest list directly, so deletion proceeds even
+// when those dependencies have been removed.
 //
 // Intentionally does NOT call validateClusterForLite — delete must remain
-// permissive on degraded clusters (matches the pre-NEU-421 contract:
-// validateDependencies was always skipped for the delete path; the fallback
-// is the force-delete annotation handled in the controller).
+// permissive on degraded clusters; the fallback is the force-delete
+// annotation handled in the controller.
 func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	ctx, err := k.prepareOrchestratorContextLite(endpoint)
 	if err != nil {
@@ -481,7 +478,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		}, nil
 	}
 
-	// NEU-421: paused check goes BEFORE !exists. A paused-from-start endpoint
+	// Paused check goes BEFORE !exists: a paused-from-start endpoint
 	// (replicas=0 on first apply) has no deployment by design — that is
 	// already the Paused steady state, not "deployment missing". Mirrors
 	// Ray.GetEndpointStatus which orders these checks the same way.

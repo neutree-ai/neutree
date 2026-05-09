@@ -1279,7 +1279,7 @@ func withoutForceUpdate() EndpointOption {
 }
 
 // withReplicas overrides the default spec.replicas.num (which is 1 in the
-// template). Use withReplicas(0) to apply a paused endpoint (NEU-421).
+// template). Use withReplicas(0) to apply a paused endpoint.
 func withReplicas(num int) EndpointOption {
 	return func(o *endpointOpts) {
 		o.replicas = num
@@ -1413,8 +1413,7 @@ func waitEndpointFailed(name string) {
 	ExpectSuccess(r)
 }
 
-// waitEndpointPaused waits for an endpoint to reach Paused phase. NEU-421:
-// used for "should reach Paused even when model registry is missing".
+// waitEndpointPaused waits for an endpoint to reach Paused phase.
 func waitEndpointPaused(name string) {
 	r := RunCLI("wait", "endpoint", name,
 		"-w", profileWorkspace(),
@@ -1434,10 +1433,10 @@ type observedEndpointStatus struct {
 }
 
 // waitEndpointDeployingWithError polls until the endpoint reaches Deploying
-// phase AND its status.errorMessage contains errSubstr. NEU-421 R4: replaces
-// the previous "config error -> Failed" pattern (C2612944 etc.). The
-// orchestrator surfaces Deploying with a specific error reason; the operator
-// reads the reason to act on it.
+// phase AND its status.errorMessage contains errSubstr. Used for config
+// errors that short-circuit before deployment creation: the orchestrator
+// surfaces Deploying with a specific reason in errorMessage so the operator
+// can act on the cause.
 func waitEndpointDeployingWithError(name, errSubstr string) {
 	EventuallyWithOffset(1, func() observedEndpointStatus {
 		r := RunCLI("get", "endpoint", name, "-w", profileWorkspace(), "-o", "json")

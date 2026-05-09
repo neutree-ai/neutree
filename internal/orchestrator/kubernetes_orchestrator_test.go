@@ -2808,12 +2808,11 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			// NEU-421: paused-from-start (e.g., applied with replicas=0 and
-			// the orchestrator's pause logic sees no deployment to scale,
-			// so no deployment was ever created). The previous logic
-			// reported Deploying("not found"); the Paused check now runs
-			// before the !exists check.
-			name: "return Paused for paused endpoint when deployment does not exist (NEU-421)",
+			// Paused-from-start (applied with replicas=0): no deployment is
+			// ever created, so observed state should be Paused, not
+			// Deploying("not found"). The Paused check therefore runs before
+			// the !exists check.
+			name: "return Paused for paused endpoint when deployment does not exist",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Spec.Replicas.Num = pointer.Int(0)
@@ -3057,8 +3056,8 @@ func TestKubernetesOrchestrator_pauseEndpoint(t *testing.T) {
 			expectedReplicas: nil, // no deployment to inspect
 		},
 		{
-			name: "succeeds even when storage has no model registry (NEU-421 repro)",
-			// pauseEndpoint must not touch storage / model registry — only K8s API
+			// pauseEndpoint must not touch storage / model registry — only K8s API.
+			name:             "succeeds without any storage interaction",
 			seedReplicas:     int32Ptr(2),
 			expectError:      false,
 			expectedReplicas: int32Ptr(0),
@@ -3097,10 +3096,9 @@ func TestKubernetesOrchestrator_pauseEndpoint(t *testing.T) {
 }
 
 // TestKubernetesOrchestrator_deleteEndpoint_NoConfigStore verifies that the
-// delete path does not depend on ModelRegistry/Engine/ImageRegistry; it relies
-// only on the deployer's ConfigMap-backed last-applied snapshot. NEU-421: this
-// allows DeleteEndpoint to succeed even when the model registry has been
-// removed.
+// delete path does not depend on ModelRegistry/Engine/ImageRegistry; it
+// relies only on the deployer's ConfigMap-backed last-applied snapshot, so
+// DeleteEndpoint succeeds even when the model registry has been removed.
 func TestKubernetesOrchestrator_deleteEndpoint_NoConfigStore(t *testing.T) {
 	fakeClient := NewFakeK8sClient(t)
 	ctx := makePauseTestCtx(fakeClient, "chat-model")

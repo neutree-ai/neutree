@@ -145,11 +145,12 @@ func (c *EndpointController) performDeletion(obj *v1.Endpoint) error {
 // signals: (1) syncErr — the error returned by sync(), and (2) the orchestrator's
 // observed reality.
 //
-// NEU-421 R4: aligned with cluster controller's pattern (see ClusterController.
-// updateStatus / DetermineClusterPhase). Phase is derived from observed reality;
-// syncErr only contributes to ErrorMessage when observed has none of its own.
-// We fall back to syncErr-driven Failed/Deleting only when the observed status
-// itself can't be retrieved (cluster unreachable, etc.).
+// Aligned with ClusterController.updateStatus + DetermineClusterPhase:
+// phase is derived from observed reality; syncErr replaces ErrorMessage when
+// non-nil so the operator sees the actionable root cause instead of the
+// downstream symptom. Falls back to syncErr-driven Failed/Deleting only
+// when the observed status itself can't be retrieved (cluster unreachable
+// etc.).
 func (c *EndpointController) updateStatusOnError(obj *v1.Endpoint, syncErr error) {
 	isForceDelete := v1.IsForceDelete(obj.GetAnnotations())
 	isDelete := obj.GetDeletionTimestamp() != ""

@@ -178,10 +178,9 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 // PauseEndpoint removes the endpoint's Ray Serve application, which is how
 // SSH/Ray clusters represent "scaled to zero". Idempotent: missing app => no-op.
 //
-// NEU-421: pause does not need ModelRegistry/Engine/ImageRegistry. We only
-// fetch the deploy cluster (for dashboard URL) and reuse the existing
-// deleteEndpoint(ctx) inner method which only depends on cluster + endpoint
-// + rayService.
+// Pause does not need ModelRegistry/Engine/ImageRegistry; only the deploy
+// cluster (for the dashboard URL) is fetched. The inner deleteEndpoint(ctx)
+// is reused because it depends only on cluster + endpoint + rayService.
 func (o *RayOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
 	ctx, err := o.prepareOrchestratorContextLite(endpoint)
 	if err != nil {
@@ -284,11 +283,11 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 
 // DeleteEndpoint removes an endpoint from Ray Serve.
 //
-// NEU-421: delete does not need ModelRegistry/Engine/ImageRegistry for new
-// clusters (>v1.0.0). For old SSH clusters (<=v1.0.0) we still try to
-// disconnect the NFS mount, but tolerate ErrResourceNotFound — if the
-// registry has already been removed, the SSH-side mount is orphaned and
-// continuing the delete is the correct outcome.
+// Delete does not need ModelRegistry/Engine/ImageRegistry on new clusters
+// (>v1.0.0). On old SSH clusters (<=v1.0.0) the NFS mount is still
+// disconnected, but ErrResourceNotFound on the registry lookup is tolerated:
+// if the registry has already been removed the SSH-side mount is orphaned
+// and continuing the delete is the correct outcome.
 func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	ctx, err := o.prepareOrchestratorContextLite(endpoint)
 	if err != nil {

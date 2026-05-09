@@ -100,10 +100,10 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
 		})
 
-		// NEU-421: delete a running endpoint without --force after its model
-		// registry has been removed. Pre-fix: stuck in DELETING. Post-fix:
-		// converges to Deleted via deployer's last-applied snapshot.
-		It("should reach Deleted when running endpoint is deleted after model removed without --force (NEU-421)", Label("C2649426"), func() {
+		// Delete a running endpoint without --force after its model registry
+		// has been removed. The endpoint must converge to Deleted via the
+		// deployer's last-applied snapshot, not stay stuck in DELETING.
+		It("should reach Deleted when running endpoint is deleted after model removed without --force", Label("C2649426"), func() {
 			epName := "e2e-ep-lc-del-after-del-" + Cfg.RunID
 			DeferCleanup(func() {
 				// Best-effort cleanup; SetupModelRegistry restores for siblings.
@@ -137,10 +137,10 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 
 	Describe("Error Handling", Label("error"), func() {
 
-		// NEU-421 R4 contract refinement: only configuration errors that
-		// short-circuit BEFORE deployment creation flip to Deploying. Cases
-		// where the deployment IS created with bogus content (bad model name,
-		// bad version, mismatched accelerator) still converge to Failed via
+		// Configuration errors that short-circuit BEFORE deployment creation
+		// surface as Deploying with a specific errorMessage. Cases where the
+		// deployment IS created with bogus content (bad model name, bad
+		// version, mismatched accelerator) still converge to Failed via
 		// observed pod state (CrashLoop / Unschedulable). Engine-not-found is
 		// the only one in this file that short-circuits in prepareCtx.
 		It("should show Failed when model does not exist", Label("C2612944"), func() {
@@ -253,7 +253,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 		})
 	})
 
-	// --- Pause / NEU-421 ---
+	// --- Pause ---
 
 	Describe("Pause", Label("pause"), func() {
 
@@ -269,7 +269,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
 		})
 
-		It("should reach Paused when applied with replicas=0 and non-existent model (NEU-421)", Label("C2649424"), func() {
+		It("should reach Paused when applied with replicas=0 and non-existent model", Label("C2649424"), func() {
 			epName := "e2e-ep-lc-pause-nomodel-" + Cfg.RunID
 			DeferCleanup(func() { deleteEndpoint(epName) })
 
@@ -284,7 +284,7 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
 		})
 
-		It("should reach Paused when running endpoint is paused after model deleted (NEU-421)", Label("C2649425"), func() {
+		It("should reach Paused when running endpoint is paused after model deleted", Label("C2649425"), func() {
 			epName := "e2e-ep-lc-pause-after-del-" + Cfg.RunID
 			DeferCleanup(func() {
 				deleteEndpoint(epName)
