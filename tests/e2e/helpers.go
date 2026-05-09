@@ -1053,6 +1053,48 @@ func createAPIKey(serverURL, jwt, workspace, name string) string {
 	return apiKey.Status.SkValue
 }
 
+// callNeutreeAPI performs an HTTP request against neutree-api regular
+// endpoints (those served at `Cfg.ServerURL/api/v1/...` other than
+// /api/v1/auth/* and /api/v1/rpc/*).
+//
+// Three auth conventions exist in this file and they are not interchangeable:
+//   - createTestUser / deleteTestUser / createAPIKey: Bearer <jwt>, against
+//     /api/v1/auth/admin/* and /api/v1/rpc/* — admin user JWT middleware.
+//   - doInferenceRequest: Bearer <api_key> against the Kong-routed inference
+//     gateway (serviceURL, NOT Cfg.ServerURL).
+//   - This helper: raw <api_key> (no Bearer prefix) against the regular
+//     /api/v1/... routes. Sending a Bearer-prefixed key here returns
+//     401 invalid_token because the middleware compares against the
+//     stored sk_value verbatim.
+//
+// TODO: unify all of the above (admin JWT, Kong inference, raw API key)
+// into a single api_helper layer. Today the three call patterns share
+// boilerplate (NewRequest + Client{Timeout} + Do + ReadAll) but are
+// duplicated across 6+ functions; a shared low-level httpJSON plus three
+// thin auth wrappers (Admin/Inference/API) would deduplicate the
+// boilerplate without merging the auth conventions, and would give
+// future tests one obvious place to look for "how do I call the API".
+func callNeutreeAPI(method, path string) ([]byte, int) {
+	GinkgoHelper()
+
+	url := strings.TrimRight(Cfg.ServerURL, "/") + path
+	req, err := http.NewRequest(method, url, nil)
+	Expect(err).NotTo(HaveOccurred())
+
+	req.Header.Set("Authorization", Cfg.APIKey)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	Expect(err).NotTo(HaveOccurred())
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	Expect(err).NotTo(HaveOccurred())
+
+	return body, resp.StatusCode
+}
+
 // --- Endpoint/inference/accelerator helpers ---
 
 // engineVersionSupportsK8s returns true if the given engine version has K8s deployment templates.

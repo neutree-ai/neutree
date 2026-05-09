@@ -3,7 +3,6 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -110,7 +109,7 @@ var _ = Describe("SSH Endpoint Failure Logs", Ordered, Label("endpoint", "ssh", 
 	})
 })
 
-// ===== test-local helpers (HTTP calls to neutree-api) =====
+// ===== test-local helpers (endpoint-specific URL shapes) =====
 
 type logSourcesResponse struct {
 	Deployments []struct {
@@ -122,31 +121,10 @@ type logSourcesResponse struct {
 	} `json:"deployments"`
 }
 
-func neutreeAPIRequest(method, path string) ([]byte, int) {
-	GinkgoHelper()
-
-	url := strings.TrimRight(Cfg.ServerURL, "/") + path
-	req, err := http.NewRequest(method, url, nil)
-	Expect(err).NotTo(HaveOccurred())
-
-	// neutree-api accepts the raw API key; only Kong/inference endpoints expect "Bearer <key>".
-	req.Header.Set("Authorization", Cfg.APIKey)
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	Expect(err).NotTo(HaveOccurred())
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	Expect(err).NotTo(HaveOccurred())
-
-	return body, resp.StatusCode
-}
-
 func getEndpointLogSources(epName string) []byte {
 	GinkgoHelper()
 	path := fmt.Sprintf("/api/v1/endpoints/%s/%s/log-sources", profileWorkspace(), epName)
-	body, code := neutreeAPIRequest(http.MethodGet, path)
+	body, code := callNeutreeAPI(http.MethodGet, path)
 	Expect(code).To(Equal(http.StatusOK), "log-sources call failed: %s", string(body))
 	return body
 }
@@ -155,7 +133,7 @@ func getEndpointReplicaLog(epName, replicaID, logType string, lines int) string 
 	GinkgoHelper()
 	path := fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/%s?lines=%d",
 		profileWorkspace(), epName, replicaID, logType, lines)
-	body, code := neutreeAPIRequest(http.MethodGet, path)
+	body, code := callNeutreeAPI(http.MethodGet, path)
 	Expect(code).To(Equal(http.StatusOK), "log stream call failed: %s", string(body))
 	return string(body)
 }
