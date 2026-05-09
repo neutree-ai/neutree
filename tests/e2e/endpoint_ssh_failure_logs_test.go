@@ -12,12 +12,11 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// NEU-423 / TestRail C2649684:
-// On an SSH/Ray cluster, when a Serve replica's actor fails to initialize
+// On an SSH/Ray cluster, when a Serve replica's actor fails to initialize,
 // Ray Serve removes it from the live applications response. Verify that
 // /log-sources still surfaces the failed actor (with failed=true) via the
 // state API fallback, and /logs/<replica_id>/stderr streams the actor's
-// stderr containing the Python traceback.
+// stderr.
 var _ = Describe("SSH Endpoint Failure Logs", Ordered, Label("endpoint", "ssh", "logs", "failure", "C2649684"), func() {
 	var clusterName string
 
