@@ -1219,7 +1219,6 @@ type endpointOpts struct {
 	env           map[string]string
 	forceUpdate   bool
 	replicas      int
-	replicasSet   bool
 }
 
 // EndpointOption configures a single field of endpointOpts.
@@ -1281,10 +1280,7 @@ func withoutForceUpdate() EndpointOption {
 // withReplicas overrides the default spec.replicas.num (which is 1 in the
 // template). Use withReplicas(0) to apply a paused endpoint.
 func withReplicas(num int) EndpointOption {
-	return func(o *endpointOpts) {
-		o.replicas = num
-		o.replicasSet = true
-	}
+	return func(o *endpointOpts) { o.replicas = num }
 }
 
 // renderEndpoint renders the endpoint YAML template and returns the temp file path and resolved options.
@@ -1300,6 +1296,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		// profile lookup picks the right engine's args.
 		gpu:         "1",
 		forceUpdate: true,
+		replicas:    1,
 	}
 	for _, fn := range opts {
 		fn(o)
@@ -1311,11 +1308,6 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 
 	if o.accType == "" || o.accProduct == "" {
 		o.accType, o.accProduct = getClusterAccelerator(cluster)
-	}
-
-	replicasNum := 1
-	if o.replicasSet {
-		replicasNum = o.replicas
 	}
 
 	data := map[string]any{
@@ -1335,7 +1327,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		"E2E_MEMORY":              o.memory,
 		"E2E_ENGINE_ARGS":         o.engineArgs,
 		"E2E_ENV":                 o.env,
-		"E2E_REPLICAS_NUM":        replicasNum,
+		"E2E_REPLICAS_NUM":        o.replicas,
 	}
 
 	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), data)
