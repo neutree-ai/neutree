@@ -152,6 +152,8 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			defer os.Remove(yamlPath)
 
 			waitEndpointFailed(epName)
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Failed"))
 		})
 
 		It("should show Failed when model version does not exist", Label("C2613501"), func() {
