@@ -476,6 +476,8 @@ func SetupImageRegistry() {
 		"--timeout", "2m",
 	)
 	ExpectSuccess(r)
+
+	trackResource("imageregistry", testImageRegistry(), profileWorkspace())
 }
 
 // TeardownImageRegistry deletes the image registry and cleans up the temp YAML.
@@ -485,6 +487,8 @@ func TeardownImageRegistry() {
 		ExpectSuccess(r)
 		os.Remove(imageRegistryYAML)
 		imageRegistryYAML = ""
+
+		untrackResource("imageregistry", testImageRegistry(), profileWorkspace())
 	}
 }
 
@@ -1180,6 +1184,8 @@ func setupSSHCluster(prefix string) (clusterName string) {
 	By("Waiting for cluster Running")
 	ch.EventuallyInPhase(clusterName, v1.ClusterPhaseRunning, "", TerminalPhaseTimeout)
 
+	trackResource("cluster", clusterName, profileWorkspace())
+
 	return clusterName
 }
 
@@ -1209,6 +1215,8 @@ func setupK8sCluster(prefix string) (clusterName string) {
 	By("Waiting for cluster Running")
 	ch.EventuallyInPhase(clusterName, v1.ClusterPhaseRunning, "", TerminalPhaseTimeout)
 
+	trackResource("cluster", clusterName, profileWorkspace())
+
 	return clusterName
 }
 
@@ -1217,6 +1225,8 @@ func teardownCluster(clusterName string) {
 	ch := NewClusterHelper()
 
 	ch.EnsureDeleted(clusterName)
+
+	untrackResource("cluster", clusterName, profileWorkspace())
 
 	TeardownImageRegistry()
 }
