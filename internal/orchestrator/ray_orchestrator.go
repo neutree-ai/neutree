@@ -338,6 +338,32 @@ func allDeploymentsHealthy(deployments map[string]dashboard.Deployment) bool {
 	return true
 }
 
+// mapDeployingPhase resolves the endpoint phase when Ray Serve reports the
+// application as DEPLOYING or NOT_STARTED. Returns Failed when any deployment
+// is UNHEALTHY; returns Running when the previous Neutree phase was Running,
+// the proxy is healthy, and every deployment is HEALTHY — the false-positive
+// window opened by Ray's PUT /api/serve/applications/ when it unconditionally
+// writes DEPLOYING to every application in the request even if their configs
+// are unchanged (see ray-project/ray#25381, #42974, #44226). Otherwise
+// returns Deploying.
+func mapDeployingPhase(endpoint *v1.Endpoint, status dashboard.RayServeApplicationStatus, proxyReady bool) v1.EndpointPhase {
+	for _, deployment := range status.Deployments {
+		if deployment.Status == dashboard.DeploymentStatusUnhealthy {
+			return v1.EndpointPhaseFAILED
+		}
+	}
+
+	if proxyReady &&
+		endpoint.Status != nil &&
+		endpoint.Status.Phase == v1.EndpointPhaseRUNNING &&
+		len(status.Deployments) > 0 &&
+		allDeploymentsHealthy(status.Deployments) {
+		return v1.EndpointPhaseRUNNING
+	}
+
+	return v1.EndpointPhaseDEPLOYING
+}
+
 // GetEndpointStatus retrieves the status of a specific endpoint from Ray Serve.
 func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
 	// Placeholder implementation: Get all apps and check if ours exists.
@@ -412,32 +438,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	switch status.Status {
 	case "DEPLOYING", "NOT_STARTED":
-		phase = v1.EndpointPhaseDEPLOYING
-
-		for _, deployment := range status.Deployments {
-			if deployment.Status == dashboard.DeploymentStatusUnhealthy {
-				phase = v1.EndpointPhaseFAILED
-				break
-			}
-		}
-
-		// Suppress the transient DEPLOYING reported by Ray Serve when this
-		// endpoint's replicas are not actually being touched. PUT
-		// /api/serve/applications/ unconditionally writes app status to
-		// DEPLOYING for every app in the request (Ray application_state.py
-		// _set_target_state), then the next reconcile tick derives the real
-		// status from deployment statuses (_determine_app_status). For a
-		// neighbor endpoint whose config did not change, deployments stay
-		// HEALTHY throughout the window and the visible flicker is purely
-		// state-machine noise. See ray-project/ray#25381, #42974, #44226.
-		if phase == v1.EndpointPhaseDEPLOYING &&
-			proxyReady &&
-			endpoint.Status != nil &&
-			endpoint.Status.Phase == v1.EndpointPhaseRUNNING &&
-			len(status.Deployments) > 0 &&
-			allDeploymentsHealthy(status.Deployments) {
-			phase = v1.EndpointPhaseRUNNING
-		}
+		phase = mapDeployingPhase(endpoint, status, proxyReady)
 	case "DEPLOY_FAILED", "UNHEALTHY":
 		phase = v1.EndpointPhaseFAILED
 	case "RUNNING":
