@@ -12,9 +12,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/internal/util"
 	utilmocks "github.com/neutree-ai/neutree/internal/util/mocks"
 	"github.com/neutree-ai/neutree/pkg/storage/mocks"
@@ -1155,4 +1158,282 @@ func TestHandleGetLogs_K8sCluster_Success(t *testing.T) {
 	assert.Equal(t, logContent, w.Body.String())
 
 	mockStorage.AssertExpectations(t)
+}
+
+// ===== Failed-actor fallback integration tests =====
+//
+// Pure helper tests for the dashboard package functions
+// (ExtractReplicaShortID, ReplicaShortIDFromActor, FindFailedActor*,
+// LookupFailedActorAcrossDeployments) live in
+// internal/ray/dashboard/serve_replica_test.go. The tests here verify
+// the routes-layer integration: getRayLogSources synthesizing a
+// failed=true ReplicaInfo, streamRayLogs resolving a recovered
+// actor_id, and the error path users see when no DEAD actor matches.
+
+func TestGetRayLogSources_FailedActor_FallbackToDashboardActors(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	// Serve API returns a deployment with NO live replicas (actor crashed and was removed).
+	appsResponse := `{
+		"applications": {
+			"default_test-endpoint": {
+				"name": "default_test-endpoint",
+				"deployments": {
+					"deploy-1": {
+						"replicas": []
+					}
+				}
+			}
+		}
+	}`
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "/api/serve/applications/")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(appsResponse)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	// Dashboard /api/v0/actors returns one DEAD actor that belongs to deploy-1.
+	mockDashboardSvc.EXPECT().
+		ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
+			hasClass, hasState := false, false
+			for _, f := range filters {
+				if f.Key == "class_name" && f.Value == "ServeReplica:default_test-endpoint:deploy-1" && f.Predicate == "=" {
+					hasClass = true
+				}
+				if f.Key == "state" && f.Value == "DEAD" && f.Predicate == "=" {
+					hasState = true
+				}
+			}
+			return hasClass && hasState
+		}), true, mock.Anything).
+		Return(&dashboard.ActorsResponse{
+			Data: dashboard.ActorsResponseData{
+				Result: dashboard.ActorsListResult{
+					Total: 1,
+					Result: []dashboard.Actor{
+						{
+							ActorID:   "actor-aaa",
+							ClassName: "ServeReplica:default_test-endpoint:deploy-1",
+							State:     "DEAD",
+							Name:      "SERVE_REPLICA::default_test-endpoint#deploy-1#shortxyz",
+							NodeID:    "node-1",
+						},
+					},
+				},
+			},
+		}, nil).
+		Once()
+
+	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Deployments, 1)
+	dep := resp.Deployments[0]
+	require.Len(t, dep.Replicas, 1, "expected one synthesized failed replica")
+	r := dep.Replicas[0]
+	assert.Equal(t, "shortxyz", r.ReplicaID, "replica_id should be the short_id from actor.Name")
+	assert.True(t, r.Failed, "synthesized replica must be marked Failed=true")
+	require.NotEmpty(t, r.Logs)
+	logTypes := map[string]bool{}
+	for _, l := range r.Logs {
+		logTypes[l.Type] = true
+	}
+	assert.True(t, logTypes["stderr"], "failed replica should expose stderr log")
+	assert.True(t, logTypes["stdout"], "failed replica should expose stdout log")
+}
+
+func TestGetRayLogSources_FailedActor_NoDeadActors_ReturnsEmptyReplicas(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	mockHTTPClient.On("Get", mock.Anything).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{"applications":{"default_ep":{"deployments":{"d":{"replicas":[]}}}}}`)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: nil}},
+	}, nil).Once()
+
+	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "ep")
+
+	require.NoError(t, err)
+	require.Len(t, resp.Deployments, 1)
+	assert.Empty(t, resp.Deployments[0].Replicas, "no DEAD actor and no live replica -> empty replicas, no error")
+}
+
+func TestStreamRayLogs_FailedActor_ResolvesActorIDByReplicaID(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	// Live serve API has no replicas in the deployment.
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "/api/serve/applications/")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{"applications":{"default_ep":{"deployments":{"d":{"replicas":[]}}}}}`)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	// Dashboard returns a DEAD actor whose name encodes the requested replica_id.
+	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{
+			Result: dashboard.ActorsListResult{
+				Result: []dashboard.Actor{
+					{ActorID: "dead-actor-id", State: "DEAD", NodeID: "node-x", Name: "SERVE_REPLICA::default_ep#d#wantedshort"},
+				},
+			},
+		},
+	}, nil).Once()
+
+	// Log fetch URL must use the recovered actor_id.
+	logContent := "Traceback (most recent call last):\n  ...\nFileNotFoundError: model not found\n"
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "actor_id=dead-actor-id") && strings.Contains(url, "suffix=err")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(logContent)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	err := streamRayLogs(c, cluster, mockHTTPClient, "default", "ep", "wantedshort", "stderr", 500)
+
+	require.NoError(t, err)
+	assert.Equal(t, logContent, w.Body.String())
+}
+
+func TestStreamRayLogs_FailedActor_NotFoundReturnsError(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "/api/serve/applications/")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{"applications":{"default_ep":{"deployments":{"d":{"replicas":[]}}}}}`)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: nil}},
+	}, nil).Once()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	err := streamRayLogs(c, cluster, mockHTTPClient, "default", "ep", "missing-replica", "stderr", 500)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "replica missing-replica not found",
+		"error must name the missing replica so the user can correlate it with their request")
+}
+
+func TestStreamRayLogs_FailedActor_ResolvesByActorIDFallback(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "/api/serve/applications/")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{"applications":{"default_ep":{"deployments":{"d":{"replicas":[]}}}}}`)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	// The DEAD actor has an unconventional Name (no '#' separator), so
+	// extractReplicaShortID returns "" and getRayLogSources would have
+	// synthesized a ReplicaInfo with replica_id=actor_id. The click-back
+	// flow must still resolve via the ActorID fallback path.
+	mockDashboardSvc.EXPECT().ListActors(mock.Anything, true, mock.Anything).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{
+			Result: dashboard.ActorsListResult{
+				Result: []dashboard.Actor{
+					{ActorID: "weirdactor-id", State: "DEAD", NodeID: "node-y", Name: "non-conventional-actor-name"},
+				},
+			},
+		},
+	}, nil).Once()
+
+	logContent := "actor stderr content\n"
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "actor_id=weirdactor-id")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(logContent)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	err := streamRayLogs(c, cluster, mockHTTPClient, "default", "ep", "weirdactor-id", "stderr", 500)
+
+	require.NoError(t, err)
+	assert.Equal(t, logContent, w.Body.String())
 }
