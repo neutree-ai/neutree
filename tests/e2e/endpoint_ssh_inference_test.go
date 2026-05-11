@@ -184,11 +184,20 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			lastTransitionBefore := epBBefore.Status.LastTransitionTime
 
 			By("Updating endpoint A (re-apply with extra env to force a Ray Serve PUT)")
+			// withEnv injects a new key into the endpoint spec → the controller
+			// detects a config diff and re-issues PUT /api/serve/applications/
+			// against Ray. The PUT is what triggers Ray's transient DEPLOYING
+			// write on every application in the request (NEU-422 trigger);
+			// the env key itself is a marker, the value is irrelevant.
 			yamlAUpdate := applyEndpoint(epNameA, clusterName,
 				withEnv(map[string]string{"NEU_422_E2E_MARKER": "1"}))
 			defer os.Remove(yamlAUpdate)
 
 			By("Polling endpoint B every second for 90s — phase must stay Running")
+			// Sampling-based assertion: catches any flicker the controller
+			// reconciles slower than 1s. The definitive guard is the
+			// LastTransitionTime equality check below — it catches any phase
+			// write by the controller regardless of poll cadence.
 			Consistently(func() v1.EndpointPhase {
 				return getEndpoint(epNameB).Status.Phase
 			}, 90*time.Second, 1*time.Second).
@@ -205,7 +214,14 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 				Should(BeEquivalentTo("Running"),
 					"endpoint B phase flickered after endpoint A finished rollout")
 
-			By("Verifying endpoint B LastTransitionTime did not change")
+			By("Verifying endpoint B LastTransitionTime did not change (definitive guard)")
+			// LastTransitionTime is bumped only when the controller detects an
+			// actual status change (shouldUpdateStatus → updateStatus). If
+			// endpoint B's phase ever flipped — even momentarily between two
+			// reconciles the sampling above couldn't catch — the controller
+			// would have written the change and bumped LastTransitionTime.
+			// Equality with the pre-update baseline therefore strictly proves
+			// no phase write happened for endpoint B during A's update.
 			epBAfter := getEndpoint(epNameB)
 			Expect(epBAfter.Status.LastTransitionTime).To(Equal(lastTransitionBefore),
 				"endpoint B LastTransitionTime changed (controller wrote an intermediate phase) — before=%q after=%q",

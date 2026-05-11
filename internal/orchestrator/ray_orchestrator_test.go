@@ -2812,6 +2812,70 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:    false,
 		},
 		{
+			name: "NEU-422 do not suppress when Deployments map is empty (no replicas registered)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments:       map[string]dashboard.Deployment{},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "NEU-422 do not suppress NOT_STARTED (Ray app not present in state)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "NOT_STARTED",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
 			name: "NEU-422 do not suppress when proxy is unhealthy (HTTP entry not serving)",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
