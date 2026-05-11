@@ -452,13 +452,20 @@ func SetupImageRegistry() {
 }
 
 // TeardownImageRegistry deletes the image registry and cleans up the temp YAML.
+//
+// Untracks only when the CLI delete succeeded; on a non-zero exit the
+// entry stays in the registry so AfterSuite can retry. Always clears the
+// YAML guard so a future SetupImageRegistry can re-enter (a transient
+// delete failure shouldn't permanently block re-setup).
 func TeardownImageRegistry() {
 	if imageRegistryYAML != "" {
-		RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
+		r := RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
 		os.Remove(imageRegistryYAML)
-
-		untrackResource("imageregistry", testImageRegistry(), profileWorkspace())
 		imageRegistryYAML = ""
+
+		if r.ExitCode == 0 {
+			untrackResource("imageregistry", testImageRegistry(), profileWorkspace())
+		}
 	}
 }
 
@@ -702,9 +709,13 @@ func (c *ClusterHelper) EventuallyObservedSpecHashAdvanced(name, oldHash string,
 }
 
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
-func (c *ClusterHelper) EnsureDeleted(name string) {
+// Returns the WaitForDelete CLIResult so callers that need to know whether
+// removal actually succeeded can branch on ExitCode (0 = gone, non-zero =
+// still present). Callers that only want fire-and-forget can ignore the
+// return value.
+func (c *ClusterHelper) EnsureDeleted(name string) CLIResult {
 	c.Delete(name)
-	c.WaitForDelete(name, TerminalPhaseTimeout)
+	return c.WaitForDelete(name, TerminalPhaseTimeout)
 }
 
 // --- Cluster JSON parsing ---
@@ -1178,12 +1189,16 @@ func setupK8sCluster(prefix string) (clusterName string) {
 }
 
 // teardownCluster deletes a cluster and image registry.
+//
+// Untracks the cluster only when the API confirms removal — otherwise the
+// entry stays in the registry so AfterSuite can retry. Wiping it out
+// blindly would defeat the safety net this PR is adding.
 func teardownCluster(clusterName string) {
 	ch := NewClusterHelper()
 
-	ch.EnsureDeleted(clusterName)
-
-	untrackResource("cluster", clusterName, profileWorkspace())
+	if ch.EnsureDeleted(clusterName).ExitCode == 0 {
+		untrackResource("cluster", clusterName, profileWorkspace())
+	}
 
 	TeardownImageRegistry()
 }

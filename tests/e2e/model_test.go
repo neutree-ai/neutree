@@ -43,13 +43,20 @@ func SetupModelRegistry() {
 }
 
 // TeardownModelRegistry deletes the model registry and cleans up the temp YAML.
+//
+// Untracks only when the CLI delete succeeded; on a non-zero exit the
+// entry stays in the registry so AfterSuite can retry. Always clears the
+// YAML guard so a future SetupModelRegistry can re-enter (a transient
+// delete failure shouldn't permanently block re-setup).
 func TeardownModelRegistry() {
 	if registryYAML != "" {
-		RunCLI("delete", "-f", registryYAML, "--force", "--ignore-not-found")
+		r := RunCLI("delete", "-f", registryYAML, "--force", "--ignore-not-found")
 		os.Remove(registryYAML)
-
-		untrackResource("modelregistry", testRegistry(), profileWorkspace())
 		registryYAML = ""
+
+		if r.ExitCode == 0 {
+			untrackResource("modelregistry", testRegistry(), profileWorkspace())
+		}
 	}
 }
 
