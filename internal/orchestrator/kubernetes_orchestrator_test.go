@@ -2,17 +2,21 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -2967,4 +2971,204 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			fakeClient.AssertExpectations()
 		})
 	}
+}
+
+// TestBuildDeployment_BooleanEngineArgs covers NEU-440: the K8s deploy
+// templates for vLLM v0.11.2 / v0.17.1 and SGLang v0.5.10 used to render
+// `--<flag>` followed by `"false"` for boolean engine_args set to false,
+// which vLLM and SGLang argparse (action="store_true") reject. The fix
+// must skip the entire flag when the value is false (bool or string),
+// emit just `--<flag>` when the value is true (bool or string), and
+// keep `--<flag>` plus quoted value for any non-boolean value.
+func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
+	cases := []struct {
+		name        string
+		templateKey string
+	}{
+		{
+			name:        "vllm-v0.11.2",
+			templateKey: "vllm-v0.11.2",
+		},
+		{
+			name:        "vllm-v0.17.1",
+			templateKey: "vllm-v0.17.1",
+		},
+		{
+			name:        "sglang-v0.5.10",
+			templateKey: "sglang-v0.5.10",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmplB64, err := engine.GetDeployTemplate(tc.templateKey)
+			require.NoError(t, err)
+
+			tmplRaw, err := base64.StdEncoding.DecodeString(tmplB64)
+			require.NoError(t, err)
+
+			data := DeploymentManifestVariables{
+				NeutreeVersion:  "v0.1.0",
+				ClusterName:     "test-cluster",
+				Workspace:       "test-workspace",
+				Namespace:       "default",
+				ImagePrefix:     "registry.example.com",
+				ImageRepo:       "myrepo",
+				ImageTag:        "v1.0.0",
+				ImagePullSecret: "my-secret",
+				EngineName:      "test-engine",
+				EngineVersion:   "v1.0.0",
+				EndpointName:    "test-endpoint",
+				ModelArgs: map[string]interface{}{
+					"name":          "gpt-4",
+					"task":          "text-generation",
+					"path":          "/mnt/models/gpt-4",
+					"registry_type": "bentoml",
+					"registry_path": "/mnt/registry/gpt-4-model",
+					"serve_name":    "gpt-4-serve",
+				},
+				EngineArgs: map[string]interface{}{
+					// Boolean false in both bool and string form: must be skipped entirely.
+					"enable-prefix-caching": false,
+					"skip-tokenizer-init":   "false",
+					// Boolean true in both forms: emit flag, no following value.
+					"trust-remote-code": true,
+					"is-embedding":      "true",
+					// Non-boolean values: emit flag followed by quoted value.
+					"max-model-len": "4096",
+					"max-num-seqs":  256,
+				},
+				Resources: map[string]string{
+					"cpu":    "500m",
+					"memory": "1Gi",
+				},
+				RoutingLogic: "roundrobin",
+				Replicas:     1,
+			}
+
+			objs, err := buildDeploymentObjects(string(tmplRaw), data)
+			require.NoError(t, err, "template render must succeed")
+
+			tokens := extractEngineCLITokens(t, objs)
+
+			// (1) False booleans must be skipped entirely — no flag, no value.
+			assert.NotContains(t, tokens, "--enable-prefix-caching",
+				"bool false engine_arg must not emit its flag")
+			assert.NotContains(t, tokens, "--skip-tokenizer-init",
+				"string false engine_arg must not emit its flag")
+			// The literal token `false` must never reach the CLI: argparse rejects
+			// `--flag false` for store_true booleans.
+			for _, tok := range tokens {
+				assert.NotEqual(t, "false", tok,
+					"no CLI token should be the literal string \"false\"")
+			}
+
+			// (2) True booleans (bool + string forms) must emit just the flag.
+			//     The token immediately after must not be "true" — it should be
+			//     the next engine_arg flag or a CLI token following it.
+			assertFlagWithoutValue(t, tokens, "--trust-remote-code")
+			assertFlagWithoutValue(t, tokens, "--is-embedding")
+
+			// (3) Non-boolean engine_args must emit `--<flag>` followed by value.
+			assertFlagWithValue(t, tokens, "--max-model-len", "4096")
+			assertFlagWithValue(t, tokens, "--max-num-seqs", "256")
+		})
+	}
+}
+
+// extractEngineCLITokens collects the rendered Deployment's first container
+// command + args into a flat ordered slice of tokens, so test assertions can
+// reason about CLI shape (token presence, adjacency).
+func extractEngineCLITokens(t *testing.T, objs *unstructured.UnstructuredList) []string {
+	t.Helper()
+	require.NotNil(t, objs)
+	require.NotEmpty(t, objs.Items, "expected at least one rendered object")
+
+	var dep *unstructured.Unstructured
+
+	for i := range objs.Items {
+		if objs.Items[i].GetKind() == "Deployment" {
+			dep = &objs.Items[i]
+			break
+		}
+	}
+
+	require.NotNil(t, dep, "rendered manifest must include a Deployment")
+
+	containers, found, err := unstructured.NestedSlice(dep.Object,
+		"spec", "template", "spec", "containers")
+	require.NoError(t, err)
+	require.True(t, found, "deployment must declare containers")
+	require.NotEmpty(t, containers, "containers slice must not be empty")
+
+	// Each engine template defines the inference container after any
+	// initContainers; we want the first containers[] entry that has the
+	// engine binary in command/args. The first containers[] entry in the
+	// vLLM / SGLang / llama-cpp templates is exactly that container.
+	cMap, ok := containers[0].(map[string]interface{})
+	require.True(t, ok)
+
+	var tokens []string
+
+	if cmd, found, _ := unstructured.NestedSlice(cMap, "command"); found {
+		tokens = append(tokens, sliceToStrings(t, cmd)...)
+	}
+
+	if args, found, _ := unstructured.NestedSlice(cMap, "args"); found {
+		tokens = append(tokens, sliceToStrings(t, args)...)
+	}
+
+	return tokens
+}
+
+func sliceToStrings(t *testing.T, in []interface{}) []string {
+	t.Helper()
+
+	out := make([]string, 0, len(in))
+
+	for _, v := range in {
+		s, ok := v.(string)
+		require.True(t, ok, "expected string CLI token, got %T (%v)", v, v)
+		out = append(out, s)
+	}
+
+	return out
+}
+
+// assertFlagWithoutValue checks that `flag` appears in tokens and the next
+// token is either another `--flag` or absent — i.e. no value follows.
+func assertFlagWithoutValue(t *testing.T, tokens []string, flag string) {
+	t.Helper()
+
+	idx := indexOf(tokens, flag)
+	require.NotEqual(t, -1, idx, "expected flag %q in tokens %v", flag, tokens)
+
+	if idx+1 >= len(tokens) {
+		return
+	}
+
+	next := tokens[idx+1]
+	assert.True(t, strings.HasPrefix(next, "--"),
+		"flag %q should not be followed by a value; got %q", flag, next)
+}
+
+// assertFlagWithValue checks that `flag` is immediately followed by `value`.
+func assertFlagWithValue(t *testing.T, tokens []string, flag, value string) {
+	t.Helper()
+
+	idx := indexOf(tokens, flag)
+	require.NotEqual(t, -1, idx, "expected flag %q in tokens %v", flag, tokens)
+	require.Less(t, idx+1, len(tokens), "flag %q should have a following value token", flag)
+	assert.Equal(t, value, tokens[idx+1],
+		"flag %q should be followed by %q; got %q", flag, value, tokens[idx+1])
+}
+
+func indexOf(tokens []string, target string) int {
+	for i, t := range tokens {
+		if t == target {
+			return i
+		}
+	}
+
+	return -1
 }

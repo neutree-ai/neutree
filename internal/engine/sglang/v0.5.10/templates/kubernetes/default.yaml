@@ -110,10 +110,14 @@ spec:
                kwargs on the SSH/Ray path. */}}
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
+          {{- if eq (printf "%v" $value) "true" }}
           - --{{ $key | replace "_" "-" }}
-      {{- if ne (printf "%v" $value) "true"}}
+          {{- else if eq (printf "%v" $value) "false" }}
+          {{- /* NEU-440: skip; SGLang argparse uses store_true booleans, rejects --flag false */ -}}
+          {{- else }}
+          - --{{ $key | replace "_" "-" }}
           - "{{ $value }}"
-      {{- end }}
+          {{- end }}
           {{- end }}
           {{- end }}
           resources:
