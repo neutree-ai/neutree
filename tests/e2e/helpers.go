@@ -486,9 +486,9 @@ func TeardownImageRegistry() {
 		r := RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
 		ExpectSuccess(r)
 		os.Remove(imageRegistryYAML)
-		imageRegistryYAML = ""
 
 		untrackResource("imageregistry", testImageRegistry(), profileWorkspace())
+		imageRegistryYAML = ""
 	}
 }
 
