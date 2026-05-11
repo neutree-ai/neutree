@@ -47,9 +47,9 @@ func TeardownModelRegistry() {
 	if registryYAML != "" {
 		RunCLI("delete", "-f", registryYAML, "--force", "--ignore-not-found")
 		os.Remove(registryYAML)
-		registryYAML = ""
 
 		untrackResource("modelregistry", testRegistry(), profileWorkspace())
+		registryYAML = ""
 	}
 }
 
