@@ -181,6 +181,17 @@ def coerce_args(args: Dict[str, Any], model_class: type) -> None:
                     "coerce_args: TypeAdapter failed for field %r (target=%s): %s",
                     field_name, target.__name__, e,
                 )
+            except Exception as e:
+                # TypeAdapter(target) schema generation can raise PydanticUserError /
+                # NameError on pathological dataclasses (unresolved forward refs in
+                # nested fields, etc.). coerce_args must never crash replica startup
+                # — the original string is preserved and vLLM will surface a clearer
+                # error downstream if the value is genuinely unusable.
+                logger.warning(
+                    "coerce_args: TypeAdapter construction or unexpected error for "
+                    "field %r (target=%s): %s",
+                    field_name, getattr(target, "__name__", target), e,
+                )
 
 
 def filter_engine_args(args: Dict[str, Any], engine_args_class: type) -> None:

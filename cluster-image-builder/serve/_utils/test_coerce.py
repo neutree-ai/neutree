@@ -231,6 +231,38 @@ class TestCoerceArgsDataclassHydration:
         coerce_args(args, FakeEngineV017)
         assert args["attn_required"] is existing
 
+    def test_typeadapter_constructor_raise_keeps_string(self, monkeypatch, caplog):
+        """If TypeAdapter(target) schema generation itself raises (e.g.
+        PydanticUserError on an unresolved forward-ref in a nested field,
+        NameError, etc.), coerce_args must keep the original string and not
+        crash replica startup."""
+        from serve._utils import coerce
+
+        class _BoomError(Exception):
+            pass
+
+        def fake_typeadapter(target):
+            raise _BoomError("schema generation blew up")
+
+        monkeypatch.setattr(coerce, "TypeAdapter", fake_typeadapter)
+        args = {"attn_required": '{"backend":"FLASH"}'}
+        with caplog.at_level(logging.WARNING, logger="ray.serve"):
+            coerce_args(args, FakeEngineV017)
+        assert args["attn_required"] == '{"backend":"FLASH"}'
+        assert "TypeAdapter construction or unexpected error" in caplog.text
+
+    def test_string_annotation_passthrough(self):
+        """Under NEU-433 last-resort recovery, _get_field_annotations returns
+        raw annotation strings from dataclasses.fields() instead of resolved
+        type objects. _is_dataclass_like / _wants_dict_or_list must short-
+        circuit on str — annotation is not a type, no hydration attempted,
+        original string preserved."""
+        from serve._utils.coerce import _is_dataclass_like, _wants_dict_or_list
+
+        # Both predicates safely return False on raw annotation strings.
+        assert _is_dataclass_like("FakeAttentionConfig") is False
+        assert _wants_dict_or_list("dict[str, Any] | None") is False
+
 
 # ---------------------------------------------------------------------------
 # Fixture for filter_engine_args tests
