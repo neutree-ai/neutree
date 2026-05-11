@@ -2639,12 +2639,12 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectErrorMsg: "Deployment BACKEND: backend deployment is error",
 			expectError:    false,
 		},
-		// NEU-422: suppress transient DEPLOYING when previously Running and replicas remain Healthy.
+		// Suppress transient DEPLOYING when previously Running and replicas remain Healthy.
 		// Ray Serve PUT /api/serve/applications/ briefly flips status to DEPLOYING for every
 		// application in the request — including unchanged ones — even though their deployments
 		// are not actually restarted. See ray-project/ray#25381, #42974, #44226.
 		{
-			name: "NEU-422 suppress transient DEPLOYING when previously Running and all deployments Healthy",
+			name: "suppress transient DEPLOYING when previously Running and all deployments Healthy",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
@@ -2678,7 +2678,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			name: "NEU-422 do not suppress when this endpoint is actually rolling out (a deployment is UPDATING)",
+			name: "do not suppress when this endpoint is actually rolling out (a deployment is UPDATING)",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
@@ -2712,7 +2712,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			name: "NEU-422 do not suppress when previous status is nil (initial deploy)",
+			name: "do not suppress when previous status is nil (initial deploy)",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				// Status nil — endpoint has never reported a phase.
@@ -2745,7 +2745,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			name: "NEU-422 do not suppress when previous status is Failed (recovering from failure)",
+			name: "do not suppress when previous status is Failed (recovering from failure)",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseFAILED}
@@ -2778,7 +2778,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			name: "NEU-422 UNHEALTHY deployment still maps to Failed even if previously Running (failure precedence preserved)",
+			name: "UNHEALTHY deployment still maps to Failed even if previously Running (failure precedence preserved)",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
@@ -2812,7 +2812,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:    false,
 		},
 		{
-			name: "NEU-422 do not suppress when Deployments map is empty (no replicas registered)",
+			name: "do not suppress when Deployments map is empty (no replicas registered)",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
@@ -2843,7 +2843,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			name: "NEU-422 do not suppress NOT_STARTED (Ray app not present in state)",
+			name: "do not suppress NOT_STARTED (Ray app not present in state)",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
@@ -2876,7 +2876,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			name: "NEU-422 do not suppress when proxy is unhealthy (HTTP entry not serving)",
+			name: "do not suppress when proxy is unhealthy (HTTP entry not serving)",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
 				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}

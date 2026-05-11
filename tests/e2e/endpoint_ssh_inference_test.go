@@ -145,7 +145,7 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 		})
 	})
 
-	// --- Sibling Endpoint Update Isolation (NEU-422) ---
+	// --- Sibling Endpoint Update Isolation ---
 	//
 	// Ray Serve PUT /api/serve/applications/ unconditionally writes
 	// ApplicationStatus to DEPLOYING for every application in the request,
@@ -154,7 +154,10 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 	// Deploying → Running flicker on sibling endpoints whenever any single
 	// endpoint in the same cluster is updated. See ray-project/ray#25381,
 	// #42974, #44226.
-	Describe("Sibling Endpoint Update Isolation", Ordered, Label("inference", "isolation", "NEU-422"), func() {
+	//
+	// Lives under the inference-test file purely to reuse the SSH cluster
+	// fixture; the case itself is a status-reporting assertion.
+	Describe("Sibling Endpoint Update Isolation", Ordered, Label("status", "isolation"), func() {
 		var epNameA, epNameB string
 
 		BeforeAll(func() {
@@ -186,11 +189,11 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			By("Updating endpoint A (re-apply with extra env to force a Ray Serve PUT)")
 			// withEnv injects a new key into the endpoint spec → the controller
 			// detects a config diff and re-issues PUT /api/serve/applications/
-			// against Ray. The PUT is what triggers Ray's transient DEPLOYING
-			// write on every application in the request (NEU-422 trigger);
-			// the env key itself is a marker, the value is irrelevant.
+			// against Ray. The PUT is what triggers the transient DEPLOYING
+			// write on every application in the request; the env key itself is
+			// a marker, the value is irrelevant.
 			yamlAUpdate := applyEndpoint(epNameA, clusterName,
-				withEnv(map[string]string{"NEU_422_E2E_MARKER": "1"}))
+				withEnv(map[string]string{"E2E_ISOLATION_MARKER": "1"}))
 			defer os.Remove(yamlAUpdate)
 
 			By("Polling endpoint B every second for 90s — phase must stay Running")
@@ -202,7 +205,7 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 				return getEndpoint(epNameB).Status.Phase
 			}, 90*time.Second, 1*time.Second).
 				Should(BeEquivalentTo("Running"),
-					"endpoint B phase flickered while endpoint A was being updated (NEU-422 regression)")
+					"endpoint B phase flickered while endpoint A was being updated")
 
 			By("Waiting for endpoint A rollout to settle")
 			waitEndpointRunning(epNameA)
