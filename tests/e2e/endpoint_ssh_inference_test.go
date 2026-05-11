@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
@@ -139,6 +142,74 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			codeB, bodyB, err := inferChat(epB.Status.ServiceURL, "Hello after delete")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(codeB).To(Equal(http.StatusOK), "inference on ep-B after deleting ep-A failed: %s", bodyB)
+		})
+	})
+
+	// --- Sibling Endpoint Update Isolation (NEU-422) ---
+	//
+	// Ray Serve PUT /api/serve/applications/ unconditionally writes
+	// ApplicationStatus to DEPLOYING for every application in the request,
+	// even those whose configs are unchanged. Without the suppression in
+	// GetEndpointStatus this leaks to Neutree as a transient Running →
+	// Deploying → Running flicker on sibling endpoints whenever any single
+	// endpoint in the same cluster is updated. See ray-project/ray#25381,
+	// #42974, #44226.
+	Describe("Sibling Endpoint Update Isolation", Ordered, Label("inference", "isolation", "NEU-422"), func() {
+		var epNameA, epNameB string
+
+		BeforeAll(func() {
+			epNameA = "e2e-ep-ssh-isoA-" + Cfg.RunID
+			epNameB = "e2e-ep-ssh-isoB-" + Cfg.RunID
+		})
+
+		AfterAll(func() {
+			deleteEndpoint(epNameA)
+			deleteEndpoint(epNameB)
+		})
+
+		It("should keep sibling endpoint Running when one endpoint is updated", Label("C2650084"), func() {
+			By("Deploying endpoint A and waiting for Running")
+			yamlA := applyEndpoint(epNameA, clusterName)
+			defer os.Remove(yamlA)
+			waitEndpointRunning(epNameA)
+
+			By("Deploying endpoint B and waiting for Running")
+			yamlB := applyEndpoint(epNameB, clusterName)
+			defer os.Remove(yamlB)
+			waitEndpointRunning(epNameB)
+
+			By("Recording endpoint B baseline before updating endpoint A")
+			epBBefore := getEndpoint(epNameB)
+			Expect(epBBefore.Status.Phase).To(BeEquivalentTo("Running"))
+			lastTransitionBefore := epBBefore.Status.LastTransitionTime
+
+			By("Updating endpoint A (re-apply with extra env to force a Ray Serve PUT)")
+			yamlAUpdate := applyEndpoint(epNameA, clusterName,
+				withEnv(map[string]string{"NEU_422_E2E_MARKER": "1"}))
+			defer os.Remove(yamlAUpdate)
+
+			By("Polling endpoint B every second for 90s — phase must stay Running")
+			Consistently(func() v1.EndpointPhase {
+				return getEndpoint(epNameB).Status.Phase
+			}, 90*time.Second, 1*time.Second).
+				Should(BeEquivalentTo("Running"),
+					"endpoint B phase flickered while endpoint A was being updated (NEU-422 regression)")
+
+			By("Waiting for endpoint A rollout to settle")
+			waitEndpointRunning(epNameA)
+
+			By("Sampling endpoint B for an additional 10s after A settled")
+			Consistently(func() v1.EndpointPhase {
+				return getEndpoint(epNameB).Status.Phase
+			}, 10*time.Second, 1*time.Second).
+				Should(BeEquivalentTo("Running"),
+					"endpoint B phase flickered after endpoint A finished rollout")
+
+			By("Verifying endpoint B LastTransitionTime did not change")
+			epBAfter := getEndpoint(epNameB)
+			Expect(epBAfter.Status.LastTransitionTime).To(Equal(lastTransitionBefore),
+				"endpoint B LastTransitionTime changed (controller wrote an intermediate phase) — before=%q after=%q",
+				lastTransitionBefore, epBAfter.Status.LastTransitionTime)
 		})
 	})
 

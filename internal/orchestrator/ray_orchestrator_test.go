@@ -2639,6 +2639,211 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectErrorMsg: "Deployment BACKEND: backend deployment is error",
 			expectError:    false,
 		},
+		// NEU-422: suppress transient DEPLOYING when previously Running and replicas remain Healthy.
+		// Ray Serve PUT /api/serve/applications/ briefly flips status to DEPLOYING for every
+		// application in the request — including unchanged ones — even though their deployments
+		// are not actually restarted. See ray-project/ray#25381, #42974, #44226.
+		{
+			name: "NEU-422 suppress transient DEPLOYING when previously Running and all deployments Healthy",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+								"WORKER":  {Name: "WORKER", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseRUNNING,
+			expectError:   false,
+		},
+		{
+			name: "NEU-422 do not suppress when this endpoint is actually rolling out (a deployment is UPDATING)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+								"WORKER":  {Name: "WORKER", Status: "UPDATING"},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "NEU-422 do not suppress when previous status is nil (initial deploy)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				// Status nil — endpoint has never reported a phase.
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "NEU-422 do not suppress when previous status is Failed (recovering from failure)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseFAILED}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "NEU-422 UNHEALTHY deployment still maps to Failed even if previously Running (failure precedence preserved)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusUnhealthy, Message: "OOM killed"},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Deployment BACKEND: OOM killed",
+			expectError:    false,
+		},
+		{
+			name: "NEU-422 do not suppress when proxy is unhealthy (HTTP entry not serving)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusUnhealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
 	}
 
 	for _, tt := range tests {

@@ -324,6 +324,20 @@ func (o *RayOrchestrator) deleteEndpoint(ctx *OrchestratorContext) error {
 	return nil
 }
 
+// allDeploymentsHealthy returns true when every entry in the deployment map
+// reports HEALTHY. An empty map returns true; callers should guard with
+// len(deployments) > 0 when "no deployments registered" should not count as
+// healthy.
+func allDeploymentsHealthy(deployments map[string]dashboard.Deployment) bool {
+	for _, dep := range deployments {
+		if dep.Status != dashboard.DeploymentStatusHealthy {
+			return false
+		}
+	}
+
+	return true
+}
+
 // GetEndpointStatus retrieves the status of a specific endpoint from Ray Serve.
 func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
 	// Placeholder implementation: Get all apps and check if ours exists.
@@ -405,6 +419,24 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 				phase = v1.EndpointPhaseFAILED
 				break
 			}
+		}
+
+		// Suppress the transient DEPLOYING reported by Ray Serve when this
+		// endpoint's replicas are not actually being touched. PUT
+		// /api/serve/applications/ unconditionally writes app status to
+		// DEPLOYING for every app in the request (Ray application_state.py
+		// _set_target_state), then the next reconcile tick derives the real
+		// status from deployment statuses (_determine_app_status). For a
+		// neighbor endpoint whose config did not change, deployments stay
+		// HEALTHY throughout the window and the visible flicker is purely
+		// state-machine noise. See ray-project/ray#25381, #42974, #44226.
+		if phase == v1.EndpointPhaseDEPLOYING &&
+			proxyReady &&
+			endpoint.Status != nil &&
+			endpoint.Status.Phase == v1.EndpointPhaseRUNNING &&
+			len(status.Deployments) > 0 &&
+			allDeploymentsHealthy(status.Deployments) {
+			phase = v1.EndpointPhaseRUNNING
 		}
 	case "DEPLOY_FAILED", "UNHEALTHY":
 		phase = v1.EndpointPhaseFAILED
