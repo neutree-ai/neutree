@@ -486,8 +486,6 @@ func TeardownImageRegistry() {
 		r := RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
 		ExpectSuccess(r)
 		os.Remove(imageRegistryYAML)
-
-		untrackResource("imageregistry", testImageRegistry(), profileWorkspace())
 		imageRegistryYAML = ""
 	}
 }
@@ -1221,12 +1219,16 @@ func setupK8sCluster(prefix string) (clusterName string) {
 }
 
 // teardownCluster deletes a cluster and image registry.
+//
+// Untracks the cluster only when the API confirms removal — otherwise the
+// entry stays in the registry so AfterSuite can retry. Wiping it out
+// blindly would defeat the safety net this PR is adding.
 func teardownCluster(clusterName string) {
 	ch := NewClusterHelper()
 
-	ch.EnsureDeleted(clusterName)
-
-	untrackResource("cluster", clusterName, profileWorkspace())
+	if ch.EnsureDeleted(clusterName).ExitCode == 0 {
+		untrackResource("cluster", clusterName, profileWorkspace())
+	}
 
 	TeardownImageRegistry()
 }
