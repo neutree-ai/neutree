@@ -38,6 +38,8 @@ func SetupModelRegistry() {
 		"--timeout", "2m",
 	)
 	ExpectSuccess(r)
+
+	trackResource("modelregistry", testRegistry(), profileWorkspace())
 }
 
 // TeardownModelRegistry deletes the model registry and cleans up the temp YAML.
@@ -45,6 +47,9 @@ func TeardownModelRegistry() {
 	if registryYAML != "" {
 		RunCLI("delete", "-f", registryYAML, "--force", "--ignore-not-found")
 		os.Remove(registryYAML)
+		registryYAML = ""
+
+		untrackResource("modelregistry", testRegistry(), profileWorkspace())
 	}
 }
 
