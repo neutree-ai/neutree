@@ -158,8 +158,8 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 		var epNameA, epNameB string
 
 		BeforeAll(func() {
-			epNameA = "e2e-ep-ssh-isoA-" + Cfg.RunID
-			epNameB = "e2e-ep-ssh-isoB-" + Cfg.RunID
+			epNameA = "e2e-ep-ssh-iso-a-" + Cfg.RunID
+			epNameB = "e2e-ep-ssh-iso-b-" + Cfg.RunID
 		})
 
 		AfterAll(func() {
