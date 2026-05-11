@@ -4,14 +4,21 @@ import (
 	"testing"
 )
 
-// resetTrackedForTest clears the package-level registry so each subtest
-// starts from a known state. Direct test on package-private state is fine
-// since this file is in the e2e package.
+// resetTrackedForTest clears the package-level registry both immediately and
+// when the test ends, so the registry is empty entering the test AND when
+// leaving it. The trailing reset matters: TestE2E runs in the same process
+// after these unit tests, and a leaked entry would surface as a phantom
+// resource in AfterSuite's cleanup pass.
 func resetTrackedForTest(t *testing.T) {
 	t.Helper()
-	trackedMu.Lock()
-	trackedResources = nil
-	trackedMu.Unlock()
+
+	reset := func() {
+		trackedMu.Lock()
+		trackedResources = nil
+		trackedMu.Unlock()
+	}
+	reset()
+	t.Cleanup(reset)
 }
 
 func TestTrackResource_AppendsEntry(t *testing.T) {
