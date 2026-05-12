@@ -324,6 +324,56 @@ func (o *RayOrchestrator) deleteEndpoint(ctx *OrchestratorContext) error {
 	return nil
 }
 
+// allDeploymentsHealthy returns true when every entry in the deployment map
+// reports HEALTHY. An empty map returns true; callers should guard with
+// len(deployments) > 0 when "no deployments registered" should not count as
+// healthy.
+func allDeploymentsHealthy(deployments map[string]dashboard.Deployment) bool {
+	for _, dep := range deployments {
+		if dep.Status != dashboard.DeploymentStatusHealthy {
+			return false
+		}
+	}
+
+	return true
+}
+
+// mapDeployingPhase resolves the endpoint phase when Ray Serve reports the
+// application as DEPLOYING or NOT_STARTED. Returns Failed when any deployment
+// is UNHEALTHY; returns Running when the previous Neutree phase was Running,
+// the proxy is healthy, every deployment is HEALTHY, and the upstream app
+// status is DEPLOYING — the false-positive window opened by Ray's PUT
+// /api/serve/applications/ when it unconditionally writes DEPLOYING to every
+// application in the request even if their configs are unchanged (see
+// ray-project/ray#25381, #42974, #44226). NOT_STARTED is excluded from
+// suppression: Ray returns it when the application is not present in its
+// state, which never matches the false-positive window. Otherwise returns
+// Deploying.
+//
+// The suppression is a snapshot heuristic — it accepts the case where
+// Neutree misses an in-progress UPDATING window between polls (poll cadence
+// > deployment-update duration). In that case the deployments observed are
+// already HEALTHY and traffic is being served; reporting Running matches
+// the actual serving state.
+func mapDeployingPhase(endpoint *v1.Endpoint, status dashboard.RayServeApplicationStatus, proxyReady bool) v1.EndpointPhase {
+	for _, deployment := range status.Deployments {
+		if deployment.Status == dashboard.DeploymentStatusUnhealthy {
+			return v1.EndpointPhaseFAILED
+		}
+	}
+
+	if status.Status == "DEPLOYING" &&
+		proxyReady &&
+		endpoint.Status != nil &&
+		endpoint.Status.Phase == v1.EndpointPhaseRUNNING &&
+		len(status.Deployments) > 0 &&
+		allDeploymentsHealthy(status.Deployments) {
+		return v1.EndpointPhaseRUNNING
+	}
+
+	return v1.EndpointPhaseDEPLOYING
+}
+
 // GetEndpointStatus retrieves the status of a specific endpoint from Ray Serve.
 func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
 	// Placeholder implementation: Get all apps and check if ours exists.
@@ -398,14 +448,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	switch status.Status {
 	case "DEPLOYING", "NOT_STARTED":
-		phase = v1.EndpointPhaseDEPLOYING
-
-		for _, deployment := range status.Deployments {
-			if deployment.Status == dashboard.DeploymentStatusUnhealthy {
-				phase = v1.EndpointPhaseFAILED
-				break
-			}
-		}
+		phase = mapDeployingPhase(endpoint, status, proxyReady)
 	case "DEPLOY_FAILED", "UNHEALTHY":
 		phase = v1.EndpointPhaseFAILED
 	case "RUNNING":
