@@ -1,16 +1,29 @@
 {{- if .Values.ingress.enabled -}}
 {{- $fullname := include "neutree.fullname" . -}}
+{{/*
+  Default backend Service names + ports. api/gateway use `neutree.fullname`
+  (parent-chart resources); grafana/vminsert use `.Release.Name` because the
+  subcharts derive their own Service names from `.Release.Name` independently
+  of the parent's fullname. If a user sets `grafana.fullnameOverride` or
+  `victoria-metrics-cluster.fullnameOverride`, override `service.name` for
+  the corresponding host.
+*/}}
 {{- $svcDefaults := dict
     "api"      (dict "name" (printf "%s-api-service" $fullname) "port" 3000)
     "gateway"  (dict "name" (printf "%s-kong-proxy"  $fullname) "port" 80)
     "grafana"  (dict "name" (printf "%s-grafana"     .Release.Name) "port" 80)
     "vminsert" (dict "name" (printf "%s-victoria-metrics-cluster-vminsert" .Release.Name) "port" 8480)
 -}}
+{{/* Fixed iteration order keeps spec.rules stable across renders. */}}
+{{- $order := list "api" "gateway" "grafana" "vminsert" -}}
+{{- range $key, $_ := .Values.ingress.hosts -}}
+  {{- if not (hasKey $svcDefaults $key) }}{{ fail (printf "ingress.hosts.%s is not a recognized backend (expected one of: api, gateway, grafana, vminsert)" $key) }}{{ end -}}
+{{- end -}}
 {{- $rules := list -}}
-{{- range $key, $cfg := .Values.ingress.hosts -}}
-  {{- $defaults := index $svcDefaults $key -}}
-  {{- if not $defaults }}{{ fail (printf "ingress.hosts.%s is not a recognized backend (expected one of: api, gateway, grafana, vminsert)" $key) }}{{ end -}}
-  {{- if and $cfg.enabled $cfg.host -}}
+{{- range $key := $order -}}
+  {{- $cfg := index $.Values.ingress.hosts $key -}}
+  {{- if and $cfg $cfg.enabled $cfg.host -}}
+    {{- $defaults := index $svcDefaults $key -}}
     {{- $svc := $cfg.service | default dict -}}
     {{- $rules = append $rules (dict
         "key"      $key
@@ -52,6 +65,10 @@ spec:
               service:
                 name: {{ $r.svcName }}
                 port:
+                  {{- if kindIs "string" $r.svcPort }}
+                  name: {{ $r.svcPort | quote }}
+                  {{- else }}
                   number: {{ $r.svcPort }}
+                  {{- end }}
     {{- end }}
 {{- end -}}

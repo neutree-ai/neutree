@@ -245,10 +245,19 @@ ingress:
   # service.name / service.port override the chart-derived defaults; leave them as
   # null (~) / empty to use the defaults shown in the comments below.
   #
-  # Note for grafana / vminsert: the defaults assume the subchart Service is named
-  # `<release>-grafana` / `<release>-victoria-metrics-cluster-vminsert`. If you set
-  # `grafana.fullnameOverride` or `victoria-metrics-cluster.fullnameOverride`, set
-  # service.name here to match the actual Service name.
+  # Default Service names below assume `{{ include "neutree.fullname" . }}` resolves
+  # to the release name (i.e. the release name contains "neutree"). When the release
+  # name does NOT contain "neutree", `neutree.fullname` becomes `<release>-neutree`,
+  # so api/gateway Services become `<release>-neutree-api-service` /
+  # `<release>-neutree-kong-proxy`. Override `service.name` to match in that case.
+  #
+  # grafana / vminsert Services come from subcharts and use `.Release.Name` directly
+  # regardless of the parent chart's fullname. If you set
+  # `grafana.fullnameOverride` or `victoria-metrics-cluster.fullnameOverride`,
+  # override `service.name` here to match the actual Service name.
+  #
+  # service.port may be an integer (resolved as `port.number`) or a string (resolved
+  # as `port.name`) to support named ports defined on the backend Service.
   hosts:
     api:
       enabled: true
@@ -256,7 +265,7 @@ ingress:
       path: /
       pathType: Prefix
       service:
-        name: ""   # default: <release>-api-service
+        name: ""   # default: <chart-fullname>-api-service
         port: ~    # default: 3000
     gateway:
       enabled: true
@@ -264,7 +273,7 @@ ingress:
       path: /
       pathType: Prefix
       service:
-        name: ""   # default: <release>-kong-proxy
+        name: ""   # default: <chart-fullname>-kong-proxy
         port: ~    # default: 80
     grafana:
       enabled: true
