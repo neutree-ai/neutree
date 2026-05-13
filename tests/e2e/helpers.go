@@ -1260,6 +1260,7 @@ type endpointOpts struct {
 	accProduct    string
 	env           map[string]string
 	forceUpdate   bool
+	replicas      int
 }
 
 // EndpointOption configures a single field of endpointOpts.
@@ -1318,6 +1319,12 @@ func withoutForceUpdate() EndpointOption {
 	return func(o *endpointOpts) { o.forceUpdate = false }
 }
 
+// withReplicas overrides the default spec.replicas.num (which is 1 in the
+// template). Use withReplicas(0) to apply a paused endpoint.
+func withReplicas(num int) EndpointOption {
+	return func(o *endpointOpts) { o.replicas = num }
+}
+
 // renderEndpoint renders the endpoint YAML template and returns the temp file path and resolved options.
 func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endpointOpts) {
 	o := &endpointOpts{
@@ -1331,6 +1338,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		// profile lookup picks the right engine's args.
 		gpu:         "1",
 		forceUpdate: true,
+		replicas:    1,
 	}
 	for _, fn := range opts {
 		fn(o)
@@ -1361,6 +1369,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		"E2E_MEMORY":              o.memory,
 		"E2E_ENGINE_ARGS":         o.engineArgs,
 		"E2E_ENV":                 o.env,
+		"E2E_REPLICAS_NUM":        o.replicas,
 	}
 
 	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), data)
@@ -1433,6 +1442,16 @@ func waitEndpointFailed(name string) {
 	r := RunCLI("wait", "endpoint", name,
 		"-w", profileWorkspace(),
 		"--for", "jsonpath=.status.phase=Failed",
+		"--timeout", profileEndpointTimeout(),
+	)
+	ExpectSuccess(r)
+}
+
+// waitEndpointPaused waits for an endpoint to reach Paused phase.
+func waitEndpointPaused(name string) {
+	r := RunCLI("wait", "endpoint", name,
+		"-w", profileWorkspace(),
+		"--for", "jsonpath=.status.phase=Paused",
 		"--timeout", profileEndpointTimeout(),
 	)
 	ExpectSuccess(r)
