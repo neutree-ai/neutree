@@ -225,6 +225,59 @@ jwtCli:
     tag: 6.2.0
     pullPolicy: IfNotPresent
 
+# Optional Ingress for control-plane API, inference gateway (Kong), Grafana, and VMInsert.
+# Requires an ingress controller (NGINX, Traefik, HAProxy, AWS ALB, etc.) running in the cluster.
+# The chart only renders a standard `networking.k8s.io/v1` Ingress resource; TLS Secrets and
+# the ingress controller itself must be managed externally (or via cert-manager annotations).
+ingress:
+  enabled: false
+  # ingressClassName (e.g. "nginx", "traefik"). Empty -> cluster default IngressClass.
+  className: ""
+  # Annotations passed through verbatim. Put controller-specific options here, e.g.
+  # nginx.ingress.kubernetes.io/proxy-body-size, cert-manager.io/cluster-issuer, etc.
+  annotations: {}
+  # K8s-native TLS spec. Example:
+  #   tls:
+  #     - hosts: ["api.neutree.example.com"]
+  #       secretName: neutree-api-tls
+  tls: []
+  # Per-backend rule. Set host="" or enabled=false to skip that backend.
+  # service.name / service.port override the chart-derived defaults; leave them empty/0
+  # to use the defaults shown in the comments below.
+  hosts:
+    api:
+      enabled: true
+      host: ""
+      path: /
+      pathType: Prefix
+      service:
+        name: ""   # default: <release>-api-service
+        port: 0    # default: 3000
+    gateway:
+      enabled: true
+      host: ""
+      path: /
+      pathType: Prefix
+      service:
+        name: ""   # default: <release>-kong-proxy
+        port: 0    # default: 80
+    grafana:
+      enabled: true
+      host: ""
+      path: /
+      pathType: Prefix
+      service:
+        name: ""   # default: <release>-grafana
+        port: 0    # default: 80
+    vminsert:
+      enabled: true
+      host: ""
+      path: /
+      pathType: Prefix
+      service:
+        name: ""   # default: <release>-victoria-metrics-cluster-vminsert
+        port: 0    # default: 8480
+
 victoria-metrics-cluster:
   enabled: true
   # global.image.registry is inherited from parent chart's global.image.registry
