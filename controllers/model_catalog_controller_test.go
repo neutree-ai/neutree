@@ -268,6 +268,8 @@ func TestModelCatalogController_sync_NilSpec(t *testing.T) {
 				return mc.Spec != nil &&
 					mc.Spec.Resources != nil &&
 					mc.Spec.Replicas != nil &&
+					mc.Spec.DeploymentOptions != nil &&
+					mc.Spec.Variables != nil &&
 					mc.Status.Phase == v1.ModelCatalogPhaseREADY
 			})).Return(nil)
 
