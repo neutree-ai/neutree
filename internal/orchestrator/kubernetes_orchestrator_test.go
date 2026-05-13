@@ -3043,13 +3043,17 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 					"serve_name":    "gpt-4-serve",
 				},
 				EngineArgs: map[string]interface{}{
-					// Boolean false in both bool and string form: must be skipped entirely.
-					// One key is in underscore form to exercise the SGLang template's
-					// `replace "_" "-"` step (a no-op when value is false but it must
-					// still parse). vLLM templates pass the key through as-is.
+					// Boolean false in both bool and string form, kebab and
+					// underscore key shape: the skip branch must drop the flag
+					// regardless of how the key was spelled.
 					"enable_prefix_caching": false,
 					"skip-tokenizer-init":   "false",
 					// Boolean true in both forms: emit flag, no following value.
+					// Keys are kebab-form so the SGLang template's
+					// `replace "_" "-"` step is a no-op here — `replace` is
+					// evaluated in the true/non-bool branches but not the skip
+					// branch, so true booleans are the right place to assert
+					// the rendered flag name matches across engines.
 					"trust-remote-code": true,
 					"is-embedding":      "true",
 					// Non-boolean values: emit flag followed by quoted value.
