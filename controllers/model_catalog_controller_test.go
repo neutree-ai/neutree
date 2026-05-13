@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
@@ -227,6 +228,59 @@ func TestModelCatalogController_sync_Delete(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
+func TestModelCatalogController_sync_NilSpec(t *testing.T) {
+	tests := []struct {
+		name  string
+		input *v1.ModelCatalog
+	}{
+		{
+			name: "Spec nil with nil Status defaults to Pending and initializes Spec",
+			input: &v1.ModelCatalog{
+				ID: 1,
+				Metadata: &v1.Metadata{
+					Name:      "test-catalog",
+					Workspace: "default",
+				},
+			},
+		},
+		{
+			name: "Spec nil with Pending Status initializes Spec",
+			input: &v1.ModelCatalog{
+				ID: 1,
+				Metadata: &v1.Metadata{
+					Name:      "test-catalog",
+					Workspace: "default",
+				},
+				Status: &v1.ModelCatalogStatus{Phase: v1.ModelCatalogPhasePENDING},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storageMocks.MockStorage{}
+			mockStorage.On("UpdateModelCatalog", "1", mock.MatchedBy(func(mc *v1.ModelCatalog) bool {
+				return mc.Spec != nil &&
+					mc.Spec.Resources != nil &&
+					mc.Spec.Replicas != nil &&
+					mc.Status.Phase == v1.ModelCatalogPhaseREADY
+			})).Return(nil)
+
+			controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
+				Storage: mockStorage,
+			})
+
+			require.NotPanics(t, func() {
+				err := controller.sync(tt.input)
+				assert.NoError(t, err)
+			})
+
+			assert.NotNil(t, tt.input.Spec)
 			mockStorage.AssertExpectations(t)
 		})
 	}
