@@ -2683,11 +2683,11 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 	}
 }
 
-// TestRayOrchestrator_prepareOrchestratorContextLite_ToleratesMissingDeps
+// TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ToleratesMissingDeps
 // verifies that the lite preparation does NOT fetch engine/model-registry/
 // image-registry from storage — this is what lets pause/delete on Ray
 // succeed when the model registry has been removed.
-func TestRayOrchestrator_prepareOrchestratorContextLite_ToleratesMissingDeps(t *testing.T) {
+func TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ToleratesMissingDeps(t *testing.T) {
 	// dashboard.NewDashboardService is a package-level mockable factory other
 	// tests in this package overwrite without restoration. Pin it for this
 	// test so the result does not leak in from prior runs.
@@ -2720,7 +2720,7 @@ func TestRayOrchestrator_prepareOrchestratorContextLite_ToleratesMissingDeps(t *
 		},
 	}
 
-	ctx, err := o.prepareOrchestratorContextLite(endpoint)
+	ctx, err := o.prepareOrchestratorContextForPauseDelete(endpoint)
 	require.NoError(t, err)
 	require.NotNil(t, ctx)
 	assert.NotNil(t, ctx.Cluster)
@@ -2735,7 +2735,7 @@ func TestRayOrchestrator_prepareOrchestratorContextLite_ToleratesMissingDeps(t *
 	mockStorage.AssertNotCalled(t, "ListImageRegistry", mock.Anything)
 }
 
-func TestRayOrchestrator_prepareOrchestratorContextLite_ClusterNotFound(t *testing.T) {
+func TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ClusterNotFound(t *testing.T) {
 	mockStorage := storagemocks.NewMockStorage(t)
 	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
 
@@ -2745,12 +2745,12 @@ func TestRayOrchestrator_prepareOrchestratorContextLite_ClusterNotFound(t *testi
 		Spec:     &v1.EndpointSpec{Cluster: "missing-cluster"},
 	}
 
-	_, err := o.prepareOrchestratorContextLite(endpoint)
+	_, err := o.prepareOrchestratorContextForPauseDelete(endpoint)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deploy cluster")
 }
 
-func TestRayOrchestrator_prepareOrchestratorContextLite_NoDashboardURL(t *testing.T) {
+func TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_NoDashboardURL(t *testing.T) {
 	cluster := v1.Cluster{
 		Metadata: &v1.Metadata{Name: "test-cluster"},
 		Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
@@ -2765,7 +2765,7 @@ func TestRayOrchestrator_prepareOrchestratorContextLite_NoDashboardURL(t *testin
 		Spec:     &v1.EndpointSpec{Cluster: "test-cluster"},
 	}
 
-	_, err := o.prepareOrchestratorContextLite(endpoint)
+	_, err := o.prepareOrchestratorContextForPauseDelete(endpoint)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dashboard URL")
 }

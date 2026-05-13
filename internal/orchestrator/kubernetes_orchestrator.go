@@ -272,12 +272,12 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 // endpoint. Multi-kind deploy modes (multiple Deployments, LeaderWorkerSet)
 // will need pause + status reporting extended together.
 func (k *kubernetesOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
-	ctx, err := k.prepareOrchestratorContextLite(endpoint)
+	ctx, err := k.prepareOrchestratorContextForPauseDelete(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare orchestrator context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
-	if err := k.validateClusterForLite(ctx); err != nil {
+	if err := k.validateClusterForPauseDelete(ctx); err != nil {
 		return errors.Wrapf(err, "failed to validate cluster for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
@@ -297,11 +297,11 @@ func (k *kubernetesOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
 // returns the last-applied manifest list directly, so deletion proceeds even
 // when those dependencies have been removed.
 //
-// Intentionally does NOT call validateClusterForLite — delete must remain
+// Intentionally does NOT call validateClusterForPauseDelete — delete must remain
 // permissive on degraded clusters; the fallback is the force-delete
 // annotation handled in the controller.
 func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
-	ctx, err := k.prepareOrchestratorContextLite(endpoint)
+	ctx, err := k.prepareOrchestratorContextForPauseDelete(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare orchestrator context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
@@ -315,12 +315,12 @@ func (k *kubernetesOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 	return nil
 }
 
-// prepareOrchestratorContextLite is the pause/delete equivalent of
+// prepareOrchestratorContextForPauseDelete is the pause/delete equivalent of
 // prepareOrchestratorContext: it fetches only what those operations actually
 // need (cluster + ctrlClient) and skips ModelRegistry/Engine/ImageRegistry
 // lookups so a removed model registry does not block convergence to
 // Paused/Deleted.
-func (k *kubernetesOrchestrator) prepareOrchestratorContextLite(endpoint *v1.Endpoint) (*OrchestratorContext, error) {
+func (k *kubernetesOrchestrator) prepareOrchestratorContextForPauseDelete(endpoint *v1.Endpoint) (*OrchestratorContext, error) {
 	deployedCluster, err := getEndpointDeployCluster(k.storage, endpoint)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get deploy cluster")
@@ -339,12 +339,12 @@ func (k *kubernetesOrchestrator) prepareOrchestratorContextLite(endpoint *v1.End
 	}, nil
 }
 
-// validateClusterForLite enforces the subset of validateDependencies that
+// validateClusterForPauseDelete enforces the subset of validateDependencies that
 // pause/delete still need: cluster must exist, be Running, and be a K8s
 // cluster. Other dependency checks (engine, model registry, image registry)
 // are intentionally skipped — they are not required to scale or delete the
 // existing K8s objects.
-func (k *kubernetesOrchestrator) validateClusterForLite(ctx *OrchestratorContext) error {
+func (k *kubernetesOrchestrator) validateClusterForPauseDelete(ctx *OrchestratorContext) error {
 	if ctx.Cluster.Status == nil || ctx.Cluster.Status.Phase != v1.ClusterPhaseRunning {
 		return errors.Errorf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
 	}

@@ -182,7 +182,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 // cluster (for the dashboard URL) is fetched. The inner deleteEndpoint(ctx)
 // is reused because it depends only on cluster + endpoint + rayService.
 func (o *RayOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
-	ctx, err := o.prepareOrchestratorContextLite(endpoint)
+	ctx, err := o.prepareOrchestratorContextForPauseDelete(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
@@ -196,12 +196,12 @@ func (o *RayOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
 	return nil
 }
 
-// prepareOrchestratorContextLite is the pause/delete equivalent of
+// prepareOrchestratorContextForPauseDelete is the pause/delete equivalent of
 // prepareOrchestratorContext: it fetches only what those operations actually
 // need (deploy cluster + dashboard service) and skips
 // ModelRegistry/Engine/ImageRegistry lookups so a removed model registry does
 // not block convergence to Paused/Deleted.
-func (o *RayOrchestrator) prepareOrchestratorContextLite(endpoint *v1.Endpoint) (*OrchestratorContext, error) {
+func (o *RayOrchestrator) prepareOrchestratorContextForPauseDelete(endpoint *v1.Endpoint) (*OrchestratorContext, error) {
 	deployedCluster, err := getEndpointDeployCluster(o.storage, endpoint)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get deploy cluster")
@@ -289,7 +289,7 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 // if the registry has already been removed the SSH-side mount is orphaned
 // and continuing the delete is the correct outcome.
 func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
-	ctx, err := o.prepareOrchestratorContextLite(endpoint)
+	ctx, err := o.prepareOrchestratorContextForPauseDelete(endpoint)
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
