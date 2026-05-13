@@ -411,11 +411,8 @@ func TestReconcileHeadNode(t *testing.T) {
 
 // TestReconcileHeadNode_RecoveryReason asserts that when a Running cluster's head
 // node becomes unhealthy, the recovery status message surfaces an actionable cause
-// instead of the generic "dashboard unreachable or raylet not alive" wording.
-//
-// NEU-244: when ray dashboard port 8265 is occupied on the head node, ray up exits
-// 0 but the dashboard never comes up. Users used to see a generic message — the
-// recovery message must point at port 8265 so they can self-diagnose.
+// (e.g. port 8265 occupancy) instead of a generic "dashboard unreachable or raylet
+// not alive" wording.
 func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -521,7 +518,7 @@ func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 
 // TestInitHeadNode_DashboardVerifyFailureHint asserts that when ray up exits 0 but
 // the post-up GetClusterMetadata probe fails, the wrapped error mentions port 8265
-// so users learn the most likely cause (NEU-244).
+// so users learn the most likely cause.
 func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 	acceleratorManager := &acceleratormocks.MockManager{}
 	e := &commandmocks.MockExecutor{}

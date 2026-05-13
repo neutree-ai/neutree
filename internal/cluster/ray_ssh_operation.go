@@ -467,8 +467,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 // dashboard API reachability (GCS) and the head node's raylet state, and returns the
 // head node's serving version when alive. This avoids redundant ListNodes calls.
 // When unhealthy, it returns a human-readable reason describing why so the caller can
-// surface an actionable message to users (e.g. "verify port 8265 is not already in
-// use" — NEU-244).
+// surface an actionable message to users (e.g. "verify port 8265 is not already in use").
 // Returns:
 //   - (true,  version, "",      nil) — dashboard reachable AND at least one head raylet is ALIVE
 //   - (false, "",      reason,  nil) — head not healthy; reason describes why

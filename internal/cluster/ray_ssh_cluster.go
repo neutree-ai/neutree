@@ -326,7 +326,7 @@ func (c *sshRayClusterReconciler) initHeadNode(reconcileCtx *ReconcileContext, v
 	if err != nil {
 		// `ray up` exited 0 but the dashboard endpoint is unreachable. The most
 		// common cause is that port 8265 was already in use on the head host —
-		// `ray up` only logs that bind failure to stderr (NEU-244).
+		// `ray up` only logs that bind failure to stderr.
 		return errors.Wrapf(err,
 			"failed to verify Ray dashboard on head node %s after `ray up`; "+
 				"verify port 8265 is not already in use by another process on this host",
