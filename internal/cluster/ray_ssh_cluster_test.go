@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -563,15 +564,14 @@ func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 
 // TestCheckHeadNodeHealth_UnhealthyErrorContract pins the contract between
 // checkHeadNodeHealth and reconcileHeadNode: an unhealthy head is signalled via
-// a *headNodeUnhealthyError (so reconcileHeadNode can split known-unhealthy from
-// unexpected internal errors via errors.As), and the dashboard-unreachable
-// variant preserves the underlying error in the chain so errors.Is / errors.As
-// can traverse it.
+// an error wrapping the errHeadNodeUnhealthy sentinel (so reconcileHeadNode can
+// split known-unhealthy from unexpected internal errors via errors.Is), and the
+// dashboard-unreachable variant inlines the underlying error message so users
+// see the actual cause in the recovery status.
 func TestCheckHeadNodeHealth_UnhealthyErrorContract(t *testing.T) {
-	t.Run("dashboard unreachable wraps underlying error", func(t *testing.T) {
+	t.Run("dashboard unreachable surfaces underlying error message and port hint", func(t *testing.T) {
 		dashboardSvc := &dashboardmocks.MockDashboardService{}
-		underlying := errors.New("connection refused")
-		dashboardSvc.On("GetClusterMetadata").Return(nil, underlying).Once()
+		dashboardSvc.On("GetClusterMetadata").Return(nil, errors.New("connection refused")).Once()
 
 		r := &sshRayClusterReconciler{}
 		alive, version, err := r.checkHeadNodeHealth(&ReconcileContext{
@@ -585,17 +585,16 @@ func TestCheckHeadNodeHealth_UnhealthyErrorContract(t *testing.T) {
 		assert.Empty(t, version)
 		require.Error(t, err)
 
-		var unhealthy *headNodeUnhealthyError
-		require.True(t, errors.As(err, &unhealthy), "expected *headNodeUnhealthyError, got %T", err)
-		assert.Contains(t, unhealthy.Error(), "port 8265")
-		assert.Contains(t, unhealthy.Error(), "192.168.1.10")
-		assert.Contains(t, unhealthy.Error(), "connection refused")
-		assert.ErrorIs(t, err, underlying, "underlying error must remain reachable via errors.Is")
+		assert.True(t, stderrors.Is(err, errHeadNodeUnhealthy),
+			"dashboard-unreachable must wrap the errHeadNodeUnhealthy sentinel, got %v", err)
+		assert.Contains(t, err.Error(), "port 8265")
+		assert.Contains(t, err.Error(), "192.168.1.10")
+		assert.Contains(t, err.Error(), "connection refused")
 
 		dashboardSvc.AssertExpectations(t)
 	})
 
-	t.Run("no alive head raylet returns unhealthy error without underlying cause", func(t *testing.T) {
+	t.Run("no alive head raylet surfaces raylet wording, no port hint", func(t *testing.T) {
 		dashboardSvc := &dashboardmocks.MockDashboardService{}
 		dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
 		dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
@@ -613,18 +612,16 @@ func TestCheckHeadNodeHealth_UnhealthyErrorContract(t *testing.T) {
 		assert.False(t, alive)
 		require.Error(t, err)
 
-		var unhealthy *headNodeUnhealthyError
-		require.True(t, errors.As(err, &unhealthy))
-		assert.Contains(t, unhealthy.Error(), "raylet")
-		assert.Contains(t, unhealthy.Error(), "not alive")
-		assert.Contains(t, unhealthy.Error(), "192.168.1.10")
-		assert.NotContains(t, unhealthy.Error(), "port 8265")
-		assert.Nil(t, errors.Unwrap(unhealthy), "no underlying cause expected for this path")
+		assert.True(t, stderrors.Is(err, errHeadNodeUnhealthy))
+		assert.Contains(t, err.Error(), "raylet")
+		assert.Contains(t, err.Error(), "not alive")
+		assert.Contains(t, err.Error(), "192.168.1.10")
+		assert.NotContains(t, err.Error(), "port 8265")
 
 		dashboardSvc.AssertExpectations(t)
 	})
 
-	t.Run("ListNodes failure surfaces as plain unexpected error, not unhealthy error", func(t *testing.T) {
+	t.Run("ListNodes failure surfaces as plain unexpected error, not unhealthy", func(t *testing.T) {
 		dashboardSvc := &dashboardmocks.MockDashboardService{}
 		dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
 		dashboardSvc.On("ListNodes").Return(nil, errors.New("boom")).Once()
@@ -640,8 +637,7 @@ func TestCheckHeadNodeHealth_UnhealthyErrorContract(t *testing.T) {
 		assert.False(t, alive)
 		require.Error(t, err)
 
-		var unhealthy *headNodeUnhealthyError
-		assert.False(t, errors.As(err, &unhealthy),
+		assert.False(t, stderrors.Is(err, errHeadNodeUnhealthy),
 			"ListNodes failures must propagate as unexpected errors so reconcileHeadNode bails out instead of writing a misleading recovery status")
 		assert.Contains(t, err.Error(), "failed to list ray nodes")
 
