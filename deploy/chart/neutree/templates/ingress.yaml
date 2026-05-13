@@ -6,6 +6,23 @@
     "grafana"  (dict "name" (printf "%s-grafana"     .Release.Name) "port" 80)
     "vminsert" (dict "name" (printf "%s-victoria-metrics-cluster-vminsert" .Release.Name) "port" 8480)
 -}}
+{{- $rules := list -}}
+{{- range $key, $cfg := .Values.ingress.hosts -}}
+  {{- $defaults := index $svcDefaults $key -}}
+  {{- if not $defaults }}{{ fail (printf "ingress.hosts.%s is not a recognized backend (expected one of: api, gateway, grafana, vminsert)" $key) }}{{ end -}}
+  {{- if and $cfg.enabled $cfg.host -}}
+    {{- $svc := $cfg.service | default dict -}}
+    {{- $rules = append $rules (dict
+        "key"      $key
+        "host"     $cfg.host
+        "path"     ($cfg.path     | default "/")
+        "pathType" ($cfg.pathType | default "Prefix")
+        "svcName"  ($svc.name | default $defaults.name)
+        "svcPort"  ($svc.port | default $defaults.port)
+    ) -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $rules }}{{ fail "ingress.enabled is true but no host is configured (set at least one of ingress.hosts.<api|gateway|grafana|vminsert>.host)" }}{{ end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -25,23 +42,16 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
-    {{- range $key, $cfg := .Values.ingress.hosts }}
-    {{- if and $cfg.enabled $cfg.host }}
-    {{- $defaults := index $svcDefaults $key }}
-    {{- if not $defaults }}{{ fail (printf "ingress.hosts.%s is not a recognized backend (expected one of: api, gateway, grafana, vminsert)" $key) }}{{ end }}
-    {{- $svc := $cfg.service | default dict }}
-    {{- $svcName := $svc.name | default $defaults.name }}
-    {{- $svcPort := $svc.port | default $defaults.port }}
-    - host: {{ $cfg.host | quote }}
+    {{- range $r := $rules }}
+    - host: {{ $r.host | quote }}
       http:
         paths:
-          - path: {{ $cfg.path | default "/" }}
-            pathType: {{ $cfg.pathType | default "Prefix" }}
+          - path: {{ $r.path | quote }}
+            pathType: {{ $r.pathType | quote }}
             backend:
               service:
-                name: {{ $svcName }}
+                name: {{ $r.svcName }}
                 port:
-                  number: {{ $svcPort }}
-    {{- end }}
+                  number: {{ $r.svcPort }}
     {{- end }}
 {{- end -}}

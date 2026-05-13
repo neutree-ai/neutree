@@ -242,8 +242,13 @@ ingress:
   #       secretName: neutree-api-tls
   tls: []
   # Per-backend rule. Set host="" or enabled=false to skip that backend.
-  # service.name / service.port override the chart-derived defaults; leave them empty/0
-  # to use the defaults shown in the comments below.
+  # service.name / service.port override the chart-derived defaults; leave them as
+  # null (~) / empty to use the defaults shown in the comments below.
+  #
+  # Note for grafana / vminsert: the defaults assume the subchart Service is named
+  # `<release>-grafana` / `<release>-victoria-metrics-cluster-vminsert`. If you set
+  # `grafana.fullnameOverride` or `victoria-metrics-cluster.fullnameOverride`, set
+  # service.name here to match the actual Service name.
   hosts:
     api:
       enabled: true
@@ -252,7 +257,7 @@ ingress:
       pathType: Prefix
       service:
         name: ""   # default: <release>-api-service
-        port: 0    # default: 3000
+        port: ~    # default: 3000
     gateway:
       enabled: true
       host: ""
@@ -260,7 +265,7 @@ ingress:
       pathType: Prefix
       service:
         name: ""   # default: <release>-kong-proxy
-        port: 0    # default: 80
+        port: ~    # default: 80
     grafana:
       enabled: true
       host: ""
@@ -268,7 +273,7 @@ ingress:
       pathType: Prefix
       service:
         name: ""   # default: <release>-grafana
-        port: 0    # default: 80
+        port: ~    # default: 80
     vminsert:
       enabled: true
       host: ""
@@ -276,7 +281,7 @@ ingress:
       pathType: Prefix
       service:
         name: ""   # default: <release>-victoria-metrics-cluster-vminsert
-        port: 0    # default: 8480
+        port: ~    # default: 8480
 
 victoria-metrics-cluster:
   enabled: true
