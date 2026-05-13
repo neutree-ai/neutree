@@ -1,0 +1,33 @@
+{{- if .Values.kong.ingress.enabled -}}
+{{- $ing := .Values.kong.ingress -}}
+{{- if not $ing.host }}{{ fail "kong.ingress.enabled is true but kong.ingress.host is empty" }}{{ end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "neutree.fullname" . }}-kong-proxy
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+  {{- with $ing.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $ing.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with $ing.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ $ing.host | quote }}
+      http:
+        paths:
+          - path: {{ $ing.path | default "/" | quote }}
+            pathType: {{ $ing.pathType | default "Prefix" | quote }}
+            backend:
+              service:
+                name: {{ include "neutree.fullname" . }}-kong-proxy
+                port:
+                  number: 80
+{{- end -}}

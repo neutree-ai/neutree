@@ -166,6 +166,21 @@ api:
   affinity: {}
   service:
     type: ClusterIP
+  # Optional Ingress for the control-plane API (`<fullname>-api-service:3000`).
+  # Requires an ingress controller in the cluster. TLS Secret and controller
+  # installation are the operator's responsibility.
+  ingress:
+    enabled: false
+    className: ""        # e.g. "nginx", "traefik"; empty -> cluster default IngressClass
+    annotations: {}      # controller-specific options, e.g.
+                         #   nginx.ingress.kubernetes.io/proxy-body-size: 10m
+                         #   cert-manager.io/cluster-issuer: letsencrypt-prod
+    host: ""
+    path: /
+    pathType: Prefix
+    tls: []              # k8s-native, e.g.
+                         #   - hosts: ["api.neutree.example.com"]
+                         #     secretName: neutree-api-tls
 
 vmagent:
   image:
@@ -204,6 +219,18 @@ kong:
   affinity: {}
   proxyService:
     type: LoadBalancer
+  # Optional Ingress for the inference gateway (Kong proxy at
+  # `<fullname>-kong-proxy:80`). Use a higher `proxy-body-size` here if your
+  # users upload large payloads. Kong admin/manager Services stay internal
+  # regardless of this setting.
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}      # e.g. nginx.ingress.kubernetes.io/proxy-body-size: 100m
+    host: ""
+    path: /
+    pathType: Prefix
+    tls: []
 
 vector:
   image:
@@ -225,72 +252,14 @@ jwtCli:
     tag: 6.2.0
     pullPolicy: IfNotPresent
 
-# Optional Ingress for control-plane API, inference gateway (Kong), Grafana, and VMInsert.
-# Requires an ingress controller (NGINX, Traefik, HAProxy, AWS ALB, etc.) running in the cluster.
-# The chart only renders a standard `networking.k8s.io/v1` Ingress resource; TLS Secrets and
-# the ingress controller itself must be managed externally (or via cert-manager annotations).
-ingress:
-  enabled: false
-  # ingressClassName (e.g. "nginx", "traefik"). Empty -> cluster default IngressClass.
-  className: ""
-  # Annotations passed through verbatim. Put controller-specific options here, e.g.
-  # nginx.ingress.kubernetes.io/proxy-body-size, cert-manager.io/cluster-issuer, etc.
-  annotations: {}
-  # K8s-native TLS spec. Example:
-  #   tls:
-  #     - hosts: ["api.neutree.example.com"]
-  #       secretName: neutree-api-tls
-  tls: []
-  # Per-backend rule. Set host="" or enabled=false to skip that backend.
-  # service.name / service.port override the chart-derived defaults; leave them as
-  # null (~) / empty to use the defaults shown in the comments below.
-  #
-  # Default Service names below assume `{{ include "neutree.fullname" . }}` resolves
-  # to the release name (i.e. the release name contains "neutree"). When the release
-  # name does NOT contain "neutree", `neutree.fullname` becomes `<release>-neutree`,
-  # so api/gateway Services become `<release>-neutree-api-service` /
-  # `<release>-neutree-kong-proxy`. Override `service.name` to match in that case.
-  #
-  # grafana / vminsert Services come from subcharts and use `.Release.Name` directly
-  # regardless of the parent chart's fullname. If you set
-  # `grafana.fullnameOverride` or `victoria-metrics-cluster.fullnameOverride`,
-  # override `service.name` here to match the actual Service name.
-  #
-  # service.port may be an integer (resolved as `port.number`) or a string (resolved
-  # as `port.name`) to support named ports defined on the backend Service.
-  hosts:
-    api:
-      enabled: true
-      host: ""
-      path: /
-      pathType: Prefix
-      service:
-        name: ""   # default: <chart-fullname>-api-service
-        port: ~    # default: 3000
-    gateway:
-      enabled: true
-      host: ""
-      path: /
-      pathType: Prefix
-      service:
-        name: ""   # default: <chart-fullname>-kong-proxy
-        port: ~    # default: 80
-    grafana:
-      enabled: true
-      host: ""
-      path: /
-      pathType: Prefix
-      service:
-        name: ""   # default: <release>-grafana
-        port: ~    # default: 80
-    vminsert:
-      enabled: true
-      host: ""
-      path: /
-      pathType: Prefix
-      service:
-        name: ""   # default: <release>-victoria-metrics-cluster-vminsert
-        port: ~    # default: 8480
+# Ingress is configured per component:
+#   - control-plane API:  api.ingress.*  (see above)
+#   - inference gateway:  kong.ingress.* (see above)
+#   - Grafana UI:         grafana.ingress.* (subchart-native; see grafana subchart values)
+#   - VMInsert metrics:   victoria-metrics-cluster.vminsert.ingress.* (subchart-native)
+# Each can be enabled and configured independently with its own className,
+# annotations, and TLS spec. An ingress controller must be installed in the
+# cluster; TLS Secret / cert provisioning is the operator's responsibility.
 
 victoria-metrics-cluster:
   enabled: true
