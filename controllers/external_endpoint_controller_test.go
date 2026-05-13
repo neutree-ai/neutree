@@ -241,6 +241,26 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "already failed with different error persists new error",
+			in: func() *v1.ExternalEndpoint {
+				e := ee(id, v1.ExternalEndpointPhaseFAILED)
+				e.Status = &v1.ExternalEndpointStatus{
+					Phase:        v1.ExternalEndpointPhaseFAILED,
+					ErrorMessage: "previous gateway error",
+				}
+				return e
+			}(),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return(assert.AnError)
+				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
+					return ee.Status != nil &&
+						ee.Status.Phase == v1.ExternalEndpointPhaseFAILED &&
+						ee.Status.ErrorMessage == assert.AnError.Error()
+				})).Return(nil)
+			},
+			wantErr: true,
+		},
+		{
 			name: "empty serve URL preserves existing serviceURL",
 			in: func() *v1.ExternalEndpoint {
 				e := ee(id, v1.ExternalEndpointPhasePENDING)
