@@ -184,12 +184,61 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "already running skips status update",
-			in:   ee(id, v1.ExternalEndpointPhaseRUNNING),
+			name: "already running with same URL recomputes but skips storage write",
+			in: func() *v1.ExternalEndpoint {
+				e := ee(id, v1.ExternalEndpointPhaseRUNNING)
+				e.Status = &v1.ExternalEndpointStatus{
+					Phase:      v1.ExternalEndpointPhaseRUNNING,
+					ServiceURL: "http://stable-gateway/path",
+				}
+				return e
+			}(),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
 				g.On("SyncExternalEndpoint", mock.Anything).Return(nil)
+				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://stable-gateway/path", nil)
+				// No UpdateExternalEndpoint expectation: drift detect should suppress write.
 			},
 			wantErr: false,
+		},
+		{
+			// When the gateway proxy URL changes (e.g. neutree-core restarts with a
+			// different --gateway-proxy-url), existing RUNNING external endpoints must
+			// refresh status.service_url on the next reconcile instead of staying frozen.
+			name: "already running with stale URL refreshes service_url on drift",
+			in: func() *v1.ExternalEndpoint {
+				e := ee(id, v1.ExternalEndpointPhaseRUNNING)
+				e.Status = &v1.ExternalEndpointStatus{
+					Phase:      v1.ExternalEndpointPhaseRUNNING,
+					ServiceURL: "http://old-gateway/path",
+				}
+				return e
+			}(),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil)
+				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://new-gateway/path", nil)
+				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
+					return ee.Status != nil &&
+						ee.Status.Phase == v1.ExternalEndpointPhaseRUNNING &&
+						ee.Status.ServiceURL == "http://new-gateway/path"
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			name: "already failed with same error skips storage write",
+			in: func() *v1.ExternalEndpoint {
+				e := ee(id, v1.ExternalEndpointPhaseFAILED)
+				e.Status = &v1.ExternalEndpointStatus{
+					Phase:        v1.ExternalEndpointPhaseFAILED,
+					ErrorMessage: assert.AnError.Error(),
+				}
+				return e
+			}(),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return(assert.AnError)
+				// No UpdateExternalEndpoint: phase and error message unchanged.
+			},
+			wantErr: true,
 		},
 		{
 			name: "empty serve URL preserves existing serviceURL",
