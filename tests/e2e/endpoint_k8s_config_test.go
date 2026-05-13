@@ -482,9 +482,21 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--max_model_len"), "integer")
 				Expect(argsStr).To(ContainSubstring("--gpu_memory_utilization"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean")
+				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean true (flag-only)")
 				Expect(argsStr).To(ContainSubstring("--seed"), "integer")
 				Expect(argsStr).To(ContainSubstring("--override_generation_config"), "object/JSON")
+
+				// Boolean false engine_args must drop the flag entirely. vLLM
+				// argparse rejects `--flag false` (store_true is nargs=0), so
+				// the template skips both `--<flag>` and `"false"` when the
+				// value is the literal string "false".
+				Expect(argsStr).NotTo(ContainSubstring("--enable_prefix_caching"),
+					"boolean false engine_arg must not emit its flag")
+				for _, tok := range allArgs {
+					Expect(tok).NotTo(Equal("false"),
+						"no CLI token should be the literal string \"false\"")
+				}
+
 				found = true
 
 				break
@@ -552,7 +564,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				// kebab-case CLI flags (sprig replace "_" "-"); assert kebab.
 				Expect(argsStr).To(ContainSubstring("--tp-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--mem-fraction-static"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean")
+				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean true (flag-only)")
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--chunked-prefill-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--served-model-name"), "string")
@@ -560,6 +572,22 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--cuda-graph-max-bs"), "integer")
 				Expect(argsStr).To(ContainSubstring("--preferred-sampling-params"), "object/JSON")
 				Expect(argsStr).To(ContainSubstring("--json-model-override-args"), "object/JSON")
+
+				// Boolean false engine_args must drop the flag entirely. SGLang
+				// argparse rejects `--flag false` (store_true is nargs=0), so
+				// the template skips both `--<flag>` and `"false"` when the
+				// value is the literal string "false". Check both kebab and
+				// underscore forms because the SGLang template applies sprig
+				// `replace "_" "-"` only on the emit branches.
+				Expect(argsStr).NotTo(ContainSubstring("--skip-tokenizer-init"),
+					"boolean false engine_arg must not emit its flag (kebab form)")
+				Expect(argsStr).NotTo(ContainSubstring("--skip_tokenizer_init"),
+					"boolean false engine_arg must not emit its flag (underscore form)")
+				for _, tok := range allArgs {
+					Expect(tok).NotTo(Equal("false"),
+						"no CLI token should be the literal string \"false\"")
+				}
+
 				found = true
 
 				break
@@ -573,130 +601,6 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 			code, body, err := inferChat(ep.Status.ServiceURL, "Hello SGLang schema types")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(200), "inference failed: %s", body)
-		})
-	})
-
-	// --- Boolean false engine_args ----------------------------------------
-	//
-	// The K8s deploy templates for vLLM and SGLang previously rendered
-	// `--<flag>` followed by `"false"` for any engine_arg set to false,
-	// which both engines' argparse (action="store_true") rejects. The fix
-	// drops the flag entirely when the value is false. These cases protect
-	// the endpoint-creation path against regression and assert the rendered
-	// Deployment never carries a literal `false` CLI token.
-	// TestRail: C2650077 (vLLM), C2650078 (SGLang).
-
-	Describe("Boolean false engine_args", Ordered, Label("config", "engine-args"), func() {
-		var vllmEpName, sglangEpName string
-
-		BeforeAll(func() {
-			vllmEpName = "e2e-ep-k8s-bool-vllm-" + Cfg.RunID
-			sglangEpName = "e2e-ep-k8s-bool-sglang-" + Cfg.RunID
-		})
-
-		AfterAll(func() {
-			if vllmEpName != "" {
-				deleteEndpoint(vllmEpName)
-			}
-			if sglangEpName != "" {
-				deleteEndpoint(sglangEpName)
-			}
-		})
-
-		It("vLLM should deploy with boolean false engine_arg and omit the flag", Label("C2650077"), func() {
-			yamlPath := applyEndpoint(vllmEpName, clusterName, withEngineArgs([]EngineArg{
-				{Key: "enable_prefix_caching", Value: "false"},
-				{Key: "dtype", Value: "half"},
-			}))
-			defer os.Remove(yamlPath)
-
-			waitEndpointRunning(vllmEpName)
-
-			ep := getEndpoint(vllmEpName)
-			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
-
-			ctx := context.Background()
-			d, err := k8sH.GetDeployment(ctx, namespace, vllmEpName)
-			Expect(err).NotTo(HaveOccurred(), "should find endpoint deployment %s", vllmEpName)
-
-			found := false
-
-			for _, c := range d.Spec.Template.Spec.Containers {
-				if c.Name != profileEngineName() {
-					continue
-				}
-
-				tokens := append(append([]string{}, c.Command...), c.Args...)
-				argsStr := strings.Join(tokens, " ")
-
-				Expect(argsStr).NotTo(ContainSubstring("--enable_prefix_caching"),
-					"bool false engine_arg flag must be omitted")
-				Expect(argsStr).NotTo(ContainSubstring("--enable-prefix-caching"),
-					"bool false engine_arg flag must be omitted (kebab form)")
-				for _, tok := range tokens {
-					Expect(tok).NotTo(Equal("false"),
-						"no CLI token should be literal \"false\"")
-				}
-				Expect(argsStr).To(ContainSubstring("--dtype"),
-					"non-bool engine_arg must still be emitted")
-				Expect(argsStr).To(ContainSubstring("half"),
-					"non-bool engine_arg value must still be present")
-				found = true
-
-				break
-			}
-
-			Expect(found).To(BeTrue(), "should find vLLM engine container in deployment")
-		})
-
-		It("SGLang should deploy with boolean false engine_arg and omit the flag", Label("C2650078"), func() {
-			yamlPath := applyEndpoint(sglangEpName, clusterName,
-				withEngine("sglang", profileEngineVersionFor("sglang")),
-				withEngineArgs([]EngineArg{
-					{Key: "disable_cuda_graph", Value: "false"},
-					{Key: "dtype", Value: "auto"},
-				}))
-			defer os.Remove(yamlPath)
-
-			waitEndpointRunning(sglangEpName)
-
-			ep := getEndpoint(sglangEpName)
-			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
-
-			ctx := context.Background()
-			d, err := k8sH.GetDeployment(ctx, namespace, sglangEpName)
-			Expect(err).NotTo(HaveOccurred(), "should find endpoint deployment %s", sglangEpName)
-
-			found := false
-
-			for _, c := range d.Spec.Template.Spec.Containers {
-				if c.Name != v1.EngineNameSGLang {
-					continue
-				}
-
-				tokens := append(append([]string{}, c.Command...), c.Args...)
-				argsStr := strings.Join(tokens, " ")
-
-				// SGLang template applies sprig replace "_" "-"; assert both
-				// forms are absent to be defensive against either render path.
-				Expect(argsStr).NotTo(ContainSubstring("--disable-cuda-graph"),
-					"bool false engine_arg flag must be omitted (kebab form)")
-				Expect(argsStr).NotTo(ContainSubstring("--disable_cuda_graph"),
-					"bool false engine_arg flag must be omitted (underscore form)")
-				for _, tok := range tokens {
-					Expect(tok).NotTo(Equal("false"),
-						"no CLI token should be literal \"false\"")
-				}
-				Expect(argsStr).To(ContainSubstring("--dtype"),
-					"non-bool engine_arg must still be emitted")
-				Expect(argsStr).To(ContainSubstring("auto"),
-					"non-bool engine_arg value must still be present")
-				found = true
-
-				break
-			}
-
-			Expect(found).To(BeTrue(), "should find SGLang engine container in deployment")
 		})
 	})
 })
