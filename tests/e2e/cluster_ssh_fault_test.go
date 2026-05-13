@@ -126,16 +126,29 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			clusterName := "e2e-ssh-badip-" + Cfg.RunID
 			DeferCleanup(func() { ClusterH.EnsureDeleted(clusterName) })
 
+			const unreachableHeadIP = "198.51.100.1"
+
 			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
-				"head_ip":         "198.51.100.1",
+				"head_ip":         unreachableHeadIP,
 				"ssh_user":        sshUser,
 				"ssh_private_key": sshPrivateKey,
 			})
 			r := ClusterH.Apply(yaml)
 			ExpectSuccess(r)
 
-			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "connection failed", TerminalPhaseTimeout)
+			cluster := ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "connection failed", TerminalPhaseTimeout)
+
+			// Actionable-error assertions: the message must surface the
+			// SSH precheck phase, target IP, and static-cluster hint so
+			// the operator can resolve the misconfiguration without
+			// guessing about ssh_private_key.
+			Expect(cluster.Status.ErrorMessage).To(ContainSubstring("ssh connection to node"),
+				"error must identify the SSH precheck phase")
+			Expect(cluster.Status.ErrorMessage).To(ContainSubstring(unreachableHeadIP),
+				"error must surface the unreachable target IP")
+			Expect(cluster.Status.ErrorMessage).To(ContainSubstring("hint:"),
+				"error must carry the static-cluster troubleshooting hint")
 		})
 
 		It("should stay Initializing when worker node IPs are unreachable", Label("C2613146"), func() {

@@ -102,8 +102,10 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 	// avoiding race conditions during boot when nvidia driver is still loading.
 	output, err := sshRunner.Run(ctx, "lspci -nn", true, nil, true, nil, "", false)
 	if err != nil {
-		if err == command_runner.ErrConnectionFailed {
-			return nil, errors.Wrapf(err, "connect to node %s failed", nodeIP)
+		if errors.Is(err, command_runner.ErrConnectionFailed) {
+			// The runner already produced an actionable message including the
+			// target IP, underlying SSH stderr, and static-cluster hint.
+			return nil, err
 		}
 
 		return nil, errors.Wrapf(err, "get node %s pci info failed", nodeIP)
