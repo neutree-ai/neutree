@@ -466,21 +466,36 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 // checkHeadNodeHealth checks whether the head node is fully healthy by verifying both
 // dashboard API reachability (GCS) and the head node's raylet state, and returns the
 // head node's serving version when alive. This avoids redundant ListNodes calls.
+// When unhealthy, it returns a human-readable reason describing why so the caller can
+// surface an actionable message to users (e.g. "verify port 8265 is not already in
+// use" — NEU-244).
 // Returns:
-//   - (true, version, nil)  — dashboard reachable AND at least one head raylet is ALIVE
-//   - (false, "", nil)      — dashboard unreachable, or raylet is not alive
-//   - (false, "", err)      — an unexpected error occurred (e.g. ListNodes failed)
-func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileContext) (bool, string, error) {
+//   - (true,  version, "",      nil) — dashboard reachable AND at least one head raylet is ALIVE
+//   - (false, "",      reason,  nil) — head not healthy; reason describes why
+//   - (false, "",      "",      err) — an unexpected error occurred (e.g. ListNodes failed)
+func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileContext) (bool, string, string, error) {
+	headIP := reconcileCtx.sshClusterConfig.Provider.HeadIP
+
 	_, err := reconcileCtx.rayService.GetClusterMetadata()
 	if err != nil {
 		klog.V(4).Infof("Head node dashboard unreachable for cluster %s: %v",
 			reconcileCtx.Cluster.Metadata.WorkspaceName(), err)
-		return false, "", nil
+
+		// `ray up` exits 0 even when the dashboard fails to bind to :8265 (Ray
+		// only logs the bind failure to stderr). The most common cause of an
+		// unreachable dashboard right after a successful `ray up` is that
+		// port 8265 was already in use on the head host.
+		reason := fmt.Sprintf(
+			"Ray dashboard on head node %s is unreachable (%v); "+
+				"verify port 8265 is not already in use by another process on this host",
+			headIP, err)
+
+		return false, "", reason, nil
 	}
 
 	nodes, err := reconcileCtx.rayService.ListNodes()
 	if err != nil {
-		return false, "", errors.Wrap(err, "failed to list ray nodes")
+		return false, "", "", errors.Wrap(err, "failed to list ray nodes")
 	}
 
 	// Ray can keep multiple records for the same head node across restarts
@@ -488,7 +503,7 @@ func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileCon
 	// head node record is in AliveNodeState.
 	for _, node := range nodes {
 		if node.Raylet.IsHeadNode && node.Raylet.State == v1.AliveNodeState {
-			return true, v1.GetVersionFromLabels(node.Raylet.Labels), nil
+			return true, v1.GetVersionFromLabels(node.Raylet.Labels), "", nil
 		}
 	}
 
@@ -496,7 +511,7 @@ func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileCon
 	// - Head raylet exited and Ray lost the isHeadNode flag
 	// - Head node exists but state is DEAD
 	// - No head node in list yet (initial startup; ProvisioningWaitTime prevents rebuild loops)
-	return false, "", nil
+	return false, "", fmt.Sprintf("no alive head raylet found on %s", headIP), nil
 }
 
 func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext) error {

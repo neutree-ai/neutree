@@ -409,6 +409,162 @@ func TestReconcileHeadNode(t *testing.T) {
 
 }
 
+// TestReconcileHeadNode_RecoveryReason asserts that when a Running cluster's head
+// node becomes unhealthy, the recovery status message surfaces an actionable cause
+// instead of the generic "dashboard unreachable or raylet not alive" wording.
+//
+// NEU-244: when ray dashboard port 8265 is occupied on the head node, ray up exits
+// 0 but the dashboard never comes up. Users used to see a generic message — the
+// recovery message must point at port 8265 so they can self-diagnose.
+func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
+	tests := []struct {
+		name              string
+		setupMock         func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService)
+		wantReasonContain []string
+		wantReasonAbsent  []string
+	}{
+		{
+			name: "dashboard unreachable - reason mentions port 8265",
+			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				dashboardSvc.On("GetClusterMetadata").Return(nil, errors.New("connection refused")).Once()
+				// rebuildHeadNode path: downCluster, then upCluster, then post-up GetClusterMetadata
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
+			},
+			wantReasonContain: []string{"port 8265", "192.168.1.10", "connection refused"},
+		},
+		{
+			name: "no alive head raylet - reason mentions raylet, not port 8265",
+			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
+				// Dashboard reachable, but only DEAD head record exists.
+				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Times(2)
+				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+					{Raylet: v1.Raylet{IsHeadNode: true, State: v1.DeadNodeState}},
+				}, nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+			},
+			wantReasonContain: []string{"raylet", "192.168.1.10"},
+			wantReasonAbsent:  []string{"port 8265"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			acceleratorManager := &acceleratormocks.MockManager{}
+			e := &commandmocks.MockExecutor{}
+			dashboardSvc := &dashboardmocks.MockDashboardService{}
+			tt.setupMock(acceleratorManager, e, dashboardSvc)
+
+			var recoveryMessages []string
+
+			s := storagemocks.MockStorage{}
+			s.On("UpdateCluster", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				updated := args.Get(1).(*v1.Cluster)
+				if updated.Status != nil && updated.Status.Phase == v1.ClusterPhaseFailed {
+					recoveryMessages = append(recoveryMessages, updated.Status.ErrorMessage)
+				}
+			}).Return(nil).Maybe()
+
+			dashboard.NewDashboardService = func(dashboardUrl string) dashboard.DashboardService {
+				return dashboardSvc
+			}
+			r := &sshRayClusterReconciler{
+				acceleratorManager: acceleratorManager,
+				executor:           e,
+				storage:            &s,
+			}
+
+			cluster := &v1.Cluster{
+				ID: *pointer.Int(1),
+				Metadata: &v1.Metadata{
+					Name: "test",
+				},
+				Status: &v1.ClusterStatus{
+					// Phase=Running is the gate that lets WriteRecoveryStatus actually write.
+					Phase:           v1.ClusterPhaseRunning,
+					Initialized:     true,
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+				},
+			}
+
+			err := r.reconcileHeadNode(&ReconcileContext{
+				rayService: dashboardSvc,
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "192.168.1.10"},
+				},
+				sshRayClusterConfig: &v1.RayClusterConfig{},
+				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
+				Cluster:             cluster,
+			})
+			assert.NoError(t, err)
+
+			require.NotEmpty(t, recoveryMessages, "WriteRecoveryStatus must persist a Failed-phase status with a reason")
+			combined := strings.Join(recoveryMessages, " || ")
+			for _, want := range tt.wantReasonContain {
+				assert.Contains(t, combined, want, "recovery message must contain %q (got: %q)", want, combined)
+			}
+			for _, absent := range tt.wantReasonAbsent {
+				assert.NotContains(t, combined, absent, "recovery message must NOT contain %q (got: %q)", absent, combined)
+			}
+
+			acceleratorManager.AssertExpectations(t)
+			e.AssertExpectations(t)
+			dashboardSvc.AssertExpectations(t)
+			s.AssertExpectations(t)
+		})
+	}
+}
+
+// TestInitHeadNode_DashboardVerifyFailureHint asserts that when ray up exits 0 but
+// the post-up GetClusterMetadata probe fails, the wrapped error mentions port 8265
+// so users learn the most likely cause (NEU-244).
+func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
+	acceleratorManager := &acceleratormocks.MockManager{}
+	e := &commandmocks.MockExecutor{}
+	dashboardSvc := &dashboardmocks.MockDashboardService{}
+
+	// upCluster: builds accelerator config and shells out to ray up
+	acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+	e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+	// post-up verify probe fails
+	dashboardSvc.On("GetClusterMetadata").Return(nil, errors.New("connection refused")).Once()
+
+	s := storagemocks.MockStorage{}
+	s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	r := &sshRayClusterReconciler{
+		acceleratorManager: acceleratorManager,
+		executor:           e,
+		storage:            &s,
+	}
+
+	err := r.initHeadNode(&ReconcileContext{
+		rayService: dashboardSvc,
+		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+			Provider: v1.Provider{HeadIP: "192.168.1.10"},
+		},
+		sshRayClusterConfig: &v1.RayClusterConfig{},
+		sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
+		Cluster: &v1.Cluster{
+			ID:       *pointer.Int(1),
+			Metadata: &v1.Metadata{Name: "test"},
+			Status: &v1.ClusterStatus{
+				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+			},
+		},
+	}, false)
+
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "port 8265", "post-up verify failure must hint at port 8265 (got: %q)", msg)
+	assert.Contains(t, msg, "192.168.1.10", "post-up verify failure must mention the head IP (got: %q)", msg)
+	assert.Contains(t, msg, "connection refused", "post-up verify failure must preserve underlying error (got: %q)", msg)
+}
+
 func TestReconcileWorkerNode(t *testing.T) {
 	tests := []struct {
 		name             string

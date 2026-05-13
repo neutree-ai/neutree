@@ -260,7 +260,7 @@ func (c *sshRayClusterReconciler) cleanupConfig(reconcileCtx *ReconcileContext) 
 }
 
 func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileContext) error {
-	alive, headVersion, err := c.checkHeadNodeHealth(reconcileCtx)
+	alive, headVersion, unhealthyReason, err := c.checkHeadNodeHealth(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to check head node health")
 	}
@@ -281,9 +281,10 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		return nil
 	}
 
-	// Head is down (dashboard unreachable or raylet dead) - write recovery status for user feedback
+	// Head is down - write recovery status with the specific reason so users see
+	// an actionable message (e.g. port 8265 occupancy hint) instead of a generic one.
 	WriteRecoveryStatus(reconcileCtx.Cluster, c.storage,
-		fmt.Sprintf("head node %s unhealthy (dashboard unreachable or raylet not alive), attempting recovery", reconcileCtx.sshClusterConfig.Provider.HeadIP))
+		fmt.Sprintf("head node unhealthy: %s, attempting recovery", unhealthyReason))
 
 	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.Phase != v1.ClusterPhaseInitializing {
 		klog.Infof("Head node not ready, try to up cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
@@ -323,7 +324,13 @@ func (c *sshRayClusterReconciler) initHeadNode(reconcileCtx *ReconcileContext, v
 
 	_, err = reconcileCtx.rayService.GetClusterMetadata()
 	if err != nil {
-		return errors.Wrap(err, "failed to get cluster metadata after starting head node")
+		// `ray up` exited 0 but the dashboard endpoint is unreachable. The most
+		// common cause is that port 8265 was already in use on the head host —
+		// `ray up` only logs that bind failure to stderr (NEU-244).
+		return errors.Wrapf(err,
+			"failed to verify Ray dashboard on head node %s after `ray up`; "+
+				"verify port 8265 is not already in use by another process on this host",
+			reconcileCtx.sshClusterConfig.Provider.HeadIP)
 	}
 
 	return nil
