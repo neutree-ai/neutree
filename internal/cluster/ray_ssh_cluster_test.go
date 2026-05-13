@@ -561,6 +561,93 @@ func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 	assert.Contains(t, msg, "connection refused", "post-up verify failure must preserve underlying error (got: %q)", msg)
 }
 
+// TestCheckHeadNodeHealth_UnhealthyErrorContract pins the contract between
+// checkHeadNodeHealth and reconcileHeadNode: an unhealthy head is signalled via
+// a *headNodeUnhealthyError (so reconcileHeadNode can split known-unhealthy from
+// unexpected internal errors via errors.As), and the dashboard-unreachable
+// variant preserves the underlying error in the chain so errors.Is / errors.As
+// can traverse it.
+func TestCheckHeadNodeHealth_UnhealthyErrorContract(t *testing.T) {
+	t.Run("dashboard unreachable wraps underlying error", func(t *testing.T) {
+		dashboardSvc := &dashboardmocks.MockDashboardService{}
+		underlying := errors.New("connection refused")
+		dashboardSvc.On("GetClusterMetadata").Return(nil, underlying).Once()
+
+		r := &sshRayClusterReconciler{}
+		alive, version, err := r.checkHeadNodeHealth(&ReconcileContext{
+			rayService: dashboardSvc,
+			sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+				Provider: v1.Provider{HeadIP: "192.168.1.10"},
+			},
+			Cluster: &v1.Cluster{Metadata: &v1.Metadata{Name: "t"}},
+		})
+		assert.False(t, alive)
+		assert.Empty(t, version)
+		require.Error(t, err)
+
+		var unhealthy *headNodeUnhealthyError
+		require.True(t, errors.As(err, &unhealthy), "expected *headNodeUnhealthyError, got %T", err)
+		assert.Contains(t, unhealthy.Error(), "port 8265")
+		assert.Contains(t, unhealthy.Error(), "192.168.1.10")
+		assert.Contains(t, unhealthy.Error(), "connection refused")
+		assert.ErrorIs(t, err, underlying, "underlying error must remain reachable via errors.Is")
+
+		dashboardSvc.AssertExpectations(t)
+	})
+
+	t.Run("no alive head raylet returns unhealthy error without underlying cause", func(t *testing.T) {
+		dashboardSvc := &dashboardmocks.MockDashboardService{}
+		dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
+		dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
+			{Raylet: v1.Raylet{IsHeadNode: true, State: v1.DeadNodeState}},
+		}, nil).Once()
+
+		r := &sshRayClusterReconciler{}
+		alive, _, err := r.checkHeadNodeHealth(&ReconcileContext{
+			rayService: dashboardSvc,
+			sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+				Provider: v1.Provider{HeadIP: "192.168.1.10"},
+			},
+			Cluster: &v1.Cluster{Metadata: &v1.Metadata{Name: "t"}},
+		})
+		assert.False(t, alive)
+		require.Error(t, err)
+
+		var unhealthy *headNodeUnhealthyError
+		require.True(t, errors.As(err, &unhealthy))
+		assert.Contains(t, unhealthy.Error(), "no alive head raylet")
+		assert.Contains(t, unhealthy.Error(), "192.168.1.10")
+		assert.NotContains(t, unhealthy.Error(), "port 8265")
+		assert.Nil(t, errors.Unwrap(unhealthy), "no underlying cause expected for this path")
+
+		dashboardSvc.AssertExpectations(t)
+	})
+
+	t.Run("ListNodes failure surfaces as plain unexpected error, not unhealthy error", func(t *testing.T) {
+		dashboardSvc := &dashboardmocks.MockDashboardService{}
+		dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
+		dashboardSvc.On("ListNodes").Return(nil, errors.New("boom")).Once()
+
+		r := &sshRayClusterReconciler{}
+		alive, _, err := r.checkHeadNodeHealth(&ReconcileContext{
+			rayService: dashboardSvc,
+			sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+				Provider: v1.Provider{HeadIP: "192.168.1.10"},
+			},
+			Cluster: &v1.Cluster{Metadata: &v1.Metadata{Name: "t"}},
+		})
+		assert.False(t, alive)
+		require.Error(t, err)
+
+		var unhealthy *headNodeUnhealthyError
+		assert.False(t, errors.As(err, &unhealthy),
+			"ListNodes failures must propagate as unexpected errors so reconcileHeadNode bails out instead of writing a misleading recovery status")
+		assert.Contains(t, err.Error(), "failed to list ray nodes")
+
+		dashboardSvc.AssertExpectations(t)
+	})
+}
+
 func TestReconcileWorkerNode(t *testing.T) {
 	tests := []struct {
 		name             string

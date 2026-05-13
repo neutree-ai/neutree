@@ -260,9 +260,12 @@ func (c *sshRayClusterReconciler) cleanupConfig(reconcileCtx *ReconcileContext) 
 }
 
 func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileContext) error {
-	alive, headVersion, unhealthyReason, err := c.checkHeadNodeHealth(reconcileCtx)
-	if err != nil {
-		return errors.Wrap(err, "failed to check head node health")
+	alive, headVersion, healthErr := c.checkHeadNodeHealth(reconcileCtx)
+
+	var unhealthy *headNodeUnhealthyError
+	if healthErr != nil && !errors.As(healthErr, &unhealthy) {
+		// Unexpected internal error (e.g. ListNodes failed) — propagate up.
+		return errors.Wrap(healthErr, "failed to check head node health")
 	}
 
 	if alive {
@@ -284,7 +287,7 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 	// Head is down - write recovery status with the specific reason so users see
 	// an actionable message (e.g. port 8265 occupancy hint) instead of a generic one.
 	WriteRecoveryStatus(reconcileCtx.Cluster, c.storage,
-		fmt.Sprintf("head node unhealthy: %s, attempting recovery", unhealthyReason))
+		fmt.Sprintf("head node unhealthy: %s, attempting recovery", healthErr.Error()))
 
 	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.Phase != v1.ClusterPhaseInitializing {
 		klog.Infof("Head node not ready, try to up cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
