@@ -39,6 +39,13 @@ type EndpointSpec struct {
 	DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
 	Variables         map[string]interface{} `json:"variables,omitempty"`
 	Env               map[string]string      `json:"env,omitempty"`
+
+	// Demo (Phase 0) PD same-host fields. Minimum subset of MVP PR-01 schema; only
+	// Strategy + Placement + Roles are needed to drive `(strategy, placement.roles)`
+	// → PD app_builder dispatch. Sidecars/PortRange/full kv schema land in MVP.
+	Strategy  string             `json:"strategy,omitempty"`  // "monolithic" | "pd"
+	Placement *PlacementSpec     `json:"placement,omitempty"` // dual-axis placement constraint
+	Roles     []EndpointRoleSpec `json:"roles,omitempty"`
 }
 
 type EndpointPhase string
@@ -58,6 +65,12 @@ type EndpointStatus struct {
 	ServiceURL         string        `json:"service_url,omitempty"`
 	LastTransitionTime string        `json:"last_transition_time,omitempty"`
 	ErrorMessage       string        `json:"error_message,omitempty"`
+
+	// Demo (Phase 0) PD same-host status fields. Flat ReplicaStatus shape
+	// (no nested Roles map until MVP per 52587f08).
+	Strategy  string          `json:"strategy,omitempty"`
+	Placement string          `json:"placement,omitempty"`
+	Replicas  []ReplicaStatus `json:"replicas,omitempty"`
 }
 
 type Endpoint struct {
