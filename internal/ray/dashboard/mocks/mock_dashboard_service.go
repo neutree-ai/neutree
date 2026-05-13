@@ -191,6 +191,66 @@ func (_c *MockDashboardService_GetServeApplications_Call) RunAndReturn(run func(
 	return _c
 }
 
+// ListActors provides a mock function with given fields: filters, detail, limit
+func (_m *MockDashboardService) ListActors(filters []dashboard.ActorFilter, detail bool, limit int) (*dashboard.ActorsResponse, error) {
+	ret := _m.Called(filters, detail, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListActors")
+	}
+
+	var r0 *dashboard.ActorsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]dashboard.ActorFilter, bool, int) (*dashboard.ActorsResponse, error)); ok {
+		return rf(filters, detail, limit)
+	}
+	if rf, ok := ret.Get(0).(func([]dashboard.ActorFilter, bool, int) *dashboard.ActorsResponse); ok {
+		r0 = rf(filters, detail, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*dashboard.ActorsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]dashboard.ActorFilter, bool, int) error); ok {
+		r1 = rf(filters, detail, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDashboardService_ListActors_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListActors'
+type MockDashboardService_ListActors_Call struct {
+	*mock.Call
+}
+
+// ListActors is a helper method to define mock.On call
+//   - filters []dashboard.ActorFilter
+//   - detail bool
+//   - limit int
+func (_e *MockDashboardService_Expecter) ListActors(filters interface{}, detail interface{}, limit interface{}) *MockDashboardService_ListActors_Call {
+	return &MockDashboardService_ListActors_Call{Call: _e.mock.On("ListActors", filters, detail, limit)}
+}
+
+func (_c *MockDashboardService_ListActors_Call) Run(run func(filters []dashboard.ActorFilter, detail bool, limit int)) *MockDashboardService_ListActors_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]dashboard.ActorFilter), args[1].(bool), args[2].(int))
+	})
+	return _c
+}
+
+func (_c *MockDashboardService_ListActors_Call) Return(_a0 *dashboard.ActorsResponse, _a1 error) *MockDashboardService_ListActors_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDashboardService_ListActors_Call) RunAndReturn(run func([]dashboard.ActorFilter, bool, int) (*dashboard.ActorsResponse, error)) *MockDashboardService_ListActors_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListNodes provides a mock function with no fields
 func (_m *MockDashboardService) ListNodes() ([]v1.NodeSummary, error) {
 	ret := _m.Called()

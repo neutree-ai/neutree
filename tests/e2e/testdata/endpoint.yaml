@@ -36,7 +36,7 @@ spec:
 {{- end }}
 {{- end }}
   replicas:
-    num: 1
+    num: {{ .E2E_REPLICAS_NUM }}
   deployment_options:
     scheduler:
       load_factor: 1.25

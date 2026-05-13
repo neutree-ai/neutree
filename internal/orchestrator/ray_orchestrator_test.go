@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.openly.dev/pointy"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -2639,6 +2640,275 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectErrorMsg: "Deployment BACKEND: backend deployment is error",
 			expectError:    false,
 		},
+		// Suppress transient DEPLOYING when previously Running and replicas remain Healthy.
+		// Ray Serve PUT /api/serve/applications/ briefly flips status to DEPLOYING for every
+		// application in the request — including unchanged ones — even though their deployments
+		// are not actually restarted. See ray-project/ray#25381, #42974, #44226.
+		{
+			name: "suppress transient DEPLOYING when previously Running and all deployments Healthy",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+								"WORKER":  {Name: "WORKER", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseRUNNING,
+			expectError:   false,
+		},
+		{
+			name: "do not suppress when this endpoint is actually rolling out (a deployment is UPDATING)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+								"WORKER":  {Name: "WORKER", Status: "UPDATING"},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "do not suppress when previous status is nil (initial deploy)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				// Status nil — endpoint has never reported a phase.
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "do not suppress when previous status is Failed (recovering from failure)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseFAILED}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "UNHEALTHY deployment still maps to Failed even if previously Running (failure precedence preserved)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusUnhealthy, Message: "OOM killed"},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "Deployment BACKEND: OOM killed",
+			expectError:    false,
+		},
+		{
+			name: "do not suppress when Deployments map is empty (no replicas registered)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments:       map[string]dashboard.Deployment{},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "do not suppress NOT_STARTED (Ray app not present in state)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "NOT_STARTED",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
+		{
+			name: "do not suppress when proxy is unhealthy (HTTP entry not serving)",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {Name: "BACKEND", Status: dashboard.DeploymentStatusHealthy},
+							},
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusUnhealthy},
+					},
+				}, nil)
+			},
+			expectedPhase: v1.EndpointPhaseDEPLOYING,
+			expectError:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2680,4 +2950,91 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			mockDashboard.AssertExpectations(t)
 		})
 	}
+}
+
+// TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ToleratesMissingDeps
+// verifies that the lite preparation does NOT fetch engine/model-registry/
+// image-registry from storage — this is what lets pause/delete on Ray
+// succeed when the model registry has been removed.
+func TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ToleratesMissingDeps(t *testing.T) {
+	// dashboard.NewDashboardService is a package-level mockable factory other
+	// tests in this package overwrite without restoration. Pin it for this
+	// test so the result does not leak in from prior runs.
+	prevFactory := dashboard.NewDashboardService
+	mockDashboard := dashboardmocks.NewMockDashboardService(t)
+	dashboard.NewDashboardService = func(string) dashboard.DashboardService { return mockDashboard }
+	t.Cleanup(func() { dashboard.NewDashboardService = prevFactory })
+
+	cluster := v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster"},
+		Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
+		Status: &v1.ClusterStatus{
+			Phase:        v1.ClusterPhaseRunning,
+			DashboardURL: "http://127.0.0.1:8265",
+		},
+	}
+
+	mockStorage := storagemocks.NewMockStorage(t)
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+	// Intentionally do NOT mock ListEngine / ListModelRegistry / ListImageRegistry:
+	// if the lite path calls them, mockery will fail the test on AssertExpectations.
+
+	o := &RayOrchestrator{cluster: &cluster, storage: mockStorage}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+		Spec: &v1.EndpointSpec{
+			Cluster:  "test-cluster",
+			Replicas: v1.ReplicaSpec{Num: pointy.Int(0)},
+			Model:    &v1.ModelSpec{Registry: "removed-registry", Name: "anything"},
+		},
+	}
+
+	ctx, err := o.prepareOrchestratorContextForPauseDelete(endpoint)
+	require.NoError(t, err)
+	require.NotNil(t, ctx)
+	assert.NotNil(t, ctx.Cluster)
+	assert.NotNil(t, ctx.rayService)
+	assert.Nil(t, ctx.ModelRegistry, "lite path must not fetch ModelRegistry")
+	assert.Nil(t, ctx.Engine, "lite path must not fetch Engine")
+	assert.Nil(t, ctx.ImageRegistry, "lite path must not fetch ImageRegistry")
+
+	// Negative assertions — confirm the unlisted methods were never called.
+	mockStorage.AssertNotCalled(t, "ListEngine", mock.Anything)
+	mockStorage.AssertNotCalled(t, "ListModelRegistry", mock.Anything)
+	mockStorage.AssertNotCalled(t, "ListImageRegistry", mock.Anything)
+}
+
+func TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ClusterNotFound(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{}, nil)
+
+	o := &RayOrchestrator{storage: mockStorage}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+		Spec:     &v1.EndpointSpec{Cluster: "missing-cluster"},
+	}
+
+	_, err := o.prepareOrchestratorContextForPauseDelete(endpoint)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deploy cluster")
+}
+
+func TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_NoDashboardURL(t *testing.T) {
+	cluster := v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster"},
+		Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
+		Status:   &v1.ClusterStatus{Phase: v1.ClusterPhaseRunning, DashboardURL: ""},
+	}
+	mockStorage := storagemocks.NewMockStorage(t)
+	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+
+	o := &RayOrchestrator{storage: mockStorage}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "ep1", Workspace: "default"},
+		Spec:     &v1.EndpointSpec{Cluster: "test-cluster"},
+	}
+
+	_, err := o.prepareOrchestratorContextForPauseDelete(endpoint)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dashboard URL")
 }

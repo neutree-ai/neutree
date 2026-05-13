@@ -1053,6 +1053,48 @@ func createAPIKey(serverURL, jwt, workspace, name string) string {
 	return apiKey.Status.SkValue
 }
 
+// callNeutreeAPI performs an HTTP request against neutree-api regular
+// endpoints (those served at `Cfg.ServerURL/api/v1/...` other than
+// /api/v1/auth/* and /api/v1/rpc/*).
+//
+// Three auth conventions exist in this file and they are not interchangeable:
+//   - createTestUser / deleteTestUser / createAPIKey: Bearer <jwt>, against
+//     /api/v1/auth/admin/* and /api/v1/rpc/* — admin user JWT middleware.
+//   - doInferenceRequest: Bearer <api_key> against the Kong-routed inference
+//     gateway (serviceURL, NOT Cfg.ServerURL).
+//   - This helper: raw <api_key> (no Bearer prefix) against the regular
+//     /api/v1/... routes. Sending a Bearer-prefixed key here returns
+//     401 invalid_token because the middleware compares against the
+//     stored sk_value verbatim.
+//
+// TODO: unify all of the above (admin JWT, Kong inference, raw API key)
+// into a single api_helper layer. Today the three call patterns share
+// boilerplate (NewRequest + Client{Timeout} + Do + ReadAll) but are
+// duplicated across 6+ functions; a shared low-level httpJSON plus three
+// thin auth wrappers (Admin/Inference/API) would deduplicate the
+// boilerplate without merging the auth conventions, and would give
+// future tests one obvious place to look for "how do I call the API".
+func callNeutreeAPI(method, path string) ([]byte, int) {
+	GinkgoHelper()
+
+	url := strings.TrimRight(Cfg.ServerURL, "/") + path
+	req, err := http.NewRequest(method, url, nil)
+	Expect(err).NotTo(HaveOccurred())
+
+	req.Header.Set("Authorization", Cfg.APIKey)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	Expect(err).NotTo(HaveOccurred())
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	Expect(err).NotTo(HaveOccurred())
+
+	return body, resp.StatusCode
+}
+
 // --- Endpoint/inference/accelerator helpers ---
 
 // engineVersionSupportsK8s returns true if the given engine version has K8s deployment templates.
@@ -1218,6 +1260,7 @@ type endpointOpts struct {
 	accProduct    string
 	env           map[string]string
 	forceUpdate   bool
+	replicas      int
 }
 
 // EndpointOption configures a single field of endpointOpts.
@@ -1276,6 +1319,12 @@ func withoutForceUpdate() EndpointOption {
 	return func(o *endpointOpts) { o.forceUpdate = false }
 }
 
+// withReplicas overrides the default spec.replicas.num (which is 1 in the
+// template). Use withReplicas(0) to apply a paused endpoint.
+func withReplicas(num int) EndpointOption {
+	return func(o *endpointOpts) { o.replicas = num }
+}
+
 // renderEndpoint renders the endpoint YAML template and returns the temp file path and resolved options.
 func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endpointOpts) {
 	o := &endpointOpts{
@@ -1289,6 +1338,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		// profile lookup picks the right engine's args.
 		gpu:         "1",
 		forceUpdate: true,
+		replicas:    1,
 	}
 	for _, fn := range opts {
 		fn(o)
@@ -1319,6 +1369,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		"E2E_MEMORY":              o.memory,
 		"E2E_ENGINE_ARGS":         o.engineArgs,
 		"E2E_ENV":                 o.env,
+		"E2E_REPLICAS_NUM":        o.replicas,
 	}
 
 	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), data)
@@ -1391,6 +1442,16 @@ func waitEndpointFailed(name string) {
 	r := RunCLI("wait", "endpoint", name,
 		"-w", profileWorkspace(),
 		"--for", "jsonpath=.status.phase=Failed",
+		"--timeout", profileEndpointTimeout(),
+	)
+	ExpectSuccess(r)
+}
+
+// waitEndpointPaused waits for an endpoint to reach Paused phase.
+func waitEndpointPaused(name string) {
+	r := RunCLI("wait", "endpoint", name,
+		"-w", profileWorkspace(),
+		"--for", "jsonpath=.status.phase=Paused",
 		"--timeout", profileEndpointTimeout(),
 	)
 	ExpectSuccess(r)

@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
@@ -139,6 +142,93 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			codeB, bodyB, err := inferChat(epB.Status.ServiceURL, "Hello after delete")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(codeB).To(Equal(http.StatusOK), "inference on ep-B after deleting ep-A failed: %s", bodyB)
+		})
+	})
+
+	// --- Sibling Endpoint Update Isolation ---
+	//
+	// Ray Serve PUT /api/serve/applications/ unconditionally writes
+	// ApplicationStatus to DEPLOYING for every application in the request,
+	// even those whose configs are unchanged. Without the suppression in
+	// GetEndpointStatus this leaks to Neutree as a transient Running →
+	// Deploying → Running flicker on sibling endpoints whenever any single
+	// endpoint in the same cluster is updated. See ray-project/ray#25381,
+	// #42974, #44226.
+	//
+	// Lives under the inference-test file purely to reuse the SSH cluster
+	// fixture; the case itself is a status-reporting assertion.
+	Describe("Sibling Endpoint Update Isolation", Ordered, Label("status", "isolation"), func() {
+		var epNameA, epNameB string
+
+		BeforeAll(func() {
+			epNameA = "e2e-ep-ssh-iso-a-" + Cfg.RunID
+			epNameB = "e2e-ep-ssh-iso-b-" + Cfg.RunID
+		})
+
+		AfterAll(func() {
+			deleteEndpoint(epNameA)
+			deleteEndpoint(epNameB)
+		})
+
+		It("should keep sibling endpoint Running when one endpoint is updated", Label("C2650084"), func() {
+			By("Deploying endpoint A and waiting for Running")
+			yamlA := applyEndpoint(epNameA, clusterName)
+			defer os.Remove(yamlA)
+			waitEndpointRunning(epNameA)
+
+			By("Deploying endpoint B and waiting for Running")
+			yamlB := applyEndpoint(epNameB, clusterName)
+			defer os.Remove(yamlB)
+			waitEndpointRunning(epNameB)
+
+			By("Recording endpoint B baseline before updating endpoint A")
+			epBBefore := getEndpoint(epNameB)
+			Expect(epBBefore.Status.Phase).To(BeEquivalentTo("Running"))
+			lastTransitionBefore := epBBefore.Status.LastTransitionTime
+
+			By("Updating endpoint A (re-apply with extra env to force a Ray Serve PUT)")
+			// withEnv injects a new key into the endpoint spec → the controller
+			// detects a config diff and re-issues PUT /api/serve/applications/
+			// against Ray. The PUT is what triggers the transient DEPLOYING
+			// write on every application in the request; the env key itself is
+			// a marker, the value is irrelevant.
+			yamlAUpdate := applyEndpoint(epNameA, clusterName,
+				withEnv(map[string]string{"E2E_ISOLATION_MARKER": "1"}))
+			defer os.Remove(yamlAUpdate)
+
+			By("Polling endpoint B every second for 90s — phase must stay Running")
+			// Sampling-based assertion: catches any flicker the controller
+			// reconciles slower than 1s. The definitive guard is the
+			// LastTransitionTime equality check below — it catches any phase
+			// write by the controller regardless of poll cadence.
+			Consistently(func() v1.EndpointPhase {
+				return getEndpoint(epNameB).Status.Phase
+			}, 90*time.Second, 1*time.Second).
+				Should(BeEquivalentTo("Running"),
+					"endpoint B phase flickered while endpoint A was being updated")
+
+			By("Waiting for endpoint A rollout to settle")
+			waitEndpointRunning(epNameA)
+
+			By("Sampling endpoint B for an additional 10s after A settled")
+			Consistently(func() v1.EndpointPhase {
+				return getEndpoint(epNameB).Status.Phase
+			}, 10*time.Second, 1*time.Second).
+				Should(BeEquivalentTo("Running"),
+					"endpoint B phase flickered after endpoint A finished rollout")
+
+			By("Verifying endpoint B LastTransitionTime did not change (definitive guard)")
+			// LastTransitionTime is bumped only when the controller detects an
+			// actual status change (shouldUpdateStatus → updateStatus). If
+			// endpoint B's phase ever flipped — even momentarily between two
+			// reconciles the sampling above couldn't catch — the controller
+			// would have written the change and bumped LastTransitionTime.
+			// Equality with the pre-update baseline therefore strictly proves
+			// no phase write happened for endpoint B during A's update.
+			epBAfter := getEndpoint(epNameB)
+			Expect(epBAfter.Status.LastTransitionTime).To(Equal(lastTransitionBefore),
+				"endpoint B LastTransitionTime changed (controller wrote an intermediate phase) — before=%q after=%q",
+				lastTransitionBefore, epBAfter.Status.LastTransitionTime)
 		})
 	})
 

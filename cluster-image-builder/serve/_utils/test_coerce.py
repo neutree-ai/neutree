@@ -2,7 +2,7 @@
 
 import logging
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
 import pytest
@@ -33,6 +33,42 @@ class SampleStdDataclass:
     name: str = ""
     config: Optional[Dict[str, Any]] = None
     items: Optional[List[str]] = None
+    count: int = 0
+
+
+# --- Fixtures for PEP 604 / dataclass-hydration coverage (NEU-425) ---
+
+
+@dataclass
+class FakeAttentionConfig:
+    backend: str = ""
+
+
+class FakePydanticConfig(BaseModel):
+    x: int = 0
+
+
+@dataclass
+class FakeInner:
+    v: int = 0
+
+
+@dataclass
+class FakeOuter:
+    inner: FakeInner = field(default_factory=FakeInner)
+
+
+@dataclass
+class FakeEngineV017:
+    """Minimal stub mirroring vLLM v0.17.1+ EngineArgs annotation shapes."""
+    speculative_config: dict[str, Any] | None = None       # PEP 604 dict
+    allowed_media_domains: list[str] | None = None          # PEP 604 list
+    bare_dict: dict[str, str] = field(default_factory=dict) # PEP 604 bare
+    attn_required: FakeAttentionConfig = field(default_factory=FakeAttentionConfig)
+    attn_optional: FakeAttentionConfig | None = None        # PEP 604 + custom
+    cfg_optional: FakePydanticConfig | None = None
+    outer: FakeOuter = field(default_factory=FakeOuter)
+    name: str = ""
     count: int = 0
 
 
@@ -127,6 +163,105 @@ class TestCoerceArgs:
         coerce_args(args, SampleStdDataclass)
         assert args["count"] == "42"
 
+
+# ---------------------------------------------------------------------------
+# PEP 604 + dataclass-hydration tests (NEU-425)
+# ---------------------------------------------------------------------------
+
+
+class TestCoerceArgsPEP604:
+    def test_pep604_optional_dict_coerced(self):
+        args = {"speculative_config": '{"method":"mtp","num":2}'}
+        coerce_args(args, FakeEngineV017)
+        assert args["speculative_config"] == {"method": "mtp", "num": 2}
+
+    def test_pep604_optional_list_coerced(self):
+        args = {"allowed_media_domains": '["a.com","b.com"]'}
+        coerce_args(args, FakeEngineV017)
+        assert args["allowed_media_domains"] == ["a.com", "b.com"]
+
+    def test_pep604_bare_dict_coerced(self):
+        args = {"bare_dict": '{"k":"v"}'}
+        coerce_args(args, FakeEngineV017)
+        assert args["bare_dict"] == {"k": "v"}
+
+
+class TestCoerceArgsDataclassHydration:
+    def test_dataclass_field_hydrated_to_instance(self):
+        args = {"attn_required": '{"backend":"FLASH"}'}
+        coerce_args(args, FakeEngineV017)
+        assert isinstance(args["attn_required"], FakeAttentionConfig)
+        assert args["attn_required"].backend == "FLASH"
+
+    def test_pep604_optional_dataclass_hydrated(self):
+        args = {"attn_optional": '{"backend":"FLASH_ATTN"}'}
+        coerce_args(args, FakeEngineV017)
+        assert isinstance(args["attn_optional"], FakeAttentionConfig)
+        assert args["attn_optional"].backend == "FLASH_ATTN"
+
+    def test_pydantic_model_hydrated(self):
+        args = {"cfg_optional": '{"x":42}'}
+        coerce_args(args, FakeEngineV017)
+        assert isinstance(args["cfg_optional"], FakePydanticConfig)
+        assert args["cfg_optional"].x == 42
+
+    def test_nested_dataclass_hydrated_recursively(self):
+        args = {"outer": '{"inner":{"v":42}}'}
+        coerce_args(args, FakeEngineV017)
+        assert isinstance(args["outer"], FakeOuter)
+        assert isinstance(args["outer"].inner, FakeInner)
+        assert args["outer"].inner.v == 42
+
+    def test_validation_error_keeps_string_and_warns(self, caplog):
+        # backend expects str, give a list — Pydantic should reject
+        args = {"attn_required": '{"backend": [1, 2, 3]}'}
+        with caplog.at_level(logging.WARNING, logger="ray.serve"):
+            coerce_args(args, FakeEngineV017)
+        assert args["attn_required"] == '{"backend": [1, 2, 3]}'
+        assert "TypeAdapter" in caplog.text
+
+    def test_invalid_json_for_dataclass_keeps_string(self):
+        args = {"attn_required": "not valid json"}
+        coerce_args(args, FakeEngineV017)
+        assert args["attn_required"] == "not valid json"
+
+    def test_native_instance_passthrough(self):
+        existing = FakeAttentionConfig(backend="ALREADY_SET")
+        args = {"attn_required": existing}
+        coerce_args(args, FakeEngineV017)
+        assert args["attn_required"] is existing
+
+    def test_typeadapter_constructor_raise_keeps_string(self, monkeypatch, caplog):
+        """If TypeAdapter(target) schema generation itself raises (e.g.
+        PydanticUserError on an unresolved forward-ref in a nested field,
+        NameError, etc.), coerce_args must keep the original string and not
+        crash replica startup."""
+        from serve._utils import coerce
+
+        class _BoomError(Exception):
+            pass
+
+        def fake_typeadapter(target):
+            raise _BoomError("schema generation blew up")
+
+        monkeypatch.setattr(coerce, "TypeAdapter", fake_typeadapter)
+        args = {"attn_required": '{"backend":"FLASH"}'}
+        with caplog.at_level(logging.WARNING, logger="ray.serve"):
+            coerce_args(args, FakeEngineV017)
+        assert args["attn_required"] == '{"backend":"FLASH"}'
+        assert "TypeAdapter construction or unexpected error" in caplog.text
+
+    def test_string_annotation_passthrough(self):
+        """Under NEU-433 last-resort recovery, _get_field_annotations returns
+        raw annotation strings from dataclasses.fields() instead of resolved
+        type objects. _is_dataclass_like / _wants_dict_or_list must short-
+        circuit on str — annotation is not a type, no hydration attempted,
+        original string preserved."""
+        from serve._utils.coerce import _is_dataclass_like, _wants_dict_or_list
+
+        # Both predicates safely return False on raw annotation strings.
+        assert _is_dataclass_like("FakeAttentionConfig") is False
+        assert _wants_dict_or_list("dict[str, Any] | None") is False
 
 
 # ---------------------------------------------------------------------------

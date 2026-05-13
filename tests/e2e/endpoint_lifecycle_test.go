@@ -99,6 +99,38 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
 		})
+
+		// Delete a running endpoint without --force after its model registry
+		// has been removed. The endpoint must converge to Deleted via the
+		// deployer's last-applied snapshot, not stay stuck in DELETING.
+		It("should reach Deleted when running endpoint is deleted after model removed without --force", Label("C2649426"), func() {
+			epName := "e2e-ep-lc-del-after-del-" + Cfg.RunID
+			DeferCleanup(func() {
+				// Best-effort cleanup; SetupModelRegistry restores for siblings.
+				RunCLI("delete", "endpoint", epName, "-w", profileWorkspace(), "--force", "--ignore-not-found")
+				SetupModelRegistry()
+			})
+
+			By("Creating endpoint and waiting for Running")
+			yamlPath := applyEndpoint(epName, clusterName)
+			defer os.Remove(yamlPath)
+			waitEndpointRunning(epName)
+
+			By("Removing the model registry the endpoint references")
+			TeardownModelRegistry()
+
+			By("Deleting endpoint without --force")
+			r := RunCLI("delete", "endpoint", epName, "-w", profileWorkspace(), "--ignore-not-found")
+			ExpectSuccess(r)
+
+			By("Endpoint converges to deleted (does not get stuck in DELETING)")
+			r = RunCLI("wait", "endpoint", epName,
+				"-w", profileWorkspace(),
+				"--for", "delete",
+				"--timeout", profileEndpointTimeout(),
+			)
+			ExpectSuccess(r)
+		})
 	})
 
 	// --- Error Handling ---
@@ -214,6 +246,67 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				os.Remove(yamlPath)
 				ExpectFailed(r)
 			}
+		})
+	})
+
+	// --- Pause ---
+
+	Describe("Pause", Label("pause"), func() {
+
+		It("should reach Paused when applied with replicas=0 and valid model", Label("C2649423"), func() {
+			epName := "e2e-ep-lc-pause-ok-" + Cfg.RunID
+			DeferCleanup(func() { deleteEndpoint(epName) })
+
+			yamlPath := applyEndpoint(epName, clusterName, withReplicas(0))
+			defer os.Remove(yamlPath)
+
+			waitEndpointPaused(epName)
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
+		})
+
+		It("should reach Paused when applied with replicas=0 and non-existent model", Label("C2649424"), func() {
+			epName := "e2e-ep-lc-pause-nomodel-" + Cfg.RunID
+			DeferCleanup(func() { deleteEndpoint(epName) })
+
+			yamlPath := applyEndpoint(epName, clusterName,
+				withReplicas(0),
+				withModel("non-existent-model-"+Cfg.RunID, "v0.0.0"),
+				withoutForceUpdate())
+			defer os.Remove(yamlPath)
+
+			waitEndpointPaused(epName)
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
+		})
+
+		It("should reach Paused when running endpoint is paused after model deleted", Label("C2649425"), func() {
+			epName := "e2e-ep-lc-pause-after-del-" + Cfg.RunID
+			DeferCleanup(func() {
+				deleteEndpoint(epName)
+				// Restore registry for sibling cases.
+				SetupModelRegistry()
+			})
+
+			By("Creating endpoint with replicas=1 and waiting for Running")
+			yamlPath := applyEndpoint(epName, clusterName)
+			defer os.Remove(yamlPath)
+			waitEndpointRunning(epName)
+
+			By("Removing the model registry the endpoint references")
+			TeardownModelRegistry()
+
+			By("Re-applying endpoint with replicas=0 (pause)")
+			// applyEndpoint defaults forceUpdate=true; the endpoint already
+			// exists from step 1 so we must force-update to push the new
+			// replicas=0 spec — without it the CLI skips existing resources.
+			yamlPath2 := applyEndpoint(epName, clusterName, withReplicas(0))
+			defer os.Remove(yamlPath2)
+
+			By("Endpoint converges to Paused even though model registry is gone")
+			waitEndpointPaused(epName)
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
 		})
 	})
 

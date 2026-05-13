@@ -19,6 +19,9 @@ type DashboardService interface {
 	// Serve related methods
 	GetServeApplications() (*RayServeApplicationsResponse, error)
 	UpdateServeApplications(appsReq RayServeApplicationsRequest) error
+
+	// State API: actor listing with filters
+	ListActors(filters []ActorFilter, detail bool, limit int) (*ActorsResponse, error)
 }
 
 type Client struct {

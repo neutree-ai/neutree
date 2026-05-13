@@ -5,8 +5,12 @@ import functools
 import json
 import logging
 import re
+import types
 import typing
 from typing import Any, Dict, Union
+
+from pydantic import BaseModel, TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
 logger = logging.getLogger("ray.serve")
 
@@ -105,18 +109,29 @@ def _get_field_annotations(model_class: type) -> Dict[str, Any]:
     return {}
 
 
+def _unwrap_optional(annotation: Any) -> Any:
+    """Strip Optional[X] / X | None — handles both typing.Union and PEP 604 types.UnionType."""
+    if typing.get_origin(annotation) in (Union, types.UnionType):
+        non_none = [a for a in typing.get_args(annotation) if a is not type(None)]
+        if len(non_none) == 1:
+            return non_none[0]
+    return annotation
+
+
 def _wants_dict_or_list(annotation: Any) -> bool:
     """Return True if the annotation expects a dict or list type."""
-    origin = getattr(annotation, '__origin__', None)
+    target = _unwrap_optional(annotation)
+    origin = typing.get_origin(target)
+    return origin in (dict, list) or target in (dict, list)
 
-    # Unwrap Optional[X] (Union[X, None]) → X
-    if origin is Union:
-        type_args = [a for a in annotation.__args__ if a is not type(None)]
-        if len(type_args) == 1:
-            annotation = type_args[0]
-            origin = getattr(annotation, '__origin__', None)
 
-    return origin in (dict, list) or annotation in (dict, list)
+def _is_dataclass_like(tp: Any) -> bool:
+    """True if *tp* is a class hydratable from JSON (Pydantic model or dataclass)."""
+    if not isinstance(tp, type):
+        return False
+    if issubclass(tp, BaseModel):
+        return True
+    return dataclasses.is_dataclass(tp)
 
 
 def coerce_args(args: Dict[str, Any], model_class: type) -> None:
@@ -129,8 +144,8 @@ def coerce_args(args: Dict[str, Any], model_class: type) -> None:
     values through as-is.
 
     This function inspects each field's type annotation and converts JSON strings
-    only for fields that expect dict or list types, leaving all other values
-    untouched.
+    for dict/list fields and for custom dataclass/Pydantic-model fields (via
+    TypeAdapter), leaving all other values untouched.
 
     Supports both Pydantic models/dataclasses and standard Python dataclasses.
 
@@ -146,14 +161,37 @@ def coerce_args(args: Dict[str, Any], model_class: type) -> None:
     for field_name, annotation in annotations.items():
         if field_name not in args or not isinstance(args[field_name], str):
             continue
+        raw = args[field_name]
 
         if _wants_dict_or_list(annotation):
             try:
-                parsed = json.loads(args[field_name])
+                parsed = json.loads(raw)
             except (json.JSONDecodeError, TypeError):
                 continue
             if isinstance(parsed, (dict, list)):
                 args[field_name] = parsed
+            continue
+
+        target = _unwrap_optional(annotation)
+        if _is_dataclass_like(target):
+            try:
+                args[field_name] = TypeAdapter(target).validate_json(raw)
+            except PydanticValidationError as e:
+                logger.warning(
+                    "coerce_args: TypeAdapter failed for field %r (target=%s): %s",
+                    field_name, target.__name__, e,
+                )
+            except Exception as e:
+                # TypeAdapter(target) schema generation can raise PydanticUserError /
+                # NameError on pathological dataclasses (unresolved forward refs in
+                # nested fields, etc.). coerce_args must never crash replica startup
+                # — the original string is preserved and vLLM will surface a clearer
+                # error downstream if the value is genuinely unusable.
+                logger.warning(
+                    "coerce_args: TypeAdapter construction or unexpected error for "
+                    "field %r (target=%s): %s",
+                    field_name, getattr(target, "__name__", target), e,
+                )
 
 
 def filter_engine_args(args: Dict[str, Any], engine_args_class: type) -> None:
