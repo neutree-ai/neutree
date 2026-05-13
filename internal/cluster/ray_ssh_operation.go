@@ -480,13 +480,18 @@ type headNodeUnhealthyError struct {
 func (e *headNodeUnhealthyError) Error() string { return e.reason }
 func (e *headNodeUnhealthyError) Unwrap() error { return e.cause }
 
-// checkHeadNodeHealth checks whether the head node is fully healthy by verifying
-// both dashboard API reachability (GCS) and the head node's raylet state, and
-// returns the head node's serving version when alive. This avoids redundant
-// ListNodes calls.
+// checkHeadNodeHealth verifies the head node across two layers and returns the
+// head node's serving version when fully healthy:
+//  1. Dashboard service reachability — the Ray dashboard API on :8265 must
+//     answer GetClusterMetadata; if it does not, the head is unhealthy (the
+//     most common cause is port 8265 occupancy on the host).
+//  2. Head raylet state — at least one head-flagged record returned by
+//     ListNodes must be in AliveNodeState; otherwise the head process itself
+//     is not running.
+//
 // Returns:
-//   - (true,  version, nil)             — dashboard reachable AND a head raylet is ALIVE
-//   - (false, "",      *headNodeUnhealthyError) — head not healthy with a known cause (surface to user, then rebuild)
+//   - (true,  version, nil)             — both layers pass
+//   - (false, "",      *headNodeUnhealthyError) — a known-unhealthy state (surface to user, then rebuild)
 //   - (false, "",      err)             — unexpected internal error (propagate up)
 func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileContext) (bool, string, error) {
 	headIP := reconcileCtx.sshClusterConfig.Provider.HeadIP
@@ -528,7 +533,7 @@ func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileCon
 	// - Head node exists but state is DEAD
 	// - No head node in list yet (initial startup; ProvisioningWaitTime prevents rebuild loops)
 	return false, "", &headNodeUnhealthyError{
-		reason: fmt.Sprintf("no alive head raylet found on %s", headIP),
+		reason: fmt.Sprintf("head raylet on %s is not alive", headIP),
 	}
 }
 

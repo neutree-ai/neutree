@@ -615,7 +615,8 @@ func TestCheckHeadNodeHealth_UnhealthyErrorContract(t *testing.T) {
 
 		var unhealthy *headNodeUnhealthyError
 		require.True(t, errors.As(err, &unhealthy))
-		assert.Contains(t, unhealthy.Error(), "no alive head raylet")
+		assert.Contains(t, unhealthy.Error(), "raylet")
+		assert.Contains(t, unhealthy.Error(), "not alive")
 		assert.Contains(t, unhealthy.Error(), "192.168.1.10")
 		assert.NotContains(t, unhealthy.Error(), "port 8265")
 		assert.Nil(t, errors.Unwrap(unhealthy), "no underlying cause expected for this path")
