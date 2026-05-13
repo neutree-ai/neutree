@@ -425,6 +425,15 @@ func (e *errorClient) Get(ctx context.Context, key client.ObjectKey, obj client.
 	return e.Client.Get(ctx, key, obj, opts...)
 }
 
+// testVllmDeploymentTemplate is a standalone fixture used by
+// TestBuildVllmDeployment (smoke render) and Test_getDeployTemplate (paired
+// with testBase64DeploymentTemplate to verify the base64 decode roundtrip).
+// It does NOT track the real embedded vLLM template under
+// internal/engine/vllm/<version>/templates/kubernetes/default.yaml — the
+// real-template behavior is exercised by TestBuildDeployment_BooleanEngineArgs
+// directly via engine.GetDeployTemplate. Edits to the production template
+// (e.g. the boolean handling branch) deliberately do not need to be mirrored
+// here.
 var testVllmDeploymentTemplate = `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -2973,13 +2982,19 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 	}
 }
 
-// TestBuildDeployment_BooleanEngineArgs covers NEU-440: the K8s deploy
-// templates for vLLM v0.11.2 / v0.17.1 and SGLang v0.5.10 used to render
-// `--<flag>` followed by `"false"` for boolean engine_args set to false,
-// which vLLM and SGLang argparse (action="store_true") reject. The fix
-// must skip the entire flag when the value is false (bool or string),
-// emit just `--<flag>` when the value is true (bool or string), and
-// keep `--<flag>` plus quoted value for any non-boolean value.
+// TestBuildDeployment_BooleanEngineArgs pins the boolean handling in the
+// K8s deploy templates that ship engine_args through to vLLM / SGLang CLI
+// argparse. Both engines' boolean flags are registered with
+// action="store_true": they accept `--flag` (no value follows) and reject
+// `--flag false` (nargs=0). The template contract is therefore:
+//
+//   - value "true"  (bool or string) -> emit "--<flag>" only
+//   - value "false" (bool or string) -> emit nothing (engine takes its default)
+//   - anything else                   -> emit "--<flag>" followed by "<value>"
+//
+// The test renders the embedded production templates (not an inline fixture),
+// passes a matrix of bool/string true/false alongside non-boolean values, and
+// asserts the rendered CLI tokens never contain a literal "false" token.
 func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -3029,7 +3044,10 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 				},
 				EngineArgs: map[string]interface{}{
 					// Boolean false in both bool and string form: must be skipped entirely.
-					"enable-prefix-caching": false,
+					// One key is in underscore form to exercise the SGLang template's
+					// `replace "_" "-"` step (a no-op when value is false but it must
+					// still parse). vLLM templates pass the key through as-is.
+					"enable_prefix_caching": false,
 					"skip-tokenizer-init":   "false",
 					// Boolean true in both forms: emit flag, no following value.
 					"trust-remote-code": true,
@@ -3052,8 +3070,12 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 			tokens := extractEngineCLITokens(t, objs)
 
 			// (1) False booleans must be skipped entirely — no flag, no value.
+			//     Check both kebab and underscore forms because SGLang transforms
+			//     `_` to `-` at render time while vLLM passes the key through.
 			assert.NotContains(t, tokens, "--enable-prefix-caching",
-				"bool false engine_arg must not emit its flag")
+				"bool false engine_arg must not emit its flag (kebab form)")
+			assert.NotContains(t, tokens, "--enable_prefix_caching",
+				"bool false engine_arg must not emit its flag (underscore form)")
 			assert.NotContains(t, tokens, "--skip-tokenizer-init",
 				"string false engine_arg must not emit its flag")
 			// The literal token `false` must never reach the CLI: argparse rejects
@@ -3137,6 +3159,12 @@ func sliceToStrings(t *testing.T, in []interface{}) []string {
 
 // assertFlagWithoutValue checks that `flag` appears in tokens and the next
 // token is either another `--flag` or absent — i.e. no value follows.
+//
+// The "absent" case (flag is the last token in the slice) is fine: a flag
+// at the end of the CLI argv with nothing after it is, by definition, a
+// flag-only invocation. require.NotEqual(t, -1, idx) above already ensures
+// the flag is present; the early return below is the "no following token to
+// check" branch, not a silent skip.
 func assertFlagWithoutValue(t *testing.T, tokens []string, flag string) {
 	t.Helper()
 

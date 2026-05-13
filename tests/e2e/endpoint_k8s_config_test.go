@@ -576,16 +576,17 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 	})
 
-	// --- NEU-440: boolean false engine_args -------------------------------
+	// --- Boolean false engine_args ----------------------------------------
 	//
-	// Before NEU-440, the K8s deploy templates for vLLM and SGLang rendered
+	// The K8s deploy templates for vLLM and SGLang previously rendered
 	// `--<flag>` followed by `"false"` for any engine_arg set to false,
 	// which both engines' argparse (action="store_true") rejects. The fix
 	// drops the flag entirely when the value is false. These cases protect
 	// the endpoint-creation path against regression and assert the rendered
 	// Deployment never carries a literal `false` CLI token.
+	// TestRail: C2650077 (vLLM), C2650078 (SGLang).
 
-	Describe("Boolean false engine_args (NEU-440)", Ordered, Label("config", "engine-args", "NEU-440"), func() {
+	Describe("Boolean false engine_args", Ordered, Label("config", "engine-args"), func() {
 		var vllmEpName, sglangEpName string
 
 		BeforeAll(func() {

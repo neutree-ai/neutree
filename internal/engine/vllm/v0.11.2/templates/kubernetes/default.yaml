@@ -114,7 +114,7 @@ spec:
           {{- if eq (printf "%v" $value) "true" }}
           - --{{ $key }}
           {{- else if eq (printf "%v" $value) "false" }}
-          {{- /* NEU-440: skip; vLLM CLI uses --flag / --no-flag, not --flag false */ -}}
+          {{- /* skip: store_true flags reject "--flag false"; passing false means "leave at default" */ -}}
           {{- else }}
           - --{{ $key }}
           - "{{ $value }}"
