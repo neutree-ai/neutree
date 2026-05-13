@@ -728,6 +728,17 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		}
 	}
 
+	// PD same-host (Phase 0 Demo) — rewrite import_path and inject the
+	// compiled plan/kv_config into Args. Keeps every other Arg (model,
+	// deployment_options, backend_container) intact so the PD actor code
+	// reuses the existing model-download + runtime_env path.
+	if isPDStrategy(endpoint) {
+		if err := applyPDBranch(endpoint, &app); err != nil {
+			return dashboard.RayServeApplication{}, errors.Wrapf(err,
+				"failed to apply PD branch for endpoint %s", endpoint.Metadata.WorkspaceName())
+		}
+	}
+
 	return app, nil
 }
 
