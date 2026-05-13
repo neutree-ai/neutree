@@ -466,9 +466,8 @@ func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 				}
 			}).Return(nil).Maybe()
 
-			dashboard.NewDashboardService = func(dashboardUrl string) dashboard.DashboardService {
-				return dashboardSvc
-			}
+			// The reconciler reads from ReconcileContext.rayService below, so we don't
+			// need to override the package-level dashboard.NewDashboardService factory.
 			r := &sshRayClusterReconciler{
 				acceleratorManager: acceleratorManager,
 				executor:           e,
