@@ -118,7 +118,10 @@ func (c *ExternalEndpointController) updateStatus(obj *v1.ExternalEndpoint, phas
 
 	if phase == v1.ExternalEndpointPhaseRUNNING {
 		url, urlErr := c.gw.GetExternalEndpointServeUrl(obj)
-		if urlErr == nil && url != "" {
+		if urlErr != nil {
+			klog.Warningf("failed to get external_endpoint %s/%s service url: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, urlErr)
+		} else if url != "" {
 			serviceURL = url
 		}
 	}
