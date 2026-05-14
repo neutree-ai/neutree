@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/deployment/plan"
 	"github.com/neutree-ai/neutree/internal/deployment/strategy"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
 )
@@ -169,13 +171,15 @@ func placementStrategyName(s plan.PlacementStrategy) string {
 // same-host strategy. Called by EndpointToApplication right before return
 // when isPDStrategy(ep) is true.
 //
-// Phase 0 Demo:
-//   - Override import_path to app_pd_collocated:app_builder
-//   - Compile plan via strategy.Get("pd")
-//   - Inject `plan` into Args (which carries num_replicas + group + transfer + nil ports/cache)
-//   - Keep existing `model`, `deployment_options`, `backend_container` so the
-//     Python actor can reuse the model download + runtime_env code path
-func applyPDBranch(ep *v1.Endpoint, app *dashboard.RayServeApplication) error {
+// Full path (Demo + MVP — no fallback):
+//  1. Override import_path to app_pd_collocated:app_builder
+//  2. strategy.Compile → plan (NumReplicas + Group + Transfer)
+//  3. portAllocator.AllocateForPlan → fills plan.Ports deterministically
+//     (idempotent on retry; same endpoint → same ports)
+//  4. SerializePlan + inject into Args so PDIngress / inner actors get
+//     both the topology and the per-actor port env on startup
+func applyPDBranch(ctx context.Context, ep *v1.Endpoint, cluster *v1.Cluster,
+	allocator portalloc.Allocator, app *dashboard.RayServeApplication) error {
 	pdImport, err := pdImportPath(ep)
 	if err != nil {
 		return errors.Wrap(err, "PD import path resolution failed")
@@ -189,6 +193,17 @@ func applyPDBranch(ep *v1.Endpoint, app *dashboard.RayServeApplication) error {
 	p, err := s.Compile(ep)
 	if err != nil {
 		return errors.Wrap(err, "pd strategy compile failed")
+	}
+
+	// Port allocation is mandatory for PD same-host (each NIXL side_channel
+	// port must be unique per actor). Refuse to render the plan if no
+	// allocator is wired — failing fast surfaces the orchestrator-options
+	// misconfiguration rather than hitting a port collision at actor start.
+	if allocator == nil {
+		return errors.New("PD same-host requires a port allocator; orchestrator.Options.PortAllocator is nil")
+	}
+	if err := allocator.AllocateForPlan(ctx, cluster, ep.ID, p); err != nil {
+		return errors.Wrapf(err, "port allocation failed for endpoint %d", ep.ID)
 	}
 
 	if app.Args == nil {

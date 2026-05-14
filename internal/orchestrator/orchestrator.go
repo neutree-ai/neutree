@@ -8,6 +8,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -24,6 +25,13 @@ type Options struct {
 	Cluster        *v1.Cluster
 	Storage        storage.Storage
 	AcceleratorMgr accelerator.Manager
+	// PortAllocator allocates per-(replica × role × rank × position) ports
+	// for endpoints whose strategy.Compile declares Role.PortsPerRank > 0.
+	// MAY be nil — only PD same-host (and future MVP/Phase 2 features)
+	// require ports; legacy monolithic endpoints (Strategy="") skip the
+	// allocator call entirely. When set, CreateEndpoint will block until
+	// allocation succeeds and DeleteEndpoint will ReleaseAll.
+	PortAllocator portalloc.Allocator
 }
 
 type NewOrchestratorFunc func(opts Options) (Orchestrator, error)

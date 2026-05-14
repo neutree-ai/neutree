@@ -1,11 +1,13 @@
 package orchestrator
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/deployment/plan"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 )
 
@@ -137,6 +139,7 @@ func TestSerializePlan_PortsPassthrough(t *testing.T) {
 
 func TestApplyPDBranch_RewritesImportAndInjectsPlan(t *testing.T) {
 	ep := &v1.Endpoint{
+		ID:       42,
 		Metadata: &v1.Metadata{Name: "ep1"},
 		Spec: &v1.EndpointSpec{
 			Replicas:  v1.ReplicaSpec{Num: num(1)},
@@ -149,9 +152,16 @@ func TestApplyPDBranch_RewritesImportAndInjectsPlan(t *testing.T) {
 			},
 		},
 	}
+	cluster := &v1.Cluster{
+		ID: 1,
+		Spec: &v1.ClusterSpec{
+			PortRange: &v1.PortRangeSpec{Start: 20000, End: 20100},
+		},
+	}
+	allocator := portalloc.New(portalloc.NewMemoryStorage())
 	app := stubRayApp("serve.vllm.v0_17_1.app:app_builder")
 
-	if err := applyPDBranch(ep, &app); err != nil {
+	if err := applyPDBranch(context.Background(), ep, cluster, allocator, &app); err != nil {
 		t.Fatalf("applyPDBranch: %v", err)
 	}
 	if app.ImportPath != "serve.vllm.v0_17_1.app_pd_collocated:app_builder" {
@@ -163,5 +173,40 @@ func TestApplyPDBranch_RewritesImportAndInjectsPlan(t *testing.T) {
 	}
 	if planArgs["num_replicas"] != 1 {
 		t.Errorf("plan.num_replicas: got %v want 1", planArgs["num_replicas"])
+	}
+	// portalloc must have populated ports for both prefill + decode.
+	ports, ok := planArgs["ports"].([]map[string][][]int)
+	if !ok {
+		t.Fatalf("plan.ports not serialized as expected: %T %v", planArgs["ports"], planArgs["ports"])
+	}
+	if len(ports) != 1 || len(ports[0]["prefill"][0]) != 1 || len(ports[0]["decode"][0]) != 1 {
+		t.Errorf("port allocation shape wrong: %v", ports)
+	}
+}
+
+func TestApplyPDBranch_RequiresAllocator(t *testing.T) {
+	ep := &v1.Endpoint{
+		ID:       1,
+		Metadata: &v1.Metadata{Name: "ep1"},
+		Spec: &v1.EndpointSpec{
+			Replicas:  v1.ReplicaSpec{Num: num(1)},
+			Strategy:  "pd",
+			Placement: &v1.PlacementSpec{Roles: "same-host"},
+			Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.17.1"},
+			Roles: []v1.EndpointRoleSpec{
+				{Name: "prefill"},
+				{Name: "decode", Dependencies: []string{"prefill"}},
+			},
+		},
+	}
+	cluster := &v1.Cluster{ID: 1, Spec: &v1.ClusterSpec{}}
+	app := stubRayApp("serve.vllm.v0_17_1.app:app_builder")
+
+	err := applyPDBranch(context.Background(), ep, cluster, nil, &app)
+	if err == nil {
+		t.Fatalf("expected error when allocator is nil")
+	}
+	if !strings.Contains(err.Error(), "port allocator") {
+		t.Errorf("error should mention port allocator, got %q", err.Error())
 	}
 }

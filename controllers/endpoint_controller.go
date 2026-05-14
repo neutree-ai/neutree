@@ -11,6 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/deployment/strategy"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -20,6 +21,8 @@ type EndpointController struct {
 
 	gw             gateway.Gateway
 	acceleratorMgr accelerator.Manager
+	portAllocator  portalloc.Allocator // may be nil — orchestrator only requires
+	// it when ep.Spec.Strategy is set (e.g. "pd" same-host).
 }
 
 type EndpointControllerOption struct {
@@ -27,6 +30,7 @@ type EndpointControllerOption struct {
 
 	Gw             gateway.Gateway
 	AcceleratorMgr accelerator.Manager
+	PortAllocator  portalloc.Allocator
 }
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
@@ -34,6 +38,7 @@ func NewEndpointController(option *EndpointControllerOption) (*EndpointControlle
 		storage:        option.Storage,
 		gw:             option.Gw,
 		acceleratorMgr: option.AcceleratorMgr,
+		portAllocator:  option.PortAllocator,
 	}
 
 	c.syncHandler = c.sync
@@ -336,6 +341,7 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 		Cluster:        &cluster[0],
 		Storage:        c.storage,
 		AcceleratorMgr: c.acceleratorMgr,
+		PortAllocator:  c.portAllocator,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create orchestrator for cluster %s", cluster[0].Metadata.WorkspaceName())

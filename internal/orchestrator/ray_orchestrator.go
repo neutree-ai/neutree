@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"math"
@@ -15,6 +16,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/model_registry"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -54,6 +56,7 @@ type RayOrchestrator struct {
 
 	storage        storage.Storage
 	acceleratorMgr accelerator.Manager
+	portAllocator  portalloc.Allocator // may be nil for legacy (no Strategy) endpoints
 }
 
 type RayOptions struct {
@@ -65,6 +68,7 @@ func NewRayOrchestrator(opts RayOptions) *RayOrchestrator {
 		cluster:        opts.Cluster,
 		storage:        opts.Storage,
 		acceleratorMgr: opts.AcceleratorMgr,
+		portAllocator:  opts.PortAllocator,
 	}
 
 	return o
@@ -234,6 +238,18 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 		return errors.Wrapf(err, "failed to convert endpoint to application for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
+	// PD same-host: override import_path, run strategy.Compile + portalloc,
+	// inject plan into Args. Side-effect: writes port-allocation rows to
+	// the configured Storage. Refuses to render without an allocator
+	// configured — the Demo path is one-and-the-same with MVP, no defaults.
+	if isPDStrategy(ctx.Endpoint) {
+		if err := applyPDBranch(context.Background(), ctx.Endpoint, ctx.Cluster,
+			o.portAllocator, &newApp); err != nil {
+			return errors.Wrapf(err, "failed to apply PD branch for endpoint %s",
+				ctx.Endpoint.Metadata.WorkspaceName())
+		}
+	}
+
 	// Build the list of applications for the PUT request
 	needAppend := true
 	needUpdate := true
@@ -319,7 +335,21 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 
 	ctx.logger.V(4).Info("Deleting endpoint from Ray Serve")
 
-	return o.deleteEndpoint(ctx)
+	if err := o.deleteEndpoint(ctx); err != nil {
+		return err
+	}
+
+	// Release port allocations *after* the Ray Serve app is gone so the
+	// reverse direction never reuses a port while a stale actor still binds
+	// it. Best-effort: log + continue if release fails — orphan rows are
+	// covered by the FK CASCADE when the endpoint row is deleted from PG.
+	if o.portAllocator != nil && endpoint != nil && endpoint.ID > 0 {
+		if err := o.portAllocator.ReleaseAll(context.Background(), endpoint.ID); err != nil {
+			ctx.logger.Error(err, "port-allocation release failed (continuing)",
+				"endpoint_id", endpoint.ID)
+		}
+	}
+	return nil
 }
 
 func (o *RayOrchestrator) deleteEndpoint(ctx *OrchestratorContext) error {
@@ -728,16 +758,9 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		}
 	}
 
-	// PD same-host (Phase 0 Demo) — rewrite import_path and inject the
-	// compiled plan/kv_config into Args. Keeps every other Arg (model,
-	// deployment_options, backend_container) intact so the PD actor code
-	// reuses the existing model-download + runtime_env path.
-	if isPDStrategy(endpoint) {
-		if err := applyPDBranch(endpoint, &app); err != nil {
-			return dashboard.RayServeApplication{}, errors.Wrapf(err,
-				"failed to apply PD branch for endpoint %s", endpoint.Metadata.WorkspaceName())
-		}
-	}
+	// PD same-host branch is applied separately by createOrUpdate
+	// (it needs portAllocator + context, which this pure-function path
+	// doesn't carry). See RayOrchestrator.createOrUpdate.
 
 	return app, nil
 }
