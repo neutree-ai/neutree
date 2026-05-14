@@ -59,12 +59,19 @@ func (a *allocator) AllocateForPlan(
 		return nil
 	}
 	if len(existing) > 0 {
-		// Partial allocation on disk → finalize state is ambiguous. Caller
-		// should have ReleaseAll'd first; bail loudly to avoid double-writes.
-		return fmt.Errorf(
-			"portalloc: endpoint %d has %d stale allocations; release before re-allocating",
-			endpointID, len(existing),
-		)
+		// Partial / shape-mismatched allocations on disk. This is the
+		// normal aftermath of an endpoint spec edit (role count, role
+		// instances, or PortsPerRank changed) — the prior port set is no
+		// longer valid for the new plan. Release the stale rows and
+		// fall through to the fresh-allocation path so the orchestrator
+		// reconcile loop is self-healing instead of demanding a manual
+		// cleanup step.
+		if err := a.storage.DeleteAllocationsByEndpoint(ctx, endpointID); err != nil {
+			return fmt.Errorf(
+				"portalloc: release %d stale allocations for endpoint %d before re-allocate: %w",
+				len(existing), endpointID, err,
+			)
+		}
 	}
 
 	// (2) Cluster-wide in-use set.

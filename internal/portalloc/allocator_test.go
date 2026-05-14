@@ -177,22 +177,28 @@ func TestAllocateForPlan_NoPortsForRoleSkipped(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_StaleAllocationDetected(t *testing.T) {
+func TestAllocateForPlan_StaleAllocationsSelfHeal(t *testing.T) {
+	// Partial / shape-mismatched allocations on disk are expected after an
+	// endpoint spec edit (role count, instances, PortsPerRank changed).
+	// AllocateForPlan releases them and re-allocates fresh — reconcile is
+	// self-healing rather than demanding manual ReleaseAll.
 	mem := NewMemoryStorage()
 	alloc := New(mem)
 	cluster := newCluster(1, 20000, 20100)
 
-	// Pre-seed with a partial allocation (1 row) for endpoint 7, simulating
-	// a crash mid-allocate where someone forgot to ReleaseAll.
 	_ = mem.InsertAllocations(context.Background(), []Allocation{{
 		ClusterID: 1, Port: 20000, EndpointID: 7,
 		ReplicaIdx: 0, RoleName: "prefill", RankIdx: 0, PositionIdx: 0,
 	}})
 
 	p := pdPlan(1, 1, 1, 1) // needs 2 slots; 1 partial exists
-	err := alloc.AllocateForPlan(context.Background(), cluster, 7, p)
-	if err == nil {
-		t.Fatalf("expected stale-state error, got nil")
+	if err := alloc.AllocateForPlan(context.Background(), cluster, 7, p); err != nil {
+		t.Fatalf("expected self-heal, got error: %v", err)
+	}
+	// After self-heal, exactly 2 rows for endpoint 7 (the partial row was
+	// dropped and replaced as part of the fresh allocation).
+	if mem.Count() != 2 {
+		t.Errorf("expected 2 rows after self-heal, got %d", mem.Count())
 	}
 }
 
