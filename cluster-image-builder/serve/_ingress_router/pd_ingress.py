@@ -41,6 +41,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from ray import serve
 from ray.serve.handle import DeploymentHandle
 
+from .observer_router import REPLICA_DISPATCH_PREFIX
 from .shared_state import (
     ActorInfo,
     ActorTopology,
@@ -160,7 +161,11 @@ class PDIngress:
         topology" rather than failing the call.
         """
         try:
-            handle = self.backend.options(multiplexed_model_id=replica_id)
+            # Use the "replica:<rid>" namespace so future LoRA / SGLang custom
+            # routing on the same multiplexed_model_id channel coexists without
+            # collision. See observer_router.REPLICA_DISPATCH_PREFIX.
+            target = f"{REPLICA_DISPATCH_PREFIX}{replica_id}"
+            handle = self.backend.options(multiplexed_model_id=target)
             topo_dict = await handle.get_actor_topology.remote()
             if not topo_dict:
                 return

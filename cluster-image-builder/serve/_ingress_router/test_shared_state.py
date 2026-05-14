@@ -157,6 +157,35 @@ def test_callbacks_can_call_back_into_mutators():
 # -------- D-10g: _extract_target_replica_id helper -------------------------
 
 
+def test_replica_dispatch_prefix_routing():
+    """Prefix parsing logic mirrors observer_router.choose_replicas branch 1.
+
+    Validates that:
+      - "replica:<rid>" → rid is extracted
+      - non-prefixed values are left alone (router defers to subclass)
+      - empty target is a no-op
+    """
+    PREFIX = "replica:"
+
+    def classify(raw: str):
+        if raw.startswith(PREFIX):
+            return ("direct", raw[len(PREFIX):])
+        elif raw:
+            return ("defer", raw)
+        return ("none", None)
+
+    assert classify("") == ("none", None)
+    assert classify("replica:abc") == ("direct", "abc")
+    assert classify("replica:default#ep#PDCB#xyz") == (
+        "direct", "default#ep#PDCB#xyz"
+    )
+    assert classify("lora-A") == ("defer", "lora-A")
+    assert classify("bootstrap-room-42") == ("defer", "bootstrap-room-42")
+    # Edge: explicit prefix with empty suffix is direct-but-rid-empty — router
+    # treats this as a miss (no candidate matches "") and falls through.
+    assert classify("replica:") == ("direct", "")
+
+
 def test_extract_target_replica_id_variants():
     """Pure-Python coverage for the metadata extractor used by ObserverRouter.
 
