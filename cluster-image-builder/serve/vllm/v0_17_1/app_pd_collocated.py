@@ -805,6 +805,57 @@ class PDCollocatedBackend:
             )
             raise
 
+    # ── teardown (避免 EP 更新残留容器) ────────────────────────────────
+    # Ray actor ownership normally ensures: PDCollocatedBackend dies →
+    # placement_group released → inner actors lose bundles → killed →
+    # their container exits → `--rm` removes it. The chain breaks when
+    # Ray Serve SIGKILLs the outer replica past its graceful-shutdown
+    # window before owner-death signals propagate; the inner vLLM
+    # process keeps the container alive indefinitely and each EP update
+    # leaks one container per inner actor.
+    #
+    # Explicit cleanup hook in both __del__ and a Serve-style
+    # async shutdown method (Ray Serve calls __del__ on graceful
+    # shutdown; the async variant is defensive for future versions).
+
+    def _teardown_inner_actors(self) -> None:
+        """Idempotent. Best-effort kill of every inner P/D actor + remove
+        the PG. Swallows every exception — running during interpreter
+        teardown means imports / state may already be partly gone.
+        """
+        try:
+            handles = list(getattr(self, "prefills", []) or []) + \
+                      list(getattr(self, "decodes", []) or [])
+            for h in handles:
+                try:
+                    ray.kill(h, no_restart=True)
+                except Exception:  # noqa: BLE001
+                    pass
+            pg = getattr(self, "pg", None)
+            if pg is not None:
+                try:
+                    from ray.util.placement_group import remove_placement_group
+                    remove_placement_group(pg)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+
+    def __del__(self):
+        # Ray Serve calls __del__ at replica shutdown (with a best-effort
+        # graceful window). Containers auto-remove via --rm once the inner
+        # actor's worker process exits.
+        try:
+            log.info(
+                "[PDCollocatedBackend][teardown] killing %d prefill + %d decode "
+                "actors; releasing PG",
+                len(getattr(self, "prefills", []) or []),
+                len(getattr(self, "decodes", []) or []),
+            )
+        except Exception:  # noqa: BLE001 — log may already be torn down
+            pass
+        self._teardown_inner_actors()
+
     # ── health probe (P+D 同生共死) ───────────────────────────────────
     # Ray Serve calls check_health periodically on each replica. Raising
     # marks the replica unhealthy and triggers controller-side recycling.
