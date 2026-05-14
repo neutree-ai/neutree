@@ -184,6 +184,12 @@ class PDIngress:
                     replica_id=self_reported,
                     replica_actor_id=str(topo_dict.get("replica_actor_id", "")),
                     replica_node=str(topo_dict.get("replica_node", "")),
+                    # Ray Serve 2.53 native rank — populated by
+                    # PDCollocatedBackend reading serve.get_replica_context().rank
+                    global_rank=int(topo_dict.get("global_rank", -1)),
+                    node_rank=int(topo_dict.get("node_rank", -1)),
+                    local_rank=int(topo_dict.get("local_rank", -1)),
+                    world_size=int(topo_dict.get("world_size", 0) or 0),
                     pg_id=str(topo_dict.get("pg_id", "")),
                     prefill=ActorInfo(
                         kind=str(prefill_raw.get("kind", "prefill")),

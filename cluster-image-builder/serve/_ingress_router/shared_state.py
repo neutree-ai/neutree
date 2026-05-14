@@ -89,6 +89,12 @@ class ActorTopology:
     replica_actor_id  — Ray ActorID of the Serve replica process itself
                         (different from the inner PrefillActor / DecodeActor)
     replica_node      — node_id of the Serve replica process
+    global_rank       — Ray Serve 2.53 native rank: 0..world_size-1 across
+                        all replicas of the deployment. ★ Used as the
+                        replica index for plan.Ports lookup.
+    node_rank         — Ray Serve native: per-node ordinal
+    local_rank        — Ray Serve native: rank within node
+    world_size        — total replica count at the time of observation
     pg_id             — placement_group id (hex string form)
     prefill           — ActorInfo for the inner PrefillActor
     decode            — ActorInfo for the inner DecodeActor
@@ -99,6 +105,10 @@ class ActorTopology:
     replica_id: str = ""
     replica_actor_id: str = ""
     replica_node: str = ""
+    global_rank: int = -1
+    node_rank: int = -1
+    local_rank: int = -1
+    world_size: int = 0
     pg_id: str = ""
     prefill: ActorInfo = field(default_factory=ActorInfo)
     decode: ActorInfo = field(default_factory=ActorInfo)

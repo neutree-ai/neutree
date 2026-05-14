@@ -73,6 +73,14 @@ curl -fsS "${svc}/v1/topology" | jq '{
     ([.actor_topology[].decode.actor_id]  | unique | length)
       == (.actor_topology | length)
   ),
+  # V16: Ray Serve 2.53 native rank populated from serve.get_replica_context().rank
+  # global_rank must be contiguous 0..N-1 across all replicas.
+  v16_native_rank_populated: (
+    [.actor_topology[].global_rank] | sort
+      == [range(0; (.actor_topology | length))]
+  ),
+  global_ranks:         [.actor_topology[].global_rank] | sort,
+  world_sizes:          [.actor_topology[].world_size]  | unique,
   prefill_actor_ids:    [.actor_topology[].prefill.actor_id] | unique,
   decode_actor_ids:     [.actor_topology[].decode.actor_id]  | unique,
   prefill_gpu_ids:      [.actor_topology[].prefill.gpu_ids],

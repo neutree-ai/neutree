@@ -66,6 +66,42 @@ log = logging.getLogger("pd_collocated")
 # ----------------------------- helpers -----------------------------
 
 
+def _vllm_port_env(plan: Dict[str, Any], replica_idx: int,
+                   role_name: str, rank: int) -> Dict[str, str]:
+    """vLLM-side positional port convention.
+
+    IR carries an opaque ordered []int per (replica × role × rank) slot:
+        plan["ports"][replica_idx][role_name][rank] = [p0, p1, ...]
+
+    This helper applies the vLLM convention — pos-0 → VLLM_PORT (HTTP engine),
+    pos-1 → VLLM_NIXL_SIDE_CHANNEL_PORT — and returns the env-var dict to
+    inject into the actor's runtime_env. Returns {} when no allocation
+    exists for this slot (Demo NumReplicas=1, portalloc didn't populate).
+
+    SGLang would have its own helper here translating pos-0/1/2 to its own
+    flag names. Naming positional convention per engine is exactly the
+    engine-side translation boundary.
+    """
+    if not plan or "ports" not in plan or plan["ports"] is None:
+        return {}
+    try:
+        replica_ports = plan["ports"][replica_idx]
+        role_ports = replica_ports.get(role_name) or []
+        slot = role_ports[rank]
+    except (IndexError, KeyError, TypeError, AttributeError):
+        return {}
+    if not slot:
+        return {}
+    env: Dict[str, str] = {}
+    if len(slot) >= 1:
+        env["VLLM_PORT"] = str(slot[0])
+    if len(slot) >= 2:
+        env["VLLM_NIXL_SIDE_CHANNEL_HOST"] = "0.0.0.0"
+        env["VLLM_NIXL_SIDE_CHANNEL_PORT"] = str(slot[1])
+    return env
+
+
+
 def _download_model(model_args: Dict[str, Any]) -> None:
     """Download the model artifacts using the standard Neutree downloader.
     Called once per actor process.
@@ -259,7 +295,9 @@ class PDCollocatedBackend:
     """
 
     def __init__(self, model_args: Dict[str, Any], engine_kwargs: Dict[str, Any],
-                 kv_extra: Dict[str, Any], gpu_per_actor: float = 1.0):
+                 kv_extra: Dict[str, Any], gpu_per_actor: float = 1.0,
+                 plan: Optional[Dict[str, Any]] = None):
+        self._plan = plan or {}
         bundles = [
             {"CPU": 1, "GPU": gpu_per_actor},  # prefill
             {"CPU": 1, "GPU": gpu_per_actor},  # decode
@@ -274,12 +312,29 @@ class PDCollocatedBackend:
         sched_decode = PlacementGroupSchedulingStrategy(
             placement_group=self.pg, placement_group_bundle_index=1,
         )
-        self.prefill = PrefillActor.options(
-            num_cpus=1, num_gpus=gpu_per_actor, scheduling_strategy=sched_prefill,
-        ).remote(model_args, engine_kwargs, kv_extra)
-        self.decode = DecodeActor.options(
-            num_cpus=1, num_gpus=gpu_per_actor, scheduling_strategy=sched_decode,
-        ).remote(model_args, engine_kwargs, kv_extra)
+        # Per-actor port env from plan["ports"][global_rank].
+        #
+        # IR carries an opaque ordered []int per slot; vLLM convention is
+        # pos-0 = VLLM_PORT (engine HTTP), pos-1 = VLLM_NIXL_SIDE_CHANNEL_PORT.
+        # When portalloc hasn't populated ports (Demo NumReplicas=1), env stays
+        # empty and vLLM falls back to its built-in defaults — works as long
+        # as no two Serve replicas land on the same host.
+        prefill_env = _vllm_port_env(self._plan, self.global_rank, "prefill", 0)
+        decode_env  = _vllm_port_env(self._plan, self.global_rank, "decode",  0)
+
+        prefill_opts = {"num_cpus": 1, "num_gpus": gpu_per_actor,
+                        "scheduling_strategy": sched_prefill}
+        if prefill_env:
+            prefill_opts["runtime_env"] = {"env_vars": prefill_env}
+        decode_opts = {"num_cpus": 1, "num_gpus": gpu_per_actor,
+                       "scheduling_strategy": sched_decode}
+        if decode_env:
+            decode_opts["runtime_env"] = {"env_vars": decode_env}
+
+        self.prefill = PrefillActor.options(**prefill_opts).remote(
+            model_args, engine_kwargs, kv_extra)
+        self.decode  = DecodeActor.options(**decode_opts).remote(
+            model_args, engine_kwargs, kv_extra)
         rt_ctx = ray.get_runtime_context()
         self.replica_node_id = rt_ctx.get_node_id()
         self.replica_actor_id = rt_ctx.get_actor_id()
@@ -287,12 +342,25 @@ class PDCollocatedBackend:
         # _SHARED.serve_replicas). serve.get_replica_context() raises outside a
         # Serve context, so guard it.
         self.replica_id_str = ""
+        # Ray Serve 2.53 native rank (replaces ad-hoc coordinator actor pattern).
+        # ctx.rank.rank is the 0..world_size-1 global rank — exactly the index
+        # we need to look up plan["ports"][rank] for portalloc integration.
+        self.global_rank = -1
+        self.node_rank = -1
+        self.local_rank = -1
+        self.world_size = 0
         try:
             rc = serve.get_replica_context()
             # Across Ray versions the attribute is either `replica_id` (newer)
             # or `replica_tag` (older). Probe both.
             rid = getattr(rc, "replica_id", None) or getattr(rc, "replica_tag", None)
             self.replica_id_str = str(rid) if rid is not None else ""
+            rank = getattr(rc, "rank", None)
+            if rank is not None:
+                self.global_rank = int(getattr(rank, "rank", -1))
+                self.node_rank   = int(getattr(rank, "node_rank", -1))
+                self.local_rank  = int(getattr(rank, "local_rank", -1))
+            self.world_size = int(getattr(rc, "world_size", 0) or 0)
         except Exception:  # noqa: BLE001 — non-Serve test contexts
             pass
         # Resolve placement_group ID into a stable string form for topology view.
@@ -324,13 +392,17 @@ class PDCollocatedBackend:
 
     async def get_actor_topology(self) -> Dict[str, Any]:
         """Return the per-replica actor topology view for the PDIngress
-        `_SHARED.actor_topology` cache. Demo V10/V11 validation entrypoint.
+        `_SHARED.actor_topology` cache. Demo V10..V16 validation entrypoint.
 
         Shape (matches shared_state.ActorTopology):
             {
               "replica_id":       "<ray serve ReplicaID>",
               "replica_actor_id": "<ray actor id of the serve replica>",
               "replica_node":     "<node id of the serve replica process>",
+              "global_rank":      <int>,     # Ray Serve 2.53 native rank
+              "node_rank":        <int>,
+              "local_rank":       <int>,
+              "world_size":       <int>,
               "pg_id":            "<placement_group id hex>",
               "prefill": {"kind","actor_id","node_id","gpu_ids","healthy"},
               "decode":  {"kind","actor_id","node_id","gpu_ids","healthy"},
@@ -353,6 +425,10 @@ class PDCollocatedBackend:
             "replica_id": self.replica_id_str,
             "replica_actor_id": str(self.replica_actor_id),
             "replica_node": str(self.replica_node_id),
+            "global_rank": self.global_rank,
+            "node_rank": self.node_rank,
+            "local_rank": self.local_rank,
+            "world_size": self.world_size,
             "pg_id": self._pg_id_str,
             "prefill": prefill_info,
             "decode": decode_info,
@@ -370,30 +446,37 @@ def app_builder(args: Dict[str, Any]) -> Application:
         args = {
             "model": {registry_type, name, version, file, task, registry_path, path, serve_name},
             "deployment_options": {...},
-            "backend_container": {...},     # optional; runtime_env builder
+            "backend_container": {...},                  # optional; runtime_env builder
             "plan": {
-                "replicas": [{id, pools, affinity}, ...],
-                "kv_config": {transfer: {connector, extra}, ...},
+                "num_replicas": int,
+                "group": {
+                    "placement": {"strategy", "granularity"},
+                    "roles": [{"name", "instances", "resources", "variables",
+                               "env", "deployment_options"}, ...]
+                },
+                "transfer": {"connector", "extra"},      # PD only
+                "cache":    {"connector", "extra"},      # optional
+                "ports":    [{role_name: [[port,...], ...]}],  # nil in Demo;
+                                                         # portalloc fills in MVP
             },
         }
     """
     model = args.get("model") or {}
     deployment_options = args.get("deployment_options") or {}
     plan = args.get("plan") or {}
-    kv_config = plan.get("kv_config") or {}
-    kv_extra = (kv_config.get("transfer") or {}).get("extra") or {}
 
-    replicas = plan.get("replicas") or []
-    num_replicas = max(1, len(replicas))
+    num_replicas = max(1, int(plan.get("num_replicas") or 1))
+    group = plan.get("group") or {}
+    roles = group.get("roles") or []
+    transfer = plan.get("transfer") or {}
+    kv_extra = (transfer.get("extra") or {})
 
-    # Demo only inspects the first replica's pools to derive engine_kwargs +
-    # per-actor GPU count. xP1D / spec.replicas heterogeneity lands in MVP.
-    first_replica = replicas[0] if replicas else {}
-    pools = first_replica.get("pools") or []
-    prefill_pool = next((p for p in pools if p.get("name") == "prefill"), {})
-    engine_kwargs = (prefill_pool.get("variables") or {})
+    # Demo inspects the prefill role for engine_kwargs + per-actor GPU.
+    # xP1D / role-heterogeneity lands in MVP.
+    prefill_role = next((r for r in roles if r.get("name") == "prefill"), {})
+    engine_kwargs = (prefill_role.get("variables") or {})
     gpu_per_actor = 1.0
-    res = (prefill_pool.get("resources") or {})
+    res = (prefill_role.get("resources") or {})
     if "gpu" in res:
         try:
             gpu_per_actor = float(res["gpu"])
@@ -422,6 +505,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         engine_kwargs=engine_kwargs,
         kv_extra=kv_extra,
         gpu_per_actor=gpu_per_actor,
+        plan=plan,                                       # full plan including ports
     )
 
     controller = PDIngress.options(

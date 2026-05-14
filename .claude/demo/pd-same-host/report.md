@@ -21,6 +21,7 @@ Each row maps to a Demo assumption (V1–V9) from
 | V13 | each replica's actor identity (actor_id + node_id + gpu_ids) reaches `_SHARED.actor_topology` | `prefill_actor_ids` and `decode_actor_ids` arrays have N unique non-empty values; `prefill_gpu_ids` / `decode_gpu_ids` non-empty per entry; backend log shows `[PrefillActor] ready: actor_id=... node=... gpus=[...]` | | |
 | V14 | `_SHARED` callbacks (push) populate `actor_topology` before any client request | hit `/v1/topology` *before* sending any `/v1/chat/completions`; `actor_topology_count == num_replicas`; ingress log shows `_on_replica_added` invoked for each replica; absence of `[PDIngress] topology pull failed` errors | | |
 | V15 | direct dispatch via `multiplexed_model_id == "replica:<rid>"` deterministically routes to the named replica (namespaced so LoRA / SGLang custom routing can coexist on the same channel) | `v15_direct_dispatch_unique == true` in `/v1/topology` (N unique prefill + decode actor_ids, no collisions); ingress log shows `[ObserverRouter] direct dispatch -> <rid>` for each replica_added pull; absence of `direct target ... not in candidates` warnings during steady state | | |
+| V16 | Ray Serve 2.53 native rank (`serve.get_replica_context().rank`) populates `_SHARED.actor_topology` with contiguous global_rank values, replacing the need for a custom coordinator actor for replica indexing | `v16_native_rank_populated == true` in `/v1/topology` (sorted `global_rank` array equals `[0, 1, ..., N-1]`); `world_sizes` is a single-element array equal to `N`; backend log shows `[PrefillActor] ready: actor_id=...` with consistent rank assignment | | |
 
 ## Decision matrix (feeds MVP planning)
 
@@ -38,6 +39,7 @@ Each row maps to a Demo assumption (V1–V9) from
 | V13 fails | per-actor identity not exposed via runtime_context → switch to actor-side `ray.get_runtime_context()` probing OR have actors register themselves in a named topology actor |
 | V14 fails | push path doesn't pre-populate `actor_topology` → check whether `_SHARED.replace_replicas` actually fired from `ObserverRouter.update_replicas` in the same process (logs); fall back to safety-net lazy refresh; consider moving callback dispatch onto a dedicated event loop in MVP |
 | V15 fails | `multiplexed_model_id` not surfaced to choose_replicas (Ray version regression?) → confirm `pending_request.metadata.multiplexed_model_id` is set; if absent, fall back to named-actor topology registry pattern; without V15, MVP composite-key dispatch (decode_rid + prefill_rid) needs a different metadata channel |
+| V16 fails | `serve.get_replica_context().rank` absent or all -1 → Ray version regression (rank added in 2.53); fall back to detached coordinator actor pattern (Approach A from rank analysis); without V16, MVP port allocation needs out-of-band rank coordination |
 
 Fill the rows above, link captured logs (`docker logs`, `ray serve status`,
 `nvidia-smi nvlink -s` output) under `Notes / artifact`, then attach the
