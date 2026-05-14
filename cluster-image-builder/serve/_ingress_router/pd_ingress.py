@@ -95,19 +95,37 @@ class PDIngress:
     async def chat(self, request: Request):
         payload = await request.json()
         stream = payload.get("stream", False)
+        # Optional caller-pinned replica dispatch (Demo V15). Header takes
+        # precedence over query param so curl-based tests stay clean.
+        # The ObserverRouter consumes multiplexed_model_id="replica:<rid>"
+        # via the same `replica:` namespace it uses for its own topology
+        # pull (REPLICA_DISPATCH_PREFIX).
+        target_replica = (
+            request.headers.get("X-Neutree-Replica-ID")
+            or request.query_params.get("replica")
+        )
         snap = self._shared.snapshot()
         log.info(
-            "[PDIngress][chat] stream=%s replicas_seen=%d topology_cached=%d",
-            stream, len(snap.get("serve_replicas", {})),
+            "[PDIngress][chat] stream=%s pin_replica=%s replicas_seen=%d "
+            "topology_cached=%d",
+            stream, target_replica,
+            len(snap.get("serve_replicas", {})),
             len(snap.get("actor_topology", {})),
         )
         # Safety-net topology refresh — push path covers the common case via
         # _on_replica_added; this catches any replica that the callback missed.
         asyncio.create_task(self._refresh_topology_async())
+
+        handle = self.backend
+        if target_replica:
+            handle = handle.options(
+                multiplexed_model_id=f"{REPLICA_DISPATCH_PREFIX}{target_replica}"
+            )
+
         if stream:
-            r = self.backend.options(stream=True).pd_chat.remote(payload)
+            r = handle.options(stream=True).pd_chat.remote(payload)
             return StreamingResponse(r, media_type="text/event-stream")
-        result = await self.backend.options(stream=False).pd_chat.remote(payload)
+        result = await handle.options(stream=False).pd_chat.remote(payload)
         if isinstance(result, dict) and "error" in result:
             log.warning(
                 "[PDIngress][chat_error] err=%s", result.get("error"),
