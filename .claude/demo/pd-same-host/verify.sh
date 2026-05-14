@@ -64,14 +64,15 @@ curl -fsS "${svc}/v1/topology" | jq '{
   all_replica_ids_keyed: (
     [.actor_topology[].replica_id] == (.actor_topology | keys)
   ),
-  # V15: direct dispatch via multiplexed_model_id must yield N unique actor
-  # identities — N collisions would prove round-robin instead of direct.
+  # V15: direct dispatch via multiplexed_model_id must yield unique actor
+  # identities across the cluster — total prefill_actors == NumReplicas * x
+  # and total decode_actors == NumReplicas * y, all distinct.
   v15_direct_dispatch_unique: (
-    ([.actor_topology[].prefill.actor_id] | unique | length)
-      == (.actor_topology | length)
+    ([.actor_topology[].prefills[].actor_id] | length)
+      == ([.actor_topology[].prefills[].actor_id] | unique | length)
     and
-    ([.actor_topology[].decode.actor_id]  | unique | length)
-      == (.actor_topology | length)
+    ([.actor_topology[].decodes[].actor_id] | length)
+      == ([.actor_topology[].decodes[].actor_id] | unique | length)
   ),
   # V16: Ray Serve 2.53 native rank populated from serve.get_replica_context().rank
   # global_rank must be contiguous 0..N-1 across all replicas.
@@ -81,12 +82,14 @@ curl -fsS "${svc}/v1/topology" | jq '{
   ),
   global_ranks:         [.actor_topology[].global_rank] | sort,
   world_sizes:          [.actor_topology[].world_size]  | unique,
-  prefill_actor_ids:    [.actor_topology[].prefill.actor_id] | unique,
-  decode_actor_ids:     [.actor_topology[].decode.actor_id]  | unique,
-  prefill_gpu_ids:      [.actor_topology[].prefill.gpu_ids],
-  decode_gpu_ids:       [.actor_topology[].decode.gpu_ids],
-  prefill_nodes:        [.actor_topology[].prefill.node_id] | unique,
-  decode_nodes:         [.actor_topology[].decode.node_id]  | unique
+  prefill_actor_ids:    [.actor_topology[].prefills[].actor_id] | unique,
+  decode_actor_ids:     [.actor_topology[].decodes[].actor_id]  | unique,
+  prefill_counts_per_replica: [.actor_topology[] | .prefills | length] | unique,
+  decode_counts_per_replica:  [.actor_topology[] | .decodes  | length] | unique,
+  prefill_gpu_ids:      [.actor_topology[].prefills[].gpu_ids],
+  decode_gpu_ids:       [.actor_topology[].decodes[].gpu_ids],
+  prefill_nodes:        [.actor_topology[].prefills[].node_id] | unique,
+  decode_nodes:         [.actor_topology[].decodes[].node_id]  | unique
 }'
 
 echo ">>> POST ${svc}/v1/chat/completions (smoke)"

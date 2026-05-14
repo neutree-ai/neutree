@@ -6,80 +6,81 @@ End-to-end runtime layout (1 replica = 1 PDCollocatedBackend):
         │  ObserverRouter (Ray 2.53 native rank) picks the replica
         ▼
     PDCollocatedBackend  (0.1 CPU, 0 GPU; owns PG + protocol conversion)
-        ├── placement_group(STRICT_PACK, 2 bundles)
-        ├── PrefillActor (extends monolithic Backend)
-        │       runtime_env.env_vars from Role.Env + portalloc PortSet
-        └── DecodeActor  (extends monolithic Backend)
-                runtime_env.env_vars from Role.Env + portalloc PortSet
+        ├── placement_group(STRICT_PACK, x + y bundles)
+        ├── PrefillActor[0..x-1]     (extends monolithic Backend)
+        │       bundle 0..x-1
+        │       runtime_env from Role.Env + portalloc port (user wins)
+        └── DecodeActor[0..y-1]      (extends monolithic Backend)
+                bundle x..x+y-1
 
 Per-request flow inside PDCollocatedBackend.pd_chat:
-    1. Apply prefill-side protocol mutation (max_tokens=1, kv_role hint).
-    2. PrefillActor.generate(req) — reuses existing Backend.generate
-       which speaks the OpenAI chat-completions protocol → vLLM AsyncLLM.
-       Returns dict containing kv_transfer_params.
-    3. Apply decode-side protocol mutation (inject kv_transfer_params).
-    4. DecodeActor.generate(req) → streams completion via NIXL cuda_ipc.
+    1. Round-robin pick prefill[i % x] and decode[i % y] via atomic counters.
+    2. prefill_payload (max_tokens=1) → prefill.generate (Backend.generate)
+    3. Extract kv_transfer_params from the response.
+    4. decode_payload (+kv_transfer_params) → decode.generate (Backend.generate)
+       — NIXL cuda_ipc fetches KV from the paired prefill on the same host.
 
-PD-specific responsibility split (per user direction):
+PD-specific responsibility split:
     * PrefillActor / DecodeActor: thin subclasses of monolithic Backend.
-      They expose the same OpenAI generate/embed/rerank/show_models surface,
-      so kv_role + NIXL config is injected via engine_args at __init__.
-    * PDCollocatedBackend: owns the PG, the actor handles, and ALL
-      protocol conversion (chat → prefill payload → decode payload).
-      No per-actor protocol awareness — the monolithic Backend code path
-      stays unchanged.
+      kv_role + NIXL connector injected via engine_args at __init__.
+    * PDCollocatedBackend: owns PG, actor handles, protocol conversion,
+      round-robin pair selection.
+
+Merge precedence (Demo + MVP):
+    * runtime_env env_vars: platform port env first, user Role.Env LAST
+      → user explicitly wins (with a warning log when overriding a
+      port var, since that bypasses portalloc).
+    * engine_kwargs:        platform NIXL kv_transfer_config first, user
+      Role.Variables LAST → user wins (with a warning when overriding
+      kv_transfer_config / kv_connector / kv_role).
 """
 import asyncio
+import itertools
 import logging
-import os
 import uuid
 from typing import Any, Dict, List, Optional
-
-from fastapi import FastAPI, Request
-from starlette.responses import JSONResponse, StreamingResponse
 
 import ray
 from ray import serve
 from ray.serve import Application
 from ray.serve.config import RequestRouterConfig
-from ray.serve.handle import DeploymentHandle
 from ray.util.placement_group import placement_group, PlacementGroupSchedulingStrategy
 
 from serve._utils.runtime_env import build_backend_runtime_env
 from serve._ingress_router.pd_ingress import PDIngress
-
 # Reuse the monolithic Backend implementation: model download, AsyncLLM
-# construction, OpenAI serving surfaces, error normalization. The PD path
-# only differs in (a) engine_args (kv_transfer_config) and (b) protocol
-# conversion between prefill and decode — neither belongs inside the
-# Backend class.
+# construction, OpenAI serving surfaces, error normalization. PrefillActor
+# / DecodeActor are thin Ray-actor wrappers over it.
 from serve.vllm.v0_17_1.app import Backend
 
 
 log = logging.getLogger("pd_collocated")
 
-# Local alias to avoid line-noise when calling asyncio.gather() in async methods.
 asyncio_gather = asyncio.gather
+
+# Platform-controlled keys: surfaced as warnings when user Role.Env or
+# Role.Variables shadow them. Users CAN still override (they win) but at
+# least the log makes the bypass auditable.
+PLATFORM_ENV_KEYS = {
+    "VLLM_NIXL_SIDE_CHANNEL_HOST",
+    "VLLM_NIXL_SIDE_CHANNEL_PORT",
+}
+PLATFORM_ENGINE_KWARG_KEYS = {
+    "kv_transfer_config",
+    "distributed_executor_backend",
+}
 
 
 # ----------------------------- helpers -----------------------------
 
 
 def _nixl_engine_args(kv_role: str, kv_extra: Dict[str, Any]) -> Dict[str, Any]:
-    """Build the vLLM kv_transfer_config dict + any companion engine_args
-    that PrefillActor / DecodeActor need to pass to AsyncEngineArgs.
-
-    Keeping this on the Python side (not in IR) is the engine-side
-    translation boundary: IR says "connector=nixl + extra={backend,
-    buffer_size, ...}" — this helper turns that into vLLM-specific
-    kv_transfer_config fields.
-    """
+    """Platform NIXL kv_transfer_config translation (engine-side convention)."""
     cfg: Dict[str, Any] = {
         "kv_connector": "NixlConnector",
         "kv_role": kv_role,  # "kv_producer" | "kv_consumer"
         "kv_buffer_size": kv_extra.get("buffer_size", 5_000_000_000),
     }
-    # Surface user-supplied extras vLLM understands.
     if "kv_buffer_device" in kv_extra:
         cfg["kv_buffer_device"] = kv_extra["kv_buffer_device"]
     return {"kv_transfer_config": cfg}
@@ -87,37 +88,30 @@ def _nixl_engine_args(kv_role: str, kv_extra: Dict[str, Any]) -> Dict[str, Any]:
 
 def _vllm_port_env(plan: Dict[str, Any], replica_idx: int,
                    role_name: str, rank: int) -> Dict[str, str]:
-    """vLLM × Ray PD positional port convention.
+    """Engine-side positional-port convention.
 
-    IR carries an opaque ordered []int per (replica × role × rank) slot:
-        plan["ports"][replica_idx][role_name][rank] = [p0, ...]
+    Reads plan["ports"][replica_idx][role_name][rank] = [side_channel_port]
+    and maps pos-0 → VLLM_NIXL_SIDE_CHANNEL_PORT (Ray PD only needs that;
+    HTTP engine port is not used because actors talk via Ray RPC).
 
-    Ray actors talk via actor-handle RPC — no HTTP engine port is needed.
-    The single allocated port per actor (PortsPerRank=1) is the NIXL
-    side_channel for the cuda_ipc handshake:
-        pos-0 = VLLM_NIXL_SIDE_CHANNEL_PORT
-
-    No defaults / fallbacks: portalloc must populate plan.Ports before this
-    helper runs. A missing slot is a fatal control-plane misconfiguration
-    and surfaces as a RuntimeError so the actor refuses to start instead
-    of binding a vLLM-default port that may collide with a sibling actor.
+    No defaults: missing/empty slot raises so PD same-host runs on exactly
+    one code path. portalloc misconfiguration surfaces here loudly rather
+    than at vLLM bind time.
     """
     if not plan or "ports" not in plan or plan["ports"] is None:
         raise RuntimeError(
-            f"PD same-host requires plan.Ports to be populated by portalloc; "
+            f"PD same-host requires plan.Ports populated by portalloc; "
             f"got plan.ports=None for {role_name} rank {rank} replica {replica_idx}"
         )
     try:
-        replica_ports = plan["ports"][replica_idx]
-        role_ports = replica_ports.get(role_name) or []
-        slot = role_ports[rank]
-    except (IndexError, KeyError, TypeError, AttributeError) as exc:
+        slot = plan["ports"][replica_idx][role_name][rank]
+    except (IndexError, KeyError, TypeError) as exc:
         raise RuntimeError(
-            f"PD same-host missing port slot for ({replica_idx},{role_name},{rank}): {exc}"
+            f"missing port slot for replica={replica_idx} role={role_name} rank={rank}: {exc}"
         ) from exc
     if not slot:
         raise RuntimeError(
-            f"PD same-host empty port slot for ({replica_idx},{role_name},{rank})"
+            f"empty port slot for replica={replica_idx} role={role_name} rank={rank}"
         )
     return {
         "VLLM_NIXL_SIDE_CHANNEL_HOST": "0.0.0.0",
@@ -125,25 +119,42 @@ def _vllm_port_env(plan: Dict[str, Any], replica_idx: int,
     }
 
 
+def _merge_user_wins(platform: Dict[str, Any],
+                     user: Dict[str, Any],
+                     audit_keys: set,
+                     context: str) -> Dict[str, Any]:
+    """Apply platform values first, then user values on top so user wins on
+    key collision. Emits a warning for each platform-controlled key the
+    user overrode so the bypass is auditable.
+    """
+    merged: Dict[str, Any] = {}
+    merged.update(platform or {})
+    if user:
+        for k in user:
+            if k in audit_keys and k in merged:
+                log.warning(
+                    "[pd_collocated][%s] user overriding platform-controlled "
+                    "key %r=%r (was %r)",
+                    context, k, user[k], merged[k],
+                )
+        merged.update(user)
+    return merged
+
+
 def _build_actor_runtime_env(role_env: Dict[str, str],
                              port_env: Dict[str, str],
                              backend_container: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Merge user-supplied Role.Env + portalloc-derived env + (optional)
-    engine container config into a single Ray runtime_env. Platform
-    (portalloc) ports win on key collision with user env.
-    """
-    env_vars: Dict[str, str] = {}
-    if role_env:
-        env_vars.update(role_env)
-    if port_env:
-        env_vars.update(port_env)
-
+    """User Role.Env wins on collision with portalloc-derived port env."""
+    env_vars = _merge_user_wins(
+        platform=port_env,
+        user=role_env or {},
+        audit_keys=PLATFORM_ENV_KEYS,
+        context="env_vars",
+    )
     runtime_env: Dict[str, Any] = {}
     if env_vars:
         runtime_env["env_vars"] = env_vars
     if backend_container:
-        # Reuse the monolithic Backend's runtime_env composer so the container
-        # image, NFS mounts, GPU options, etc. propagate identically.
         merged = build_backend_runtime_env(backend_container)
         if "container" in merged:
             runtime_env["container"] = merged["container"]
@@ -151,24 +162,18 @@ def _build_actor_runtime_env(role_env: Dict[str, str],
 
 
 def _role_resources_to_ray(role: Dict[str, Any]) -> Dict[str, Any]:
-    """Translate plan["group"]["roles"][i]["resources"] (api.ResourceSpec
-    shape) into ray_actor_options fields. Sensible defaults match the
-    monolithic Backend deployment annotation (1 cpu, 1 gpu) but every
-    field can be overridden by the user-facing EndpointSpec.Roles[].Resources.
-    """
+    """plan.Role.Resources → ray_actor_options."""
     res = role.get("resources") or {}
     opts: Dict[str, Any] = {
         "num_cpus": float(res.get("cpu", 1)),
         "num_gpus": float(res.get("gpu", 1)),
     }
-    # vLLM uses bytes; the user-facing field is a Gi-suffixed string per
-    # the Neutree memory note "Endpoint spec memory unit defaults to GiB".
     mem = res.get("memory")
     if mem:
         try:
             opts["memory"] = int(float(mem) * (1024 ** 3))
         except (TypeError, ValueError):
-            log.warning(f"[pd_collocated] memory value {mem!r} not parseable; skipping")
+            log.warning(f"memory value {mem!r} not parseable; skipping")
     if res.get("accelerator"):
         opts["resources"] = res["accelerator"]
     return opts
@@ -179,21 +184,23 @@ def _role_resources_to_ray(role: Dict[str, Any]) -> Dict[str, Any]:
 
 @ray.remote
 class PrefillActor(Backend):
-    """Prefill-side vLLM engine. Extends the monolithic Backend class — it
-    inherits model download + AsyncLLM construction + the OpenAI serving
-    surfaces. The only behavior delta is the kv_transfer_config baked
-    into engine_args at __init__: kv_role=kv_producer + NIXL connector.
+    """Prefill-side vLLM engine. Extends Backend so model download +
+    AsyncLLM + OpenAI generate surface are inherited unchanged.
 
-    Protocol conversion (chat → prefill-with-max_tokens-1) does NOT happen
-    here. PDCollocatedBackend.pd_chat owns that.
+    Merge precedence: NIXL kv_transfer_config is the platform default;
+    user Role.Variables override on key collision (warning logged).
     """
 
     def __init__(self, *,
                  model_args: Dict[str, Any],
                  engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any]):
-        merged_kwargs = dict(engine_kwargs or {})
-        merged_kwargs.update(_nixl_engine_args("kv_producer", kv_extra))
+        merged_kwargs = _merge_user_wins(
+            platform=_nixl_engine_args("kv_producer", kv_extra),
+            user=engine_kwargs or {},
+            audit_keys=PLATFORM_ENGINE_KWARG_KEYS,
+            context="engine_kwargs/prefill",
+        )
         super().__init__(
             model_registry_type=model_args.get("registry_type"),
             model_name=model_args.get("name"),
@@ -227,17 +234,20 @@ class PrefillActor(Backend):
 
 @ray.remote
 class DecodeActor(Backend):
-    """Decode-side vLLM engine. Same inheritance pattern as PrefillActor;
-    kv_role=kv_consumer. Receives KV blocks from the paired PrefillActor
-    via NIXL cuda_ipc (zero-copy on the same host) at request time.
+    """Decode-side vLLM engine. Same inheritance + merge contract as
+    PrefillActor; kv_role=kv_consumer.
     """
 
     def __init__(self, *,
                  model_args: Dict[str, Any],
                  engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any]):
-        merged_kwargs = dict(engine_kwargs or {})
-        merged_kwargs.update(_nixl_engine_args("kv_consumer", kv_extra))
+        merged_kwargs = _merge_user_wins(
+            platform=_nixl_engine_args("kv_consumer", kv_extra),
+            user=engine_kwargs or {},
+            audit_keys=PLATFORM_ENGINE_KWARG_KEYS,
+            context="engine_kwargs/decode",
+        )
         super().__init__(
             model_registry_type=model_args.get("registry_type"),
             model_name=model_args.get("name"),
@@ -274,15 +284,9 @@ class DecodeActor(Backend):
 
 @serve.deployment(ray_actor_options={"num_cpus": 0.1, "num_gpus": 0})
 class PDCollocatedBackend:
-    """One per HA replica. Owns:
-      - placement_group(STRICT_PACK, [prefill_bundle, decode_bundle])
-      - PrefillActor / DecodeActor handles bound to the two bundles
-      - per-request protocol conversion (chat → prefill payload → decode payload)
-
-    The protocol conversion is the only PD-specific code path. The actors
-    themselves use the standard monolithic Backend OpenAI surface; vLLM's
-    NixlConnector handshakes the KV between them when the decode request
-    carries the prefill's kv_transfer_params.
+    """One per HA replica. Owns x PrefillActors + y DecodeActors collocated
+    via STRICT_PACK PG. Round-robins prefill+decode selection on each
+    pd_chat call (MVP will replace with CHWBL).
     """
 
     def __init__(self, *,
@@ -290,10 +294,19 @@ class PDCollocatedBackend:
                  prefill_engine_kwargs: Dict[str, Any],
                  decode_engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any],
+                 prefill_count: int,
+                 decode_count: int,
                  prefill_actor_options: Dict[str, Any],
                  decode_actor_options: Dict[str, Any],
                  plan: Optional[Dict[str, Any]] = None):
+        if prefill_count <= 0 or decode_count <= 0:
+            raise ValueError(
+                f"PD same-host requires prefill_count>0 and decode_count>0, "
+                f"got prefill={prefill_count} decode={decode_count}"
+            )
         self._plan = plan or {}
+        self._prefill_count = prefill_count
+        self._decode_count = decode_count
 
         # ── Ray Serve 2.53 native rank ────────────────────────────────
         rt_ctx = ray.get_runtime_context()
@@ -317,64 +330,71 @@ class PDCollocatedBackend:
         except Exception:  # noqa: BLE001
             pass
 
-        # ── placement_group for the two collocated actors ─────────────
-        gpu_per_actor_pf = float(prefill_actor_options.get("num_gpus", 1))
-        cpu_per_actor_pf = float(prefill_actor_options.get("num_cpus", 1))
-        gpu_per_actor_de = float(decode_actor_options.get("num_gpus", 1))
-        cpu_per_actor_de = float(decode_actor_options.get("num_cpus", 1))
-        bundles = [
-            {"CPU": cpu_per_actor_pf, "GPU": gpu_per_actor_pf},
-            {"CPU": cpu_per_actor_de, "GPU": gpu_per_actor_de},
-        ]
+        # ── placement_group: x + y bundles, all STRICT_PACK ───────────
+        gpu_pf = float(prefill_actor_options.get("num_gpus", 1))
+        cpu_pf = float(prefill_actor_options.get("num_cpus", 1))
+        gpu_de = float(decode_actor_options.get("num_gpus", 1))
+        cpu_de = float(decode_actor_options.get("num_cpus", 1))
+        bundles = (
+            [{"CPU": cpu_pf, "GPU": gpu_pf} for _ in range(prefill_count)]
+            + [{"CPU": cpu_de, "GPU": gpu_de} for _ in range(decode_count)]
+        )
         self.pg = placement_group(bundles, strategy="STRICT_PACK")
         ray.get(self.pg.ready())
-        log.info(f"[PDCollocatedBackend] PG ready: {self.pg.bundle_specs}")
+        log.info(
+            f"[PDCollocatedBackend] PG ready: {prefill_count}P + {decode_count}D "
+            f"= {len(bundles)} bundles"
+        )
         pg_id_bytes = getattr(self.pg, "id", None)
         self._pg_id_str = pg_id_bytes.hex() if isinstance(pg_id_bytes, bytes) else str(self.pg)
 
-        # ── inject per-actor NIXL side_channel port via runtime_env ───
-        # No fallback: portalloc is mandatory for PD same-host.
-        prefill_port_env = _vllm_port_env(self._plan, self.global_rank, "prefill", 0)
-        decode_port_env = _vllm_port_env(self._plan, self.global_rank, "decode", 0)
-
+        # ── spawn x PrefillActors + y DecodeActors ─────────────────────
         prefill_role = self._role_dict("prefill")
         decode_role = self._role_dict("decode")
+        prefill_env = prefill_role.get("env") or {}
+        decode_env = decode_role.get("env") or {}
         backend_container = self._plan.get("backend_container") if self._plan else None
 
-        prefill_full_opts = dict(prefill_actor_options)
-        prefill_full_opts["scheduling_strategy"] = PlacementGroupSchedulingStrategy(
-            placement_group=self.pg, placement_group_bundle_index=0,
-        )
-        prefill_runtime_env = _build_actor_runtime_env(
-            role_env=prefill_role.get("env") or {},
-            port_env=prefill_port_env,
-            backend_container=backend_container,
-        )
-        if prefill_runtime_env:
-            prefill_full_opts["runtime_env"] = prefill_runtime_env
+        self.prefills: List[Any] = []
+        for rank in range(prefill_count):
+            port_env = _vllm_port_env(self._plan, self.global_rank, "prefill", rank)
+            opts = dict(prefill_actor_options)
+            opts["scheduling_strategy"] = PlacementGroupSchedulingStrategy(
+                placement_group=self.pg, placement_group_bundle_index=rank,
+            )
+            rt = _build_actor_runtime_env(prefill_env, port_env, backend_container)
+            if rt:
+                opts["runtime_env"] = rt
+            self.prefills.append(
+                PrefillActor.options(**opts).remote(
+                    model_args=model_args,
+                    engine_kwargs=prefill_engine_kwargs,
+                    kv_extra=kv_extra,
+                )
+            )
 
-        decode_full_opts = dict(decode_actor_options)
-        decode_full_opts["scheduling_strategy"] = PlacementGroupSchedulingStrategy(
-            placement_group=self.pg, placement_group_bundle_index=1,
-        )
-        decode_runtime_env = _build_actor_runtime_env(
-            role_env=decode_role.get("env") or {},
-            port_env=decode_port_env,
-            backend_container=backend_container,
-        )
-        if decode_runtime_env:
-            decode_full_opts["runtime_env"] = decode_runtime_env
+        self.decodes: List[Any] = []
+        for rank in range(decode_count):
+            port_env = _vllm_port_env(self._plan, self.global_rank, "decode", rank)
+            opts = dict(decode_actor_options)
+            opts["scheduling_strategy"] = PlacementGroupSchedulingStrategy(
+                placement_group=self.pg,
+                placement_group_bundle_index=prefill_count + rank,
+            )
+            rt = _build_actor_runtime_env(decode_env, port_env, backend_container)
+            if rt:
+                opts["runtime_env"] = rt
+            self.decodes.append(
+                DecodeActor.options(**opts).remote(
+                    model_args=model_args,
+                    engine_kwargs=decode_engine_kwargs,
+                    kv_extra=kv_extra,
+                )
+            )
 
-        self.prefill = PrefillActor.options(**prefill_full_opts).remote(
-            model_args=model_args,
-            engine_kwargs=prefill_engine_kwargs,
-            kv_extra=kv_extra,
-        )
-        self.decode = DecodeActor.options(**decode_full_opts).remote(
-            model_args=model_args,
-            engine_kwargs=decode_engine_kwargs,
-            kv_extra=kv_extra,
-        )
+        # Round-robin counters for prefill / decode pair selection.
+        self._prefill_cursor = itertools.count()
+        self._decode_cursor = itertools.count()
 
     def _role_dict(self, name: str) -> Dict[str, Any]:
         roles = ((self._plan or {}).get("group") or {}).get("roles") or []
@@ -383,25 +403,35 @@ class PDCollocatedBackend:
                 return r
         return {}
 
+    def _pick_prefill(self):
+        idx = next(self._prefill_cursor) % self._prefill_count
+        return idx, self.prefills[idx]
+
+    def _pick_decode(self):
+        idx = next(self._decode_cursor) % self._decode_count
+        return idx, self.decodes[idx]
+
     # ── protocol conversion: chat → prefill → decode ─────────────────
 
     async def pd_chat(self, payload: Dict[str, Any]):
-        """Per-request orchestration. Reuses PrefillActor/DecodeActor's
-        OpenAI generate() (= Backend.generate) — the only PD-specific
-        work is mutating the request payload across the two stages.
-        """
+        """Round-robin pair selection + chat-completion protocol conversion."""
+        prefill_idx, prefill_handle = self._pick_prefill()
+        decode_idx, decode_handle = self._pick_decode()
+
         prefill_payload = dict(payload)
         prefill_payload.setdefault("request_id", uuid.uuid4().hex)
-        # Force a single-token prefill so vLLM doesn't autoregress.
         prefill_payload["max_tokens"] = 1
         prefill_payload["stream"] = False
 
-        prefill_resp = await self.prefill.generate.remote(prefill_payload)
+        log.debug(
+            "[pd_chat] req=%s prefill_rank=%d decode_rank=%d",
+            prefill_payload["request_id"], prefill_idx, decode_idx,
+        )
+
+        prefill_resp = await prefill_handle.generate.remote(prefill_payload)
         if isinstance(prefill_resp, dict) and "error" in prefill_resp:
             return prefill_resp
 
-        # vLLM surfaces kv_transfer_params at the top level of the chat
-        # completion response (set by the NixlConnector on the producer side).
         kv_params = None
         if hasattr(prefill_resp, "kv_transfer_params"):
             kv_params = prefill_resp.kv_transfer_params
@@ -415,23 +445,28 @@ class PDCollocatedBackend:
         if kv_params is not None:
             decode_payload["kv_transfer_params"] = kv_params
 
-        return await self.decode.generate.remote(decode_payload)
+        return await decode_handle.generate.remote(decode_payload)
 
     async def show_available_models(self):
-        return await self.prefill.show_available_models.remote()
+        return await self.prefills[0].show_available_models.remote()
 
     async def get_actor_topology(self) -> Dict[str, Any]:
-        prefill_info, decode_info = await asyncio_gather(
-            self.prefill.get_self_info.remote(),
-            self.decode.get_self_info.remote(),
+        prefill_infos = await asyncio_gather(
+            *[a.get_self_info.remote() for a in self.prefills]
         )
-        prefill_info = dict(prefill_info)
-        decode_info = dict(decode_info)
-        prefill_info["healthy"] = True
-        decode_info["healthy"] = True
+        decode_infos = await asyncio_gather(
+            *[a.get_self_info.remote() for a in self.decodes]
+        )
+        prefill_infos = [dict(i, healthy=True) for i in prefill_infos]
+        decode_infos = [dict(i, healthy=True) for i in decode_infos]
+        all_nodes = (
+            [i.get("node_id") for i in prefill_infos]
+            + [i.get("node_id") for i in decode_infos]
+        )
         same_host = (
-            prefill_info.get("node_id") == decode_info.get("node_id")
-            and prefill_info.get("node_id") is not None
+            len(all_nodes) > 0
+            and all(n is not None for n in all_nodes)
+            and len(set(all_nodes)) == 1
         )
         return {
             "replica_id": self.replica_id_str,
@@ -442,8 +477,8 @@ class PDCollocatedBackend:
             "local_rank": self.local_rank,
             "world_size": self.world_size,
             "pg_id": self._pg_id_str,
-            "prefill": prefill_info,
-            "decode": decode_info,
+            "prefills": prefill_infos,
+            "decodes": decode_infos,
             "same_host": same_host,
         }
 
@@ -462,41 +497,7 @@ def _find_role(plan: Dict[str, Any], name: str) -> Dict[str, Any]:
 
 
 def app_builder(args: Dict[str, Any]) -> Application:
-    """Phase 0 Demo app_builder — complete EndpointSpec → Ray Serve propagation.
-
-    Args contract (matches orchestrator.SerializePlan):
-        args = {
-            "model": {...},
-            "deployment_options": {...},
-            "backend_container": {...},
-            "plan": {
-                "num_replicas": int,
-                "group": {
-                    "placement": {...},
-                    "roles": [{
-                        "name", "instances", "ports_per_rank",
-                        "resources": {cpu, gpu, memory, accelerator},
-                        "variables": engine_args,
-                        "env": runtime_env_overrides,
-                        "deployment_options",
-                    }, ...],
-                },
-                "transfer": {"connector", "extra"},   # PD only
-                "cache":    {"connector", "extra"},   # optional
-                "ports":    [ReplicaPortMap],         # ★ mandatory for PD
-            },
-        }
-
-    Propagation summary (the user's "ep → ray runtime_env / engine_args / replicas" ask):
-        plan.num_replicas             → backend.options(num_replicas=…)
-        role.variables                → AsyncEngineArgs (via Backend __init__)
-        role.resources.{cpu,gpu,memory,accelerator}
-                                      → ray_actor_options on each actor
-        role.env                      → runtime_env.env_vars per actor
-        plan.transfer.{connector,extra}
-                                      → kv_transfer_config (NixlConnector + buffer_size + …)
-        plan.ports[r][role][rank]     → VLLM_NIXL_SIDE_CHANNEL_PORT per actor
-    """
+    """Phase 0 Demo app_builder — xPyD parameterized + full EndpointSpec propagation."""
     model = args.get("model") or {}
     plan = args.get("plan") or {}
 
@@ -507,11 +508,12 @@ def app_builder(args: Dict[str, Any]) -> Application:
     prefill_role = _find_role(plan, "prefill")
     decode_role = _find_role(plan, "decode")
 
-    # Propagate full EndpointSpec.Resources for each role into ray_actor_options.
+    prefill_count = int(prefill_role.get("instances") or 1)
+    decode_count = int(decode_role.get("instances") or 1)
+
     prefill_actor_options = _role_resources_to_ray(prefill_role)
     decode_actor_options = _role_resources_to_ray(decode_role)
 
-    # Propagate per-role engine_args (Variables).
     prefill_engine_kwargs = dict(prefill_role.get("variables") or {})
     decode_engine_kwargs = dict(decode_role.get("variables") or {})
 
@@ -524,9 +526,6 @@ def app_builder(args: Dict[str, Any]) -> Application:
             request_router_kwargs={},
         ),
     }
-    # PDCollocatedBackend itself doesn't run an engine; only the inner
-    # actors need backend_container. Stash on plan so PDCollocatedBackend.__init__
-    # can build the per-actor runtime_env.
     backend_container = args.get("backend_container")
     if backend_container:
         plan = dict(plan)
@@ -537,6 +536,8 @@ def app_builder(args: Dict[str, Any]) -> Application:
         prefill_engine_kwargs=prefill_engine_kwargs,
         decode_engine_kwargs=decode_engine_kwargs,
         kv_extra=kv_extra,
+        prefill_count=prefill_count,
+        decode_count=decode_count,
         prefill_actor_options=prefill_actor_options,
         decode_actor_options=decode_actor_options,
         plan=plan,

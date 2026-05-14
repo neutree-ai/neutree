@@ -58,18 +58,24 @@ def test_remove_replica_emits_only_when_present():
 def test_topology_updated_event_carries_full_topology():
     s = _Shared()
     seen = []
-    s.on_topology_updated(lambda rid, topo: seen.append((rid, topo.prefill.actor_id)))
+    s.on_topology_updated(
+        lambda rid, topo: seen.append((rid, [a.actor_id for a in topo.prefills]))
+    )
 
+    # xPyD: 2 prefill + 1 decode in this replica.
     s.upsert_topology(
         "r0",
         ActorTopology(
             replica_id="r0",
-            prefill=ActorInfo(kind="prefill", actor_id="A"),
-            decode=ActorInfo(kind="decode", actor_id="B"),
+            prefills=[
+                ActorInfo(kind="prefill", actor_id="P0"),
+                ActorInfo(kind="prefill", actor_id="P1"),
+            ],
+            decodes=[ActorInfo(kind="decode", actor_id="D0")],
         ),
     )
 
-    assert seen == [("r0", "A")]
+    assert seen == [("r0", ["P0", "P1"])]
 
 
 def test_callback_exception_does_not_wedge_subsequent_handlers():

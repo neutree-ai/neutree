@@ -84,23 +84,20 @@ class ActorInfo:
 class ActorTopology:
     """Per-PDCollocatedBackend-replica actor placement.
 
-    replica_id        — canonical Ray Serve ReplicaID (matches ObserverRouter
-                        / _SHARED.serve_replicas key)
-    replica_actor_id  — Ray ActorID of the Serve replica process itself
-                        (different from the inner PrefillActor / DecodeActor)
+    replica_id        — canonical Ray Serve ReplicaID
+    replica_actor_id  — Ray ActorID of the Serve replica process
     replica_node      — node_id of the Serve replica process
-    global_rank       — Ray Serve 2.53 native rank: 0..world_size-1 across
-                        all replicas of the deployment. ★ Used as the
-                        replica index for plan.Ports lookup.
+    global_rank       — Ray Serve 2.53 native rank: 0..world_size-1.
+                        ★ Used as the replica index for plan.Ports lookup.
     node_rank         — Ray Serve native: per-node ordinal
     local_rank        — Ray Serve native: rank within node
     world_size        — total replica count at the time of observation
     pg_id             — placement_group id (hex string form)
-    prefill           — ActorInfo for the inner PrefillActor
-    decode            — ActorInfo for the inner DecodeActor
-    same_host         — prefill.node_id == decode.node_id (and == replica_node
-                        in Phase 0 since the Serve replica owns the PG)
-    observed_at       — wall-clock time we fetched this from the backend replica
+    prefills          — ActorInfo list, one per PrefillActor rank (len == x)
+    decodes           — ActorInfo list, one per DecodeActor rank  (len == y)
+    same_host         — true when every inner actor's node_id matches
+                        replica_node (Phase 1 invariant: STRICT_PACK PG)
+    observed_at       — wall-clock when this view was fetched
     """
     replica_id: str = ""
     replica_actor_id: str = ""
@@ -110,8 +107,8 @@ class ActorTopology:
     local_rank: int = -1
     world_size: int = 0
     pg_id: str = ""
-    prefill: ActorInfo = field(default_factory=ActorInfo)
-    decode: ActorInfo = field(default_factory=ActorInfo)
+    prefills: List[ActorInfo] = field(default_factory=list)
+    decodes: List[ActorInfo] = field(default_factory=list)
     same_host: bool = False
     observed_at: float = 0.0
 

@@ -176,8 +176,18 @@ class PDIngress:
                     "skipping upsert (older Ray Serve API?)"
                 )
                 return
-            prefill_raw = topo_dict.get("prefill") or {}
-            decode_raw = topo_dict.get("decode") or {}
+            def _to_info(raw: dict, default_kind: str) -> ActorInfo:
+                raw = raw or {}
+                return ActorInfo(
+                    kind=str(raw.get("kind", default_kind)),
+                    actor_id=str(raw.get("actor_id", "")),
+                    node_id=str(raw.get("node_id", "")),
+                    gpu_ids=[int(g) for g in (raw.get("gpu_ids") or [])],
+                    healthy=bool(raw.get("healthy", False)),
+                )
+
+            prefills_raw = topo_dict.get("prefills") or []
+            decodes_raw = topo_dict.get("decodes") or []
             self._shared.upsert_topology(
                 self_reported,
                 ActorTopology(
@@ -191,20 +201,8 @@ class PDIngress:
                     local_rank=int(topo_dict.get("local_rank", -1)),
                     world_size=int(topo_dict.get("world_size", 0) or 0),
                     pg_id=str(topo_dict.get("pg_id", "")),
-                    prefill=ActorInfo(
-                        kind=str(prefill_raw.get("kind", "prefill")),
-                        actor_id=str(prefill_raw.get("actor_id", "")),
-                        node_id=str(prefill_raw.get("node_id", "")),
-                        gpu_ids=[int(g) for g in (prefill_raw.get("gpu_ids") or [])],
-                        healthy=bool(prefill_raw.get("healthy", False)),
-                    ),
-                    decode=ActorInfo(
-                        kind=str(decode_raw.get("kind", "decode")),
-                        actor_id=str(decode_raw.get("actor_id", "")),
-                        node_id=str(decode_raw.get("node_id", "")),
-                        gpu_ids=[int(g) for g in (decode_raw.get("gpu_ids") or [])],
-                        healthy=bool(decode_raw.get("healthy", False)),
-                    ),
+                    prefills=[_to_info(p, "prefill") for p in prefills_raw],
+                    decodes=[_to_info(d, "decode") for d in decodes_raw],
                     same_host=bool(topo_dict.get("same_host", False)),
                 ),
             )
