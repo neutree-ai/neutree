@@ -225,6 +225,36 @@ def _build_actor_runtime_env(role_env: Dict[str, str],
     return runtime_env
 
 
+def _setup_actor_stderr_logging() -> None:
+    """Inner @ray.remote actors run in plain Ray worker processes that
+    don't get Ray Serve's logging config — `ray.serve` logger has no
+    handlers there and `log.info(...)` is silently dropped.
+
+    Idempotently install a stderr StreamHandler on the root logger so:
+      - actor-side log.info lands in
+        /tmp/ray/session_*/logs/worker-*-stderr-*.log
+      - is queryable via `ray logs actor <actor_id>`
+      - shows up in `ray.get_log()` / dashboard streaming
+
+    PDCollocatedBackend additionally re-emits per-actor identity at init
+    using its own (Serve-wired) logger so the same info also appears in
+    the deployment-replica log file — see `__init__` post-barrier loop.
+    """
+    root = logging.getLogger()
+    for h in root.handlers:
+        if getattr(h, "_neutree_actor_setup", False):
+            return
+    handler = logging.StreamHandler()  # stderr by default
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    handler._neutree_actor_setup = True
+    root.addHandler(handler)
+    if root.level == logging.WARNING or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+
+
 def _actor_options_to_bundle(actor_options: Dict[str, Any]) -> Dict[str, float]:
     """ray_actor_options → placement_group bundle.
 
@@ -291,6 +321,7 @@ class PrefillActor(Backend):
                  model_args: Dict[str, Any],
                  engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any]):
+        _setup_actor_stderr_logging()
         log.info(
             "[PrefillActor][init/pre-merge] user_engine_kwargs_keys=%s kv_extra=%s",
             sorted((engine_kwargs or {}).keys()), kv_extra,
@@ -350,6 +381,7 @@ class DecodeActor(Backend):
                  model_args: Dict[str, Any],
                  engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any]):
+        _setup_actor_stderr_logging()
         log.info(
             "[DecodeActor][init/pre-merge] user_engine_kwargs_keys=%s kv_extra=%s",
             sorted((engine_kwargs or {}).keys()), kv_extra,
@@ -622,10 +654,31 @@ class PDCollocatedBackend:
             "actors to finish vLLM init",
             prefill_count, decode_count,
         )
-        ray.get([h.get_self_info.remote() for h in self.prefills + self.decodes])
+        prefill_infos = ray.get([h.get_self_info.remote() for h in self.prefills])
+        decode_infos = ray.get([h.get_self_info.remote() for h in self.decodes])
+        # Bridge inner-actor identity into PDCollocatedBackend's logger so
+        # the deployment-replica log file is one-stop for "where did each
+        # P/D actor land". Inner actors also log to worker stderr via
+        # _setup_actor_stderr_logging (queryable with `ray logs actor`)
+        # but the bridge here is what makes Demo verification readable.
+        for i, info in enumerate(prefill_infos):
+            log.info(
+                "[PDCollocatedBackend][actor_ready/prefill rank=%d] "
+                "actor_id=%s node_id=%s gpu_ids=%s",
+                i, info.get("actor_id"), info.get("node_id"), info.get("gpu_ids"),
+            )
+        for i, info in enumerate(decode_infos):
+            log.info(
+                "[PDCollocatedBackend][actor_ready/decode rank=%d] "
+                "actor_id=%s node_id=%s gpu_ids=%s",
+                i, info.get("actor_id"), info.get("node_id"), info.get("gpu_ids"),
+            )
+        all_nodes = [i.get("node_id") for i in prefill_infos + decode_infos]
+        same_host = len(set(all_nodes)) == 1 if all_nodes else False
         log.info(
-            "[PDCollocatedBackend][init/done] %dP + %dD actors ready",
-            prefill_count, decode_count,
+            "[PDCollocatedBackend][init/done] %dP + %dD actors ready "
+            "same_host=%s nodes=%s",
+            prefill_count, decode_count, same_host, sorted(set(all_nodes)),
         )
 
     def _role_dict(self, name: str) -> Dict[str, Any]:
