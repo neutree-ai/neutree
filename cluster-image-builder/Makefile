@@ -54,21 +54,14 @@ VLLM_CUDA_MAJOR ?= $(shell \
         fi; \
     fi)
 
-# Version specifier appended after nixl-cu${VLLM_CUDA_MAJOR}. Only consumed
-# when TARGET_CUDA is non-empty (i.e., vLLM < 0.21.0 — the reinstall path).
-# vLLM >= 0.21.0 ships nixl 1.1.0 meta-wheel, VLLM_CUDA_MAJOR resolves to
-# empty there, and the Dockerfile skips this RUN step entirely.
-#
-# Default '>=0.7.1,<=0.10.1' matches the nixl version range that vLLM
-# upstream officially supports for the pre-0.21.0 packaging — within this
-# window vLLM's NixlConnector + our app_pd_collocated.py KV-handshake
-# contract is validated. Bump the bounds only when upstream certifies a
-# new release for the pre-0.21 branch.
-#
-# Override examples:
-#     make docker-build-engine-vllm NIXL_VERSION='==0.10.0'  # pin exact
-#     make docker-build-engine-vllm NIXL_VERSION=''          # latest available
-NIXL_VERSION ?= >=0.7.1,<=0.10.1
+# Optional user-supplied nixl version specifier (PEP 440 form). Empty by
+# default — meaning "use the Dockerfile's vLLM-upstream-supported range
+# fallback on the reinstall path; do nothing on the skip path". Set to
+# something like '==0.10.0' or '>=0.9.0,<0.11.0' to pin a specific
+# version when reinstall is in play (TARGET_CUDA non-empty, i.e. vLLM
+# < 0.21.0). Has no effect when TARGET_CUDA is empty (vLLM >= 0.21.0 or
+# ROCm) because the Dockerfile skips the reinstall RUN entirely.
+NIXL_VERSION ?=
 # Optional override of the upstream vLLM base image tag (defaults to
 # ENGINE_VLLM_VERSION). Use to point at non-standard upstream tags (e.g. dev
 # builds) without editing the Makefile; release workflows expose this via the
