@@ -190,8 +190,9 @@ class ObserverRouter(MultiplexMixin, RequestRouter):
             rid = raw_target[len(REPLICA_DISPATCH_PREFIX):]
             for r in candidate_replicas:
                 if str(r.replica_id) == rid:
-                    logger.debug(
-                        "[ObserverRouter] direct dispatch -> %s (caller-pinned)", rid
+                    logger.info(
+                        "[ObserverRouter][pick/direct] target=%s "
+                        "candidates=%d", rid, len(candidate_replicas),
                     )
                     return [[r]]
             logger.warning(
@@ -222,18 +223,28 @@ class ObserverRouter(MultiplexMixin, RequestRouter):
         if not known_ids:
             # Cold start: _SHARED not populated yet → let the framework pick
             # from the raw candidate list.
+            logger.info(
+                "[ObserverRouter][pick/cold] _SHARED empty; framework pick "
+                "from candidates=%d", len(candidate_replicas),
+            )
             return [candidate_replicas]
 
         candidate_map = {str(r.replica_id): r for r in candidate_replicas}
         ordered_known = [rid for rid in known_ids if rid in candidate_map]
         if not ordered_known:
+            logger.info(
+                "[ObserverRouter][pick/no-overlap] known=%d candidates=%d "
+                "intersection=0; framework pick from candidates",
+                len(known_ids), len(candidate_replicas),
+            )
             return [candidate_replicas]
 
         idx = next(self._cursor) % len(ordered_known)
         picked_id = ordered_known[idx]
         picked = candidate_map[picked_id]
-        logger.debug(
-            "[ObserverRouter] round-robin picked %s (idx=%d/%d)",
+        logger.info(
+            "[ObserverRouter][pick/rr] picked=%s idx=%d/%d known=%d candidates=%d",
             picked_id, idx, len(ordered_known),
+            len(known_ids), len(candidate_replicas),
         )
         return [[picked]]
