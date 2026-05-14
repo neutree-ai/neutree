@@ -1,0 +1,32 @@
+# PD Same-Host Phase 0 — Validation Report
+
+Fill this after running `create.sh` + `verify.sh` (+ optional `perf.sh`).
+Each row maps to a Demo assumption (V1–V9) from
+[`00-overview-and-pr-plan.md §3.0`](../../knowledge/neutree-pd-same-host-phase1-detailed/00-overview-and-pr-plan.md).
+
+| # | Assumption | How to read the signal | Pass / Fail | Notes / artifact |
+|---|---|---|---|---|
+| V1 | API → IR → Orchestrator → Ray Application end-to-end works | `verify.sh` reaches `phase=Running` and Ray dashboard shows Application `${EP}` Running | | |
+| V2 | `(strategy, placement.roles)` routes to PD import_path | endpoint_controller logs show `applyPDBranch` invocation; Ray Application `import_path` = `serve.vllm.v0_17_1.app_pd_collocated:app_builder` | | |
+| V3 | Plan serialized to Python args dict reaches deserialization intact | `app_pd_collocated.py` log line `placement_group ready` AND `engine_kwargs={...}` matches the EndpointSpec | | |
+| V4 | STRICT_PACK PG colocates prefill + decode actors on same node | inside the head pod: `ray.get(pg.bundle_specs)` shows 2 bundles; both Actor.get_node_id are equal | | |
+| V5 | PrefillActor / DecodeActor NIXL cuda_ipc handshake works | engine log shows `NixlConnector ... role=kv_producer/kv_consumer` + a successful handshake; `nvidia-smi nvlink -s` shows nonzero RX/TX on the same host | | |
+| V6 | `kv_transfer_params` is a plain dict, round-trippable through Ray | `pd_chat` log shows `kv_params={...}` with no exception; field types are JSON-friendly | | |
+| V7 | Ray Serve handle dispatch latency < 1 ms cross actor | `verify.sh` e2e latency vs vLLM stand-alone; Ray Serve metrics `ray_serve_request_router_duration_seconds_bucket` p50 < 0.001 | | |
+| V8 | Streaming dispatch does not buffer the full decode response | `verify.sh` with `stream=true` (toggle in the script) prints incremental chunks; PDIngress mem stays flat | | |
+| V9 | NIXL cuda_ipc bandwidth approaches NVLink theoretical | `perf.sh` PD TTFT vs monolithic baseline; document GB/s observed | | |
+
+## Decision matrix (feeds MVP planning)
+
+| Outcome | Next action |
+|---|---|
+| V1–V4 all pass | Architecture is sound → proceed to MVP scope as planned in `00 doc §MVP` |
+| V5 fails | NIXL handshake stalled → +5d to MVP for transport debugging; consider Mooncake fallback |
+| V6 fails | kv_transfer_params not plain dict → +2d for serialization shim |
+| V7 fails | Cross-actor dispatch > 1 ms → reconsider whether PDIngress should fuse with PDCollocatedBackend |
+| V8 fails | Streaming buffered in ingress → +3d streaming rewrite |
+| V9 fails | Bandwidth far from NVLink theoretical → investigate fabric manager / NVSwitch routing before MVP |
+
+Fill the rows above, link captured logs (`docker logs`, `ray serve status`,
+`nvidia-smi nvlink -s` output) under `Notes / artifact`, then attach the
+final report to GitLab MR !21.

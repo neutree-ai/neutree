@@ -1,0 +1,53 @@
+{
+  "api_version": "v1",
+  "kind": "Endpoint",
+  "metadata": {
+    "name": "demo-pd-same-host",
+    "workspace": "default"
+  },
+  "spec": {
+    "cluster": "REPLACE_WITH_CLUSTER_NAME",
+    "model": {
+      "registry": "huggingface",
+      "name": "Qwen/Qwen2.5-7B-Instruct",
+      "version": "main",
+      "task": "text-generation"
+    },
+    "engine": {
+      "engine": "vllm",
+      "version": "v0.17.1"
+    },
+    "replicas": {
+      "num": 1
+    },
+    "strategy": "pd",
+    "placement": {
+      "replicas": "spread-node",
+      "roles": "same-host"
+    },
+    "roles": [
+      {
+        "name": "prefill",
+        "replicas": {"num": 1},
+        "resources": {"cpu": "8", "gpu": "1", "memory": "32"}
+      },
+      {
+        "name": "decode",
+        "replicas": {"num": 1},
+        "resources": {"cpu": "8", "gpu": "1", "memory": "32"},
+        "dependencies": ["prefill"]
+      }
+    ],
+    "deployment_options": {
+      "kv": {
+        "transfer": {
+          "connector": "nixl",
+          "extra": {
+            "backend": "cuda_ipc",
+            "buffer_size": 5000000000
+          }
+        }
+      }
+    }
+  }
+}
