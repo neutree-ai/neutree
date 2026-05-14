@@ -709,12 +709,18 @@ class PDCollocatedBackend:
         """Iterate the decode actor's yield-based generate_stream and
         re-yield each chunk so Ray Serve's stream-mode wrapper turns the
         coroutine into an SSE response.
+
+        decode_handle is a plain @ray.remote actor (not a Serve handle),
+        so the streaming `.remote()` returns an ObjectRefGenerator. Each
+        iterated item is an ObjectRef — `await`ing it resolves to the
+        actual yielded value from the actor side (the SSE chunk string).
+        Skipping the await would forward raw refs into starlette which
+        crashes with "ObjectRef has no attribute 'encode'".
         """
-        # decode_handle is a plain @ray.remote actor handle (not a Serve
-        # DeploymentHandle), so we use the actor-RPC streaming pattern.
         gen = decode_handle.generate_stream.remote(decode_payload)
         try:
-            async for chunk in gen:
+            async for ref in gen:
+                chunk = await ref
                 yield chunk
         except Exception as exc:  # noqa: BLE001
             log.warning(
