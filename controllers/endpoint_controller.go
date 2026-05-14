@@ -8,6 +8,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/deployment/strategy"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -69,6 +70,25 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to get orchestrator for endpoint %s",
 			obj.Metadata.WorkspaceName())
+	}
+
+	// PD same-host (Phase 0 Demo): validate the strategy at the controller layer
+	// so users get fast feedback before the heavier orchestrator path runs. The
+	// actual Compile invocation lives inside ray_orchestrator.applyPDBranch
+	// for Demo; MVP PR-05 lifts Compile to here when portAllocator.AllocateForPlan
+	// gets wired in between Compile and Apply.
+	if obj.Spec != nil && obj.Spec.Strategy != "" {
+		s, sErr := strategy.Get(obj.Spec.Strategy)
+		if sErr != nil {
+			err = sErr
+			return errors.Wrapf(sErr, "failed to resolve strategy for endpoint %s",
+				obj.Metadata.WorkspaceName())
+		}
+		if vErr := s.Validate(obj); vErr != nil {
+			err = vErr
+			return errors.Wrapf(vErr, "strategy validation failed for endpoint %s",
+				obj.Metadata.WorkspaceName())
+		}
 	}
 
 	if orchestrator.IsEndpointPaused(obj) {
