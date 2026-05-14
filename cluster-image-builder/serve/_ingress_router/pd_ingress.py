@@ -39,6 +39,7 @@ from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, StreamingResponse
 
 from ray import serve
+from ray.serve._private.constants import SERVE_LOGGER_NAME
 from ray.serve.handle import DeploymentHandle
 
 from .observer_router import REPLICA_DISPATCH_PREFIX
@@ -50,7 +51,11 @@ from .shared_state import (
 )
 
 
-log = logging.getLogger("pd_ingress")
+# Use the Ray Serve logger so log records land in the deployment-replica
+# stdout / replica log file. Custom logger names ("pd_ingress" etc.) have
+# no handler attached by default — Ray's logging config only wires
+# SERVE_LOGGER_NAME ("ray.serve").
+log = logging.getLogger(SERVE_LOGGER_NAME)
 app = FastAPI()
 
 

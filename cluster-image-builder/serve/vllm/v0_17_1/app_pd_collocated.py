@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional
 import ray
 from ray import serve
 from ray.serve import Application
+from ray.serve._private.constants import SERVE_LOGGER_NAME
 from ray.serve.config import RequestRouterConfig
 from ray.util.placement_group import placement_group, PlacementGroupSchedulingStrategy
 
@@ -61,7 +62,10 @@ from serve._ingress_router.pd_ingress import PDIngress
 from serve.vllm.v0_17_1.app import _Backend as Backend
 
 
-log = logging.getLogger("pd_collocated")
+# Route through the Ray Serve logger so logs land in the deployment-
+# replica stdout / replica log file. Custom logger names have no handler
+# attached by default and disappear silently.
+log = logging.getLogger(SERVE_LOGGER_NAME)
 
 asyncio_gather = asyncio.gather
 

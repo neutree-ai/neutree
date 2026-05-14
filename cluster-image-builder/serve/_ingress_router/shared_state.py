@@ -43,7 +43,12 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 
-log = logging.getLogger("pd_ingress.shared")
+from ray.serve._private.constants import SERVE_LOGGER_NAME
+
+# Route through the Ray Serve logger so callback / state-mutation logs
+# land in the replica's stdout. The "pd_ingress.shared" custom name had
+# no handler attached and dropped silently.
+log = logging.getLogger(SERVE_LOGGER_NAME)
 
 # A callback can be a plain function or a coroutine function. Return value is
 # ignored either way; exceptions are caught + logged so a buggy callback
