@@ -200,6 +200,34 @@ def _build_actor_runtime_env(role_env: Dict[str, str],
     return runtime_env
 
 
+def _actor_options_to_bundle(actor_options: Dict[str, Any]) -> Dict[str, float]:
+    """ray_actor_options → placement_group bundle.
+
+    Ray requires the bundle to declare *every* resource key the actor
+    requests (CPU, GPU, memory, and any custom resources like NVIDIA_L20).
+    A bundle missing any requested key triggers:
+
+        ValueError: resource request {...} cannot fit into any bundles ...
+
+    The bundle key naming follows Ray conventions:
+      num_cpus            → "CPU"
+      num_gpus            → "GPU"
+      memory              → "memory"
+      resources[k] = v    → k = v   (custom resources passthrough)
+    """
+    bundle: Dict[str, float] = {}
+    if "num_cpus" in actor_options:
+        bundle["CPU"] = float(actor_options["num_cpus"])
+    if "num_gpus" in actor_options:
+        bundle["GPU"] = float(actor_options["num_gpus"])
+    if "memory" in actor_options:
+        bundle["memory"] = float(actor_options["memory"])
+    extra = actor_options.get("resources") or {}
+    for k, v in extra.items():
+        bundle[k] = float(v)
+    return bundle
+
+
 def _role_resources_to_ray(role: Dict[str, Any]) -> Dict[str, Any]:
     """plan.Role.RayResource → ray_actor_options.
 
@@ -374,13 +402,15 @@ class PDCollocatedBackend:
             pass
 
         # ── placement_group: x + y bundles, all STRICT_PACK ───────────
-        gpu_pf = float(prefill_actor_options.get("num_gpus", 1))
-        cpu_pf = float(prefill_actor_options.get("num_cpus", 1))
-        gpu_de = float(decode_actor_options.get("num_gpus", 1))
-        cpu_de = float(decode_actor_options.get("num_cpus", 1))
+        # Bundle keys must be a superset of every key the actor_options request
+        # (CPU/GPU/memory + custom resources like NVIDIA_L20). Otherwise Ray
+        # rejects scheduling with "resource request {...} cannot fit into any
+        # bundles".
+        prefill_bundle = _actor_options_to_bundle(prefill_actor_options)
+        decode_bundle = _actor_options_to_bundle(decode_actor_options)
         bundles = (
-            [{"CPU": cpu_pf, "GPU": gpu_pf} for _ in range(prefill_count)]
-            + [{"CPU": cpu_de, "GPU": gpu_de} for _ in range(decode_count)]
+            [dict(prefill_bundle) for _ in range(prefill_count)]
+            + [dict(decode_bundle) for _ in range(decode_count)]
         )
         self.pg = placement_group(bundles, strategy="STRICT_PACK")
         ray.get(self.pg.ready())
