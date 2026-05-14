@@ -33,49 +33,18 @@ FROM ${ENGINE_BASE_IMAGE}
 ENV HOME=/home/ray
 WORKDIR ${HOME}
 
-# Pin the correct nixl CUDA-major variant matching the vLLM base image's
-# CUDA runtime. The vllm-openai base preinstalls nixl-cuXX; we force-
-# reinstall the right one so version drift across base-image updates can't
-# silently leave a stale variant in site-packages.
-#
-# Target CUDA major resolution (first non-empty wins):
-#   1. TARGET_CUDA build arg (explicit override — non-standard forks / patches)
-#   2. vLLM version rule applied to ENGINE_VERSION_DIR (e.g. "v0_17_1" → "0.17.1"):
-#        < 0.20.0  → vLLM ships CUDA 12.9 → cuda_target=12
-#        >= 0.20.0 → vLLM ships CUDA 13.0 → cuda_target=13
-#      (vLLM upstream switched default CUDA from 12.9 to 13.0 at 0.20.0.
-#       Update this threshold when upstream changes again.)
-#   3. cuXX suffix in ENGINE_BASE_IMAGE tag (legacy / forced fallback)
-#   4. no-op (non-semver versions like "gemma4" with no cu suffix)
-#
-# NIXL_VERSION (optional) is concatenated after the package name to pin a
-# specific nixl release, e.g. NIXL_VERSION='<0.10.0' or '==0.5.0'. Empty
-# means "latest available for this cuXX".
-ARG ENGINE_BASE_IMAGE
-ARG ENGINE_VERSION_DIR
+# Pin the correct nixl CUDA-major variant. TARGET_CUDA is computed at
+# build invocation time by the Makefile based on ENGINE_VLLM_VERSION
+# (< 0.20.0 → 12, >= 0.20.0 → 13). Empty means "skip" — used by the
+# ROCm build to short-circuit nixl-cuXX reconciliation. NIXL_VERSION
+# (optional) is appended to pin a specific release.
 ARG TARGET_CUDA=""
 ARG NIXL_VERSION=""
-RUN cuda_target="${TARGET_CUDA}"; \
-    if [ -z "$cuda_target" ] && [ -n "${ENGINE_VERSION_DIR}" ]; then \
-        ver=$(printf '%s' "${ENGINE_VERSION_DIR}" | sed 's/^v//;s/_/./g'); \
-        if echo "$ver" | grep -Eq '^[0-9]+\.[0-9]+'; then \
-            lowest=$(printf '%s\n%s' "$ver" "0.20.0" | sort -V | head -1); \
-            if [ "$lowest" = "$ver" ] && [ "$ver" != "0.20.0" ]; then \
-                cuda_target=12; \
-            else \
-                cuda_target=13; \
-            fi; \
-            echo "[nixl-reconcile] vLLM $ver → cuda_target=$cuda_target (threshold 0.20.0)"; \
-        fi; \
-    fi; \
-    if [ -z "$cuda_target" ]; then \
-        cuda_target=$(printf '%s' "${ENGINE_BASE_IMAGE}" | grep -oE 'cu[0-9]+' | head -1 | sed 's/^cu//'); \
-    fi; \
-    if [ -n "$cuda_target" ]; then \
-        echo "[nixl-reconcile] force-reinstall nixl-cu${cuda_target}${NIXL_VERSION}"; \
-        uv pip install --system --force-reinstall --no-deps "nixl-cu${cuda_target}${NIXL_VERSION}"; \
+RUN if [ -n "${TARGET_CUDA}" ]; then \
+        echo "[nixl-reconcile] force-reinstall nixl-cu${TARGET_CUDA}${NIXL_VERSION}"; \
+        uv pip install --system --force-reinstall --no-deps "nixl-cu${TARGET_CUDA}${NIXL_VERSION}"; \
     else \
-        echo "[nixl-reconcile] could not determine target CUDA; leaving nixl as-is"; \
+        echo "[nixl-reconcile] TARGET_CUDA empty; skipping nixl reconcile"; \
     fi
 
 # Install Ray neutree fork (same version as cluster image)
