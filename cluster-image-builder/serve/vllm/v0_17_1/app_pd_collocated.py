@@ -266,11 +266,22 @@ class PrefillActor(Backend):
                  model_args: Dict[str, Any],
                  engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any]):
+        log.info(
+            "[PrefillActor][init/pre-merge] user_engine_kwargs_keys=%s kv_extra=%s",
+            sorted((engine_kwargs or {}).keys()), kv_extra,
+        )
         merged_kwargs = _merge_user_wins(
             platform=_nixl_engine_args("kv_producer", kv_extra),
             user=engine_kwargs or {},
             audit_keys=PLATFORM_ENGINE_KWARG_KEYS,
             context="engine_kwargs/prefill",
+        )
+        kv_cfg = merged_kwargs.get("kv_transfer_config") or {}
+        log.info(
+            "[PrefillActor][init/post-merge] kv_role=%s kv_connector=%s "
+            "merged_keys=%s",
+            kv_cfg.get("kv_role"), kv_cfg.get("kv_connector"),
+            sorted(merged_kwargs.keys()),
         )
         super().__init__(
             model_registry_type=model_args.get("registry_type"),
@@ -291,7 +302,8 @@ class PrefillActor(Backend):
         except Exception:  # noqa: BLE001
             self.gpu_ids = []
         log.info(
-            f"[PrefillActor] ready: actor_id={self.actor_id} node={self.node_id} gpus={self.gpu_ids}"
+            "[PrefillActor][init/done] actor_id=%s node=%s gpus=%s",
+            self.actor_id, self.node_id, self.gpu_ids,
         )
 
     def get_self_info(self) -> Dict[str, Any]:
@@ -313,11 +325,22 @@ class DecodeActor(Backend):
                  model_args: Dict[str, Any],
                  engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any]):
+        log.info(
+            "[DecodeActor][init/pre-merge] user_engine_kwargs_keys=%s kv_extra=%s",
+            sorted((engine_kwargs or {}).keys()), kv_extra,
+        )
         merged_kwargs = _merge_user_wins(
             platform=_nixl_engine_args("kv_consumer", kv_extra),
             user=engine_kwargs or {},
             audit_keys=PLATFORM_ENGINE_KWARG_KEYS,
             context="engine_kwargs/decode",
+        )
+        kv_cfg = merged_kwargs.get("kv_transfer_config") or {}
+        log.info(
+            "[DecodeActor][init/post-merge] kv_role=%s kv_connector=%s "
+            "merged_keys=%s",
+            kv_cfg.get("kv_role"), kv_cfg.get("kv_connector"),
+            sorted(merged_kwargs.keys()),
         )
         super().__init__(
             model_registry_type=model_args.get("registry_type"),
@@ -338,7 +361,8 @@ class DecodeActor(Backend):
         except Exception:  # noqa: BLE001
             self.gpu_ids = []
         log.info(
-            f"[DecodeActor] ready: actor_id={self.actor_id} node={self.node_id} gpus={self.gpu_ids}"
+            "[DecodeActor][init/done] actor_id=%s node=%s gpus=%s",
+            self.actor_id, self.node_id, self.gpu_ids,
         )
 
     def get_self_info(self) -> Dict[str, Any]:
@@ -379,6 +403,20 @@ class PDCollocatedBackend:
         self._prefill_count = prefill_count
         self._decode_count = decode_count
 
+        # ── Demo debug: plan + actor_options shape (V3 / V8 / V18) ─────
+        log.info(
+            "[PDCollocatedBackend][init/plan] num_replicas=%s prefill_count=%d decode_count=%d "
+            "transfer=%s ports_present=%s backend_container_present=%s",
+            self._plan.get("num_replicas"), prefill_count, decode_count,
+            (self._plan.get("transfer") or {}).get("connector"),
+            bool(self._plan.get("ports")),
+            bool(self._plan.get("backend_container")),
+        )
+        log.info(
+            "[PDCollocatedBackend][init/actor_options] prefill=%s decode=%s",
+            prefill_actor_options, decode_actor_options,
+        )
+
         # ── Ray Serve 2.53 native rank ────────────────────────────────
         rt_ctx = ray.get_runtime_context()
         self.replica_node_id = rt_ctx.get_node_id()
@@ -412,11 +450,20 @@ class PDCollocatedBackend:
             [dict(prefill_bundle) for _ in range(prefill_count)]
             + [dict(decode_bundle) for _ in range(decode_count)]
         )
+        # V8 validation: bundle shape must be a superset of actor_options keys
+        # (else Ray PG rejects scheduling). Log both so debug is one-shot.
+        log.info(
+            "[PDCollocatedBackend][init/bundles] prefill_bundle=%s decode_bundle=%s total=%d",
+            prefill_bundle, decode_bundle, len(bundles),
+        )
         self.pg = placement_group(bundles, strategy="STRICT_PACK")
         ray.get(self.pg.ready())
         log.info(
-            f"[PDCollocatedBackend] PG ready: {prefill_count}P + {decode_count}D "
-            f"= {len(bundles)} bundles"
+            "[PDCollocatedBackend][init/pg] PG ready: %dP + %dD = %d bundles strategy=STRICT_PACK "
+            "global_rank=%d node_rank=%d local_rank=%d world_size=%d replica_id=%s",
+            prefill_count, decode_count, len(bundles),
+            self.global_rank, self.node_rank, self.local_rank, self.world_size,
+            self.replica_id_str,
         )
         pg_id_bytes = getattr(self.pg, "id", None)
         self._pg_id_str = pg_id_bytes.hex() if isinstance(pg_id_bytes, bytes) else str(self.pg)
@@ -438,6 +485,14 @@ class PDCollocatedBackend:
             rt = _build_actor_runtime_env(prefill_env, port_env, backend_container)
             if rt:
                 opts["runtime_env"] = rt
+            # V19 / V21 / V22 — per-actor spawn point: bundle_index, port env,
+            # runtime_env composition (container vs env_vars) all in one line.
+            log.info(
+                "[PDCollocatedBackend][spawn/prefill rank=%d] bundle_index=%d "
+                "port_env=%s role_env_keys=%s rt_keys=%s",
+                rank, rank, port_env, sorted((prefill_env or {}).keys()),
+                sorted((rt or {}).keys()),
+            )
             self.prefills.append(
                 PrefillActor.options(**opts).remote(
                     model_args=model_args,
@@ -457,6 +512,13 @@ class PDCollocatedBackend:
             rt = _build_actor_runtime_env(decode_env, port_env, backend_container)
             if rt:
                 opts["runtime_env"] = rt
+            log.info(
+                "[PDCollocatedBackend][spawn/decode rank=%d] bundle_index=%d "
+                "port_env=%s role_env_keys=%s rt_keys=%s",
+                rank, prefill_count + rank, port_env,
+                sorted((decode_env or {}).keys()),
+                sorted((rt or {}).keys()),
+            )
             self.decodes.append(
                 DecodeActor.options(**opts).remote(
                     model_args=model_args,
@@ -468,6 +530,11 @@ class PDCollocatedBackend:
         # Round-robin counters for prefill / decode pair selection.
         self._prefill_cursor = itertools.count()
         self._decode_cursor = itertools.count()
+        log.info(
+            "[PDCollocatedBackend][init/done] %dP + %dD actors spawned "
+            "(handles pending; first .remote() will block on actor ready)",
+            prefill_count, decode_count,
+        )
 
     def _role_dict(self, name: str) -> Dict[str, Any]:
         roles = ((self._plan or {}).get("group") or {}).get("roles") or []
@@ -495,29 +562,51 @@ class PDCollocatedBackend:
         prefill_payload.setdefault("request_id", uuid.uuid4().hex)
         prefill_payload["max_tokens"] = 1
         prefill_payload["stream"] = False
+        req_id = prefill_payload["request_id"]
 
-        log.debug(
-            "[pd_chat] req=%s prefill_rank=%d decode_rank=%d",
-            prefill_payload["request_id"], prefill_idx, decode_idx,
+        log.info(
+            "[pd_chat][pair] req=%s prefill_rank=%d decode_rank=%d "
+            "(replica global_rank=%d)",
+            req_id, prefill_idx, decode_idx, self.global_rank,
         )
 
         prefill_resp = await prefill_handle.generate.remote(prefill_payload)
         if isinstance(prefill_resp, dict) and "error" in prefill_resp:
+            log.warning(
+                "[pd_chat][prefill_error] req=%s err=%s", req_id, prefill_resp.get("error"),
+            )
             return prefill_resp
 
         kv_params = None
+        kv_source = "none"
         if hasattr(prefill_resp, "kv_transfer_params"):
             kv_params = prefill_resp.kv_transfer_params
+            kv_source = "attr"
         elif hasattr(prefill_resp, "model_dump"):
             kv_params = prefill_resp.model_dump().get("kv_transfer_params")
+            kv_source = "model_dump"
         elif isinstance(prefill_resp, dict):
             kv_params = prefill_resp.get("kv_transfer_params")
+            kv_source = "dict"
+
+        # V6 validation: kv_transfer_params is a plain dict round-trippable
+        # via Ray, and prefill returned it before decode runs.
+        log.info(
+            "[pd_chat][prefill_done] req=%s resp_type=%s kv_source=%s kv_present=%s "
+            "kv_keys=%s",
+            req_id, type(prefill_resp).__name__, kv_source, kv_params is not None,
+            sorted(kv_params.keys()) if isinstance(kv_params, dict) else None,
+        )
 
         decode_payload = dict(payload)
-        decode_payload["request_id"] = prefill_payload["request_id"]
+        decode_payload["request_id"] = req_id
         if kv_params is not None:
             decode_payload["kv_transfer_params"] = kv_params
 
+        log.info(
+            "[pd_chat][decode_dispatch] req=%s kv_injected=%s stream=%s",
+            req_id, kv_params is not None, decode_payload.get("stream", False),
+        )
         return await decode_handle.generate.remote(decode_payload)
 
     async def show_available_models(self):

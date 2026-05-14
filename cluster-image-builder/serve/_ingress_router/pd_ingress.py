@@ -90,6 +90,12 @@ class PDIngress:
     async def chat(self, request: Request):
         payload = await request.json()
         stream = payload.get("stream", False)
+        snap = self._shared.snapshot()
+        log.info(
+            "[PDIngress][chat] stream=%s replicas_seen=%d topology_cached=%d",
+            stream, len(snap.get("serve_replicas", {})),
+            len(snap.get("actor_topology", {})),
+        )
         # Safety-net topology refresh — push path covers the common case via
         # _on_replica_added; this catches any replica that the callback missed.
         asyncio.create_task(self._refresh_topology_async())
@@ -98,6 +104,9 @@ class PDIngress:
             return StreamingResponse(r, media_type="text/event-stream")
         result = await self.backend.options(stream=False).pd_chat.remote(payload)
         if isinstance(result, dict) and "error" in result:
+            log.warning(
+                "[PDIngress][chat_error] err=%s", result.get("error"),
+            )
             return JSONResponse(content=result, status_code=500)
         return JSONResponse(content=result)
 
@@ -134,6 +143,7 @@ class PDIngress:
         """
         if replica_id in self._topology_inflight:
             return
+        log.info("[PDIngress][replica_added] replica=%s — pulling topology", replica_id)
         self._topology_inflight.add(replica_id)
         try:
             await self._pull_topology_for(replica_id)
@@ -205,6 +215,15 @@ class PDIngress:
                     decodes=[_to_info(d, "decode") for d in decodes_raw],
                     same_host=bool(topo_dict.get("same_host", False)),
                 ),
+            )
+            # V12 / V13 / V14 — what the push or safety-net pull actually
+            # absorbed into _SHARED. one line per replica.
+            log.info(
+                "[PDIngress][topology_pull] replica=%s prefills=%d decodes=%d "
+                "same_host=%s global_rank=%s pg_id=%s",
+                self_reported, len(prefills_raw), len(decodes_raw),
+                topo_dict.get("same_host"), topo_dict.get("global_rank"),
+                topo_dict.get("pg_id"),
             )
             if self_reported != replica_id:
                 # Should only happen when `replica_id` died between the
