@@ -646,7 +646,19 @@ class PDCollocatedBackend:
     # ── protocol conversion: chat → prefill → decode ─────────────────
 
     async def pd_chat(self, payload: Dict[str, Any]):
-        """Round-robin pair selection + chat-completion protocol conversion."""
+        """Round-robin pair selection + chat-completion protocol conversion.
+
+        vLLM NIXL contract (vllm/distributed/kv_transfer/.../nixl/scheduler.py):
+          - Prefill request must carry kv_transfer_params={"do_remote_decode":
+            True}. Without this flag NIXL treats the request as a normal
+            completion, releases KV after prefill, and response.kv_transfer_params
+            stays None — no transfer happens.
+          - Prefill response then carries the producer-side blob:
+            {do_remote_prefill: True, remote_block_ids, remote_engine_id,
+             remote_request_id, remote_host, remote_port, tp_size,
+             remote_num_tokens}. Pass it through as-is to decode so NIXL on the
+             consumer side fetches the staged KV via cuda_ipc.
+        """
         prefill_idx, prefill_handle = self._pick_prefill()
         decode_idx, decode_handle = self._pick_decode()
 
@@ -654,6 +666,11 @@ class PDCollocatedBackend:
         prefill_payload.setdefault("request_id", uuid.uuid4().hex)
         prefill_payload["max_tokens"] = 1
         prefill_payload["stream"] = False
+        # Signal the prefill engine: stage KV for a remote decode. Drop any
+        # client-supplied kv_transfer_params on the prefill side — it would
+        # confuse the scheduler (clients send decode-side params for D-only
+        # endpoints, not P-only).
+        prefill_payload["kv_transfer_params"] = {"do_remote_decode": True}
         req_id = prefill_payload["request_id"]
 
         log.info(
