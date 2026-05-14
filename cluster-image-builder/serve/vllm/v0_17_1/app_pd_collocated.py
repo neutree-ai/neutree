@@ -225,34 +225,23 @@ def _build_actor_runtime_env(role_env: Dict[str, str],
     return runtime_env
 
 
-def _setup_actor_stderr_logging() -> None:
-    """Inner @ray.remote actors run in plain Ray worker processes that
-    don't get Ray Serve's logging config — `ray.serve` logger has no
-    handlers there and `log.info(...)` is silently dropped.
+def _summarize_kv_params(kv: Any, max_block_ids: int = 8) -> Any:
+    """Render kv_transfer_params for debug logs.
 
-    Idempotently install a stderr StreamHandler on the root logger so:
-      - actor-side log.info lands in
-        /tmp/ray/session_*/logs/worker-*-stderr-*.log
-      - is queryable via `ray logs actor <actor_id>`
-      - shows up in `ray.get_log()` / dashboard streaming
-
-    PDCollocatedBackend additionally re-emits per-actor identity at init
-    using its own (Serve-wired) logger so the same info also appears in
-    the deployment-replica log file — see `__init__` post-barrier loop.
+    Returns the dict as-is, except remote_block_ids is trimmed to the
+    first `max_block_ids` entries with a "+N more" suffix so a 4k-token
+    prefill doesn't blow up the log line. Non-dict input passes through
+    so callers can pipe None / errors verbatim.
     """
-    root = logging.getLogger()
-    for h in root.handlers:
-        if getattr(h, "_neutree_actor_setup", False):
-            return
-    handler = logging.StreamHandler()  # stderr by default
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    ))
-    handler._neutree_actor_setup = True
-    root.addHandler(handler)
-    if root.level == logging.WARNING or root.level == logging.NOTSET:
-        root.setLevel(logging.INFO)
+    if not isinstance(kv, dict):
+        return kv
+    out = dict(kv)
+    blocks = out.get("remote_block_ids")
+    if isinstance(blocks, list) and len(blocks) > max_block_ids:
+        out["remote_block_ids"] = (
+            list(blocks[:max_block_ids]) + [f"...+{len(blocks) - max_block_ids} more"]
+        )
+    return out
 
 
 def _actor_options_to_bundle(actor_options: Dict[str, Any]) -> Dict[str, float]:
@@ -321,7 +310,6 @@ class PrefillActor(Backend):
                  model_args: Dict[str, Any],
                  engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any]):
-        _setup_actor_stderr_logging()
         log.info(
             "[PrefillActor][init/pre-merge] user_engine_kwargs_keys=%s kv_extra=%s",
             sorted((engine_kwargs or {}).keys()), kv_extra,
@@ -381,7 +369,6 @@ class DecodeActor(Backend):
                  model_args: Dict[str, Any],
                  engine_kwargs: Dict[str, Any],
                  kv_extra: Dict[str, Any]):
-        _setup_actor_stderr_logging()
         log.info(
             "[DecodeActor][init/pre-merge] user_engine_kwargs_keys=%s kv_extra=%s",
             sorted((engine_kwargs or {}).keys()), kv_extra,
@@ -761,13 +748,17 @@ class PDCollocatedBackend:
             kv_params = prefill_resp.get("kv_transfer_params")
             kv_source = "dict"
 
-        # V6 validation: kv_transfer_params is a plain dict round-trippable
-        # via Ray, and prefill returned it before decode runs.
+        # V6 validation (debug-phase verbose): emit the full kv_transfer_params
+        # dict so the NIXL hand-off blob (remote_engine_id / remote_host /
+        # remote_port / remote_block_ids / tp_size / remote_num_tokens) can be
+        # eyeballed end-to-end. Trim to a repr() with a soft cap on
+        # remote_block_ids so the log line stays grep-friendly when prefill
+        # produced thousands of blocks.
         log.info(
-            "[pd_chat][prefill_done] req=%s resp_type=%s kv_source=%s kv_present=%s "
-            "kv_keys=%s",
-            req_id, type(prefill_resp).__name__, kv_source, kv_params is not None,
-            sorted(kv_params.keys()) if isinstance(kv_params, dict) else None,
+            "[pd_chat][prefill_done] req=%s resp_type=%s kv_source=%s "
+            "kv_present=%s kv_transfer_params=%s",
+            req_id, type(prefill_resp).__name__, kv_source,
+            kv_params is not None, _summarize_kv_params(kv_params),
         )
 
         decode_payload = dict(payload)
@@ -777,8 +768,10 @@ class PDCollocatedBackend:
 
         is_stream = bool(decode_payload.get("stream"))
         log.info(
-            "[pd_chat][decode_dispatch] req=%s kv_injected=%s stream=%s",
+            "[pd_chat][decode_dispatch] req=%s kv_injected=%s stream=%s "
+            "decode_kv_transfer_params=%s",
             req_id, kv_params is not None, is_stream,
+            _summarize_kv_params(decode_payload.get("kv_transfer_params")),
         )
         if is_stream:
             # Return a local async generator that transparently forwards
