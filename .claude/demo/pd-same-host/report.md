@@ -19,6 +19,7 @@ Each row maps to a Demo assumption (V1–V9) from
 | V11 | replica add/remove drives ObserverRouter callbacks → `_SHARED` updates | scale endpoint to N+1 (or kill a backend replica); poll `/v1/topology` until count changes; check ingress log for `[ObserverRouter] update_replicas` / `replica died:` | | |
 | V12 | actor_topology cache keys by canonical Ray Serve ReplicaID | `verify.sh` shows `all_replica_ids_keyed == true` (the dict keys equal the `replica_id` field inside each entry) | | |
 | V13 | each replica's actor identity (actor_id + node_id + gpu_ids) reaches `_SHARED.actor_topology` | `prefill_actor_ids` and `decode_actor_ids` arrays have N unique non-empty values; `prefill_gpu_ids` / `decode_gpu_ids` non-empty per entry; backend log shows `[PrefillActor] ready: actor_id=... node=... gpus=[...]` | | |
+| V14 | `_SHARED` callbacks (push) populate `actor_topology` before any client request | hit `/v1/topology` *before* sending any `/v1/chat/completions`; `actor_topology_count == num_replicas`; ingress log shows `_on_replica_added` invoked for each replica; absence of `[PDIngress] topology pull failed` errors | | |
 
 ## Decision matrix (feeds MVP planning)
 
@@ -34,6 +35,7 @@ Each row maps to a Demo assumption (V1–V9) from
 | V11 fails | replica death/scale not reflected → consider Ray Serve internal hook stability; potentially poll backend status from MVP CP side instead |
 | V12 fails | `serve.get_replica_context()` returns empty / unstable id across Ray versions → fall back to a stable id minted by PDCollocatedBackend.__init__ (e.g. uuid4) and emit it from both ObserverRouter (via a side channel) and get_actor_topology |
 | V13 fails | per-actor identity not exposed via runtime_context → switch to actor-side `ray.get_runtime_context()` probing OR have actors register themselves in a named topology actor |
+| V14 fails | push path doesn't pre-populate `actor_topology` → check whether `_SHARED.replace_replicas` actually fired from `ObserverRouter.update_replicas` in the same process (logs); fall back to safety-net lazy refresh; consider moving callback dispatch onto a dedicated event loop in MVP |
 
 Fill the rows above, link captured logs (`docker logs`, `ray serve status`,
 `nvidia-smi nvlink -s` output) under `Notes / artifact`, then attach the
