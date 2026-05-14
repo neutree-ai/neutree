@@ -23,24 +23,52 @@ ENGINE_VLLM_DIR_VERSION ?= $(shell echo $(ENGINE_VLLM_VERSION) | sed 's/-.*//' |
 
 # vLLM CUDA major used for the nixl-cuXX reconcile in Dockerfile.engine-vllm.
 #
-# vLLM upstream's default CUDA base:
-#   < 0.20.0   → CUDA 12.9 → nixl-cu12
-#   >= 0.20.0  → CUDA 13.0 → nixl-cu13
+# vLLM upstream packaging history:
+#   < 0.20.0           → CUDA 12.9 base → nixl-cu12 preinstalled
+#   0.20.0..0.20.x     → CUDA 13.0 base → nixl-cu13 preinstalled
+#   >= 0.21.0          → CUDA 13.0 base → nixl 1.1.0 META-WHEEL preinstalled.
+#                        The meta-wheel ships both cu12 and cu13 backends and
+#                        selects the right one at runtime from torch.version.cuda.
+#                        No reconcile needed → empty value, Dockerfile skips.
 #
-# Computed from ENGINE_VLLM_VERSION at make-time (strip 'v' prefix and any
-# patch suffix, then version-compare against 0.20.0). Overridable via env
-# for non-standard forks or upstream changes:
+# Computed from ENGINE_VLLM_VERSION at make parse-time. Overridable for
+# non-standard forks or upstream packaging changes:
 #     make docker-build-engine-vllm VLLM_CUDA_MAJOR=13
+#     make docker-build-engine-vllm VLLM_CUDA_MAJOR=        # explicit skip
 #
-# For ROCm builds (Dockerfile.engine-vllm-rocm path uses the same Dockerfile)
-# the reconcile is short-circuited by passing TARGET_CUDA="" — there's no
-# nixl-cu wheel for ROCm.
-VLLM_CUDA_MAJOR ?= $(shell ver=$$(echo $(ENGINE_VLLM_VERSION) | sed 's/^v//;s/-.*//'); \
-    lowest=$$(printf '%s\n%s\n' "$$ver" "0.20.0" | sort -V | head -1); \
-    if [ "$$lowest" = "$$ver" ] && [ "$$ver" != "0.20.0" ]; then echo 12; else echo 13; fi)
+# For ROCm (Dockerfile.engine-vllm path with rocm base) the reconcile is
+# short-circuited by passing TARGET_CUDA="" — no nixl-cuXX wheel for ROCm.
+VLLM_CUDA_MAJOR ?= $(shell \
+    ver=$$(echo $(ENGINE_VLLM_VERSION) | sed 's/^v//;s/-.*//'); \
+    if ! echo "$$ver" | grep -Eq '^[0-9]+\.[0-9]+'; then \
+        echo ""; \
+    else \
+        cmp_020=$$(printf '%s\n0.20.0\n' "$$ver" | sort -V | head -1); \
+        cmp_021=$$(printf '0.21.0\n%s\n' "$$ver" | sort -V | head -1); \
+        if [ "$$cmp_020" = "$$ver" ] && [ "$$ver" != "0.20.0" ]; then \
+            echo 12; \
+        elif [ "$$cmp_021" = "0.21.0" ]; then \
+            echo ""; \
+        else \
+            echo 13; \
+        fi; \
+    fi)
 
-# Optional pin appended after nixl-cu${VLLM_CUDA_MAJOR}, e.g. NIXL_VERSION='<0.10.0'.
-NIXL_VERSION ?=
+# Version specifier appended after nixl-cu${VLLM_CUDA_MAJOR}. Only consumed
+# when TARGET_CUDA is non-empty (i.e., vLLM < 0.21.0 — the reinstall path).
+# vLLM >= 0.21.0 ships nixl 1.1.0 meta-wheel, VLLM_CUDA_MAJOR resolves to
+# empty there, and the Dockerfile skips this RUN step entirely.
+#
+# Default '>=0.7.1,<=0.10.1' matches the nixl version range that vLLM
+# upstream officially supports for the pre-0.21.0 packaging — within this
+# window vLLM's NixlConnector + our app_pd_collocated.py KV-handshake
+# contract is validated. Bump the bounds only when upstream certifies a
+# new release for the pre-0.21 branch.
+#
+# Override examples:
+#     make docker-build-engine-vllm NIXL_VERSION='==0.10.0'  # pin exact
+#     make docker-build-engine-vllm NIXL_VERSION=''          # latest available
+NIXL_VERSION ?= >=0.7.1,<=0.10.1
 # Optional override of the upstream vLLM base image tag (defaults to
 # ENGINE_VLLM_VERSION). Use to point at non-standard upstream tags (e.g. dev
 # builds) without editing the Makefile; release workflows expose this via the
