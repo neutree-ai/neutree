@@ -31,14 +31,14 @@ func TestMonolithic_Compile_DefaultRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	if len(p.Replicas) != 2 {
-		t.Errorf("replicas: got %d want 2", len(p.Replicas))
+	if p.NumReplicas != 2 {
+		t.Errorf("NumReplicas: got %d want 2", p.NumReplicas)
 	}
-	if len(p.Replicas[0].Pools) != 1 || p.Replicas[0].Pools[0].Name != "engine" {
-		t.Errorf("expected single engine pool, got %+v", p.Replicas[0].Pools)
+	if p.Group == nil || len(p.Group.Roles) != 1 || p.Group.Roles[0].Name != "engine" {
+		t.Errorf("expected single engine role, got %+v", p.Group)
 	}
-	if p.KVConfig != nil {
-		t.Errorf("monolithic should have nil KVConfig, got %+v", p.KVConfig)
+	if p.Transfer != nil {
+		t.Errorf("monolithic should have nil Transfer, got %+v", p.Transfer)
 	}
 }
 
@@ -105,23 +105,33 @@ func TestPD_Compile_SameHost1P1D(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	if len(p.Replicas) != 2 {
-		t.Errorf("replicas: got %d want 2", len(p.Replicas))
+	if p.NumReplicas != 2 {
+		t.Errorf("NumReplicas: got %d want 2", p.NumReplicas)
 	}
-	r0 := p.Replicas[0]
-	if len(r0.Pools) != 2 {
-		t.Fatalf("pools: got %d want 2", len(r0.Pools))
+	if p.Group == nil {
+		t.Fatalf("expected Group, got nil")
 	}
-	for _, pool := range r0.Pools {
-		if pool.Placement == nil || pool.Placement.Strategy != plan.STRICT_PACK {
-			t.Errorf("pool %s placement not STRICT_PACK: %+v", pool.Name, pool.Placement)
-		}
+	if p.Group.Placement == nil || p.Group.Placement.Strategy != plan.STRICT_PACK {
+		t.Errorf("Group.Placement: got %+v want STRICT_PACK", p.Group.Placement)
 	}
-	if r0.Affinity[0].Type != "co-locate" {
-		t.Errorf("affinity.type: got %s want co-locate", r0.Affinity[0].Type)
+	if p.Group.Placement.Granularity != "node" {
+		t.Errorf("Granularity: got %q want node", p.Group.Placement.Granularity)
 	}
-	if p.KVConfig == nil || p.KVConfig.Transfer.Connector != "nixl" {
-		t.Errorf("kv transfer connector: got %+v want nixl", p.KVConfig)
+	if len(p.Group.Roles) != 2 {
+		t.Fatalf("roles: got %d want 2", len(p.Group.Roles))
+	}
+	if p.Group.Roles[0].Name != "prefill" || p.Group.Roles[1].Name != "decode" {
+		t.Errorf("role order: got [%s, %s] want [prefill, decode]",
+			p.Group.Roles[0].Name, p.Group.Roles[1].Name)
+	}
+	if p.Transfer == nil || p.Transfer.Connector != "nixl" {
+		t.Errorf("Transfer.Connector: got %+v want nixl", p.Transfer)
+	}
+	if p.Cache != nil {
+		t.Errorf("Cache should stay nil for Phase 1, got %+v", p.Cache)
+	}
+	if p.Ports != nil {
+		t.Errorf("Ports should be nil before portalloc, got %v", p.Ports)
 	}
 }
 
@@ -147,8 +157,8 @@ func TestPD_Compile_KVConnectorOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	if p.KVConfig.Transfer.Connector != "mooncake" {
-		t.Errorf("connector: got %s want mooncake", p.KVConfig.Transfer.Connector)
+	if p.Transfer.Connector != "mooncake" {
+		t.Errorf("connector: got %s want mooncake", p.Transfer.Connector)
 	}
 }
 

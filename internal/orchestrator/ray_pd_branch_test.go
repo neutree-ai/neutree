@@ -73,41 +73,65 @@ func TestSerializePlan_Shape(t *testing.T) {
 	cpu := "1"
 	gpu := "1"
 	p := &plan.DeploymentPlan{
-		KVConfig: &plan.KVConfig{
-			Transfer: &plan.KVTransferConfig{Connector: "nixl"},
-		},
-		Replicas: []*plan.Replica{
-			{
-				ID: "replica-0",
-				Pools: []*plan.Pool{
-					{
-						Name:      "prefill",
-						Instances: 1,
-						Resources: &v1.ResourceSpec{CPU: &cpu, GPU: &gpu},
-						Placement: &plan.PlacementSpec{Strategy: plan.STRICT_PACK, Granularity: "node"},
-					},
+		NumReplicas: 2,
+		Transfer:    &plan.KVTransferConfig{Connector: "nixl"},
+		Group: &plan.RoleGroup{
+			Placement: &plan.PlacementSpec{Strategy: plan.STRICT_PACK, Granularity: "node"},
+			Roles: []*plan.Role{
+				{
+					Name:      "prefill",
+					Instances: 1,
+					Resources: &v1.ResourceSpec{CPU: &cpu, GPU: &gpu},
 				},
-				Affinity: []*plan.CrossPoolAffinity{
-					{FromPool: "decode", ToPool: "prefill", Type: "co-locate", Granularity: "node"},
-				},
+				{Name: "decode", Instances: 1},
 			},
 		},
 	}
 	out := SerializePlan(p)
-	if out["kv_config"] == nil {
-		t.Errorf("expected kv_config")
+	if out["num_replicas"] != 2 {
+		t.Errorf("num_replicas: got %v want 2", out["num_replicas"])
 	}
-	replicas := out["replicas"].([]map[string]interface{})
-	if len(replicas) != 1 || replicas[0]["id"] != "replica-0" {
-		t.Errorf("replicas serialized wrong: %+v", replicas)
-	}
-	pools := replicas[0]["pools"].([]map[string]interface{})
-	if len(pools) != 1 || pools[0]["name"] != "prefill" {
-		t.Errorf("pools serialized wrong: %+v", pools)
-	}
-	plc := pools[0]["placement"].(map[string]interface{})
+	group := out["group"].(map[string]interface{})
+	plc := group["placement"].(map[string]interface{})
 	if plc["strategy"] != "STRICT_PACK" {
-		t.Errorf("placement strategy: %+v", plc)
+		t.Errorf("placement.strategy: got %v want STRICT_PACK", plc["strategy"])
+	}
+	roles := group["roles"].([]map[string]interface{})
+	if len(roles) != 2 || roles[0]["name"] != "prefill" {
+		t.Errorf("roles: %+v", roles)
+	}
+	if _, ok := out["cache"]; ok {
+		t.Errorf("cache should be omitted when nil, got %v", out["cache"])
+	}
+	if _, ok := out["ports"]; ok {
+		t.Errorf("ports should be omitted when nil, got %v", out["ports"])
+	}
+}
+
+func TestSerializePlan_PortsPassthrough(t *testing.T) {
+	// portalloc fills Ports with opaque []int per slot; serializer passes through.
+	p := &plan.DeploymentPlan{
+		NumReplicas: 1,
+		Group: &plan.RoleGroup{
+			Roles: []*plan.Role{{Name: "prefill", Instances: 1}, {Name: "decode", Instances: 1}},
+		},
+		Ports: []plan.ReplicaPortMap{
+			{
+				"prefill": {{20000, 20001}},
+				"decode":  {{20003, 20004}},
+			},
+		},
+	}
+	out := SerializePlan(p)
+	ports := out["ports"].([]map[string][][]int)
+	if len(ports) != 1 {
+		t.Fatalf("ports len: got %d want 1", len(ports))
+	}
+	if ports[0]["prefill"][0][1] != 20001 {
+		t.Errorf("prefill rank-0 pos-1: got %v", ports[0]["prefill"][0])
+	}
+	if ports[0]["decode"][0][0] != 20003 {
+		t.Errorf("decode rank-0 pos-0: got %v", ports[0]["decode"][0])
 	}
 }
 
@@ -125,7 +149,6 @@ func TestApplyPDBranch_RewritesImportAndInjectsPlan(t *testing.T) {
 			},
 		},
 	}
-	// EndpointToApplication-style partial app the helper receives.
 	app := stubRayApp("serve.vllm.v0_17_1.app:app_builder")
 
 	if err := applyPDBranch(ep, &app); err != nil {
@@ -134,7 +157,11 @@ func TestApplyPDBranch_RewritesImportAndInjectsPlan(t *testing.T) {
 	if app.ImportPath != "serve.vllm.v0_17_1.app_pd_collocated:app_builder" {
 		t.Errorf("import_path not rewritten: %q", app.ImportPath)
 	}
-	if app.Args["plan"] == nil {
-		t.Errorf("plan not injected into Args")
+	planArgs, ok := app.Args["plan"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("plan not injected as map, got %T", app.Args["plan"])
+	}
+	if planArgs["num_replicas"] != 1 {
+		t.Errorf("plan.num_replicas: got %v want 1", planArgs["num_replicas"])
 	}
 }

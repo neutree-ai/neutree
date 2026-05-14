@@ -8,7 +8,8 @@ import (
 )
 
 // Monolithic is the single-role strategy. It maps the user-facing endpoint to
-// N independent replicas, each with one Pool ("engine").
+// NumReplicas independent routing-domain copies of one Group containing a
+// single "engine" Role.
 type Monolithic struct{}
 
 func init() { Register(&Monolithic{}) }
@@ -37,9 +38,9 @@ func (s *Monolithic) Compile(ep *v1.Endpoint) (*plan.DeploymentPlan, error) {
 		numReplicas = *ep.Spec.Replicas.Num
 	}
 
-	// Single Pool per replica. Resources / engine_args inherit from top-level
+	// Single Role per group. Resources / engine_args inherit from top-level
 	// EndpointSpec when no explicit role is set (legacy compatibility).
-	role := v1.EndpointRoleSpec{
+	roleSpec := v1.EndpointRoleSpec{
 		Name:              "engine",
 		Resources:         ep.Spec.Resources,
 		Variables:         ep.Spec.Variables,
@@ -47,15 +48,15 @@ func (s *Monolithic) Compile(ep *v1.Endpoint) (*plan.DeploymentPlan, error) {
 		DeploymentOptions: ep.Spec.DeploymentOptions,
 	}
 	if len(ep.Spec.Roles) == 1 {
-		role = ep.Spec.Roles[0]
+		roleSpec = ep.Spec.Roles[0]
 	}
 
 	return &plan.DeploymentPlan{
-		Replicas: plan.MakeReplicas(numReplicas, func(i int) *plan.Replica {
-			return &plan.Replica{
-				ID:    fmt.Sprintf("replica-%d", i),
-				Pools: []*plan.Pool{plan.PoolFromRole(role, 1, nil, nil)},
-			}
-		}),
+		NumReplicas: numReplicas,
+		Group: &plan.RoleGroup{
+			// Monolithic: no inter-role placement (single role auto-co-locates).
+			Roles: []*plan.Role{plan.RoleFromSpec(roleSpec, 1, nil)},
+		},
+		// Transfer / Cache / Ports stay nil for monolithic.
 	}, nil
 }

@@ -56,79 +56,78 @@ func SerializePlan(p *plan.DeploymentPlan) map[string]interface{} {
 		return nil
 	}
 	out := map[string]interface{}{
-		"replicas": serializeReplicas(p.Replicas),
+		"num_replicas": p.NumReplicas,
 	}
-	if p.KVConfig != nil {
-		out["kv_config"] = serializeKVConfig(p.KVConfig)
+	if p.Group != nil {
+		out["group"] = serializeGroup(p.Group)
+	}
+	if p.Transfer != nil {
+		out["transfer"] = serializeKVTransfer(p.Transfer)
+	}
+	if p.Cache != nil {
+		out["cache"] = serializeKVCache(p.Cache)
+	}
+	if p.Ports != nil {
+		out["ports"] = serializePorts(p.Ports)
 	}
 	return out
 }
 
-func serializeReplicas(rs []*plan.Replica) []map[string]interface{} {
+func serializeGroup(g *plan.RoleGroup) map[string]interface{} {
+	out := map[string]interface{}{
+		"roles": serializeRoles(g.Roles),
+	}
+	if g.Placement != nil {
+		out["placement"] = map[string]interface{}{
+			"strategy":    placementStrategyName(g.Placement.Strategy),
+			"granularity": g.Placement.Granularity,
+		}
+	}
+	return out
+}
+
+func serializeRoles(rs []*plan.Role) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(rs))
 	for _, r := range rs {
-		out = append(out, map[string]interface{}{
-			"id":       r.ID,
-			"pools":    serializePools(r.Pools),
-			"affinity": serializeAffinity(r.Affinity),
-		})
-	}
-	return out
-}
-
-func serializePools(ps []*plan.Pool) []map[string]interface{} {
-	out := make([]map[string]interface{}, 0, len(ps))
-	for _, p := range ps {
 		entry := map[string]interface{}{
-			"name":               p.Name,
-			"instances":          p.Instances,
-			"variables":          p.Variables,
-			"env":                p.Env,
-			"deployment_options": p.DeploymentOptions,
+			"name":               r.Name,
+			"instances":          r.Instances,
+			"variables":          r.Variables,
+			"env":                r.Env,
+			"deployment_options": r.DeploymentOptions,
 		}
-		if p.Resources != nil {
-			entry["resources"] = serializeResources(p.Resources)
-		}
-		if p.Placement != nil {
-			entry["placement"] = map[string]interface{}{
-				"strategy":    placementStrategyName(p.Placement.Strategy),
-				"granularity": p.Placement.Granularity,
-			}
+		if r.Resources != nil {
+			entry["resources"] = serializeResources(r.Resources)
 		}
 		out = append(out, entry)
 	}
 	return out
 }
 
-func serializeAffinity(as []*plan.CrossPoolAffinity) []map[string]interface{} {
-	if len(as) == 0 {
-		return nil
+func serializeKVTransfer(kt *plan.KVTransferConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"connector": kt.Connector,
+		"extra":     kt.Extra,
 	}
-	out := make([]map[string]interface{}, 0, len(as))
-	for _, a := range as {
-		out = append(out, map[string]interface{}{
-			"from_pool":   a.FromPool,
-			"to_pool":     a.ToPool,
-			"type":        a.Type,
-			"granularity": a.Granularity,
-		})
-	}
-	return out
 }
 
-func serializeKVConfig(kv *plan.KVConfig) map[string]interface{} {
-	out := map[string]interface{}{}
-	if kv.Transfer != nil {
-		out["transfer"] = map[string]interface{}{
-			"connector": kv.Transfer.Connector,
-			"extra":     kv.Transfer.Extra,
-		}
+func serializeKVCache(kc *plan.KVCacheConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"connector": kc.Connector,
+		"extra":     kc.Extra,
 	}
-	if kv.Cache != nil {
-		out["cache"] = map[string]interface{}{
-			"connector": kv.Cache.Connector,
-			"extra":     kv.Cache.Extra,
+}
+
+// serializePorts passes through the (replica × role × rank × []int) shape
+// verbatim. Per-position meaning is owned by the engine-side app.py.
+func serializePorts(ports []plan.ReplicaPortMap) []map[string][][]int {
+	out := make([]map[string][][]int, 0, len(ports))
+	for _, replicaMap := range ports {
+		entry := make(map[string][][]int, len(replicaMap))
+		for role, perRank := range replicaMap {
+			entry[role] = perRank
 		}
+		out = append(out, entry)
 	}
 	return out
 }
@@ -172,7 +171,7 @@ func placementStrategyName(s plan.PlacementStrategy) string {
 // Phase 0 Demo:
 //   - Override import_path to app_pd_collocated:app_builder
 //   - Compile plan via strategy.Get("pd")
-//   - Inject `plan` and `kv_config` into Args
+//   - Inject `plan` into Args (which carries num_replicas + group + transfer + nil ports/cache)
 //   - Keep existing `model`, `deployment_options`, `backend_container` so the
 //     Python actor can reuse the model download + runtime_env code path
 func applyPDBranch(ep *v1.Endpoint, app *dashboard.RayServeApplication) error {

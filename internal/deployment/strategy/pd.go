@@ -8,8 +8,7 @@ import (
 )
 
 // PD is the prefill / decode disaggregation strategy. Phase 0 (Demo) only
-// implements placement.roles == "same-host" with NIXL + cuda_ipc transport;
-// other placement variants and the full PlacementProfile table land in MVP.
+// implements placement.roles == "same-host" with NIXL + cuda_ipc transport.
 type PD struct{}
 
 func init() { Register(&PD{}) }
@@ -42,8 +41,8 @@ func (s *PD) Validate(ep *v1.Endpoint) error {
 }
 
 // Compile compiles a same-host PD endpoint into a DeploymentPlan with one
-// prefill Pool + one decode Pool per replica, co-located via STRICT_PACK +
-// CrossPoolAffinity{co-locate,node}. KVConfig.Transfer defaults to NIXL.
+// RoleGroup containing prefill + decode Roles co-located via STRICT_PACK.
+// Transfer defaults to NIXL.
 func (s *PD) Compile(ep *v1.Endpoint) (*plan.DeploymentPlan, error) {
 	if err := s.Validate(ep); err != nil {
 		return nil, err
@@ -57,30 +56,28 @@ func (s *PD) Compile(ep *v1.Endpoint) (*plan.DeploymentPlan, error) {
 	pfPerReplica := roleReplicas(pf)
 	dePerReplica := roleReplicas(de)
 
-	pool := &plan.PlacementSpec{Strategy: plan.STRICT_PACK, Granularity: "node"}
 	decodeDerived := map[string]interface{}{
 		"scheduler": map[string]interface{}{"type": "chwbl", "key": "prefix"},
 	}
 
 	return &plan.DeploymentPlan{
-		KVConfig: &plan.KVConfig{
-			Transfer: &plan.KVTransferConfig{
-				Connector: getKVConnector(ep, "nixl"),
-				Extra:     getKVExtra(ep),
+		NumReplicas: numReplicas,
+		Group: &plan.RoleGroup{
+			Placement: &plan.PlacementSpec{
+				Strategy:    plan.STRICT_PACK,
+				Granularity: "node",
+			},
+			Roles: []*plan.Role{
+				plan.RoleFromSpec(*pf, pfPerReplica, nil),
+				plan.RoleFromSpec(*de, dePerReplica, decodeDerived),
 			},
 		},
-		Replicas: plan.MakeReplicas(numReplicas, func(i int) *plan.Replica {
-			return &plan.Replica{
-				ID: fmt.Sprintf("replica-%d", i),
-				Pools: []*plan.Pool{
-					plan.PoolFromRole(*pf, pfPerReplica, pool, nil),
-					plan.PoolFromRole(*de, dePerReplica, pool, decodeDerived),
-				},
-				Affinity: []*plan.CrossPoolAffinity{
-					{FromPool: "decode", ToPool: "prefill", Type: "co-locate", Granularity: "node"},
-				},
-			}
-		}),
+		Transfer: &plan.KVTransferConfig{
+			Connector: getKVConnector(ep, "nixl"),
+			Extra:     getKVExtra(ep),
+		},
+		// Cache stays nil (Tier 1 LMCache handled via engine_args passthrough).
+		// Ports stays nil — portalloc.AllocateForPlan fills in MVP.
 	}, nil
 }
 
@@ -124,8 +121,6 @@ func contains(ss []string, want string) bool {
 	return false
 }
 
-// getKVConnector returns spec.deployment_options.kv.transfer.connector when set,
-// otherwise the supplied default.
 func getKVConnector(ep *v1.Endpoint, def string) string {
 	kv := getKVMap(ep)
 	if kv == nil {
@@ -141,7 +136,6 @@ func getKVConnector(ep *v1.Endpoint, def string) string {
 	return def
 }
 
-// getKVExtra returns spec.deployment_options.kv.transfer.extra (may be nil).
 func getKVExtra(ep *v1.Endpoint) map[string]interface{} {
 	kv := getKVMap(ep)
 	if kv == nil {
