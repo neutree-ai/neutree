@@ -161,7 +161,7 @@ func TestApplyPDBranch_RewritesImportAndInjectsPlan(t *testing.T) {
 	allocator := portalloc.New(portalloc.NewMemoryStorage())
 	app := stubRayApp("serve.vllm.v0_17_1.app:app_builder")
 
-	if err := applyPDBranch(context.Background(), ep, cluster, allocator, &app); err != nil {
+	if err := applyPDBranch(context.Background(), ep, cluster, nil, allocator, &app); err != nil {
 		t.Fatalf("applyPDBranch: %v", err)
 	}
 	if app.ImportPath != "serve.vllm.v0_17_1.app_pd_collocated:app_builder" {
@@ -202,7 +202,7 @@ func TestApplyPDBranch_RequiresAllocator(t *testing.T) {
 	cluster := &v1.Cluster{ID: 1, Spec: &v1.ClusterSpec{}}
 	app := stubRayApp("serve.vllm.v0_17_1.app:app_builder")
 
-	err := applyPDBranch(context.Background(), ep, cluster, nil, &app)
+	err := applyPDBranch(context.Background(), ep, cluster, nil, nil, &app)
 	if err == nil {
 		t.Fatalf("expected error when allocator is nil")
 	}

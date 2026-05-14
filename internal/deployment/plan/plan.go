@@ -39,9 +39,24 @@ type RoleGroup struct {
 // {prefill, decode}; Phase 2 monolithic uses {engine}; Phase 3 TP+PP uses
 // {stage-0, stage-1, …}; Phase 4 wide-EP uses {ep-leader, ep-worker}.
 type Role struct {
-	Name              string
-	Instances         int
-	Resources         *v1.ResourceSpec
+	Name      string
+	Instances int
+
+	// Resources is the user's original declaration (cpu/gpu/memory strings,
+	// accelerator type/product/custom-resource map). Source of truth for
+	// audit / validation / serialization-to-status. Strategy.Compile copies
+	// this verbatim from EndpointSpec.Roles[i].Resources.
+	Resources *v1.ResourceSpec
+
+	// RayResource is the Go-side acceleratorMgr conversion product: the Ray
+	// actor_options shape (num_cpus/num_gpus/memory bytes + custom-resource
+	// map). Source of truth for runtime — the renderer serializes this to
+	// engine-side app.py so accelerator-plugin variation (NVIDIA / AMD /
+	// future Ascend) stays single-sourced in Go rather than being
+	// re-implemented per engine. Populated by the orchestrator after
+	// Compile, not by Compile itself.
+	RayResource *v1.RayResourceSpec
+
 	Variables         map[string]interface{}
 	Env               map[string]string
 	DeploymentOptions map[string]interface{}

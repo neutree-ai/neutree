@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/deployment/plan"
 	"github.com/neutree-ai/neutree/internal/deployment/strategy"
 	"github.com/neutree-ai/neutree/internal/portalloc"
@@ -99,8 +100,11 @@ func serializeRoles(rs []*plan.Role) []map[string]interface{} {
 			"env":                r.Env,
 			"deployment_options": r.DeploymentOptions,
 		}
-		if r.Resources != nil {
-			entry["resources"] = serializeResources(r.Resources)
+		// Engine-side consumes the Ray-shape (num_cpus/num_gpus/memory bytes
+		// + custom-resource map). raw ResourceSpec stays CP-internal for
+		// audit; do not leak it over the wire.
+		if r.RayResource != nil {
+			entry["resources"] = serializeRayResource(r.RayResource)
 		}
 		out = append(out, entry)
 	}
@@ -135,19 +139,22 @@ func serializePorts(ports []plan.ReplicaPortMap) []map[string][][]int {
 	return out
 }
 
-func serializeResources(r *v1.ResourceSpec) map[string]interface{} {
+// serializeRayResource flattens *v1.RayResourceSpec into the dict shape the
+// Python app_builder feeds straight into `ray_actor_options`. Only emits keys
+// that are set so the engine side can keep `**opts` semantics.
+func serializeRayResource(r *v1.RayResourceSpec) map[string]interface{} {
 	out := map[string]interface{}{}
-	if r.CPU != nil {
-		out["cpu"] = *r.CPU
+	if r.NumCPUs != 0 {
+		out["num_cpus"] = r.NumCPUs
 	}
-	if r.GPU != nil {
-		out["gpu"] = *r.GPU
+	if r.NumGPUs != 0 {
+		out["num_gpus"] = r.NumGPUs
 	}
-	if r.Memory != nil {
-		out["memory"] = *r.Memory
+	if r.Memory != 0 {
+		out["memory"] = r.Memory
 	}
-	if r.Accelerator != nil {
-		out["accelerator"] = r.Accelerator
+	if len(r.Resources) > 0 {
+		out["resources"] = r.Resources
 	}
 	return out
 }
@@ -174,12 +181,17 @@ func placementStrategyName(s plan.PlacementStrategy) string {
 // Full path (Demo + MVP — no fallback):
 //  1. Override import_path to app_pd_collocated:app_builder
 //  2. strategy.Compile → plan (NumReplicas + Group + Transfer)
-//  3. portAllocator.AllocateForPlan → fills plan.Ports deterministically
+//  3. Convert each role's *v1.ResourceSpec → *v1.RayResourceSpec via
+//     acceleratorMgr (plugin-driven: NVIDIA / AMD / future Ascend). Writes
+//     to plan.Role.RayResource so the engine side consumes the same shape
+//     monolithic uses, without re-implementing the plugin matrix in Python.
+//  4. portAllocator.AllocateForPlan → fills plan.Ports deterministically
 //     (idempotent on retry; same endpoint → same ports)
-//  4. SerializePlan + inject into Args so PDIngress / inner actors get
+//  5. SerializePlan + inject into Args so PDIngress / inner actors get
 //     both the topology and the per-actor port env on startup
 func applyPDBranch(ctx context.Context, ep *v1.Endpoint, cluster *v1.Cluster,
-	allocator portalloc.Allocator, app *dashboard.RayServeApplication) error {
+	acceleratorMgr accelerator.Manager, allocator portalloc.Allocator,
+	app *dashboard.RayServeApplication) error {
 	pdImport, err := pdImportPath(ep)
 	if err != nil {
 		return errors.Wrap(err, "PD import path resolution failed")
@@ -193,6 +205,23 @@ func applyPDBranch(ctx context.Context, ep *v1.Endpoint, cluster *v1.Cluster,
 	p, err := s.Compile(ep)
 	if err != nil {
 		return errors.Wrap(err, "pd strategy compile failed")
+	}
+
+	// Per-role accelerator-aware resource translation. acceleratorMgr is
+	// optional only to keep test wiring trivial; production createOrUpdate
+	// always passes one. Plugin-driven conversion (NumGPUs/custom-resource
+	// keys per accelerator) stays single-sourced in Go.
+	if acceleratorMgr != nil && p.Group != nil {
+		for i, role := range p.Group.Roles {
+			if role == nil || role.Resources == nil {
+				continue
+			}
+			rr, err := convertToRay(acceleratorMgr, role.Resources)
+			if err != nil {
+				return errors.Wrapf(err, "convert role %q resources to Ray shape", role.Name)
+			}
+			p.Group.Roles[i].RayResource = rr
+		}
 	}
 
 	// Port allocation is mandatory for PD same-host (each NIXL side_channel

@@ -244,7 +244,7 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 	// configured — the Demo path is one-and-the-same with MVP, no defaults.
 	if isPDStrategy(ctx.Endpoint) {
 		if err := applyPDBranch(context.Background(), ctx.Endpoint, ctx.Cluster,
-			o.portAllocator, &newApp); err != nil {
+			o.acceleratorMgr, o.portAllocator, &newApp); err != nil {
 			return errors.Wrapf(err, "failed to apply PD branch for endpoint %s",
 				ctx.Endpoint.Metadata.WorkspaceName())
 		}
@@ -617,21 +617,30 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		}
 	}
 
-	rayResource, err := convertToRay(acceleratorMgr, endpoint.Spec.Resources)
-	if err != nil {
-		klog.Errorf("Failed to convert endpoint %s resources to Ray format: %v", endpoint.Metadata.WorkspaceName(), err)
-		return dashboard.RayServeApplication{}, err
-	}
+	// rayResource represents one Backend actor's footprint. Monolithic endpoints
+	// have one implicit Backend role under spec.resources; PD endpoints have
+	// multiple roles under spec.roles[*] and per-role rayResource is built by
+	// the PD branch (applyPDBranch) into plan.Group.Roles[*].Resources. In the
+	// PD case there is no single top-level Backend deployment, so skip the
+	// top-level backend config here.
+	var rayResource *v1.RayResourceSpec
+	if endpoint.Spec.Resources != nil {
+		rayResource, err = convertToRay(acceleratorMgr, endpoint.Spec.Resources)
+		if err != nil {
+			klog.Errorf("Failed to convert endpoint %s resources to Ray format: %v", endpoint.Metadata.WorkspaceName(), err)
+			return dashboard.RayServeApplication{}, err
+		}
 
-	backendConfig := map[string]interface{}{
-		"num_replicas": endpoint.Spec.Replicas.Num,
-		"num_cpus":     rayResource.NumCPUs,
-		"memory":       rayResource.Memory,
-		"num_gpus":     rayResource.NumGPUs,
-		"resources":    rayResource.Resources,
-	}
+		backendConfig := map[string]interface{}{
+			"num_replicas": endpoint.Spec.Replicas.Num,
+			"num_cpus":     rayResource.NumCPUs,
+			"memory":       rayResource.Memory,
+			"num_gpus":     rayResource.NumGPUs,
+			"resources":    rayResource.Resources,
+		}
 
-	deploymentOptions["backend"] = backendConfig
+		deploymentOptions["backend"] = backendConfig
+	}
 
 	deploymentOptions["controller"] = map[string]interface{}{
 		"num_replicas": 1,
@@ -709,7 +718,11 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
-	setDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
+	// PD endpoints autoset TP per-role inside app_pd_collocated.py from the plan;
+	// the top-level autoset only applies when spec.resources is present.
+	if rayResource != nil {
+		setDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
+	}
 
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
@@ -838,14 +851,10 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 		return nil, nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
 	}
 
-	// Get accelerator type from endpoint resources (consistent with K8s orchestrator).
-	// Default to "cpu" when no accelerator type is specified.
-	acceleratorType := ""
-
-	if endpoint.Spec.Resources != nil {
-		acceleratorType = endpoint.Spec.Resources.GetAcceleratorType()
-	}
-
+	// Get accelerator type strategy-aware: monolithic reads spec.Resources;
+	// PD same-host has spec.Resources == nil so we fall back to spec.Roles[*].
+	// Default to "cpu" when neither path yields a type.
+	acceleratorType := deriveAcceleratorType(endpoint)
 	if acceleratorType == "" {
 		acceleratorType = acceleratorTypeCPU
 	}

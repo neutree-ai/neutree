@@ -195,20 +195,24 @@ def _build_actor_runtime_env(role_env: Dict[str, str],
 
 
 def _role_resources_to_ray(role: Dict[str, Any]) -> Dict[str, Any]:
-    """plan.Role.Resources → ray_actor_options."""
+    """plan.Role.RayResource → ray_actor_options.
+
+    The CP runs the accelerator-plugin matrix (NVIDIA / AMD / future Ascend)
+    and serializes the converted Ray-shape under plan.group.roles[*].resources:
+    {num_cpus, num_gpus, memory(bytes), resources(map[str, float])}. This
+    helper is a direct passthrough — keeping plugin variation single-sourced
+    in Go avoids forking it across every engine's app.py.
+    """
     res = role.get("resources") or {}
-    opts: Dict[str, Any] = {
-        "num_cpus": float(res.get("cpu", 1)),
-        "num_gpus": float(res.get("gpu", 1)),
-    }
-    mem = res.get("memory")
-    if mem:
-        try:
-            opts["memory"] = int(float(mem) * (1024 ** 3))
-        except (TypeError, ValueError):
-            log.warning(f"memory value {mem!r} not parseable; skipping")
-    if res.get("accelerator"):
-        opts["resources"] = res["accelerator"]
+    opts: Dict[str, Any] = {}
+    if "num_cpus" in res:
+        opts["num_cpus"] = float(res["num_cpus"])
+    if "num_gpus" in res:
+        opts["num_gpus"] = float(res["num_gpus"])
+    if "memory" in res:
+        opts["memory"] = int(res["memory"])
+    if res.get("resources"):
+        opts["resources"] = dict(res["resources"])
     return opts
 
 
