@@ -37,6 +37,9 @@ func TestMonolithic_Compile_DefaultRole(t *testing.T) {
 	if p.Group == nil || len(p.Group.Roles) != 1 || p.Group.Roles[0].Name != "engine" {
 		t.Errorf("expected single engine role, got %+v", p.Group)
 	}
+	if got := p.Group.Roles[0].PortsPerRank; got != 1 {
+		t.Errorf("monolithic engine PortsPerRank: got %d want 1 (HTTP)", got)
+	}
 	if p.Transfer != nil {
 		t.Errorf("monolithic should have nil Transfer, got %+v", p.Transfer)
 	}
@@ -123,6 +126,13 @@ func TestPD_Compile_SameHost1P1D(t *testing.T) {
 	if p.Group.Roles[0].Name != "prefill" || p.Group.Roles[1].Name != "decode" {
 		t.Errorf("role order: got [%s, %s] want [prefill, decode]",
 			p.Group.Roles[0].Name, p.Group.Roles[1].Name)
+	}
+	// Ray PD: prefill / decode each need 1 port (NIXL side_channel only, no HTTP).
+	for _, role := range p.Group.Roles {
+		if role.PortsPerRank != 1 {
+			t.Errorf("Role %q PortsPerRank: got %d want 1 (NIXL side_channel only)",
+				role.Name, role.PortsPerRank)
+		}
 	}
 	if p.Transfer == nil || p.Transfer.Connector != "nixl" {
 		t.Errorf("Transfer.Connector: got %+v want nixl", p.Transfer)

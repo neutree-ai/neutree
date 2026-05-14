@@ -51,11 +51,15 @@ func (s *Monolithic) Compile(ep *v1.Endpoint) (*plan.DeploymentPlan, error) {
 		roleSpec = ep.Spec.Roles[0]
 	}
 
+	// Single HTTP engine port per actor.
+	engineRole := plan.RoleFromSpec(roleSpec, 1, nil)
+	engineRole.PortsPerRank = 1
+
 	return &plan.DeploymentPlan{
 		NumReplicas: numReplicas,
 		Group: &plan.RoleGroup{
 			// Monolithic: no inter-role placement (single role auto-co-locates).
-			Roles: []*plan.Role{plan.RoleFromSpec(roleSpec, 1, nil)},
+			Roles: []*plan.Role{engineRole},
 		},
 		// Transfer / Cache / Ports stay nil for monolithic.
 	}, nil

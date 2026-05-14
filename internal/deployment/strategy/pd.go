@@ -60,6 +60,24 @@ func (s *PD) Compile(ep *v1.Endpoint) (*plan.DeploymentPlan, error) {
 		"scheduler": map[string]interface{}{"type": "chwbl", "key": "prefix"},
 	}
 
+	// Port requirements per role for the (PD same-host × vLLM × Ray) combo.
+	//
+	// Ray actors are called via actor-handle RPC — there is no HTTP engine
+	// server, so the only port needed per actor is the NIXL side_channel
+	// for the cuda_ipc handshake between paired prefill / decode actors:
+	//   pos-0 = VLLM_NIXL_SIDE_CHANNEL_PORT
+	//
+	// K8s Form A (Phase 2+) renders a separate HTTP engine port for each
+	// container; that's a K8s-renderer concern handled at template time,
+	// not in IR.
+	//
+	// SGLang variant adds bootstrap port for prefill in a future strategy
+	// branch.
+	prefillRole := plan.RoleFromSpec(*pf, pfPerReplica, nil)
+	prefillRole.PortsPerRank = 1
+	decodeRole := plan.RoleFromSpec(*de, dePerReplica, decodeDerived)
+	decodeRole.PortsPerRank = 1
+
 	return &plan.DeploymentPlan{
 		NumReplicas: numReplicas,
 		Group: &plan.RoleGroup{
@@ -67,10 +85,7 @@ func (s *PD) Compile(ep *v1.Endpoint) (*plan.DeploymentPlan, error) {
 				Strategy:    plan.STRICT_PACK,
 				Granularity: "node",
 			},
-			Roles: []*plan.Role{
-				plan.RoleFromSpec(*pf, pfPerReplica, nil),
-				plan.RoleFromSpec(*de, dePerReplica, decodeDerived),
-			},
+			Roles: []*plan.Role{prefillRole, decodeRole},
 		},
 		Transfer: &plan.KVTransferConfig{
 			Connector: getKVConnector(ep, "nixl"),

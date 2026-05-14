@@ -72,6 +72,12 @@ RUN --mount=type=bind,src=requirements,target=requirements \
 # actors collocated on the same host. Pin nixl<0.10.0 per Phase 1 same-host
 # KV connector deep-dive (project memory: project-pd-same-host-phase1, section
 # "same-host KV connector deep dive").
+#
+# The vllm-openai base image ships nixl-cu13 (NIXL built against CUDA 13)
+# preinstalled. Uninstall it first — the CUDA-13 build conflicts with our
+# UCX cuda_ipc stack on CUDA-12 runtime hosts and leaves stale .so files in
+# site-packages that win over the version pin if both are present.
+RUN uv pip uninstall --system nixl-cu13 || true
 RUN uv pip install --system "nixl<0.10.0"
 
 # UCX_TLS allowlist: collapse to same-host transports + cuda_copy + cuda_ipc.

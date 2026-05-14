@@ -68,19 +68,23 @@ log = logging.getLogger("pd_collocated")
 
 def _vllm_port_env(plan: Dict[str, Any], replica_idx: int,
                    role_name: str, rank: int) -> Dict[str, str]:
-    """vLLM-side positional port convention.
+    """vLLM × Ray PD positional port convention.
 
     IR carries an opaque ordered []int per (replica × role × rank) slot:
-        plan["ports"][replica_idx][role_name][rank] = [p0, p1, ...]
+        plan["ports"][replica_idx][role_name][rank] = [p0, ...]
 
-    This helper applies the vLLM convention — pos-0 → VLLM_PORT (HTTP engine),
-    pos-1 → VLLM_NIXL_SIDE_CHANNEL_PORT — and returns the env-var dict to
-    inject into the actor's runtime_env. Returns {} when no allocation
-    exists for this slot (Demo NumReplicas=1, portalloc didn't populate).
+    Ray actors talk via actor-handle RPC — no HTTP engine port is needed.
+    The single allocated port per actor (PortsPerRank=1) is the NIXL
+    side_channel for the cuda_ipc handshake:
+        pos-0 = VLLM_NIXL_SIDE_CHANNEL_PORT
+
+    K8s Form A (future Phase 2) renders an additional HTTP engine port at
+    template time using a different positional convention — that's a
+    K8s-renderer concern, not this helper's.
 
     SGLang would have its own helper here translating pos-0/1/2 to its own
-    flag names. Naming positional convention per engine is exactly the
-    engine-side translation boundary.
+    flag names. Per-engine positional convention is exactly the engine-side
+    translation boundary.
     """
     if not plan or "ports" not in plan or plan["ports"] is None:
         return {}
@@ -94,10 +98,8 @@ def _vllm_port_env(plan: Dict[str, Any], replica_idx: int,
         return {}
     env: Dict[str, str] = {}
     if len(slot) >= 1:
-        env["VLLM_PORT"] = str(slot[0])
-    if len(slot) >= 2:
         env["VLLM_NIXL_SIDE_CHANNEL_HOST"] = "0.0.0.0"
-        env["VLLM_NIXL_SIDE_CHANNEL_PORT"] = str(slot[1])
+        env["VLLM_NIXL_SIDE_CHANNEL_PORT"] = str(slot[0])
     return env
 
 

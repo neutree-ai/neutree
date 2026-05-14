@@ -45,6 +45,20 @@ type Role struct {
 	Variables         map[string]interface{}
 	Env               map[string]string
 	DeploymentOptions map[string]interface{}
+	// PortsPerRank tells portalloc how many ports to allocate per
+	// (replica × this-role × rank) slot. Set by strategy.Compile based on
+	// (strategy × engine × role) combo. 0 means this role needs no ports.
+	//
+	// Examples:
+	//   vLLM PD prefill / decode:  2  (HTTP + NIXL side_channel)
+	//   vLLM monolithic engine:    1  (HTTP only)
+	//   SGLang PD prefill:         3  (HTTP + side_channel + bootstrap)
+	//   SGLang PD decode:          2  (HTTP + side_channel)
+	//
+	// IR keeps the count (platform-level); per-position semantics
+	// (which port is HTTP, which is side_channel) stays in the near-engine
+	// side (per-engine app.py / K8s template).
+	PortsPerRank int
 }
 
 // ReplicaPortMap holds port allocations for one replica. Mirrors the IR

@@ -92,6 +92,7 @@ func serializeRoles(rs []*plan.Role) []map[string]interface{} {
 		entry := map[string]interface{}{
 			"name":               r.Name,
 			"instances":          r.Instances,
+			"ports_per_rank":     r.PortsPerRank,
 			"variables":          r.Variables,
 			"env":                r.Env,
 			"deployment_options": r.DeploymentOptions,
