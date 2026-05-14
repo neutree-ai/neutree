@@ -482,9 +482,21 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--max_model_len"), "integer")
 				Expect(argsStr).To(ContainSubstring("--gpu_memory_utilization"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean")
+				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean true (flag-only)")
 				Expect(argsStr).To(ContainSubstring("--seed"), "integer")
 				Expect(argsStr).To(ContainSubstring("--override_generation_config"), "object/JSON")
+
+				// Boolean false engine_args must drop the flag entirely. vLLM
+				// argparse rejects `--flag false` (store_true is nargs=0), so
+				// the template skips both `--<flag>` and `"false"` when the
+				// value is the literal string "false".
+				Expect(argsStr).NotTo(ContainSubstring("--enable_prefix_caching"),
+					"boolean false engine_arg must not emit its flag")
+				for _, tok := range allArgs {
+					Expect(tok).NotTo(Equal("false"),
+						"no CLI token should be the literal string \"false\"")
+				}
+
 				found = true
 
 				break
@@ -552,7 +564,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				// kebab-case CLI flags (sprig replace "_" "-"); assert kebab.
 				Expect(argsStr).To(ContainSubstring("--tp-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--mem-fraction-static"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean")
+				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean true (flag-only)")
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--chunked-prefill-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--served-model-name"), "string")
@@ -560,6 +572,22 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--cuda-graph-max-bs"), "integer")
 				Expect(argsStr).To(ContainSubstring("--preferred-sampling-params"), "object/JSON")
 				Expect(argsStr).To(ContainSubstring("--json-model-override-args"), "object/JSON")
+
+				// Boolean false engine_args must drop the flag entirely. SGLang
+				// argparse rejects `--flag false` (store_true is nargs=0), so
+				// the template skips both `--<flag>` and `"false"` when the
+				// value is the literal string "false". Check both kebab and
+				// underscore forms because the SGLang template applies sprig
+				// `replace "_" "-"` only on the emit branches.
+				Expect(argsStr).NotTo(ContainSubstring("--skip-tokenizer-init"),
+					"boolean false engine_arg must not emit its flag (kebab form)")
+				Expect(argsStr).NotTo(ContainSubstring("--skip_tokenizer_init"),
+					"boolean false engine_arg must not emit its flag (underscore form)")
+				for _, tok := range allArgs {
+					Expect(tok).NotTo(Equal("false"),
+						"no CLI token should be the literal string \"false\"")
+				}
+
 				found = true
 
 				break

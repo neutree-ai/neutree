@@ -2,17 +2,21 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
@@ -422,166 +426,6 @@ func (e *errorClient) Get(ctx context.Context, key client.ObjectKey, obj client.
 	return e.Client.Get(ctx, key, obj, opts...)
 }
 
-var testVllmDeploymentTemplate = `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ .EndpointName }}
-  namespace: {{ .Namespace }}
-  labels:
-    engine: {{ .EngineName }}
-    engine_version: {{ .EngineVersion }}
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
-    endpoint: {{ .EndpointName }}
-    routing_logic: {{ .RoutingLogic }}
-    app: inference
-spec:
-  replicas: {{ .Replicas }}
-  progressDeadlineSeconds: 1200
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
-      maxSurge: 0
-  selector:
-    matchLabels:
-      cluster: {{ .ClusterName }}
-      workspace: {{ .Workspace }}
-      endpoint: {{ .EndpointName }}
-      app: inference
-  template:
-    metadata:
-      labels:
-        engine: {{ .EngineName }}
-        engine_version: {{ .EngineVersion }}
-        cluster: {{ .ClusterName }}
-        workspace: {{ .Workspace }}
-        endpoint: {{ .EndpointName }}
-        routing_logic: {{ .RoutingLogic }}
-        app: inference
-    spec:
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: endpoint
-                      operator: In
-                      values:
-                        - {{ .EndpointName }}
-                topologyKey: "kubernetes.io/hostname"
-      {{- if .NodeSelector }}
-      nodeSelector:
-        {{- range $key, $value := .NodeSelector }}
-        {{ $key }}: {{ $value }}
-        {{- end }}
-      {{- end }}
-      {{- if .ImagePullSecret }}
-      imagePullSecrets:
-        - name: {{ .ImagePullSecret }}
-      {{- end }}
-
-      {{- if .Volumes }}
-      volumes:
-{{ .Volumes | toYaml | indent 6 }}
-      {{- end }}
-      initContainers:
-        - name: model-downloader
-          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
-          command:
-            - bash
-            - -c
-          args:
-            - >-
-              python3 -m neutree.downloader
-              --name="{{ .ModelArgs.name }}"
-              --registry_type="{{ .ModelArgs.registry_type }}"
-              --registry_path="{{ .ModelArgs.registry_path }}"
-              --version="{{ .ModelArgs.version }}"
-              --file="{{ .ModelArgs.file }}"
-              --task="{{ .ModelArgs.task }}"
-          env:
-           {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
-           {{ end }}
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}
-
-      containers:
-        - name: {{ .EngineName }}
-          image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
-          command:
-          - vllm
-          - serve
-          - {{ .ModelArgs.path }}
-          - --host
-          - "0.0.0.0"
-          - "--port"
-          - "8000"
-          - --served-model-name
-          - {{ .ModelArgs.serve_name }}
-          - --task
-          {{- if eq .ModelArgs.task "text-embedding" }}
-          - embedding
-          {{- else if eq .ModelArgs.task "text-generation" }}
-          - generate
-          {{- else if eq .ModelArgs.task "text-rerank" }}
-          - rerank
-          {{- else }}
-          - {{ .ModelArgs.task }}
-          {{- end }}
-          {{- if .EngineArgs }}
-          {{- range $key, $value := .EngineArgs }}
-          - --{{ $key }}
-      {{- if ne (printf "%v" $value) "true"}}
-          - "{{ $value }}"
-      {{- end }}
-          {{- end }}
-          {{- end }}
-          resources:
-            limits:
-              {{- range $key, $value := .Resources }}
-              {{ $key }}: {{ $value }}
-              {{- end }}
-            requests:
-              {{- range $key, $value := .Resources }}
-              {{ $key }}: {{ $value }}
-              {{- end }}
-          env:
-           {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
-           {{ end }}
-          ports:
-            - containerPort: 8000
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 5
-            timeoutSeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            failureThreshold: 120
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 5
-            timeoutSeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            failureThreshold: 3
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}`
-
 // TestBuildVllmDeployment only tests the building of a VLLM default deployment manifest.
 func TestBuildVllmDeployment(t *testing.T) {
 	data := DeploymentManifestVariables{
@@ -635,7 +479,7 @@ func TestBuildVllmDeployment(t *testing.T) {
 		},
 	}
 
-	objs, err := buildDeploymentObjects(testVllmDeploymentTemplate, data)
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.11.2"), data)
 	if err != nil {
 		t.Fatalf("Failed to build deployment: %v", err)
 	}
@@ -646,146 +490,6 @@ func TestBuildVllmDeployment(t *testing.T) {
 
 	// Additional checks can be added here to validate the structure of the generated object
 }
-
-var testLlamacppDeploymentTemplate = `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ .EndpointName }}
-  namespace: {{ .Namespace }}
-  labels:
-    engine: {{ .EngineName }}
-    engine_version: {{ .EngineVersion }}
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
-    endpoint: {{ .EndpointName }}
-    routing_logic: {{ .RoutingLogic }}
-    app: inference
-spec:
-  replicas: {{ .Replicas }}
-  progressDeadlineSeconds: 1200
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
-      maxSurge: 0
-  selector:
-    matchLabels:
-      cluster: {{ .ClusterName }}
-      workspace: {{ .Workspace }}
-      endpoint: {{ .EndpointName }}
-      app: inference
-  template:
-    metadata:
-      labels:
-        engine: {{ .EngineName }}
-        engine_version: {{ .EngineVersion }}
-        cluster: {{ .ClusterName }}
-        workspace: {{ .Workspace }}
-        endpoint: {{ .EndpointName }}
-        routing_logic: {{ .RoutingLogic }}
-        app: inference
-    spec:
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: endpoint
-                      operator: In
-                      values:
-                        - {{ .EndpointName }}
-                topologyKey: "kubernetes.io/hostname"
-      {{- if .NodeSelector }}
-      nodeSelector:
-        {{- range $key, $value := .NodeSelector }}
-        {{ $key }}: {{ $value }}
-        {{- end }}
-      {{- end }}
-      {{- if .ImagePullSecret }}
-      imagePullSecrets:
-        - name: {{ .ImagePullSecret }}
-      {{- end }}
-      {{- if .Volumes }}
-      volumes:
-{{ .Volumes | toYaml | indent 6 }}
-      {{- end }}
-      initContainers:
-        - name: model-downloader
-          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
-          command:
-            - bash
-            - -c
-          args:
-            - >-
-              python3 -m neutree.downloader
-              --name="{{ .ModelArgs.name }}"
-              --registry_type="{{ .ModelArgs.registry_type }}"
-              --registry_path="{{ .ModelArgs.registry_path }}"
-              --version="{{ .ModelArgs.version }}"
-              --file="{{ .ModelArgs.file }}"
-              --task="{{ .ModelArgs.task }}"
-          env:
-            {{ range $key, $value := .Env }}
-            - name: {{ $key }}
-              value: "{{ $value }}"
-            {{ end }}
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}
-      containers:
-        - name: {{ .EngineName }}
-          image: {{ .ImagePrefix }}/{{ .ImageRepo }}:{{ .ImageTag }}
-          command:
-            - bash
-            - -c
-          args:
-            - >-
-              python3 -m llama_cpp.server
-              --model $(find {{ .ModelArgs.path }} -path "*/{{ .ModelArgs.file }}" | head -n 1)
-              --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.serve_name }}
-              {{- if eq .ModelArgs.task "text-embedding" }} --embedding{{- end }}
-              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{- if ne (printf "%v" $value) "true"}} "{{ $value }}"{{- end }}{{- end }}{{- end }}
-          resources:
-            limits:
-              {{- range $key, $value := .Resources }}
-              {{ $key }}: {{ $value }}
-              {{- end }}
-            requests:
-              {{- range $key, $value := .Resources }}
-              {{ $key }}: {{ $value }}
-              {{- end }}
-          env:
-            {{ range $key, $value := .Env }}
-            - name: {{ $key }}
-              value: "{{ $value }}"
-            {{ end }}
-          ports:
-            - containerPort: 8000
-          startupProbe:
-            httpGet:
-              path: /v1/models
-              port: 8000
-            initialDelaySeconds: 5
-            timeoutSeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            failureThreshold: 120
-          readinessProbe:
-            httpGet:
-              path: /v1/models
-              port: 8000
-            initialDelaySeconds: 5
-            timeoutSeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            failureThreshold: 3
-          {{- if .VolumeMounts }}
-          volumeMounts:
-{{ .VolumeMounts | toYaml | indent 10 }}
-          {{- end }}`
 
 // TestBuildLlamacppDeployment only tests the building of a Llamacpp default deployment manifest.
 func TestBuildLlamacppDeployment(t *testing.T) {
@@ -841,7 +545,7 @@ func TestBuildLlamacppDeployment(t *testing.T) {
 		},
 	}
 
-	objs, err := buildDeploymentObjects(testLlamacppDeploymentTemplate, data)
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "llama-cpp-v0.3.7"), data)
 	if err != nil {
 		t.Fatalf("Failed to build deployment: %v", err)
 	}
@@ -1105,10 +809,16 @@ func TestKubernetesOrchestrator_getImageForAccelerator_MultipleAccelerators(t *t
 	}
 }
 
-var testBase64DeploymentTemplate = `YXBpVmVyc2lvbjogYXBwcy92MQpraW5kOiBEZXBsb3ltZW50Cm1ldGFkYXRhOgogIG5hbWU6IHt7IC5FbmRwb2ludE5hbWUgfX0KICBuYW1lc3BhY2U6IHt7IC5OYW1lc3BhY2UgfX0KICBsYWJlbHM6CiAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICBlbmdpbmVfdmVyc2lvbjoge3sgLkVuZ2luZVZlcnNpb24gfX0KICAgIGNsdXN0ZXI6IHt7IC5DbHVzdGVyTmFtZSB9fQogICAgd29ya3NwYWNlOiB7eyAuV29ya3NwYWNlIH19CiAgICBlbmRwb2ludDoge3sgLkVuZHBvaW50TmFtZSB9fQogICAgcm91dGluZ19sb2dpYzoge3sgLlJvdXRpbmdMb2dpYyB9fQogICAgYXBwOiBpbmZlcmVuY2UKc3BlYzoKICByZXBsaWNhczoge3sgLlJlcGxpY2FzIH19CiAgcHJvZ3Jlc3NEZWFkbGluZVNlY29uZHM6IDEyMDAKICBzdHJhdGVneToKICAgIHR5cGU6IFJvbGxpbmdVcGRhdGUKICAgIHJvbGxpbmdVcGRhdGU6CiAgICAgIG1heFVuYXZhaWxhYmxlOiAxCiAgICAgIG1heFN1cmdlOiAwCiAgc2VsZWN0b3I6CiAgICBtYXRjaExhYmVsczoKICAgICAgY2x1c3Rlcjoge3sgLkNsdXN0ZXJOYW1lIH19CiAgICAgIHdvcmtzcGFjZToge3sgLldvcmtzcGFjZSB9fQogICAgICBlbmRwb2ludDoge3sgLkVuZHBvaW50TmFtZSB9fQogICAgICBhcHA6IGluZmVyZW5jZQogIHRlbXBsYXRlOgogICAgbWV0YWRhdGE6CiAgICAgIGxhYmVsczoKICAgICAgICBlbmdpbmU6IHt7IC5FbmdpbmVOYW1lIH19CiAgICAgICAgZW5naW5lX3ZlcnNpb246IHt7IC5FbmdpbmVWZXJzaW9uIH19CiAgICAgICAgY2x1c3Rlcjoge3sgLkNsdXN0ZXJOYW1lIH19CiAgICAgICAgd29ya3NwYWNlOiB7eyAuV29ya3NwYWNlIH19CiAgICAgICAgZW5kcG9pbnQ6IHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgICByb3V0aW5nX2xvZ2ljOiB7eyAuUm91dGluZ0xvZ2ljIH19CiAgICAgICAgYXBwOiBpbmZlcmVuY2UKICAgIHNwZWM6CiAgICAgIGFmZmluaXR5OgogICAgICAgIHBvZEFudGlBZmZpbml0eToKICAgICAgICAgIHByZWZlcnJlZER1cmluZ1NjaGVkdWxpbmdJZ25vcmVkRHVyaW5nRXhlY3V0aW9uOgogICAgICAgICAgICAtIHdlaWdodDogMTAwCiAgICAgICAgICAgICAgcG9kQWZmaW5pdHlUZXJtOgogICAgICAgICAgICAgICAgbGFiZWxTZWxlY3RvcjoKICAgICAgICAgICAgICAgICAgbWF0Y2hFeHByZXNzaW9uczoKICAgICAgICAgICAgICAgICAgICAtIGtleTogZW5kcG9pbnQKICAgICAgICAgICAgICAgICAgICAgIG9wZXJhdG9yOiBJbgogICAgICAgICAgICAgICAgICAgICAgdmFsdWVzOgogICAgICAgICAgICAgICAgICAgICAgICAtIHt7IC5FbmRwb2ludE5hbWUgfX0KICAgICAgICAgICAgICAgIHRvcG9sb2d5S2V5OiAia3ViZXJuZXRlcy5pby9ob3N0bmFtZSIKICAgICAge3stIGlmIC5Ob2RlU2VsZWN0b3IgfX0KICAgICAgbm9kZVNlbGVjdG9yOgogICAgICAgIHt7LSByYW5nZSAka2V5LCAkdmFsdWUgOj0gLk5vZGVTZWxlY3RvciB9fQogICAgICAgIHt7ICRrZXkgfX06IHt7ICR2YWx1ZSB9fQogICAgICAgIHt7LSBlbmQgfX0KICAgICAge3stIGVuZCB9fQogICAgICB7ey0gaWYgLkltYWdlUHVsbFNlY3JldCB9fQogICAgICBpbWFnZVB1bGxTZWNyZXRzOgogICAgICAgIC0gbmFtZToge3sgLkltYWdlUHVsbFNlY3JldCB9fQogICAgICB7ey0gZW5kIH19CgogICAgICB7ey0gaWYgLlZvbHVtZXMgfX0KICAgICAgdm9sdW1lczoKe3sgLlZvbHVtZXMgfCB0b1lhbWwgfCBpbmRlbnQgNiB9fQogICAgICB7ey0gZW5kIH19CiAgICAgIGluaXRDb250YWluZXJzOgogICAgICAgIC0gbmFtZTogbW9kZWwtZG93bmxvYWRlcgogICAgICAgICAgaW1hZ2U6IHt7IC5JbWFnZVByZWZpeCB9fS9uZXV0cmVlL25ldXRyZWUtcnVudGltZTp7eyAuTmV1dHJlZVZlcnNpb24gfX0KICAgICAgICAgIGNvbW1hbmQ6CiAgICAgICAgICAgIC0gYmFzaAogICAgICAgICAgICAtIC1jCiAgICAgICAgICBhcmdzOgogICAgICAgICAgICAtID4tCiAgICAgICAgICAgICAgcHl0aG9uMyAtbSBuZXV0cmVlLmRvd25sb2FkZXIKICAgICAgICAgICAgICAtLW5hbWU9Int7IC5Nb2RlbEFyZ3MubmFtZSB9fSIKICAgICAgICAgICAgICAtLXJlZ2lzdHJ5X3R5cGU9Int7IC5Nb2RlbEFyZ3MucmVnaXN0cnlfdHlwZSB9fSIKICAgICAgICAgICAgICAtLXJlZ2lzdHJ5X3BhdGg9Int7IC5Nb2RlbEFyZ3MucmVnaXN0cnlfcGF0aCB9fSIKICAgICAgICAgICAgICAtLXZlcnNpb249Int7IC5Nb2RlbEFyZ3MudmVyc2lvbiB9fSIKICAgICAgICAgICAgICAtLWZpbGU9Int7IC5Nb2RlbEFyZ3MuZmlsZSB9fSIKICAgICAgICAgICAgICAtLXRhc2s9Int7IC5Nb2RlbEFyZ3MudGFzayB9fSIKICAgICAgICAgIGVudjoKICAgICAgICAgICB7eyByYW5nZSAka2V5LCAkdmFsdWUgOj0gLkVudiB9fQogICAgICAgICAgIC0gbmFtZToge3sgJGtleSB9fQogICAgICAgICAgICAgdmFsdWU6ICJ7eyAkdmFsdWUgfX0iCiAgICAgICAgICAge3sgZW5kIH19CiAgICAgICAgICB7ey0gaWYgLlZvbHVtZU1vdW50cyB9fQogICAgICAgICAgdm9sdW1lTW91bnRzOgp7eyAuVm9sdW1lTW91bnRzIHwgdG9ZYW1sIHwgaW5kZW50IDEwIH19CiAgICAgICAgICB7ey0gZW5kIH19CgogICAgICBjb250YWluZXJzOgogICAgICAgIC0gbmFtZToge3sgLkVuZ2luZU5hbWUgfX0KICAgICAgICAgIGltYWdlOiB7eyAuSW1hZ2VQcmVmaXggfX0ve3sgLkltYWdlUmVwbyB9fTp7eyAuSW1hZ2VUYWcgfX0KICAgICAgICAgIGNvbW1hbmQ6CiAgICAgICAgICAtIHZsbG0KICAgICAgICAgIC0gc2VydmUKICAgICAgICAgIC0ge3sgLk1vZGVsQXJncy5wYXRoIH19CiAgICAgICAgICAtIC0taG9zdAogICAgICAgICAgLSAiMC4wLjAuMCIKICAgICAgICAgIC0gIi0tcG9ydCIKICAgICAgICAgIC0gIjgwMDAiCiAgICAgICAgICAtIC0tc2VydmVkLW1vZGVsLW5hbWUKICAgICAgICAgIC0ge3sgLk1vZGVsQXJncy5zZXJ2ZV9uYW1lIH19CiAgICAgICAgICAtIC0tdGFzawogICAgICAgICAge3stIGlmIGVxIC5Nb2RlbEFyZ3MudGFzayAidGV4dC1lbWJlZGRpbmciIH19CiAgICAgICAgICAtIGVtYmVkZGluZwogICAgICAgICAge3stIGVsc2UgaWYgZXEgLk1vZGVsQXJncy50YXNrICJ0ZXh0LWdlbmVyYXRpb24iIH19CiAgICAgICAgICAtIGdlbmVyYXRlCiAgICAgICAgICB7ey0gZWxzZSBpZiBlcSAuTW9kZWxBcmdzLnRhc2sgInRleHQtcmVyYW5rIiB9fQogICAgICAgICAgLSByZXJhbmsKICAgICAgICAgIHt7LSBlbHNlIH19CiAgICAgICAgICAtIHt7IC5Nb2RlbEFyZ3MudGFzayB9fQogICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAge3stIGlmIC5FbmdpbmVBcmdzIH19CiAgICAgICAgICB7ey0gcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5FbmdpbmVBcmdzIH19CiAgICAgICAgICAtIC0te3sgJGtleSB9fQogICAgICB7ey0gaWYgbmUgKHByaW50ZiAiJXYiICR2YWx1ZSkgInRydWUifX0KICAgICAgICAgIC0gInt7ICR2YWx1ZSB9fSIKICAgICAge3stIGVuZCB9fQogICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAgcmVzb3VyY2VzOgogICAgICAgICAgICBsaW1pdHM6CiAgICAgICAgICAgICAge3stIHJhbmdlICRrZXksICR2YWx1ZSA6PSAuUmVzb3VyY2VzIH19CiAgICAgICAgICAgICAge3sgJGtleSB9fToge3sgJHZhbHVlIH19CiAgICAgICAgICAgICAge3stIGVuZCB9fQogICAgICAgICAgICByZXF1ZXN0czoKICAgICAgICAgICAgICB7ey0gcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5SZXNvdXJjZXMgfX0KICAgICAgICAgICAgICB7eyAka2V5IH19OiB7eyAkdmFsdWUgfX0KICAgICAgICAgICAgICB7ey0gZW5kIH19CiAgICAgICAgICBlbnY6CiAgICAgICAgICAge3sgcmFuZ2UgJGtleSwgJHZhbHVlIDo9IC5FbnYgfX0KICAgICAgICAgICAtIG5hbWU6IHt7ICRrZXkgfX0KICAgICAgICAgICAgIHZhbHVlOiAie3sgJHZhbHVlIH19IgogICAgICAgICAgIHt7IGVuZCB9fQogICAgICAgICAgcG9ydHM6CiAgICAgICAgICAgIC0gY29udGFpbmVyUG9ydDogODAwMAogICAgICAgICAgc3RhcnR1cFByb2JlOgogICAgICAgICAgICBodHRwR2V0OgogICAgICAgICAgICAgIHBhdGg6IC9oZWFsdGgKICAgICAgICAgICAgICBwb3J0OiA4MDAwCiAgICAgICAgICAgIGluaXRpYWxEZWxheVNlY29uZHM6IDUKICAgICAgICAgICAgdGltZW91dFNlY29uZHM6IDUKICAgICAgICAgICAgcGVyaW9kU2Vjb25kczogMTAKICAgICAgICAgICAgc3VjY2Vzc1RocmVzaG9sZDogMQogICAgICAgICAgICBmYWlsdXJlVGhyZXNob2xkOiAxMjAKICAgICAgICAgIHJlYWRpbmVzc1Byb2JlOgogICAgICAgICAgICBodHRwR2V0OgogICAgICAgICAgICAgIHBhdGg6IC9oZWFsdGgKICAgICAgICAgICAgICBwb3J0OiA4MDAwCiAgICAgICAgICAgIGluaXRpYWxEZWxheVNlY29uZHM6IDUKICAgICAgICAgICAgdGltZW91dFNlY29uZHM6IDUKICAgICAgICAgICAgcGVyaW9kU2Vjb25kczogMTAKICAgICAgICAgICAgc3VjY2Vzc1RocmVzaG9sZDogMQogICAgICAgICAgICBmYWlsdXJlVGhyZXNob2xkOiAzCiAgICAgICAgICB7ey0gaWYgLlZvbHVtZU1vdW50cyB9fQogICAgICAgICAgdm9sdW1lTW91bnRzOgp7eyAuVm9sdW1lTW91bnRzIHwgdG9ZYW1sIHwgaW5kZW50IDEwIH19CiAgICAgICAgICB7ey0gZW5kIH19`
-
 func Test_getDeployTemplate(t *testing.T) {
 	k := &kubernetesOrchestrator{}
+
+	// Drive the test through the real embedded vLLM template instead of an
+	// inline base64 fixture. This proves the decode path against production
+	// data and removes any "test fixture is out of sync with the real
+	// template" failure mode.
+	vllmTemplateB64, err := engine.GetDeployTemplate("vllm-v0.11.2")
+	require.NoError(t, err)
+	vllmTemplateRaw := realEmbeddedTemplate(t, "vllm-v0.11.2")
 
 	tests := []struct {
 		name             string
@@ -1136,14 +846,14 @@ func Test_getDeployTemplate(t *testing.T) {
 							Version: "v0.5.0",
 							DeployTemplate: map[string]map[string]string{
 								"kubernetes": {
-									"default": testBase64DeploymentTemplate,
+									"default": vllmTemplateB64,
 								},
 							},
 						},
 					},
 				},
 			},
-			expectedTemplate: testVllmDeploymentTemplate,
+			expectedTemplate: vllmTemplateRaw,
 		},
 		{
 			name: "template not found for orchestrator",
@@ -2987,6 +2697,122 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 	}
 }
 
+// TestBuildDeployment_BooleanEngineArgs pins the boolean handling in the
+// K8s deploy templates that ship engine_args through to vLLM / SGLang CLI
+// argparse. Both engines' boolean flags are registered with
+// action="store_true": they accept `--flag` (no value follows) and reject
+// `--flag false` (nargs=0). The template contract is therefore:
+//
+//   - value "true"  (bool or string) -> emit "--<flag>" only
+//   - value "false" (bool or string) -> emit nothing (engine takes its default)
+//   - anything else                   -> emit "--<flag>" followed by "<value>"
+//
+// The test renders the embedded production templates (not an inline fixture),
+// passes a matrix of bool/string true/false alongside non-boolean values, and
+// asserts the rendered CLI tokens never contain a literal "false" token.
+func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
+	cases := []struct {
+		name        string
+		templateKey string
+	}{
+		{
+			name:        "vllm-v0.11.2",
+			templateKey: "vllm-v0.11.2",
+		},
+		{
+			name:        "vllm-v0.17.1",
+			templateKey: "vllm-v0.17.1",
+		},
+		{
+			name:        "sglang-v0.5.10",
+			templateKey: "sglang-v0.5.10",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpl := realEmbeddedTemplate(t, tc.templateKey)
+
+			data := DeploymentManifestVariables{
+				NeutreeVersion:  "v0.1.0",
+				ClusterName:     "test-cluster",
+				Workspace:       "test-workspace",
+				Namespace:       "default",
+				ImagePrefix:     "registry.example.com",
+				ImageRepo:       "myrepo",
+				ImageTag:        "v1.0.0",
+				ImagePullSecret: "my-secret",
+				EngineName:      "test-engine",
+				EngineVersion:   "v1.0.0",
+				EndpointName:    "test-endpoint",
+				ModelArgs: map[string]interface{}{
+					"name":          "gpt-4",
+					"task":          "text-generation",
+					"path":          "/mnt/models/gpt-4",
+					"registry_type": "bentoml",
+					"registry_path": "/mnt/registry/gpt-4-model",
+					"serve_name":    "gpt-4-serve",
+				},
+				EngineArgs: map[string]interface{}{
+					// Boolean false in both bool and string form, kebab and
+					// underscore key shape: the skip branch must drop the flag
+					// regardless of how the key was spelled.
+					"enable_prefix_caching": false,
+					"skip-tokenizer-init":   "false",
+					// Boolean true in both forms: emit flag, no following value.
+					// Keys are kebab-form so the SGLang template's
+					// `replace "_" "-"` step is a no-op here — `replace` is
+					// evaluated in the true/non-bool branches but not the skip
+					// branch, so true booleans are the right place to assert
+					// the rendered flag name matches across engines.
+					"trust-remote-code": true,
+					"is-embedding":      "true",
+					// Non-boolean values: emit flag followed by quoted value.
+					"max-model-len": "4096",
+					"max-num-seqs":  256,
+				},
+				Resources: map[string]string{
+					"cpu":    "500m",
+					"memory": "1Gi",
+				},
+				RoutingLogic: "roundrobin",
+				Replicas:     1,
+			}
+
+			objs, err := buildDeploymentObjects(tmpl, data)
+			require.NoError(t, err, "template render must succeed")
+
+			tokens := extractEngineCLITokens(t, objs)
+
+			// (1) False booleans must be skipped entirely — no flag, no value.
+			//     Check both kebab and underscore forms because SGLang transforms
+			//     `_` to `-` at render time while vLLM passes the key through.
+			assert.NotContains(t, tokens, "--enable-prefix-caching",
+				"bool false engine_arg must not emit its flag (kebab form)")
+			assert.NotContains(t, tokens, "--enable_prefix_caching",
+				"bool false engine_arg must not emit its flag (underscore form)")
+			assert.NotContains(t, tokens, "--skip-tokenizer-init",
+				"string false engine_arg must not emit its flag")
+			// The literal token `false` must never reach the CLI: argparse rejects
+			// `--flag false` for store_true booleans.
+			for _, tok := range tokens {
+				assert.NotEqual(t, "false", tok,
+					"no CLI token should be the literal string \"false\"")
+			}
+
+			// (2) True booleans (bool + string forms) must emit just the flag.
+			//     The token immediately after must not be "true" — it should be
+			//     the next engine_arg flag or a CLI token following it.
+			assertFlagWithoutValue(t, tokens, "--trust-remote-code")
+			assertFlagWithoutValue(t, tokens, "--is-embedding")
+
+			// (3) Non-boolean engine_args must emit `--<flag>` followed by value.
+			assertFlagWithValue(t, tokens, "--max-model-len", "4096")
+			assertFlagWithValue(t, tokens, "--max-num-seqs", "256")
+		})
+	}
+}
+
 // makePauseTestCtx builds a minimal OrchestratorContext for pause/delete tests:
 // only fields that pauseEndpoint / deleteEndpoint actually read.
 func makePauseTestCtx(ctrlClient client.Client, name string) *OrchestratorContext {
@@ -3093,6 +2919,127 @@ func TestKubernetesOrchestrator_pauseEndpoint(t *testing.T) {
 			assert.Equal(t, *tt.expectedReplicas, *dep.Spec.Replicas)
 		})
 	}
+}
+
+// realEmbeddedTemplate decodes the production embedded K8s deploy template for
+// the given engine key (e.g. "vllm-v0.11.2", "llama-cpp-v0.3.7",
+// "sglang-v0.5.10"). Tests that need a representative template should use this
+// instead of pasting an inline fixture, so future edits to the real template
+// (probe paths, label additions, etc.) propagate automatically and there is no
+// "test fixture is out of sync" failure mode.
+func realEmbeddedTemplate(t *testing.T, engineKey string) string {
+	t.Helper()
+
+	b64, err := engine.GetDeployTemplate(engineKey)
+	require.NoError(t, err, "engine.GetDeployTemplate(%q) failed", engineKey)
+
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	require.NoError(t, err, "base64 decode of %q template failed", engineKey)
+
+	return string(raw)
+}
+
+// extractEngineCLITokens collects the rendered Deployment's first container
+// command + args into a flat ordered slice of tokens, so test assertions can
+// reason about CLI shape (token presence, adjacency).
+func extractEngineCLITokens(t *testing.T, objs *unstructured.UnstructuredList) []string {
+	t.Helper()
+	require.NotNil(t, objs)
+	require.NotEmpty(t, objs.Items, "expected at least one rendered object")
+
+	var dep *unstructured.Unstructured
+
+	for i := range objs.Items {
+		if objs.Items[i].GetKind() == "Deployment" {
+			dep = &objs.Items[i]
+			break
+		}
+	}
+
+	require.NotNil(t, dep, "rendered manifest must include a Deployment")
+
+	containers, found, err := unstructured.NestedSlice(dep.Object,
+		"spec", "template", "spec", "containers")
+	require.NoError(t, err)
+	require.True(t, found, "deployment must declare containers")
+	require.NotEmpty(t, containers, "containers slice must not be empty")
+
+	// Each engine template defines the inference container after any
+	// initContainers; we want the first containers[] entry that has the
+	// engine binary in command/args. The first containers[] entry in the
+	// vLLM / SGLang / llama-cpp templates is exactly that container.
+	cMap, ok := containers[0].(map[string]interface{})
+	require.True(t, ok)
+
+	var tokens []string
+
+	if cmd, found, _ := unstructured.NestedSlice(cMap, "command"); found {
+		tokens = append(tokens, sliceToStrings(t, cmd)...)
+	}
+
+	if args, found, _ := unstructured.NestedSlice(cMap, "args"); found {
+		tokens = append(tokens, sliceToStrings(t, args)...)
+	}
+
+	return tokens
+}
+
+func sliceToStrings(t *testing.T, in []interface{}) []string {
+	t.Helper()
+
+	out := make([]string, 0, len(in))
+
+	for _, v := range in {
+		s, ok := v.(string)
+		require.True(t, ok, "expected string CLI token, got %T (%v)", v, v)
+		out = append(out, s)
+	}
+
+	return out
+}
+
+// assertFlagWithoutValue checks that `flag` appears in tokens and the next
+// token is either another `--flag` or absent — i.e. no value follows.
+//
+// The "absent" case (flag is the last token in the slice) is fine: a flag
+// at the end of the CLI argv with nothing after it is, by definition, a
+// flag-only invocation. require.NotEqual(t, -1, idx) above already ensures
+// the flag is present; the early return below is the "no following token to
+// check" branch, not a silent skip.
+func assertFlagWithoutValue(t *testing.T, tokens []string, flag string) {
+	t.Helper()
+
+	idx := indexOf(tokens, flag)
+	require.NotEqual(t, -1, idx, "expected flag %q in tokens %v", flag, tokens)
+
+	if idx+1 >= len(tokens) {
+		return
+	}
+
+	next := tokens[idx+1]
+	assert.True(t, strings.HasPrefix(next, "--"),
+		"flag %q should not be followed by a value; got %q", flag, next)
+}
+
+// assertFlagWithValue checks that `flag` is immediately followed by `value`.
+func assertFlagWithValue(t *testing.T, tokens []string, flag, value string) {
+	t.Helper()
+
+	idx := indexOf(tokens, flag)
+	require.NotEqual(t, -1, idx, "expected flag %q in tokens %v", flag, tokens)
+	require.Less(t, idx+1, len(tokens), "flag %q should have a following value token", flag)
+	assert.Equal(t, value, tokens[idx+1],
+		"flag %q should be followed by %q; got %q", flag, value, tokens[idx+1])
+}
+
+func indexOf(tokens []string, target string) int {
+	for i, t := range tokens {
+		if t == target {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // TestKubernetesOrchestrator_deleteEndpoint_NoConfigStore verifies that the

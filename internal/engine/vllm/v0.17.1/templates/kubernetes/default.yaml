@@ -101,10 +101,14 @@ spec:
           - {{ .ModelArgs.serve_name }}
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
+          {{- if eq (printf "%v" $value) "true" }}
           - --{{ $key }}
-      {{- if ne (printf "%v" $value) "true"}}
+          {{- else if eq (printf "%v" $value) "false" }}
+          {{- /* skip: store_true flags reject "--flag false"; passing false means "leave at default" */ -}}
+          {{- else }}
+          - --{{ $key }}
           - "{{ $value }}"
-      {{- end }}
+          {{- end }}
           {{- end }}
           {{- end }}
           resources:

@@ -1393,13 +1393,17 @@ func applyEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath strin
 	return yamlPath
 }
 
-// allSchemaTypesEngineArgs returns an engine_args slice covering multiple JSON Schema data types.
+// allSchemaTypesEngineArgs returns an engine_args slice covering multiple JSON
+// Schema data types. enforce_eager covers the true-bool path (flag emitted with
+// no value); enable_prefix_caching covers the false-bool path (flag dropped
+// entirely, since vLLM argparse rejects `--flag false` for store_true flags).
 func allSchemaTypesEngineArgs() []EngineArg {
 	return []EngineArg{
 		{Key: "dtype", Value: "half"},
 		{Key: "max_model_len", Value: "4096"},
 		{Key: "gpu_memory_utilization", Value: "0.85"},
 		{Key: "enforce_eager", Value: "true"},
+		{Key: "enable_prefix_caching", Value: "false"},
 		{Key: "seed", Value: "42"},
 		{Key: "override_generation_config", Value: `'{"temperature": 0.8}'`},
 	}
@@ -1412,11 +1416,16 @@ func allSchemaTypesEngineArgs() []EngineArg {
 // Array types are intentionally absent — SGLang's only array-shaped CLI flag
 // is `--cuda-graph-bs` (nargs="+"), which the single-token K8s template can't
 // render.
+//
+// disable_cuda_graph covers the true-bool path (flag emitted with no value);
+// skip_tokenizer_init covers the false-bool path (flag dropped entirely,
+// since SGLang argparse rejects `--flag false` for store_true flags).
 func allSchemaTypesEngineArgsSGLang() []EngineArg {
 	return []EngineArg{
 		{Key: "tp_size", Value: "1"},
 		{Key: "mem_fraction_static", Value: "0.85"},
 		{Key: "disable_cuda_graph", Value: "true"},
+		{Key: "skip_tokenizer_init", Value: "false"},
 		{Key: "dtype", Value: "auto"},
 		{Key: "chunked_prefill_size", Value: "8192"},
 		{Key: "served_model_name", Value: "neu-sglang-test"},
