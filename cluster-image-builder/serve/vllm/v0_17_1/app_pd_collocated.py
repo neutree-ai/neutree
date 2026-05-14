@@ -64,11 +64,28 @@ asyncio_gather = asyncio.gather
 PLATFORM_ENV_KEYS = {
     "VLLM_NIXL_SIDE_CHANNEL_HOST",
     "VLLM_NIXL_SIDE_CHANNEL_PORT",
+    "UCX_TLS",
 }
 PLATFORM_ENGINE_KWARG_KEYS = {
     "kv_transfer_config",
     "distributed_executor_backend",
 }
+
+# Platform-default env vars applied to every PD inner actor (user Role.Env
+# wins on collision via _merge_user_wins). Collapsed to host-local NVLink /
+# cuda_ipc transports so UCX doesn't accidentally probe rc/tcp on multi-NIC
+# hosts and stall NIXL handshake (vLLM Bug #35799).
+PD_PLATFORM_DEFAULT_ENV = {
+    "UCX_TLS": "self,sm,cuda_copy,cuda_ipc",
+}
+
+# Bind-mount the host's nvidia-fabricmanager socket dir into every PD inner
+# actor's container. Required on NVSwitch hosts (HGX H100 / A100 8-GPU SXM);
+# harmless empty dir on NVLink-bridge / PCIe-only hosts because CUDA driver
+# only queries fabric_manager when NVSwitch routing is in play.
+PD_FABRIC_MANAGER_MOUNT = (
+    "-v", "/var/run/nvidia-fabricmanager:/var/run/nvidia-fabricmanager:ro",
+)
 
 
 # ----------------------------- helpers -----------------------------
@@ -141,12 +158,37 @@ def _merge_user_wins(platform: Dict[str, Any],
     return merged
 
 
+def _augment_pd_container(backend_container: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Append PD-specific docker run_options to the engine container config.
+
+    Currently injects the fabric_manager bind mount required on NVSwitch
+    hosts. On non-NVSwitch hosts the bind target is a non-existent dir;
+    docker default behavior is to auto-create an empty dir on the host
+    (cheap, harmless — CUDA driver never queries it on those hosts).
+    """
+    if not backend_container:
+        return backend_container
+    augmented = dict(backend_container)
+    existing = list(augmented.get("run_options") or [])
+    # idempotent — don't double-add if PD app_builder runs twice
+    if PD_FABRIC_MANAGER_MOUNT[1] not in existing:
+        existing.extend(PD_FABRIC_MANAGER_MOUNT)
+    augmented["run_options"] = existing
+    return augmented
+
+
 def _build_actor_runtime_env(role_env: Dict[str, str],
                              port_env: Dict[str, str],
                              backend_container: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """User Role.Env wins on collision with portalloc-derived port env."""
+    """User Role.Env wins over (platform defaults + portalloc port env)."""
+    # Platform layer: PD defaults (UCX_TLS, ...) merged with portalloc port env.
+    # Port env doesn't collide with PD defaults so no warning expected here.
+    platform_env: Dict[str, str] = {}
+    platform_env.update(PD_PLATFORM_DEFAULT_ENV)
+    platform_env.update(port_env or {})
+
     env_vars = _merge_user_wins(
-        platform=port_env,
+        platform=platform_env,
         user=role_env or {},
         audit_keys=PLATFORM_ENV_KEYS,
         context="env_vars",
@@ -154,8 +196,10 @@ def _build_actor_runtime_env(role_env: Dict[str, str],
     runtime_env: Dict[str, Any] = {}
     if env_vars:
         runtime_env["env_vars"] = env_vars
-    if backend_container:
-        merged = build_backend_runtime_env(backend_container)
+
+    pd_container = _augment_pd_container(backend_container)
+    if pd_container:
+        merged = build_backend_runtime_env(pd_container)
         if "container" in merged:
             runtime_env["container"] = merged["container"]
     return runtime_env

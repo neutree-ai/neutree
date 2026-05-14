@@ -18,21 +18,16 @@ check_health etc.
 |---|---|---|
 | Neutree CP | running on local CP or LAN CP | `NO_PROXY=10.255.1.54,...` if behind proxy |
 | SSH cluster | registered + Ray runtime online | `neutree-cli cluster list` shows Ready |
-| Engine image | `neutree/engine-vllm:v0.17.1-pd` | built via `cluster-image-builder/Dockerfile.engine-vllm-pd` |
+| Engine image | `neutree/engine-vllm:v0.17.1` | same image as monolithic; PD-specific knobs (UCX_TLS, fabric_manager bind mount) injected by the control plane at deploy time |
 | EngineVersion | `vllm@v0.17.1` registered | comes from `internal/engine/builtin.go` |
 | GPU node | 2 GPU NVLink, fabric manager running | required for V5/V9 |
 
 ## Run
 
 ```bash
-# 0. Build the PD engine image (one time)
-make -C cluster-image-builder build-engine-vllm-pd  # TBD make target; or manual:
-#   docker build -f cluster-image-builder/Dockerfile.engine-vllm-pd \
-#     --build-arg ENGINE_BASE_IMAGE=vllm/vllm-openai:v0.17.1 \
-#     --build-arg ENGINE_VERSION_DIR=v0_17_1 \
-#     --build-arg RAY_REPO=https://github.com/neutree-ai/ray \
-#     --build-arg RAY_COMMIT=$(grep '^RAY_COMMIT' cluster-image-builder/Makefile | awk '{print $3}') \
-#     -t neutree/engine-vllm:v0.17.1-pd cluster-image-builder
+# 0. Use the existing engine-vllm image (built via the normal release pipeline).
+#    No PD-specific image needed — the control plane injects UCX_TLS env
+#    and the /var/run/nvidia-fabricmanager bind mount at deploy time.
 
 # 1. Submit endpoint
 NEUTREE_API_URL=http://10.255.1.54:3000 \
