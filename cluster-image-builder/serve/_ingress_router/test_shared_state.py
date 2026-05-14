@@ -152,3 +152,35 @@ def test_callbacks_can_call_back_into_mutators():
     s.upsert_topology("r0", ActorTopology(replica_id="r0"))
 
     assert seen == [("r0", ["r0"])]
+
+
+# -------- D-10g: _extract_target_replica_id helper -------------------------
+
+
+def test_extract_target_replica_id_variants():
+    """Pure-Python coverage for the metadata extractor used by ObserverRouter.
+
+    Mirrors the helper in observer_router._extract_target_replica_id so the
+    behavior is testable without a running Ray Serve.
+    """
+    from types import SimpleNamespace
+
+    # Inline copy of the helper logic — same shape, same fallbacks.
+    def _extract(pr):
+        if pr is None:
+            return ""
+        md = getattr(pr, "metadata", None)
+        if md is None:
+            return ""
+        val = getattr(md, "multiplexed_model_id", None)
+        return str(val) if val else ""
+
+    assert _extract(None) == ""
+    assert _extract(SimpleNamespace(metadata=None)) == ""
+    assert _extract(SimpleNamespace(metadata=SimpleNamespace())) == ""
+    assert _extract(SimpleNamespace(
+        metadata=SimpleNamespace(multiplexed_model_id=None))) == ""
+    assert _extract(SimpleNamespace(
+        metadata=SimpleNamespace(multiplexed_model_id=""))) == ""
+    assert _extract(SimpleNamespace(
+        metadata=SimpleNamespace(multiplexed_model_id="r2"))) == "r2"

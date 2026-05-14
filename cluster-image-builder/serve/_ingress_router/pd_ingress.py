@@ -149,17 +149,19 @@ class PDIngress:
     # ----- internals -----
 
     async def _pull_topology_for(self, replica_id: str) -> None:
-        """Pull get_actor_topology() once and upsert into _SHARED.
+        """Pull get_actor_topology() from the exact replica `replica_id`.
 
-        ObserverRouter round-robins, so a single .remote() call may land on a
-        different replica than `replica_id`. The response self-identifies via
-        its `replica_id` field, so we always upsert under that id rather than
-        the one we *expected* — which means a burst of N replica_added events
-        in flight will collectively fan out into N round-robin pulls that fill
-        the topology cache for all N replicas.
+        Uses Ray Serve's `multiplexed_model_id` metadata channel as a direct
+        ReplicaID selector — see observer_router.ObserverRouter.choose_replicas.
+        If `replica_id` has just died and is no longer in candidates, the
+        router falls back to round-robin and the response self-identifies
+        via its embedded `replica_id` field; we upsert under that id, which
+        means a stale target degrades to "we refreshed *some* replica's
+        topology" rather than failing the call.
         """
         try:
-            topo_dict = await self.backend.get_actor_topology.remote()
+            handle = self.backend.options(multiplexed_model_id=replica_id)
+            topo_dict = await handle.get_actor_topology.remote()
             if not topo_dict:
                 return
             self_reported = str(topo_dict.get("replica_id") or "")
@@ -196,8 +198,11 @@ class PDIngress:
                 ),
             )
             if self_reported != replica_id:
-                log.debug(
-                    "[PDIngress] pull intended for %s landed on %s (round-robin)",
+                # Should only happen when `replica_id` died between the
+                # callback firing and the router resolving candidates.
+                log.warning(
+                    "[PDIngress] direct dispatch for %s degraded to %s; "
+                    "target likely just died",
                     replica_id, self_reported,
                 )
         except Exception as exc:  # noqa: BLE001 — Demo diagnostics only

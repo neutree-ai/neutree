@@ -64,6 +64,15 @@ curl -fsS "${svc}/v1/topology" | jq '{
   all_replica_ids_keyed: (
     [.actor_topology[].replica_id] == (.actor_topology | keys)
   ),
+  # V15: direct dispatch via multiplexed_model_id must yield N unique actor
+  # identities — N collisions would prove round-robin instead of direct.
+  v15_direct_dispatch_unique: (
+    ([.actor_topology[].prefill.actor_id] | unique | length)
+      == (.actor_topology | length)
+    and
+    ([.actor_topology[].decode.actor_id]  | unique | length)
+      == (.actor_topology | length)
+  ),
   prefill_actor_ids:    [.actor_topology[].prefill.actor_id] | unique,
   decode_actor_ids:     [.actor_topology[].decode.actor_id]  | unique,
   prefill_gpu_ids:      [.actor_topology[].prefill.gpu_ids],

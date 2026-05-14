@@ -6,14 +6,24 @@ Demo (Phase 0) responsibilities:
       module-level `_SHARED.serve_replicas` (validates V10).
     - Override `on_replica_actor_died(replica_id)` to evict from `_SHARED`
       (validates V11).
-    - Override `choose_replicas(...)` to do a deterministic round-robin pick
-      so the dispatch path provably reads `_SHARED`. Falls back to the
-      candidate list if `_SHARED` is empty (cold start race).
+    - Override `choose_replicas(...)` to honor an optional caller-supplied
+      `multiplexed_model_id` as a direct ReplicaID selector (validates V15);
+      falls back to deterministic round-robin over `_SHARED.known_replica_ids`
+      so the dispatch path provably reads `_SHARED`.
 
-MVP (PR-ingress-lib) replaces choose_replicas with the full Ingress-as-Decider
-pipeline: decode-first CHWBL(session-id) → same-host prefill CHWBL(prompt prefix).
-ObserverRouter remains the topology observer; the scheduling primitives live in
-serve/_scheduler/.
+We deliberately **do not** inherit MultiplexMixin: that mixin maintains a
+`_multiplexed_model_id_to_replica_ids` map populated by `@serve.multiplexed`-
+decorated backend methods (the LoRA adapter tracking semantics). We do not
+use that semantics — we repurpose the metadata field as a direct ReplicaID
+key. Inheriting MultiplexMixin would add dead state-tracking code and muddle
+intent. The metadata field itself is set framework-side from
+`handle.options(multiplexed_model_id=...)` and reaches us in
+`PendingRequest.metadata.multiplexed_model_id` regardless of mixin.
+
+MVP (PR-ingress-lib) replaces `choose_replicas` with the full Ingress-as-
+Decider pipeline: decode-first CHWBL(session-id) → same-host prefill
+CHWBL(prompt prefix). ObserverRouter remains the topology observer; the
+scheduling primitives live in serve/_scheduler/.
 """
 from __future__ import annotations
 
@@ -51,8 +61,33 @@ def _extract_node_id(replica: RunningReplica) -> str:
     return ""
 
 
+def _extract_target_replica_id(pending_request: Optional[PendingRequest]) -> str:
+    """Read the caller-supplied direct-dispatch hint from request metadata.
+
+    Returns the empty string when no hint is set or metadata is unavailable
+    (we treat that as "router decides"). Robust to Ray version drift on
+    the metadata attribute name.
+    """
+    if pending_request is None:
+        return ""
+    md = getattr(pending_request, "metadata", None)
+    if md is None:
+        return ""
+    val = getattr(md, "multiplexed_model_id", None)
+    return str(val) if val else ""
+
+
 class ObserverRouter(RequestRouter):
-    """RequestRouter that observes replica topology and round-robin dispatches."""
+    """RequestRouter that observes replica topology and dispatches.
+
+    Dispatch rules (D-10g):
+        1. If caller set `multiplexed_model_id` on the handle, match it
+           exactly against `str(r.replica_id)` of every candidate. Hit →
+           direct dispatch. Miss → log warning, fall through to round-robin
+           (so a request to a just-died replica still gets served).
+        2. Otherwise, deterministic round-robin over the
+           `_SHARED.known_replica_ids()` view intersected with `candidates`.
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -61,7 +96,10 @@ class ObserverRouter(RequestRouter):
 
     def initialize_state(self, **kwargs):
         """Custom kwargs from request_router_kwargs; Demo accepts none."""
-        logger.info("[ObserverRouter] initialized (Demo: topology observer + round-robin)")
+        logger.info(
+            "[ObserverRouter] initialized (topology observer + replica_id-direct "
+            "dispatch with round-robin fallback)"
+        )
 
     # ----- topology observation (V10/V11) -----
 
@@ -86,7 +124,7 @@ class ObserverRouter(RequestRouter):
         super().on_replica_actor_died(replica_id)
         logger.warning("[ObserverRouter] replica died: %s", replica_id)
 
-    # ----- dispatch (proves _SHARED is consumed) -----
+    # ----- dispatch (V15: direct addressing via multiplexed_model_id) -----
 
     async def choose_replicas(
         self,
@@ -97,13 +135,30 @@ class ObserverRouter(RequestRouter):
             logger.warning("[ObserverRouter] no candidates available")
             return [[]]
 
+        # ── (1) Direct dispatch via multiplexed_model_id == replica_id ──
+        target = _extract_target_replica_id(pending_request)
+        if target:
+            for r in candidate_replicas:
+                if str(r.replica_id) == target:
+                    logger.debug(
+                        "[ObserverRouter] direct dispatch -> %s (caller-pinned)", target
+                    )
+                    return [[r]]
+            logger.warning(
+                "[ObserverRouter] target replica %s not in current %d candidates; "
+                "falling back to round-robin",
+                target,
+                len(candidate_replicas),
+            )
+            # fall through
+
+        # ── (2) Deterministic round-robin over _SHARED-known replicas ──
         known_ids = self._shared.known_replica_ids()
         if not known_ids:
             # Cold start: _SHARED hasn't been populated yet → fall back to the
             # raw candidate list and let Ray Serve's default selection win.
             return [candidate_replicas]
 
-        # Deterministic round-robin over known_ids intersected with candidates.
         candidate_map = {str(r.replica_id): r for r in candidate_replicas}
         ordered_known = [rid for rid in known_ids if rid in candidate_map]
         if not ordered_known:
@@ -112,6 +167,8 @@ class ObserverRouter(RequestRouter):
         idx = next(self._cursor) % len(ordered_known)
         picked_id = ordered_known[idx]
         picked = candidate_map[picked_id]
-        logger.debug("[ObserverRouter] round-robin picked %s (idx=%d/%d)",
-                     picked_id, idx, len(ordered_known))
+        logger.debug(
+            "[ObserverRouter] round-robin picked %s (idx=%d/%d)",
+            picked_id, idx, len(ordered_known),
+        )
         return [[picked]]
