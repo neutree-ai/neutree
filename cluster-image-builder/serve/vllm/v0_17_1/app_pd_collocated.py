@@ -89,6 +89,14 @@ PLATFORM_ENV_KEYS = {
     "NEUTREE_RAY_STAT_APPLICATION",
     "NEUTREE_RAY_STAT_ROLE",
     "NEUTREE_RAY_STAT_RANK",
+    # Force line-buffered stdio inside the engine container. Without this
+    # CPython fully-buffers stdout/stderr in non-TTY mode (which is what
+    # `docker run` produces), so vLLM's logger.info / print stay in the
+    # process buffer until the actor exits — at which point `--rm` has
+    # already removed the container. Setting this in runtime_env.env_vars
+    # makes `docker logs <container>` / `ray logs actor <id>` tailable in
+    # real time.
+    "PYTHONUNBUFFERED",
 }
 PLATFORM_ENGINE_KWARG_KEYS = {
     "kv_transfer_config",
@@ -549,7 +557,11 @@ class PDCollocatedBackend:
         # per-actor role/rank so vLLM-side metrics keep the deployment /
         # replica / application dimensions and gain role/rank for per-actor
         # slicing.
-        metrics_env_base = {}
+        # PYTHONUNBUFFERED=1 makes the inner-actor container's stdio
+        # line-buffered so vLLM's logger.info / print show up immediately
+        # via `docker logs` / `ray logs actor`, instead of being trapped
+        # in CPython's full-buffer (default for non-TTY stdio).
+        metrics_env_base = {"PYTHONUNBUFFERED": "1"}
         try:
             rc = serve.get_replica_context()
             dep = getattr(rc, "deployment", "") or ""
