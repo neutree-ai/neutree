@@ -72,10 +72,22 @@ class NeutreeRayStatLogger(RayPrometheusStatLogger):
             }
             if hasattr(ctx, "app_name"):
                 extra_labels["application"] = ctx.app_name
-        except RuntimeError:
+        except Exception as exc:  # noqa: BLE001
+            # Two real-world miss-paths, both treated identically (skip labels):
+            #   - RuntimeError: legacy ray (< 2.53) raise path
+            #   - ray.serve.exceptions.RayServeException: 2.53+ raise path
+            # Also covers PD same-host: PrefillActor / DecodeActor run as
+            # plain @ray.remote actors (not Serve deployments) so calling
+            # get_replica_context() from inside vLLM's stat logger factory
+            # — which fires during super().__init__ before our subclass body
+            # gets a chance — always misses. Custom labels then come from
+            # the outer PDCollocatedBackend (a Serve deployment) reporting
+            # its own context separately; vLLM-side metrics are fine
+            # unlabeled.
             logger.warning(
-                "NeutreeRayStatLogger: not running in Ray Serve context, "
-                "skipping custom labels"
+                "NeutreeRayStatLogger: not running in Ray Serve context "
+                "(%s); skipping custom labels",
+                type(exc).__name__,
             )
 
         if extra_labels:
