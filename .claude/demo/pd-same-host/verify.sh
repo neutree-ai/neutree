@@ -61,8 +61,15 @@ curl -fsS "${svc}/v1/topology" | jq '{
   serve_replicas_count: (.serve_replicas | length),
   actor_topology_count: (.actor_topology | length),
   all_same_host:        ([.actor_topology[].same_host] | all),
-  prefill_nodes:        [.actor_topology[].prefill_node] | unique,
-  decode_nodes:         [.actor_topology[].decode_node]  | unique
+  all_replica_ids_keyed: (
+    [.actor_topology[].replica_id] == (.actor_topology | keys)
+  ),
+  prefill_actor_ids:    [.actor_topology[].prefill.actor_id] | unique,
+  decode_actor_ids:     [.actor_topology[].decode.actor_id]  | unique,
+  prefill_gpu_ids:      [.actor_topology[].prefill.gpu_ids],
+  decode_gpu_ids:       [.actor_topology[].decode.gpu_ids],
+  prefill_nodes:        [.actor_topology[].prefill.node_id] | unique,
+  decode_nodes:         [.actor_topology[].decode.node_id]  | unique
 }'
 
 echo ">>> POST ${svc}/v1/chat/completions (smoke)"

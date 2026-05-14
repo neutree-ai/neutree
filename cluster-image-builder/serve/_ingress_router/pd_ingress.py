@@ -34,7 +34,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from ray import serve
 from ray.serve.handle import DeploymentHandle
 
-from .shared_state import ActorTopology, get_shared
+from .shared_state import ActorInfo, ActorTopology, get_shared
 
 
 log = logging.getLogger("pd_ingress")
@@ -115,17 +115,26 @@ class PDIngress:
     async def _refresh_topology_async(self) -> None:
         """Top-up _SHARED.actor_topology for any serve_replicas that don't yet
         have a topology entry or whose entry is older than _TOPOLOGY_TTL_SEC.
-        Per-replica refresh is single-flight so concurrent ingress requests
-        don't fan out N×M pulls.
 
-        Demo simplification: we trigger this from /v1/chat/completions and
-        /v1/topology. MVP (PR-ingress-lib) hoists the refresh into the
-        ObserverRouter `update_replicas` callback directly.
+        Each get_actor_topology() response self-identifies via `replica_id`
+        (from `serve.get_replica_context()` on the backend side), so the
+        ingress can key _SHARED.actor_topology by the same id ObserverRouter
+        populates — no "any-replica-missing-topology" heuristic.
+
+        ObserverRouter round-robins; we fire up to len(missing) pulls so the
+        cursor walks through each candidate. The single-flight set guards
+        against concurrent /v1/chat/completions traffic triggering N×M pulls.
+
+        MVP (PR-ingress-lib) hoists this refresh into the ObserverRouter
+        update_replicas callback directly so the view is always fresh and the
+        request path stays pull-free.
         """
         snap = self._shared.snapshot()
         now = asyncio.get_running_loop().time()
         targets: list[str] = []
-        for rid, sr in snap["serve_replicas"].items():
+        for rid in snap["serve_replicas"].keys():
+            if rid in self._topology_inflight:
+                continue
             topo = snap["actor_topology"].get(rid)
             if topo is None:
                 targets.append(rid)
@@ -140,39 +149,55 @@ class PDIngress:
         if not targets:
             return
 
-        # Demo pulls the *backend* (any replica's view of itself) — because
-        # ObserverRouter round-robins, calling get_actor_topology N times will
-        # in practice walk through each replica. For Demo correctness this is
-        # good enough; MVP refines to per-replica direct addressing.
+        # Reserve single-flight slots upfront.
+        for rid in targets:
+            self._topology_inflight.add(rid)
+
         async def pull_once():
             try:
                 topo_dict = await self.backend.get_actor_topology.remote()
-                # Find which replica's view this is by matching on prefill/decode
-                # node_ids — for Demo we just associate with any known serve
-                # replica that still lacks topology. Best effort.
                 if not topo_dict:
                     return
-                target_rid = next(
-                    (
-                        rid for rid in targets
-                        if rid not in self._shared.snapshot()["actor_topology"]
-                    ),
-                    None,
-                )
-                if target_rid is None:
+                replica_id = str(topo_dict.get("replica_id") or "")
+                if not replica_id:
+                    log.warning(
+                        "[PDIngress] backend returned topology without replica_id; "
+                        "dropping (likely older Ray Serve API)"
+                    )
                     return
+                prefill_raw = topo_dict.get("prefill") or {}
+                decode_raw = topo_dict.get("decode") or {}
                 self._shared.upsert_topology(
-                    target_rid,
+                    replica_id,
                     ActorTopology(
+                        replica_id=replica_id,
+                        replica_actor_id=str(topo_dict.get("replica_actor_id", "")),
+                        replica_node=str(topo_dict.get("replica_node", "")),
                         pg_id=str(topo_dict.get("pg_id", "")),
-                        prefill_node=str(topo_dict.get("prefill_node", "")),
-                        decode_node=str(topo_dict.get("decode_node", "")),
+                        prefill=ActorInfo(
+                            kind=str(prefill_raw.get("kind", "prefill")),
+                            actor_id=str(prefill_raw.get("actor_id", "")),
+                            node_id=str(prefill_raw.get("node_id", "")),
+                            gpu_ids=[int(g) for g in (prefill_raw.get("gpu_ids") or [])],
+                            healthy=bool(prefill_raw.get("healthy", False)),
+                        ),
+                        decode=ActorInfo(
+                            kind=str(decode_raw.get("kind", "decode")),
+                            actor_id=str(decode_raw.get("actor_id", "")),
+                            node_id=str(decode_raw.get("node_id", "")),
+                            gpu_ids=[int(g) for g in (decode_raw.get("gpu_ids") or [])],
+                            healthy=bool(decode_raw.get("healthy", False)),
+                        ),
                         same_host=bool(topo_dict.get("same_host", False)),
                     ),
                 )
             except Exception as exc:  # noqa: BLE001 — Demo diagnostics only
                 log.warning("[PDIngress] topology pull failed: %s", exc)
 
-        # Fire one pull per missing target. ObserverRouter round-robins so a
-        # sequence of pulls hits different replicas.
-        await asyncio.gather(*[pull_once() for _ in targets])
+        try:
+            # Fire one pull per missing target; ObserverRouter round-robins so
+            # the cursor walks through each candidate over the burst.
+            await asyncio.gather(*[pull_once() for _ in targets])
+        finally:
+            for rid in targets:
+                self._topology_inflight.discard(rid)

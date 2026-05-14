@@ -35,18 +35,44 @@ class ReplicaSnapshot:
 
 
 @dataclass
+class ActorInfo:
+    """Per-actor identity / placement inside one PDCollocatedBackend replica.
+
+    kind      — "prefill" or "decode"
+    actor_id  — Ray ActorID (hex string), stable across calls
+    node_id   — Ray node_id where this actor's process lives
+    gpu_ids   — Ray-visible GPU indices (subset of CUDA_VISIBLE_DEVICES)
+    healthy   — True when the actor reported its identity successfully
+    """
+    kind: str = ""
+    actor_id: str = ""
+    node_id: str = ""
+    gpu_ids: List[int] = field(default_factory=list)
+    healthy: bool = False
+
+
+@dataclass
 class ActorTopology:
     """Per-PDCollocatedBackend-replica actor placement.
 
-    pg_id          — placement_group id (truncated string form)
-    prefill_node   — Ray node_id of the PrefillActor (1 bundle of the PG)
-    decode_node    — Ray node_id of the DecodeActor (the other bundle)
-    same_host      — convenience flag, True iff prefill_node == decode_node
-    observed_at    — wall-clock time we fetched this from the backend replica
+    replica_id        — canonical Ray Serve ReplicaID (matches ObserverRouter
+                        / _SHARED.serve_replicas key)
+    replica_actor_id  — Ray ActorID of the Serve replica process itself
+                        (different from the inner PrefillActor / DecodeActor)
+    replica_node      — node_id of the Serve replica process
+    pg_id             — placement_group id (hex string form)
+    prefill           — ActorInfo for the inner PrefillActor
+    decode            — ActorInfo for the inner DecodeActor
+    same_host         — prefill.node_id == decode.node_id (and == replica_node
+                        in Phase 0 since the Serve replica owns the PG)
+    observed_at       — wall-clock time we fetched this from the backend replica
     """
+    replica_id: str = ""
+    replica_actor_id: str = ""
+    replica_node: str = ""
     pg_id: str = ""
-    prefill_node: str = ""
-    decode_node: str = ""
+    prefill: ActorInfo = field(default_factory=ActorInfo)
+    decode: ActorInfo = field(default_factory=ActorInfo)
     same_host: bool = False
     observed_at: float = 0.0
 

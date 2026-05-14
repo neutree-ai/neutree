@@ -130,11 +130,25 @@ class PrefillActor:
         }
         self.engine = _build_engine(model_args, engine_kwargs, kv_cfg)
         self.model_id = model_args.get("serve_name") or model_args.get("name")
-        self.node_id = ray.get_runtime_context().get_node_id()
-        log.info(f"[PrefillActor] ready on node {self.node_id}")
+        ctx = ray.get_runtime_context()
+        self.node_id = ctx.get_node_id()
+        self.actor_id = ctx.get_actor_id()
+        try:
+            self.gpu_ids = list(ctx.get_gpu_ids())
+        except Exception:  # noqa: BLE001 — older Ray returns ints, some return strs
+            self.gpu_ids = []
+        log.info(
+            f"[PrefillActor] ready: actor_id={self.actor_id} node={self.node_id} gpus={self.gpu_ids}"
+        )
 
-    def get_node_id(self) -> str:
-        return self.node_id
+    def get_self_info(self) -> Dict[str, Any]:
+        """Topology probe — returns {kind, actor_id, node_id, gpu_ids}."""
+        return {
+            "kind": "prefill",
+            "actor_id": str(self.actor_id),
+            "node_id": str(self.node_id),
+            "gpu_ids": [int(g) for g in self.gpu_ids],
+        }
 
     async def prefill_at(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Run prefill (max_tokens=1) and return kv_transfer_params metadata.
@@ -190,11 +204,25 @@ class DecodeActor:
         }
         self.engine = _build_engine(model_args, engine_kwargs, kv_cfg)
         self.model_id = model_args.get("serve_name") or model_args.get("name")
-        self.node_id = ray.get_runtime_context().get_node_id()
-        log.info(f"[DecodeActor] ready on node {self.node_id}")
+        ctx = ray.get_runtime_context()
+        self.node_id = ctx.get_node_id()
+        self.actor_id = ctx.get_actor_id()
+        try:
+            self.gpu_ids = list(ctx.get_gpu_ids())
+        except Exception:  # noqa: BLE001
+            self.gpu_ids = []
+        log.info(
+            f"[DecodeActor] ready: actor_id={self.actor_id} node={self.node_id} gpus={self.gpu_ids}"
+        )
 
-    def get_node_id(self) -> str:
-        return self.node_id
+    def get_self_info(self) -> Dict[str, Any]:
+        """Topology probe — returns {kind, actor_id, node_id, gpu_ids}."""
+        return {
+            "kind": "decode",
+            "actor_id": str(self.actor_id),
+            "node_id": str(self.node_id),
+            "gpu_ids": [int(g) for g in self.gpu_ids],
+        }
 
     async def decode_at(self, payload: Dict[str, Any], kv_params: Optional[Dict[str, Any]]):
         """Stream / return decode chunks, consuming KV blocks transferred from
@@ -252,7 +280,21 @@ class PDCollocatedBackend:
         self.decode = DecodeActor.options(
             num_cpus=1, num_gpus=gpu_per_actor, scheduling_strategy=sched_decode,
         ).remote(model_args, engine_kwargs, kv_extra)
-        self.replica_node_id = ray.get_runtime_context().get_node_id()
+        rt_ctx = ray.get_runtime_context()
+        self.replica_node_id = rt_ctx.get_node_id()
+        self.replica_actor_id = rt_ctx.get_actor_id()
+        # Ray Serve replica identity (matches ObserverRouter._replicas key in
+        # _SHARED.serve_replicas). serve.get_replica_context() raises outside a
+        # Serve context, so guard it.
+        self.replica_id_str = ""
+        try:
+            rc = serve.get_replica_context()
+            # Across Ray versions the attribute is either `replica_id` (newer)
+            # or `replica_tag` (older). Probe both.
+            rid = getattr(rc, "replica_id", None) or getattr(rc, "replica_tag", None)
+            self.replica_id_str = str(rid) if rid is not None else ""
+        except Exception:  # noqa: BLE001 — non-Serve test contexts
+            pass
         # Resolve placement_group ID into a stable string form for topology view.
         # In Ray 2.x PG identity is exposed via .id (binary) or via str(pg) repr.
         pg_id_bytes = getattr(self.pg, "id", None)
@@ -283,17 +325,38 @@ class PDCollocatedBackend:
     async def get_actor_topology(self) -> Dict[str, Any]:
         """Return the per-replica actor topology view for the PDIngress
         `_SHARED.actor_topology` cache. Demo V10/V11 validation entrypoint.
+
+        Shape (matches shared_state.ActorTopology):
+            {
+              "replica_id":       "<ray serve ReplicaID>",
+              "replica_actor_id": "<ray actor id of the serve replica>",
+              "replica_node":     "<node id of the serve replica process>",
+              "pg_id":            "<placement_group id hex>",
+              "prefill": {"kind","actor_id","node_id","gpu_ids","healthy"},
+              "decode":  {"kind","actor_id","node_id","gpu_ids","healthy"},
+              "same_host": bool,
+            }
         """
-        prefill_node, decode_node = await asyncio_gather(
-            self.prefill.get_node_id.remote(),
-            self.decode.get_node_id.remote(),
+        prefill_info, decode_info = await asyncio_gather(
+            self.prefill.get_self_info.remote(),
+            self.decode.get_self_info.remote(),
+        )
+        prefill_info = dict(prefill_info)
+        decode_info = dict(decode_info)
+        prefill_info["healthy"] = True
+        decode_info["healthy"] = True
+        same_host = (
+            prefill_info.get("node_id") == decode_info.get("node_id")
+            and prefill_info.get("node_id") is not None
         )
         return {
+            "replica_id": self.replica_id_str,
+            "replica_actor_id": str(self.replica_actor_id),
+            "replica_node": str(self.replica_node_id),
             "pg_id": self._pg_id_str,
-            "prefill_node": prefill_node,
-            "decode_node": decode_node,
-            "same_host": prefill_node == decode_node,
-            "replica_node": self.replica_node_id,
+            "prefill": prefill_info,
+            "decode": decode_info,
+            "same_host": same_host,
         }
 
 
