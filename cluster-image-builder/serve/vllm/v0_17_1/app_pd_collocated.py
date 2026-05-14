@@ -51,7 +51,13 @@ from serve._ingress_router.pd_ingress import PDIngress
 # Reuse the monolithic Backend implementation: model download, AsyncLLM
 # construction, OpenAI serving surfaces, error normalization. PrefillActor
 # / DecodeActor are thin Ray-actor wrappers over it.
-from serve.vllm.v0_17_1.app import Backend
+#
+# Import the RAW class (`_Backend`), not the `@serve.deployment`-wrapped
+# `Backend` symbol. Subclassing a Deployment instance triggers
+# Deployment.__init__ at class-body time and raises "Deployment constructor
+# should not be called directly". The raw class is what we want to extend
+# with @ray.remote.
+from serve.vllm.v0_17_1.app import _Backend as Backend
 
 
 log = logging.getLogger("pd_collocated")

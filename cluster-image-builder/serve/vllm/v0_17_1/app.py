@@ -49,8 +49,15 @@ SCHEDULER_CLASS_PATHS = {
 }
 
 
-@serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})
-class Backend:
+# Raw class kept undecorated so the PD same-host app
+# (serve/vllm/v0_17_1/app_pd_collocated.py) can subclass it as a plain
+# @ray.remote actor. Subclassing a @serve.deployment-wrapped class raises
+# "Deployment constructor should not be called directly" because Ray Serve
+# replaces the symbol with a Deployment wrapper.
+#
+# `Backend` (the wrapped Deployment, defined right below) stays the public
+# symbol for the monolithic app_builder.
+class _Backend:
     def __init__(self,
                  # Model config parameters
                  model_registry_type: str,
@@ -313,6 +320,14 @@ class Backend:
     async def show_available_models(self):
         models = await self._ensure_models()
         return await models.show_available_models()
+
+
+# Wrap the raw `_Backend` as a Ray Serve Deployment for the monolithic
+# app_builder. Defined here (after the class body) so callers can either:
+#   - `from .app import Backend`  → Deployment instance for `.options(...).bind(...)`
+#   - `from .app import _Backend` → raw class for `@ray.remote` subclassing
+#     (used by app_pd_collocated.py's PrefillActor / DecodeActor).
+Backend = serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})(_Backend)
 
 
 app = FastAPI()
