@@ -25,11 +25,15 @@ Demo intentionally:
 
 Demo design: .claude/knowledge/neutree-pd-same-host-phase1-detailed/00-overview-and-pr-plan.md §3.0
 """
+import asyncio
 import json
 import logging
 import os
 import uuid
 from typing import Any, Dict, List, Optional
+
+# Local alias to avoid line-noise when calling asyncio.gather() in async methods.
+asyncio_gather = asyncio.gather
 
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, StreamingResponse
@@ -37,6 +41,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 import ray
 from ray import serve
 from ray.serve import Application
+from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle
 from ray.util.placement_group import placement_group, PlacementGroupSchedulingStrategy
 
@@ -125,7 +130,11 @@ class PrefillActor:
         }
         self.engine = _build_engine(model_args, engine_kwargs, kv_cfg)
         self.model_id = model_args.get("serve_name") or model_args.get("name")
-        log.info("[PrefillActor] ready")
+        self.node_id = ray.get_runtime_context().get_node_id()
+        log.info(f"[PrefillActor] ready on node {self.node_id}")
+
+    def get_node_id(self) -> str:
+        return self.node_id
 
     async def prefill_at(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Run prefill (max_tokens=1) and return kv_transfer_params metadata.
@@ -181,7 +190,11 @@ class DecodeActor:
         }
         self.engine = _build_engine(model_args, engine_kwargs, kv_cfg)
         self.model_id = model_args.get("serve_name") or model_args.get("name")
-        log.info("[DecodeActor] ready")
+        self.node_id = ray.get_runtime_context().get_node_id()
+        log.info(f"[DecodeActor] ready on node {self.node_id}")
+
+    def get_node_id(self) -> str:
+        return self.node_id
 
     async def decode_at(self, payload: Dict[str, Any], kv_params: Optional[Dict[str, Any]]):
         """Stream / return decode chunks, consuming KV blocks transferred from
@@ -239,6 +252,14 @@ class PDCollocatedBackend:
         self.decode = DecodeActor.options(
             num_cpus=1, num_gpus=gpu_per_actor, scheduling_strategy=sched_decode,
         ).remote(model_args, engine_kwargs, kv_extra)
+        self.replica_node_id = ray.get_runtime_context().get_node_id()
+        # Resolve placement_group ID into a stable string form for topology view.
+        # In Ray 2.x PG identity is exposed via .id (binary) or via str(pg) repr.
+        pg_id_bytes = getattr(self.pg, "id", None)
+        if isinstance(pg_id_bytes, bytes):
+            self._pg_id_str = pg_id_bytes.hex()
+        else:
+            self._pg_id_str = str(self.pg)
 
     async def pd_chat(self, payload: Dict[str, Any]):
         # Step 1: prefill -> kv_transfer_params
@@ -257,6 +278,22 @@ class PDCollocatedBackend:
             "object": "list",
             "data": [{"id": await self.prefill.__ray_call__.remote(lambda a: a.model_id),
                       "object": "model"}],
+        }
+
+    async def get_actor_topology(self) -> Dict[str, Any]:
+        """Return the per-replica actor topology view for the PDIngress
+        `_SHARED.actor_topology` cache. Demo V10/V11 validation entrypoint.
+        """
+        prefill_node, decode_node = await asyncio_gather(
+            self.prefill.get_node_id.remote(),
+            self.decode.get_node_id.remote(),
+        )
+        return {
+            "pg_id": self._pg_id_str,
+            "prefill_node": prefill_node,
+            "decode_node": decode_node,
+            "same_host": prefill_node == decode_node,
+            "replica_node": self.replica_node_id,
         }
 
 
@@ -304,6 +341,13 @@ def app_builder(args: Dict[str, Any]) -> Application:
         "num_replicas": num_replicas,
         "max_ongoing_requests": 100,
         "ray_actor_options": {"num_cpus": 0.1, "num_gpus": 0},
+        # ObserverRouter runs inside the *caller* process (PDIngress) and
+        # maintains the global view of PDCollocatedBackend replicas in
+        # _SHARED. See serve/_ingress_router/observer_router.py.
+        "request_router_config": RequestRouterConfig(
+            request_router_class="serve._ingress_router.observer_router:ObserverRouter",
+            request_router_kwargs={},
+        ),
     }
     backend_container = args.get("backend_container")
     if backend_container:

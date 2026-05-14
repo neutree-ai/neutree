@@ -51,6 +51,20 @@ echo "  service_url=${svc}"
 echo ">>> GET ${svc}/v1/models"
 curl -fsS "${svc}/v1/models" | jq .
 
+echo ">>> GET ${svc}/v1/topology (V10/V11: ObserverRouter view of replicas)"
+# First call also primes the actor_topology cache via lazy pull.
+curl -fsS "${svc}/v1/topology" | jq .
+echo ">>> sleep 5s then re-poll to confirm cache populated"
+sleep 5
+curl -fsS "${svc}/v1/topology" | jq '{
+  last_update_ts,
+  serve_replicas_count: (.serve_replicas | length),
+  actor_topology_count: (.actor_topology | length),
+  all_same_host:        ([.actor_topology[].same_host] | all),
+  prefill_nodes:        [.actor_topology[].prefill_node] | unique,
+  decode_nodes:         [.actor_topology[].decode_node]  | unique
+}'
+
 echo ">>> POST ${svc}/v1/chat/completions (smoke)"
 start=$(date +%s%N)
 resp=$(curl -fsS -H 'Content-Type: application/json' \

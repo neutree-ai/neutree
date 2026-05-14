@@ -47,7 +47,14 @@ CLUSTER=my-ssh-cluster \
 ./.claude/demo/pd-same-host/perf.sh
 ```
 
-## What this validates (V1–V9)
+## What this validates (V1–V11)
 
 See `report.md`. The Demo only sets up enough scaffolding to observe each
 assumption. Pass/fail goes back into MVP planning per the 00 overview doc.
+
+V10 + V11 specifically exercise the Ray-RequestRouter-as-topology-observer
+pattern: `serve/_ingress_router/observer_router.py` is wired as the
+`request_router_class` of `PDCollocatedBackend`, and PDIngress reads the
+resulting `_SHARED` view via `GET /v1/topology`. If V10 fails the MVP
+`_SHARED + ObserverRouter` design needs reconsideration before
+`PR-ingress-lib`.
