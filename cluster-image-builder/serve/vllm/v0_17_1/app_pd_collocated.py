@@ -664,6 +664,45 @@ class PDCollocatedBackend:
         )
         return await decode_handle.generate.remote(decode_payload)
 
+    # ── health probe (P+D 同生共死) ───────────────────────────────────
+    # Ray Serve calls check_health periodically on each replica. Raising
+    # marks the replica unhealthy and triggers controller-side recycling.
+    # Default (no method) only checks "actor alive"; we extend it to fan
+    # out a cheap RPC to every inner PrefillActor / DecodeActor so a dead
+    # inner actor takes down its replica instead of silently routing
+    # requests to a stale handle.
+
+    _HEALTH_TIMEOUT_SEC = 5.0
+
+    async def check_health(self):
+        """Replica health hook.
+
+        Success: every inner actor responded to get_self_info within
+        _HEALTH_TIMEOUT_SEC.
+        Failure: any inner actor is dead or unresponsive → raise →
+        Ray Serve tears down the replica (and its PG, and the rest of
+        the inner actors), then re-creates one. Same-host semantic
+        means we don't try to "rescue" a half-living replica.
+        """
+        handles = list(self.prefills) + list(self.decodes)
+        if not handles:
+            raise RuntimeError("[PDCollocatedBackend] no inner actors to probe")
+        try:
+            await asyncio.wait_for(
+                asyncio_gather(*[h.get_self_info.remote() for h in handles]),
+                timeout=self._HEALTH_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError(
+                f"[PDCollocatedBackend] inner-actor health probe timed out "
+                f">{self._HEALTH_TIMEOUT_SEC}s (replica={self.replica_id_str})"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"[PDCollocatedBackend] inner-actor health probe failed "
+                f"(replica={self.replica_id_str}): {exc}"
+            ) from exc
+
     async def show_available_models(self):
         """OpenAI-compatible /v1/models response.
 
