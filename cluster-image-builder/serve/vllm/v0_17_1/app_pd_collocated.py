@@ -61,22 +61,17 @@ asyncio_gather = asyncio.gather
 # Platform-controlled keys: surfaced as warnings when user Role.Env or
 # Role.Variables shadow them. Users CAN still override (they win) but at
 # least the log makes the bypass auditable.
+#
+# Note: UCX_TLS is NOT platform-controlled. The engine / OS / NIXL pick
+# sensible defaults; if a user wants to pin (e.g. drop tcp on multi-NIC
+# hosts to dodge vLLM Bug #35799) they set it via EndpointSpec.Roles[].Env.
 PLATFORM_ENV_KEYS = {
     "VLLM_NIXL_SIDE_CHANNEL_HOST",
     "VLLM_NIXL_SIDE_CHANNEL_PORT",
-    "UCX_TLS",
 }
 PLATFORM_ENGINE_KWARG_KEYS = {
     "kv_transfer_config",
     "distributed_executor_backend",
-}
-
-# Platform-default env vars applied to every PD inner actor (user Role.Env
-# wins on collision via _merge_user_wins). Collapsed to host-local NVLink /
-# cuda_ipc transports so UCX doesn't accidentally probe rc/tcp on multi-NIC
-# hosts and stall NIXL handshake (vLLM Bug #35799).
-PD_PLATFORM_DEFAULT_ENV = {
-    "UCX_TLS": "self,sm,cuda_copy,cuda_ipc",
 }
 
 # Bind-mount the host's nvidia-fabricmanager socket dir into every PD inner
@@ -180,15 +175,9 @@ def _augment_pd_container(backend_container: Optional[Dict[str, Any]]) -> Option
 def _build_actor_runtime_env(role_env: Dict[str, str],
                              port_env: Dict[str, str],
                              backend_container: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """User Role.Env wins over (platform defaults + portalloc port env)."""
-    # Platform layer: PD defaults (UCX_TLS, ...) merged with portalloc port env.
-    # Port env doesn't collide with PD defaults so no warning expected here.
-    platform_env: Dict[str, str] = {}
-    platform_env.update(PD_PLATFORM_DEFAULT_ENV)
-    platform_env.update(port_env or {})
-
+    """User Role.Env wins over portalloc-derived port env."""
     env_vars = _merge_user_wins(
-        platform=platform_env,
+        platform=port_env or {},
         user=role_env or {},
         audit_keys=PLATFORM_ENV_KEYS,
         context="env_vars",

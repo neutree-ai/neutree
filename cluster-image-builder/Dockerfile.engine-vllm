@@ -33,6 +33,37 @@ FROM ${ENGINE_BASE_IMAGE}
 ENV HOME=/home/ray
 WORKDIR ${HOME}
 
+# Reconcile preinstalled nixl variants against the base image's CUDA major.
+#
+# The vllm-openai base ships nixl-cuXX where XX matches its CUDA layer. When
+# we run NIXL cuda_ipc PD on a different CUDA runtime (or want a different
+# nixl version), the mismatched variant's .so files in site-packages can
+# shadow the right one. Strategy: detect target CUDA major by parsing the
+# base image tag (or honoring an explicit TARGET_CUDA build arg), then
+# uninstall any nixl-cuYY where YY != target. Survivor's version is left
+# alone unless the operator pins NIXL_VERSION at build time.
+ARG ENGINE_BASE_IMAGE
+ARG TARGET_CUDA=""
+ARG NIXL_VERSION=""
+RUN cuda_target="${TARGET_CUDA}"; \
+    if [ -z "$cuda_target" ]; then \
+        cuda_target=$(printf '%s' "${ENGINE_BASE_IMAGE}" | grep -oE 'cu[0-9]+' | head -1 | sed 's/^cu//'); \
+    fi; \
+    if [ -n "$cuda_target" ]; then \
+        echo "[nixl-reconcile] target CUDA major = $cuda_target; uninstalling mismatched nixl variants"; \
+        for v in 11 12 13 14; do \
+            if [ "$v" != "$cuda_target" ]; then \
+                uv pip uninstall --system "nixl-cu$v" 2>/dev/null || true; \
+            fi; \
+        done; \
+    else \
+        echo "[nixl-reconcile] no cuXX detected in ENGINE_BASE_IMAGE='${ENGINE_BASE_IMAGE}'; skipping cleanup"; \
+    fi; \
+    if [ -n "$NIXL_VERSION" ]; then \
+        echo "[nixl-reconcile] pinning nixl == $NIXL_VERSION"; \
+        uv pip install --system "nixl${NIXL_VERSION}"; \
+    fi
+
 # Install Ray neutree fork (same version as cluster image)
 RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
     cd /install \
@@ -48,6 +79,7 @@ ARG ENGINE_VERSION_DIR
 COPY serve/_metrics ./serve/_metrics
 COPY serve/_replica_scheduler ./serve/_replica_scheduler
 COPY serve/_utils ./serve/_utils
+COPY serve/_ingress_router ./serve/_ingress_router
 COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
 # Copy downloader sources only; do NOT `pip install` downloader/requirements.txt.
 # Its huggingface-hub<1.0 pin would downgrade the newer huggingface_hub already
