@@ -717,7 +717,17 @@ class PDCollocatedBackend:
 
         prefill_payload = dict(payload)
         prefill_payload.setdefault("request_id", uuid.uuid4().hex)
+        # Cap output to exactly 1 token. OpenAI chat completions accept two
+        # equivalent knobs:
+        #   - max_tokens             (legacy alias)
+        #   - max_completion_tokens  (preferred since 2024; wins when both set)
+        # If we only overrode max_tokens, a client request carrying
+        # max_completion_tokens=N would have the prefill actually generate N
+        # tokens — defeating the PD split and wasting GPU. Override both so
+        # the effective limit is 1 regardless of which name the client used.
         prefill_payload["max_tokens"] = 1
+        if "max_completion_tokens" in prefill_payload:
+            prefill_payload["max_completion_tokens"] = 1
         prefill_payload["stream"] = False
         # Signal the prefill engine: stage KV for a remote decode. Drop any
         # client-supplied kv_transfer_params on the prefill side — it would
