@@ -606,9 +606,21 @@ class PDCollocatedBackend:
         # Round-robin counters for prefill / decode pair selection.
         self._prefill_cursor = itertools.count()
         self._decode_cursor = itertools.count()
+
+        # Block until every inner actor finishes vLLM init (model download,
+        # AsyncLLM construction, NIXL handshake). Ray Serve calls
+        # check_health right after __init__ returns; without this wait the
+        # 5s probe always times out because actors are still loading the
+        # model in the background. Same shape as monolithic Backend
+        # blocking on AsyncLLM.from_engine_args (sync ctor).
         log.info(
-            "[PDCollocatedBackend][init/done] %dP + %dD actors spawned "
-            "(handles pending; first .remote() will block on actor ready)",
+            "[PDCollocatedBackend][init/wait_ready] waiting for %dP + %dD "
+            "actors to finish vLLM init",
+            prefill_count, decode_count,
+        )
+        ray.get([h.get_self_info.remote() for h in self.prefills + self.decodes])
+        log.info(
+            "[PDCollocatedBackend][init/done] %dP + %dD actors ready",
             prefill_count, decode_count,
         )
 
