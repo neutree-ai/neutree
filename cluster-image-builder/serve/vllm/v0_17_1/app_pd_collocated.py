@@ -37,6 +37,7 @@ Merge precedence (Demo + MVP):
 import asyncio
 import itertools
 import logging
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -74,6 +75,16 @@ asyncio_gather = asyncio.gather
 PLATFORM_ENV_KEYS = {
     "VLLM_NIXL_SIDE_CHANNEL_HOST",
     "VLLM_NIXL_SIDE_CHANNEL_PORT",
+    # PD inner actors are not Serve deployments, so they cannot call
+    # serve.get_replica_context() to populate NeutreeRayStatLogger labels.
+    # The outer PDCollocatedBackend forwards its own Serve context plus
+    # the per-actor role/rank via these env vars so vLLM-side metrics keep
+    # the deployment / replica / application / role / rank dimensions.
+    "NEUTREE_RAY_STAT_DEPLOYMENT",
+    "NEUTREE_RAY_STAT_REPLICA",
+    "NEUTREE_RAY_STAT_APPLICATION",
+    "NEUTREE_RAY_STAT_ROLE",
+    "NEUTREE_RAY_STAT_RANK",
 }
 PLATFORM_ENGINE_KWARG_KEYS = {
     "kv_transfer_config",
@@ -180,10 +191,20 @@ def _augment_pd_container(backend_container: Optional[Dict[str, Any]]) -> Option
 
 def _build_actor_runtime_env(role_env: Dict[str, str],
                              port_env: Dict[str, str],
+                             metrics_env: Dict[str, str],
                              backend_container: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """User Role.Env wins over portalloc-derived port env."""
+    """User Role.Env wins over portalloc + metrics-platform env.
+
+    Platform env = port_env (NIXL side_channel*) ∪ metrics_env
+    (NEUTREE_RAY_STAT_* for NeutreeRayStatLogger labels). User Role.Env
+    overrides both — warnings are logged for any PLATFORM_ENV_KEYS the
+    user shadows so the bypass is auditable.
+    """
+    platform = {}
+    platform.update(metrics_env or {})
+    platform.update(port_env or {})
     env_vars = _merge_user_wins(
-        platform=port_env or {},
+        platform=platform,
         user=role_env or {},
         audit_keys=PLATFORM_ENV_KEYS,
         context="env_vars",
@@ -402,6 +423,10 @@ class PDCollocatedBackend:
         self._plan = plan or {}
         self._prefill_count = prefill_count
         self._decode_count = decode_count
+        # Stashed so show_available_models can synthesize the /v1/models
+        # response directly without bouncing through a PrefillActor RPC.
+        self._model_serve_name = (model_args or {}).get("serve_name") \
+            or (model_args or {}).get("name", "")
 
         # ── Demo debug: plan + actor_options shape (V3 / V8 / V18) ─────
         log.info(
@@ -475,14 +500,41 @@ class PDCollocatedBackend:
         decode_env = decode_role.get("env") or {}
         backend_container = self._plan.get("backend_container") if self._plan else None
 
+        # Metrics-label forwarding for NeutreeRayStatLogger. PD inner actors
+        # have no Serve context; we forward the outer replica's triple plus
+        # per-actor role/rank so vLLM-side metrics keep the deployment /
+        # replica / application dimensions and gain role/rank for per-actor
+        # slicing.
+        metrics_env_base = {}
+        try:
+            rc = serve.get_replica_context()
+            dep = getattr(rc, "deployment", "") or ""
+            rtag = getattr(rc, "replica_tag", "") or getattr(rc, "replica_id", "") or ""
+            app = getattr(rc, "app_name", "") or ""
+            if dep:
+                metrics_env_base["NEUTREE_RAY_STAT_DEPLOYMENT"] = str(dep)
+            if rtag:
+                metrics_env_base["NEUTREE_RAY_STAT_REPLICA"] = str(rtag)
+            if app:
+                metrics_env_base["NEUTREE_RAY_STAT_APPLICATION"] = str(app)
+        except Exception as exc:  # noqa: BLE001 — outer is always Serve; log if not
+            log.warning(
+                "[PDCollocatedBackend] no Serve context for metrics-label "
+                "forwarding (%s); PD actor metrics will lack labels",
+                type(exc).__name__,
+            )
+
         self.prefills: List[Any] = []
         for rank in range(prefill_count):
             port_env = _vllm_port_env(self._plan, self.global_rank, "prefill", rank)
+            metrics_env = dict(metrics_env_base)
+            metrics_env["NEUTREE_RAY_STAT_ROLE"] = "prefill"
+            metrics_env["NEUTREE_RAY_STAT_RANK"] = str(rank)
             opts = dict(prefill_actor_options)
             opts["scheduling_strategy"] = PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=rank,
             )
-            rt = _build_actor_runtime_env(prefill_env, port_env, backend_container)
+            rt = _build_actor_runtime_env(prefill_env, port_env, metrics_env, backend_container)
             if rt:
                 opts["runtime_env"] = rt
             # V19 / V21 / V22 — per-actor spawn point: bundle_index, port env,
@@ -504,12 +556,15 @@ class PDCollocatedBackend:
         self.decodes: List[Any] = []
         for rank in range(decode_count):
             port_env = _vllm_port_env(self._plan, self.global_rank, "decode", rank)
+            metrics_env = dict(metrics_env_base)
+            metrics_env["NEUTREE_RAY_STAT_ROLE"] = "decode"
+            metrics_env["NEUTREE_RAY_STAT_RANK"] = str(rank)
             opts = dict(decode_actor_options)
             opts["scheduling_strategy"] = PlacementGroupSchedulingStrategy(
                 placement_group=self.pg,
                 placement_group_bundle_index=prefill_count + rank,
             )
-            rt = _build_actor_runtime_env(decode_env, port_env, backend_container)
+            rt = _build_actor_runtime_env(decode_env, port_env, metrics_env, backend_container)
             if rt:
                 opts["runtime_env"] = rt
             log.info(
@@ -610,7 +665,26 @@ class PDCollocatedBackend:
         return await decode_handle.generate.remote(decode_payload)
 
     async def show_available_models(self):
-        return await self.prefills[0].show_available_models.remote()
+        """OpenAI-compatible /v1/models response.
+
+        Synthesized directly from the endpoint's model serve_name —
+        PrefillActor.show_available_models would just echo the same model
+        (it's downloaded with the same model_args), so the extra Ray RPC
+        hop adds latency without information. Matches OpenAI's response
+        shape so the JSONResponse wrapper in PDIngress passes it through
+        unchanged.
+        """
+        return {
+            "object": "list",
+            "data": [
+                {
+                    "id": self._model_serve_name,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": "neutree",
+                }
+            ],
+        }
 
     async def get_actor_topology(self) -> Dict[str, Any]:
         prefill_infos = await asyncio_gather(
