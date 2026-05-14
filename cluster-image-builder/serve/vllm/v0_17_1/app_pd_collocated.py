@@ -394,6 +394,27 @@ class DecodeActor(Backend):
             "gpu_ids": [int(g) for g in self.gpu_ids],
         }
 
+    async def generate_stream(self, payload: Dict[str, Any]):
+        """Yield-based streaming wrapper for SSE chat completions.
+
+        Backend.generate returns an AsyncGenerator object when payload has
+        stream=True. Generator objects do not survive Ray's RPC pickling,
+        so we cannot just `await decode_handle.generate.remote(...)` and
+        iterate on the caller side — that fails for plain @ray.remote
+        actors. Instead this yield-based method iterates the underlying
+        generator inside the actor process; Ray transparently turns
+        `.remote()` on a yield-based async method into a
+        StreamingObjectRefGenerator that the caller can `async for`.
+        """
+        gen_or_value = await self.generate(payload)
+        if hasattr(gen_or_value, "__aiter__"):
+            async for chunk in gen_or_value:
+                yield chunk
+        else:
+            # stream=False path or error response; yield once so the
+            # streaming contract still holds.
+            yield gen_or_value
+
 
 # --------------------------- PD backend ---------------------------
 
@@ -658,11 +679,36 @@ class PDCollocatedBackend:
         if kv_params is not None:
             decode_payload["kv_transfer_params"] = kv_params
 
+        is_stream = bool(decode_payload.get("stream"))
         log.info(
             "[pd_chat][decode_dispatch] req=%s kv_injected=%s stream=%s",
-            req_id, kv_params is not None, decode_payload.get("stream", False),
+            req_id, kv_params is not None, is_stream,
         )
+        if is_stream:
+            # Return a local async generator that transparently forwards
+            # the decode actor's streaming chunks back to PDIngress, which
+            # is wrapping pd_chat with options(stream=True). Returning a
+            # generator object (vs `await ...`) is what makes Ray Serve
+            # actually stream over SSE instead of buffering.
+            return self._stream_decode(decode_handle, decode_payload, req_id)
         return await decode_handle.generate.remote(decode_payload)
+
+    async def _stream_decode(self, decode_handle, decode_payload, req_id):
+        """Iterate the decode actor's yield-based generate_stream and
+        re-yield each chunk so Ray Serve's stream-mode wrapper turns the
+        coroutine into an SSE response.
+        """
+        # decode_handle is a plain @ray.remote actor handle (not a Serve
+        # DeploymentHandle), so we use the actor-RPC streaming pattern.
+        gen = decode_handle.generate_stream.remote(decode_payload)
+        try:
+            async for chunk in gen:
+                yield chunk
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "[pd_chat][stream_error] req=%s err=%s", req_id, exc,
+            )
+            raise
 
     # ── health probe (P+D 同生共死) ───────────────────────────────────
     # Ray Serve calls check_health periodically on each replica. Raising
