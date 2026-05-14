@@ -217,14 +217,37 @@ class PDIngress:
                 ),
             )
             # V12 / V13 / V14 — what the push or safety-net pull actually
-            # absorbed into _SHARED. one line per replica.
+            # absorbed into _SHARED. Summary + per-actor identity breakdown
+            # so the operator can confirm placement (actor_id + node_id +
+            # gpu_ids) without hitting /v1/topology.
             log.info(
-                "[PDIngress][topology_pull] replica=%s prefills=%d decodes=%d "
-                "same_host=%s global_rank=%s pg_id=%s",
+                "[PDIngress][topology_pull/summary] replica=%s prefills=%d "
+                "decodes=%d same_host=%s global_rank=%s node_rank=%s "
+                "local_rank=%s world_size=%s pg_id=%s replica_actor=%s "
+                "replica_node=%s",
                 self_reported, len(prefills_raw), len(decodes_raw),
                 topo_dict.get("same_host"), topo_dict.get("global_rank"),
-                topo_dict.get("pg_id"),
+                topo_dict.get("node_rank"), topo_dict.get("local_rank"),
+                topo_dict.get("world_size"), topo_dict.get("pg_id"),
+                topo_dict.get("replica_actor_id"),
+                topo_dict.get("replica_node"),
             )
+            for i, p in enumerate(prefills_raw):
+                p = p or {}
+                log.info(
+                    "[PDIngress][topology_pull/prefill] replica=%s rank=%d "
+                    "actor_id=%s node_id=%s gpu_ids=%s",
+                    self_reported, i, p.get("actor_id"), p.get("node_id"),
+                    p.get("gpu_ids"),
+                )
+            for i, d in enumerate(decodes_raw):
+                d = d or {}
+                log.info(
+                    "[PDIngress][topology_pull/decode] replica=%s rank=%d "
+                    "actor_id=%s node_id=%s gpu_ids=%s",
+                    self_reported, i, d.get("actor_id"), d.get("node_id"),
+                    d.get("gpu_ids"),
+                )
             if self_reported != replica_id:
                 # Should only happen when `replica_id` died between the
                 # callback firing and the router resolving candidates.
