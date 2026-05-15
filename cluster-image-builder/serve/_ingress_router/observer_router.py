@@ -232,15 +232,33 @@ class ObserverRouter(MultiplexMixin, RequestRouter):
             for r in candidate_replicas:
                 if _replica_id_matches(r, rid):
                     logger.info(
-                        "[ObserverRouter][pick/direct] target=%s "
-                        "candidates=%d", rid, len(candidate_replicas),
+                        "[ObserverRouter][pick/direct] target=%r matched=%r "
+                        "(uid=%r) candidates=%d",
+                        rid,
+                        str(r.replica_id),
+                        _replica_unique_id(r.replica_id),
+                        len(candidate_replicas),
                     )
                     return [[r]]
+            # No match — surface BOTH the bare str() form and the parsed
+            # short uid for every candidate so the caller can copy a form
+            # that will match. This is the single most useful debug signal
+            # when a pin silently falls through to RR.
+            candidate_dump = [
+                {
+                    "str": str(r.replica_id),
+                    "uid": _replica_unique_id(r.replica_id),
+                }
+                for r in candidate_replicas
+            ]
             logger.warning(
-                "[ObserverRouter] direct target %s not in current %d candidates; "
-                "falling back to round-robin",
+                "[ObserverRouter] direct target %r not in current %d "
+                "candidates; falling back to round-robin. caller_uid=%r "
+                "candidates=%s",
                 raw_target,
                 len(candidate_replicas),
+                _replica_unique_id(rid),
+                candidate_dump,
             )
             # fall through
         elif raw_target:
