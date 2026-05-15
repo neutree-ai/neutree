@@ -40,6 +40,7 @@ Demo invariants the architecture review needs to validate:
          async __init__.
 """
 import asyncio
+import itertools
 import logging
 from typing import Optional
 
@@ -70,7 +71,16 @@ app = FastAPI()
 @serve.deployment(ray_actor_options={"num_cpus": 0.1})
 @serve.ingress(app)
 class PDIngress:
-    """Single backend handle, ObserverRouter does the per-request selection.
+    """HTTP ingress + replica routing strategy owner for PD same-host.
+
+    Two-layer division of labor with ObserverRouter:
+      - PDIngress (this class): picks WHICH PDCollocatedBackend replica
+        each request should land on. Demo uses deterministic round-robin
+        over _SHARED.known_replica_ids; MVP plugs in CHWBL on session_id /
+        prefix-cache awareness here without touching the router.
+      - ObserverRouter: passive — mirrors topology, obeys the pin we set
+        via `multiplexed_model_id="replica:<rid>"`, defers everything
+        else to the framework default. No decision logic.
 
     Topology cache is single-sourced from _SHARED callbacks:
       replica_added   -> _on_replica_added pulls topology
@@ -90,6 +100,10 @@ class PDIngress:
     async def __init__(self, backend: DeploymentHandle):
         self.backend = backend
         self._shared = get_shared()
+        # Demo routing strategy: deterministic RR over known replicas.
+        # MVP replaces with a pluggable strategy abstraction (see
+        # `_pick_replica`).
+        self._rr_cursor = itertools.count()
         # Register BEFORE prime so any incremental replica_added the router
         # fires while we're priming is also captured. Double-pull on a rid
         # that's both in the prime snapshot AND fired through the callback
@@ -120,20 +134,26 @@ class PDIngress:
     async def chat(self, request: Request):
         payload = await request.json()
         stream = payload.get("stream", False)
-        # Optional caller-pinned replica dispatch (Demo V15). Header takes
-        # precedence over query param so curl-based tests stay clean.
-        # The ObserverRouter consumes multiplexed_model_id="replica:<rid>"
-        # via the same `replica:` namespace it uses for its own topology
-        # pull (REPLICA_DISPATCH_PREFIX).
+        # Replica selection precedence:
+        #   1. caller pin (X-Neutree-Replica-ID header / ?replica= query) — V15
+        #   2. ingress strategy (Demo RR; MVP CHWBL / prefix-aware)
+        # Either way we express the choice through
+        # `multiplexed_model_id="replica:<rid>"`. ObserverRouter obeys
+        # the pin verbatim; if the chosen rid raced replica death, the
+        # router falls back to framework default (pow2 etc).
+        pin_source = "caller"
         target_replica = (
             request.headers.get("X-Neutree-Replica-ID")
             or request.query_params.get("replica")
         )
+        if not target_replica:
+            target_replica = self._pick_replica()
+            pin_source = "strategy"
         snap = self._shared.snapshot()
         log.info(
-            "[PDIngress][chat] stream=%s pin_replica=%s replicas_seen=%d "
-            "topology_cached=%d",
-            stream, target_replica,
+            "[PDIngress][chat] stream=%s pin_replica=%s pin_source=%s "
+            "replicas_seen=%d topology_cached=%d",
+            stream, target_replica, pin_source,
             len(snap.get("serve_replicas", {})),
             len(snap.get("actor_topology", {})),
         )
@@ -179,6 +199,24 @@ class PDIngress:
         rebuilt when the replica's next update_replicas / restart fires.
         """
         return JSONResponse(content=self._shared.snapshot())
+
+    # ----- replica selection strategy -----
+
+    def _pick_replica(self) -> Optional[str]:
+        """Replica routing strategy. Demo: deterministic round-robin over
+        the _SHARED.known_replica_ids view. Returns None when nothing is
+        known yet (cold-start window) — caller leaves the handle unpinned
+        and lets the framework default pick.
+
+        MVP slot: this method becomes a thin dispatcher over a pluggable
+        strategy interface supporting weighted multi-strategy scoring
+        (CHWBL on session_id + prefix-cache hit-rate + load, etc.).
+        """
+        rids = self._shared.known_replica_ids()
+        if not rids:
+            return None
+        idx = next(self._rr_cursor) % len(rids)
+        return rids[idx]
 
     # ----- push-driven callbacks (V14) -----
 

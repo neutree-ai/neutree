@@ -42,7 +42,6 @@ primitive; the scheduling primitives live in serve/_scheduler/.
 """
 from __future__ import annotations
 
-import itertools
 import logging
 from typing import List, Optional
 
@@ -158,32 +157,34 @@ def _extract_target_replica_id(pending_request: Optional[PendingRequest]) -> str
 
 
 class ObserverRouter(MultiplexMixin, RequestRouter):
-    """RequestRouter that observes replica topology and dispatches.
+    """Passive RequestRouter: mirrors topology to _SHARED and obeys pins.
 
-    Dispatch rules (D-10g + D-10h):
-        1. If caller set `multiplexed_model_id` starting with `"replica:"`,
-           match the suffix exactly against `str(r.replica_id)`. Hit →
-           direct dispatch. Miss → log warning, fall through to round-robin.
-        2. If caller set `multiplexed_model_id` *without* `"replica:"`,
-           Demo logs and falls through to round-robin. MVP subclasses
-           override this branch to query MultiplexMixin's
-           `_multiplexed_model_id_to_replica_ids` or implement
-           engine-specific semantics (SGLang bootstrap_room etc.).
-        3. Otherwise (no hint), deterministic round-robin over the
-           `_SHARED.known_replica_ids()` view intersected with `candidates`.
+    Two responsibilities only:
+      1. Topology observation — `update_replicas` / `on_replica_actor_died`
+         mirror Ray Serve's view of PDCollocatedBackend replicas into
+         module-level `_SHARED` so PDIngress can read it via callbacks.
+      2. Pin obedience — when the caller sets
+         `multiplexed_model_id="replica:<rid>"`, dispatch directly to that
+         replica. Pin miss / no pin / non-replica namespace all defer to
+         the framework default (PDIngress is the strategy owner and is
+         expected to set a pin on every request; deferring is the safe
+         fallback for the race window where its pinned target just died).
+
+    Decision logic — round-robin, CHWBL, prefix-cache aware routing — does
+    NOT live here. PDIngress owns those, calling `.options(multiplexed_
+    model_id="replica:<rid>")` on the backend handle to express the choice
+    through the pin channel this router obeys.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._cursor = itertools.count()
         self._shared = get_shared()
 
     def initialize_state(self, **kwargs):
         """Custom kwargs from request_router_kwargs; Demo accepts none."""
         logger.info(
-            "[ObserverRouter] initialized (topology observer + 'replica:' "
-            "namespace direct dispatch + round-robin fallback; "
-            "MultiplexMixin inherited for forward compatibility)"
+            "[ObserverRouter] initialized (passive observer + 'replica:' "
+            "pin obedience; MultiplexMixin inherited for forward compat)"
         )
 
     # ----- topology observation (V10/V11) -----
@@ -225,8 +226,9 @@ class ObserverRouter(MultiplexMixin, RequestRouter):
             logger.warning("[ObserverRouter] no candidates available")
             return [[]]
 
-        # ── (1) Explicit "replica:<rid>" namespace → direct dispatch ──
         raw_target = _extract_target_replica_id(pending_request)
+
+        # Explicit "replica:<rid>" pin → exact dispatch
         if raw_target.startswith(REPLICA_DISPATCH_PREFIX):
             rid = raw_target[len(REPLICA_DISPATCH_PREFIX):]
             for r in candidate_replicas:
@@ -240,10 +242,10 @@ class ObserverRouter(MultiplexMixin, RequestRouter):
                         len(candidate_replicas),
                     )
                     return [[r]]
-            # No match — surface BOTH the bare str() form and the parsed
-            # short uid for every candidate so the caller can copy a form
-            # that will match. This is the single most useful debug signal
-            # when a pin silently falls through to RR.
+            # Pin miss — caller's chosen replica is no longer a candidate
+            # (race: it died between PDIngress reading _SHARED and Ray Serve
+            # updating this router's candidate set). Dump both str() and
+            # parsed uid for every candidate so the caller can recover.
             candidate_dump = [
                 {
                     "str": str(r.replica_id),
@@ -252,58 +254,28 @@ class ObserverRouter(MultiplexMixin, RequestRouter):
                 for r in candidate_replicas
             ]
             logger.warning(
-                "[ObserverRouter] direct target %r not in current %d "
-                "candidates; falling back to round-robin. caller_uid=%r "
-                "candidates=%s",
+                "[ObserverRouter] pin %r not in %d candidates; deferring to "
+                "framework. caller_uid=%r candidates=%s",
                 raw_target,
                 len(candidate_replicas),
                 _replica_unique_id(rid),
                 candidate_dump,
             )
-            # fall through
+            # fall through to framework default
+
         elif raw_target:
-            # ── (2) Other namespaces — defer to subclass / round-robin ──
-            #
-            # Demo doesn't claim non-"replica:" multiplexed_model_id values.
-            # MVP routers (LoRA adapter routing, SGLang custom semantics) can
-            # subclass ObserverRouter and override this branch to consult
-            # MultiplexMixin state, e.g.
-            #   replicas = getattr(self, "_multiplexed_model_id_to_replica_ids", {})
-            #                   .get(raw_target)
+            # Non-replica namespaces (LoRA adapter, SGLang bootstrap_room, …)
+            # are the responsibility of MVP subclasses that override this
+            # branch and consult MultiplexMixin state. Demo defers.
             logger.debug(
-                "[ObserverRouter] non-replica multiplex target %r; Demo defers "
-                "to round-robin (MVP subclass should override)",
+                "[ObserverRouter] non-replica multiplex target %r; defer to "
+                "framework (MVP subclass should override)",
                 raw_target,
             )
             # fall through
 
-        # ── (3) Deterministic round-robin over _SHARED-known replicas ──
-        known_ids = self._shared.known_replica_ids()
-        if not known_ids:
-            # Cold start: _SHARED not populated yet → let the framework pick
-            # from the raw candidate list.
-            logger.info(
-                "[ObserverRouter][pick/cold] _SHARED empty; framework pick "
-                "from candidates=%d", len(candidate_replicas),
-            )
-            return [candidate_replicas]
-
-        candidate_map = {str(r.replica_id): r for r in candidate_replicas}
-        ordered_known = [rid for rid in known_ids if rid in candidate_map]
-        if not ordered_known:
-            logger.info(
-                "[ObserverRouter][pick/no-overlap] known=%d candidates=%d "
-                "intersection=0; framework pick from candidates",
-                len(known_ids), len(candidate_replicas),
-            )
-            return [candidate_replicas]
-
-        idx = next(self._cursor) % len(ordered_known)
-        picked_id = ordered_known[idx]
-        picked = candidate_map[picked_id]
-        logger.info(
-            "[ObserverRouter][pick/rr] picked=%s idx=%d/%d known=%d candidates=%d",
-            picked_id, idx, len(ordered_known),
-            len(known_ids), len(candidate_replicas),
-        )
-        return [[picked]]
+        # No pin / pin miss / non-replica namespace → framework default
+        # (pow2 etc). PDIngress is expected to set a pin on every request,
+        # so reaching here on the steady-state path indicates either a
+        # race with replica death or a non-PDIngress caller.
+        return [candidate_replicas]
