@@ -54,22 +54,28 @@ SCHEDULER_CLASS_PATHS = {
 
 
 class _Backend:
-    # async __init__: Ray Serve / @ray.remote async actors both await the
-    # constructor inside the deployment's event loop, which lets us safely
-    # spawn background tasks (`do_log_stats` pump) without lazy lifecycle
-    # gymnastics. PrefillActor / DecodeActor inherit via @ray.remote and
-    # get the same behavior — Ray's actor loop calls async __init__.
-    async def __init__(self,
-                       # Model config parameters
-                       model_registry_type: str,
-                       model_name: str,
-                       model_version: str,
-                       model_file: str = "",
-                       model_task: str = "",
-                       model_registry_path: str = "",
-                       model_path: str = "",
-                       model_serve_name: str = "",
-                       **engine_kwargs):
+    # NOTE: sync __init__ is mandatory because in the monolithic path
+    # `Backend = serve.deployment(...)(_Backend)` is wrapped by Ray Serve's
+    # ASGI / replica machinery in a way that calls `cls.__init__` without
+    # awaiting it (see api.py:295-301 ASGIIngressWrapper.__init__ for the
+    # @serve.ingress combo; the analogous issue applies to any path that
+    # introspects __init__ before async-await dispatch happens).
+    # PrefillActor / DecodeActor (@ray.remote) also stay sync below for
+    # uniformity — their `super().__init__()` calls now run synchronously.
+    # The do_log_stats pump is scheduled as a fire-and-forget task on the
+    # actor's already-running event loop (FastAPI / Ray async actor both
+    # have it up by the time __init__ runs).
+    def __init__(self,
+                 # Model config parameters
+                 model_registry_type: str,
+                 model_name: str,
+                 model_version: str,
+                 model_file: str = "",
+                 model_task: str = "",
+                 model_registry_path: str = "",
+                 model_path: str = "",
+                 model_serve_name: str = "",
+                 **engine_kwargs):
         """
         Backend deployment for vLLM inference.
 
@@ -213,9 +219,35 @@ class _Backend:
         )
         self._log_stats_task: Optional[asyncio.Task] = None
         if self._log_stats_interval_s > 0 and hasattr(self.engine, "do_log_stats"):
-            self._log_stats_task = asyncio.create_task(
-                self._periodic_do_log_stats()
-            )
+            try:
+                loop = asyncio.get_running_loop()
+                self._log_stats_task = loop.create_task(
+                    self._periodic_do_log_stats()
+                )
+            except RuntimeError:
+                # No event loop running at ctor time. Pump will be lazy-
+                # started on first generate() via _ensure_log_stats_task.
+                logging.getLogger("ray.serve").warning(
+                    "[Backend] no running loop at __init__; do_log_stats "
+                    "pump deferred to first request"
+                )
+
+    def _ensure_log_stats_task(self):
+        """Lazy fallback to start the do_log_stats pump.
+
+        Only fires if __init__ couldn't schedule the task (no running loop
+        at construction time, exceedingly rare under Ray Serve / @ray.remote
+        async actors). Idempotent — guards on `_log_stats_task` non-None.
+        """
+        if self._log_stats_task is not None or self._log_stats_interval_s <= 0:
+            return
+        if not hasattr(self.engine, "do_log_stats"):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._log_stats_task = loop.create_task(self._periodic_do_log_stats())
 
     async def _periodic_do_log_stats(self):
         log = logging.getLogger("ray.serve")
@@ -250,6 +282,9 @@ class _Backend:
         return self.model_config
 
     async def _ensure_models(self):
+        # Lazy guard for the edge case where __init__ couldn't schedule
+        # the do_log_stats pump (no running loop at ctor). Idempotent.
+        self._ensure_log_stats_task()
         if self.openai_serving_models is None:
             self._ensure_model_config()
             self.openai_serving_models = OpenAIServingModels(
