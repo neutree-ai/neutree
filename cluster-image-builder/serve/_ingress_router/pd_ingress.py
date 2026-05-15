@@ -97,7 +97,16 @@ class PDIngress:
     `_prime_topology` at the end of __init__ closes that window.
     """
 
-    async def __init__(self, backend: DeploymentHandle):
+    def __init__(self, backend: DeploymentHandle):
+        # NOTE: sync __init__ is mandatory under @serve.ingress(app).
+        # Ray Serve does NOT await async def __init__ in the
+        # @serve.deployment + @serve.ingress combo (the FastAPI ASGI
+        # wrapper path calls `cls(...)` synchronously and discards the
+        # returned coroutine). Symptom is the entire body silently
+        # skipped, surfacing later as `AttributeError: ... has no
+        # attribute 'backend'` on first request. Plain @serve.deployment
+        # and @ray.remote actors do support async __init__, which is why
+        # _Backend / PrefillActor / DecodeActor can keep theirs.
         self.backend = backend
         self._shared = get_shared()
         # Demo routing strategy: deterministic RR over known replicas.
@@ -110,10 +119,21 @@ class PDIngress:
         # is idempotent (upsert_topology overwrites under a lock).
         self._shared.on_replica_added(self._on_replica_added)
         self._shared.on_replica_removed(self._on_replica_removed)
-        await self._prime_topology()
-        log.info(
-            "[PDIngress] dispatcher initialized (callbacks + one-shot prime)"
-        )
+        # Schedule prime on the actor's event loop. Ray Serve has the
+        # asyncio loop running by the time it constructs an @serve.ingress
+        # deployment (FastAPI needs it), so get_running_loop() succeeds
+        # here. If it ever stops being true, fall back to lazy prime on
+        # the first request.
+        try:
+            asyncio.get_running_loop().create_task(self._prime_topology())
+            self._prime_scheduled = True
+        except RuntimeError:
+            self._prime_scheduled = False
+            log.warning(
+                "[PDIngress] no running loop at __init__; prime deferred to "
+                "first request"
+            )
+        log.info("[PDIngress] dispatcher initialized (callbacks + prime task)")
 
     async def _prime_topology(self) -> None:
         """One-shot startup pull for every replica the router already knows.
@@ -121,6 +141,7 @@ class PDIngress:
         Covers the PDIngress restart race where update_replicas fires on
         the new router before the callback registration takes effect.
         Pure no-op when serve_replicas is empty (typical first deployment).
+        Idempotent — safe to retry if the scheduled task didn't fire.
         """
         rids = self._shared.known_replica_ids()
         if not rids:
@@ -128,10 +149,19 @@ class PDIngress:
         log.info("[PDIngress][prime] pulling topology for %d known replicas", len(rids))
         await asyncio.gather(*[self._pull_topology_for(r) for r in rids])
 
+    async def _ensure_primed(self) -> None:
+        """Lazy fallback when __init__ couldn't schedule prime (no loop).
+        Idempotent; runs at most once."""
+        if self._prime_scheduled:
+            return
+        self._prime_scheduled = True
+        await self._prime_topology()
+
     # ----- routing surface -----
 
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
+        await self._ensure_primed()
         payload = await request.json()
         stream = payload.get("stream", False)
         # Replica selection precedence:
@@ -177,6 +207,7 @@ class PDIngress:
 
     @app.get("/v1/models")
     async def models(self):
+        await self._ensure_primed()
         result = await self.backend.show_available_models.remote()
         return JSONResponse(content=result)
 
@@ -188,6 +219,7 @@ class PDIngress:
 
     @app.get("/v1/topology")
     async def topology(self):
+        await self._ensure_primed()
         """Return the current PDIngress global view of PDCollocatedBackend
         replicas + their inner actor placement. See shared_state.ActorTopology.
 
