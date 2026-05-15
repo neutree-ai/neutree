@@ -288,10 +288,15 @@ class PrefillActor(Backend):
     user Role.Variables override on key collision (warning logged).
     """
 
-    def __init__(self, *,
-                 model_args: Dict[str, Any],
-                 engine_kwargs: Dict[str, Any],
-                 kv_extra: Dict[str, Any]):
+    # async __init__: parent _Backend's ctor is now async (Ray Serve / actor
+    # loop awaits it so do_log_stats pump can be spawned safely). super()
+    # call must `await` to drive that coroutine to completion. Ray creates
+    # the actor's event loop because methods are async, and calls async
+    # __init__ inside that loop.
+    async def __init__(self, *,
+                       model_args: Dict[str, Any],
+                       engine_kwargs: Dict[str, Any],
+                       kv_extra: Dict[str, Any]):
         log.info(
             "[PrefillActor][init/pre-merge] user_engine_kwargs_keys=%s kv_extra=%s",
             sorted((engine_kwargs or {}).keys()), kv_extra,
@@ -309,7 +314,7 @@ class PrefillActor(Backend):
             kv_cfg.get("kv_role"), kv_cfg.get("kv_connector"),
             sorted(merged_kwargs.keys()),
         )
-        super().__init__(
+        await super().__init__(
             model_registry_type=model_args.get("registry_type"),
             model_name=model_args.get("name"),
             model_version=model_args.get("version"),
@@ -347,10 +352,11 @@ class DecodeActor(Backend):
     PrefillActor; kv_role=kv_consumer.
     """
 
-    def __init__(self, *,
-                 model_args: Dict[str, Any],
-                 engine_kwargs: Dict[str, Any],
-                 kv_extra: Dict[str, Any]):
+    # See PrefillActor.__init__ — same async-await rationale.
+    async def __init__(self, *,
+                       model_args: Dict[str, Any],
+                       engine_kwargs: Dict[str, Any],
+                       kv_extra: Dict[str, Any]):
         log.info(
             "[DecodeActor][init/pre-merge] user_engine_kwargs_keys=%s kv_extra=%s",
             sorted((engine_kwargs or {}).keys()), kv_extra,
@@ -368,7 +374,7 @@ class DecodeActor(Backend):
             kv_cfg.get("kv_role"), kv_cfg.get("kv_connector"),
             sorted(merged_kwargs.keys()),
         )
-        super().__init__(
+        await super().__init__(
             model_registry_type=model_args.get("registry_type"),
             model_name=model_args.get("name"),
             model_version=model_args.get("version"),
