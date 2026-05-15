@@ -100,22 +100,45 @@ def _extract_node_id(replica: RunningReplica) -> str:
     return ""
 
 
+def _replica_unique_id(replica_id_or_str) -> str:
+    """Reduce any Ray ReplicaID representation to its short `unique_id`.
+
+    Ray's stringification has shifted between releases — observed forms:
+        Replica(id='<uid>', deployment='...', app='...')
+        SERVE_REPLICA::<app>#<deployment>#<uid>
+        <uid>                                  # plain
+    We probe in order:
+      1. `.unique_id` attribute on the object (cheapest, most accurate)
+      2. trailing `#<uid>` segment (SERVE_REPLICA actor-name form)
+      3. `id='<uid>'` substring (Replica(...) repr form)
+      4. whole string (assume caller passed bare unique_id)
+    """
+    uid = getattr(replica_id_or_str, "unique_id", None)
+    if isinstance(uid, str) and uid:
+        return uid
+    s = str(replica_id_or_str)
+    if "#" in s:
+        return s.rsplit("#", 1)[-1]
+    if "id='" in s:
+        try:
+            return s.split("id='", 1)[1].split("'", 1)[0]
+        except IndexError:
+            pass
+    return s
+
+
 def _replica_id_matches(replica: RunningReplica, rid: str) -> bool:
     """True if `rid` selects this replica.
 
-    Ray's ReplicaID stringifies as
-        Replica(id='<unique_id>', deployment='...', app='...')
-    but callers naturally supply just the short `<unique_id>` (the form
-    visible in Ray dashboard / logs). Accept both: the full str() form
-    (verbatim) and the `unique_id` field. Falling back to substring would
-    over-match across deployments sharing the same short suffix, so we
-    only accept exact equality on either representation.
+    Match by reducing both sides to the short `unique_id` token, so any
+    user-facing repr is accepted (bare `dh8c06yy`, the actor-name form
+    `SERVE_REPLICA::app#dep#dh8c06yy`, or the `Replica(id='dh8c06yy', ...)`
+    repr). Exact-equality fast path first so a verbatim full-form pin
+    still wins without parsing.
     """
-    full = str(replica.replica_id)
-    if full == rid:
+    if str(replica.replica_id) == rid:
         return True
-    short = getattr(replica.replica_id, "unique_id", None)
-    return isinstance(short, str) and short == rid
+    return _replica_unique_id(replica.replica_id) == _replica_unique_id(rid)
 
 
 def _extract_target_replica_id(pending_request: Optional[PendingRequest]) -> str:
