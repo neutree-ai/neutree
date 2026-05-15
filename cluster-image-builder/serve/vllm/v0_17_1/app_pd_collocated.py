@@ -103,15 +103,6 @@ PLATFORM_ENGINE_KWARG_KEYS = {
     "distributed_executor_backend",
 }
 
-# Bind-mount the host's nvidia-fabricmanager socket dir into every PD inner
-# actor's container. Required on NVSwitch hosts (HGX H100 / A100 8-GPU SXM);
-# harmless empty dir on NVLink-bridge / PCIe-only hosts because CUDA driver
-# only queries fabric_manager when NVSwitch routing is in play.
-PD_FABRIC_MANAGER_MOUNT = (
-    "-v", "/var/run/nvidia-fabricmanager:/var/run/nvidia-fabricmanager:ro",
-)
-
-
 # ----------------------------- helpers -----------------------------
 
 
@@ -182,25 +173,6 @@ def _merge_user_wins(platform: Dict[str, Any],
     return merged
 
 
-def _augment_pd_container(backend_container: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Append PD-specific docker run_options to the engine container config.
-
-    Currently injects the fabric_manager bind mount required on NVSwitch
-    hosts. On non-NVSwitch hosts the bind target is a non-existent dir;
-    docker default behavior is to auto-create an empty dir on the host
-    (cheap, harmless — CUDA driver never queries it on those hosts).
-    """
-    if not backend_container:
-        return backend_container
-    augmented = dict(backend_container)
-    existing = list(augmented.get("run_options") or [])
-    # idempotent — don't double-add if PD app_builder runs twice
-    if PD_FABRIC_MANAGER_MOUNT[1] not in existing:
-        existing.extend(PD_FABRIC_MANAGER_MOUNT)
-    augmented["run_options"] = existing
-    return augmented
-
-
 def _build_actor_runtime_env(role_env: Dict[str, str],
                              port_env: Dict[str, str],
                              metrics_env: Dict[str, str],
@@ -225,9 +197,11 @@ def _build_actor_runtime_env(role_env: Dict[str, str],
     if env_vars:
         runtime_env["env_vars"] = env_vars
 
-    pd_container = _augment_pd_container(backend_container)
-    if pd_container:
-        merged = build_backend_runtime_env(pd_container)
+    # backend_container is fully assembled CP-side (image + GPU run_options +
+    # NFS / model-cache mounts + PD-specific FM mount for NVSwitch hosts);
+    # engine side just forwards it onto each actor's runtime_env.container.
+    if backend_container:
+        merged = build_backend_runtime_env(backend_container)
         if "container" in merged:
             runtime_env["container"] = merged["container"]
     return runtime_env

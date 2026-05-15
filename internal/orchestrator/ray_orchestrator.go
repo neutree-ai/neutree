@@ -947,6 +947,19 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 	// Auto-remove engine container when it exits to prevent residual containers on the host.
 	backendRunOptions = append(backendRunOptions, "--rm")
 
+	// PD same-host: bind-mount the host's nvidia-fabricmanager socket dir
+	// into every PD inner actor's engine container. Required on NVSwitch
+	// hosts (HGX H100 / A100 8-GPU SXM) where CUDA queries fabric_manager
+	// for NVSwitch routing. On non-NVSwitch hosts the bind target may not
+	// exist; docker auto-creates an empty dir on the host (cheap, harmless
+	// — CUDA never queries it there). Adding it here (CP, application-
+	// shared concern) instead of inside app_pd_collocated.py keeps the
+	// engine-side code path free of platform topology concerns.
+	if isPDStrategy(endpoint) {
+		const fmMount = "-v /var/run/nvidia-fabricmanager:/var/run/nvidia-fabricmanager:ro"
+		backendRunOptions = append(backendRunOptions, fmMount)
+	}
+
 	backendConfig = map[string]interface{}{
 		"image":       imageRef,
 		"run_options": backendRunOptions,
