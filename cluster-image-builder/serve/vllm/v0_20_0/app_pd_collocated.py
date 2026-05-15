@@ -707,6 +707,10 @@ class PDCollocatedBackend:
         if "max_completion_tokens" in prefill_payload:
             prefill_payload["max_completion_tokens"] = 1
         prefill_payload["stream"] = False
+        # vLLM ChatCompletionRequest rejects `stream_options` when
+        # `stream=False`. Decode side keeps its original stream/stream_options
+        # — only prefill needs stripping.
+        prefill_payload.pop("stream_options", None)
         # Signal the prefill engine: stage KV for a remote decode. Drop any
         # client-supplied kv_transfer_params on the prefill side — it would
         # confuse the scheduler (clients send decode-side params for D-only
