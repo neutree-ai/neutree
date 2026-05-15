@@ -100,6 +100,24 @@ def _extract_node_id(replica: RunningReplica) -> str:
     return ""
 
 
+def _replica_id_matches(replica: RunningReplica, rid: str) -> bool:
+    """True if `rid` selects this replica.
+
+    Ray's ReplicaID stringifies as
+        Replica(id='<unique_id>', deployment='...', app='...')
+    but callers naturally supply just the short `<unique_id>` (the form
+    visible in Ray dashboard / logs). Accept both: the full str() form
+    (verbatim) and the `unique_id` field. Falling back to substring would
+    over-match across deployments sharing the same short suffix, so we
+    only accept exact equality on either representation.
+    """
+    full = str(replica.replica_id)
+    if full == rid:
+        return True
+    short = getattr(replica.replica_id, "unique_id", None)
+    return isinstance(short, str) and short == rid
+
+
 def _extract_target_replica_id(pending_request: Optional[PendingRequest]) -> str:
     """Read the caller-supplied direct-dispatch hint from request metadata.
 
@@ -189,7 +207,7 @@ class ObserverRouter(MultiplexMixin, RequestRouter):
         if raw_target.startswith(REPLICA_DISPATCH_PREFIX):
             rid = raw_target[len(REPLICA_DISPATCH_PREFIX):]
             for r in candidate_replicas:
-                if str(r.replica_id) == rid:
+                if _replica_id_matches(r, rid):
                     logger.info(
                         "[ObserverRouter][pick/direct] target=%s "
                         "candidates=%d", rid, len(candidate_replicas),
