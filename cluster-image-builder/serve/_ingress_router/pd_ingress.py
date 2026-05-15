@@ -30,6 +30,14 @@ Demo invariants the architecture review needs to validate:
     V13: per-actor identity (actor_id + node_id + gpu_ids) reaches _SHARED
     V14: push-driven _SHARED callbacks (replica_added -> proactive topology pull)
          remove the request-path lazy refresh
+    MVP: drop the TTL list refresh entirely. PDCollocatedBackend.check_health()
+         already fan-out probes inner actors; any inner actor failure marks
+         the whole replica unhealthy and Ray Serve recreates it. Replica
+         recreation produces a fresh replica_id which triggers replica_added,
+         so the callback path single-sourcedly handles every steady-state
+         transition. Only edge left is "PDIngress restart racing the router's
+         initial update_replicas burst" — handled by a one-shot prime at
+         async __init__.
 """
 import asyncio
 import logging
@@ -64,30 +72,47 @@ app = FastAPI()
 class PDIngress:
     """Single backend handle, ObserverRouter does the per-request selection.
 
-    PDIngress registers a `replica_added` callback on _SHARED so a topology
-    pull happens the moment ObserverRouter sees a new PDCollocatedBackend
-    replica (push-driven). The request-path lazy refresh stays only as a
-    safety net for ids that somehow slipped past the callback (e.g. an
-    ingress restart that misses the burst of update_replicas events fired
-    against the previous incarnation).
+    Topology cache is single-sourced from _SHARED callbacks:
+      replica_added   -> _on_replica_added pulls topology
+      replica_removed -> _SHARED already evicted; we just log
+    Steady-state correctness relies on PDCollocatedBackend.check_health()
+    marking the whole replica unhealthy when any inner actor fails, which
+    forces Ray Serve to recreate the replica with a fresh replica_id —
+    that path emits replica_removed + replica_added, which the callbacks
+    here translate into a topology refresh.
+
+    The only edge the callback path can't cover is the registration race
+    when PDIngress itself restarts: Ray Serve fires update_replicas on the
+    fresh router before __init__ has registered callbacks. A one-shot
+    `_prime_topology` at the end of __init__ closes that window.
     """
 
-    # Safety-net lazy refresh: per-replica TTL before the on-request fallback
-    # decides a topology entry is stale enough to re-pull.
-    _TOPOLOGY_TTL_SEC = 30.0
-
-    def __init__(self, backend: DeploymentHandle):
+    async def __init__(self, backend: DeploymentHandle):
         self.backend = backend
         self._shared = get_shared()
-        self._topology_inflight: set[str] = set()
-        # Register push-driven hooks BEFORE the first request lands. The
-        # _SHARED.on_* registration is idempotent, so a restarted PDIngress
-        # replica registering again is harmless.
+        # Register BEFORE prime so any incremental replica_added the router
+        # fires while we're priming is also captured. Double-pull on a rid
+        # that's both in the prime snapshot AND fired through the callback
+        # is idempotent (upsert_topology overwrites under a lock).
         self._shared.on_replica_added(self._on_replica_added)
         self._shared.on_replica_removed(self._on_replica_removed)
+        await self._prime_topology()
         log.info(
-            "[PDIngress] dispatcher initialized (ObserverRouter + _SHARED with callbacks)"
+            "[PDIngress] dispatcher initialized (callbacks + one-shot prime)"
         )
+
+    async def _prime_topology(self) -> None:
+        """One-shot startup pull for every replica the router already knows.
+
+        Covers the PDIngress restart race where update_replicas fires on
+        the new router before the callback registration takes effect.
+        Pure no-op when serve_replicas is empty (typical first deployment).
+        """
+        rids = self._shared.known_replica_ids()
+        if not rids:
+            return
+        log.info("[PDIngress][prime] pulling topology for %d known replicas", len(rids))
+        await asyncio.gather(*[self._pull_topology_for(r) for r in rids])
 
     # ----- routing surface -----
 
@@ -112,9 +137,6 @@ class PDIngress:
             len(snap.get("serve_replicas", {})),
             len(snap.get("actor_topology", {})),
         )
-        # Safety-net topology refresh — push path covers the common case via
-        # _on_replica_added; this catches any replica that the callback missed.
-        asyncio.create_task(self._refresh_topology_async())
 
         handle = self.backend
         if target_replica:
@@ -149,12 +171,13 @@ class PDIngress:
         """Return the current PDIngress global view of PDCollocatedBackend
         replicas + their inner actor placement. See shared_state.ActorTopology.
 
-        The serve_replicas dict is populated by ObserverRouter.update_replicas.
-        The actor_topology dict is populated by the replica_added callback
-        (push path) and the on-request safety-net pull.
+        Both dicts are populated by callbacks:
+          serve_replicas  - ObserverRouter.update_replicas / on_replica_actor_died
+          actor_topology  - _on_replica_added → _pull_topology_for upsert
+        Read-only — if a replica's actor_topology is missing here, the
+        callback path failed (transient pull error) and the entry will be
+        rebuilt when the replica's next update_replicas / restart fires.
         """
-        # Safety net for /v1/topology probes that happen before any chat call.
-        await self._refresh_topology_async()
         return JSONResponse(content=self._shared.snapshot())
 
     # ----- push-driven callbacks (V14) -----
@@ -162,16 +185,17 @@ class PDIngress:
     async def _on_replica_added(self, replica_id: str, snap: ReplicaSnapshot) -> None:
         """Fired by _SHARED when ObserverRouter saw a brand-new replica.
         Pull its actor topology immediately so the view is hot before the
-        first request arrives. Single-flight via _topology_inflight.
+        first request arrives.
+
+        replica_added fires at most once per (replica_id) by _SHARED's
+        contract (a rid added twice without an intervening remove can't
+        happen — replace_replicas computes set diff). The only concurrent
+        firing window is "prime + callback both racing for a rid the prime
+        snapshot included" — handled by upsert_topology being a locked
+        last-write-wins idempotent operation.
         """
-        if replica_id in self._topology_inflight:
-            return
         log.info("[PDIngress][replica_added] replica=%s — pulling topology", replica_id)
-        self._topology_inflight.add(replica_id)
-        try:
-            await self._pull_topology_for(replica_id)
-        finally:
-            self._topology_inflight.discard(replica_id)
+        await self._pull_topology_for(replica_id)
 
     def _on_replica_removed(self, replica_id: str) -> None:
         """Fired by _SHARED when a replica died or fell out of the set.
@@ -281,38 +305,3 @@ class PDIngress:
                 )
         except Exception as exc:  # noqa: BLE001 — Demo diagnostics only
             log.warning("[PDIngress] topology pull failed for %s: %s", replica_id, exc)
-
-    async def _refresh_topology_async(self) -> None:
-        """Safety-net refresh — only fires for replicas that the push path
-        somehow missed or whose entry exceeded _TOPOLOGY_TTL_SEC. With the
-        replica_added callback in place this is effectively a no-op in steady
-        state; kept for restart races and TTL refresh.
-        """
-        snap = self._shared.snapshot()
-        now = asyncio.get_running_loop().time()
-        targets: list[str] = []
-        for rid in snap["serve_replicas"].keys():
-            if rid in self._topology_inflight:
-                continue
-            topo = snap["actor_topology"].get(rid)
-            if topo is None:
-                targets.append(rid)
-                continue
-            try:
-                age = now - float(topo.get("observed_at", 0.0))
-            except (TypeError, ValueError):
-                age = float("inf")
-            if age >= self._TOPOLOGY_TTL_SEC:
-                targets.append(rid)
-
-        if not targets:
-            return
-
-        for rid in targets:
-            self._topology_inflight.add(rid)
-
-        try:
-            await asyncio.gather(*[self._pull_topology_for(rid) for rid in targets])
-        finally:
-            for rid in targets:
-                self._topology_inflight.discard(rid)
