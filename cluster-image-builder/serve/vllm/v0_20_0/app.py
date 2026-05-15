@@ -1,3 +1,4 @@
+import asyncio
 import os
 import enum
 import logging
@@ -194,12 +195,65 @@ class _Backend:
         self.openai_serving_score = None
         self.openai_serving_models = None
 
+        # vLLM v1 AsyncLLM hands "periodically emit log lines" to its caller:
+        # `record()` is driven by the output handler each step (Prometheus stays
+        # fresh), but `logger_manager.log()` is only invoked when somebody calls
+        # `AsyncLLM.do_log_stats()`. The stock vLLM api_server runs a
+        # background task that pumps this every N seconds — we skip api_server
+        # entirely (Ray Serve drives chat directly), so nobody ever called
+        # do_log_stats. Net result: `LoggingStatLogger.log()` + its embedded
+        # `KVConnectorLogging.log()` would never fire, masking KV transfer
+        # progress (and the standard "Avg prompt throughput" line).
+        # Drive it ourselves. Interval matches vLLM's default 10s; override
+        # via env for debugging.
+        self._log_stats_interval_s = float(
+            os.environ.get("NEUTREE_LOG_STATS_INTERVAL_S", "10")
+        )
+        self._log_stats_task: Optional[asyncio.Task] = None
+
+    def _ensure_log_stats_task(self):
+        """Lazy-start the periodic do_log_stats pump.
+
+        Called from `_ensure_models()` which is awaited from every entry
+        method — by then the event loop is guaranteed running, both in the
+        Ray Serve deployment path and in the @ray.remote async-actor path
+        (PrefillActor / DecodeActor). Doing it lazily sidesteps the question
+        of whether `__init__` itself runs inside the loop.
+        """
+        if self._log_stats_task is not None:
+            return
+        if self._log_stats_interval_s <= 0:
+            return
+        if not hasattr(self.engine, "do_log_stats"):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._log_stats_task = loop.create_task(self._periodic_do_log_stats())
+
+    async def _periodic_do_log_stats(self):
+        log = logging.getLogger("ray.serve")
+        log.info(
+            "[Backend] periodic do_log_stats started, interval=%.1fs",
+            self._log_stats_interval_s,
+        )
+        while True:
+            try:
+                await asyncio.sleep(self._log_stats_interval_s)
+                await self.engine.do_log_stats()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                log.exception("[Backend] periodic do_log_stats failed")
+
     def _ensure_model_config(self):
         if self.model_config is None:
             self.model_config = self.engine.model_config
         return self.model_config
 
     async def _ensure_models(self):
+        self._ensure_log_stats_task()
         if self.openai_serving_models is None:
             self._ensure_model_config()
             self.openai_serving_models = OpenAIServingModels(
