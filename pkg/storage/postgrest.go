@@ -667,7 +667,7 @@ func (s *postgrestStorage) ListEndpoint(option ListOption) ([]v1.Endpoint, error
 func (s *postgrestStorage) CallDatabaseFunction(method string, params map[string]interface{}, result interface{}) error {
 	resultString, err := s.postgrestClient.RpcWithError(method, "", params)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "rpc %s failed", method)
 	}
 
 	if result == nil {
