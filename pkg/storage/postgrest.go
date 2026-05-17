@@ -675,7 +675,7 @@ func (s *postgrestStorage) CallDatabaseFunction(method string, params map[string
 	}
 
 	if err := json.Unmarshal([]byte(resultString), result); err != nil {
-		return errors.Wrapf(err, "failed to unmarshal response: %v Raw response: %s", err, resultString)
+		return errors.Wrapf(err, "failed to unmarshal response, raw: %s", resultString)
 	}
 
 	return nil
