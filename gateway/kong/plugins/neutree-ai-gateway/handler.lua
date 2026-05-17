@@ -476,10 +476,14 @@ local function convert_response(openai_resp, request_model)
                     input = parsed
                 end
             end
+            local fn_name = (tc["function"] or EMPTY).name
+            if fn_name == nil or fn_name == cjson.null then
+                fn_name = ""
+            end
             content[#content + 1] = {
                 type = "tool_use",
                 id = tc.id,
-                name = tc["function"] and tc["function"].name or "",
+                name = fn_name,
                 input = input,
             }
         end
