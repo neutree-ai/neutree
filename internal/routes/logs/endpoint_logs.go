@@ -20,9 +20,10 @@ import (
 )
 
 type Dependencies struct {
-	Storage    storage.Storage
-	HTTPClient util.HTTPClient
-	K8sClient  util.K8sClient
+	Storage         storage.Storage
+	HTTPClient      util.HTTPClient
+	K8sClient       util.K8sClient
+	AITraceStoreURL string
 }
 
 // LogSourcesResponse represents the response for log sources discovery
