@@ -124,9 +124,10 @@ type LogsRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 func LogsRouteFactory(register LogsRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &logs.Dependencies{
-			Storage:    deps.Config.Storage,
-			HTTPClient: &util.DefaultHTTPClient{},
-			K8sClient:  &util.DefaultK8sClient{},
+			Storage:         deps.Config.Storage,
+			HTTPClient:      &util.DefaultHTTPClient{},
+			K8sClient:       &util.DefaultK8sClient{},
+			AITraceStoreURL: deps.Config.AITraceStoreURL,
 		})
 
 		return nil

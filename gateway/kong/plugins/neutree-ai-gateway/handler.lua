@@ -615,6 +615,8 @@ local function handle_openai_json_response()
         return
     end
 
+    kong.ctx.plugin.response_body_raw = response_body
+
     local ai_response, err = cjson.decode(response_body)
     if err then
         return
@@ -642,6 +644,10 @@ local function handle_openai_stream_response(chunk, finished)
     end
 
     local body_buffer = kong.ctx.plugin.sse_body_buffer
+    local raw_buffer = kong.ctx.plugin.sse_raw_buffer
+    if raw_buffer and type(chunk) == "string" and chunk ~= "" then
+        raw_buffer:put(chunk)
+    end
     if type(chunk) == "string" and chunk ~= "" then
         local events = ai_shared.frame_to_events(chunk, normalized_content_type)
         if not events then
@@ -685,6 +691,8 @@ local function handle_anthropic_non_stream_body()
     ctx.body_buffer = ctx.body_buffer .. (ngx.arg[1] or "")
 
     if ngx.arg[2] then
+        ctx.response_body_raw = ctx.body_buffer
+
         local openai_resp, err = cjson.decode(ctx.body_buffer)
         if err or openai_resp == nil then
             ngx.arg[1] = ctx.body_buffer
@@ -863,6 +871,8 @@ function AIGatewayHandler:access(conf)
             return anthropic_error(400, "invalid_request_error", "Request body is required")
         end
 
+        kong.ctx.plugin.request_body_raw = request_body
+
         local anthropic_req, err = cjson.decode(request_body)
         if err or anthropic_req == nil then
             return anthropic_error(400, "invalid_request_error", "Invalid JSON in request body")
@@ -944,6 +954,8 @@ function AIGatewayHandler:access(conf)
         return fail(400, "request body can not be null")
     end
 
+    kong.ctx.plugin.request_body_raw = request_body
+
     local ai_request, err = cjson.decode(request_body)
     if err then
         return fail(400, "request body is not json format")
@@ -1015,6 +1027,7 @@ function AIGatewayHandler:header_filter(conf)
     local normalized_content_type = content_type and content_type:sub(1, (content_type:find(";") or 0) - 1)
     if normalized_content_type and normalized_content_type == "text/event-stream" then
         kong.ctx.plugin.sse_body_buffer = buffer.new()
+        kong.ctx.plugin.sse_raw_buffer = buffer.new()
         return true
     end
 
@@ -1049,6 +1062,25 @@ function AIGatewayHandler:log(conf)
     end
 
     local response_status = kong.service.response.get_status()
+
+    -- POC: emit raw req/res trace for every request (incl. failures)
+    local response_body = kong.ctx.plugin.response_body_raw
+    if response_body == nil and kong.ctx.plugin.sse_raw_buffer ~= nil then
+        response_body = kong.ctx.plugin.sse_raw_buffer:get()
+    end
+    if response_body == nil then
+        local ok, body = pcall(kong.service.response.get_raw_body)
+        if ok and body ~= nil then
+            response_body = body
+        end
+    end
+    if kong.ctx.plugin.request_body_raw ~= nil then
+        kong.log.set_serialize_value("ai.trace.request_body", kong.ctx.plugin.request_body_raw)
+    end
+    if response_body ~= nil then
+        kong.log.set_serialize_value("ai.trace.response_body", response_body)
+    end
+
     if response_status ~= 200 then
         return
     end

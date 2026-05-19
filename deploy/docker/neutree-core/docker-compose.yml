@@ -225,6 +225,7 @@ services:
       - --gin-mode=release
       - --auth-endpoint=http://auth:9999
       - --grafana-url={{ .GrafanaURL }}
+      - --ai-trace-store-url=http://victorialogs:9428
     ports:
       - 3000:3000
     networks:
@@ -319,6 +320,7 @@ services:
       - /etc/vector/
     volumes:
       - {{ .NeutreeCoreWorkDir }}/vector:/etc/vector
+      - {{ .NeutreeCoreWorkDir }}/vector-trace:/var/log/vector
     restart: always
     networks:
       - neutree

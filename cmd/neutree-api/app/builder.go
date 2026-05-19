@@ -43,6 +43,7 @@ func NewBuilder() *Builder {
 		"dashboard-proxy": ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
 		"k8s-proxy":       ProxiesRouteFactory(proxies.RegisterKubernetesProxyRoutes),
 		"endpoint-logs":   LogsRouteFactory(logs.RegisterEndpointLogsRoutes),
+		"ai-traces":      LogsRouteFactory(logs.RegisterAITraceRoutes),
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		// Auth route (no auth required for authentication itself)
 		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
@@ -88,6 +89,7 @@ func NewBuilder() *Builder {
 		"k8s-proxy":     {"auth"},
 		"system":        {"auth"},
 		"endpoint-logs": {"auth"},
+		"ai-traces":     {"auth"},
 		// PostgREST proxy routes now require auth middleware to:
 		// 1. Validate JWT tokens (pass-through to PostgREST)
 		// 2. Convert API keys to PostgREST-compatible JWT tokens
