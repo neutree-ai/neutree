@@ -11,6 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/internal/version"
+	"github.com/neutree-ai/neutree/pkg/featuregate"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -38,6 +39,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	o.Storage.AddFlags(fs)
 	o.API.AddFlags(fs)
 	o.External.AddFlags(fs)
+	featuregate.DefaultMutableFeatureGate.AddFlag(fs)
 }
 
 // Validate validates all options
