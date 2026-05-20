@@ -253,6 +253,10 @@ local function convert_tools(tools)
             },
         }
     end
+    -- An empty Lua table serialises to a JSON object `{}`, which upstreams
+    -- (e.g. vLLM) reject for the array-typed `tools` field. Omit `tools`
+    -- entirely when the client sent an empty list.
+    if #result == 0 then return nil end
     return result
 end
 
