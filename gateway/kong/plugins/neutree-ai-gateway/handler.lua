@@ -1048,6 +1048,11 @@ function AIGatewayHandler:body_filter(conf)
 
     local response_status = kong.service.response.get_status()
     if response_status ~= 200 then
+        -- POC trace: error responses bypass the transform paths below, and
+        -- streaming requests have no response buffering — so capture the raw
+        -- error body here for the log phase to surface.
+        local ctx = kong.ctx.plugin
+        ctx.response_body_raw = (ctx.response_body_raw or "") .. (ngx.arg[1] or "")
         return
     end
 
