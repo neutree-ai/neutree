@@ -1,6 +1,5 @@
 CREATE TYPE api.user_profile_status_old AS (
     phase TEXT,
-    service_url TEXT,
     error_message TEXT
 );
 
