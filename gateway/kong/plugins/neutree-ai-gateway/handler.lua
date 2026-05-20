@@ -717,6 +717,9 @@ local function handle_anthropic_stream_body()
     local chunk = ngx.arg[1] or ""
     local is_last = ngx.arg[2]
     ctx.sse_buffer = (ctx.sse_buffer or "") .. chunk
+    -- POC trace: the anthropic streaming path never reaches the SSE buffer
+    -- set up in header_filter, so accumulate the raw upstream response here.
+    ctx.response_body_raw = (ctx.response_body_raw or "") .. chunk
 
     local output_parts = {}
     while true do
