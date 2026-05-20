@@ -6,9 +6,9 @@ import (
 
 // ExternalOptions holds external service configuration options
 type ExternalOptions struct {
-	AuthEndpoint     string
-	GrafanaURL       string
-	AITraceStoreURL  string
+	AuthEndpoint    string
+	GrafanaURL      string
+	AITraceStoreURL string
 }
 
 // NewExternalOptions creates new external options with default values

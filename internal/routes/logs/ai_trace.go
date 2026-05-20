@@ -231,6 +231,7 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 		workspace := c.Param("workspace")
 
 		days := 7
+
 		if v := c.Query("days"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 90 {
 				days = n
@@ -240,7 +241,7 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 		now := time.Now().UTC()
 		// Day buckets are aligned to UTC midnight; the window covers the last
 		// `days` days up to and including the current (partial) day.
-		startDay := now.Truncate(24 * time.Hour).AddDate(0, 0, -(days - 1))
+		startDay := now.Truncate(24*time.Hour).AddDate(0, 0, -(days - 1))
 
 		query := fmt.Sprintf(
 			"workspace:=%s | stats by (_time:1d) count() total",
@@ -262,6 +263,7 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		out := make([]AITraceDayCount, 0, days)
+
 		for i := 0; i < days; i++ {
 			date := startDay.AddDate(0, 0, i).Format("2006-01-02")
 			out = append(out, AITraceDayCount{Date: date, Count: counts[date]})
@@ -300,6 +302,7 @@ func queryAITraceDayCounts(deps *Dependencies, query string, params url.Values) 
 			Time  string `json:"_time"`
 			Total string `json:"total"`
 		}
+
 		if err := json.Unmarshal(line, &r); err != nil {
 			continue
 		}

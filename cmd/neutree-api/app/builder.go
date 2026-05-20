@@ -43,7 +43,7 @@ func NewBuilder() *Builder {
 		"dashboard-proxy": ProxiesRouteFactory(proxies.RegisterRayDashboardProxyRoutes),
 		"k8s-proxy":       ProxiesRouteFactory(proxies.RegisterKubernetesProxyRoutes),
 		"endpoint-logs":   LogsRouteFactory(logs.RegisterEndpointLogsRoutes),
-		"ai-traces":      LogsRouteFactory(logs.RegisterAITraceRoutes),
+		"ai-traces":       LogsRouteFactory(logs.RegisterAITraceRoutes),
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		// Auth route (no auth required for authentication itself)
 		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
