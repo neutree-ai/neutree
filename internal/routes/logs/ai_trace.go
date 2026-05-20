@@ -56,6 +56,19 @@ type AITraceListResponse struct {
 	NextBefore string    `json:"next_before,omitempty"`
 }
 
+// AITraceDayCount is one day's request count in the stats response.
+type AITraceDayCount struct {
+	Date  string `json:"date"` // YYYY-MM-DD, UTC day bucket
+	Count int    `json:"count"`
+}
+
+// AITraceStatsResponse is the wire format for
+// GET /api/v1/ai-traces/:workspace/stats — per-day request counts powering
+// the activity bar chart at the top of the SPA's trace list.
+type AITraceStatsResponse struct {
+	Days []AITraceDayCount `json:"days"`
+}
+
 // RegisterAITraceRoutes mounts the AI inference trace endpoints.
 func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	traces := group.Group("/ai-traces/:workspace")
@@ -65,6 +78,7 @@ func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	}))
 
 	traces.GET("", handleListAITraces(deps))
+	traces.GET("/stats", handleAITraceStats(deps))
 	traces.GET("/:request_id", handleGetAITrace(deps))
 }
 
@@ -200,6 +214,112 @@ func handleGetAITrace(deps *Dependencies) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, items[0])
 	}
+}
+
+// handleAITraceStats returns per-day request counts for the trailing window,
+// powering the activity bar chart at the top of the SPA's trace list.
+func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.AITraceStoreURL == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "ai trace store is not configured",
+			})
+
+			return
+		}
+
+		workspace := c.Param("workspace")
+
+		days := 7
+		if v := c.Query("days"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 90 {
+				days = n
+			}
+		}
+
+		now := time.Now().UTC()
+		// Day buckets are aligned to UTC midnight; the window covers the last
+		// `days` days up to and including the current (partial) day.
+		startDay := now.Truncate(24 * time.Hour).AddDate(0, 0, -(days - 1))
+
+		query := fmt.Sprintf(
+			"workspace:=%s | stats by (_time:1d) count() total",
+			logsQLQuoteValue(workspace),
+		)
+
+		params := url.Values{}
+		params.Set("start", startDay.Format(time.RFC3339))
+		params.Set("end", now.Format(time.RFC3339))
+
+		counts, err := queryAITraceDayCounts(deps, query, params)
+		if err != nil {
+			klog.Errorf("ai-trace: stats: %v", err)
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": "failed to query trace store",
+			})
+
+			return
+		}
+
+		out := make([]AITraceDayCount, 0, days)
+		for i := 0; i < days; i++ {
+			date := startDay.AddDate(0, 0, i).Format("2006-01-02")
+			out = append(out, AITraceDayCount{Date: date, Count: counts[date]})
+		}
+
+		c.JSON(http.StatusOK, AITraceStatsResponse{Days: out})
+	}
+}
+
+// queryAITraceDayCounts runs a `stats by (_time:1d)` LogsQL query and returns
+// a map of UTC date (YYYY-MM-DD) to request count.
+func queryAITraceDayCounts(deps *Dependencies, query string, params url.Values) (map[string]int, error) {
+	params.Set("query", query)
+	reqURL := strings.TrimRight(deps.AITraceStoreURL, "/") + "/select/logsql/query?" + params.Encode()
+
+	resp, err := deps.HTTPClient.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("query victorialogs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("victorialogs returned status %d", resp.StatusCode)
+	}
+
+	counts := make(map[string]int)
+	scanner := bufio.NewScanner(resp.Body)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var r struct {
+			Time  string `json:"_time"`
+			Total string `json:"total"`
+		}
+		if err := json.Unmarshal(line, &r); err != nil {
+			continue
+		}
+
+		// `_time` is an RFC3339 day bucket; key by the date component.
+		date := r.Time
+		if len(date) >= 10 {
+			date = date[:10]
+		}
+
+		if n, err := strconv.Atoi(r.Total); err == nil {
+			counts[date] = n
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan victorialogs response: %w", err)
+	}
+
+	return counts, nil
 }
 
 // queryAITraces runs a LogsQL query against VictoriaLogs and decodes the
