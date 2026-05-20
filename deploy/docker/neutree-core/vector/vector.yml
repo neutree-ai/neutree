@@ -73,11 +73,15 @@ transforms:
       - filter_trace_logs
     source: |
       . = {
+          # VictoriaLogs rejects records without a non-empty `_msg`. Failed
+          # requests often carry no response body, so `_msg` must be a field
+          # that is always populated — never the (optional) response body.
+          "_msg":           .request.id || "ai-trace",
           "request_id":     .request.id,
           "timestamp":      .started_at,
-          "workspace":      .extracted_data.workspace,
-          "endpoint_type":  .extracted_data.endpoint_type,
-          "endpoint_name":  .extracted_data.endpoint_name,
+          "workspace":      .extracted_data.workspace || "",
+          "endpoint_type":  .extracted_data.endpoint_type || "",
+          "endpoint_name":  .extracted_data.endpoint_name || "",
           "api_key_id":     .consumer.custom_id,
           "request_uri":    .request.uri,
           "request_model":  .ai."statistics".meta.request_model,
@@ -122,7 +126,7 @@ sinks:
     type: http
     inputs:
       - prepare_trace_payload
-    uri: http://victorialogs:9428/insert/jsonline?_stream_fields=workspace,endpoint_type,endpoint_name&_msg_field=response_body&_time_field=timestamp
+    uri: http://victorialogs:9428/insert/jsonline?_stream_fields=workspace,endpoint_type,endpoint_name&_time_field=timestamp
     method: post
     encoding:
       codec: json

@@ -64,12 +64,14 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"error": "ai trace store is not configured",
 			})
+
 			return
 		}
 
 		workspace := c.Param("workspace")
 
 		limit := 50
+
 		if v := c.Query("limit"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
 				limit = n
@@ -81,12 +83,15 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 		if endpoint := strings.TrimSpace(c.Query("endpoint_name")); endpoint != "" {
 			queryParts = append(queryParts, fmt.Sprintf("endpoint_name:=%s", logsQLQuoteValue(endpoint)))
 		}
+
 		if endpointType := strings.TrimSpace(c.Query("endpoint_type")); endpointType != "" {
 			queryParts = append(queryParts, fmt.Sprintf("endpoint_type:=%s", logsQLQuoteValue(endpointType)))
 		}
+
 		if status := strings.TrimSpace(c.Query("status")); status != "" {
 			queryParts = append(queryParts, fmt.Sprintf("response_status:=%s", logsQLQuoteValue(status)))
 		}
+
 		if model := strings.TrimSpace(c.Query("model")); model != "" {
 			// model can match either request or response model
 			queryParts = append(queryParts, fmt.Sprintf(
@@ -99,6 +104,7 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 
 		params := url.Values{}
 		params.Set("query", query)
+
 		if start := strings.TrimSpace(c.Query("start")); start != "" {
 			params.Set("start", start)
 		}
@@ -118,6 +124,7 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadGateway, gin.H{
 				"error": "failed to query trace store",
 			})
+
 			return
 		}
 		defer resp.Body.Close()
@@ -128,6 +135,7 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 				"error":  "trace store returned non-200",
 				"status": resp.StatusCode,
 			})
+
 			return
 		}
 
@@ -146,6 +154,7 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			if !ok {
 				continue
 			}
+
 			items = append(items, item)
 		}
 
@@ -170,7 +179,6 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 type vlRecord struct {
 	Time             string `json:"_time"`
 	Stream           string `json:"_stream,omitempty"`
-	Msg              string `json:"_msg,omitempty"`
 	RequestID        string `json:"request_id"`
 	Workspace        string `json:"workspace"`
 	EndpointType     string `json:"endpoint_type"`
@@ -193,12 +201,6 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 		return AITrace{}, false
 	}
 
-	responseBody := r.ResponseBody
-	if responseBody == "" {
-		// VL stores the configured _msg_field under "_msg"; recover it.
-		responseBody = r.Msg
-	}
-
 	t := AITrace{
 		RequestID:     r.RequestID,
 		Time:          r.Time,
@@ -210,24 +212,28 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 		RequestModel:  r.RequestModel,
 		ResponseModel: r.ResponseModel,
 		RequestBody:   r.RequestBody,
-		ResponseBody:  responseBody,
+		ResponseBody:  r.ResponseBody,
 	}
 	if r.Time == "" {
 		t.Time = time.Now().UTC().Format(time.RFC3339Nano)
 	}
+
 	if n, err := strconv.Atoi(r.ResponseStatus); err == nil {
 		t.ResponseStatus = n
 	}
+
 	if r.PromptTokens != "" {
 		if n, err := strconv.Atoi(r.PromptTokens); err == nil {
 			t.PromptTokens = &n
 		}
 	}
+
 	if r.CompletionTokens != "" {
 		if n, err := strconv.Atoi(r.CompletionTokens); err == nil {
 			t.CompletionTokens = &n
 		}
 	}
+
 	if r.TotalTokens != "" {
 		if n, err := strconv.Atoi(r.TotalTokens); err == nil {
 			t.TotalTokens = &n
@@ -244,6 +250,7 @@ func logsQLQuoteValue(v string) string {
 	var b strings.Builder
 	b.Grow(len(v) + 2)
 	b.WriteByte('"')
+
 	for _, r := range v {
 		switch r {
 		case '\\', '"':
@@ -255,6 +262,8 @@ func logsQLQuoteValue(v string) string {
 			b.WriteRune(r)
 		}
 	}
+
 	b.WriteByte('"')
+
 	return b.String()
 }
