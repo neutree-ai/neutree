@@ -16,10 +16,12 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 )
 
-// AITrace is one row in the inference trace list returned to the SPA.
+// AITrace is one inference trace record returned to the SPA.
 //
 // Mirrors the shape Vector pushes to VictoriaLogs, with response_status
-// normalised to int for the UI's filtering convenience.
+// normalised to int for the UI's filtering convenience. The list endpoint
+// leaves RequestBody/ResponseBody empty — they are large and unused by the
+// list view; the detail endpoint populates them for a single record.
 type AITrace struct {
 	RequestID        string `json:"request_id"`
 	Time             string `json:"time"`
@@ -38,6 +40,13 @@ type AITrace struct {
 	ResponseBody     string `json:"response_body,omitempty"`
 }
 
+// listProjection is the LogsQL `fields` projection for the list query: every
+// metadata column the list view renders, deliberately excluding the large
+// request_body / response_body fields so list responses stay small.
+const listProjection = "_time, request_id, workspace, endpoint_type, " +
+	"endpoint_name, api_key_id, request_uri, request_model, response_model, " +
+	"response_status, prompt_tokens, completion_tokens, total_tokens"
+
 // AITraceListResponse is the wire format for GET /api/v1/ai-traces/:workspace.
 //
 // NextBefore is the cursor for the next page: passing it as ?before=<ts> on
@@ -47,7 +56,7 @@ type AITraceListResponse struct {
 	NextBefore string    `json:"next_before,omitempty"`
 }
 
-// RegisterAITraceRoutes mounts the AI inference trace listing endpoint.
+// RegisterAITraceRoutes mounts the AI inference trace endpoints.
 func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	traces := group.Group("/ai-traces/:workspace")
 	traces.Use(middlewares...)
@@ -56,6 +65,7 @@ func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	}))
 
 	traces.GET("", handleListAITraces(deps))
+	traces.GET("/:request_id", handleGetAITrace(deps))
 }
 
 func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
@@ -100,10 +110,13 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			))
 		}
 
-		query := strings.Join(queryParts, " ") + " | sort by (_time) desc | limit " + strconv.Itoa(limit)
+		// The list view never renders request/response bodies — project them
+		// out so VictoriaLogs returns only the small metadata columns.
+		query := strings.Join(queryParts, " ") +
+			" | sort by (_time) desc | limit " + strconv.Itoa(limit) +
+			" | fields " + listProjection
 
 		params := url.Values{}
-		params.Set("query", query)
 
 		if start := strings.TrimSpace(c.Query("start")); start != "" {
 			params.Set("start", start)
@@ -116,50 +129,14 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			params.Set("end", end)
 		}
 
-		reqURL := strings.TrimRight(deps.AITraceStoreURL, "/") + "/select/logsql/query?" + params.Encode()
-
-		resp, err := deps.HTTPClient.Get(reqURL)
+		items, err := queryAITraces(deps, query, params)
 		if err != nil {
-			klog.Errorf("ai-trace: failed to query victorialogs: %v", err)
+			klog.Errorf("ai-trace: list: %v", err)
 			c.JSON(http.StatusBadGateway, gin.H{
 				"error": "failed to query trace store",
 			})
 
 			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			klog.Errorf("ai-trace: victorialogs returned %d", resp.StatusCode)
-			c.JSON(http.StatusBadGateway, gin.H{
-				"error":  "trace store returned non-200",
-				"status": resp.StatusCode,
-			})
-
-			return
-		}
-
-		items := make([]AITrace, 0, limit)
-		scanner := bufio.NewScanner(resp.Body)
-		// VL records can be large because they embed full request/response bodies.
-		scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
-
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-
-			item, ok := decodeVLRecord(line)
-			if !ok {
-				continue
-			}
-
-			items = append(items, item)
-		}
-
-		if err := scanner.Err(); err != nil {
-			klog.Errorf("ai-trace: scan victorialogs response: %v", err)
 		}
 
 		var nextBefore string
@@ -172,6 +149,100 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			NextBefore: nextBefore,
 		})
 	}
+}
+
+// handleGetAITrace returns a single trace — including the full request and
+// response bodies — looked up by request id. The list endpoint omits bodies,
+// so the SPA's detail drawer fetches them lazily through this route.
+func handleGetAITrace(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.AITraceStoreURL == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "ai trace store is not configured",
+			})
+
+			return
+		}
+
+		workspace := c.Param("workspace")
+
+		requestID := strings.TrimSpace(c.Param("request_id"))
+		if requestID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "request_id is required",
+			})
+
+			return
+		}
+
+		query := fmt.Sprintf(
+			"workspace:=%s request_id:=%s | sort by (_time) desc | limit 1",
+			logsQLQuoteValue(workspace), logsQLQuoteValue(requestID),
+		)
+
+		items, err := queryAITraces(deps, query, url.Values{})
+		if err != nil {
+			klog.Errorf("ai-trace: detail: %v", err)
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": "failed to query trace store",
+			})
+
+			return
+		}
+
+		if len(items) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "trace not found",
+			})
+
+			return
+		}
+
+		c.JSON(http.StatusOK, items[0])
+	}
+}
+
+// queryAITraces runs a LogsQL query against VictoriaLogs and decodes the
+// NDJSON response into AITrace records.
+func queryAITraces(deps *Dependencies, query string, params url.Values) ([]AITrace, error) {
+	params.Set("query", query)
+	reqURL := strings.TrimRight(deps.AITraceStoreURL, "/") + "/select/logsql/query?" + params.Encode()
+
+	resp, err := deps.HTTPClient.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("query victorialogs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("victorialogs returned status %d", resp.StatusCode)
+	}
+
+	items := make([]AITrace, 0, 64)
+	scanner := bufio.NewScanner(resp.Body)
+	// A detail record can be large because it embeds the full request and
+	// response bodies.
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		item, ok := decodeVLRecord(line)
+		if !ok {
+			continue
+		}
+
+		items = append(items, item)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan victorialogs response: %w", err)
+	}
+
+	return items, nil
 }
 
 // vlRecord matches the shape Vector writes to VictoriaLogs.
