@@ -1,6 +1,8 @@
 package launch
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,6 +104,34 @@ services:
 			assert.Equal(t, tt.expectedImages, actualImages)
 		})
 	}
+}
+
+func TestResolveNodeIPDetectsAndPrintsNodeIP(t *testing.T) {
+	options := &commonOptions{}
+	var output bytes.Buffer
+
+	err := resolveNodeIP(&output, options, func() (string, error) {
+		return "10.0.0.42", nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "10.0.0.42", options.nodeIP)
+	assert.Equal(t, "Using node IP: 10.0.0.42\n", output.String())
+}
+
+func TestResolveNodeIPPrintsExplicitNodeIP(t *testing.T) {
+	options := &commonOptions{
+		nodeIP: "192.168.1.12",
+	}
+	var output bytes.Buffer
+
+	err := resolveNodeIP(&output, options, func() (string, error) {
+		return "", errors.New("should not auto-detect explicit node IP")
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.1.12", options.nodeIP)
+	assert.Equal(t, "Using node IP: 192.168.1.12\n", output.String())
 }
 
 func TestNewLaunchCmd(t *testing.T) {
