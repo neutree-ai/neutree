@@ -88,10 +88,12 @@ func resolveNodeIP(out io.Writer, options *commonOptions, getHostIP func() (stri
 		if err != nil {
 			return err
 		}
+
 		options.nodeIP = ip
 	}
 
 	_, err := fmt.Fprintf(out, "Using node IP: %s\n", options.nodeIP)
+
 	return err
 }
 

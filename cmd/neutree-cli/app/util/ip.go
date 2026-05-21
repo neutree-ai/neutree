@@ -18,6 +18,7 @@ func getHostIP(chooseHostInterface func() (net.IP, error), interfaceAddrs func()
 		if ipv4 == nil {
 			return "", fmt.Errorf("no valid host IPv4 found")
 		}
+
 		return ipv4.String(), nil
 	}
 
