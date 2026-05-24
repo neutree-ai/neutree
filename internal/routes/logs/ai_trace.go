@@ -36,6 +36,9 @@ type AITrace struct {
 	PromptTokens     *int   `json:"prompt_tokens,omitempty"`
 	CompletionTokens *int   `json:"completion_tokens,omitempty"`
 	TotalTokens      *int   `json:"total_tokens,omitempty"`
+	FinishReason     string `json:"finish_reason,omitempty"`
+	UserAgent        string `json:"user_agent,omitempty"`
+	DurationMs       *int   `json:"duration_ms,omitempty"`
 	RequestBody      string `json:"request_body,omitempty"`
 	ResponseBody     string `json:"response_body,omitempty"`
 }
@@ -45,7 +48,8 @@ type AITrace struct {
 // request_body / response_body fields so list responses stay small.
 const listProjection = "_time, request_id, workspace, endpoint_type, " +
 	"endpoint_name, api_key_id, request_uri, request_model, response_model, " +
-	"response_status, prompt_tokens, completion_tokens, total_tokens"
+	"response_status, prompt_tokens, completion_tokens, total_tokens, " +
+	"finish_reason, user_agent, duration_ms"
 
 // AITraceListResponse is the wire format for GET /api/v1/ai-traces/:workspace.
 //
@@ -118,6 +122,10 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 
 		if apiKeyID := strings.TrimSpace(c.Query("api_key_id")); apiKeyID != "" {
 			queryParts = append(queryParts, fmt.Sprintf("api_key_id:=%s", logsQLQuoteValue(apiKeyID)))
+		}
+
+		if fr := strings.TrimSpace(c.Query("finish_reason")); fr != "" {
+			queryParts = append(queryParts, fmt.Sprintf("finish_reason:=%s", logsQLQuoteValue(fr)))
 		}
 
 		if model := strings.TrimSpace(c.Query("model")); model != "" {
@@ -389,6 +397,9 @@ type vlRecord struct {
 	PromptTokens     string `json:"prompt_tokens"`
 	CompletionTokens string `json:"completion_tokens"`
 	TotalTokens      string `json:"total_tokens"`
+	FinishReason     string `json:"finish_reason"`
+	UserAgent        string `json:"user_agent"`
+	DurationMs       string `json:"duration_ms"`
 	RequestBody      string `json:"request_body"`
 	ResponseBody     string `json:"response_body"`
 }
@@ -409,6 +420,8 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 		RequestURI:    r.RequestURI,
 		RequestModel:  r.RequestModel,
 		ResponseModel: r.ResponseModel,
+		FinishReason:  r.FinishReason,
+		UserAgent:     r.UserAgent,
 		RequestBody:   r.RequestBody,
 		ResponseBody:  r.ResponseBody,
 	}
@@ -435,6 +448,14 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 	if r.TotalTokens != "" {
 		if n, err := strconv.Atoi(r.TotalTokens); err == nil {
 			t.TotalTokens = &n
+		}
+	}
+
+	if r.DurationMs != "" {
+		// `latencies.request` arrives as a float-formatted string from Vector.
+		if f, err := strconv.ParseFloat(r.DurationMs, 64); err == nil {
+			n := int(f)
+			t.DurationMs = &n
 		}
 	}
 

@@ -628,6 +628,10 @@ local function handle_openai_json_response()
 
     local route_type = kong.ctx.plugin.route_type
     kong.ctx.plugin.response_model = ai_response.model
+    local first_choice = ((ai_response.choices or EMPTY)[1]) or EMPTY
+    if first_choice.finish_reason and first_choice.finish_reason ~= cjson.null then
+        kong.ctx.plugin.finish_reason = first_choice.finish_reason
+    end
     if is_table(ai_response.usage) then
         if route_type == "/v1/chat/completions" then
             kong.ctx.plugin.completions_tokens = ai_response.usage.completion_tokens
@@ -665,6 +669,10 @@ local function handle_openai_stream_response(chunk, finished)
                 if not err then
                     if event_t.choices and #event_t.choices > 0 and body_buffer ~= nil then
                         body_buffer:put(get_token_text(event_t))
+                    end
+                    if event_t.choices and event_t.choices[1] and event_t.choices[1].finish_reason
+                        and event_t.choices[1].finish_reason ~= cjson.null then
+                        kong.ctx.plugin.finish_reason = event_t.choices[1].finish_reason
                     end
                     if kong.ctx.plugin.response_model == nil and event_t.model then
                         kong.ctx.plugin.response_model = event_t.model
@@ -704,6 +712,10 @@ local function handle_anthropic_non_stream_body()
         end
 
         ctx.response_model = openai_resp.model
+        local first_choice = ((openai_resp.choices or EMPTY)[1]) or EMPTY
+        if first_choice.finish_reason and first_choice.finish_reason ~= cjson.null then
+            ctx.finish_reason = first_choice.finish_reason
+        end
         if is_table(openai_resp.usage) then
             ctx.input_tokens = openai_resp.usage.prompt_tokens or 0
             ctx.output_tokens = openai_resp.usage.completion_tokens or 0
@@ -785,6 +797,9 @@ local function handle_anthropic_stream_body()
 
         local delta = choice.delta or EMPTY
         local finish_reason = choice.finish_reason
+        if finish_reason and finish_reason ~= cjson.null then
+            ctx.finish_reason = finish_reason
+        end
 
         if not ctx.message_started then
             output_parts[#output_parts + 1] = sse_frame("message_start", make_message_start(ctx.request_model, ctx.input_tokens))
@@ -1091,6 +1106,9 @@ function AIGatewayHandler:log(conf)
     end
     if response_body ~= nil then
         kong.log.set_serialize_value("ai.trace.response_body", response_body)
+    end
+    if kong.ctx.plugin.finish_reason ~= nil then
+        kong.log.set_serialize_value("ai.trace.finish_reason", kong.ctx.plugin.finish_reason)
     end
 
     if response_status ~= 200 then
