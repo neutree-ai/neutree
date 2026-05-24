@@ -116,6 +116,10 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			queryParts = append(queryParts, fmt.Sprintf("response_status:=%s", logsQLQuoteValue(status)))
 		}
 
+		if apiKeyID := strings.TrimSpace(c.Query("api_key_id")); apiKeyID != "" {
+			queryParts = append(queryParts, fmt.Sprintf("api_key_id:=%s", logsQLQuoteValue(apiKeyID)))
+		}
+
 		if model := strings.TrimSpace(c.Query("model")); model != "" {
 			// model can match either request or response model
 			queryParts = append(queryParts, fmt.Sprintf(
