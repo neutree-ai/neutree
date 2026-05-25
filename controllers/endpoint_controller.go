@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/internal/recipe"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -64,6 +65,13 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	defer func() {
 		c.updateStatusOnError(obj, err)
 	}()
+
+	// Expand catalog reference once on first reconcile: subsequent passes
+	// see the materialized legacy fields and skip this block.
+	if err = c.expandCatalogRef(obj); err != nil {
+		return errors.Wrapf(err, "failed to expand model catalog for endpoint %s",
+			obj.Metadata.WorkspaceName())
+	}
 
 	o, err = c.getOrchestrator(obj)
 	if err != nil {
@@ -287,6 +295,76 @@ func (c *EndpointController) formatStatus(phase v1.EndpointPhase, err error) *v1
 	}
 
 	return newStatus
+}
+
+// expandCatalogRef materializes a recipe MC into the endpoint's legacy
+// fields and clears the catalog ref so downstream controllers stay
+// catalog-agnostic. The cleared ref doubles as the "already expanded"
+// marker for subsequent reconcile passes — see the !=nil Model guard below.
+func (c *EndpointController) expandCatalogRef(obj *v1.Endpoint) error {
+	if obj == nil || obj.Spec == nil {
+		return nil
+	}
+
+	if obj.Spec.ModelCatalog == "" || obj.Spec.Model != nil {
+		return nil
+	}
+
+	catalogs, err := c.storage.ListModelCatalog(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->name",
+				Operator: "eq",
+				Value:    strconv.Quote(obj.Spec.ModelCatalog),
+			},
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(obj.Metadata.Workspace),
+			},
+		},
+	})
+	if err != nil {
+		return errors.Wrapf(err, "list model catalog %s", obj.Spec.ModelCatalog)
+	}
+
+	if len(catalogs) == 0 {
+		return errors.Errorf("model catalog %q not found in workspace %q", obj.Spec.ModelCatalog, obj.Metadata.Workspace)
+	}
+
+	composed, err := recipe.ComposeEndpointSpec(catalogs[0].Spec, obj.Spec.Variant, obj.Spec.EnabledFeatures)
+	if err != nil {
+		return err
+	}
+
+	obj.Spec.Model = composed.Model
+	obj.Spec.Resources = composed.Resources
+
+	if composed.Engine != nil {
+		obj.Spec.Engine = composed.Engine
+	}
+
+	if composed.EngineArgs != nil {
+		if obj.Spec.Variables == nil {
+			obj.Spec.Variables = map[string]interface{}{}
+		}
+
+		obj.Spec.Variables["engine_args"] = composed.EngineArgs
+	}
+
+	if composed.Env != nil {
+		obj.Spec.Env = composed.Env
+	}
+
+	obj.Spec.ModelCatalog = ""
+	obj.Spec.Variant = ""
+	obj.Spec.EnabledFeatures = nil
+
+	if err := c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Spec: obj.Spec}); err != nil {
+		return errors.Wrapf(err, "persist composed endpoint %s", obj.Metadata.WorkspaceName())
+	}
+
+	return nil
 }
 
 func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orchestrator, error) {
