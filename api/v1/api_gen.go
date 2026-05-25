@@ -520,6 +520,9 @@ type ApiEndpointSpec struct {
 	Replicas          interface{} `json:"replicas"`
 	DeploymentOptions interface{} `json:"deployment_options"`
 	Variables         interface{} `json:"variables"`
+	ModelCatalog      string      `json:"model_catalog"`
+	Variant           string      `json:"variant"`
+	EnabledFeatures   interface{} `json:"enabled_features"`
 }
 
 type ApiEndpointStatus struct {
@@ -600,6 +603,9 @@ type ApiModelCatalogSpec struct {
 	DeploymentOptions interface{} `json:"deployment_options"`
 	Variables         interface{} `json:"variables"`
 	Env               interface{} `json:"env"`
+	Base              interface{} `json:"base"`
+	Variants          interface{} `json:"variants"`
+	Features          interface{} `json:"features"`
 }
 
 type ApiModelCatalogStatus struct {

@@ -36,9 +36,17 @@ type EndpointSpec struct {
 	Engine            *EndpointEngineSpec    `json:"engine,omitempty"`
 	Resources         *ResourceSpec          `json:"resources,omitempty"`
 	Replicas          ReplicaSpec            `json:"replicas,omitempty"`
-	DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
-	Variables         map[string]interface{} `json:"variables,omitempty"`
+	DeploymentOptions map[string]any `json:"deployment_options,omitempty"`
+	Variables         map[string]any `json:"variables,omitempty"`
 	Env               map[string]string      `json:"env,omitempty"`
+
+	// Recipe reference: when ModelCatalog is set and Model is nil the
+	// endpoint controller resolves the catalog, composes the kernel, writes
+	// the result into the legacy fields above, and clears these refs as a
+	// "already expanded" marker so downstream controllers stay untouched.
+	ModelCatalog    string   `json:"model_catalog,omitempty"`
+	Variant         string   `json:"variant,omitempty"`
+	EnabledFeatures []string `json:"enabled_features,omitempty"`
 }
 
 type EndpointPhase string
@@ -188,11 +196,11 @@ func (obj *Endpoint) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *Endpoint) GetSpec() interface{} {
+func (obj *Endpoint) GetSpec() any {
 	return obj.Spec
 }
 
-func (obj *Endpoint) GetStatus() interface{} {
+func (obj *Endpoint) GetStatus() any {
 	return obj.Status
 }
 
@@ -212,7 +220,7 @@ func (obj *Endpoint) SetID(id string) {
 	obj.ID, _ = strconv.Atoi(id)
 }
 
-func (obj *Endpoint) GetMetadata() interface{} {
+func (obj *Endpoint) GetMetadata() any {
 	return obj.Metadata
 }
 
