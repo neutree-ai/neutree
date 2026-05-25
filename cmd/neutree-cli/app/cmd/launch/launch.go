@@ -1,6 +1,8 @@
 package launch
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -78,6 +80,21 @@ Examples:
 	launchCmd.AddCommand(NewNeutreeCoreInstallCmd(exector, commonOptions))
 
 	return launchCmd
+}
+
+func resolveNodeIP(out io.Writer, options *commonOptions, getHostIP func() (string, error)) error {
+	if options.nodeIP == "" {
+		ip, err := getHostIP()
+		if err != nil {
+			return err
+		}
+
+		options.nodeIP = ip
+	}
+
+	_, err := fmt.Fprintf(out, "Using node IP: %s\n", options.nodeIP)
+
+	return err
 }
 
 func LaunchWorkDir() string {

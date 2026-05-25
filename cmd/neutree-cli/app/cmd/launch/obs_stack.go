@@ -44,13 +44,9 @@ Examples:
   # Deploy with custom registry
   neutree-cli launch obs-stack --mirror-registry my.registry.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// set default node ip
-			if options.nodeIP == "" {
-				ip, err := util.GetHostIP()
-				if err != nil {
-					return err
-				}
-				options.nodeIP = ip
+			err := resolveNodeIP(cmd.OutOrStdout(), options.commonOptions, util.GetHostIP)
+			if err != nil {
+				return err
 			}
 
 			return installObsStack(exector, options)

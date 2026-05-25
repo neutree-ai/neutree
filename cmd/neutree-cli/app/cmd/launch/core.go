@@ -63,14 +63,11 @@ Examples:
 				return fmt.Errorf("--jwt-secret is required")
 			}
 
-			// set default node ip
-			if options.nodeIP == "" {
-				ip, err := util.GetHostIP()
-				if err != nil {
-					return err
-				}
-				options.nodeIP = ip
+			err := resolveNodeIP(cmd.OutOrStdout(), options.commonOptions, util.GetHostIP)
+			if err != nil {
+				return err
 			}
+
 			return installNeutreeCore(exector, options)
 		},
 	}
