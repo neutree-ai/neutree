@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/recipe"
 )
 
 // RegisterModelCatalogRoutes registers model catalog routes
@@ -228,12 +229,20 @@ func decodeModelCatalogDoc(doc map[string]any, defaultWorkspace string) (*v1.Mod
 		return &catalog, catalog.Metadata.Name, errors.New("spec is required")
 	}
 
-	if catalog.Spec.Model == nil || strings.TrimSpace(catalog.Spec.Model.Name) == "" {
-		return &catalog, catalog.Metadata.Name, errors.New("spec.model.name is required")
+	// Recipe MCs declare model per-variant; only require top-level model for
+	// trivial MCs (no variants).
+	if len(catalog.Spec.Variants) == 0 {
+		if catalog.Spec.Model == nil || strings.TrimSpace(catalog.Spec.Model.Name) == "" {
+			return &catalog, catalog.Metadata.Name, errors.New("spec.model.name is required")
+		}
 	}
 
 	if catalog.Spec.Engine == nil || strings.TrimSpace(catalog.Spec.Engine.Engine) == "" {
 		return &catalog, catalog.Metadata.Name, errors.New("spec.engine.engine is required")
+	}
+
+	if err := recipe.ValidateModelCatalogSpec(catalog.Spec); err != nil {
+		return &catalog, catalog.Metadata.Name, err
 	}
 
 	catalog.Kind = "ModelCatalog"
@@ -297,4 +306,3 @@ func yamlMapToJSONMap(in any) (any, error) {
 		return v, nil
 	}
 }
-
