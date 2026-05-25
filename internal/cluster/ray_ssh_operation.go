@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	stderrors "errors"
 	"fmt"
 	"path"
 	"strings"
@@ -16,6 +17,13 @@ import (
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+// errHeadNodeUnhealthy marks a known-unhealthy head-node state (dashboard
+// unreachable or head raylet not alive) as opposed to an unexpected internal
+// error like a ListNodes failure. Callers use errors.Is on this sentinel to
+// decide between writing a recovery status + rebuilding vs. propagating the
+// failure up the stack.
+var errHeadNodeUnhealthy = stderrors.New("head node unhealthy")
 
 func (c *sshRayClusterReconciler) upCluster(reconcileCtx *ReconcileContext, restart bool) (string, error) {
 	dockerConfig, changed, err := c.buildAcceleratorDockerConfig(reconcileCtx, reconcileCtx.sshClusterConfig.Provider.HeadIP)
@@ -463,19 +471,35 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	return rayClusterConfig, nil
 }
 
-// checkHeadNodeHealth checks whether the head node is fully healthy by verifying both
-// dashboard API reachability (GCS) and the head node's raylet state, and returns the
-// head node's serving version when alive. This avoids redundant ListNodes calls.
+// checkHeadNodeHealth verifies the head node across two layers and returns the
+// head node's serving version when fully healthy:
+//  1. Dashboard service reachability — the Ray dashboard API on :8265 must
+//     answer GetClusterMetadata; if it does not, the head is unhealthy (the
+//     most common cause is port 8265 occupancy on the host).
+//  2. Head raylet state — at least one head-flagged record returned by
+//     ListNodes must be in AliveNodeState; otherwise the head process itself
+//     is not running.
+//
 // Returns:
-//   - (true, version, nil)  — dashboard reachable AND at least one head raylet is ALIVE
-//   - (false, "", nil)      — dashboard unreachable, or raylet is not alive
-//   - (false, "", err)      — an unexpected error occurred (e.g. ListNodes failed)
+//   - (true,  version, nil)                            — both layers pass
+//   - (false, "",      err wrapping errHeadNodeUnhealthy) — known-unhealthy state (surface to user, then rebuild)
+//   - (false, "",      err)                            — unexpected internal error (propagate up)
 func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileContext) (bool, string, error) {
+	headIP := reconcileCtx.sshClusterConfig.Provider.HeadIP
+
 	_, err := reconcileCtx.rayService.GetClusterMetadata()
 	if err != nil {
 		klog.V(4).Infof("Head node dashboard unreachable for cluster %s: %v",
 			reconcileCtx.Cluster.Metadata.WorkspaceName(), err)
-		return false, "", nil
+
+		// `ray up` exits 0 even when the dashboard fails to bind to :8265 (Ray
+		// only logs the bind failure to stderr). The most common cause of an
+		// unreachable dashboard right after a successful `ray up` is that
+		// port 8265 was already in use on the head host.
+		return false, "", fmt.Errorf(
+			"%w: Ray dashboard on head node %s is unreachable (%v); "+
+				"verify port 8265 is not already in use by another process on this host",
+			errHeadNodeUnhealthy, headIP, err)
 	}
 
 	nodes, err := reconcileCtx.rayService.ListNodes()
@@ -496,7 +520,7 @@ func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileCon
 	// - Head raylet exited and Ray lost the isHeadNode flag
 	// - Head node exists but state is DEAD
 	// - No head node in list yet (initial startup; ProvisioningWaitTime prevents rebuild loops)
-	return false, "", nil
+	return false, "", fmt.Errorf("%w: head raylet on %s is not alive", errHeadNodeUnhealthy, headIP)
 }
 
 func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext) error {
