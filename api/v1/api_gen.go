@@ -599,6 +599,7 @@ type ApiModelCatalogSpec struct {
 	Replicas          interface{} `json:"replicas"`
 	DeploymentOptions interface{} `json:"deployment_options"`
 	Variables         interface{} `json:"variables"`
+	Env               interface{} `json:"env"`
 }
 
 type ApiModelCatalogStatus struct {

@@ -22,6 +22,7 @@ type ModelCatalogSpec struct {
 	Replicas          *ReplicaSpec           `json:"replicas,omitempty"`
 	DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
 	Variables         map[string]interface{} `json:"variables,omitempty"`
+	Env               map[string]string      `json:"env,omitempty"`
 }
 
 type ModelCatalogStatus struct {
