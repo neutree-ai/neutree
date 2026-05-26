@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/neutree-ai/neutree/internal/util"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // TestVLLMV0_17_1TemplateTaskTranslation locks in the contract that the
@@ -50,7 +51,8 @@ func TestVLLMV0_17_1TemplateTaskTranslation(t *testing.T) {
 				t.Fatalf("no objects rendered")
 			}
 
-			cmd := mustExtractContainerCommand(t, objs.Items[0].Object, "vllm-engine")
+			deploy := mustFindRenderedObject(t, objs.Items, "Deployment", "ep-test")
+			cmd := mustExtractContainerCommand(t, deploy.Object, "vllm-engine")
 
 			gotRunner := flagValue(cmd, "--runner")
 			if gotRunner != tc.wantRunner {
@@ -96,6 +98,17 @@ func newTestVLLMV0_17_1Vars(task string) map[string]any {
 	}
 }
 
+func mustFindRenderedObject(t *testing.T, objs []unstructured.Unstructured, kind, name string) unstructured.Unstructured {
+	t.Helper()
+	for _, obj := range objs {
+		if obj.GetKind() == kind && obj.GetName() == name {
+			return obj
+		}
+	}
+	t.Fatalf("rendered object %s/%s not found", kind, name)
+	return unstructured.Unstructured{}
+}
+
 // mustExtractContainerCommand pulls the named container's command list out of
 // a rendered unstructured Deployment object.
 func mustExtractContainerCommand(t *testing.T, obj map[string]any, containerName string) []string {
@@ -109,8 +122,8 @@ func mustExtractContainerCommand(t *testing.T, obj map[string]any, containerName
 		if name, _ := cm["name"].(string); name == containerName {
 			cmd, _ := cm["command"].([]any)
 			out := make([]string, 0, len(cmd))
-			for _, s := range cmd {
-				out = append(out, asString(s))
+			for i, s := range cmd {
+				out = append(out, mustString(t, s, "command", i))
 			}
 			return out
 		}
@@ -130,9 +143,11 @@ func flagValue(cmd []string, flag string) string {
 	return ""
 }
 
-func asString(v any) string {
+func mustString(t *testing.T, v any, field string, index int) string {
+	t.Helper()
 	if s, ok := v.(string); ok {
 		return s
 	}
+	t.Fatalf("%s[%d] must be string, got %T (%v)", field, index, v, v)
 	return ""
 }

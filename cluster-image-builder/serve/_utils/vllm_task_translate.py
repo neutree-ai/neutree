@@ -14,7 +14,7 @@ _TASK_KWARGS: dict[str, dict[str, str]] = {
 }
 
 
-def task_kwargs(model_task: str) -> dict[str, str]:
+def task_kwargs(model_task: str | None) -> dict[str, str]:
     """Return a fresh dict of runner/convert kwargs for a Neutree model_task.
 
     Empty dict for unknown / generation tasks so callers can do
