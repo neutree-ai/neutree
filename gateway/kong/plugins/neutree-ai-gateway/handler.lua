@@ -18,6 +18,10 @@ local function is_table(v)
     return type(v) == "table"
 end
 
+local function string_or_empty(v)
+    return type(v) == "string" and v or ""
+end
+
 local SUPPORTED_ROUTE_TYPES = {
     "/v1/chat/completions",
     "/v1/embeddings",
@@ -469,22 +473,19 @@ local function convert_response(openai_resp, request_model)
         for _, tc in ipairs(message.tool_calls) do
             local input = {}
             local fn = is_table(tc["function"]) and tc["function"] or EMPTY
-            if fn.arguments and fn.arguments ~= cjson.null then
-                local parsed, err = cjson.decode(fn.arguments)
+            local args = fn.arguments
+            if type(args) == "string" then
+                local parsed, err = cjson.decode(args)
                 if err or parsed == nil then
-                    input = { raw = fn.arguments }
+                    input = { raw = args }
                 else
                     input = parsed
                 end
             end
-            local fn_name = fn.name
-            if fn_name == nil or fn_name == cjson.null then
-                fn_name = ""
-            end
             content[#content + 1] = {
                 type = "tool_use",
                 id = tc.id,
-                name = fn_name,
+                name = string_or_empty(fn.name),
                 input = input,
             }
         end
@@ -787,6 +788,7 @@ local function handle_anthropic_stream_body()
 
         if is_table(delta.tool_calls) then
             for _, tc in ipairs(delta.tool_calls) do
+                local fn = is_table(tc["function"]) and tc["function"] or EMPTY
                 local tc_index = tc.index or 0
                 if tc_index ~= ctx.current_tool_index then
                     if ctx.current_tool_index ~= nil then
@@ -799,12 +801,12 @@ local function handle_anthropic_stream_body()
                     ctx.current_tool_index = tc_index
                     ctx.anthropic_block_index = ctx.anthropic_block_index + 1
                     local tc_id = tc.id or ""
-                    local tc_name = (tc["function"] or EMPTY).name or ""
+                    local tc_name = string_or_empty(fn.name)
                     output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_tool_use(ctx.anthropic_block_index, tc_id, tc_name))
                 end
 
-                local args = (tc["function"] or EMPTY).arguments
-                if args and args ~= "" then
+                local args = fn.arguments
+                if type(args) == "string" and args ~= "" then
                     output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_json(ctx.anthropic_block_index, args))
                 end
             end
