@@ -16,13 +16,13 @@ const (
 )
 
 type ModelCatalogSpec struct {
-	Model             *ModelSpec             `json:"model,omitempty"`
-	Engine            *EndpointEngineSpec    `json:"engine,omitempty"`
-	Resources         *ResourceSpec          `json:"resources,omitempty"`
-	Replicas          *ReplicaSpec           `json:"replicas,omitempty"`
-	DeploymentOptions map[string]any `json:"deployment_options,omitempty"`
-	Variables         map[string]any `json:"variables,omitempty"`
-	Env               map[string]string      `json:"env,omitempty"`
+	Model             *ModelSpec          `json:"model,omitempty"`
+	Engine            *EndpointEngineSpec `json:"engine,omitempty"`
+	Resources         *ResourceSpec       `json:"resources,omitempty"`
+	Replicas          *ReplicaSpec        `json:"replicas,omitempty"`
+	DeploymentOptions map[string]any      `json:"deployment_options,omitempty"`
+	Variables         map[string]any      `json:"variables,omitempty"`
+	Env               map[string]string   `json:"env,omitempty"`
 
 	// Recipe extension: when Variants is non-empty the catalog is a recipe
 	// template; ComposeEndpointSpec selects a variant and merges enabled
@@ -34,28 +34,31 @@ type ModelCatalogSpec struct {
 
 // RecipeBase carries config shared by every variant in a recipe MC.
 type RecipeBase struct {
-	EngineArgs map[string]any `json:"engine_args,omitempty"`
-	Env        map[string]string      `json:"env,omitempty"`
+	EngineArgs map[string]any    `json:"engine_args,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
 }
 
 // RecipeVariant is what differs per variant: typically the checkpoint
 // (model) and hardware footprint (resources); engine_args/env overrides are
 // allowed but optional.
 type RecipeVariant struct {
-	Model       *ModelSpec             `json:"model,omitempty"`
-	Resources   *ResourceSpec          `json:"resources,omitempty"`
-	EngineArgs  map[string]any `json:"engine_args,omitempty"`
-	Env         map[string]string      `json:"env,omitempty"`
-	Description string                 `json:"description,omitempty"`
+	Model       *ModelSpec        `json:"model,omitempty"`
+	Resources   *ResourceSpec     `json:"resources,omitempty"`
+	EngineArgs  map[string]any    `json:"engine_args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	Description string            `json:"description,omitempty"`
 }
 
 // RecipeFeature is an independently toggleable bundle of engine_args/env.
+// `Category` is a free-form grouping hint for the UI ("tuning" surfaces in a
+// separate "Performance tuning" section); it has no effect on composition.
 type RecipeFeature struct {
-	Description   string                 `json:"description,omitempty"`
-	Default       bool                   `json:"default,omitempty"`
-	EngineArgs    map[string]any `json:"engine_args,omitempty"`
-	Env           map[string]string      `json:"env,omitempty"`
-	ConflictsWith []string               `json:"conflicts_with,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	Default       bool              `json:"default,omitempty"`
+	Category      string            `json:"category,omitempty"`
+	EngineArgs    map[string]any    `json:"engine_args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	ConflictsWith []string          `json:"conflicts_with,omitempty"`
 }
 
 type ModelCatalogStatus struct {
