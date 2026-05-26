@@ -96,6 +96,7 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 	// before running the command, check if the connection is still alive
 	if err := s.checkConnection(ctx, sshCommand); err != nil {
 		klog.V(2).ErrorS(err, "SSH connection failed", "nodeID", s.nodeID)
+
 		return "", &sshConnectionError{
 			ip:    s.sshIP,
 			cause: err,
