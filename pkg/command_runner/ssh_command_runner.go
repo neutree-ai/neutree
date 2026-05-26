@@ -131,7 +131,12 @@ func (s *SSHCommandRunner) checkConnection(ctx context.Context, sshCommand []str
 	connectCommand = append(connectCommand, sshCommand[last])
 	connectCommand = append(connectCommand, "uptime")
 
-	if _, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:]); err != nil {
+	output, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
+	if err != nil {
+		if outputText := strings.TrimSpace(string(output)); outputText != "" {
+			return fmt.Errorf("%w: %s", err, outputText)
+		}
+
 		return err
 	}
 

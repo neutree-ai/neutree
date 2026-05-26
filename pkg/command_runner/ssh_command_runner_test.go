@@ -246,6 +246,29 @@ func TestSSHCommandRunner_CheckConnection_PreservesUnderlyingErrorAsConnectionFa
 	mockExec.AssertExpectations(t)
 }
 
+func TestSSHCommandRunner_CheckConnection_PreservesExecutorOutputAsConnectionFailureDetail(t *testing.T) {
+	mockExec := new(commandmocks.MockExecutor)
+	runner := newSSHCommandRunner(mockExec)
+
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("ssh: connect to host 127.0.0.1 port 22: Connection refused\n"), errors.New("exit status 255")).Once()
+
+	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrConnectionFailed),
+		"errors.Is must report ErrConnectionFailed; got %v", err)
+	assert.Contains(t, err.Error(), "exit status 255",
+		"message should preserve the process exit status")
+	assert.Contains(t, err.Error(), "Connection refused",
+		"message should preserve SSH stderr returned as executor output")
+	assert.Contains(t, err.Error(), "hint:",
+		"message should include the static-cluster troubleshooting hint section")
+	mockExec.AssertExpectations(t)
+}
+
 func TestSSHCommandRunner_CheckConnection_AddsConnectTimeout(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
