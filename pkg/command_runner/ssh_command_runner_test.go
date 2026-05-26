@@ -233,8 +233,14 @@ func TestSSHCommandRunner_CheckConnection_PreservesUnderlyingErrorAsConnectionFa
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrConnectionFailed),
 		"errors.Is must report ErrConnectionFailed; got %v", err)
+	assert.True(t, errors.Is(err, underlying),
+		"errors.Is must preserve the original precheck error; got %v", err)
 	assert.Contains(t, err.Error(), "ssh connection to node",
 		"message should identify the precheck phase")
+	assert.Contains(t, err.Error(), "failed:",
+		"message should read naturally without embedding the sentinel text as prose")
+	assert.NotContains(t, err.Error(), "node 127.0.0.1 connection failed",
+		"message should not repeat the sentinel wording in the user-facing sentence")
 	assert.Contains(t, err.Error(), testSSHIP,
 		"message should include the target IP %q", testSSHIP)
 	assert.Contains(t, err.Error(), "Connection refused",

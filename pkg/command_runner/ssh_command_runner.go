@@ -25,6 +25,27 @@ const staticClusterConnectionHint = "verify the node IP is the physical server "
 	"address (not the management plane IP), the ssh_user can log in to that host, " +
 	"and the ssh_private_key matches"
 
+type sshConnectionError struct {
+	ip    string
+	cause error
+}
+
+func (e *sshConnectionError) Error() string {
+	if e.cause == nil {
+		return fmt.Sprintf("ssh connection to node %s failed (hint: %s)", e.ip, staticClusterConnectionHint)
+	}
+
+	return fmt.Sprintf("ssh connection to node %s failed: %v (hint: %s)", e.ip, e.cause, staticClusterConnectionHint)
+}
+
+func (e *sshConnectionError) Unwrap() []error {
+	if e.cause == nil {
+		return []error{ErrConnectionFailed}
+	}
+
+	return []error{ErrConnectionFailed, e.cause}
+}
+
 type ProcessExecute func(ctx context.Context, name string, args []string) ([]byte, error)
 
 // SSHCommandRunner represents an SSH command runner.
@@ -75,8 +96,10 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 	// before running the command, check if the connection is still alive
 	if err := s.checkConnection(ctx, sshCommand); err != nil {
 		klog.V(2).ErrorS(err, "SSH connection failed", "nodeID", s.nodeID)
-		return "", fmt.Errorf("ssh connection to node %s %w: %v (hint: %s)",
-			s.sshIP, ErrConnectionFailed, err, staticClusterConnectionHint)
+		return "", &sshConnectionError{
+			ip:    s.sshIP,
+			cause: err,
+		}
 	}
 
 	if shutdownAfterRun {
