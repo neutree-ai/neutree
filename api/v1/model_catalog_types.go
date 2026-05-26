@@ -40,13 +40,15 @@ type RecipeBase struct {
 
 // RecipeVariant is what differs per variant: typically the checkpoint
 // (model) and hardware footprint (resources); engine_args/env overrides are
-// allowed but optional.
+// allowed but optional. `VRAMMinimumGB` mirrors upstream and feeds the
+// "needs ≥ X GB" hint plus the OOM-risk badge at endpoint creation.
 type RecipeVariant struct {
-	Model       *ModelSpec        `json:"model,omitempty"`
-	Resources   *ResourceSpec     `json:"resources,omitempty"`
-	EngineArgs  map[string]any    `json:"engine_args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	Description string            `json:"description,omitempty"`
+	Model         *ModelSpec        `json:"model,omitempty"`
+	Resources     *ResourceSpec     `json:"resources,omitempty"`
+	EngineArgs    map[string]any    `json:"engine_args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	VRAMMinimumGB *int              `json:"vram_minimum_gb,omitempty"`
 }
 
 // RecipeFeature is an independently toggleable bundle of engine_args/env.
