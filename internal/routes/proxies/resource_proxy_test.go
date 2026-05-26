@@ -1,16 +1,22 @@
 package proxies
 
 import (
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/utils/request"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 func Test_filterObject(t *testing.T) {
@@ -471,6 +477,216 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 		}
 		assert.Equal(t, expected, result)
 	})
+}
+
+func Test_extractTopLevelJSONFields(t *testing.T) {
+	type testObject struct {
+		ID       string `json:"id"`
+		Name     string `json:"name,omitempty"`
+		Ignored  string `json:"-"`
+		NoTag    string
+		internal string
+	}
+
+	cases := []struct {
+		name     string
+		input    reflect.Type
+		expected []string
+	}{
+		{
+			name:  "extract endpoint writable table columns from API struct",
+			input: reflect.TypeOf(v1.Endpoint{}),
+			expected: []string{
+				"id",
+				"api_version",
+				"kind",
+				"metadata",
+				"spec",
+				"status",
+			},
+		},
+		{
+			name:     "ignore json dash empty and unexported fields",
+			input:    reflect.TypeOf(testObject{}),
+			expected: []string{"id", "name"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := extractTopLevelJSONFields(tc.input)
+
+			assert.Equal(t, tc.expected, fields)
+			assert.NotContains(t, fields, "status_sort_priority")
+		})
+	}
+}
+
+func TestCreateStructProxyHandlerFiltersUnknownTopLevelFieldsAndInfersColumns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/endpoints", r.URL.Path)
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.NotContains(t, r.URL.Query(), "columns")
+		assert.Equal(t, "*", r.URL.Query().Get("select"))
+
+		var payload map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		assert.Contains(t, payload, "spec")
+		assert.Contains(t, payload, "status")
+		assert.NotContains(t, payload, "status_sort_priority")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	handler := CreateStructProxyHandler[v1.Endpoint](&Dependencies{
+		StorageAccessURL: upstream.URL,
+	}, storage.ENDPOINT_TABLE)
+	router.PATCH("/api/v1/endpoints", handler)
+
+	body := strings.NewReader(`{"id":118,"api_version":"v1","kind":"Endpoint","metadata":{"name":"sshgpu","workspace":"default"},"spec":{"replicas":{"num":0}},"status":{"phase":"Running"},"status_sort_priority":1}`)
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		`/api/v1/endpoints?metadata->>name=eq.sshgpu&metadata->>workspace=eq.default&select=*`,
+		body,
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := newCloseNotifyRecorder()
+	router.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusOK, recorder.ResponseRecorder.Code)
+}
+
+func TestCreateStructProxyHandlerFiltersSoftDeletePayloadAndInfersColumns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/endpoints", r.URL.Path)
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.NotContains(t, r.URL.Query(), "columns")
+
+		var payload map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		assert.Contains(t, payload, "metadata")
+		assert.NotContains(t, payload, "spec")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	handler := CreateStructProxyHandler[v1.Endpoint](&Dependencies{
+		StorageAccessURL: upstream.URL,
+	}, storage.ENDPOINT_TABLE)
+	router.PATCH("/api/v1/endpoints", handler)
+
+	body := strings.NewReader(`{"metadata":{"name":"sshgpu","workspace":"default","deletion_timestamp":"2026-05-28T07:20:48Z","annotations":{"neutree.ai/force-delete":"true"}}}`)
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		`/api/v1/endpoints?id=eq.118`,
+		body,
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := newCloseNotifyRecorder()
+	router.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusNoContent, recorder.ResponseRecorder.Code)
+}
+
+func TestCreateStructProxyHandlerSkipsBackfillForSoftDeleteOnMaskedResource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/image_registries", r.URL.Path)
+		assert.Equal(t, http.MethodPatch, r.Method)
+
+		var payload map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		assert.Contains(t, payload, "metadata")
+		assert.NotContains(t, payload, "spec")
+		assert.NotContains(t, payload, "status")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	handler := CreateStructProxyHandler[v1.ImageRegistry](&Dependencies{
+		StorageAccessURL: upstream.URL,
+	}, storage.IMAGE_REGISTRY_TABLE)
+	router.PATCH("/api/v1/image_registries", handler)
+
+	body := strings.NewReader(`{"metadata":{"name":"registry","workspace":"default","deletion_timestamp":"2026-05-28T07:20:48Z"}}`)
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		`/api/v1/image_registries?id=eq.118`,
+		body,
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := newCloseNotifyRecorder()
+	router.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusNoContent, recorder.ResponseRecorder.Code)
+}
+
+func TestCreateStructProxyHandlerDoesNotApplyWriteColumnsToPost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/image_registries", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.NotContains(t, r.URL.Query(), "columns")
+
+		var payload map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		assert.NotContains(t, payload, "id")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	handler := CreateStructProxyHandler[v1.ImageRegistry](&Dependencies{
+		StorageAccessURL: upstream.URL,
+	}, storage.IMAGE_REGISTRY_TABLE)
+	router.POST("/api/v1/image_registries", handler)
+
+	body := strings.NewReader(`{"api_version":"v1","kind":"ImageRegistry","metadata":{"name":"registry","workspace":"default"},"spec":{"url":"https://registry.example.com","repository":"neutree"}}`)
+	req := httptest.NewRequest(http.MethodPost, `/api/v1/image_registries`, body)
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := newCloseNotifyRecorder()
+	router.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusCreated, recorder.ResponseRecorder.Code)
+}
+
+type closeNotifyRecorder struct {
+	*httptest.ResponseRecorder
+	closeCh chan bool
+}
+
+func newCloseNotifyRecorder() *closeNotifyRecorder {
+	return &closeNotifyRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		closeCh:          make(chan bool, 1),
+	}
+}
+
+func (r *closeNotifyRecorder) CloseNotify() <-chan bool {
+	return r.closeCh
 }
 
 func Test_mergeExcludedFields(t *testing.T) {

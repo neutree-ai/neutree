@@ -163,6 +163,39 @@ func extractExcludeFieldsFromTag(t reflect.Type) map[string]struct{} {
 	return excludeFields
 }
 
+func extractTopLevelJSONFields(t reflect.Type) []string {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	fields := make([]string, 0, t.NumField())
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "" || jsonTag == "-" {
+			continue
+		}
+
+		jsonName := strings.Split(jsonTag, ",")[0]
+		if jsonName == "" {
+			continue
+		}
+
+		fields = append(fields, jsonName)
+	}
+
+	return fields
+}
+
 // extractFieldsRecursive recursively extracts fields with api:"-" tag
 func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[string]struct{}) {
 	// Handle pointer types
@@ -322,6 +355,59 @@ func buildSelectParam(excludeFields map[string]struct{}) string {
 	return strings.Join(fields, ",")
 }
 
+func filterPayloadToTopLevelFields(bodyBytes []byte, topLevelFields []string) ([]byte, error) {
+	if len(topLevelFields) == 0 || len(bytes.TrimSpace(bodyBytes)) == 0 {
+		return bodyBytes, nil
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse request body: %w", err)
+	}
+
+	filteredPayload := make(map[string]json.RawMessage, len(payload))
+
+	for _, field := range topLevelFields {
+		value, ok := payload[field]
+		if !ok {
+			continue
+		}
+
+		filteredPayload[field] = value
+	}
+
+	filteredBodyBytes, err := json.Marshal(filteredPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	return filteredBodyBytes, nil
+}
+
+func filterPatchPayloadToTopLevelFields(req *http.Request, topLevelFields []string) error {
+	if req.Body == nil {
+		return nil
+	}
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read request body: %w", err)
+	}
+
+	req.Body.Close()
+
+	filteredBodyBytes, err := filterPayloadToTopLevelFields(bodyBytes, topLevelFields)
+	if err != nil {
+		return err
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(filteredBodyBytes))
+	req.ContentLength = int64(len(filteredBodyBytes))
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(filteredBodyBytes)))
+
+	return nil
+}
+
 // queryParamsToFilters converts URL query params to storage.Filter array
 func queryParamsToFilters(queryParams url.Values) []storage.Filter {
 	filters := make([]storage.Filter, 0)
@@ -404,9 +490,21 @@ func fetchCurrentResource(
 func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.HandlerFunc {
 	// Extract exclude fields from struct type at initialization time (compile-time type safety)
 	var zero T
-	excludeFields := extractExcludeFieldsFromTag(reflect.TypeOf(zero))
+	structType := reflect.TypeOf(zero)
+	excludeFields := extractExcludeFieldsFromTag(structType)
+	topLevelFields := extractTopLevelJSONFields(structType)
 
 	return func(c *gin.Context) {
+		if c.Request.Method == "PATCH" {
+			if err := filterPatchPayloadToTopLevelFields(c.Request, topLevelFields); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": err.Error(),
+				})
+
+				return
+			}
+		}
+
 		// Handle PATCH requests with excluded fields backfilling
 		if c.Request.Method == "PATCH" && len(excludeFields) > 0 {
 			handlePatchWithBackfill(c, deps, tableName, excludeFields)

@@ -1,6 +1,9 @@
 package e2e
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -307,6 +310,50 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			waitEndpointPaused(epName)
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
+		})
+
+		// TestRail: C2682160
+		It("should ignore generated status sort column during full-row PATCH", Label("C2682160"), func() {
+			epName := "e2e-ep-lc-fullpatch-" + Cfg.RunID
+			defer deleteEndpoint(epName)
+
+			yamlPath := applyEndpoint(epName, clusterName)
+			defer os.Remove(yamlPath)
+
+			waitEndpointRunning(epName)
+
+			query := url.Values{}
+			query.Set("metadata->>name", "eq."+epName)
+			query.Set("metadata->>workspace", "eq."+profileWorkspace())
+			query.Set("select", "*")
+			path := "/api/v1/endpoints?" + query.Encode()
+
+			By("Reading the endpoint with select=* so the generated column is present")
+			body, code := callNeutreeAPI(http.MethodGet, path)
+			Expect(code).To(Equal(http.StatusOK), "GET endpoint failed: %s", string(body))
+
+			var rows []map[string]any
+			Expect(json.Unmarshal(body, &rows)).To(Succeed(), "failed to parse endpoint list: %s", string(body))
+			Expect(rows).To(HaveLen(1), "expected exactly one endpoint row: %s", string(body))
+			Expect(rows[0]).To(HaveKey("status_sort_priority"))
+
+			payload := rows[0]
+			spec, ok := payload["spec"].(map[string]any)
+			Expect(ok).To(BeTrue(), "endpoint row missing spec object: %s", string(body))
+			replicas, ok := spec["replicas"].(map[string]any)
+			Expect(ok).To(BeTrue(), "endpoint row missing spec.replicas object: %s", string(body))
+			replicas["num"] = float64(0)
+
+			By("Patching the full row back with status_sort_priority still in the payload")
+			patchBody, patchCode := callNeutreeAPIWithJSON(http.MethodPatch, path, payload)
+			Expect(patchCode).To(BeNumerically(">=", 200), "PATCH endpoint failed: %s", string(patchBody))
+			Expect(patchCode).To(BeNumerically("<", 300), "PATCH endpoint failed: %s", string(patchBody))
+			Expect(string(patchBody)).NotTo(ContainSubstring("can only be updated to DEFAULT"))
+
+			waitEndpointPaused(epName)
+			ep := getEndpoint(epName)
+			Expect(ep.Spec.Replicas.Num).NotTo(BeNil())
+			Expect(*ep.Spec.Replicas.Num).To(Equal(0))
 		})
 	})
 

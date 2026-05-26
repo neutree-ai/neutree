@@ -452,7 +452,8 @@ func SetupImageRegistry() {
 // TeardownImageRegistry deletes the image registry and cleans up the temp YAML.
 func TeardownImageRegistry() {
 	if imageRegistryYAML != "" {
-		RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
+		r := RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
+		ExpectSuccess(r)
 		os.Remove(imageRegistryYAML)
 		imageRegistryYAML = ""
 	}
@@ -699,8 +700,11 @@ func (c *ClusterHelper) EventuallyObservedSpecHashAdvanced(name, oldHash string,
 
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
 func (c *ClusterHelper) EnsureDeleted(name string) {
-	c.Delete(name)
-	c.WaitForDelete(name, TerminalPhaseTimeout)
+	r := c.Delete(name)
+	ExpectSuccess(r)
+
+	r = c.WaitForDelete(name, TerminalPhaseTimeout)
+	ExpectSuccess(r)
 }
 
 // --- Cluster JSON parsing ---
@@ -1075,13 +1079,30 @@ func createAPIKey(serverURL, jwt, workspace, name string) string {
 // boilerplate without merging the auth conventions, and would give
 // future tests one obvious place to look for "how do I call the API".
 func callNeutreeAPI(method, path string) ([]byte, int) {
+	return callNeutreeAPIWithBody(method, path, nil)
+}
+
+func callNeutreeAPIWithJSON(method, path string, payload any) ([]byte, int) {
+	GinkgoHelper()
+
+	body, err := json.Marshal(payload)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	return callNeutreeAPIWithBody(method, path, bytes.NewReader(body))
+}
+
+func callNeutreeAPIWithBody(method, path string, requestBody io.Reader) ([]byte, int) {
 	GinkgoHelper()
 
 	url := strings.TrimRight(Cfg.ServerURL, "/") + path
-	req, err := http.NewRequest(method, url, nil)
+	req, err := http.NewRequest(method, url, requestBody)
 	Expect(err).NotTo(HaveOccurred())
 
 	req.Header.Set("Authorization", Cfg.APIKey)
+
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
@@ -1476,12 +1497,15 @@ func getEndpoint(name string) v1.Endpoint {
 
 // deleteEndpoint deletes an endpoint and waits for it to be removed.
 func deleteEndpoint(name string) {
-	RunCLI("delete", "endpoint", name, "-w", profileWorkspace(), "--force", "--ignore-not-found")
-	RunCLI("wait", "endpoint", name,
+	r := RunCLI("delete", "endpoint", name, "-w", profileWorkspace(), "--force", "--ignore-not-found")
+	ExpectSuccess(r)
+
+	r = RunCLI("wait", "endpoint", name,
 		"-w", profileWorkspace(),
 		"--for", "delete",
 		"--timeout", "5m",
 	)
+	ExpectSuccess(r)
 }
 
 func parseEndpointJSON(stdout string) v1.Endpoint {
