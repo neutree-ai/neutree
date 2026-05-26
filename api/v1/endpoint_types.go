@@ -31,14 +31,14 @@ type ReplicaSpec struct {
 }
 
 type EndpointSpec struct {
-	Cluster           string                 `json:"cluster,omitempty"`
-	Model             *ModelSpec             `json:"model,omitempty"`
-	Engine            *EndpointEngineSpec    `json:"engine,omitempty"`
-	Resources         *ResourceSpec          `json:"resources,omitempty"`
-	Replicas          ReplicaSpec            `json:"replicas,omitempty"`
-	DeploymentOptions map[string]any `json:"deployment_options,omitempty"`
-	Variables         map[string]any `json:"variables,omitempty"`
-	Env               map[string]string      `json:"env,omitempty"`
+	Cluster           string              `json:"cluster,omitempty"`
+	Model             *ModelSpec          `json:"model,omitempty"`
+	Engine            *EndpointEngineSpec `json:"engine,omitempty"`
+	Resources         *ResourceSpec       `json:"resources,omitempty"`
+	Replicas          ReplicaSpec         `json:"replicas,omitempty"`
+	DeploymentOptions map[string]any      `json:"deployment_options,omitempty"`
+	Variables         map[string]any      `json:"variables,omitempty"`
+	Env               map[string]string   `json:"env,omitempty"`
 
 	// Recipe reference: when ModelCatalog is set and Model is nil the
 	// endpoint controller resolves the catalog, composes the kernel, writes
