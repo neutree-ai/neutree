@@ -468,15 +468,16 @@ local function convert_response(openai_resp, request_model)
     if is_table(message.tool_calls) then
         for _, tc in ipairs(message.tool_calls) do
             local input = {}
-            if tc["function"] and tc["function"].arguments then
-                local parsed, err = cjson.decode(tc["function"].arguments)
+            local fn = is_table(tc["function"]) and tc["function"] or EMPTY
+            if fn.arguments and fn.arguments ~= cjson.null then
+                local parsed, err = cjson.decode(fn.arguments)
                 if err or parsed == nil then
-                    input = { raw = tc["function"].arguments }
+                    input = { raw = fn.arguments }
                 else
                     input = parsed
                 end
             end
-            local fn_name = (tc["function"] or EMPTY).name
+            local fn_name = fn.name
             if fn_name == nil or fn_name == cjson.null then
                 fn_name = ""
             end
