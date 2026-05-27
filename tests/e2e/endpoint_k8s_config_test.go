@@ -461,8 +461,8 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				yamlPath := applyEndpoint(epName, clusterName,
 					withTask(tc.task),
 					withEngineArgs([]EngineArg{{Key: "dtype", Value: "half"}}))
-				defer os.Remove(yamlPath)
-				defer deleteEndpoint(epName)
+				DeferCleanup(func() { deleteEndpoint(epName) })
+				DeferCleanup(os.Remove, yamlPath)
 
 				cmd := eventuallyEndpointContainerCommand(k8sH, namespace, epName, profileEngineName())
 				Expect(commandFlagValue(cmd, "--runner")).To(Equal(tc.wantRunner),

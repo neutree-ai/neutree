@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func writeTempTemplate(t *testing.T, content string) string {
@@ -295,15 +297,7 @@ func TestDefaultEndpointEngineArgsMergesModelOverrides(t *testing.T) {
 		{Key: "hf_overrides", Value: hfOverrides},
 	}
 
-	if len(got) != len(want) {
-		t.Fatalf("len(got)=%d want=%d; got=%#v", len(got), len(want), got)
-	}
-
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got[%d]=%#v want=%#v; got=%#v", i, got[i], want[i], got)
-		}
-	}
+	require.Equal(t, want, got)
 }
 
 func TestRenderTemplate_RolePermissionsRange(t *testing.T) {
