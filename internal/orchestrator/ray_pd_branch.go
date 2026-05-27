@@ -2,18 +2,14 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/pkg/errors"
-	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/deployment/pdconfig"
 	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
-	"github.com/neutree-ai/neutree/internal/semver"
 )
 
 // isPDStrategy returns true when the endpoint requests PD same-host
@@ -24,32 +20,6 @@ func isPDStrategy(ep *v1.Endpoint) bool {
 	}
 
 	return pdconfig.EffectivePlacementRoles(ep) == pdconfig.DefaultPlacementRoles
-}
-
-// pdImportPath returns the Ray Serve import path for a PD same-host endpoint.
-// Phase 0 Demo only supports vLLM; the engine version is consumed verbatim
-// after semver base-version stripping (matching the monolithic path).
-func pdImportPath(ep *v1.Endpoint) (string, error) {
-	if ep.Spec == nil || ep.Spec.Engine == nil {
-		return "", errors.New("endpoint engine is not configured")
-	}
-
-	engine := strings.ReplaceAll(ep.Spec.Engine.Engine, "-", "_")
-	if engine != "vllm" {
-		return "", fmt.Errorf("PD same-host Demo only supports vllm (got %q)", ep.Spec.Engine.Engine)
-	}
-
-	base, err := semver.BaseVersion(ep.Spec.Engine.Version)
-	if err != nil {
-		klog.Warningf("engine version %q is not semver, using as-is for PD import path: %v",
-			ep.Spec.Engine.Version, err)
-
-		base = ep.Spec.Engine.Version
-	}
-
-	version := strings.NewReplacer(".", "_", "-", "_").Replace(base)
-
-	return fmt.Sprintf("serve.%s.%s.app_pd_collocated:app_builder", engine, version), nil
 }
 
 // SerializePDConfig flattens a pdconfig.PDSameHostConfig into the dict shape
@@ -117,8 +87,8 @@ func serializeKVTransfer(kt *pdconfig.KVTransferConfig) map[string]interface{} {
 	}
 }
 
-// serializePorts passes through the (replica × role × rank × []int) shape
-// verbatim. Per-position meaning is owned by the engine-side app.py.
+// serializePorts passes through the (RoleGroup × role × rank × []int) shape
+// verbatim. Phase 1 PD carries a single port in each rank's []int slot.
 func serializePorts(ports []pdconfig.ReplicaPortMap) []map[string][][]int {
 	out := make([]map[string][][]int, 0, len(ports))
 
@@ -174,17 +144,21 @@ func serializeRayResource(r *v1.RayResourceSpec) map[string]interface{} {
 //     (idempotent on retry; same endpoint → same ports)
 //  5. SerializePDConfig + inject into Args so PDIngress / inner actors get
 //     both the topology and the per-actor port env on startup
-func applyPDBranch(ctx context.Context, ep *v1.Endpoint, cluster *v1.Cluster,
+func applyPDBranch(ctx context.Context, ep *v1.Endpoint, cluster *v1.Cluster, engine *v1.Engine,
 	acceleratorMgr accelerator.Manager, allocator portalloc.Allocator,
 	app *dashboard.RayServeApplication) error {
-	pdImport, err := pdImportPath(ep)
+	resolution, err := pdconfig.ResolveEngineCapabilities(ep, cluster, engine)
 	if err != nil {
-		return errors.Wrap(err, "PD import path resolution failed")
+		return errors.Wrap(err, "PD engine capability resolution failed")
 	}
 
-	app.ImportPath = pdImport
+	if resolution == nil {
+		return errors.New("PD engine capability resolution returned nil")
+	}
 
-	cfg, err := pdconfig.DerivePDSameHostConfig(ep)
+	app.ImportPath = resolution.RayServeEntrypoint
+
+	cfg, err := pdconfig.DerivePDSameHostConfig(ep, resolution.KVConnector)
 	if err != nil {
 		return errors.Wrap(err, "derive PD same-host config failed")
 	}

@@ -60,8 +60,8 @@ func ValidatePortRange(pr v1.PortRangeSpec) error {
 //     already on disk, fill cfg.Ports from them and return early.
 //  2. Otherwise, read the cluster-wide allocations to compute the in-use
 //     port set, then walk the configured PortRange picking the smallest
-//     unused port for each (replica × role × rank × position) slot the
-//     config still needs.
+//     unused port for each (RoleGroup × role × rank) slot the config still
+//     needs.
 //  3. Persist the newly-picked rows in a single InsertAllocations call so
 //     a partial failure leaves no orphans.
 //  4. Materialize cfg.Ports.
@@ -83,7 +83,11 @@ func (a *allocator) AllocateForPDSameHostConfig(
 		return fmt.Errorf("portalloc: endpoint id must be positive, got %d", endpointID)
 	}
 
-	required := buildRequiredSlots(cfg)
+	required, err := buildRequiredSlots(cfg)
+	if err != nil {
+		return err
+	}
+
 	if len(required) == 0 {
 		// Nothing to allocate.
 		cfg.Ports = materializePorts(cfg, nil)
@@ -104,7 +108,7 @@ func (a *allocator) AllocateForPDSameHostConfig(
 	if len(existing) > 0 {
 		// Partial / shape-mismatched allocations on disk. This is the
 		// normal aftermath of an endpoint spec edit (role count, role
-		// instances, or PortsPerRank changed) — the prior port set is no
+		// instances, or port requirement changed) — the prior port set is no
 		// longer valid for the new config. Release the stale rows and
 		// fall through to the fresh-allocation path so the orchestrator
 		// reconcile loop is self-healing instead of demanding a manual
@@ -134,9 +138,9 @@ func (a *allocator) AllocateForPDSameHostConfig(
 		return fmt.Errorf("portalloc: invalid port range: %w", err)
 	}
 
-	// `required` already walks replica → Group.Roles (declaration order) →
-	// rank → position. We keep that natural order so allocation maps to the
-	// config top-to-bottom: replica-0 prefill-0 first, then decode-0, etc.
+	// `required` already walks role_group_index → Group.Roles (declaration
+	// order) → rank. We keep that natural order so allocation maps to the
+	// config top-to-bottom: group-0 prefill-0 first, then decode-0, etc.
 	// Reconcile retries replay the same order deterministically.
 
 	// (3) Pick smallest unused port for each slot.
@@ -156,13 +160,12 @@ func (a *allocator) AllocateForPDSameHostConfig(
 		cursor = next
 
 		alloc := Allocation{
-			ClusterID:   cluster.ID,
-			Port:        port,
-			EndpointID:  endpointID,
-			ReplicaIdx:  slot.ReplicaIdx,
-			RoleName:    slot.RoleName,
-			RankIdx:     slot.RankIdx,
-			PositionIdx: slot.PositionIdx,
+			ClusterID:      cluster.ID,
+			Port:           port,
+			EndpointID:     endpointID,
+			RoleGroupIndex: slot.RoleGroupIndex,
+			Role:           slot.Role,
+			Rank:           slot.Rank,
 		}
 
 		picked = append(picked, alloc)
@@ -194,15 +197,14 @@ func (a *allocator) ReleaseAll(ctx context.Context, endpointID int) error {
 
 // slotKey identifies one port slot uniquely.
 type slotKey struct {
-	ReplicaIdx  int
-	RoleName    string
-	RankIdx     int
-	PositionIdx int
+	RoleGroupIndex int
+	Role           string
+	Rank           int
 }
 
-func buildRequiredSlots(cfg *pdconfig.PDSameHostConfig) []slotKey {
+func buildRequiredSlots(cfg *pdconfig.PDSameHostConfig) ([]slotKey, error) {
 	if cfg.Group == nil || cfg.NumReplicas <= 0 {
-		return nil
+		return nil, nil
 	}
 
 	out := make([]slotKey, 0, 16)
@@ -213,33 +215,37 @@ func buildRequiredSlots(cfg *pdconfig.PDSameHostConfig) []slotKey {
 				continue
 			}
 
+			if role.PortsPerRank > 1 {
+				return nil, fmt.Errorf(
+					"portalloc: role %s requests %d ports per rank; PD same-host currently supports one port per rank",
+					role.Name, role.PortsPerRank,
+				)
+			}
+
 			for rank := 0; rank < role.Instances; rank++ {
-				for pos := 0; pos < role.PortsPerRank; pos++ {
-					out = append(out, slotKey{
-						ReplicaIdx:  replica,
-						RoleName:    role.Name,
-						RankIdx:     rank,
-						PositionIdx: pos,
-					})
-				}
+				out = append(out, slotKey{
+					RoleGroupIndex: replica,
+					Role:           role.Name,
+					Rank:           rank,
+				})
 			}
 		}
 	}
 
-	return out
+	return out, nil
 }
 
 // isCompleteFor returns true when `existing` covers every slot in `required`.
 // The relation is checked by set equality on slotKey.
 func isCompleteFor(required []slotKey, existing []Allocation) bool {
-	if len(existing) < len(required) {
+	if len(existing) != len(required) {
 		return false
 	}
 
 	have := make(map[slotKey]struct{}, len(existing))
 
 	for _, a := range existing {
-		have[slotKey{a.ReplicaIdx, a.RoleName, a.RankIdx, a.PositionIdx}] = struct{}{}
+		have[slotKey{a.RoleGroupIndex, a.Role, a.Rank}] = struct{}{}
 	}
 
 	for _, r := range required {
@@ -266,9 +272,9 @@ func nextFreePort(cursor, end int, inUse map[int]struct{}) (int, int, bool) {
 }
 
 // materializePorts walks the allocations and fills cfg.Ports following the
-// config shape: Ports[replica_idx][role_name][rank_idx][position_idx] = port.
+// config shape: Ports[role_group_index][role][rank][0] = port.
 //
-// The config slice + slot positional order is preserved exactly, even when
+// The config slice + slot order is preserved exactly, even when
 // `allocations` is empty (each replica still gets an empty map so the
 // renderer doesn't have to nil-check).
 func materializePorts(cfg *pdconfig.PDSameHostConfig, allocations []Allocation) []pdconfig.ReplicaPortMap {
@@ -286,9 +292,9 @@ func materializePorts(cfg *pdconfig.PDSameHostConfig, allocations []Allocation) 
 		return ports
 	}
 
-	// Pre-size []int slices to (Instances × PortsPerRank) so positional
-	// indexing works even before any allocation row lands for that slot.
-	for replicaIdx := 0; replicaIdx < cfg.NumReplicas; replicaIdx++ {
+	// Pre-size []int slices to (Instances × 1) so engine-side indexing works
+	// even before any allocation row lands for that slot.
+	for roleGroupIdx := 0; roleGroupIdx < cfg.NumReplicas; roleGroupIdx++ {
 		for _, role := range cfg.Group.Roles {
 			if role.PortsPerRank <= 0 || role.Instances <= 0 {
 				continue
@@ -297,32 +303,28 @@ func materializePorts(cfg *pdconfig.PDSameHostConfig, allocations []Allocation) 
 			ranks := make([][]int, role.Instances)
 
 			for rank := 0; rank < role.Instances; rank++ {
-				ranks[rank] = make([]int, role.PortsPerRank)
+				ranks[rank] = make([]int, 1)
 			}
 
-			ports[replicaIdx][role.Name] = ranks
+			ports[roleGroupIdx][role.Name] = ranks
 		}
 	}
 
 	for _, a := range allocations {
-		if a.ReplicaIdx < 0 || a.ReplicaIdx >= len(ports) {
+		if a.RoleGroupIndex < 0 || a.RoleGroupIndex >= len(ports) {
 			continue
 		}
 
-		role, ok := ports[a.ReplicaIdx][a.RoleName]
+		role, ok := ports[a.RoleGroupIndex][a.Role]
 		if !ok {
 			continue
 		}
 
-		if a.RankIdx < 0 || a.RankIdx >= len(role) {
+		if a.Rank < 0 || a.Rank >= len(role) {
 			continue
 		}
 
-		if a.PositionIdx < 0 || a.PositionIdx >= len(role[a.RankIdx]) {
-			continue
-		}
-
-		role[a.RankIdx][a.PositionIdx] = a.Port
+		role[a.Rank][0] = a.Port
 	}
 
 	return ports

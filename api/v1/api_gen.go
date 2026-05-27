@@ -554,8 +554,12 @@ type ApiModelRegistryStatus struct {
 }
 
 type ApiEngineVersion struct {
-	Version      string      `json:"version"`
-	ValuesSchema interface{} `json:"values_schema"`
+	Version        string      `json:"version"`
+	ValuesSchema   interface{} `json:"values_schema"`
+	DeployTemplate interface{} `json:"deploy_template"`
+	Images         interface{} `json:"images"`
+	SupportedTasks interface{} `json:"supported_tasks"`
+	Capabilities   interface{} `json:"capabilities"`
 }
 
 type ApiEngineSpec struct {

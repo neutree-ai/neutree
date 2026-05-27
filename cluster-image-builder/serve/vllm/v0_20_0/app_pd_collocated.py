@@ -117,13 +117,14 @@ def _nixl_engine_args(kv_role: str, kv_extra: Dict[str, Any]) -> Dict[str, Any]:
     return {"kv_transfer_config": cfg}
 
 
-def _vllm_port_env(pd_config: Dict[str, Any], replica_idx: int,
+def _vllm_port_env(pd_config: Dict[str, Any], role_group_index: int,
                    role_name: str, rank: int) -> Dict[str, str]:
-    """Engine-side positional-port convention.
+    """Engine-side single-port convention.
 
-    Reads pd_config["ports"][replica_idx][role_name][rank] = [side_channel_port]
-    and maps pos-0 → VLLM_NIXL_SIDE_CHANNEL_PORT (Ray PD only needs that;
-    HTTP engine port is not used because actors talk via Ray RPC).
+    Reads pd_config["ports"][role_group_index][role_name][rank] =
+    [side_channel_port] and maps the sole value to
+    VLLM_NIXL_SIDE_CHANNEL_PORT (Ray PD only needs that; HTTP engine port is
+    not used because actors talk via Ray RPC).
 
     No defaults: missing/empty slot raises so PD same-host runs on exactly
     one code path. portalloc misconfiguration surfaces here loudly rather
@@ -132,17 +133,17 @@ def _vllm_port_env(pd_config: Dict[str, Any], replica_idx: int,
     if not pd_config or "ports" not in pd_config or pd_config["ports"] is None:
         raise RuntimeError(
             f"PD same-host requires pd_config.Ports populated by portalloc; "
-            f"got pd_config.ports=None for {role_name} rank {rank} replica {replica_idx}"
+            f"got pd_config.ports=None for {role_name} rank {rank} role_group {role_group_index}"
         )
     try:
-        slot = pd_config["ports"][replica_idx][role_name][rank]
+        slot = pd_config["ports"][role_group_index][role_name][rank]
     except (IndexError, KeyError, TypeError) as exc:
         raise RuntimeError(
-            f"missing port slot for replica={replica_idx} role={role_name} rank={rank}: {exc}"
+            f"missing port slot for role_group={role_group_index} role={role_name} rank={rank}: {exc}"
         ) from exc
     if not slot:
         raise RuntimeError(
-            f"empty port slot for replica={replica_idx} role={role_name} rank={rank}"
+            f"empty port slot for role_group={role_group_index} role={role_name} rank={rank}"
         )
     return {
         "VLLM_NIXL_SIDE_CHANNEL_HOST": "0.0.0.0",

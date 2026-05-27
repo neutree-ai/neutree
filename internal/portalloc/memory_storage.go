@@ -68,8 +68,8 @@ func (m *MemoryStorage) InsertAllocations(_ context.Context, allocations []Alloc
 
 		if _, dup := existingSlot[slotFingerprint(a)]; dup {
 			return fmt.Errorf(
-				"memstorage: slot (cluster=%d, endpoint=%d, replica=%d, role=%s, rank=%d, pos=%d) already allocated",
-				a.ClusterID, a.EndpointID, a.ReplicaIdx, a.RoleName, a.RankIdx, a.PositionIdx,
+				"memstorage: slot (cluster=%d, endpoint=%d, role_group_index=%d, role=%s, rank=%d) already allocated",
+				a.ClusterID, a.EndpointID, a.RoleGroupIndex, a.Role, a.Rank,
 			)
 		}
 
@@ -115,8 +115,8 @@ func slotFingerprint(a Allocation) [5]string {
 	return [5]string{
 		fmt.Sprintf("%d", a.ClusterID),
 		fmt.Sprintf("%d", a.EndpointID),
-		fmt.Sprintf("%d", a.ReplicaIdx),
-		a.RoleName,
-		fmt.Sprintf("%d-%d", a.RankIdx, a.PositionIdx),
+		fmt.Sprintf("%d", a.RoleGroupIndex),
+		a.Role,
+		fmt.Sprintf("%d", a.Rank),
 	}
 }

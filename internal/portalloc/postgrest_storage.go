@@ -63,7 +63,7 @@ func (s *PostgRESTStorage) InsertAllocations(_ context.Context, allocations []Al
 	}
 	// PostgREST batch insert; on UNIQUE violation Postgres returns 409 which
 	// surfaces as an error here. allocator.AllocateForPDSameHostConfig guards against
-	// duplicate (replica, role, rank, position) so a 409 indicates a race
+	// duplicate (role_group_index, role, rank) so a 409 indicates a race
 	// across reconcilers — caller should retry derive+allocate
 	// flow from a fresh state read.
 	if _, _, err := s.client.

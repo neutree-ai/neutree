@@ -13,6 +13,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/deploy"
+	"github.com/neutree-ai/neutree/internal/deployment/pdconfig"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 
@@ -105,6 +106,12 @@ func (k *kubernetesOrchestrator) validateDependencies(ctx *OrchestratorContext) 
 	// validate image registry status
 	if ctx.ImageRegistry.Status == nil || ctx.ImageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
 		return errors.Errorf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
+	}
+
+	if isPDStrategy(ctx.Endpoint) {
+		if _, err := pdconfig.ResolveEngineCapabilities(ctx.Endpoint, ctx.Cluster, ctx.Engine); err != nil {
+			return errors.Wrap(err, "failed to validate PD engine capabilities")
+		}
 	}
 
 	return nil

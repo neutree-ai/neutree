@@ -25,7 +25,7 @@ func TestDerivePDSameHostConfig(t *testing.T) {
 		},
 	}
 
-	cfg, err := DerivePDSameHostConfig(ep)
+	cfg, err := DerivePDSameHostConfig(ep, "mooncake")
 	if err != nil {
 		t.Fatalf("DerivePDSameHostConfig: %v", err)
 	}
@@ -64,8 +64,8 @@ func TestRoleShapeDoesNotExposeDeploymentOptions(t *testing.T) {
 	}
 }
 
-func TestDerivePDSameHostConfig_DefaultsKVConnector(t *testing.T) {
-	cfg, err := DerivePDSameHostConfig(&v1.Endpoint{
+func TestDerivePDSameHostConfig_RequiresResolvedKVConnector(t *testing.T) {
+	_, err := DerivePDSameHostConfig(&v1.Endpoint{
 		Spec: &v1.EndpointSpec{
 			Strategy: "pd",
 			Roles: []v1.EndpointRoleSpec{
@@ -73,12 +73,165 @@ func TestDerivePDSameHostConfig_DefaultsKVConnector(t *testing.T) {
 				{Name: "decode"},
 			},
 		},
-	})
-	if err != nil {
-		t.Fatalf("DerivePDSameHostConfig: %v", err)
+	}, "")
+	if err == nil || !contains(err.Error(), "connector") {
+		t.Fatalf("expected connector error, got %v", err)
 	}
-	if cfg.Transfer == nil || cfg.Transfer.Connector != "nixl" {
-		t.Fatalf("default connector: got %+v want nixl", cfg.Transfer)
+}
+
+func TestResolveKVConnector(t *testing.T) {
+	version := &v1.EngineVersion{
+		Capabilities: &v1.EngineVersionCapabilities{
+			PD: &v1.PDCapabilitySpec{KVConnectors: []string{"nixl", "mooncake"}},
+		},
+	}
+
+	got, err := ResolveKVConnector(&v1.Endpoint{Spec: &v1.EndpointSpec{}}, version)
+	if err != nil {
+		t.Fatalf("ResolveKVConnector default: %v", err)
+	}
+	if got != "nixl" {
+		t.Fatalf("default connector: got %q want nixl", got)
+	}
+
+	got, err = ResolveKVConnector(&v1.Endpoint{Spec: &v1.EndpointSpec{
+		KV: &v1.KVSpec{Transfer: &v1.KVTransferSpec{Connector: "mooncake"}},
+	}}, version)
+	if err != nil {
+		t.Fatalf("ResolveKVConnector explicit: %v", err)
+	}
+	if got != "mooncake" {
+		t.Fatalf("explicit connector: got %q want mooncake", got)
+	}
+
+	_, err = ResolveKVConnector(&v1.Endpoint{Spec: &v1.EndpointSpec{
+		KV: &v1.KVSpec{Transfer: &v1.KVTransferSpec{Connector: "unsupported"}},
+	}}, version)
+	if err == nil || !contains(err.Error(), "unsupported") {
+		t.Fatalf("expected unsupported connector error, got %v", err)
+	}
+
+	_, err = ResolveKVConnector(&v1.Endpoint{Spec: &v1.EndpointSpec{}}, &v1.EngineVersion{
+		Capabilities: &v1.EngineVersionCapabilities{PD: &v1.PDCapabilitySpec{}},
+	})
+	if err == nil || !contains(err.Error(), "at least one") {
+		t.Fatalf("expected empty connectors error, got %v", err)
+	}
+}
+
+func TestResolveEngineCapabilities_Ray(t *testing.T) {
+	ep := &v1.Endpoint{Spec: &v1.EndpointSpec{
+		Strategy: "pd",
+		Engine:   &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.20.0"},
+		Model:    &v1.ModelSpec{Task: v1.TextGenerationModelTask},
+	}}
+	cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}}
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{
+			{
+				Version: "v0.20.0",
+				DeployTemplate: map[string]map[string]string{
+					v1.RayServeDeployTarget: {
+						v1.PDDeployMode: "c2VydmUudmxsbS52MF8yMF8wLmFwcF9wZF9jb2xsb2NhdGVkOmFwcF9idWlsZGVy",
+					},
+				},
+				Capabilities: &v1.EngineVersionCapabilities{
+					PD: &v1.PDCapabilitySpec{
+						KVConnectors:   []string{"nixl", "mooncake"},
+						SupportedTasks: []string{v1.TextGenerationModelTask},
+					},
+				},
+			},
+		}},
+	}
+
+	resolution, err := ResolveEngineCapabilities(ep, cluster, engine)
+	if err != nil {
+		t.Fatalf("ResolveEngineCapabilities: %v", err)
+	}
+	if resolution.KVConnector != "nixl" {
+		t.Fatalf("KVConnector: got %q want nixl", resolution.KVConnector)
+	}
+	if resolution.RayServeEntrypoint != "serve.vllm.v0_20_0.app_pd_collocated:app_builder" {
+		t.Fatalf("RayServeEntrypoint: got %q", resolution.RayServeEntrypoint)
+	}
+}
+
+func TestResolveEngineCapabilities_Failures(t *testing.T) {
+	baseEndpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{
+		Strategy: "pd",
+		Engine:   &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.20.0"},
+		Model:    &v1.ModelSpec{Task: v1.TextGenerationModelTask},
+	}}
+
+	tests := []struct {
+		name    string
+		ep      *v1.Endpoint
+		cluster *v1.Cluster
+		engine  *v1.Engine
+		wantSub string
+	}{
+		{
+			name:    "missing_pd_capability",
+			ep:      baseEndpoint,
+			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}},
+			engine: &v1.Engine{Metadata: &v1.Metadata{Name: "vllm"}, Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{
+				{Version: "v0.20.0"},
+			}}},
+			wantSub: "does not support strategy=pd",
+		},
+		{
+			name:    "missing_ray_entrypoint",
+			ep:      baseEndpoint,
+			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}},
+			engine:  engineWithPDCapability(nil),
+			wantSub: "does not support PD on ssh/ray",
+		},
+		{
+			name:    "unsupported_task",
+			ep:      &v1.Endpoint{Spec: &v1.EndpointSpec{Strategy: "pd", Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.20.0"}, Model: &v1.ModelSpec{Task: v1.TextEmbeddingModelTask}}},
+			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}},
+			engine:  engineWithPDCapability(map[string]map[string]string{v1.RayServeDeployTarget: {v1.PDDeployMode: "aW1wb3J0OnBhdGg="}}),
+			wantSub: "task",
+		},
+		{
+			name:    "kubernetes_template_required",
+			ep:      baseEndpoint,
+			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}},
+			engine:  engineWithPDCapability(map[string]map[string]string{v1.RayServeDeployTarget: {v1.PDDeployMode: "aW1wb3J0OnBhdGg="}}),
+			wantSub: "kubernetes",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ResolveEngineCapabilities(tc.ep, tc.cluster, tc.engine)
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			if !contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
+func engineWithPDCapability(templates map[string]map[string]string) *v1.Engine {
+	return &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{
+			{
+				Version:        "v0.20.0",
+				DeployTemplate: templates,
+				Capabilities: &v1.EngineVersionCapabilities{
+					PD: &v1.PDCapabilitySpec{
+						KVConnectors:   []string{"nixl"},
+						SupportedTasks: []string{v1.TextGenerationModelTask},
+					},
+				},
+			},
+		}},
 	}
 }
 

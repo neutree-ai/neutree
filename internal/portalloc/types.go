@@ -1,8 +1,7 @@
 // Package portalloc is the cluster-level port allocator for Neutree.
 //
 // Responsibility:
-//   - Allocate exactly N ports per (replica × role × rank × position) slot
-//     where N is `Role.PortsPerRank` from the PD same-host config.
+//   - Allocate one port per (RoleGroup × role × rank) slot.
 //   - Persist allocations in api.cluster_port_allocations.
 //   - Hand the result back as cfg.Ports so renderers can inject env vars
 //     deterministically.
@@ -25,15 +24,14 @@ import (
 // Allocation is one persisted port row matching the api.cluster_port_allocations
 // schema 1:1.
 type Allocation struct {
-	ID          int    `json:"id,omitempty"`
-	ClusterID   int    `json:"cluster_id"`
-	Port        int    `json:"port"`
-	EndpointID  int    `json:"endpoint_id"`
-	ReplicaIdx  int    `json:"replica_idx"`
-	RoleName    string `json:"role_name"`
-	RankIdx     int    `json:"rank_idx"`
-	PositionIdx int    `json:"position_idx"`
-	AllocatedAt string `json:"allocated_at,omitempty"`
+	ID             int    `json:"id,omitempty"`
+	ClusterID      int    `json:"cluster_id"`
+	Port           int    `json:"port"`
+	EndpointID     int    `json:"endpoint_id"`
+	RoleGroupIndex int    `json:"role_group_index"`
+	Role           string `json:"role"`
+	Rank           int    `json:"rank"`
+	AllocatedAt    string `json:"allocated_at,omitempty"`
 }
 
 // Storage is the persistence contract for portalloc.
@@ -52,7 +50,7 @@ type Storage interface {
 // Storage with config-aware allocation logic.
 type Allocator interface {
 	// AllocateForPDSameHostConfig reserves ports for every
-	// (replica × role × rank × position) slot implied by the config, writes
+	// (RoleGroup × role × rank) slot implied by the config, writes
 	// them into cfg.Ports, and persists rows into Storage. Idempotent: if rows
 	// already exist for endpointID, the existing assignments are returned (and
 	// cfg.Ports is filled from them) — this keeps reconcile safe to retry

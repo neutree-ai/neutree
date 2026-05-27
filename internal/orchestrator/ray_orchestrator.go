@@ -145,6 +145,12 @@ func (o *RayOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
 		return errors.Errorf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
 	}
 
+	if isPDStrategy(ctx.Endpoint) {
+		if _, err := pdconfig.ResolveEngineCapabilities(ctx.Endpoint, ctx.Cluster, ctx.Engine); err != nil {
+			return errors.Wrap(err, "failed to validate PD engine capabilities")
+		}
+	}
+
 	return nil
 }
 
@@ -244,7 +250,7 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 	// to the configured Storage. Refuses to render without an allocator
 	// configured — the Demo path is one-and-the-same with MVP, no defaults.
 	if isPDStrategy(ctx.Endpoint) {
-		if err := applyPDBranch(context.Background(), ctx.Endpoint, ctx.Cluster,
+		if err := applyPDBranch(context.Background(), ctx.Endpoint, ctx.Cluster, ctx.Engine,
 			o.acceleratorMgr, o.portAllocator, &newApp); err != nil {
 			return errors.Wrapf(err, "failed to apply PD branch for endpoint %s",
 				ctx.Endpoint.Metadata.WorkspaceName())

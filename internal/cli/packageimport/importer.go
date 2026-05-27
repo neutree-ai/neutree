@@ -297,6 +297,7 @@ func validateModelTasks(em *EngineMetadata) error {
 		task  string
 	}
 	var bads []bad
+	var subsetBads []bad
 
 	for _, t := range em.SupportedTasks {
 		if strings.TrimSpace(t) == "" {
@@ -322,20 +323,63 @@ func validateModelTasks(em *EngineMetadata) error {
 				bads = append(bads, bad{where: "engines[" + em.Name + "].engine_versions[" + v.Version + "].supported_tasks", task: t})
 			}
 		}
+
+		if v.Capabilities != nil && v.Capabilities.PD != nil {
+			for _, t := range v.Capabilities.PD.SupportedTasks {
+				if strings.TrimSpace(t) == "" {
+					continue
+				}
+
+				where := "engines[" + em.Name + "].engine_versions[" + v.Version + "].capabilities.pd.supported_tasks"
+				if !v1.IsKnownModelTask(t) {
+					bads = append(bads, bad{where: where, task: t})
+					continue
+				}
+
+				if !containsString(em.SupportedTasks, t) && !containsString(v.SupportedTasks, t) {
+					subsetBads = append(subsetBads, bad{where: where, task: t})
+				}
+			}
+		}
 	}
 
-	if len(bads) == 0 {
+	if len(bads) == 0 && len(subsetBads) == 0 {
 		return nil
 	}
 
-	parts := make([]string, 0, len(bads))
-	for _, b := range bads {
-		parts = append(parts, b.where+`=`+strconv.Quote(b.task))
+	var messages []string
+
+	if len(bads) > 0 {
+		parts := make([]string, 0, len(bads))
+		for _, b := range bads {
+			parts = append(parts, b.where+`=`+strconv.Quote(b.task))
+		}
+
+		messages = append(messages, fmt.Sprintf("unknown model task value(s) — only %v are accepted: %s",
+			v1.KnownModelTasks(),
+			strings.Join(parts, "; ")))
 	}
 
-	return fmt.Errorf("unknown model task value(s) — only %v are accepted: %s",
-		v1.KnownModelTasks(),
-		strings.Join(parts, "; "))
+	if len(subsetBads) > 0 {
+		parts := make([]string, 0, len(subsetBads))
+		for _, b := range subsetBads {
+			parts = append(parts, b.where+`=`+strconv.Quote(b.task))
+		}
+
+		messages = append(messages, "pd supported_tasks must be a subset of engine/version supported_tasks: "+strings.Join(parts, "; "))
+	}
+
+	return fmt.Errorf("%s", strings.Join(messages, "; "))
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 // aggregateSupportedTasks unions the manifest top-level supported_tasks with each

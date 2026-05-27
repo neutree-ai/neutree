@@ -115,10 +115,12 @@ type EngineVersion struct {
 	//  }
 	ValuesSchema map[string]interface{} `json:"values_schema,omitempty" yaml:"values_schema,omitempty"`
 
-	// DeployTemplate contains Base64-encoded deployment templates for different cluster types and modes.
-	// The first level key represents the cluster type (e.g., "kubernetes", "ssh").
-	// The second level key represents the deployment mode (e.g., "default", "pd", "tp").
-	// Values are Base64-encoded YAML template strings to avoid JSON escaping issues.
+	// DeployTemplate contains Base64-encoded deployment templates or runtime
+	// entrypoints for different deploy targets and modes. The first-level key
+	// is a deploy target (for example, "kubernetes" for YAML templates or
+	// "ray_serve" for a Ray Serve import path). The second-level key is the
+	// deployment mode (for example, "default" or "pd"). Values are Base64
+	// encoded to avoid JSON escaping issues.
 	//
 	// Example:
 	//  DeployTemplate: map[string]map[string]string{
@@ -156,6 +158,19 @@ type EngineVersion struct {
 	//    "text-generate",
 	//    "text-embedding",
 	//  },
+	SupportedTasks []string `json:"supported_tasks,omitempty" yaml:"supported_tasks,omitempty"`
+
+	// Capabilities describes strategy-specific capabilities that cannot be
+	// inferred from images or generic deployment templates alone.
+	Capabilities *EngineVersionCapabilities `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+}
+
+type EngineVersionCapabilities struct {
+	PD *PDCapabilitySpec `json:"pd,omitempty" yaml:"pd,omitempty"`
+}
+
+type PDCapabilitySpec struct {
+	KVConnectors   []string `json:"kv_connectors,omitempty" yaml:"kv_connectors,omitempty"`
 	SupportedTasks []string `json:"supported_tasks,omitempty" yaml:"supported_tasks,omitempty"`
 }
 
@@ -336,6 +351,11 @@ func (in *EngineList) SetItems(objs []scheme.Object) {
 // It defines a naming convention only and does not prescribe specific image contents.
 const SSHImageKeyPrefix = "ssh_"
 
+const (
+	RayServeDeployTarget = "ray_serve"
+	PDDeployMode         = "pd"
+)
+
 // GetImageForAccelerator returns the image information for a specific accelerator type
 // If the accelerator type is not found, it returns nil
 func (ev *EngineVersion) GetImageForAccelerator(acceleratorType string) *EngineImage {
@@ -472,6 +492,14 @@ func (ev *EngineVersion) HasDeployTemplate(clusterType, mode string) bool {
 	}
 
 	return clusterModes[mode] != ""
+}
+
+func (ev *EngineVersion) GetRayServeEntrypoint(mode string) (string, error) {
+	return ev.GetDeployTemplate(RayServeDeployTarget, mode)
+}
+
+func (ev *EngineVersion) HasRayServeEntrypoint(mode string) bool {
+	return ev.HasDeployTemplate(RayServeDeployTarget, mode)
 }
 
 // GetDeployTemplateRaw returns the raw Base64-encoded template without decoding.

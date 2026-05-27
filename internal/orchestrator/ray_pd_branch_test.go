@@ -21,6 +21,24 @@ func stubRayApp(importPath string) dashboard.RayServeApplication {
 
 func num(n int) *int { return &n }
 
+func pdEngine(version, entrypoint string) *v1.Engine {
+	ev := &v1.EngineVersion{
+		Version: version,
+		Capabilities: &v1.EngineVersionCapabilities{
+			PD: &v1.PDCapabilitySpec{
+				KVConnectors:   []string{"nixl", "mooncake"},
+				SupportedTasks: []string{v1.TextGenerationModelTask},
+			},
+		},
+	}
+	ev.SetDeployTemplate(v1.RayServeDeployTarget, v1.PDDeployMode, entrypoint)
+
+	return &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec:     &v1.EngineSpec{Versions: []*v1.EngineVersion{ev}},
+	}
+}
+
 func TestIsPDStrategy(t *testing.T) {
 	cases := []struct {
 		name string
@@ -48,26 +66,36 @@ func TestIsPDStrategy(t *testing.T) {
 	}
 }
 
-func TestPDImportPath_VLLM(t *testing.T) {
+func TestResolveEngineCapabilities_RayServeEntrypoint(t *testing.T) {
 	ep := &v1.Endpoint{Spec: &v1.EndpointSpec{
-		Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.17.1"},
+		Strategy: "pd",
+		Engine:   &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.17.1"},
+		Model:    &v1.ModelSpec{Task: v1.TextGenerationModelTask},
 	}}
-	got, err := pdImportPath(ep)
+	cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}}
+	got, err := pdconfig.ResolveEngineCapabilities(ep, cluster, pdEngine("v0.17.1", "serve.vllm.v0_17_1.app_pd_collocated:app_builder"))
 	if err != nil {
-		t.Fatalf("pdImportPath: %v", err)
+		t.Fatalf("ResolveEngineCapabilities: %v", err)
 	}
 	want := "serve.vllm.v0_17_1.app_pd_collocated:app_builder"
-	if got != want {
-		t.Errorf("import_path: got %q want %q", got, want)
+	if got.RayServeEntrypoint != want {
+		t.Errorf("entrypoint: got %q want %q", got.RayServeEntrypoint, want)
 	}
 }
 
-func TestPDImportPath_RejectsNonVLLM(t *testing.T) {
+func TestResolveEngineCapabilities_RejectsMissingPDCapability(t *testing.T) {
 	ep := &v1.Endpoint{Spec: &v1.EndpointSpec{
-		Engine: &v1.EndpointEngineSpec{Engine: "sglang", Version: "v0.5.10"},
+		Strategy: "pd",
+		Engine:   &v1.EndpointEngineSpec{Engine: "sglang", Version: "v0.5.10"},
 	}}
-	if _, err := pdImportPath(ep); err == nil || !strings.Contains(err.Error(), "vllm") {
-		t.Errorf("expected sglang to be rejected, got err=%v", err)
+	cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}}
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "sglang"},
+		Spec:     &v1.EngineSpec{Versions: []*v1.EngineVersion{{Version: "v0.5.10"}}},
+	}
+
+	if _, err := pdconfig.ResolveEngineCapabilities(ep, cluster, engine); err == nil || !strings.Contains(err.Error(), "strategy=pd") {
+		t.Errorf("expected missing PD capability to be rejected, got err=%v", err)
 	}
 }
 
@@ -112,7 +140,7 @@ func TestSerializePDConfig_Shape(t *testing.T) {
 }
 
 func TestSerializePDConfig_PortsPassthrough(t *testing.T) {
-	// portalloc fills Ports with opaque []int per slot; serializer passes through.
+	// portalloc fills Ports with one []int slot per role rank; serializer passes through.
 	cfg := &pdconfig.PDSameHostConfig{
 		NumReplicas: 1,
 		Group: &pdconfig.RoleGroup{
@@ -120,8 +148,8 @@ func TestSerializePDConfig_PortsPassthrough(t *testing.T) {
 		},
 		Ports: []pdconfig.ReplicaPortMap{
 			{
-				"prefill": {{20000, 20001}},
-				"decode":  {{20003, 20004}},
+				"prefill": {{20000}},
+				"decode":  {{20001}},
 			},
 		},
 	}
@@ -130,11 +158,11 @@ func TestSerializePDConfig_PortsPassthrough(t *testing.T) {
 	if len(ports) != 1 {
 		t.Fatalf("ports len: got %d want 1", len(ports))
 	}
-	if ports[0]["prefill"][0][1] != 20001 {
-		t.Errorf("prefill rank-0 pos-1: got %v", ports[0]["prefill"][0])
+	if ports[0]["prefill"][0][0] != 20000 {
+		t.Errorf("prefill rank-0 port: got %v", ports[0]["prefill"][0])
 	}
-	if ports[0]["decode"][0][0] != 20003 {
-		t.Errorf("decode rank-0 pos-0: got %v", ports[0]["decode"][0])
+	if ports[0]["decode"][0][0] != 20001 {
+		t.Errorf("decode rank-0 port: got %v", ports[0]["decode"][0])
 	}
 }
 
@@ -146,6 +174,7 @@ func TestApplyPDBranch_RewritesImportAndInjectsPDConfig(t *testing.T) {
 			Replicas: v1.ReplicaSpec{Num: num(1)},
 			Strategy: "pd",
 			Engine:   &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.17.1"},
+			Model:    &v1.ModelSpec{Task: v1.TextGenerationModelTask},
 			Roles: []v1.EndpointRoleSpec{
 				{Name: "prefill"},
 				{Name: "decode"},
@@ -154,15 +183,16 @@ func TestApplyPDBranch_RewritesImportAndInjectsPDConfig(t *testing.T) {
 	}
 	cluster := &v1.Cluster{
 		ID:   1,
-		Spec: &v1.ClusterSpec{},
+		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType},
 	}
+	engine := pdEngine("v0.17.1", "serve.vllm.v0_17_1.app_pd_collocated:app_builder")
 	allocator := portalloc.New(
 		portalloc.NewMemoryStorage(),
 		portalloc.WithPortRange(v1.PortRangeSpec{Start: 20000, End: 21000}),
 	)
 	app := stubRayApp("serve.vllm.v0_17_1.app:app_builder")
 
-	if err := applyPDBranch(context.Background(), ep, cluster, nil, allocator, &app); err != nil {
+	if err := applyPDBranch(context.Background(), ep, cluster, engine, nil, allocator, &app); err != nil {
 		t.Fatalf("applyPDBranch: %v", err)
 	}
 	if app.ImportPath != "serve.vllm.v0_17_1.app_pd_collocated:app_builder" {
@@ -194,16 +224,18 @@ func TestApplyPDBranch_RequiresAllocator(t *testing.T) {
 			Strategy:  "pd",
 			Placement: &v1.PlacementSpec{Roles: "same-host"},
 			Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.17.1"},
+			Model:     &v1.ModelSpec{Task: v1.TextGenerationModelTask},
 			Roles: []v1.EndpointRoleSpec{
 				{Name: "prefill"},
 				{Name: "decode"},
 			},
 		},
 	}
-	cluster := &v1.Cluster{ID: 1, Spec: &v1.ClusterSpec{}}
+	cluster := &v1.Cluster{ID: 1, Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}}
+	engine := pdEngine("v0.17.1", "serve.vllm.v0_17_1.app_pd_collocated:app_builder")
 	app := stubRayApp("serve.vllm.v0_17_1.app:app_builder")
 
-	err := applyPDBranch(context.Background(), ep, cluster, nil, nil, &app)
+	err := applyPDBranch(context.Background(), ep, cluster, engine, nil, nil, &app)
 	if err == nil {
 		t.Fatalf("expected error when allocator is nil")
 	}

@@ -25,8 +25,9 @@ type Options struct {
 	Cluster        *v1.Cluster
 	Storage        storage.Storage
 	AcceleratorMgr accelerator.Manager
-	// PortAllocator allocates per-(replica × role × rank × position) ports
+	// PortAllocator allocates per-(RoleGroup × role × rank) ports
 	// for derived PD runtime configs that declare Role.PortsPerRank > 0.
+	// Phase 1 PD supports a single allocated port per role rank.
 	// MAY be nil — only PD same-host (and future MVP/Phase 2 features)
 	// require ports; legacy monolithic endpoints (Strategy="") skip the
 	// allocator call entirely. When set, CreateEndpoint will block until

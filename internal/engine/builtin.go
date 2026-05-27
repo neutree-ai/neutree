@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"encoding/base64"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
@@ -118,6 +120,15 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 							"kubernetes": {
 								"default": GetVLLMV0_17_1DeployTemplate(),
 							},
+							v1.RayServeDeployTarget: {
+								v1.PDDeployMode: rayServeEntrypoint("serve.vllm.v0_17_1.app_pd_collocated:app_builder"),
+							},
+						},
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								KVConnectors:   []string{"nixl", "mooncake"},
+								SupportedTasks: []string{v1.TextGenerationModelTask},
+							},
 						},
 					},
 					{
@@ -132,6 +143,15 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
 								"default": GetVLLMV0_20_0DeployTemplate(),
+							},
+							v1.RayServeDeployTarget: {
+								v1.PDDeployMode: rayServeEntrypoint("serve.vllm.v0_20_0.app_pd_collocated:app_builder"),
+							},
+						},
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								KVConnectors:   []string{"nixl", "mooncake"},
+								SupportedTasks: []string{v1.TextGenerationModelTask},
 							},
 						},
 					},
@@ -172,4 +192,8 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 	}
 
 	return engines, nil
+}
+
+func rayServeEntrypoint(importPath string) string {
+	return base64.StdEncoding.EncodeToString([]byte(importPath))
 }

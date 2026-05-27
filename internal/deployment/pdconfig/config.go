@@ -2,6 +2,7 @@ package pdconfig
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -9,7 +10,6 @@ import (
 const (
 	DefaultPlacementRoles    = "same-host"
 	DefaultPlacementReplicas = "spread-node"
-	DefaultKVConnector       = "nixl"
 )
 
 // PDSameHostConfig is the deterministic runtime config derived from
@@ -41,8 +41,8 @@ type Role struct {
 	Variables map[string]interface{}
 	Env       map[string]string
 
-	// PortsPerRank tells portalloc how many stable ports are needed for each
-	// (replica x role x rank) slot.
+	// PortsPerRank gates whether each (RoleGroup x role x rank) slot needs a
+	// stable port. Phase 1 PD supports only 0 or 1 port per rank.
 	PortsPerRank int
 }
 
@@ -95,9 +95,20 @@ func ValidatePDSameHost(ep *v1.Endpoint) error {
 	return nil
 }
 
-func DerivePDSameHostConfig(ep *v1.Endpoint) (*PDSameHostConfig, error) {
+type EngineCapabilityResolution struct {
+	Version            *v1.EngineVersion
+	KVConnector        string
+	RayServeEntrypoint string
+}
+
+func DerivePDSameHostConfig(ep *v1.Endpoint, connector string) (*PDSameHostConfig, error) {
 	if err := ValidatePDSameHost(ep); err != nil {
 		return nil, err
+	}
+
+	connector = strings.TrimSpace(connector)
+	if connector == "" {
+		return nil, fmt.Errorf("pd kv connector is empty")
 	}
 
 	pf, de, _ := lookupPDRoles(ep.Spec.Roles)
@@ -118,10 +129,100 @@ func DerivePDSameHostConfig(ep *v1.Endpoint) (*PDSameHostConfig, error) {
 			Roles: []*Role{prefillRole, decodeRole},
 		},
 		Transfer: &KVTransferConfig{
-			Connector: kvConnector(ep, DefaultKVConnector),
+			Connector: connector,
 			Extra:     kvExtra(ep),
 		},
 	}, nil
+}
+
+func ResolveEngineCapabilities(ep *v1.Endpoint, cluster *v1.Cluster, engine *v1.Engine) (*EngineCapabilityResolution, error) {
+	if ep == nil || ep.Spec == nil {
+		return nil, fmt.Errorf("endpoint spec is nil")
+	}
+
+	if ep.Spec.Strategy != "pd" {
+		return nil, nil
+	}
+
+	if cluster == nil || cluster.Spec == nil {
+		return nil, fmt.Errorf("cluster spec is nil")
+	}
+
+	version, err := findEngineVersion(engine, ep)
+	if err != nil {
+		return nil, err
+	}
+
+	if version.Capabilities == nil || version.Capabilities.PD == nil {
+		return nil, fmt.Errorf("engine %s version %s does not support strategy=pd",
+			engineName(engine), ep.Spec.Engine.Version)
+	}
+
+	connector, err := ResolveKVConnector(ep, version)
+	if err != nil {
+		return nil, err
+	}
+
+	pd := version.Capabilities.PD
+	if task := effectiveModelTask(ep); !containsTrimmed(pd.SupportedTasks, task) {
+		return nil, fmt.Errorf("engine %s version %s does not support PD task %q",
+			engineName(engine), ep.Spec.Engine.Version, task)
+	}
+
+	resolution := &EngineCapabilityResolution{
+		Version:     version,
+		KVConnector: connector,
+	}
+
+	switch cluster.Spec.Type {
+	case v1.SSHClusterType:
+		entrypoint, err := version.GetRayServeEntrypoint(v1.PDDeployMode)
+		if err != nil {
+			return nil, fmt.Errorf("engine %s version %s does not support PD on ssh/ray: %w",
+				engineName(engine), ep.Spec.Engine.Version, err)
+		}
+
+		resolution.RayServeEntrypoint = strings.TrimSpace(entrypoint)
+		if resolution.RayServeEntrypoint == "" {
+			return nil, fmt.Errorf("engine %s version %s has an empty ray_serve PD entrypoint",
+				engineName(engine), ep.Spec.Engine.Version)
+		}
+	case v1.KubernetesClusterType:
+		if !version.HasDeployTemplate(v1.KubernetesClusterType, v1.PDDeployMode) {
+			return nil, fmt.Errorf("engine %s version %s does not support PD on kubernetes",
+				engineName(engine), ep.Spec.Engine.Version)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported cluster type %q for PD", cluster.Spec.Type)
+	}
+
+	return resolution, nil
+}
+
+func ResolveKVConnector(ep *v1.Endpoint, version *v1.EngineVersion) (string, error) {
+	if version == nil || version.Capabilities == nil || version.Capabilities.PD == nil {
+		return "", fmt.Errorf("engine version does not declare PD capabilities")
+	}
+
+	supported := version.Capabilities.PD.KVConnectors
+	if len(supported) == 0 {
+		return "", fmt.Errorf("engine version PD capabilities must declare at least one kv connector")
+	}
+
+	connector := strings.TrimSpace(userKVConnector(ep))
+	if connector == "" {
+		connector = strings.TrimSpace(supported[0])
+	}
+
+	if connector == "" {
+		return "", fmt.Errorf("engine version PD capabilities contain an empty default kv connector")
+	}
+
+	if !containsTrimmed(supported, connector) {
+		return "", fmt.Errorf("engine version PD capabilities do not support kv connector %q", connector)
+	}
+
+	return connector, nil
 }
 
 func roleFromSpec(spec v1.EndpointRoleSpec, instances int) *Role {
@@ -213,10 +314,10 @@ func validateRoleReplicas(name string, r *v1.EndpointRoleSpec) error {
 	return nil
 }
 
-func kvConnector(ep *v1.Endpoint, def string) string {
+func userKVConnector(ep *v1.Endpoint) string {
 	transfer := kvTransfer(ep)
-	if transfer == nil || transfer.Connector == "" {
-		return def
+	if transfer == nil {
+		return ""
 	}
 
 	return transfer.Connector
@@ -237,4 +338,48 @@ func kvTransfer(ep *v1.Endpoint) *v1.KVTransferSpec {
 	}
 
 	return ep.Spec.KV.Transfer
+}
+
+func findEngineVersion(engine *v1.Engine, ep *v1.Endpoint) (*v1.EngineVersion, error) {
+	if engine == nil || engine.Spec == nil {
+		return nil, fmt.Errorf("engine is nil")
+	}
+
+	if ep == nil || ep.Spec == nil || ep.Spec.Engine == nil {
+		return nil, fmt.Errorf("endpoint engine is not configured")
+	}
+
+	for _, version := range engine.Spec.Versions {
+		if version != nil && version.Version == ep.Spec.Engine.Version {
+			return version, nil
+		}
+	}
+
+	return nil, fmt.Errorf("engine %s version %s not found", engineName(engine), ep.Spec.Engine.Version)
+}
+
+func effectiveModelTask(ep *v1.Endpoint) string {
+	if ep == nil || ep.Spec == nil || ep.Spec.Model == nil || ep.Spec.Model.Task == "" {
+		return v1.TextGenerationModelTask
+	}
+
+	return ep.Spec.Model.Task
+}
+
+func engineName(engine *v1.Engine) string {
+	if engine == nil || engine.Metadata == nil {
+		return ""
+	}
+
+	return engine.Metadata.Name
+}
+
+func containsTrimmed(values []string, want string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+
+	return false
 }

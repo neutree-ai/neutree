@@ -51,6 +51,20 @@ func TestGetBuiltinEngines(t *testing.T) {
 					t.Errorf("vllm %s missing default kubernetes deploy template", v.Version)
 				}
 			}
+
+			switch v.Version {
+			case "v0.17.1", "v0.20.0":
+				if v.Capabilities == nil || v.Capabilities.PD == nil {
+					t.Errorf("vllm %s missing PD capability", v.Version)
+					continue
+				}
+				if !v.HasRayServeEntrypoint(v1.PDDeployMode) {
+					t.Errorf("vllm %s missing ray_serve/pd entrypoint", v.Version)
+				}
+				if got, err := v.GetRayServeEntrypoint(v1.PDDeployMode); err != nil || got == "" {
+					t.Errorf("vllm %s invalid ray_serve/pd entrypoint: got %q err=%v", v.Version, got, err)
+				}
+			}
 		}
 	}
 

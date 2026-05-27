@@ -48,10 +48,10 @@ func TestAllocateForPDSameHostConfig_PDSameHost_1P1D_OneReplica(t *testing.T) {
 		t.Fatalf("cfg.Ports len: got %d want 1", len(p.Ports))
 	}
 	if got := p.Ports[0]["prefill"][0][0]; got != 20000 {
-		t.Errorf("prefill rank-0 pos-0: got %d want 20000", got)
+		t.Errorf("prefill rank-0 port: got %d want 20000", got)
 	}
 	if got := p.Ports[0]["decode"][0][0]; got != 20001 {
-		t.Errorf("decode rank-0 pos-0: got %d want 20001", got)
+		t.Errorf("decode rank-0 port: got %d want 20001", got)
 	}
 }
 
@@ -179,7 +179,7 @@ func TestAllocateForPDSameHostConfig_NoPortsForRoleSkipped(t *testing.T) {
 
 func TestAllocateForPDSameHostConfig_StaleAllocationsSelfHeal(t *testing.T) {
 	// Partial / shape-mismatched allocations on disk are expected after an
-	// endpoint spec edit (role count, instances, PortsPerRank changed).
+	// endpoint spec edit (role count, instances, port requirement changed).
 	// AllocateForPDSameHostConfig releases them and re-allocates fresh; reconcile is
 	// self-healing rather than demanding manual ReleaseAll.
 	mem := NewMemoryStorage()
@@ -188,7 +188,7 @@ func TestAllocateForPDSameHostConfig_StaleAllocationsSelfHeal(t *testing.T) {
 
 	_ = mem.InsertAllocations(context.Background(), []Allocation{{
 		ClusterID: 1, Port: 20000, EndpointID: 7,
-		ReplicaIdx: 0, RoleName: "prefill", RankIdx: 0, PositionIdx: 0,
+		RoleGroupIndex: 0, Role: "prefill", Rank: 0,
 	}})
 
 	p := pdConfig(1, 1, 1, 1) // needs 2 slots; 1 partial exists
@@ -202,24 +202,18 @@ func TestAllocateForPDSameHostConfig_StaleAllocationsSelfHeal(t *testing.T) {
 	}
 }
 
-func TestAllocateForPDSameHostConfig_MultiPositionPerSlot(t *testing.T) {
-	// PortsPerRank=2 (e.g. future K8s PD with HTTP+side_channel).
+func TestAllocateForPDSameHostConfig_RejectsMultiPortPerRank(t *testing.T) {
 	mem := NewMemoryStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 	p := pdConfig(1, 1, 1, 2)
 
-	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 3, p); err != nil {
-		t.Fatalf("AllocateForPDSameHostConfig: %v", err)
+	err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 3, p)
+	if err == nil {
+		t.Fatalf("expected error for PortsPerRank=2")
 	}
-	if mem.Count() != 4 {
-		t.Errorf("expected 4 allocations (2 roles × 1 rank × 2 positions), got %d", mem.Count())
-	}
-	if len(p.Ports[0]["prefill"][0]) != 2 {
-		t.Errorf("prefill rank-0 should have 2 ports, got %v", p.Ports[0]["prefill"][0])
-	}
-	if p.Ports[0]["prefill"][0][0] == p.Ports[0]["prefill"][0][1] {
-		t.Errorf("pos-0 and pos-1 collided: %v", p.Ports[0]["prefill"][0])
+	if mem.Count() != 0 {
+		t.Errorf("multi-port rejection should not insert rows, got %d", mem.Count())
 	}
 }
 

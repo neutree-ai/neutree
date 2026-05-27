@@ -6,7 +6,8 @@ import (
 )
 
 // PD is the prefill / decode disaggregation strategy. Phase 1 supports
-// placement.roles=same-host with NIXL as the default transfer connector.
+// placement.roles=same-host; the effective transfer connector is resolved from
+// the selected EngineVersion's PD capabilities.
 type PD struct{}
 
 func (s *PD) Name() string { return "pd" }
