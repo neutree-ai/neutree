@@ -364,7 +364,27 @@ func StopLocalRegistry(containerID string) {
 
 // testRegistry returns the model registry name for tests.
 func testRegistry() string {
-	return "e2e-registry-" + Cfg.RunID
+	return testRegistryForType("")
+}
+
+func testRegistryForType(registryType string) string {
+	if profileModelRegistryTypeUsesDefaultName(registryType) {
+		return "e2e-registry-" + Cfg.RunID
+	}
+
+	return "e2e-registry-" + slugName(registryType) + "-" + Cfg.RunID
+}
+
+func slugName(s string) string {
+	parts := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !isSlugRune(r)
+	})
+
+	return strings.Join(parts, "-")
+}
+
+func isSlugRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
 }
 
 // testImageRegistry returns the image registry name for tests.
@@ -744,8 +764,9 @@ func profileVarMap() map[string]string {
 		"E2E_IMAGE_REGISTRY_PASSWORD": profile.ImageRegistry.Password,
 
 		// Model registry
-		"E2E_MODEL_REGISTRY_TYPE": profile.ModelRegistry.Type,
-		"E2E_MODEL_REGISTRY_URL":  profile.ModelRegistry.URL,
+		"E2E_MODEL_REGISTRY_TYPE":        profileModelRegistryForType("").Type,
+		"E2E_MODEL_REGISTRY_URL":         profileModelRegistryForType("").URL,
+		"E2E_MODEL_REGISTRY_CREDENTIALS": profileModelRegistryForType("").Credentials,
 
 		// Engine
 		"E2E_ENGINE_NAME":    profileEngineName(),
@@ -1247,20 +1268,21 @@ func engineArgs(engineName string) []EngineArg {
 
 // endpointOpts holds configurable fields for applyEndpoint.
 type endpointOpts struct {
-	engineName    string
-	engineVersion string
-	model         string
-	modelVersion  string
-	task          string
-	engineArgs    []EngineArg
-	gpu           string
-	cpu           string
-	memory        string
-	accType       string
-	accProduct    string
-	env           map[string]string
-	forceUpdate   bool
-	replicas      int
+	engineName        string
+	engineVersion     string
+	modelRegistryType string
+	model             string
+	modelVersion      string
+	task              string
+	engineArgs        []EngineArg
+	gpu               string
+	cpu               string
+	memory            string
+	accType           string
+	accProduct        string
+	env               map[string]string
+	forceUpdate       bool
+	replicas          int
 }
 
 // EndpointOption configures a single field of endpointOpts.
@@ -1289,6 +1311,10 @@ func withModel(name, version string) EndpointOption {
 		o.model = name
 		o.modelVersion = version
 	}
+}
+
+func withModelRegistryType(registryType string) EndpointOption {
+	return func(o *endpointOpts) { o.modelRegistryType = registryType }
 }
 
 func withTask(task string) EndpointOption {
@@ -1358,7 +1384,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		"E2E_CLUSTER_NAME":        cluster,
 		"E2E_ENGINE_NAME":         o.engineName,
 		"E2E_ENGINE_VERSION":      o.engineVersion,
-		"E2E_MODEL_REGISTRY":      testRegistry(),
+		"E2E_MODEL_REGISTRY":      testRegistryForType(o.modelRegistryType),
 		"E2E_MODEL_NAME":          o.model,
 		"E2E_MODEL_VERSION":       o.modelVersion,
 		"E2E_MODEL_TASK":          o.task,

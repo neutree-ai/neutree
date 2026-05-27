@@ -4,13 +4,18 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	defaultModelVersion = "latest"
+	defaultModelVersion      = "latest"
+	defaultModelRegistryType = "bentoml"
+	defaultProfileName       = "default"
+	defaultRegistryAlias     = defaultProfileName
+	defaultWorkspace         = defaultProfileName
 	// defaultEngineName is the engine looked up by helpers that don't take an
 	// explicit engine name (renderEndpoint default, profileEngineVersion, etc.).
 	// Tests that target a different engine pass it via withEngine(name, version).
@@ -26,6 +31,19 @@ type EngineProfile struct {
 	// into a YAML snippet under spec.variables.engine_args. Empty (or missing)
 	// means rely on the engine's built-in defaults.
 	EngineArgs string `yaml:"engine_args"`
+}
+
+type ModelProfile struct {
+	Name    string `yaml:"name"`
+	Version string `yaml:"version"`
+	File    string `yaml:"file"`
+	Task    string `yaml:"task"`
+}
+
+type ModelRegistryProfile struct {
+	Type        string `yaml:"type"`
+	URL         string `yaml:"url"`
+	Credentials string `yaml:"credentials"`
 }
 
 // Profile represents the test-infra standard profile format (snake_case).
@@ -60,11 +78,8 @@ type Profile struct {
 		Password   string `yaml:"password"`
 	} `yaml:"image_registry"`
 
-	ModelRegistry struct {
-		Type        string `yaml:"type"`
-		URL         string `yaml:"url"`
-		Credentials string `yaml:"credentials"`
-	} `yaml:"model_registry"`
+	ModelRegistry   ModelRegistryProfile            `yaml:"model_registry"`
+	ModelRegistries map[string]ModelRegistryProfile `yaml:"model_registries"`
 
 	Workspace string `yaml:"workspace"`
 
@@ -81,12 +96,7 @@ type Profile struct {
 	// block — no Go struct change required.
 	Engines map[string]EngineProfile `yaml:"engines"`
 
-	Model struct {
-		Name    string `yaml:"name"`
-		Version string `yaml:"version"`
-		File    string `yaml:"file"`
-		Task    string `yaml:"task"`
-	} `yaml:"model"`
+	Model ModelProfile `yaml:"model"`
 
 	EmbeddingModel struct {
 		Name    string `yaml:"name"`
@@ -158,6 +168,10 @@ func LoadProfile() error {
 		return fmt.Errorf("failed to parse profile %s: %w", path, err)
 	}
 
+	if err := validateProfile(); err != nil {
+		return fmt.Errorf("invalid profile %s: %w", path, err)
+	}
+
 	// Compute derived fields.
 
 	// SSH: read key file and base64-encode; compute worker IPs.
@@ -211,6 +225,21 @@ func LoadProfile() error {
 
 	if profile.ControlPlane.K8sNamespace == "" {
 		profile.ControlPlane.K8sNamespace = "neutree-e2e"
+	}
+
+	return nil
+}
+
+func validateProfile() error {
+	for registryType, registryProfile := range profile.ModelRegistries {
+		if registryType == "" {
+			return fmt.Errorf("model_registries contains an empty registry type")
+		}
+
+		if registryProfile.Type != "" && registryProfile.Type != registryType {
+			return fmt.Errorf("model_registries.%s.type must match map key %q, got %q",
+				registryType, registryType, registryProfile.Type)
+		}
 	}
 
 	return nil
@@ -272,7 +301,7 @@ func profileWorkspace() string {
 		return profile.Workspace
 	}
 
-	return "default"
+	return defaultWorkspace
 }
 
 func profileClusterVersion() string {
@@ -356,6 +385,96 @@ func profileEngineArgsFor(name string) string {
 	}
 
 	return ""
+}
+
+func modelRegistryProfileConfigured(p ModelRegistryProfile) bool {
+	return p.Type != "" || p.URL != "" || p.Credentials != ""
+}
+
+func modelRegistryProfileWithType(registryType string, p ModelRegistryProfile) ModelRegistryProfile {
+	if p.Type == "" {
+		p.Type = registryType
+	}
+
+	return p
+}
+
+func profileModelRegistryForType(registryType string) ModelRegistryProfile {
+	if registryType == "" || registryType == defaultRegistryAlias {
+		if modelRegistryProfileConfigured(profile.ModelRegistry) {
+			return modelRegistryProfileWithType(defaultModelRegistryType, profile.ModelRegistry)
+		}
+
+		if p, ok := profile.ModelRegistries[defaultModelRegistryType]; ok {
+			return modelRegistryProfileWithType(defaultModelRegistryType, p)
+		}
+
+		return ModelRegistryProfile{Type: defaultModelRegistryType}
+	}
+
+	if p, ok := profile.ModelRegistries[registryType]; ok {
+		return modelRegistryProfileWithType(registryType, p)
+	}
+
+	if modelRegistryProfileConfigured(profile.ModelRegistry) {
+		legacy := modelRegistryProfileWithType(defaultModelRegistryType, profile.ModelRegistry)
+		if legacy.Type == registryType {
+			return legacy
+		}
+	}
+
+	return ModelRegistryProfile{Type: registryType}
+}
+
+func profileModelRegistryTypeUsesDefaultName(registryType string) bool {
+	if registryType == "" || registryType == defaultRegistryAlias {
+		return true
+	}
+
+	if _, ok := profile.ModelRegistries[registryType]; ok {
+		return false
+	}
+
+	if modelRegistryProfileConfigured(profile.ModelRegistry) {
+		legacy := modelRegistryProfileWithType(defaultModelRegistryType, profile.ModelRegistry)
+
+		return legacy.Type == registryType
+	}
+
+	return false
+}
+
+func profileModelRegistryTypes() []string {
+	seen := map[string]struct{}{}
+
+	if modelRegistryProfileConfigured(profile.ModelRegistry) {
+		seen[profileModelRegistryForType("").Type] = struct{}{}
+	}
+
+	for registryType := range profile.ModelRegistries {
+		if registryType != "" {
+			seen[registryType] = struct{}{}
+		}
+	}
+
+	if len(seen) == 0 {
+		seen[defaultModelRegistryType] = struct{}{}
+	}
+
+	var types []string
+	if _, ok := seen[defaultModelRegistryType]; ok {
+		types = append(types, defaultModelRegistryType)
+		delete(seen, defaultModelRegistryType)
+	}
+
+	var rest []string
+	for registryType := range seen {
+		rest = append(rest, registryType)
+	}
+
+	sort.Strings(rest)
+
+	return append(types, rest...)
 }
 
 func profileEndpointTimeout() string {
