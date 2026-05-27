@@ -11,11 +11,11 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// portAllocSingleton lives at the app level so every EndpointController
-// instance shares one port table. For Demo / single-process neutree-core
-// we back it with MemoryStorage; MVP will swap to NewPostgRESTStorage(client)
+// portAllocStorageSingleton lives at the app level so every EndpointController
+// instance shares one port table. For Demo / single-process neutree-core we
+// back it with MemoryStorage; later deployments can swap to PostgRESTStorage
 // for persistence + multi-replica controller HA.
-var portAllocSingleton = portalloc.New(portalloc.NewMemoryStorage())
+var portAllocStorageSingleton = portalloc.NewMemoryStorage()
 
 type ControllerOptions struct {
 	config      *config.CoreConfig
@@ -87,11 +87,16 @@ func NewEngineControllerFactory() ControllerFactory {
 
 func NewEndpointControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		portAllocOpts := []portalloc.Option{}
+		if opts.config.PortRange != nil {
+			portAllocOpts = append(portAllocOpts, portalloc.WithPortRange(*opts.config.PortRange))
+		}
+
 		endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
 			Storage:        opts.config.Storage,
 			Gw:             opts.config.Gateway,
 			AcceleratorMgr: opts.config.AcceleratorManager,
-			PortAllocator:  portAllocSingleton,
+			PortAllocator:  portalloc.New(portAllocStorageSingleton, portAllocOpts...),
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create endpoint controller")

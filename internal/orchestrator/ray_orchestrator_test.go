@@ -2952,6 +2952,53 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 	}
 }
 
+func TestRayOrchestrator_GetEndpointStatus_PDSameHostReplicaCounters(t *testing.T) {
+	prevFactory := dashboard.NewDashboardService
+	mockDashboard := dashboardmocks.NewMockDashboardService(t)
+	dashboard.NewDashboardService = func(string) dashboard.DashboardService { return mockDashboard }
+	t.Cleanup(func() { dashboard.NewDashboardService = prevFactory })
+
+	applicationName := "production_chat-model"
+	ep := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "production", Name: "chat-model"},
+		Spec: &v1.EndpointSpec{
+			Strategy:  "pd",
+			Placement: &v1.PlacementSpec{Roles: "same-host"},
+			Replicas:  v1.ReplicaSpec{Num: pointy.Int(2)},
+		},
+	}
+	mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+		Applications: map[string]dashboard.RayServeApplicationStatus{
+			applicationName: {
+				Status: "RUNNING",
+				Deployments: map[string]dashboard.Deployment{
+					"PDIngress":           {Name: "PDIngress", Status: dashboard.DeploymentStatusHealthy},
+					"PDCollocatedBackend": {Name: "PDCollocatedBackend", Status: dashboard.DeploymentStatusHealthy},
+				},
+			},
+		},
+		Proxies: map[string]dashboard.ProxyStatus{
+			"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+		},
+	}, nil)
+
+	o := &RayOrchestrator{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster"},
+			Spec:     &v1.ClusterSpec{Version: "v1.0.0", Config: &v1.ClusterConfig{}},
+			Status:   &v1.ClusterStatus{Initialized: true, DashboardURL: "http://ray-dashboard.example.com:8265"},
+		},
+	}
+
+	status, err := o.GetEndpointStatus(ep)
+	assert.NoError(t, err)
+	assert.Equal(t, v1.EndpointPhaseRUNNING, status.Phase)
+	assert.Equal(t, "pd", status.Strategy)
+	assert.Equal(t, "same-host", status.Placement)
+	assert.Equal(t, 2, status.TotalReplicas)
+	assert.Equal(t, 2, status.ReadyReplicas)
+}
+
 // TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ToleratesMissingDeps
 // verifies that the lite preparation does NOT fetch engine/model-registry/
 // image-registry from storage — this is what lets pause/delete on Ray

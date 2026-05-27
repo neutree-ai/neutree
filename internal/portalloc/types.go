@@ -2,15 +2,15 @@
 //
 // Responsibility:
 //   - Allocate exactly N ports per (replica × role × rank × position) slot
-//     where N is `Role.PortsPerRank` from the IR.
+//     where N is `Role.PortsPerRank` from the PD same-host config.
 //   - Persist allocations in api.cluster_port_allocations.
-//   - Hand the result back as plan.Ports so the renderer (Ray runtime_env /
-//     K8s container.env) can inject env vars deterministically.
+//   - Hand the result back as cfg.Ports so renderers can inject env vars
+//     deterministically.
 //
 // Allocation lifecycle is tied to the endpoint:
-//   - Reconcile path: AllocateForPlan is called after strategy.Compile and
-//     before orchestrator.Apply. Idempotent — re-running on an existing
-//     endpoint returns the same ports.
+//   - Reconcile path: AllocateForPDSameHostConfig is called after deriving the
+//     runtime config and before orchestrator.Apply. Idempotent — re-running on
+//     an existing endpoint returns the same ports.
 //   - Cleanup path: ReleaseAll on endpoint delete. ON DELETE CASCADE on the
 //     PG FK also covers the case where the endpoint row is deleted directly.
 package portalloc
@@ -19,7 +19,7 @@ import (
 	"context"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/deployment/plan"
+	"github.com/neutree-ai/neutree/internal/deployment/pdconfig"
 )
 
 // Allocation is one persisted port row matching the api.cluster_port_allocations
@@ -48,15 +48,16 @@ type Storage interface {
 	DeleteAllocationsByEndpoint(ctx context.Context, endpointID int) error
 }
 
-// Allocator is the public API. AllocateForPlan / ReleaseAll wrap Storage with
-// the IR-aware logic.
+// Allocator is the public API. AllocateForPDSameHostConfig / ReleaseAll wrap
+// Storage with config-aware allocation logic.
 type Allocator interface {
-	// AllocateForPlan reserves ports for every (replica × role × rank × position)
-	// slot implied by the plan, writes them into plan.Ports, and persists rows
-	// into Storage. Idempotent: if rows already exist for endpointID, the
-	// existing assignments are returned (and plan.Ports is filled from them)
-	// — this keeps reconcile safe to retry without leaking ports.
-	AllocateForPlan(ctx context.Context, cluster *v1.Cluster, endpointID int, p *plan.DeploymentPlan) error
+	// AllocateForPDSameHostConfig reserves ports for every
+	// (replica × role × rank × position) slot implied by the config, writes
+	// them into cfg.Ports, and persists rows into Storage. Idempotent: if rows
+	// already exist for endpointID, the existing assignments are returned (and
+	// cfg.Ports is filled from them) — this keeps reconcile safe to retry
+	// without leaking ports.
+	AllocateForPDSameHostConfig(ctx context.Context, cluster *v1.Cluster, endpointID int, cfg *pdconfig.PDSameHostConfig) error
 
 	// ReleaseAll removes every allocation for an endpoint. Idempotent.
 	ReleaseAll(ctx context.Context, endpointID int) error

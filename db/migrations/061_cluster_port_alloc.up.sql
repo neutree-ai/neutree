@@ -1,4 +1,4 @@
--- Cluster-level port allocator infrastructure.
+-- Cluster port allocator infrastructure.
 -- See .claude/knowledge/neutree-cluster-port-allocator-zh.md
 --
 -- Ports are allocated by control plane (pkg/portalloc) and consumed by the
@@ -7,12 +7,10 @@
 --   - cluster_id  ─ which cluster the port lives on
 --   - endpoint_id ─ allocation lifecycle owner (cascade delete)
 --   - replica_idx ─ 0..NumReplicas-1, matches Ray Serve native rank
---   - role_name   ─ matches plan.Role.Name (prefill / decode / engine / ...)
+--   - role_name   ─ matches derived runtime role name (prefill / decode / engine / ...)
 --   - rank_idx    ─ 0..Role.Instances-1
 --   - position_idx ─ 0..Role.PortsPerRank-1, per-engine positional
 --                   convention (vLLM: 0=HTTP, 1=NIXL side_channel)
-
-ALTER TYPE api.cluster_spec ADD ATTRIBUTE port_range json;
 
 CREATE TABLE api.cluster_port_allocations (
     cluster_id    integer NOT NULL REFERENCES api.clusters(id) ON DELETE CASCADE,

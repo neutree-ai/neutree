@@ -2,23 +2,22 @@ package v1
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
-// TestEndpointSpecPDFields_RoundTrip verifies the Demo (Phase 0) PD fields
-// serialize cleanly into JSON and parse back into typed structs. This is the
-// minimal contract D-04 / D-05 will rely on (orchestrator branches on these
-// fields after PostgREST JSON round-trip).
+// TestEndpointSpecPDFields_RoundTrip verifies the final PD same-host API fields
+// serialize cleanly into JSON and parse back into typed structs.
 func TestEndpointSpecPDFields_RoundTrip(t *testing.T) {
 	tests := []struct {
 		name string
 		spec EndpointSpec
 	}{
 		{
-			name: "monolithic_empty_pd_fields",
+			name: "standard_empty_pd_fields",
 			spec: EndpointSpec{
 				Cluster:  "c1",
-				Strategy: "monolithic",
+				Strategy: "standard",
 			},
 		},
 		{
@@ -32,7 +31,15 @@ func TestEndpointSpecPDFields_RoundTrip(t *testing.T) {
 				},
 				Roles: []EndpointRoleSpec{
 					{Name: "prefill"},
-					{Name: "decode", Dependencies: []string{"prefill"}},
+					{Name: "decode"},
+				},
+				KV: &KVSpec{
+					Transfer: &KVTransferSpec{
+						Connector: "nixl",
+						Extra: map[string]interface{}{
+							"buffer_size": float64(5000000000),
+						},
+					},
 				},
 			},
 		},
@@ -43,6 +50,9 @@ func TestEndpointSpecPDFields_RoundTrip(t *testing.T) {
 			raw, err := json.Marshal(tc.spec)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
+			}
+			if strings.Contains(string(raw), "deployment_options") || strings.Contains(string(raw), "dependencies") {
+				t.Fatalf("role-local legacy fields leaked into JSON: %s", raw)
 			}
 			var got EndpointSpec
 			if err := json.Unmarshal(raw, &got); err != nil {
@@ -59,6 +69,15 @@ func TestEndpointSpecPDFields_RoundTrip(t *testing.T) {
 					t.Errorf("placement.roles mismatch: %+v", got.Placement)
 				}
 			}
+			if tc.spec.KV != nil {
+				if got.KV == nil || got.KV.Transfer == nil {
+					t.Fatalf("kv.transfer did not round-trip: %+v", got.KV)
+				}
+				if got.KV.Transfer.Connector != tc.spec.KV.Transfer.Connector {
+					t.Errorf("kv.transfer.connector mismatch: got %q want %q",
+						got.KV.Transfer.Connector, tc.spec.KV.Transfer.Connector)
+				}
+			}
 		})
 	}
 }
@@ -66,9 +85,11 @@ func TestEndpointSpecPDFields_RoundTrip(t *testing.T) {
 // TestPDStatus_RoundTrip ensures ReplicaStatus survives PostgREST JSON shape.
 func TestPDStatus_RoundTrip(t *testing.T) {
 	in := EndpointStatus{
-		Phase:     EndpointPhaseRUNNING,
-		Strategy:  "pd",
-		Placement: "same-host",
+		Phase:         EndpointPhaseRUNNING,
+		Strategy:      "pd",
+		Placement:     "same-host",
+		TotalReplicas: 2,
+		ReadyReplicas: 1,
 		Replicas: []ReplicaStatus{
 			{ID: "replica-0", NodeName: "node-a", Phase: "Ready"},
 		},
@@ -80,5 +101,9 @@ func TestPDStatus_RoundTrip(t *testing.T) {
 	}
 	if len(got.Replicas) != 1 || got.Replicas[0].NodeName != "node-a" {
 		t.Errorf("replicas round-trip failed: %+v", got.Replicas)
+	}
+	if got.TotalReplicas != 2 || got.ReadyReplicas != 1 {
+		t.Errorf("replica counters round-trip failed: total=%d ready=%d",
+			got.TotalReplicas, got.ReadyReplicas)
 	}
 }

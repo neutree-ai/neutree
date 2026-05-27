@@ -93,7 +93,7 @@ class ActorTopology:
     replica_actor_id  — Ray ActorID of the Serve replica process
     replica_node      — node_id of the Serve replica process
     global_rank       — Ray Serve 2.53 native rank: 0..world_size-1.
-                        ★ Used as the replica index for plan.Ports lookup.
+                        ★ Used as the replica index for pd_config.Ports lookup.
     node_rank         — Ray Serve native: per-node ordinal
     local_rank        — Ray Serve native: rank within node
     world_size        — total replica count at the time of observation

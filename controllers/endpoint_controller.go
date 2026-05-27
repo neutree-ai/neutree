@@ -77,18 +77,17 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 			obj.Metadata.WorkspaceName())
 	}
 
-	// PD same-host (Phase 0 Demo): validate the strategy at the controller layer
-	// so users get fast feedback before the heavier orchestrator path runs. The
-	// actual Compile invocation lives inside ray_orchestrator.applyPDBranch
-	// for Demo; MVP PR-05 lifts Compile to here when portAllocator.AllocateForPlan
-	// gets wired in between Compile and Apply.
-	if obj.Spec != nil && obj.Spec.Strategy != "" {
+	// Validate strategy-specific API invariants at the controller layer so
+	// users get fast feedback before the heavier orchestrator path runs. Empty
+	// strategy resolves to the standard path.
+	if obj.Spec != nil {
 		s, sErr := strategy.Get(obj.Spec.Strategy)
 		if sErr != nil {
 			err = sErr
 			return errors.Wrapf(sErr, "failed to resolve strategy for endpoint %s",
 				obj.Metadata.WorkspaceName())
 		}
+
 		if vErr := s.Validate(obj); vErr != nil {
 			err = vErr
 			return errors.Wrapf(vErr, "strategy validation failed for endpoint %s",

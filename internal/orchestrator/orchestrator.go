@@ -26,7 +26,7 @@ type Options struct {
 	Storage        storage.Storage
 	AcceleratorMgr accelerator.Manager
 	// PortAllocator allocates per-(replica × role × rank × position) ports
-	// for endpoints whose strategy.Compile declares Role.PortsPerRank > 0.
+	// for derived PD runtime configs that declare Role.PortsPerRank > 0.
 	// MAY be nil — only PD same-host (and future MVP/Phase 2 features)
 	// require ports; legacy monolithic endpoints (Strategy="") skip the
 	// allocator call entirely. When set, CreateEndpoint will block until

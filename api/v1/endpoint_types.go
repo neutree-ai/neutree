@@ -40,12 +40,26 @@ type EndpointSpec struct {
 	Variables         map[string]interface{} `json:"variables,omitempty"`
 	Env               map[string]string      `json:"env,omitempty"`
 
-	// Demo (Phase 0) PD same-host fields. Minimum subset of MVP PR-01 schema; only
-	// Strategy + Placement + Roles are needed to drive `(strategy, placement.roles)`
-	// → PD app_builder dispatch. Sidecars/PortRange/full kv schema land in MVP.
-	Strategy  string             `json:"strategy,omitempty"`  // "monolithic" | "pd"
+	// PD same-host fields. Empty strategy follows the existing standard path;
+	// strategy="pd" enables prefill / decode role-group deployment.
+	Strategy  string             `json:"strategy,omitempty"`  // "standard" | "pd"
 	Placement *PlacementSpec     `json:"placement,omitempty"` // dual-axis placement constraint
 	Roles     []EndpointRoleSpec `json:"roles,omitempty"`
+	KV        *KVSpec            `json:"kv,omitempty"`
+}
+
+// KVSpec is the endpoint-level KV data-plane config container. Phase 1 only
+// exposes per-request P/D transfer; cache/offload can be added later without
+// mixing it into the transfer contract.
+type KVSpec struct {
+	Transfer *KVTransferSpec `json:"transfer,omitempty"`
+}
+
+// KVTransferSpec describes the prefill -> decode KV transfer for the current
+// request. Connector defaults are derived by placement profile when empty.
+type KVTransferSpec struct {
+	Connector string                 `json:"connector,omitempty"`
+	Extra     map[string]interface{} `json:"extra,omitempty"`
 }
 
 type EndpointPhase string
@@ -66,11 +80,13 @@ type EndpointStatus struct {
 	LastTransitionTime string        `json:"last_transition_time,omitempty"`
 	ErrorMessage       string        `json:"error_message,omitempty"`
 
-	// Demo (Phase 0) PD same-host status fields. Flat ReplicaStatus shape
-	// (no nested Roles map until MVP per 52587f08).
-	Strategy  string          `json:"strategy,omitempty"`
-	Placement string          `json:"placement,omitempty"`
-	Replicas  []ReplicaStatus `json:"replicas,omitempty"`
+	// PD same-host status fields. Replica counters are RoleGroup counts, not
+	// prefill + decode actor totals.
+	Strategy      string          `json:"strategy,omitempty"`
+	Placement     string          `json:"placement,omitempty"`
+	Replicas      []ReplicaStatus `json:"replicas,omitempty"`
+	TotalReplicas int             `json:"total_replicas,omitempty"`
+	ReadyReplicas int             `json:"ready_replicas,omitempty"`
 }
 
 type Endpoint struct {

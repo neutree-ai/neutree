@@ -1,9 +1,9 @@
-"""Phase 0 Demo — PD same-host collocated app builder for vLLM v0.20.0.
+"""PD same-host collocated app builder for vLLM v0.20.0.
 
 End-to-end runtime layout (1 replica = 1 PDCollocatedBackend):
 
     PDIngress (FastAPI, 0.1 CPU, 0 GPU)
-        │  ObserverRouter (Ray 2.53 native rank) picks the replica
+        │  Selects RoleGroup + prefill/decode ranks; ObserverRouter pins replica
         ▼
     PDCollocatedBackend  (0.1 CPU, 0 GPU; owns PG + protocol conversion)
         ├── placement_group(STRICT_PACK, x + y bundles)
@@ -14,7 +14,7 @@ End-to-end runtime layout (1 replica = 1 PDCollocatedBackend):
                 bundle x..x+y-1
 
 Per-request flow inside PDCollocatedBackend.pd_chat:
-    1. Round-robin pick prefill[i % x] and decode[i % y] via atomic counters.
+    1. Receive prefill_index/decode_index selected by PDIngress.
     2. prefill_payload (max_tokens=1) → prefill.generate (Backend.generate)
     3. Extract kv_transfer_params from the response.
     4. decode_payload (+kv_transfer_params) → decode.generate (Backend.generate)
@@ -24,9 +24,9 @@ PD-specific responsibility split:
     * PrefillActor / DecodeActor: thin subclasses of monolithic Backend.
       kv_role + NIXL connector injected via engine_args at __init__.
     * PDCollocatedBackend: owns PG, actor handles, protocol conversion,
-      round-robin pair selection.
+      and executes the ingress-selected P/D pair.
 
-Merge precedence (Demo + MVP):
+Merge precedence:
     * runtime_env env_vars: platform port env first, user Role.Env LAST
       → user explicitly wins (with a warning log when overriding a
       port var, since that bypasses portalloc).
@@ -35,7 +35,6 @@ Merge precedence (Demo + MVP):
       kv_transfer_config / kv_connector / kv_role).
 """
 import asyncio
-import itertools
 import logging
 import time
 import uuid
@@ -118,11 +117,11 @@ def _nixl_engine_args(kv_role: str, kv_extra: Dict[str, Any]) -> Dict[str, Any]:
     return {"kv_transfer_config": cfg}
 
 
-def _vllm_port_env(plan: Dict[str, Any], replica_idx: int,
+def _vllm_port_env(pd_config: Dict[str, Any], replica_idx: int,
                    role_name: str, rank: int) -> Dict[str, str]:
     """Engine-side positional-port convention.
 
-    Reads plan["ports"][replica_idx][role_name][rank] = [side_channel_port]
+    Reads pd_config["ports"][replica_idx][role_name][rank] = [side_channel_port]
     and maps pos-0 → VLLM_NIXL_SIDE_CHANNEL_PORT (Ray PD only needs that;
     HTTP engine port is not used because actors talk via Ray RPC).
 
@@ -130,13 +129,13 @@ def _vllm_port_env(plan: Dict[str, Any], replica_idx: int,
     one code path. portalloc misconfiguration surfaces here loudly rather
     than at vLLM bind time.
     """
-    if not plan or "ports" not in plan or plan["ports"] is None:
+    if not pd_config or "ports" not in pd_config or pd_config["ports"] is None:
         raise RuntimeError(
-            f"PD same-host requires plan.Ports populated by portalloc; "
-            f"got plan.ports=None for {role_name} rank {rank} replica {replica_idx}"
+            f"PD same-host requires pd_config.Ports populated by portalloc; "
+            f"got pd_config.ports=None for {role_name} rank {rank} replica {replica_idx}"
         )
     try:
-        slot = plan["ports"][replica_idx][role_name][rank]
+        slot = pd_config["ports"][replica_idx][role_name][rank]
     except (IndexError, KeyError, TypeError) as exc:
         raise RuntimeError(
             f"missing port slot for replica={replica_idx} role={role_name} rank={rank}: {exc}"
@@ -255,10 +254,10 @@ def _actor_options_to_bundle(actor_options: Dict[str, Any]) -> Dict[str, float]:
 
 
 def _role_resources_to_ray(role: Dict[str, Any]) -> Dict[str, Any]:
-    """plan.Role.RayResource → ray_actor_options.
+    """pd_config.Role.RayResource → ray_actor_options.
 
     The CP runs the accelerator-plugin matrix (NVIDIA / AMD / future Ascend)
-    and serializes the converted Ray-shape under plan.group.roles[*].resources:
+    and serializes the converted Ray-shape under pd_config.group.roles[*].resources:
     {num_cpus, num_gpus, memory(bytes), resources(map[str, float])}. This
     helper is a direct passthrough — keeping plugin variation single-sourced
     in Go avoids forking it across every engine's app.py.
@@ -432,8 +431,8 @@ class DecodeActor(Backend):
 @serve.deployment(ray_actor_options={"num_cpus": 0.1, "num_gpus": 0})
 class PDCollocatedBackend:
     """One per HA replica. Owns x PrefillActors + y DecodeActors collocated
-    via STRICT_PACK PG. Round-robins prefill+decode selection on each
-    pd_chat call (MVP will replace with CHWBL).
+    via STRICT_PACK PG. PDIngress selects the RoleGroup and local
+    prefill/decode ranks; this deployment only performs protocol conversion.
     """
 
     def __init__(self, *,
@@ -445,13 +444,13 @@ class PDCollocatedBackend:
                  decode_count: int,
                  prefill_actor_options: Dict[str, Any],
                  decode_actor_options: Dict[str, Any],
-                 plan: Optional[Dict[str, Any]] = None):
+                 pd_config: Optional[Dict[str, Any]] = None):
         if prefill_count <= 0 or decode_count <= 0:
             raise ValueError(
                 f"PD same-host requires prefill_count>0 and decode_count>0, "
                 f"got prefill={prefill_count} decode={decode_count}"
             )
-        self._plan = plan or {}
+        self._pd_config = pd_config or {}
         self._prefill_count = prefill_count
         self._decode_count = decode_count
         # Stashed so show_available_models can synthesize the /v1/models
@@ -459,14 +458,14 @@ class PDCollocatedBackend:
         self._model_serve_name = (model_args or {}).get("serve_name") \
             or (model_args or {}).get("name", "")
 
-        # ── Demo debug: plan + actor_options shape (V3 / V8 / V18) ─────
+        # ── PD debug: pd_config + actor_options shape (V3 / V8 / V18) ─────
         log.info(
-            "[PDCollocatedBackend][init/plan] num_replicas=%s prefill_count=%d decode_count=%d "
+            "[PDCollocatedBackend][init/pd_config] num_replicas=%s prefill_count=%d decode_count=%d "
             "transfer=%s ports_present=%s backend_container_present=%s",
-            self._plan.get("num_replicas"), prefill_count, decode_count,
-            (self._plan.get("transfer") or {}).get("connector"),
-            bool(self._plan.get("ports")),
-            bool(self._plan.get("backend_container")),
+            self._pd_config.get("num_replicas"), prefill_count, decode_count,
+            (self._pd_config.get("transfer") or {}).get("connector"),
+            bool(self._pd_config.get("ports")),
+            bool(self._pd_config.get("backend_container")),
         )
         log.info(
             "[PDCollocatedBackend][init/actor_options] prefill=%s decode=%s",
@@ -529,7 +528,7 @@ class PDCollocatedBackend:
         decode_role = self._role_dict("decode")
         prefill_env = prefill_role.get("env") or {}
         decode_env = decode_role.get("env") or {}
-        backend_container = self._plan.get("backend_container") if self._plan else None
+        backend_container = self._pd_config.get("backend_container") if self._pd_config else None
 
         # Metrics-label forwarding for NeutreeRayStatLogger. PD inner actors
         # have no Serve context; we forward the outer replica's triple plus
@@ -561,7 +560,7 @@ class PDCollocatedBackend:
 
         self.prefills: List[Any] = []
         for rank in range(prefill_count):
-            port_env = _vllm_port_env(self._plan, self.global_rank, "prefill", rank)
+            port_env = _vllm_port_env(self._pd_config, self.global_rank, "prefill", rank)
             metrics_env = dict(metrics_env_base)
             metrics_env["NEUTREE_RAY_STAT_ROLE"] = "prefill"
             metrics_env["NEUTREE_RAY_STAT_RANK"] = str(rank)
@@ -590,7 +589,7 @@ class PDCollocatedBackend:
 
         self.decodes: List[Any] = []
         for rank in range(decode_count):
-            port_env = _vllm_port_env(self._plan, self.global_rank, "decode", rank)
+            port_env = _vllm_port_env(self._pd_config, self.global_rank, "decode", rank)
             metrics_env = dict(metrics_env_base)
             metrics_env["NEUTREE_RAY_STAT_ROLE"] = "decode"
             metrics_env["NEUTREE_RAY_STAT_RANK"] = str(rank)
@@ -617,10 +616,6 @@ class PDCollocatedBackend:
                 )
             )
 
-        # Round-robin counters for prefill / decode pair selection.
-        self._prefill_cursor = itertools.count()
-        self._decode_cursor = itertools.count()
-
         # Block until every inner actor finishes vLLM init (model download,
         # AsyncLLM construction, NIXL handshake). Ray Serve calls
         # check_health right after __init__ returns; without this wait the
@@ -638,7 +633,7 @@ class PDCollocatedBackend:
         # the deployment-replica log file is one-stop for "where did each
         # P/D actor land". Inner actors also log to worker stderr via
         # _setup_actor_stderr_logging (queryable with `ray logs actor`)
-        # but the bridge here is what makes Demo verification readable.
+        # but the bridge here keeps verification readable.
         for i, info in enumerate(prefill_infos):
             log.info(
                 "[PDCollocatedBackend][actor_ready/prefill rank=%d] "
@@ -660,24 +655,41 @@ class PDCollocatedBackend:
         )
 
     def _role_dict(self, name: str) -> Dict[str, Any]:
-        roles = ((self._plan or {}).get("group") or {}).get("roles") or []
+        roles = ((self._pd_config or {}).get("group") or {}).get("roles") or []
         for r in roles:
             if r.get("name") == name:
                 return r
         return {}
 
-    def _pick_prefill(self):
-        idx = next(self._prefill_cursor) % self._prefill_count
+    def _pick_prefill(self, index: Optional[int]):
+        if index is None:
+            raise ValueError("prefill_index is required")
+        idx = int(index)
+        if idx < 0 or idx >= self._prefill_count:
+            raise IndexError(
+                f"prefill_index {idx} out of range [0,{self._prefill_count})"
+            )
         return idx, self.prefills[idx]
 
-    def _pick_decode(self):
-        idx = next(self._decode_cursor) % self._decode_count
+    def _pick_decode(self, index: Optional[int]):
+        if index is None:
+            raise ValueError("decode_index is required")
+        idx = int(index)
+        if idx < 0 or idx >= self._decode_count:
+            raise IndexError(
+                f"decode_index {idx} out of range [0,{self._decode_count})"
+            )
         return idx, self.decodes[idx]
 
     # ── protocol conversion: chat → prefill → decode ─────────────────
 
-    async def pd_chat(self, payload: Dict[str, Any]):
-        """Round-robin pair selection + chat-completion protocol conversion.
+    async def pd_chat(
+        self,
+        payload: Dict[str, Any],
+        prefill_index: Optional[int] = None,
+        decode_index: Optional[int] = None,
+    ):
+        """Chat-completion protocol conversion for the ingress-selected P/D pair.
 
         vLLM NIXL contract (vllm/distributed/kv_transfer/.../nixl/scheduler.py):
           - Prefill request must carry kv_transfer_params={"do_remote_decode":
@@ -690,8 +702,11 @@ class PDCollocatedBackend:
              remote_num_tokens}. Pass it through as-is to decode so NIXL on the
              consumer side fetches the staged KV via cuda_ipc.
         """
-        prefill_idx, prefill_handle = self._pick_prefill()
-        decode_idx, decode_handle = self._pick_decode()
+        try:
+            prefill_idx, prefill_handle = self._pick_prefill(prefill_index)
+            decode_idx, decode_handle = self._pick_decode(decode_index)
+        except (TypeError, ValueError, IndexError) as exc:
+            return {"error": f"invalid PD route indices: {exc}"}
 
         prefill_payload = dict(payload)
         prefill_payload.setdefault("request_id", uuid.uuid4().hex)
@@ -948,27 +963,27 @@ class PDCollocatedBackend:
 # --------------------------- app_builder ---------------------------
 
 
-def _find_role(plan: Dict[str, Any], name: str) -> Dict[str, Any]:
-    roles = ((plan or {}).get("group") or {}).get("roles") or []
+def _find_role(pd_config: Dict[str, Any], name: str) -> Dict[str, Any]:
+    roles = ((pd_config or {}).get("group") or {}).get("roles") or []
     for r in roles:
         if r.get("name") == name:
             return r
     raise RuntimeError(
-        f"PD plan missing role {name!r}; group.roles = {[r.get('name') for r in roles]}"
+        f"PD config missing role {name!r}; group.roles = {[r.get('name') for r in roles]}"
     )
 
 
 def app_builder(args: Dict[str, Any]) -> Application:
-    """Phase 0 Demo app_builder — xPyD parameterized + full EndpointSpec propagation."""
+    """PD same-host app_builder — xPyD parameterized + full EndpointSpec propagation."""
     model = args.get("model") or {}
-    plan = args.get("plan") or {}
+    pd_config = args.get("pd_config") or {}
 
-    num_replicas = max(1, int(plan.get("num_replicas") or 1))
-    transfer = plan.get("transfer") or {}
+    num_replicas = max(1, int(pd_config.get("num_replicas") or 1))
+    transfer = pd_config.get("transfer") or {}
     kv_extra = (transfer.get("extra") or {})
 
-    prefill_role = _find_role(plan, "prefill")
-    decode_role = _find_role(plan, "decode")
+    prefill_role = _find_role(pd_config, "prefill")
+    decode_role = _find_role(pd_config, "decode")
 
     prefill_count = int(prefill_role.get("instances") or 1)
     decode_count = int(decode_role.get("instances") or 1)
@@ -990,8 +1005,8 @@ def app_builder(args: Dict[str, Any]) -> Application:
     }
     backend_container = args.get("backend_container")
     if backend_container:
-        plan = dict(plan)
-        plan["backend_container"] = backend_container
+        pd_config = dict(pd_config)
+        pd_config["backend_container"] = backend_container
 
     backend = PDCollocatedBackend.options(**backend_deploy_options).bind(
         model_args=model,
@@ -1002,7 +1017,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         decode_count=decode_count,
         prefill_actor_options=prefill_actor_options,
         decode_actor_options=decode_actor_options,
-        plan=plan,
+        pd_config=pd_config,
     )
 
     controller = PDIngress.options(

@@ -15,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/deployment/pdconfig"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
@@ -238,9 +239,9 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 		return errors.Wrapf(err, "failed to convert endpoint to application for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
-	// PD same-host: override import_path, run strategy.Compile + portalloc,
-	// inject plan into Args. Side-effect: writes port-allocation rows to
-	// the configured Storage. Refuses to render without an allocator
+	// PD same-host: override import_path, derive pd_config + allocate ports,
+	// then inject pd_config into Args. Side-effect: writes port-allocation rows
+	// to the configured Storage. Refuses to render without an allocator
 	// configured — the Demo path is one-and-the-same with MVP, no defaults.
 	if isPDStrategy(ctx.Endpoint) {
 		if err := applyPDBranch(context.Background(), ctx.Endpoint, ctx.Cluster,
@@ -349,6 +350,7 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 				"endpoint_id", endpoint.ID)
 		}
 	}
+
 	return nil
 }
 
@@ -410,6 +412,68 @@ func allDeploymentsHealthy(deployments map[string]dashboard.Deployment) bool {
 	return true
 }
 
+func endpointReplicaCount(endpoint *v1.Endpoint) int {
+	if endpoint == nil || endpoint.Spec == nil ||
+		endpoint.Spec.Replicas.Num == nil || *endpoint.Spec.Replicas.Num <= 0 {
+		return 1
+	}
+
+	return *endpoint.Spec.Replicas.Num
+}
+
+func decoratePDStatus(endpoint *v1.Endpoint, out *v1.EndpointStatus,
+	appStatus *dashboard.RayServeApplicationStatus) *v1.EndpointStatus {
+	if out == nil {
+		out = &v1.EndpointStatus{}
+	}
+
+	if !isPDStrategy(endpoint) {
+		return out
+	}
+
+	total := endpointReplicaCount(endpoint)
+	ready := 0
+
+	if out.Phase == v1.EndpointPhaseRUNNING &&
+		appStatus != nil &&
+		pdBackendDeploymentHealthy(appStatus.Deployments) {
+		ready = total
+	}
+
+	out.Strategy = endpoint.Spec.Strategy
+	out.Placement = pdconfig.EffectivePlacementRoles(endpoint)
+	out.TotalReplicas = total
+	out.ReadyReplicas = ready
+	out.Replicas = make([]v1.ReplicaStatus, 0, total)
+
+	for i := 0; i < total; i++ {
+		phase := "Pending"
+
+		if i < ready {
+			phase = "Ready"
+		}
+
+		replica := v1.ReplicaStatus{
+			ID:    fmt.Sprintf("replica-%d", i),
+			Phase: phase,
+		}
+
+		out.Replicas = append(out.Replicas, replica)
+	}
+
+	return out
+}
+
+func pdBackendDeploymentHealthy(deployments map[string]dashboard.Deployment) bool {
+	for name, deployment := range deployments {
+		if name == "PDCollocatedBackend" || deployment.Name == "PDCollocatedBackend" {
+			return deployment.Status == dashboard.DeploymentStatusHealthy
+		}
+	}
+
+	return false
+}
+
 // mapDeployingPhase resolves the endpoint phase when Ray Serve reports the
 // application as DEPLOYING or NOT_STARTED. Returns Failed when any deployment
 // is UNHEALTHY; returns Running when the previous Neutree phase was Running,
@@ -466,38 +530,38 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	if isDeleting {
 		if !exists {
-			return &v1.EndpointStatus{
+			return decoratePDStatus(endpoint, &v1.EndpointStatus{
 				Phase:        v1.EndpointPhaseDELETED,
 				ErrorMessage: "",
-			}, nil
+			}, nil), nil
 		}
 
-		return &v1.EndpointStatus{
+		return decoratePDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDELETING,
 			ErrorMessage: "Endpoint deleting in progress: waiting for Ray Serve to delete the application",
-		}, nil
+		}, &status), nil
 	}
 
 	isPaused := IsEndpointPaused(endpoint)
 	if isPaused {
 		if !exists {
-			return &v1.EndpointStatus{
+			return decoratePDStatus(endpoint, &v1.EndpointStatus{
 				Phase:        v1.EndpointPhasePAUSED,
 				ErrorMessage: "",
-			}, nil
+			}, nil), nil
 		}
 
-		return &v1.EndpointStatus{
+		return decoratePDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDEPLOYING,
 			ErrorMessage: "Endpoint pausing in progress: waiting for Ray Serve to delete the application",
-		}, nil
+		}, &status), nil
 	}
 
 	if !exists {
-		return &v1.EndpointStatus{
+		return decoratePDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDEPLOYING,
 			ErrorMessage: "Endpoint deploying in progress: Endpoint not found in Ray Serve applications",
-		}, nil
+		}, nil), nil
 	}
 
 	proxyReady := true
@@ -538,10 +602,10 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	}
 
 	if phase == v1.EndpointPhaseRUNNING {
-		return &v1.EndpointStatus{
+		return decoratePDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        phase,
 			ErrorMessage: "",
-		}, nil
+		}, &status), nil
 	}
 
 	// Merge Ray Serve error messages
@@ -572,10 +636,10 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}
 	}
 
-	endpointStatus := &v1.EndpointStatus{
+	endpointStatus := decoratePDStatus(endpoint, &v1.EndpointStatus{
 		Phase:        phase,
 		ErrorMessage: errorMsg, // Use merged error message
-	}
+	}, &status)
 
 	return endpointStatus, nil
 }
@@ -620,7 +684,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	// rayResource represents one Backend actor's footprint. Monolithic endpoints
 	// have one implicit Backend role under spec.resources; PD endpoints have
 	// multiple roles under spec.roles[*] and per-role rayResource is built by
-	// the PD branch (applyPDBranch) into plan.Group.Roles[*].Resources. In the
+	// the PD branch (applyPDBranch) into the derived PD config. In the
 	// PD case there is no single top-level Backend deployment, so skip the
 	// top-level backend config here.
 	var rayResource *v1.RayResourceSpec
@@ -718,7 +782,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
-	// PD endpoints autoset TP per-role inside app_pd_collocated.py from the plan;
+	// PD endpoints autoset TP per-role inside app_pd_collocated.py from pd_config;
 	// the top-level autoset only applies when spec.resources is present.
 	if rayResource != nil {
 		setDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)

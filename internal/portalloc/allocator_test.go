@@ -5,47 +5,47 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/deployment/plan"
+	"github.com/neutree-ai/neutree/internal/deployment/pdconfig"
 )
 
-func newCluster(id int, start, end int) *v1.Cluster {
-	pr := &v1.PortRangeSpec{Start: start, End: end}
+func newCluster(id int) *v1.Cluster {
 	return &v1.Cluster{
-		ID: id,
-		Spec: &v1.ClusterSpec{
-			PortRange: pr,
-		},
+		ID:   id,
+		Spec: &v1.ClusterSpec{},
 	}
 }
 
-func pdPlan(numReplicas, prefillInstances, decodeInstances, portsPerRank int) *plan.DeploymentPlan {
-	return &plan.DeploymentPlan{
+func newAllocator(storage Storage) Allocator {
+	return New(storage, WithPortRange(v1.PortRangeSpec{Start: 20000, End: 21000}))
+}
+
+func pdConfig(numReplicas, prefillInstances, decodeInstances, portsPerRank int) *pdconfig.PDSameHostConfig {
+	return &pdconfig.PDSameHostConfig{
 		NumReplicas: numReplicas,
-		Group: &plan.RoleGroup{
-			Placement: &plan.PlacementSpec{Strategy: plan.STRICT_PACK, Granularity: "node"},
-			Roles: []*plan.Role{
+		Group: &pdconfig.RoleGroup{
+			Roles: []*pdconfig.Role{
 				{Name: "prefill", Instances: prefillInstances, PortsPerRank: portsPerRank},
 				{Name: "decode", Instances: decodeInstances, PortsPerRank: portsPerRank},
 			},
 		},
-		Transfer: &plan.KVTransferConfig{Connector: "nixl"},
+		Transfer: &pdconfig.KVTransferConfig{Connector: "nixl"},
 	}
 }
 
-func TestAllocateForPlan_PDSameHost_1P1D_OneReplica(t *testing.T) {
+func TestAllocateForPDSameHostConfig_PDSameHost_1P1D_OneReplica(t *testing.T) {
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	cluster := newCluster(1, 20000, 20100)
-	p := pdPlan(1, 1, 1, 1)
+	alloc := newAllocator(mem)
+	cluster := newCluster(1)
+	p := pdConfig(1, 1, 1, 1)
 
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 7, p); err != nil {
-		t.Fatalf("AllocateForPlan: %v", err)
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 7, p); err != nil {
+		t.Fatalf("AllocateForPDSameHostConfig: %v", err)
 	}
 	if mem.Count() != 2 {
 		t.Errorf("expected 2 allocations (1 prefill + 1 decode), got %d", mem.Count())
 	}
 	if len(p.Ports) != 1 {
-		t.Fatalf("plan.Ports len: got %d want 1", len(p.Ports))
+		t.Fatalf("cfg.Ports len: got %d want 1", len(p.Ports))
 	}
 	if got := p.Ports[0]["prefill"][0][0]; got != 20000 {
 		t.Errorf("prefill rank-0 pos-0: got %d want 20000", got)
@@ -55,14 +55,14 @@ func TestAllocateForPlan_PDSameHost_1P1D_OneReplica(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_PortsAreUnique_AcrossReplicas(t *testing.T) {
+func TestAllocateForPDSameHostConfig_PortsAreUnique_AcrossReplicas(t *testing.T) {
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	cluster := newCluster(1, 20000, 20100)
-	p := pdPlan(3, 1, 1, 1)
+	alloc := newAllocator(mem)
+	cluster := newCluster(1)
+	p := pdConfig(3, 1, 1, 1)
 
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 11, p); err != nil {
-		t.Fatalf("AllocateForPlan: %v", err)
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 11, p); err != nil {
+		t.Fatalf("AllocateForPDSameHostConfig: %v", err)
 	}
 	seen := map[int]struct{}{}
 	for replicaIdx, rmap := range p.Ports {
@@ -83,21 +83,21 @@ func TestAllocateForPlan_PortsAreUnique_AcrossReplicas(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_Idempotent(t *testing.T) {
+func TestAllocateForPDSameHostConfig_Idempotent(t *testing.T) {
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	cluster := newCluster(1, 20000, 20100)
-	p1 := pdPlan(2, 1, 1, 1)
+	alloc := newAllocator(mem)
+	cluster := newCluster(1)
+	p1 := pdConfig(2, 1, 1, 1)
 
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 42, p1); err != nil {
-		t.Fatalf("first AllocateForPlan: %v", err)
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 42, p1); err != nil {
+		t.Fatalf("first AllocateForPDSameHostConfig: %v", err)
 	}
 	firstCount := mem.Count()
 
-	// Second call on a fresh plan instance with same endpoint must reuse rows.
-	p2 := pdPlan(2, 1, 1, 1)
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 42, p2); err != nil {
-		t.Fatalf("second AllocateForPlan: %v", err)
+	// Second call on a fresh config instance with same endpoint must reuse rows.
+	p2 := pdConfig(2, 1, 1, 1)
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 42, p2); err != nil {
+		t.Fatalf("second AllocateForPDSameHostConfig: %v", err)
 	}
 	if mem.Count() != firstCount {
 		t.Errorf("idempotent retry should not insert new rows: %d → %d",
@@ -116,14 +116,14 @@ func TestAllocateForPlan_Idempotent(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_RangeExhausted(t *testing.T) {
+func TestAllocateForPDSameHostConfig_RangeExhausted(t *testing.T) {
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	// Only 3 ports available, plan needs 4 (2 replicas × 2 roles).
-	cluster := newCluster(1, 20000, 20002)
-	p := pdPlan(2, 1, 1, 1)
+	alloc := New(mem, WithPortRange(v1.PortRangeSpec{Start: 20000, End: 21000}))
+	// 1001 ports available, config needs 1002 (501 replicas × 2 roles).
+	cluster := newCluster(1)
+	p := pdConfig(501, 1, 1, 1)
 
-	err := alloc.AllocateForPlan(context.Background(), cluster, 1, p)
+	err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 1, p)
 	if err == nil {
 		t.Fatalf("expected exhaustion error, got nil")
 	}
@@ -134,11 +134,11 @@ func TestAllocateForPlan_RangeExhausted(t *testing.T) {
 
 func TestReleaseAll_Frees(t *testing.T) {
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	cluster := newCluster(1, 20000, 20100)
-	p := pdPlan(2, 1, 1, 1)
+	alloc := newAllocator(mem)
+	cluster := newCluster(1)
+	p := pdConfig(2, 1, 1, 1)
 
-	_ = alloc.AllocateForPlan(context.Background(), cluster, 99, p)
+	_ = alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 99, p)
 	if mem.Count() != 4 {
 		t.Fatalf("expected 4 allocations before release, got %d", mem.Count())
 	}
@@ -150,21 +150,21 @@ func TestReleaseAll_Frees(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_NoPortsForRoleSkipped(t *testing.T) {
+func TestAllocateForPDSameHostConfig_NoPortsForRoleSkipped(t *testing.T) {
 	// PortsPerRank=0 → role contributes no slots.
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	cluster := newCluster(1, 20000, 20100)
-	p := &plan.DeploymentPlan{
+	alloc := newAllocator(mem)
+	cluster := newCluster(1)
+	p := &pdconfig.PDSameHostConfig{
 		NumReplicas: 2,
-		Group: &plan.RoleGroup{
-			Roles: []*plan.Role{
+		Group: &pdconfig.RoleGroup{
+			Roles: []*pdconfig.Role{
 				{Name: "engine", Instances: 1, PortsPerRank: 0},
 			},
 		},
 	}
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 5, p); err != nil {
-		t.Fatalf("AllocateForPlan: %v", err)
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 5, p); err != nil {
+		t.Fatalf("AllocateForPDSameHostConfig: %v", err)
 	}
 	if mem.Count() != 0 {
 		t.Errorf("expected 0 allocations (PortsPerRank=0), got %d", mem.Count())
@@ -177,22 +177,22 @@ func TestAllocateForPlan_NoPortsForRoleSkipped(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_StaleAllocationsSelfHeal(t *testing.T) {
+func TestAllocateForPDSameHostConfig_StaleAllocationsSelfHeal(t *testing.T) {
 	// Partial / shape-mismatched allocations on disk are expected after an
 	// endpoint spec edit (role count, instances, PortsPerRank changed).
-	// AllocateForPlan releases them and re-allocates fresh — reconcile is
+	// AllocateForPDSameHostConfig releases them and re-allocates fresh; reconcile is
 	// self-healing rather than demanding manual ReleaseAll.
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	cluster := newCluster(1, 20000, 20100)
+	alloc := newAllocator(mem)
+	cluster := newCluster(1)
 
 	_ = mem.InsertAllocations(context.Background(), []Allocation{{
 		ClusterID: 1, Port: 20000, EndpointID: 7,
 		ReplicaIdx: 0, RoleName: "prefill", RankIdx: 0, PositionIdx: 0,
 	}})
 
-	p := pdPlan(1, 1, 1, 1) // needs 2 slots; 1 partial exists
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 7, p); err != nil {
+	p := pdConfig(1, 1, 1, 1) // needs 2 slots; 1 partial exists
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 7, p); err != nil {
 		t.Fatalf("expected self-heal, got error: %v", err)
 	}
 	// After self-heal, exactly 2 rows for endpoint 7 (the partial row was
@@ -202,15 +202,15 @@ func TestAllocateForPlan_StaleAllocationsSelfHeal(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_MultiPositionPerSlot(t *testing.T) {
+func TestAllocateForPDSameHostConfig_MultiPositionPerSlot(t *testing.T) {
 	// PortsPerRank=2 (e.g. future K8s PD with HTTP+side_channel).
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	cluster := newCluster(1, 20000, 20100)
-	p := pdPlan(1, 1, 1, 2)
+	alloc := newAllocator(mem)
+	cluster := newCluster(1)
+	p := pdConfig(1, 1, 1, 2)
 
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 3, p); err != nil {
-		t.Fatalf("AllocateForPlan: %v", err)
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 3, p); err != nil {
+		t.Fatalf("AllocateForPDSameHostConfig: %v", err)
 	}
 	if mem.Count() != 4 {
 		t.Errorf("expected 4 allocations (2 roles × 1 rank × 2 positions), got %d", mem.Count())
@@ -223,18 +223,13 @@ func TestAllocateForPlan_MultiPositionPerSlot(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_DefaultPortRange(t *testing.T) {
+func TestAllocateForPDSameHostConfig_DefaultPortRange(t *testing.T) {
 	mem := NewMemoryStorage()
 	alloc := New(mem)
-	cluster := &v1.Cluster{
-		ID:   1,
-		Spec: &v1.ClusterSpec{
-			// PortRange nil → fall back to v1.DefaultPortRange.
-		},
-	}
-	p := pdPlan(1, 1, 1, 1)
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 1, p); err != nil {
-		t.Fatalf("AllocateForPlan: %v", err)
+	cluster := newCluster(1)
+	p := pdConfig(1, 1, 1, 1)
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 1, p); err != nil {
+		t.Fatalf("AllocateForPDSameHostConfig: %v", err)
 	}
 	got := p.Ports[0]["prefill"][0][0]
 	if got < v1.DefaultPortRange.Start || got > v1.DefaultPortRange.End {
@@ -243,19 +238,30 @@ func TestAllocateForPlan_DefaultPortRange(t *testing.T) {
 	}
 }
 
-func TestAllocateForPlan_RejectsBadInput(t *testing.T) {
+func TestAllocateForPDSameHostConfig_RejectsBadConfiguredRange(t *testing.T) {
 	mem := NewMemoryStorage()
-	alloc := New(mem)
-	cluster := newCluster(1, 20000, 20100)
-	p := pdPlan(1, 1, 1, 1)
+	alloc := New(mem, WithPortRange(v1.PortRangeSpec{Start: 20000, End: 20010}))
+	cluster := newCluster(1)
+	p := pdConfig(1, 1, 1, 1)
 
-	if err := alloc.AllocateForPlan(context.Background(), nil, 1, p); err == nil {
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 1, p); err == nil {
+		t.Fatalf("expected error for too-small configured port range")
+	}
+}
+
+func TestAllocateForPDSameHostConfig_RejectsBadInput(t *testing.T) {
+	mem := NewMemoryStorage()
+	alloc := newAllocator(mem)
+	cluster := newCluster(1)
+	p := pdConfig(1, 1, 1, 1)
+
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), nil, 1, p); err == nil {
 		t.Errorf("expected error for nil cluster")
 	}
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 0, p); err == nil {
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 0, p); err == nil {
 		t.Errorf("expected error for endpointID=0")
 	}
-	if err := alloc.AllocateForPlan(context.Background(), cluster, 1, nil); err == nil {
-		t.Errorf("expected error for nil plan")
+	if err := alloc.AllocateForPDSameHostConfig(context.Background(), cluster, 1, nil); err == nil {
+		t.Errorf("expected error for nil config")
 	}
 }

@@ -1,26 +1,27 @@
-"""Naive PD ingress for Phase 0 Demo.
+"""PD ingress for same-host P/D routing.
 
 End-to-end request flow:
 
     client -> PDIngress (FastAPI)
                 |
-                | self.backend.pd_chat.remote(payload)
+                | self.backend.pd_chat.remote(
+                |     payload, prefill_index=..., decode_index=...)
                 |   |  ObserverRouter (Ray RequestRouter inside this process)
                 |   |  - update_replicas() -> _SHARED.replace_replicas()
                 |   |                          -> _SHARED.emit(replica_added)
                 |   |                             -> PDIngress._on_replica_added
                 |   |                                pulls get_actor_topology() now
                 |   |  - on_replica_actor_died -> _SHARED.emit(replica_removed)
-                |   |  - choose_replicas()    reads _SHARED, round-robins
+                |   |  - choose_replicas()    obeys replica:<rid> pin
                 v
               PDCollocatedBackend (one of N replicas)
-                |--> PrefillActor.prefill_at(req)        (returns kv_transfer_params)
-                '--> DecodeActor.decode_at(req, kv_params) (streams completion chunks)
+                |--> PrefillActor.generate(req)         (returns kv_transfer_params)
+                '--> DecodeActor.generate(req, kv_params) (streams completion chunks)
 
-Demo invariants the architecture review needs to validate:
-    V1: API -> IR -> orchestrator -> Ray Application end-to-end works
+Runtime invariants:
+    V1: API -> pd_config -> orchestrator -> Ray Application end-to-end works
     V2: (strategy, placement.roles) routes to correct import_path
-    V3: plan serialized to args reaches Python deserialization intact
+    V3: pd_config serialized to args reaches Python deserialization intact
     V4: STRICT_PACK PG actually colocates prefill + decode actors
     V6: vLLM kv_transfer_params is a plain dict round-trippable via Ray
     V7: Ray Serve handle dispatch latency stays sub-ms
@@ -30,19 +31,18 @@ Demo invariants the architecture review needs to validate:
     V13: per-actor identity (actor_id + node_id + gpu_ids) reaches _SHARED
     V14: push-driven _SHARED callbacks (replica_added -> proactive topology pull)
          remove the request-path lazy refresh
-    MVP: drop the TTL list refresh entirely. PDCollocatedBackend.check_health()
-         already fan-out probes inner actors; any inner actor failure marks
-         the whole replica unhealthy and Ray Serve recreates it. Replica
-         recreation produces a fresh replica_id which triggers replica_added,
-         so the callback path single-sourcedly handles every steady-state
-         transition. Only edge left is "PDIngress restart racing the router's
-         initial update_replicas burst" — handled by a one-shot prime at
-         async __init__.
+    PDCollocatedBackend.check_health() already fan-out probes inner actors;
+    any inner actor failure marks the whole replica unhealthy and Ray Serve
+    recreates it. Replica recreation produces a fresh replica_id which triggers
+    replica_added, so the callback path handles every steady-state transition.
+    The PDIngress restart race against the router's initial update_replicas
+    burst is handled by a one-shot prime during __init__.
 """
 import asyncio
-import itertools
+import bisect
+import hashlib
 import logging
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, StreamingResponse
@@ -75,9 +75,9 @@ class PDIngress:
 
     Two-layer division of labor with ObserverRouter:
       - PDIngress (this class): picks WHICH PDCollocatedBackend replica
-        each request should land on. Demo uses deterministic round-robin
-        over _SHARED.known_replica_ids; MVP plugs in CHWBL on session_id /
-        prefix-cache awareness here without touching the router.
+        each request should land on and WHICH prefill/decode ranks inside
+        that replica handle the request. Phase 1 uses decode-first CHWBL and
+        restricts prefill selection to the chosen decode's local RoleGroup.
       - ObserverRouter: passive — mirrors topology, obeys the pin we set
         via `multiplexed_model_id="replica:<rid>"`, defers everything
         else to the framework default. No decision logic.
@@ -109,10 +109,9 @@ class PDIngress:
         # _Backend / PrefillActor / DecodeActor can keep theirs.
         self.backend = backend
         self._shared = get_shared()
-        # Demo routing strategy: deterministic RR over known replicas.
-        # MVP replaces with a pluggable strategy abstraction (see
-        # `_pick_replica`).
-        self._rr_cursor = itertools.count()
+        self._virtual_nodes = 100
+        self._load_factor = 1.25
+        self._role_loads: Dict[str, int] = {}
         # Register BEFORE prime so any incremental replica_added the router
         # fires while we're priming is also captured. Double-pull on a rid
         # that's both in the prime snapshot AND fired through the callback
@@ -133,7 +132,7 @@ class PDIngress:
                 "[PDIngress] no running loop at __init__; prime deferred to "
                 "first request"
             )
-        log.info("[PDIngress] dispatcher initialized (callbacks + prime task)")
+        log.info("[PDIngress] dispatcher initialized (decode-first CHWBL + prime task)")
 
     async def _prime_topology(self) -> None:
         """One-shot startup pull for every replica the router already knows.
@@ -165,45 +164,78 @@ class PDIngress:
         payload = await request.json()
         stream = payload.get("stream", False)
         # Replica selection precedence:
-        #   1. caller pin (X-Neutree-Replica-ID header / ?replica= query) — V15
-        #   2. ingress strategy (Demo RR; MVP CHWBL / prefix-aware)
-        # Either way we express the choice through
+        #   1. caller pin (X-Neutree-Replica-ID header / ?replica= query)
+        #      restricts the candidate RoleGroup.
+        #   2. otherwise decode-first CHWBL picks the RoleGroup and ranks.
+        # Either way we express the chosen RoleGroup through
         # `multiplexed_model_id="replica:<rid>"`. ObserverRouter obeys
-        # the pin verbatim; if the chosen rid raced replica death, the
-        # router falls back to framework default (pow2 etc).
+        # the pin verbatim; if the chosen rid raced replica death, this request
+        # fails at Serve routing/backend dispatch instead of being re-picked.
         pin_source = "caller"
-        target_replica = (
+        pinned_replica = (
             request.headers.get("X-Neutree-Replica-ID")
             or request.query_params.get("replica")
         )
-        if not target_replica:
-            target_replica = self._pick_replica()
+        try:
+            route = self._select_route(payload, pinned_replica)
+        except RuntimeError as exc:
+            log.warning("[PDIngress][route_error] %s", exc)
+            return JSONResponse(content={"error": str(exc)}, status_code=503)
+
+        target_replica = route["replica_id"]
+        prefill_index = int(route["prefill_rank"])
+        decode_index = int(route["decode_rank"])
+
+        if not pinned_replica:
             pin_source = "strategy"
         snap = self._shared.snapshot()
         log.info(
             "[PDIngress][chat] stream=%s pin_replica=%s pin_source=%s "
-            "replicas_seen=%d topology_cached=%d",
+            "prefill_rank=%d decode_rank=%d replicas_seen=%d topology_cached=%d",
             stream, target_replica, pin_source,
+            prefill_index, decode_index,
             len(snap.get("serve_replicas", {})),
             len(snap.get("actor_topology", {})),
         )
 
-        handle = self.backend
-        if target_replica:
-            handle = handle.options(
-                multiplexed_model_id=f"{REPLICA_DISPATCH_PREFIX}{target_replica}"
-            )
+        handle = self.backend.options(
+            multiplexed_model_id=f"{REPLICA_DISPATCH_PREFIX}{target_replica}"
+        )
+
+        self._retain_route(route)
 
         if stream:
-            r = handle.options(stream=True).pd_chat.remote(payload)
-            return StreamingResponse(r, media_type="text/event-stream")
-        result = await handle.options(stream=False).pd_chat.remote(payload)
-        if isinstance(result, dict) and "error" in result:
-            log.warning(
-                "[PDIngress][chat_error] err=%s", result.get("error"),
+            r = handle.options(stream=True).pd_chat.remote(
+                payload,
+                prefill_index=prefill_index,
+                decode_index=decode_index,
             )
-            return JSONResponse(content=result, status_code=500)
-        return JSONResponse(content=result)
+            return StreamingResponse(
+                self._release_on_stream_close(r, route),
+                media_type="text/event-stream",
+            )
+
+        try:
+            result = await handle.options(stream=False).pd_chat.remote(
+                payload,
+                prefill_index=prefill_index,
+                decode_index=decode_index,
+            )
+            if isinstance(result, dict) and "error" in result:
+                log.warning(
+                    "[PDIngress][chat_error] err=%s", result.get("error"),
+                )
+                return JSONResponse(content=result, status_code=500)
+            return JSONResponse(content=result)
+        finally:
+            self._release_route(route)
+
+    async def _release_on_stream_close(self, stream, route: Dict[str, Any]):
+        try:
+            async for chunk in stream:
+                yield chunk
+        finally:
+            self._release_route(route)
 
     @app.get("/v1/models")
     async def models(self):
@@ -215,7 +247,7 @@ class PDIngress:
     async def health(self):
         return {"status": "ok"}
 
-    # ----- Demo V10/V11/V14 debug surface -----
+    # ----- topology debug surface -----
 
     @app.get("/v1/topology")
     async def topology(self):
@@ -232,23 +264,145 @@ class PDIngress:
         """
         return JSONResponse(content=self._shared.snapshot())
 
-    # ----- replica selection strategy -----
+    # ----- decode-first route selection -----
 
-    def _pick_replica(self) -> Optional[str]:
-        """Replica routing strategy. Demo: deterministic round-robin over
-        the _SHARED.known_replica_ids view. Returns None when nothing is
-        known yet (cold-start window) — caller leaves the handle unpinned
-        and lets the framework default pick.
+    def _select_route(
+        self,
+        payload: Dict[str, Any],
+        pinned_replica: Optional[str],
+    ) -> Dict[str, Any]:
+        cache_key = self._extract_cache_key(payload)
+        decode_units = self._route_units("decode")
+        if pinned_replica:
+            decode_units = [
+                u for u in decode_units
+                if u["replica_id"] == pinned_replica
+            ]
+        if not decode_units:
+            if pinned_replica:
+                raise RuntimeError(
+                    f"no ready decode unit in pinned RoleGroup {pinned_replica}"
+                )
+            raise RuntimeError("no ready decode unit")
 
-        MVP slot: this method becomes a thin dispatcher over a pluggable
-        strategy interface supporting weighted multi-strategy scoring
-        (CHWBL on session_id + prefix-cache hit-rate + load, etc.).
-        """
-        rids = self._shared.known_replica_ids()
-        if not rids:
-            return None
-        idx = next(self._rr_cursor) % len(rids)
-        return rids[idx]
+        decode = self._select_chwbl(decode_units, cache_key)
+        prefill_units = [
+            u for u in self._route_units("prefill")
+            if u["replica_id"] == decode["replica_id"]
+        ]
+        if not prefill_units:
+            raise RuntimeError(
+                f"no ready prefill unit in RoleGroup {decode['replica_id']}"
+            )
+
+        prefill = self._select_chwbl(prefill_units, cache_key)
+        return {
+            "replica_id": decode["replica_id"],
+            "decode_key": decode["key"],
+            "decode_rank": decode["rank"],
+            "prefill_key": prefill["key"],
+            "prefill_rank": prefill["rank"],
+        }
+
+    def _route_units(self, role: str) -> List[Dict[str, Any]]:
+        snap = self._shared.snapshot()
+        out: List[Dict[str, Any]] = []
+        for replica_id, topo in (snap.get("actor_topology") or {}).items():
+            actor_key = "decodes" if role == "decode" else "prefills"
+            actors = (topo or {}).get(actor_key) or []
+            for rank, actor in enumerate(actors):
+                if not (actor or {}).get("healthy", False):
+                    continue
+                key = f"{replica_id}:{role}:{rank}"
+                out.append(
+                    {
+                        "key": key,
+                        "replica_id": replica_id,
+                        "role": role,
+                        "rank": rank,
+                    }
+                )
+        return out
+
+    def _select_chwbl(
+        self,
+        units: List[Dict[str, Any]],
+        cache_key: Optional[str],
+    ) -> Dict[str, Any]:
+        if not units:
+            raise RuntimeError("no ready route units")
+
+        if not cache_key:
+            return min(
+                units,
+                key=lambda u: (self._role_loads.get(u["key"], 0), u["key"]),
+            )
+
+        ring = []
+        by_hash: Dict[int, Dict[str, Any]] = {}
+        for unit in units:
+            for i in range(self._virtual_nodes):
+                h = self._hash(f"{unit['key']}:{i}")
+                by_hash[h] = unit
+                bisect.insort(ring, h)
+        if not ring:
+            raise RuntimeError("no ready route units")
+
+        start = bisect.bisect_left(ring, self._hash(cache_key))
+        if start >= len(ring):
+            start = 0
+
+        loads = {u["key"]: self._role_loads.get(u["key"], 0) for u in units}
+        threshold = ((sum(loads.values()) + 1) / len(units)) * self._load_factor
+        checked = set()
+        fallback = None
+        idx = start
+        while len(checked) < len(units):
+            unit = by_hash[ring[idx]]
+            key = unit["key"]
+            if key in checked:
+                idx = (idx + 1) % len(ring)
+                continue
+            checked.add(key)
+            if fallback is None:
+                fallback = unit
+            if loads.get(key, 0) + 1 <= threshold:
+                return unit
+            idx = (idx + 1) % len(ring)
+        return fallback or units[0]
+
+    def _retain_route(self, route: Dict[str, Any]) -> None:
+        for key in (route["decode_key"], route["prefill_key"]):
+            self._role_loads[key] = self._role_loads.get(key, 0) + 1
+
+    def _release_route(self, route: Dict[str, Any]) -> None:
+        for key in (route["decode_key"], route["prefill_key"]):
+            self._role_loads[key] = max(0, self._role_loads.get(key, 0) - 1)
+
+    def _extract_cache_key(self, payload: Dict[str, Any]) -> Optional[str]:
+        try:
+            cache_components = []
+            messages = (payload or {}).get("messages", [])
+            user_seen = 0
+            for msg in messages:
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "system":
+                    cache_components.append(f"system:{content}")
+                elif role == "user" and user_seen < 2:
+                    cache_components.append(f"user_{user_seen}:{content}")
+                    user_seen += 1
+            if cache_components:
+                return "|".join(cache_components)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[PDIngress][cache_key_error] %s", exc)
+        return None
+
+    @staticmethod
+    def _hash(key: str) -> int:
+        return int(hashlib.md5(key.encode()).hexdigest()[:16], 16)
 
     # ----- push-driven callbacks (V14) -----
 
@@ -269,7 +423,7 @@ class PDIngress:
 
     def _on_replica_removed(self, replica_id: str) -> None:
         """Fired by _SHARED when a replica died or fell out of the set.
-        Demo: log only — _SHARED.replace_replicas / remove_replica already
+        Log only — _SHARED.replace_replicas / remove_replica already
         evict the actor_topology cache.
         """
         log.info("[PDIngress] replica_removed callback: %s", replica_id)
@@ -282,10 +436,8 @@ class PDIngress:
         Uses Ray Serve's `multiplexed_model_id` metadata channel as a direct
         ReplicaID selector — see observer_router.ObserverRouter.choose_replicas.
         If `replica_id` has just died and is no longer in candidates, the
-        router falls back to round-robin and the response self-identifies
-        via its embedded `replica_id` field; we upsert under that id, which
-        means a stale target degrades to "we refreshed *some* replica's
-        topology" rather than failing the call.
+        router returns no candidates. The topology pull fails and the next
+        replica update/restart callback refreshes the cache.
         """
         try:
             # Use the "replica:<rid>" namespace so future LoRA / SGLang custom
@@ -373,5 +525,5 @@ class PDIngress:
                     "target likely just died",
                     replica_id, self_reported,
                 )
-        except Exception as exc:  # noqa: BLE001 — Demo diagnostics only
+        except Exception as exc:  # noqa: BLE001 — diagnostics only
             log.warning("[PDIngress] topology pull failed for %s: %s", replica_id, exc)

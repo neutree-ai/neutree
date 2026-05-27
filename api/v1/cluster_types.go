@@ -36,10 +36,6 @@ type ClusterSpec struct {
 	ImageRegistry string         `json:"image_registry"`
 	// the neutree serving version, if not specified, the default version will be used
 	Version string `json:"version"`
-	// PortRange is the cluster-level port pool from which pkg/portalloc draws
-	// per-(replica × role × rank × position) port assignments. Nil falls back
-	// to DefaultPortRange (20000-29999).
-	PortRange *PortRangeSpec `json:"port_range,omitempty"`
 }
 
 // PortRangeSpec defines a closed integer interval [Start, End] used by the
@@ -49,10 +45,9 @@ type PortRangeSpec struct {
 	End   int `json:"end"`
 }
 
-// DefaultPortRange is applied when ClusterSpec.PortRange is nil. Picked to
-// stay above the typical Linux ephemeral floor (32768) without colliding
-// with Ray dashboard / Serve internal ports (52365 / 8265 / 8266) — and
-// large enough for thousands of (replica × role × rank × position) slots.
+// DefaultPortRange is applied when neutree-core does not override the global
+// allocator range. It stays below the Kubernetes NodePort default range
+// (30000-32767) and the typical Linux ephemeral range.
 var DefaultPortRange = PortRangeSpec{Start: 20000, End: 29999}
 
 type ClusterConfig struct {

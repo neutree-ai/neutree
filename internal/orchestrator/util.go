@@ -348,20 +348,24 @@ func deriveAcceleratorType(endpoint *v1.Endpoint) string {
 	if endpoint == nil || endpoint.Spec == nil {
 		return ""
 	}
+
 	if endpoint.Spec.Resources != nil {
 		if t := endpoint.Spec.Resources.GetAcceleratorType(); t != "" {
 			return t
 		}
 	}
+
 	for i := range endpoint.Spec.Roles {
 		role := &endpoint.Spec.Roles[i]
 		if role.Resources == nil {
 			continue
 		}
+
 		if t := role.Resources.GetAcceleratorType(); t != "" {
 			return t
 		}
 	}
+
 	return ""
 }
 

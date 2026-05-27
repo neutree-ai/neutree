@@ -30,10 +30,12 @@ func (s *PostgRESTStorage) ListAllocationsByCluster(_ context.Context, clusterID
 	if err != nil {
 		return nil, err
 	}
+
 	var out []Allocation
 	if err := json.Unmarshal(resp, &out); err != nil {
 		return nil, err
 	}
+
 	return out, nil
 }
 
@@ -46,10 +48,12 @@ func (s *PostgRESTStorage) ListAllocationsByEndpoint(_ context.Context, endpoint
 	if err != nil {
 		return nil, err
 	}
+
 	var out []Allocation
 	if err := json.Unmarshal(resp, &out); err != nil {
 		return nil, err
 	}
+
 	return out, nil
 }
 
@@ -58,9 +62,9 @@ func (s *PostgRESTStorage) InsertAllocations(_ context.Context, allocations []Al
 		return nil
 	}
 	// PostgREST batch insert; on UNIQUE violation Postgres returns 409 which
-	// surfaces as an error here. allocator.AllocateForPlan guards against
+	// surfaces as an error here. allocator.AllocateForPDSameHostConfig guards against
 	// duplicate (replica, role, rank, position) so a 409 indicates a race
-	// across reconcilers — caller should retry the full Compile+Allocate
+	// across reconcilers — caller should retry derive+allocate
 	// flow from a fresh state read.
 	if _, _, err := s.client.
 		From(PortAllocationTable).
@@ -68,6 +72,7 @@ func (s *PostgRESTStorage) InsertAllocations(_ context.Context, allocations []Al
 		Execute(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -79,5 +84,6 @@ func (s *PostgRESTStorage) DeleteAllocationsByEndpoint(_ context.Context, endpoi
 		Execute(); err != nil {
 		return err
 	}
+
 	return nil
 }

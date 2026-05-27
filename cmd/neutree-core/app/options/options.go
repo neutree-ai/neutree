@@ -55,6 +55,10 @@ func (o *NeutreeCoreOptions) Validate() error {
 		return err
 	}
 
+	if err := o.Cluster.Validate(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -158,6 +162,8 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		DefaultClusterVersion: o.Cluster.DefaultClusterVersion,
 		MetricsRemoteWriteURL: o.Observability.MetricsRemoteWriteURL,
 	}
+	portRange := o.Cluster.PortRange()
+	c.PortRange = &portRange
 	c.ServerConfig = &config.ServerConfig{
 		Port: o.Server.Port,
 		Host: o.Server.Host,
