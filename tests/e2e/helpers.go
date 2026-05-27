@@ -368,7 +368,7 @@ func testRegistry() string {
 }
 
 func testRegistryForType(registryType string) string {
-	if registryType == "" || registryType == "default" {
+	if registryType == "" || registryType == defaultRegistryAlias {
 		return "e2e-registry-" + Cfg.RunID
 	}
 
@@ -376,21 +376,15 @@ func testRegistryForType(registryType string) string {
 }
 
 func slugName(s string) string {
-	var b strings.Builder
-	lastDash := false
-	for _, r := range strings.ToLower(s) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash && b.Len() > 0 {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
+	parts := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !isSlugRune(r)
+	})
 
-	return strings.Trim(b.String(), "-")
+	return strings.Join(parts, "-")
+}
+
+func isSlugRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
 }
 
 // testImageRegistry returns the image registry name for tests.

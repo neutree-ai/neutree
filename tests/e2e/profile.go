@@ -13,6 +13,9 @@ import (
 const (
 	defaultModelVersion      = "latest"
 	defaultModelRegistryType = "bentoml"
+	defaultProfileName       = "default"
+	defaultRegistryAlias     = defaultProfileName
+	defaultWorkspace         = defaultProfileName
 	// defaultEngineName is the engine looked up by helpers that don't take an
 	// explicit engine name (renderEndpoint default, profileEngineVersion, etc.).
 	// Tests that target a different engine pass it via withEngine(name, version).
@@ -232,6 +235,7 @@ func validateProfile() error {
 		if registryType == "" {
 			return fmt.Errorf("model_registries contains an empty registry type")
 		}
+
 		if registryProfile.Type != "" && registryProfile.Type != registryType {
 			return fmt.Errorf("model_registries.%s.type must match map key %q, got %q",
 				registryType, registryType, registryProfile.Type)
@@ -297,7 +301,7 @@ func profileWorkspace() string {
 		return profile.Workspace
 	}
 
-	return "default"
+	return defaultWorkspace
 }
 
 func profileClusterVersion() string {
@@ -396,7 +400,7 @@ func modelRegistryProfileWithType(registryType string, p ModelRegistryProfile) M
 }
 
 func profileModelRegistryForType(registryType string) ModelRegistryProfile {
-	if registryType == "" || registryType == "default" {
+	if registryType == "" || registryType == defaultRegistryAlias {
 		if modelRegistryProfileConfigured(profile.ModelRegistry) {
 			return modelRegistryProfileWithType(defaultModelRegistryType, profile.ModelRegistry)
 		}
@@ -449,6 +453,7 @@ func profileModelRegistryTypes() []string {
 	for registryType := range seen {
 		rest = append(rest, registryType)
 	}
+
 	sort.Strings(rest)
 
 	return append(types, rest...)
