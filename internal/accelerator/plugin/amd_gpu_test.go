@@ -122,7 +122,7 @@ func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo_ConnectionFailureExposes
 		"errors.Is must report ErrConnectionFailed; got %v", err)
 	assert.NotContains(t, err.Error(), "get node 10.255.1.54 pci info failed",
 		"AMD plugin must not double-wrap connection failures with the pci-info prefix")
-	assert.Contains(t, err.Error(), "ssh connection to node", "phase identification must reach the caller")
+	assert.Contains(t, err.Error(), "ssh connection failed to node", "phase identification must reach the caller")
 	assert.Contains(t, err.Error(), "10.255.1.54", "target IP must be surfaced")
 	assert.Contains(t, err.Error(), "Connection refused", "underlying SSH stderr must survive")
 	assert.Contains(t, err.Error(), "hint:", "static-cluster hint must be present")

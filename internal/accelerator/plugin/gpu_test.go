@@ -127,7 +127,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo_ConnectionFailureExposesCon
 	// constructed the full message. The plugin only propagates the error.
 	assert.NotContains(t, err.Error(), "get node 10.255.1.54 pci info failed",
 		"connection failure must not be wrapped with the misleading pci-info prefix")
-	assert.Contains(t, err.Error(), "ssh connection to node",
+	assert.Contains(t, err.Error(), "ssh connection failed to node",
 		"connection-phase identification must reach the caller")
 	assert.Contains(t, err.Error(), "10.255.1.54", "target IP must be surfaced")
 	assert.Contains(t, err.Error(), "Connection refused", "underlying SSH stderr must survive")

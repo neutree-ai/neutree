@@ -32,10 +32,10 @@ type sshConnectionError struct {
 
 func (e *sshConnectionError) Error() string {
 	if e.cause == nil {
-		return fmt.Sprintf("ssh connection to node %s failed (hint: %s)", e.ip, staticClusterConnectionHint)
+		return fmt.Sprintf("ssh connection failed to node %s (hint: %s)", e.ip, staticClusterConnectionHint)
 	}
 
-	return fmt.Sprintf("ssh connection to node %s failed: %v (hint: %s)", e.ip, e.cause, staticClusterConnectionHint)
+	return fmt.Sprintf("ssh connection failed to node %s: %v (hint: %s)", e.ip, e.cause, staticClusterConnectionHint)
 }
 
 func (e *sshConnectionError) Unwrap() []error {
