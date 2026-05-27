@@ -6,3 +6,6 @@ metadata:
 spec:
   type: {{ .E2E_MODEL_REGISTRY_TYPE }}
   url: {{ .E2E_MODEL_REGISTRY_URL }}
+{{- if .E2E_MODEL_REGISTRY_CREDENTIALS }}
+  credentials: {{ .E2E_MODEL_REGISTRY_CREDENTIALS }}
+{{- end }}

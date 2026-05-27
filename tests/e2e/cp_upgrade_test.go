@@ -363,8 +363,12 @@ func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k
 
 	By("Creating model registry")
 
+	registryProfile := profileModelRegistryForType("")
 	mrPath, err := renderTemplateToTempFile("testdata/model-registry.yaml", map[string]any{
-		"E2E_MODEL_REGISTRY": mrName,
+		"E2E_MODEL_REGISTRY":             mrName,
+		"E2E_MODEL_REGISTRY_TYPE":        registryProfile.Type,
+		"E2E_MODEL_REGISTRY_URL":         registryProfile.URL,
+		"E2E_MODEL_REGISTRY_CREDENTIALS": registryProfile.Credentials,
 	})
 	Expect(err).NotTo(HaveOccurred())
 

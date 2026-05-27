@@ -31,6 +31,16 @@ model_registry:
   url: https://huggingface.co
   credentials: ""
 
+# Optional: configure multiple model registry profiles by registry type.
+# Tests that target a specific type select the registry from this map, while
+# all endpoint model names/versions/tasks still come from the top-level model.
+# model_registries:
+#   bentoml:
+#     url: nfs://10.0.0.10:/models
+#   hugging-face:
+#     url: https://huggingface.co
+#     credentials: ""
+
 workspace: default
 
 cluster:

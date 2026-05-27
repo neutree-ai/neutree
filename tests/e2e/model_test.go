@@ -12,27 +12,35 @@ import (
 
 // --- Model registry setup/teardown ---
 
-// registryYAML holds the path to the rendered model registry YAML for teardown.
-var registryYAML string
+// registryYAMLs holds rendered model registry YAML paths by registry type.
+var registryYAMLs = map[string]string{}
 
 // SetupModelRegistry creates a model registry from the YAML template
 // and waits for it to reach Connected phase.
 func SetupModelRegistry() {
+	SetupModelRegistryForType("")
+}
+
+func SetupModelRegistryForType(registryType string) {
+	registryProfile := profileModelRegistryForType(registryType)
 	defaults := map[string]any{
-		"E2E_MODEL_REGISTRY":     testRegistry(),
-		"E2E_WORKSPACE":          profileWorkspace(),
-		"E2E_MODEL_REGISTRY_URL": profile.ModelRegistry.URL,
+		"E2E_MODEL_REGISTRY":             testRegistryForType(registryType),
+		"E2E_WORKSPACE":                  profileWorkspace(),
+		"E2E_MODEL_REGISTRY_TYPE":        registryProfile.Type,
+		"E2E_MODEL_REGISTRY_URL":         registryProfile.URL,
+		"E2E_MODEL_REGISTRY_CREDENTIALS": registryProfile.Credentials,
 	}
 	var err error
-	registryYAML, err = renderTemplateToTempFile(
+	registryYAML, err := renderTemplateToTempFile(
 		filepath.Join("testdata", "model-registry.yaml"), defaults,
 	)
 	Expect(err).NotTo(HaveOccurred(), "failed to render model registry template")
+	registryYAMLs[registryType] = registryYAML
 
 	r := RunCLI("apply", "-f", registryYAML)
 	ExpectSuccess(r)
 
-	r = RunCLI("wait", "modelregistry", testRegistry(),
+	r = RunCLI("wait", "modelregistry", testRegistryForType(registryType),
 		"-w", profileWorkspace(),
 		"--for", "jsonpath=.status.phase=Connected",
 		"--timeout", "2m",
@@ -42,10 +50,46 @@ func SetupModelRegistry() {
 
 // TeardownModelRegistry deletes the model registry and cleans up the temp YAML.
 func TeardownModelRegistry() {
-	if registryYAML != "" {
+	TeardownModelRegistryForType("")
+}
+
+func TeardownModelRegistryForType(registryType string) {
+	if registryYAML := registryYAMLs[registryType]; registryYAML != "" {
 		RunCLI("delete", "-f", registryYAML, "--force", "--ignore-not-found")
 		os.Remove(registryYAML)
+		delete(registryYAMLs, registryType)
 	}
+}
+
+func SetupModelRegistries(registryTypes ...string) {
+	if len(registryTypes) == 0 {
+		registryTypes = profileModelRegistryTypes()
+	}
+
+	for _, registryType := range registryTypes {
+		SetupModelRegistryForType(registryType)
+	}
+}
+
+func TeardownModelRegistries(registryTypes ...string) {
+	if len(registryTypes) == 0 {
+		registryTypes = profileModelRegistryTypes()
+	}
+
+	for _, registryType := range registryTypes {
+		TeardownModelRegistryForType(registryType)
+	}
+}
+
+func configuredModelRegistryTypesWithURL() []string {
+	var registryTypes []string
+	for _, registryType := range profileModelRegistryTypes() {
+		if profileModelRegistryForType(registryType).URL != "" {
+			registryTypes = append(registryTypes, registryType)
+		}
+	}
+
+	return registryTypes
 }
 
 // --- ModelHelper (Page Object for "model" CLI subcommands) ---
@@ -116,6 +160,20 @@ func pushModel(name, version string, fileSize int, extraArgs ...string) CLIResul
 }
 
 // --- Tests ---
+
+var _ = Describe("ModelRegistry Profile", Label("model-registry", "profile"), func() {
+	It("should create all configured registry types", func() {
+		registryTypes := configuredModelRegistryTypesWithURL()
+		if len(registryTypes) < 2 {
+			Skip("requires at least two model registry profiles with URL configured")
+		}
+
+		SetupModelRegistries(registryTypes...)
+		DeferCleanup(func() {
+			TeardownModelRegistries(registryTypes...)
+		})
+	})
+})
 
 var _ = Describe("Model", Ordered, func() {
 
