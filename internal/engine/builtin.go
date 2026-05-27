@@ -118,12 +118,14 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						},
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
-								"default": GetVLLMV0_17_1DeployTemplate(),
+								"default":       GetVLLMV0_17_1DeployTemplate(),
+								v1.PDDeployMode: GetVLLMV0_17_1PDDeployTemplate(),
 							},
 							v1.RayServeDeployTarget: {
 								v1.PDDeployMode: rayServeEntrypoint("serve.vllm.v0_17_1.app_pd_collocated:app_builder"),
 							},
 						},
+						Sidecar: pdRouterSidecar("v0.17.1"),
 						Capabilities: &v1.EngineVersionCapabilities{
 							PD: &v1.PDCapabilitySpec{
 								KVConnectors:   []string{"nixl", "mooncake"},
@@ -142,12 +144,14 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						},
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
-								"default": GetVLLMV0_20_0DeployTemplate(),
+								"default":       GetVLLMV0_20_0DeployTemplate(),
+								v1.PDDeployMode: GetVLLMV0_20_0PDDeployTemplate(),
 							},
 							v1.RayServeDeployTarget: {
 								v1.PDDeployMode: rayServeEntrypoint("serve.vllm.v0_20_0.app_pd_collocated:app_builder"),
 							},
 						},
+						Sidecar: pdRouterSidecar("v0.20.0"),
 						Capabilities: &v1.EngineVersionCapabilities{
 							PD: &v1.PDCapabilitySpec{
 								KVConnectors:   []string{"nixl", "mooncake"},
@@ -178,12 +182,14 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						},
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
-								"default": GetSGLangV0_5_10DeployTemplate(),
+								"default":       GetSGLangV0_5_10DeployTemplate(),
+								v1.PDDeployMode: GetSGLangV0_5_10PDDeployTemplate(),
 							},
 							v1.RayServeDeployTarget: {
 								v1.PDDeployMode: rayServeEntrypoint("serve.sglang.v0_5_10.app_pd_collocated:app_builder"),
 							},
 						},
+						Sidecar: pdRouterSidecar("v0.5.10"),
 						Capabilities: &v1.EngineVersionCapabilities{
 							PD: &v1.PDCapabilitySpec{
 								KVConnectors:   []string{"nixl", "mooncake"},
@@ -205,4 +211,15 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 
 func rayServeEntrypoint(importPath string) string {
 	return base64.StdEncoding.EncodeToString([]byte(importPath))
+}
+
+func pdRouterSidecar(tag string) *v1.EngineVersionSidecar {
+	return &v1.EngineVersionSidecar{
+		Image: &v1.EngineImage{
+			ImageName: "neutree/pd-router-sidecar",
+			Tag:       tag,
+		},
+		Port:       8000,
+		HealthPath: "/health",
+	}
 }

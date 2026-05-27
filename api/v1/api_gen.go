@@ -568,6 +568,7 @@ type ApiEngineVersion struct {
 	ValuesSchema   interface{} `json:"values_schema"`
 	DeployTemplate interface{} `json:"deploy_template"`
 	Images         interface{} `json:"images"`
+	Sidecar        interface{} `json:"sidecar"`
 	SupportedTasks interface{} `json:"supported_tasks"`
 	Capabilities   interface{} `json:"capabilities"`
 }

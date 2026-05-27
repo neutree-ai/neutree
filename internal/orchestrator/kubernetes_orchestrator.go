@@ -15,6 +15,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/deployment/pdconfig"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 
@@ -38,12 +39,14 @@ type kubernetesOrchestrator struct {
 	storage storage.Storage
 
 	acceleratorMgr accelerator.Manager
+	portAllocator  portalloc.Allocator
 }
 
 func newKubernetesOrchestrator(opts Options) *kubernetesOrchestrator {
 	return &kubernetesOrchestrator{
 		storage:        opts.Storage,
 		acceleratorMgr: opts.AcceleratorMgr,
+		portAllocator:  opts.PortAllocator,
 	}
 }
 
@@ -412,6 +415,12 @@ func (k *kubernetesOrchestrator) deleteEndpoint(ctx *OrchestratorContext) error 
 
 	if !deleteFinished {
 		ctx.logger.Info("waiting for endpoint to be fully deleted")
+	}
+
+	if deleteFinished && k.portAllocator != nil && ctx.Endpoint != nil && ctx.Endpoint.ID > 0 {
+		if err := k.portAllocator.ReleaseAll(context.Background(), ctx.Endpoint.ID); err != nil {
+			return errors.Wrapf(err, "failed to release PD port allocations for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
+		}
 	}
 
 	return nil

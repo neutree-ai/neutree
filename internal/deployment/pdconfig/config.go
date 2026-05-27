@@ -107,9 +107,6 @@ func DerivePDSameHostConfig(ep *v1.Endpoint, connector string) (*PDSameHostConfi
 	}
 
 	connector = strings.TrimSpace(connector)
-	if connector == "" {
-		return nil, fmt.Errorf("pd kv connector is empty")
-	}
 
 	pf, de, _ := lookupPDRoles(ep.Spec.Roles)
 	numReplicas := 1
@@ -209,13 +206,13 @@ func ResolveKVConnector(ep *v1.Endpoint, version *v1.EngineVersion) (string, err
 		return "", fmt.Errorf("engine version PD capabilities must declare at least one kv connector")
 	}
 
-	connector := strings.TrimSpace(userKVConnector(ep))
-	if connector == "" {
-		connector = strings.TrimSpace(supported[0])
+	if !hasNonEmptyTrimmed(supported) {
+		return "", fmt.Errorf("engine version PD capabilities must declare at least one kv connector")
 	}
 
+	connector := strings.TrimSpace(userKVConnector(ep))
 	if connector == "" {
-		return "", fmt.Errorf("engine version PD capabilities contain an empty default kv connector")
+		return "", nil
 	}
 
 	if !containsTrimmed(supported, connector) {
@@ -377,6 +374,16 @@ func engineName(engine *v1.Engine) string {
 func containsTrimmed(values []string, want string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasNonEmptyTrimmed(values []string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
 			return true
 		}
 	}

@@ -71,6 +71,10 @@ func MergeEngineVersion(existing, new *v1.EngineVersion) *v1.EngineVersion {
 		existing.Capabilities = new.Capabilities
 	}
 
+	if new.Sidecar != nil {
+		existing.Sidecar = new.Sidecar
+	}
+
 	for idx := range new.SupportedTasks {
 		found := false
 

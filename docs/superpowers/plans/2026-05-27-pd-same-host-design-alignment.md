@@ -76,9 +76,29 @@
 - [x] Add SGLang metrics env fallback labels for PD inner actors.
 - [x] Copy `_ingress_router` into the SGLang engine image so `PDIngress` and `ObserverRouter` are available at runtime.
 - [x] Register SGLang v0.5.10 Ray Serve PD capability with NIXL/Mooncake connectors.
-- [ ] Keep K8s PD runtime explicitly unimplemented until the sidecar / production-stack router contract is available.
+- [x] Keep sidecar / production-stack router business implementation outside this slice; implement K8s deployTemplate/control-plane rendering after confirming sidecar image comes from `EngineVersion`.
 
-### Task 6: Verification and PR Hygiene
+### Task 6: K8s PD DeployTemplate Support
+
+**Files:**
+- Modify: `api/v1/engine_types.go`
+- Modify: `internal/engine/template.go`
+- Modify: `internal/engine/builtin.go`
+- Add: `internal/engine/vllm/v0.17.1/templates/kubernetes/pd.yaml`
+- Add: `internal/engine/vllm/v0.20.0/templates/kubernetes/pd.yaml`
+- Add: `internal/engine/sglang/v0.5.10/templates/kubernetes/pd.yaml`
+- Modify: `internal/orchestrator/kubernetes_orchestrator.go`
+- Modify: `internal/orchestrator/kubernetes_orchestrator_resource.go`
+- Test: builtin engine, util merge, K8s orchestrator render tests
+
+- [x] Add `EngineVersion.Sidecar` so `pd-router-sidecar` image/port/health config comes from the selected engine version.
+- [x] Register K8s `pd` deploy templates for vLLM v0.17.1/v0.20.0 and SGLang v0.5.10.
+- [x] Make `strategy=pd` select K8s deploy mode `pd` without requiring `deployment_options.deploy_mode=pd`.
+- [x] Derive K8s PD manifest variables from `EndpointSpec.Roles`, KV transfer config, role env/resources/variables, sidecar config, and port allocation results.
+- [x] Render a collocated Deployment whose Pod contains `pd-router-sidecar`, `prefill-*`, and `decode-*` containers with PD labels for global router discovery.
+- [x] Keep production-stack `vllm_router` and sidecar request-translation implementation outside this repo slice.
+
+### Task 7: Verification and PR Hygiene
 
 **Files:**
 - Modify only files touched by the tasks above.
@@ -90,4 +110,4 @@
 - [x] Run `git diff --check`.
 - [x] Run `go test ./api/v1 ./db/migrations ./internal/... -count=1`.
 - [x] Run `./bin/golangci-lint run`.
-- [ ] Commit and push after verified.
+- [x] Commit and push after verified.

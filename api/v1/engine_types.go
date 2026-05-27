@@ -151,6 +151,11 @@ type EngineVersion struct {
 	//  }
 	Images map[string]*EngineImage `json:"images,omitempty" yaml:"images,omitempty"`
 
+	// Sidecar describes the engine-version-specific in-pod sidecar used by
+	// deployment modes that need an engine protocol translator, such as
+	// Kubernetes PD same-host.
+	Sidecar *EngineVersionSidecar `json:"sidecar,omitempty" yaml:"sidecar,omitempty"`
+
 	// SupportedTasks lists the tasks supported by this engine version
 	//
 	// Example:
@@ -163,6 +168,12 @@ type EngineVersion struct {
 	// Capabilities describes strategy-specific capabilities that cannot be
 	// inferred from images or generic deployment templates alone.
 	Capabilities *EngineVersionCapabilities `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+}
+
+type EngineVersionSidecar struct {
+	Image      *EngineImage `json:"image,omitempty" yaml:"image,omitempty"`
+	Port       int          `json:"port,omitempty" yaml:"port,omitempty"`
+	HealthPath string       `json:"health_path,omitempty" yaml:"health_path,omitempty"`
 }
 
 type EngineVersionCapabilities struct {

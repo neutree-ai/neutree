@@ -64,8 +64,8 @@ func TestRoleShapeDoesNotExposeDeploymentOptions(t *testing.T) {
 	}
 }
 
-func TestDerivePDSameHostConfig_RequiresResolvedKVConnector(t *testing.T) {
-	_, err := DerivePDSameHostConfig(&v1.Endpoint{
+func TestDerivePDSameHostConfig_AllowsTemplateOwnedDefaultKVConnector(t *testing.T) {
+	cfg, err := DerivePDSameHostConfig(&v1.Endpoint{
 		Spec: &v1.EndpointSpec{
 			Strategy: "pd",
 			Roles: []v1.EndpointRoleSpec{
@@ -74,8 +74,11 @@ func TestDerivePDSameHostConfig_RequiresResolvedKVConnector(t *testing.T) {
 			},
 		},
 	}, "")
-	if err == nil || !contains(err.Error(), "connector") {
-		t.Fatalf("expected connector error, got %v", err)
+	if err != nil {
+		t.Fatalf("DerivePDSameHostConfig: %v", err)
+	}
+	if cfg.Transfer == nil || cfg.Transfer.Connector != "" {
+		t.Fatalf("Transfer.Connector: got %+v want empty connector", cfg.Transfer)
 	}
 }
 
@@ -88,10 +91,10 @@ func TestResolveKVConnector(t *testing.T) {
 
 	got, err := ResolveKVConnector(&v1.Endpoint{Spec: &v1.EndpointSpec{}}, version)
 	if err != nil {
-		t.Fatalf("ResolveKVConnector default: %v", err)
+		t.Fatalf("ResolveKVConnector omitted: %v", err)
 	}
-	if got != "nixl" {
-		t.Fatalf("default connector: got %q want nixl", got)
+	if got != "" {
+		t.Fatalf("omitted connector: got %q want empty", got)
 	}
 
 	got, err = ResolveKVConnector(&v1.Endpoint{Spec: &v1.EndpointSpec{
@@ -116,6 +119,13 @@ func TestResolveKVConnector(t *testing.T) {
 	})
 	if err == nil || !contains(err.Error(), "at least one") {
 		t.Fatalf("expected empty connectors error, got %v", err)
+	}
+
+	_, err = ResolveKVConnector(&v1.Endpoint{Spec: &v1.EndpointSpec{}}, &v1.EngineVersion{
+		Capabilities: &v1.EngineVersionCapabilities{PD: &v1.PDCapabilitySpec{KVConnectors: []string{" "}}},
+	})
+	if err == nil || !contains(err.Error(), "at least one") {
+		t.Fatalf("expected blank connectors error, got %v", err)
 	}
 }
 
@@ -150,8 +160,8 @@ func TestResolveEngineCapabilities_Ray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveEngineCapabilities: %v", err)
 	}
-	if resolution.KVConnector != "nixl" {
-		t.Fatalf("KVConnector: got %q want nixl", resolution.KVConnector)
+	if resolution.KVConnector != "" {
+		t.Fatalf("KVConnector: got %q want empty", resolution.KVConnector)
 	}
 	if resolution.RayServeEntrypoint != "serve.vllm.v0_20_0.app_pd_collocated:app_builder" {
 		t.Fatalf("RayServeEntrypoint: got %q", resolution.RayServeEntrypoint)

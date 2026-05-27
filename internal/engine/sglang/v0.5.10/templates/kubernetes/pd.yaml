@@ -1,0 +1,217 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .EndpointName }}
+  namespace: {{ .Namespace }}
+  labels:
+    engine: {{ .EngineName }}
+    engine_version: {{ .EngineVersion }}
+    routing_logic: {{ .RoutingLogic }}
+    app: inference
+    neutree.io/component: pd-collocated
+spec:
+  replicas: {{ .Replicas }}
+  progressDeadlineSeconds: 1200
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      cluster: {{ .ClusterName }}
+      workspace: {{ .Workspace }}
+      endpoint: {{ .EndpointName }}
+      app: inference
+  template:
+    metadata:
+      labels:
+        engine: {{ .EngineName }}
+        engine_version: {{ .EngineVersion }}
+        cluster: {{ .ClusterName }}
+        workspace: {{ .Workspace }}
+        endpoint: {{ .EndpointName }}
+        routing_logic: {{ .RoutingLogic }}
+        app: inference
+        neutree.io/component: pd-collocated
+        neutree.io/leader: "true"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: endpoint
+                      operator: In
+                      values:
+                        - {{ .EndpointName }}
+                topologyKey: "kubernetes.io/hostname"
+      {{- if .NodeSelector }}
+      nodeSelector:
+        {{- range $key, $value := .NodeSelector }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
+      {{- if .ImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .ImagePullSecret }}
+      {{- end }}
+
+      {{- if .Volumes }}
+      volumes:
+{{ .Volumes | toYaml | indent 6 }}
+      {{- end }}
+      initContainers:
+        - name: model-downloader
+          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
+          command:
+            - bash
+            - -c
+          args:
+            - >-
+              python3 -m neutree.downloader
+              --name="{{ .ModelArgs.name }}"
+              --registry_type="{{ .ModelArgs.registry_type }}"
+              --registry_path="{{ .ModelArgs.registry_path }}"
+              --path="{{ .ModelArgs.path }}"
+              --version="{{ .ModelArgs.version }}"
+              --file="{{ .ModelArgs.file }}"
+              --task="{{ .ModelArgs.task }}"
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
+
+      containers:
+        - name: pd-router-sidecar
+          image: {{ .PD.Sidecar.Image }}
+          env:
+            - name: NEUTREE_PD_CONFIG
+              value: {{ .PD.ConfigJSON | quote }}
+            - name: NEUTREE_PD_SIDECAR_PORT
+              value: "{{ .PD.Sidecar.Port }}"
+            {{- range $key, $value := .Env }}
+            - name: {{ $key }}
+              value: "{{ $value }}"
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .PD.Sidecar.Port }}
+          startupProbe:
+            httpGet:
+              path: {{ .PD.Sidecar.HealthPath }}
+              port: {{ .PD.Sidecar.Port }}
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: {{ .PD.Sidecar.HealthPath }}
+              port: {{ .PD.Sidecar.Port }}
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+        {{- range .PD.Containers }}
+        - name: {{ .Name }}
+          image: {{ $.ImagePrefix }}/{{ $.ImageRepo }}:{{ $.ImageTag }}
+          command:
+          - python3
+          - -m
+          - sglang.launch_server
+          - --host
+          - "0.0.0.0"
+          - --port
+          - "{{ .Port }}"
+          - --model-path
+          - {{ $.ModelArgs.path }}
+          - --served-model-name
+          - {{ $.ModelArgs.serve_name }}
+          {{- $engineArgs := .EngineArgs }}
+          {{- if and (not (hasKey $engineArgs "disaggregation_mode")) (not (hasKey $engineArgs "disaggregation-mode")) }}
+          - --disaggregation-mode
+          - "{{ .Role }}"
+          {{- end }}
+          {{- if and (not (hasKey $engineArgs "disaggregation_transfer_backend")) (not (hasKey $engineArgs "disaggregation-transfer-backend")) }}
+          {{- $transferBackend := "nixl" }}
+          {{- if .KVTransferConnector }}
+          {{- $transferBackend = .KVTransferConnector }}
+          {{- end }}
+          {{- if hasKey .KVTransferExtra "transfer_backend" }}
+          {{- $transferBackend = get .KVTransferExtra "transfer_backend" }}
+          {{- else if hasKey .KVTransferExtra "backend" }}
+          {{- $transferBackend = get .KVTransferExtra "backend" }}
+          {{- end }}
+          - --disaggregation-transfer-backend
+          - "{{ $transferBackend }}"
+          {{- end }}
+          {{- if and (eq .Role "prefill") (not (hasKey $engineArgs "disaggregation_bootstrap_port")) (not (hasKey $engineArgs "disaggregation-bootstrap-port")) }}
+          - --disaggregation-bootstrap-port
+          - "{{ .SideChannelPort }}"
+          {{- end }}
+          {{- if and (hasKey .KVTransferExtra "disaggregation_ib_device") (not (hasKey $engineArgs "disaggregation_ib_device")) (not (hasKey $engineArgs "disaggregation-ib-device")) }}
+          - --disaggregation-ib-device
+          - "{{ get .KVTransferExtra "disaggregation_ib_device" }}"
+          {{- end }}
+          {{- if .EngineArgs }}
+          {{- range $key, $value := .EngineArgs }}
+          - --{{ $key | replace "_" "-" }}
+      {{- if ne (printf "%v" $value) "true"}}
+          - "{{ $value }}"
+      {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- if .Resources }}
+          resources:
+            limits:
+              {{- range $key, $value := .Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+            requests:
+              {{- range $key, $value := .Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+          {{- end }}
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          ports:
+            - containerPort: {{ .Port }}
+            {{- if gt .SideChannelPort 0 }}
+            - containerPort: {{ .SideChannelPort }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Port }}
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Port }}
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          {{- if $.VolumeMounts }}
+          volumeMounts:
+{{ $.VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
+        {{- end }}

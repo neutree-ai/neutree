@@ -58,6 +58,12 @@ func TestGetBuiltinEngines(t *testing.T) {
 					t.Errorf("vllm %s missing PD capability", v.Version)
 					continue
 				}
+				if !v.HasDeployTemplate(v1.KubernetesClusterType, v1.PDDeployMode) {
+					t.Errorf("vllm %s missing kubernetes/pd deploy template", v.Version)
+				}
+				if v.Sidecar == nil || v.Sidecar.Image == nil {
+					t.Errorf("vllm %s missing PD sidecar image config", v.Version)
+				}
 				if !v.HasRayServeEntrypoint(v1.PDDeployMode) {
 					t.Errorf("vllm %s missing ray_serve/pd entrypoint", v.Version)
 				}
@@ -102,6 +108,11 @@ func TestGetBuiltinEngines(t *testing.T) {
 			t.Errorf("sglang %s missing kubernetes deploy template", v.Version)
 		} else if _, ok := k8sTemplates["default"]; !ok {
 			t.Errorf("sglang %s missing default kubernetes deploy template", v.Version)
+		} else if _, ok := k8sTemplates[v1.PDDeployMode]; !ok {
+			t.Errorf("sglang %s missing kubernetes/pd deploy template", v.Version)
+		}
+		if v.Sidecar == nil || v.Sidecar.Image == nil {
+			t.Errorf("sglang %s missing PD sidecar image config", v.Version)
 		}
 		if v.Capabilities == nil || v.Capabilities.PD == nil {
 			t.Errorf("sglang %s missing PD capability", v.Version)

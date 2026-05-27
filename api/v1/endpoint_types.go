@@ -56,7 +56,8 @@ type KVSpec struct {
 }
 
 // KVTransferSpec describes the prefill -> decode KV transfer for the current
-// request. Connector defaults are derived by placement profile when empty.
+// request. When connector is empty, the runtime renderer or engine image
+// chooses its own default for the target engine and hardware ecosystem.
 type KVTransferSpec struct {
 	Connector string                 `json:"connector,omitempty"`
 	Extra     map[string]interface{} `json:"extra,omitempty"`
