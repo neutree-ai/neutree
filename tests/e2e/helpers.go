@@ -1180,18 +1180,16 @@ func teardownCluster(clusterName string) {
 
 // --- Endpoint helpers ---
 
-// engineArgs parses the named engine's profile engine_args
-// ("k=v,k2=v2,...") into a structured slice for direct injection into the
-// endpoint template via {{range}}.
-func engineArgs(engineName string) []EngineArg {
-	raw := profileEngineArgsFor(engineName)
+// parseEngineArgs parses a comma-separated "k=v,k2=v2" string into a structured
+// slice for direct injection into the endpoint template via {{range}}.
+func parseEngineArgs(raw string) []EngineArg {
 	if raw == "" {
 		return nil
 	}
 
 	var args []EngineArg
 
-	for _, pair := range strings.Split(raw, ",") {
+	for _, pair := range splitEngineArgPairs(raw) {
 		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
 		if !ok || k == "" {
 			continue
@@ -1201,6 +1199,92 @@ func engineArgs(engineName string) []EngineArg {
 	}
 
 	return args
+}
+
+func splitEngineArgPairs(raw string) []string {
+	var pairs []string
+	start := 0
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i, r := range raw {
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if inString {
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch r {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				pairs = append(pairs, raw[start:i])
+				start = i + 1
+			}
+		}
+	}
+
+	pairs = append(pairs, raw[start:])
+	return pairs
+}
+
+// engineArgs parses the named engine's profile engine_args.
+func engineArgs(engineName string) []EngineArg {
+	return parseEngineArgs(profileEngineArgsFor(engineName))
+}
+
+// mergeEngineArgs overlays model-level engine args onto engine-level defaults.
+// Existing keys keep their position; model-level values win on duplicate keys.
+func mergeEngineArgs(base, overlay []EngineArg) []EngineArg {
+	if len(base) == 0 {
+		return append([]EngineArg(nil), overlay...)
+	}
+
+	merged := append([]EngineArg(nil), base...)
+	indexByKey := make(map[string]int, len(merged))
+	for i, arg := range merged {
+		indexByKey[arg.Key] = i
+	}
+
+	for _, arg := range overlay {
+		if arg.Key == "" {
+			continue
+		}
+		if i, ok := indexByKey[arg.Key]; ok {
+			merged[i] = arg
+			continue
+		}
+
+		indexByKey[arg.Key] = len(merged)
+		merged = append(merged, arg)
+	}
+
+	return merged
+}
+
+func defaultEndpointEngineArgs(engineName, task string) []EngineArg {
+	return mergeEngineArgs(
+		engineArgs(engineName),
+		parseEngineArgs(profileModelEngineArgsFor(task)),
+	)
 }
 
 // endpointOpts holds configurable fields for applyEndpoint.
@@ -1295,7 +1379,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 	}
 
 	if len(o.engineArgs) == 0 {
-		o.engineArgs = engineArgs(o.engineName)
+		o.engineArgs = defaultEndpointEngineArgs(o.engineName, o.task)
 	}
 
 	if o.accType == "" || o.accProduct == "" {

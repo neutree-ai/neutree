@@ -272,6 +272,40 @@ func TestRenderTemplate_EngineArgsRange(t *testing.T) {
 	}
 }
 
+func TestDefaultEndpointEngineArgsMergesModelOverrides(t *testing.T) {
+	originalProfile := profile
+	t.Cleanup(func() { profile = originalProfile })
+
+	hfOverrides := `{"architectures": ["Qwen3VLForSequenceClassification"],"classifier_from_token": ["no", "yes"],"is_original_qwen3_reranker": true}`
+	profile = Profile{
+		Engines: map[string]EngineProfile{
+			defaultEngineName: {
+				EngineArgs: "dtype=half,max-model-len=4096,enforce_eager=true",
+			},
+		},
+	}
+	profile.RerankModel.EngineArgs = "max-model-len=8192,language_model_only=true,hf_overrides=" + hfOverrides
+
+	got := defaultEndpointEngineArgs(defaultEngineName, "text-rerank")
+	want := []EngineArg{
+		{Key: "dtype", Value: "half"},
+		{Key: "max-model-len", Value: "8192"},
+		{Key: "enforce_eager", Value: "true"},
+		{Key: "language_model_only", Value: "true"},
+		{Key: "hf_overrides", Value: hfOverrides},
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("len(got)=%d want=%d; got=%#v", len(got), len(want), got)
+	}
+
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d]=%#v want=%#v; got=%#v", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestRenderTemplate_RolePermissionsRange(t *testing.T) {
 	tmpl := `permissions:
 {{- range .PERMS }}
