@@ -426,6 +426,24 @@ func profileModelRegistryForType(registryType string) ModelRegistryProfile {
 	return ModelRegistryProfile{Type: registryType}
 }
 
+func profileModelRegistryTypeUsesDefaultName(registryType string) bool {
+	if registryType == "" || registryType == defaultRegistryAlias {
+		return true
+	}
+
+	if _, ok := profile.ModelRegistries[registryType]; ok {
+		return false
+	}
+
+	if modelRegistryProfileConfigured(profile.ModelRegistry) {
+		legacy := modelRegistryProfileWithType(defaultModelRegistryType, profile.ModelRegistry)
+
+		return legacy.Type == registryType
+	}
+
+	return false
+}
+
 func profileModelRegistryTypes() []string {
 	seen := map[string]struct{}{}
 

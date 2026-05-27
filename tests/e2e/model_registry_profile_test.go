@@ -159,6 +159,49 @@ engines:
 	}
 }
 
+func TestRenderEndpointWithLegacyModelRegistryTypeUsesDefaultRegistryName(t *testing.T) {
+	gomega.RegisterTestingT(t)
+
+	loadModelRegistryProfileForTest(t, `
+model_registry:
+  type: hugging-face
+  url: https://huggingface.co
+model:
+  name: global-model
+  version: v2
+  task: text-generation
+engines:
+  vllm:
+    version: v0.11.2
+`)
+
+	Cfg.RunID = "777777"
+	yamlPath, _ := renderEndpoint(
+		"legacy-registry-endpoint",
+		"cluster-a",
+		withModelRegistryType("hugging-face"),
+		withAccelerator("nvidia_gpu", "NVIDIA-A100"),
+	)
+	t.Cleanup(func() { os.Remove(yamlPath) })
+
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("read rendered endpoint: %v", err)
+	}
+	rendered := string(data)
+
+	for _, want := range []string{
+		"registry: e2e-registry-777777",
+		"name: global-model",
+		"version: v2",
+		"task: text-generation",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered endpoint missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
 func TestModelRegistryTemplateRendersCredentialsWhenConfigured(t *testing.T) {
 	rendered, err := renderTemplate("testdata/model-registry.yaml", map[string]any{
 		"E2E_MODEL_REGISTRY":             "registry-with-token",

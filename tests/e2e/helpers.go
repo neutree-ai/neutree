@@ -368,7 +368,7 @@ func testRegistry() string {
 }
 
 func testRegistryForType(registryType string) string {
-	if registryType == "" || registryType == defaultRegistryAlias {
+	if profileModelRegistryTypeUsesDefaultName(registryType) {
 		return "e2e-registry-" + Cfg.RunID
 	}
 

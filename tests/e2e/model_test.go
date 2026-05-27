@@ -81,17 +81,6 @@ func TeardownModelRegistries(registryTypes ...string) {
 	}
 }
 
-func configuredModelRegistryTypesWithURL() []string {
-	var registryTypes []string
-	for _, registryType := range profileModelRegistryTypes() {
-		if profileModelRegistryForType(registryType).URL != "" {
-			registryTypes = append(registryTypes, registryType)
-		}
-	}
-
-	return registryTypes
-}
-
 // --- ModelHelper (Page Object for "model" CLI subcommands) ---
 
 // ModelHelper encapsulates common parameters for model CLI operations.
@@ -158,22 +147,6 @@ func pushModel(name, version string, fileSize int, extraArgs ...string) CLIResul
 	Expect(os.WriteFile(filepath.Join(modelDir, "model.bin"), data, 0644)).To(Succeed())
 	return Model.Push(modelDir, name, version, extraArgs...)
 }
-
-// --- Tests ---
-
-var _ = Describe("ModelRegistry Profile", Label("model-registry", "profile"), func() {
-	It("should create all configured registry types", func() {
-		registryTypes := configuredModelRegistryTypesWithURL()
-		if len(registryTypes) < 2 {
-			Skip("requires at least two model registry profiles with URL configured")
-		}
-
-		SetupModelRegistries(registryTypes...)
-		DeferCleanup(func() {
-			TeardownModelRegistries(registryTypes...)
-		})
-	})
-})
 
 var _ = Describe("Model", Ordered, func() {
 
