@@ -32,6 +32,20 @@ func setupTestDeps(mockStorage *mocks.MockStorage) *Dependencies {
 	}
 }
 
+func numPtr(n int) *int {
+	return &n
+}
+
+func hasActorNameFilter(filters []dashboard.ActorFilter, name string) bool {
+	for _, f := range filters {
+		if f.Key == "name" && f.Predicate == "=" && f.Value == name {
+			return true
+		}
+	}
+
+	return false
+}
+
 // createLogsMockContext creates a mock Gin context for logs endpoints testing
 func createLogsMockContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
@@ -530,7 +544,7 @@ func TestGetRayLogSources_Success(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil)
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -555,7 +569,7 @@ func TestGetRayLogSources_HTTPError(t *testing.T) {
 	// Mock HTTP error
 	mockHTTPClient.On("Get", mock.Anything).Return((*http.Response)(nil), errors.New("connection refused"))
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -582,7 +596,7 @@ func TestGetRayLogSources_InvalidJSON(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil)
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -609,7 +623,7 @@ func TestGetRayLogSources_Non200Status(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil)
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -643,7 +657,7 @@ func TestGetRayLogSources_ApplicationNotFound(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil)
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -1144,7 +1158,7 @@ func TestGetRayLogSources_LiveReplicaIncludesActorID(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil).Once()
 
-	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	require.NoError(t, err)
 	require.Len(t, resp.Deployments, 1)
@@ -1152,6 +1166,128 @@ func TestGetRayLogSources_LiveReplicaIncludesActorID(t *testing.T) {
 	for _, log := range resp.Deployments[0].Replicas[0].Logs {
 		assert.Equal(t, "actor-1", log.ActorID)
 	}
+}
+
+func TestGetRayLogSources_PDRoleActorsResolvedByName(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Strategy: "pd",
+			Roles: []v1.EndpointRoleSpec{
+				{Name: "prefill", Replicas: &v1.ReplicaSpec{Num: numPtr(1)}},
+				{Name: "decode", Replicas: &v1.ReplicaSpec{Num: numPtr(1)}},
+			},
+		},
+	}
+
+	responseBody := `{
+		"applications": {
+			"default_test-endpoint": {
+				"name": "default_test-endpoint",
+				"deployments": {
+					"PDCollocatedBackend": {
+						"replicas": [
+							{
+								"replica_id": "replica-aa",
+								"actor_id": "outer-actor"
+							}
+						]
+					}
+				}
+			}
+		}
+	}`
+	mockHTTPClient.On("Get", "http://ray-dashboard:8265/api/serve/applications/").Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	mockDashboardSvc.EXPECT().ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
+		return hasActorNameFilter(filters, "neutree:default:test-endpoint:replica:replica-aa:role:prefill:rank:0")
+	}), true, 100).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
+			{
+				ActorID: "prefill-actor",
+				Name:    "neutree:default:test-endpoint:replica:replica-aa:role:prefill:rank:0",
+				State:   "ALIVE",
+				NodeID:  "node-a",
+			},
+		}}},
+	}, nil).Once()
+	mockDashboardSvc.EXPECT().ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
+		return hasActorNameFilter(filters, "neutree:default:test-endpoint:replica:replica-aa:role:decode:rank:0")
+	}), true, 100).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
+			{
+				ActorID: "decode-actor",
+				Name:    "neutree:default:test-endpoint:replica:replica-aa:role:decode:rank:0",
+				State:   "ALIVE",
+				NodeID:  "node-a",
+			},
+		}}},
+	}, nil).Once()
+
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", endpoint)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Deployments, 1)
+	require.Len(t, resp.Deployments[0].Replicas, 1)
+	roleLogs := map[string]LogInfo{}
+	for _, log := range resp.Deployments[0].Replicas[0].Logs {
+		if log.Role != "" {
+			roleLogs[log.Role] = log
+		}
+	}
+	require.Contains(t, roleLogs, "prefill")
+	require.Contains(t, roleLogs, "decode")
+	assert.Equal(t, "prefill-actor", roleLogs["prefill"].ActorID)
+	assert.Equal(t, "neutree:default:test-endpoint:replica:replica-aa:role:prefill:rank:0", roleLogs["prefill"].ActorName)
+	require.NotNil(t, roleLogs["prefill"].Rank)
+	assert.Equal(t, 0, *roleLogs["prefill"].Rank)
+	assert.Contains(t, roleLogs["prefill"].URL, "actor_id=prefill-actor")
+}
+
+func TestStreamRayLogs_ExplicitActorIDQueryStreamsRoleActorLog(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	logContent := "role actor stderr\n"
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "actor_id=role-actor") &&
+			strings.Contains(url, "suffix=err") &&
+			strings.Contains(url, "lines=500")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(logContent)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/logs/replica-aa/stderr?actor_id=role-actor", nil)
+
+	err := streamRayLogs(c, cluster, mockHTTPClient, "default", "test-endpoint", "replica-aa", "stderr", 500)
+
+	require.NoError(t, err)
+	assert.Equal(t, logContent, w.Body.String())
 }
 
 func TestBuildK8sReplicaLogSources_PDMultiContainerIncludesContainerMetadata(t *testing.T) {
@@ -1461,7 +1597,7 @@ func TestGetRayLogSources_FailedActor_FallbackToDashboardActors(t *testing.T) {
 		}, nil).
 		Once()
 
-	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -1505,7 +1641,7 @@ func TestGetRayLogSources_FailedActor_NoDeadActors_ReturnsEmptyReplicas(t *testi
 		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: nil}},
 	}, nil).Once()
 
-	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "ep")
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "ep", nil)
 
 	require.NoError(t, err)
 	require.Len(t, resp.Deployments, 1)

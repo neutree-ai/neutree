@@ -62,6 +62,12 @@ type LogInfo struct {
 	ActorID       string `json:"actor_id,omitempty"`
 }
 
+const (
+	logTypeApplication = "application"
+	logTypeStderr      = "stderr"
+	logTypeStdout      = "stdout"
+)
+
 // RayApplicationsResponse represents Ray Dashboard API response structure.
 //
 // TODO: Ray dashboard API types and calls belong in `internal/ray/dashboard/`,
@@ -152,7 +158,7 @@ func handleGetLogSources(deps *Dependencies) gin.HandlerFunc {
 
 		switch cluster.Spec.Type {
 		case v1.SSHClusterType:
-			response, err = getRayLogSources(cluster, deps.HTTPClient, workspace, name)
+			response, err = getRayLogSourcesWithEndpoint(cluster, deps.HTTPClient, workspace, name, endpoint)
 		case v1.KubernetesClusterType:
 			response, err = getK8sLogSources(cluster, endpoint, workspace, name)
 		default:
@@ -300,8 +306,7 @@ func getEndpointAndCluster(deps *Dependencies, workspace, name string) (*v1.Endp
 	return endpoint, &clusters[0], nil
 }
 
-// getRayLogSources gets log sources from Ray Dashboard API
-func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace, endpointName string) (*LogSourcesResponse, error) {
+func getRayLogSourcesWithEndpoint(cluster *v1.Cluster, httpClient util.HTTPClient, workspace, endpointName string, endpoint *v1.Endpoint) (*LogSourcesResponse, error) {
 	dashboardURL := cluster.Status.DashboardURL
 	if dashboardURL == "" {
 		return nil, fmt.Errorf("dashboard_url not found in cluster")
@@ -350,24 +355,29 @@ func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace
 		for _, replica := range deployment.Replicas {
 			logs := []LogInfo{
 				{
-					Type:        "application",
-					URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/application", workspace, endpointName, replica.ReplicaID),
-					DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/application?download=true", workspace, endpointName, replica.ReplicaID),
+					Type:        logTypeApplication,
+					URL:         rayLogURL(workspace, endpointName, replica.ReplicaID, logTypeApplication, "", false),
+					DownloadURL: rayLogURL(workspace, endpointName, replica.ReplicaID, logTypeApplication, "", true),
 					ActorID:     replica.ActorID,
 				},
 				{
-					Type:        "stderr",
-					URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/stderr", workspace, endpointName, replica.ReplicaID),
-					DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/stderr?download=true", workspace, endpointName, replica.ReplicaID),
+					Type:        logTypeStderr,
+					URL:         rayLogURL(workspace, endpointName, replica.ReplicaID, logTypeStderr, "", false),
+					DownloadURL: rayLogURL(workspace, endpointName, replica.ReplicaID, logTypeStderr, "", true),
 					ActorID:     replica.ActorID,
 				},
 				{
-					Type:        "stdout",
-					URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/stdout", workspace, endpointName, replica.ReplicaID),
-					DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/stdout?download=true", workspace, endpointName, replica.ReplicaID),
+					Type:        logTypeStdout,
+					URL:         rayLogURL(workspace, endpointName, replica.ReplicaID, logTypeStdout, "", false),
+					DownloadURL: rayLogURL(workspace, endpointName, replica.ReplicaID, logTypeStdout, "", true),
 					ActorID:     replica.ActorID,
 				},
 			}
+
+			if deploymentName == "PDCollocatedBackend" {
+				logs = appendPDRoleActorLogs(logs, dashboard.NewDashboardService(dashboardURL), endpoint, workspace, endpointName, replica.ReplicaID)
+			}
+
 			replicas = append(replicas, ReplicaInfo{
 				ReplicaID: replica.ReplicaID,
 				Logs:      logs,
@@ -396,6 +406,100 @@ func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace
 	return response, nil
 }
 
+func appendPDRoleActorLogs(logs []LogInfo, svc dashboard.DashboardService, endpoint *v1.Endpoint, workspace, endpointName, replicaID string) []LogInfo {
+	roleCounts := pdRoleCounts(endpoint)
+	if len(roleCounts) == 0 || replicaID == "" {
+		return logs
+	}
+
+	for _, role := range []string{"prefill", "decode"} {
+		count := roleCounts[role]
+		for rank := 0; rank < count; rank++ {
+			actorName := pdRoleActorName(workspace, endpointName, replicaID, role, rank)
+			actor, err := dashboard.FindActorByNamePreferAlive(svc, actorName)
+
+			if err != nil {
+				klog.Warningf("failed to look up PD role actor %s: %v", actorName, err)
+				continue
+			}
+
+			if actor == nil || actor.ActorID == "" {
+				continue
+			}
+
+			logs = append(logs,
+				buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logTypeStderr, role, rank, actorName, actor.ActorID),
+				buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logTypeStdout, role, rank, actorName, actor.ActorID),
+			)
+		}
+	}
+
+	return logs
+}
+
+func pdRoleCounts(endpoint *v1.Endpoint) map[string]int {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Strategy != "pd" {
+		return nil
+	}
+
+	counts := map[string]int{}
+
+	for _, role := range endpoint.Spec.Roles {
+		if role.Name != "prefill" && role.Name != "decode" {
+			continue
+		}
+
+		count := 1
+		if role.Replicas != nil && role.Replicas.Num != nil && *role.Replicas.Num > 0 {
+			count = *role.Replicas.Num
+		}
+
+		counts[role.Name] = count
+	}
+
+	if counts["prefill"] == 0 || counts["decode"] == 0 {
+		return nil
+	}
+
+	return counts
+}
+
+func pdRoleActorName(workspace, endpointName, replicaID, role string, rank int) string {
+	return fmt.Sprintf("neutree:%s:%s:replica:%s:role:%s:rank:%d",
+		workspace, endpointName, replicaID, role, rank)
+}
+
+func buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logType, role string, rank int, actorName, actorID string) LogInfo {
+	return LogInfo{
+		Type:        logType,
+		URL:         rayLogURL(workspace, endpointName, replicaID, logType, actorID, false),
+		DownloadURL: rayLogURL(workspace, endpointName, replicaID, logType, actorID, true),
+		Role:        role,
+		Rank:        &rank,
+		ActorName:   actorName,
+		ActorID:     actorID,
+	}
+}
+
+func rayLogURL(workspace, endpointName, replicaID, logType, actorID string, download bool) string {
+	base := fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/%s", workspace, endpointName, replicaID, logType)
+	q := url.Values{}
+
+	if actorID != "" {
+		q.Set("actor_id", actorID)
+	}
+
+	if download {
+		q.Set("download", "true")
+	}
+
+	if len(q) == 0 {
+		return base
+	}
+
+	return base + "?" + q.Encode()
+}
+
 // buildFailedReplicaInfo synthesizes a ReplicaInfo for a DEAD actor
 // recovered from the state API. Only stderr / stdout log types are
 // exposed because the application log file path is not retained in
@@ -412,7 +516,7 @@ func buildFailedReplicaInfo(workspace, endpointName, replicaID string) ReplicaIn
 	return ReplicaInfo{
 		ReplicaID: replicaID,
 		Failed:    true,
-		Logs:      []LogInfo{mkLog("stderr"), mkLog("stdout")},
+		Logs:      []LogInfo{mkLog(logTypeStderr), mkLog(logTypeStdout)},
 	}
 }
 
@@ -523,6 +627,21 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 		return fmt.Errorf("dashboard_url not found in cluster")
 	}
 
+	if actorID := rayActorIDQuery(c); actorID != "" {
+		switch logType {
+		case logTypeStderr:
+			return streamRayLogURL(c, httpClient, fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=err&lines=%d&format=text",
+				dashboardURL, actorID, lines))
+		case logTypeStdout:
+			return streamRayLogURL(c, httpClient, fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=out&lines=%d&format=text",
+				dashboardURL, actorID, lines))
+		case logTypeApplication:
+			return fmt.Errorf("application log is unavailable for explicit actor_id %s; use stderr or stdout", actorID)
+		default:
+			return fmt.Errorf("unsupported log type: %s", logType)
+		}
+	}
+
 	// First, get the application info to find node_id, actor_id, and log_file_path
 	appURL := fmt.Sprintf("%s/api/serve/applications/", dashboardURL)
 
@@ -577,7 +696,7 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 
 	if replica != nil {
 		switch logType {
-		case "application":
+		case logTypeApplication:
 			// Remove leading slash from log file path if present
 			logFilePath := replica.LogFilePath
 			if len(logFilePath) > 0 && logFilePath[0] == '/' {
@@ -586,10 +705,10 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 
 			logURL = fmt.Sprintf("%s/api/v0/logs/file?node_id=%s&filename=%s&lines=%d&format=text",
 				dashboardURL, replica.NodeID, logFilePath, lines)
-		case "stderr":
+		case logTypeStderr:
 			logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=err&lines=%d&format=text",
 				dashboardURL, replica.ActorID, lines)
-		case "stdout":
+		case logTypeStdout:
 			logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=out&lines=%d&format=text",
 				dashboardURL, replica.ActorID, lines)
 		default:
@@ -613,20 +732,31 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 		}
 
 		switch logType {
-		case "stderr":
+		case logTypeStderr:
 			logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=err&lines=%d&format=text",
 				dashboardURL, failedActor.ActorID, lines)
-		case "stdout":
+		case logTypeStdout:
 			logURL = fmt.Sprintf("%s/api/v0/logs/file?actor_id=%s&suffix=out&lines=%d&format=text",
 				dashboardURL, failedActor.ActorID, lines)
-		case "application":
+		case logTypeApplication:
 			return fmt.Errorf("application log is unavailable for failed replica %s; use stderr or stdout", replicaID)
 		default:
 			return fmt.Errorf("unsupported log type: %s", logType)
 		}
 	}
 
-	// Fetch logs
+	return streamRayLogURL(c, httpClient, logURL)
+}
+
+func rayActorIDQuery(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return ""
+	}
+
+	return c.Query("actor_id")
+}
+
+func streamRayLogURL(c *gin.Context, httpClient util.HTTPClient, logURL string) error {
 	logResp, err := httpClient.Get(logURL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %v", err)

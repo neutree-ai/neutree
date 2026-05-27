@@ -151,6 +151,22 @@ def _vllm_port_env(pd_config: Dict[str, Any], role_group_index: int,
     }
 
 
+def _role_actor_name(pd_config: Dict[str, Any], role_group_key: str,
+                     role: str, rank: int) -> str:
+    workspace = str((pd_config or {}).get("workspace") or "")
+    endpoint = str((pd_config or {}).get("endpoint") or "")
+    role_group_key = str(role_group_key or "")
+    if not workspace or not endpoint or not role_group_key:
+        raise RuntimeError(
+            "PD role actor naming requires pd_config.workspace, "
+            "pd_config.endpoint, and a non-empty Serve replica key"
+        )
+    return (
+        f"neutree:{workspace}:{endpoint}:replica:{role_group_key}:"
+        f"role:{role}:rank:{rank}"
+    )
+
+
 def _merge_user_wins(platform: Dict[str, Any],
                      user: Dict[str, Any],
                      audit_keys: set,
@@ -567,13 +583,16 @@ class PDCollocatedBackend:
             rt = _build_actor_runtime_env(prefill_env, port_env, metrics_env, backend_container)
             if rt:
                 opts["runtime_env"] = rt
+            opts["name"] = _role_actor_name(
+                self._pd_config, self.replica_id_str, "prefill", rank,
+            )
             # V19 / V21 / V22 — per-actor spawn point: bundle_index, port env,
             # runtime_env composition (container vs env_vars) all in one line.
             log.info(
                 "[PDCollocatedBackend][spawn/prefill rank=%d] bundle_index=%d "
-                "port_env=%s role_env_keys=%s rt_keys=%s",
-                rank, rank, port_env, sorted((prefill_env or {}).keys()),
-                sorted((rt or {}).keys()),
+                "actor_name=%s port_env=%s role_env_keys=%s rt_keys=%s",
+                rank, rank, opts["name"], port_env,
+                sorted((prefill_env or {}).keys()), sorted((rt or {}).keys()),
             )
             self.prefills.append(
                 PrefillActor.options(**opts).remote(
@@ -597,12 +616,14 @@ class PDCollocatedBackend:
             rt = _build_actor_runtime_env(decode_env, port_env, metrics_env, backend_container)
             if rt:
                 opts["runtime_env"] = rt
+            opts["name"] = _role_actor_name(
+                self._pd_config, self.replica_id_str, "decode", rank,
+            )
             log.info(
                 "[PDCollocatedBackend][spawn/decode rank=%d] bundle_index=%d "
-                "port_env=%s role_env_keys=%s rt_keys=%s",
-                rank, prefill_count + rank, port_env,
-                sorted((decode_env or {}).keys()),
-                sorted((rt or {}).keys()),
+                "actor_name=%s port_env=%s role_env_keys=%s rt_keys=%s",
+                rank, prefill_count + rank, opts["name"], port_env,
+                sorted((decode_env or {}).keys()), sorted((rt or {}).keys()),
             )
             self.decodes.append(
                 DecodeActor.options(**opts).remote(

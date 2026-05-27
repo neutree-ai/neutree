@@ -2972,8 +2972,15 @@ func TestRayOrchestrator_GetEndpointStatus_PDSameHostReplicaCounters(t *testing.
 			applicationName: {
 				Status: "RUNNING",
 				Deployments: map[string]dashboard.Deployment{
-					"PDIngress":           {Name: "PDIngress", Status: dashboard.DeploymentStatusHealthy},
-					"PDCollocatedBackend": {Name: "PDCollocatedBackend", Status: dashboard.DeploymentStatusHealthy},
+					"PDIngress": {Name: "PDIngress", Status: dashboard.DeploymentStatusHealthy},
+					"PDCollocatedBackend": {
+						Name:   "PDCollocatedBackend",
+						Status: dashboard.DeploymentStatusHealthy,
+						Replicas: []dashboard.DeploymentReplica{
+							{ReplicaID: "backend-replica-a", NodeID: "node-a"},
+							{ReplicaID: "backend-replica-b", NodeID: "node-b"},
+						},
+					},
 				},
 			},
 		},
@@ -2997,6 +3004,13 @@ func TestRayOrchestrator_GetEndpointStatus_PDSameHostReplicaCounters(t *testing.
 	assert.Equal(t, "same-host", status.Placement)
 	assert.Equal(t, 2, status.TotalReplicas)
 	assert.Equal(t, 2, status.ReadyReplicas)
+	require.Len(t, status.Replicas, 2)
+	assert.Equal(t, "backend-replica-a", status.Replicas[0].ID)
+	assert.Equal(t, "node-a", status.Replicas[0].NodeName)
+	assert.Equal(t, "Ready", status.Replicas[0].Phase)
+	assert.Equal(t, "backend-replica-b", status.Replicas[1].ID)
+	assert.Equal(t, "node-b", status.Replicas[1].NodeName)
+	assert.Equal(t, "Ready", status.Replicas[1].Phase)
 }
 
 // TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ToleratesMissingDeps

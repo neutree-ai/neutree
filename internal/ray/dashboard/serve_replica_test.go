@@ -140,6 +140,30 @@ func TestFindFailedActorForDeployment_NoActorsReturnsNil(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+func TestFindActorByNamePreferAlive_BuildsNameFilterAndPrefersAlive(t *testing.T) {
+	svc := dashboardmocks.NewMockDashboardService(t)
+	name := "neutree:ws:ep:replica:replica-aa:role:prefill:rank:0"
+
+	svc.EXPECT().
+		ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
+			require.Len(t, filters, 1)
+			return filters[0].Key == "name" && filters[0].Predicate == "=" && filters[0].Value == name
+		}), true, 100).
+		Return(&dashboard.ActorsResponse{
+			Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
+				{ActorID: "dead-actor", Name: name, State: "DEAD", StartTime: 2000},
+				{ActorID: "alive-actor", Name: name, State: "ALIVE", StartTime: 1000},
+			}}},
+		}, nil).
+		Once()
+
+	got, err := dashboard.FindActorByNamePreferAlive(svc, name)
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "alive-actor", got.ActorID)
+}
+
 func TestFindFailedActorByReplicaID_MatchesShortID(t *testing.T) {
 	svc := dashboardmocks.NewMockDashboardService(t)
 	svc.EXPECT().ListActors(mock.Anything, mock.Anything, mock.Anything).Return(&dashboard.ActorsResponse{

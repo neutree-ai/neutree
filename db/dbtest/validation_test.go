@@ -669,6 +669,7 @@ func TestEndpointAcceleratorValidation(t *testing.T) {
 					NULL,
 					NULL,
 					NULL,
+					NULL,
 					NULL
 				)::api.endpoint_spec,
 				ROW('test-ep-accel', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata

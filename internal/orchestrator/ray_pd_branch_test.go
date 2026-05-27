@@ -169,7 +169,7 @@ func TestSerializePDConfig_PortsPassthrough(t *testing.T) {
 func TestApplyPDBranch_RewritesImportAndInjectsPDConfig(t *testing.T) {
 	ep := &v1.Endpoint{
 		ID:       42,
-		Metadata: &v1.Metadata{Name: "ep1"},
+		Metadata: &v1.Metadata{Workspace: "ws1", Name: "ep1"},
 		Spec: &v1.EndpointSpec{
 			Replicas: v1.ReplicaSpec{Num: num(1)},
 			Strategy: "pd",
@@ -204,6 +204,9 @@ func TestApplyPDBranch_RewritesImportAndInjectsPDConfig(t *testing.T) {
 	}
 	if configArgs["num_replicas"] != 1 {
 		t.Errorf("pd_config.num_replicas: got %v want 1", configArgs["num_replicas"])
+	}
+	if configArgs["workspace"] != "ws1" || configArgs["endpoint"] != "ep1" {
+		t.Errorf("pd_config identity: got workspace=%v endpoint=%v", configArgs["workspace"], configArgs["endpoint"])
 	}
 	// portalloc must have populated ports for both prefill + decode.
 	ports, ok := configArgs["ports"].([]map[string][][]int)

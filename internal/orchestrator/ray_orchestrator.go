@@ -427,6 +427,12 @@ func endpointReplicaCount(endpoint *v1.Endpoint) int {
 	return *endpoint.Spec.Replicas.Num
 }
 
+const (
+	replicaPhasePending = "Pending"
+	replicaPhaseReady   = "Ready"
+	replicaPhaseFailed  = "Failed"
+)
+
 func decoratePDStatus(endpoint *v1.Endpoint, out *v1.EndpointStatus,
 	appStatus *dashboard.RayServeApplicationStatus) *v1.EndpointStatus {
 	if out == nil {
@@ -450,13 +456,21 @@ func decoratePDStatus(endpoint *v1.Endpoint, out *v1.EndpointStatus,
 	out.Placement = pdconfig.EffectivePlacementRoles(endpoint)
 	out.TotalReplicas = total
 	out.ReadyReplicas = ready
+
+	if statuses, readyReplicas, ok := pdBackendReplicaStatuses(appStatus, out.Phase, total); ok {
+		out.Replicas = statuses
+		out.ReadyReplicas = readyReplicas
+
+		return out
+	}
+
 	out.Replicas = make([]v1.ReplicaStatus, 0, total)
 
 	for i := 0; i < total; i++ {
-		phase := "Pending"
+		phase := replicaPhasePending
 
 		if i < ready {
-			phase = "Ready"
+			phase = replicaPhaseReady
 		}
 
 		replica := v1.ReplicaStatus{
@@ -470,14 +484,85 @@ func decoratePDStatus(endpoint *v1.Endpoint, out *v1.EndpointStatus,
 	return out
 }
 
+func pdBackendReplicaStatuses(appStatus *dashboard.RayServeApplicationStatus, phase v1.EndpointPhase, total int) ([]v1.ReplicaStatus, int, bool) {
+	deployment, ok := pdBackendDeployment(appStatus)
+	if !ok || len(deployment.Replicas) == 0 {
+		return nil, 0, false
+	}
+
+	statuses := make([]v1.ReplicaStatus, 0, total)
+	ready := 0
+	replicaPhase := replicaPhasePending
+
+	if phase == v1.EndpointPhaseRUNNING && deployment.Status == dashboard.DeploymentStatusHealthy {
+		replicaPhase = replicaPhaseReady
+	}
+
+	if deployment.Status == dashboard.DeploymentStatusUnhealthy {
+		replicaPhase = replicaPhaseFailed
+	}
+
+	for _, runtimeReplica := range deployment.Replicas {
+		id := runtimeReplicaStatusID(runtimeReplica, len(statuses))
+
+		if replicaPhase == replicaPhaseReady {
+			ready++
+		}
+
+		statuses = append(statuses, v1.ReplicaStatus{
+			ID:       id,
+			NodeName: runtimeReplica.NodeID,
+			Phase:    replicaPhase,
+		})
+	}
+
+	for len(statuses) < total {
+		statuses = append(statuses, v1.ReplicaStatus{
+			ID:    fmt.Sprintf("replica-%d", len(statuses)),
+			Phase: replicaPhasePending,
+		})
+	}
+
+	return statuses, ready, true
+}
+
+func runtimeReplicaStatusID(runtimeReplica dashboard.DeploymentReplica, fallbackIndex int) string {
+	if runtimeReplica.ReplicaID != "" {
+		return runtimeReplica.ReplicaID
+	}
+
+	if runtimeReplica.ActorID != "" {
+		return runtimeReplica.ActorID
+	}
+
+	return fmt.Sprintf("replica-%d", fallbackIndex)
+}
+
 func pdBackendDeploymentHealthy(deployments map[string]dashboard.Deployment) bool {
+	deployment, ok := pdBackendDeploymentFromMap(deployments)
+	if !ok {
+		return false
+	}
+
+	return deployment.Status == dashboard.DeploymentStatusHealthy
+}
+
+func pdBackendDeployment(appStatus *dashboard.RayServeApplicationStatus) (dashboard.Deployment, bool) {
+	if appStatus == nil {
+		return dashboard.Deployment{}, false
+	}
+
+	return pdBackendDeploymentFromMap(appStatus.Deployments)
+}
+
+func pdBackendDeploymentFromMap(deployments map[string]dashboard.Deployment) (dashboard.Deployment, bool) {
 	for name, deployment := range deployments {
 		if name == "PDCollocatedBackend" || deployment.Name == "PDCollocatedBackend" {
-			return deployment.Status == dashboard.DeploymentStatusHealthy
+			return deployment, true
 		}
 	}
 
-	return false
+	return dashboard.Deployment{}, false
 }
 
 // mapDeployingPhase resolves the endpoint phase when Ray Serve reports the

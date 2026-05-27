@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -524,25 +525,101 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 
 	// Check if all pods are ready and updated
 	if util.IsDeploymentUpdatedAndReady(dep) {
-		return &v1.EndpointStatus{
+		return decorateK8sPDStatus(endpoint, &v1.EndpointStatus{
 			Phase: v1.EndpointPhaseRUNNING,
-		}, nil
+		}, dep, pods), nil
 	}
 
 	if hasFailed, failedMsg := k.checkPodFailures(pods); hasFailed {
-		return &v1.EndpointStatus{
+		return decorateK8sPDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseFAILED,
 			ErrorMessage: "Endpoint failed: " + failedMsg,
-		}, nil
+		}, dep, pods), nil
 	}
 
 	// Otherwise, still deploying
 	errorMessage := k.buildDeploymentErrorMessage(dep)
 
-	return &v1.EndpointStatus{
+	return decorateK8sPDStatus(endpoint, &v1.EndpointStatus{
 		Phase:        v1.EndpointPhaseDEPLOYING,
 		ErrorMessage: "Endpoint deploying in progress: " + errorMessage,
-	}, nil
+	}, dep, pods), nil
+}
+
+func decorateK8sPDStatus(endpoint *v1.Endpoint, status *v1.EndpointStatus, dep *appsv1.Deployment, pods []corev1.Pod) *v1.EndpointStatus {
+	if status == nil {
+		status = &v1.EndpointStatus{}
+	}
+
+	if !isPDStrategy(endpoint) {
+		return status
+	}
+
+	total := endpointReplicaCount(endpoint)
+	status.Strategy = endpoint.Spec.Strategy
+	status.Placement = pdconfig.EffectivePlacementRoles(endpoint)
+	status.TotalReplicas = total
+
+	sortedPods := append([]corev1.Pod(nil), pods...)
+	sort.Slice(sortedPods, func(i, j int) bool {
+		return sortedPods[i].Name < sortedPods[j].Name
+	})
+
+	status.Replicas = make([]v1.ReplicaStatus, 0, total)
+
+	for _, pod := range sortedPods {
+		ready := k8sPodReady(pod)
+		phase := k8sPDReplicaPhase(status.Phase, ready)
+
+		if ready {
+			status.ReadyReplicas++
+		}
+
+		status.Replicas = append(status.Replicas, v1.ReplicaStatus{
+			ID:       pod.Name,
+			NodeName: pod.Spec.NodeName,
+			Phase:    phase,
+		})
+	}
+
+	for len(status.Replicas) < total {
+		status.Replicas = append(status.Replicas, v1.ReplicaStatus{
+			ID:    fmt.Sprintf("replica-%d", len(status.Replicas)),
+			Phase: replicaPhasePending,
+		})
+	}
+
+	if dep != nil && len(sortedPods) == 0 && dep.Status.ReadyReplicas > 0 {
+		status.ReadyReplicas = int(dep.Status.ReadyReplicas)
+	}
+
+	return status
+}
+
+func k8sPDReplicaPhase(endpointPhase v1.EndpointPhase, ready bool) string {
+	if ready {
+		return replicaPhaseReady
+	}
+
+	if endpointPhase == v1.EndpointPhaseFAILED {
+		return replicaPhaseFailed
+	}
+
+	return replicaPhasePending
+}
+
+func k8sPodReady(pod corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning || len(pod.Status.ContainerStatuses) == 0 {
+		return false
+	}
+
+	for _, container := range pod.Status.ContainerStatuses {
+		if !container.Ready {
+			return false
+		}
+	}
+
+	return true
 }
 
 // listPods lists pods matching the given labels in the specified namespace.

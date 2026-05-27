@@ -166,6 +166,40 @@ func (f *FakeK8sClient) WithPods(count int) *FakeK8sClient {
 	return f
 }
 
+func (f *FakeK8sClient) WithPDPod(name, nodeName string, ready bool) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: nodeName,
+			Containers: []corev1.Container{
+				{Name: "pd-router-sidecar"},
+				{Name: "prefill-0"},
+				{Name: "decode-0"},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "pd-router-sidecar", Ready: ready, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
+				{Name: "prefill-0", Ready: ready, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
+				{Name: "decode-0", Ready: ready, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
+			},
+		},
+	}
+	if err := f.Client.Create(context.Background(), pod); err != nil {
+		f.t.Fatalf("failed to create PD pod: %v", err)
+	}
+
+	return f
+}
+
 func (f *FakeK8sClient) WithPodInCrashLoopBackOff(containerName string, restartCount int32) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2985,6 +3019,41 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			fakeClient.AssertExpectations()
 		})
 	}
+}
+
+func TestKubernetesOrchestrator_getEndpointStats_PDSameHostReplicaStatus(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "production",
+			Name:      "chat-model",
+		},
+		Spec: &v1.EndpointSpec{
+			Strategy:  "pd",
+			Placement: &v1.PlacementSpec{Roles: "same-host"},
+			Replicas:  v1.ReplicaSpec{Num: pointer.Int(2)},
+		},
+	}
+	fakeClient := NewFakeK8sClient(t).
+		WithDeployment(endpoint.Metadata.Name, 2, 2, 2).
+		WithPDPod("chat-model-pd-a", "node-a", true).
+		WithPDPod("chat-model-pd-b", "node-b", true)
+
+	o := &kubernetesOrchestrator{}
+	status, err := o.getEndpointStats(fakeClient, "test-namespace", endpoint)
+
+	require.NoError(t, err)
+	assert.Equal(t, v1.EndpointPhaseRUNNING, status.Phase)
+	assert.Equal(t, "pd", status.Strategy)
+	assert.Equal(t, "same-host", status.Placement)
+	assert.Equal(t, 2, status.TotalReplicas)
+	assert.Equal(t, 2, status.ReadyReplicas)
+	require.Len(t, status.Replicas, 2)
+	assert.Equal(t, "chat-model-pd-a", status.Replicas[0].ID)
+	assert.Equal(t, "node-a", status.Replicas[0].NodeName)
+	assert.Equal(t, "Ready", status.Replicas[0].Phase)
+	assert.Equal(t, "chat-model-pd-b", status.Replicas[1].ID)
+	assert.Equal(t, "node-b", status.Replicas[1].NodeName)
+	assert.Equal(t, "Ready", status.Replicas[1].Phase)
 }
 
 // makePauseTestCtx builds a minimal OrchestratorContext for pause/delete tests:

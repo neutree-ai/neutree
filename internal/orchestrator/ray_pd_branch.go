@@ -197,7 +197,13 @@ func applyPDBranch(ctx context.Context, ep *v1.Endpoint, cluster *v1.Cluster, en
 		app.Args = map[string]interface{}{}
 	}
 
-	app.Args["pd_config"] = SerializePDConfig(cfg)
+	pdConfig := SerializePDConfig(cfg)
+	if ep.Metadata != nil {
+		pdConfig["workspace"] = ep.Metadata.Workspace
+		pdConfig["endpoint"] = ep.Metadata.Name
+	}
+
+	app.Args["pd_config"] = pdConfig
 
 	return nil
 }

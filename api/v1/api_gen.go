@@ -520,6 +520,11 @@ type ApiEndpointSpec struct {
 	Replicas          interface{} `json:"replicas"`
 	DeploymentOptions interface{} `json:"deployment_options"`
 	Variables         interface{} `json:"variables"`
+	Env               interface{} `json:"env"`
+	Strategy          string      `json:"strategy"`
+	Placement         interface{} `json:"placement"`
+	Roles             interface{} `json:"roles"`
+	Kv                interface{} `json:"kv"`
 }
 
 type ApiEndpointStatus struct {
@@ -527,6 +532,11 @@ type ApiEndpointStatus struct {
 	ServiceUrl         string      `json:"service_url"`
 	LastTransitionTime interface{} `json:"last_transition_time"`
 	ErrorMessage       string      `json:"error_message"`
+	Strategy           string      `json:"strategy"`
+	Placement          string      `json:"placement"`
+	Replicas           interface{} `json:"replicas"`
+	TotalReplicas      interface{} `json:"total_replicas"`
+	ReadyReplicas      interface{} `json:"ready_replicas"`
 }
 
 type ApiImageRegistrySpec struct {
