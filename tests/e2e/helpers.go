@@ -1219,9 +1219,11 @@ func splitEngineArgPairs(raw string) []string {
 				escaped = true
 				continue
 			}
+
 			if r == '"' {
 				inString = false
 			}
+
 			continue
 		}
 
@@ -1243,6 +1245,7 @@ func splitEngineArgPairs(raw string) []string {
 	}
 
 	pairs = append(pairs, raw[start:])
+
 	return pairs
 }
 
@@ -1259,6 +1262,7 @@ func mergeEngineArgs(base, overlay []EngineArg) []EngineArg {
 	}
 
 	merged := append([]EngineArg(nil), base...)
+
 	indexByKey := make(map[string]int, len(merged))
 	for i, arg := range merged {
 		indexByKey[arg.Key] = i
@@ -1268,6 +1272,7 @@ func mergeEngineArgs(base, overlay []EngineArg) []EngineArg {
 		if arg.Key == "" {
 			continue
 		}
+
 		if i, ok := indexByKey[arg.Key]; ok {
 			merged[i] = arg
 			continue
