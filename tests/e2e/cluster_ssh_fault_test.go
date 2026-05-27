@@ -143,7 +143,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			// SSH precheck phase, target IP, and static-cluster hint so
 			// the operator can resolve the misconfiguration without
 			// guessing about ssh_private_key.
-			Expect(cluster.Status.ErrorMessage).To(ContainSubstring("ssh connection to node"),
+			Expect(cluster.Status.ErrorMessage).To(ContainSubstring("ssh connection failed to node"),
 				"error must identify the SSH precheck phase")
 			Expect(cluster.Status.ErrorMessage).To(ContainSubstring(unreachableHeadIP),
 				"error must surface the unreachable target IP")
