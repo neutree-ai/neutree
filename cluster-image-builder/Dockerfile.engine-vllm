@@ -23,6 +23,11 @@ ENV BUILDKITE_COMMIT=${RAY_COMMIT}
 ENV TRAVIS_COMMIT=${BUILDKITE_COMMIT}
 ENV BUILD_ONE_PYTHON_ONLY=py312
 ENV RAY_DISABLE_EXTRA_CPP=1
+# Docker build runs this stage as root, while Ray's manylinux script creates a
+# non-root builduser from HOST_UID/HOST_GID. Avoid defaulting those values to
+# 0/0, which makes groupadd collide with the existing root group.
+ENV HOST_UID=1000
+ENV HOST_GID=1000
 WORKDIR /ray
 COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
 RUN /ray/python/build-wheel-manylinux2014.sh
