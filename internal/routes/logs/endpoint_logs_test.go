@@ -816,6 +816,102 @@ func TestStreamK8sLogs_Success(t *testing.T) {
 	assert.Equal(t, logContent, w.Body.String())
 }
 
+func TestStreamK8sLogs_UsesRequestedContainer(t *testing.T) {
+	mockK8sClient := utilmocks.NewMockK8sClient(t)
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-cluster",
+		},
+		Spec: &v1.ClusterSpec{
+			Type: v1.KubernetesClusterType,
+		},
+	}
+
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-endpoint",
+		},
+		Spec: &v1.EndpointSpec{
+			Strategy: "pd",
+		},
+	}
+
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "prefill-0"},
+				{Name: "decode-1"},
+			},
+		},
+	}
+	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").Return(pod, nil)
+
+	logContent := "decode log line\n"
+	mockK8sClient.On("GetPodLogs", mock.Anything, cluster, mock.Anything, "pod-123", mock.MatchedBy(func(opts *corev1.PodLogOptions) bool {
+		return opts != nil && opts.Container == "decode-1"
+	})).Return(io.NopCloser(strings.NewReader(logContent)), nil)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("GET", "/logs?container=decode-1", nil)
+	c.Request = req
+
+	err := streamK8sLogs(c, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+
+	assert.NoError(t, err)
+	assert.Equal(t, logContent, w.Body.String())
+}
+
+func TestStreamK8sLogs_PDMultiContainerRequiresContainer(t *testing.T) {
+	mockK8sClient := utilmocks.NewMockK8sClient(t)
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-cluster",
+		},
+		Spec: &v1.ClusterSpec{
+			Type: v1.KubernetesClusterType,
+		},
+	}
+
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-endpoint",
+		},
+		Spec: &v1.EndpointSpec{
+			Strategy: "pd",
+		},
+	}
+
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "pd-router-sidecar"},
+				{Name: "prefill-0"},
+				{Name: "decode-0"},
+			},
+		},
+	}
+	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").Return(pod, nil)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("GET", "/logs", nil)
+	c.Request = req
+
+	err := streamK8sLogs(c, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "container query parameter is required")
+}
+
 func TestStreamK8sLogs_GetPodError(t *testing.T) {
 	mockK8sClient := utilmocks.NewMockK8sClient(t)
 
@@ -1015,6 +1111,133 @@ func TestHandleGetLogSources_SSHCluster_Success(t *testing.T) {
 	assert.NotEmpty(t, response.Deployments)
 
 	mockStorage.AssertExpectations(t)
+}
+
+func TestGetRayLogSources_LiveReplicaIncludesActorID(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	responseBody := `{
+		"applications": {
+			"default_test-endpoint": {
+				"name": "default_test-endpoint",
+				"deployments": {
+					"deployment-1": {
+						"replicas": [
+							{
+								"replica_id": "replica-1",
+								"actor_id": "actor-1"
+							}
+						]
+					}
+				}
+			}
+		}
+	}`
+	mockHTTPClient.On("Get", "http://ray-dashboard:8265/api/serve/applications/").Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+
+	require.NoError(t, err)
+	require.Len(t, resp.Deployments, 1)
+	require.Len(t, resp.Deployments[0].Replicas, 1)
+	for _, log := range resp.Deployments[0].Replicas[0].Logs {
+		assert.Equal(t, "actor-1", log.ActorID)
+	}
+}
+
+func TestBuildK8sReplicaLogSources_PDMultiContainerIncludesContainerMetadata(t *testing.T) {
+	infos := []util.EndpointLogInfo{
+		{
+			ReplicaID:     "pod-123",
+			PodName:       "pod-123",
+			ContainerName: "pd-router-sidecar",
+			Status:        "Running",
+		},
+		{
+			ReplicaID:     "pod-123",
+			PodName:       "pod-123",
+			ContainerName: "prefill-0",
+			Status:        "Running",
+		},
+		{
+			ReplicaID:     "pod-123",
+			PodName:       "pod-123",
+			ContainerName: "decode-1",
+			Status:        "Running",
+		},
+	}
+
+	replicas := buildK8sReplicaLogSources(infos, "default", "test-endpoint")
+
+	require.Len(t, replicas, 1)
+	assert.Equal(t, "pod-123", replicas[0].ReplicaID)
+	require.Len(t, replicas[0].Logs, 3)
+
+	byContainer := map[string]LogInfo{}
+	for _, log := range replicas[0].Logs {
+		byContainer[log.ContainerName] = log
+	}
+
+	sidecar := byContainer["pd-router-sidecar"]
+	assert.Equal(t, "logs", sidecar.Type)
+	assert.Equal(t, "router", sidecar.Role)
+	assert.Nil(t, sidecar.Rank)
+	assert.Contains(t, sidecar.URL, "/api/v1/endpoints/default/test-endpoint/logs/pod-123/logs")
+	assert.Contains(t, sidecar.URL, "container=pd-router-sidecar")
+	assert.Contains(t, sidecar.DownloadURL, "download=true")
+
+	prefill := byContainer["prefill-0"]
+	assert.Equal(t, "prefill", prefill.Role)
+	require.NotNil(t, prefill.Rank)
+	assert.Equal(t, 0, *prefill.Rank)
+	assert.Contains(t, prefill.URL, "container=prefill-0")
+
+	decode := byContainer["decode-1"]
+	assert.Equal(t, "decode", decode.Role)
+	require.NotNil(t, decode.Rank)
+	assert.Equal(t, 1, *decode.Rank)
+	assert.Contains(t, decode.URL, "container=decode-1")
+}
+
+func TestParseK8sContainerLogIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		wantRole string
+		wantRank *int
+	}{
+		{name: "prefill-0", wantRole: "prefill", wantRank: intPtr(0)},
+		{name: "decode-12", wantRole: "decode", wantRank: intPtr(12)},
+		{name: "pd-router-sidecar", wantRole: "router"},
+		{name: "vllm", wantRole: ""},
+		{name: "decode-x", wantRole: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			role, rank := parseK8sContainerLogIdentity(tt.name)
+
+			assert.Equal(t, tt.wantRole, role)
+			if tt.wantRank == nil {
+				assert.Nil(t, rank)
+			} else {
+				require.NotNil(t, rank)
+				assert.Equal(t, *tt.wantRank, *rank)
+			}
+		})
+	}
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 // ===== Tests for handleGetLogs with mock clients =====

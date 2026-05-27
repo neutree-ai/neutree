@@ -197,8 +197,9 @@ class ObserverRouter(MultiplexMixin, RequestRouter):
         self._shared.replace_replicas(snapshots)
         # super() chain (MRO: ObserverRouter -> MultiplexMixin -> RequestRouter):
         #   - MultiplexMixin.update_replicas inspects each replica's advertised
-        #     multiplexed_model_ids and updates its internal map. Demo doesn't
-        #     query this map, but keeping it fresh means subclasses can.
+        #     multiplexed_model_ids and updates its internal map. PDIngress
+        #     performs its own route decision, but keeping this fresh preserves
+        #     framework invariants for subclasses.
         #   - RequestRouter.update_replicas keeps self._replicas in sync.
         super().update_replicas(replicas)
         logger.info(

@@ -28,10 +28,9 @@ type Options struct {
 	// PortAllocator allocates per-(RoleGroup × role × rank) ports
 	// for derived PD runtime configs that declare Role.PortsPerRank > 0.
 	// Phase 1 PD supports a single allocated port per role rank.
-	// MAY be nil — only PD same-host (and future MVP/Phase 2 features)
-	// require ports; legacy monolithic endpoints (Strategy="") skip the
-	// allocator call entirely. When set, CreateEndpoint will block until
-	// allocation succeeds and DeleteEndpoint will ReleaseAll.
+	// MAY be nil. PD same-host requires ports; legacy monolithic endpoints
+	// (Strategy="") skip the allocator call entirely. When set, CreateEndpoint
+	// will block until allocation succeeds and DeleteEndpoint will ReleaseAll.
 	PortAllocator portalloc.Allocator
 }
 

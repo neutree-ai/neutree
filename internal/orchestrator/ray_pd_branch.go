@@ -12,8 +12,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 )
 
-// isPDStrategy returns true when the endpoint requests PD same-host
-// (Phase 0 Demo dispatch key).
+// isPDStrategy returns true when the endpoint requests PD same-host placement.
 func isPDStrategy(ep *v1.Endpoint) bool {
 	if ep.Spec == nil || ep.Spec.Strategy != "pd" {
 		return false
@@ -133,7 +132,7 @@ func serializeRayResource(r *v1.RayResourceSpec) map[string]interface{} {
 // same-host strategy. Called by EndpointToApplication right before return
 // when isPDStrategy(ep) is true.
 //
-// Full path (Demo + MVP — no fallback):
+// Full path:
 //  1. Override import_path to app_pd_collocated:app_builder
 //  2. Derive PDSameHostConfig (NumReplicas + Group + Transfer)
 //  3. Convert each role's *v1.ResourceSpec → *v1.RayResourceSpec via

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -50,9 +52,14 @@ type ReplicaInfo struct {
 
 // LogInfo represents log information
 type LogInfo struct {
-	Type        string `json:"type"` // "application" | "stderr" | "stdout" | "logs"
-	URL         string `json:"url"`
-	DownloadURL string `json:"download_url"`
+	Type          string `json:"type"` // "application" | "stderr" | "stdout" | "logs"
+	URL           string `json:"url"`
+	DownloadURL   string `json:"download_url"`
+	ContainerName string `json:"container_name,omitempty"`
+	Role          string `json:"role,omitempty"`
+	Rank          *int   `json:"rank,omitempty"`
+	ActorName     string `json:"actor_name,omitempty"`
+	ActorID       string `json:"actor_id,omitempty"`
 }
 
 // RayApplicationsResponse represents Ray Dashboard API response structure.
@@ -346,16 +353,19 @@ func getRayLogSources(cluster *v1.Cluster, httpClient util.HTTPClient, workspace
 					Type:        "application",
 					URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/application", workspace, endpointName, replica.ReplicaID),
 					DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/application?download=true", workspace, endpointName, replica.ReplicaID),
+					ActorID:     replica.ActorID,
 				},
 				{
 					Type:        "stderr",
 					URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/stderr", workspace, endpointName, replica.ReplicaID),
 					DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/stderr?download=true", workspace, endpointName, replica.ReplicaID),
+					ActorID:     replica.ActorID,
 				},
 				{
 					Type:        "stdout",
 					URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/stdout", workspace, endpointName, replica.ReplicaID),
 					DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/stdout?download=true", workspace, endpointName, replica.ReplicaID),
+					ActorID:     replica.ActorID,
 				},
 			}
 			replicas = append(replicas, ReplicaInfo{
@@ -421,22 +431,7 @@ func getK8sLogSources(cluster *v1.Cluster, endpoint *v1.Endpoint, workspace, end
 		return nil, fmt.Errorf("no pods found for endpoint %s", endpointName)
 	}
 
-	// Build response
-	replicas := []ReplicaInfo{}
-
-	for _, info := range logInfos {
-		logs := []LogInfo{
-			{
-				Type:        "logs",
-				URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/logs", workspace, endpointName, info.ReplicaID),
-				DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/logs?download=true", workspace, endpointName, info.ReplicaID),
-			},
-		}
-		replicas = append(replicas, ReplicaInfo{
-			ReplicaID: info.ReplicaID,
-			Logs:      logs,
-		})
-	}
+	replicas := buildK8sReplicaLogSources(logInfos, workspace, endpointName)
 
 	response := &LogSourcesResponse{
 		Deployments: []DeploymentInfo{
@@ -448,6 +443,77 @@ func getK8sLogSources(cluster *v1.Cluster, endpoint *v1.Endpoint, workspace, end
 	}
 
 	return response, nil
+}
+
+func buildK8sReplicaLogSources(logInfos []util.EndpointLogInfo, workspace, endpointName string) []ReplicaInfo {
+	replicas := make([]ReplicaInfo, 0)
+	indexByReplica := make(map[string]int)
+
+	for _, info := range logInfos {
+		replicaID := info.ReplicaID
+		if replicaID == "" {
+			replicaID = info.PodName
+		}
+
+		if _, exists := indexByReplica[replicaID]; !exists {
+			indexByReplica[replicaID] = len(replicas)
+			replicas = append(replicas, ReplicaInfo{ReplicaID: replicaID})
+		}
+
+		role, rank := info.Role, info.Rank
+		if role == "" && rank == nil {
+			role, rank = parseK8sContainerLogIdentity(info.ContainerName)
+		}
+
+		idx := indexByReplica[replicaID]
+		replicas[idx].Logs = append(replicas[idx].Logs, LogInfo{
+			Type:          "logs",
+			URL:           k8sContainerLogURL(workspace, endpointName, replicaID, info.ContainerName, false),
+			DownloadURL:   k8sContainerLogURL(workspace, endpointName, replicaID, info.ContainerName, true),
+			ContainerName: info.ContainerName,
+			Role:          role,
+			Rank:          rank,
+		})
+	}
+
+	return replicas
+}
+
+func k8sContainerLogURL(workspace, endpointName, replicaID, containerName string, download bool) string {
+	base := fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/logs", workspace, endpointName, replicaID)
+	q := url.Values{}
+
+	if containerName != "" {
+		q.Set("container", containerName)
+	}
+
+	if download {
+		q.Set("download", "true")
+	}
+
+	if len(q) == 0 {
+		return base
+	}
+
+	return base + "?" + q.Encode()
+}
+
+func parseK8sContainerLogIdentity(containerName string) (string, *int) {
+	if containerName == "pd-router-sidecar" {
+		return "router", nil
+	}
+
+	role, suffix, ok := strings.Cut(containerName, "-")
+	if !ok || (role != "prefill" && role != "decode") {
+		return "", nil
+	}
+
+	rank, err := strconv.Atoi(suffix)
+	if err != nil || rank < 0 {
+		return "", nil
+	}
+
+	return role, &rank
 }
 
 // streamRayLogs streams logs from Ray Dashboard API directly to the response
@@ -582,8 +648,6 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 
 // streamK8sLogs streams logs from Kubernetes cluster directly to the response
 func streamK8sLogs(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient, endpoint *v1.Endpoint, replicaID, logType string, lines int64) error {
-	_ = endpoint // Reserved for future use
-
 	if logType != "logs" {
 		return fmt.Errorf("unsupported log type for Kubernetes: %s (only 'logs' is supported)", logType)
 	}
@@ -597,12 +661,9 @@ func streamK8sLogs(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient
 		return fmt.Errorf("failed to get pod %s: %v", replicaID, err)
 	}
 
-	// Find the main container (first non-init container)
-	var containerName string
-	if len(pod.Spec.Containers) > 0 {
-		containerName = pod.Spec.Containers[0].Name
-	} else {
-		return fmt.Errorf("no containers found in pod %s", replicaID)
+	containerName, err := resolveK8sLogContainer(pod, c.Query("container"), endpoint)
+	if err != nil {
+		return err
 	}
 
 	// Configure log options
@@ -629,4 +690,34 @@ func streamK8sLogs(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient
 	}
 
 	return nil
+}
+
+func resolveK8sLogContainer(pod *corev1.Pod, requested string, endpoint *v1.Endpoint) (string, error) {
+	if pod == nil {
+		return "", fmt.Errorf("pod is nil")
+	}
+
+	if len(pod.Spec.Containers) == 0 {
+		return "", fmt.Errorf("no containers found in pod %s", pod.Name)
+	}
+
+	if requested != "" {
+		for _, container := range pod.Spec.Containers {
+			if container.Name == requested {
+				return requested, nil
+			}
+		}
+
+		return "", fmt.Errorf("container %q not found in pod %s", requested, pod.Name)
+	}
+
+	if len(pod.Spec.Containers) == 1 {
+		return pod.Spec.Containers[0].Name, nil
+	}
+
+	if endpoint != nil && endpoint.Spec != nil && endpoint.Spec.Strategy == "pd" {
+		return "", fmt.Errorf("container query parameter is required for PD pod %s with %d containers", pod.Name, len(pod.Spec.Containers))
+	}
+
+	return pod.Spec.Containers[0].Name, nil
 }

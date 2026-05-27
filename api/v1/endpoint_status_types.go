@@ -1,7 +1,8 @@
 package v1
 
-// ReplicaStatus is the Demo / Phase 0 shape — flat, no nested Pools or Roles.
-// Phase 1 MVP will extend with `Roles map[string]RoleStatus` per review 52587f08.
+// ReplicaStatus is the flat routing-domain status used by EndpointStatus.
+// PD same-host reports RoleGroup readiness here; per-role runtime details stay
+// in logs, metrics, and topology surfaces.
 type ReplicaStatus struct {
 	ID       string `json:"id"`
 	NodeName string `json:"node_name,omitempty"`

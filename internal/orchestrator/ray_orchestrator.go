@@ -248,7 +248,7 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 	// PD same-host: override import_path, derive pd_config + allocate ports,
 	// then inject pd_config into Args. Side-effect: writes port-allocation rows
 	// to the configured Storage. Refuses to render without an allocator
-	// configured — the Demo path is one-and-the-same with MVP, no defaults.
+	// configured.
 	if isPDStrategy(ctx.Endpoint) {
 		if err := applyPDBranch(context.Background(), ctx.Endpoint, ctx.Cluster, ctx.Engine,
 			o.acceleratorMgr, o.portAllocator, &newApp); err != nil {

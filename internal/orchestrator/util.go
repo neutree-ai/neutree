@@ -339,8 +339,8 @@ func convertToKubernetes(acceleratorMgr accelerator.Manager, spec *v1.ResourceSp
 //   - monolithic (and any strategy that fills spec.Resources): reads it directly.
 //   - PD same-host (and other role-list strategies where spec.Resources is nil):
 //     scans spec.Roles[*].Resources and returns the first non-empty accelerator
-//     type. Demo assumes homogeneous accelerator across roles in one endpoint;
-//     Phase 2+ with cross-accelerator P/D will need a per-role container path,
+//     type. Phase 1 assumes homogeneous accelerator across roles in one endpoint;
+//     future cross-accelerator P/D will need a per-role container path,
 //     not just a single shared accelerator type.
 //
 // Returns "" when no accelerator info is present — caller defaults to CPU.

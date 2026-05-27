@@ -1,7 +1,6 @@
--- Demo (Phase 0) — PD same-host minimum API fields.
--- MVP PR-01 will extend api.endpoint_spec with Sidecars[], full kv
--- schema, and ReplicaStatus.Roles map; this migration only adds the Demo-minimum
--- attributes to api.endpoint_spec / api.endpoint_status composite types.
+-- PD same-host API fields on api.endpoint_spec / api.endpoint_status.
+-- These fields model strategy, placement summary, role definitions, and
+-- flattened RoleGroup replica status for the Phase 1 same-host design.
 
 ALTER TYPE api.endpoint_spec ADD ATTRIBUTE strategy  TEXT;
 ALTER TYPE api.endpoint_spec ADD ATTRIBUTE placement json;

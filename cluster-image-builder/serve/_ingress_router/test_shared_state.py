@@ -1,4 +1,4 @@
-"""Unit tests for shared_state._Shared callback hooks (Demo V14).
+"""Unit tests for shared_state._Shared callback hooks.
 
 Pure-Python — no Ray needed. Run with `pytest test_shared_state.py`.
 """

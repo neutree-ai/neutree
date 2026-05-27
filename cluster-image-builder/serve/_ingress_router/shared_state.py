@@ -1,11 +1,11 @@
 """Module-level _SHARED view for PDIngress.
 
-Architecture invariant being validated (Demo V10):
+Architecture invariant:
     Inside a single Python process (the PDIngress replica), a module-level
     singleton acts as a coherent shared view between the Ray Serve RequestRouter
     callbacks (update_replicas / on_replica_actor_died) and the FastAPI request
     handlers. Multiple ingress processes (num_replicas > 1) each maintain their
-    own _SHARED — MVP keeps this assumption.
+    own _SHARED.
 
 Data model:
     serve_replicas: {replica_id_str -> ReplicaSnapshot}
@@ -16,10 +16,10 @@ Data model:
     actor_topology: {replica_id_str -> ActorTopology}
         Populated lazily by PDIngress when it first needs to know which node
         the PrefillActor / DecodeActor of a given backend replica live on.
-        MVP will refresh on a TTL (~100ms) per project memory; Demo keeps it
-        observed-once.
+        Refreshes are driven by request-router callbacks and explicit topology
+        pulls.
 
-Event hooks (Demo V14):
+Event hooks:
     _Shared accepts callback registration for three events:
         replica_added     — fired with (replica_id, ReplicaSnapshot)
         replica_removed   — fired with (replica_id,)
@@ -29,9 +29,7 @@ Event hooks (Demo V14):
 
     Callbacks may be sync or async. Async callbacks are scheduled via the
     running asyncio loop; if no loop is found (mutation came from a non-loop
-    thread), the callback is logged and skipped — MVP can revisit with a
-    dedicated dispatcher loop if Ray Serve internals turn out to mutate from
-    a background thread.
+    thread), the callback is logged and skipped.
 """
 from __future__ import annotations
 
