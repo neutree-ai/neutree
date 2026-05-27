@@ -180,6 +180,15 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 							"kubernetes": {
 								"default": GetSGLangV0_5_10DeployTemplate(),
 							},
+							v1.RayServeDeployTarget: {
+								v1.PDDeployMode: rayServeEntrypoint("serve.sglang.v0_5_10.app_pd_collocated:app_builder"),
+							},
+						},
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								KVConnectors:   []string{"nixl", "mooncake"},
+								SupportedTasks: []string{v1.TextGenerationModelTask},
+							},
 						},
 					},
 				},

@@ -61,13 +61,22 @@
 
 **Files:**
 - Likely modify: `internal/engine/builtin.go`
-- Likely modify: `internal/engine/vllm/*/templates/kubernetes/*`
-- Likely create/modify: K8s sidecar translator code/templates
-- Likely modify: SGLang Ray app/capability files
+- Modify: `cluster-image-builder/serve/sglang/v0_5_10/app.py`
+- Add: `cluster-image-builder/serve/sglang/v0_5_10/app_pd_collocated.py`
+- Modify: `cluster-image-builder/serve/_metrics/sglang_ray_bridge.py`
+- Modify: `cluster-image-builder/Dockerfile.engine-sglang`
+- Test: SGLang static PD app checks and builtin engine capability tests
 
 - [x] Re-read design sections 5.4.1, 5.5.4, and 5.6.2 before editing.
 - [x] Stop and ask for confirmation if implementing the full K8s multi-container Pod and production-stack router contract requires files outside this repo or a new sidecar image contract.
-- [ ] Implement the smallest independently testable slice after confirmation.
+- [x] Confirm scope is SSH/Ray static cluster SGLang P/D only; leave full K8s sidecar/router runtime out of this slice.
+- [x] Add failing tests for SGLang v0.5.10 `ray_serve/pd` capability and static PD app contract.
+- [x] Refactor SGLang monolithic backend to expose raw `_Backend` for PD inner actors.
+- [x] Implement `serve.sglang.v0_5_10.app_pd_collocated:app_builder` with `PDCollocatedBackend`, same-host placement group, deterministic role actor names, SGLang bootstrap payload injection, and async prefill/decode dispatch.
+- [x] Add SGLang metrics env fallback labels for PD inner actors.
+- [x] Copy `_ingress_router` into the SGLang engine image so `PDIngress` and `ObserverRouter` are available at runtime.
+- [x] Register SGLang v0.5.10 Ray Serve PD capability with NIXL/Mooncake connectors.
+- [ ] Keep K8s PD runtime explicitly unimplemented until the sidecar / production-stack router contract is available.
 
 ### Task 6: Verification and PR Hygiene
 
@@ -79,4 +88,6 @@
 - [x] Run Python compile checks for touched app files.
 - [x] Run dashboard JSON validation after dashboard changes.
 - [x] Run `git diff --check`.
+- [x] Run `go test ./api/v1 ./db/migrations ./internal/... -count=1`.
+- [x] Run `./bin/golangci-lint run`.
 - [ ] Commit and push after verified.
