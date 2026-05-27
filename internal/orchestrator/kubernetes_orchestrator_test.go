@@ -1380,6 +1380,11 @@ func TestKubernetesOrchestrator_applyPDBranchVariables_UsesEngineVersionSidecarA
 		assert.NotContains(t, container.EngineArgs, "disaggregation_bootstrap_port")
 	}
 	assert.Contains(t, data.PD.ConfigJSON, `"endpoint":"chat-model"`)
+
+	var sidecarConfig map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(data.PD.ConfigJSON), &sidecarConfig))
+	assert.Equal(t, "vllm", sidecarConfig["engine"])
+	assert.Equal(t, "v0.20.0", sidecarConfig["engine_version"])
 }
 
 func TestKubernetesOrchestrator_KubernetesPDTemplateRendersCollocatedPod(t *testing.T) {

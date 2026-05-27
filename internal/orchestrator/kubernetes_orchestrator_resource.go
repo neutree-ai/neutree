@@ -444,6 +444,9 @@ func (k *kubernetesOrchestrator) applyKubernetesPDBranchVariables(ctx context.Co
 		pdConfig["endpoint"] = endpoint.Metadata.Name
 	}
 
+	pdConfig["engine"] = engine.Metadata.Name
+	pdConfig["engine_version"] = endpoint.Spec.Engine.Version
+
 	pdConfig["sidecar"] = map[string]interface{}{
 		"port":        pdVars.Sidecar.Port,
 		"health_path": pdVars.Sidecar.HealthPath,

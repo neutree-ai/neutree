@@ -1,0 +1,12 @@
+ARG ARCH
+
+FROM --platform=linux/${ARCH} python:3.11-slim
+WORKDIR /app
+
+COPY python/neutree/__init__.py /app/neutree/__init__.py
+COPY python/neutree/pd_router_sidecar /app/neutree/pd_router_sidecar
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+ENTRYPOINT ["python", "-m", "neutree.pd_router_sidecar"]
