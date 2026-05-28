@@ -1,6 +1,7 @@
 from router.scheduling.handlers import PDSameHostPicker, PDSameHostProfileHandler
 from router.scheduling.plugins import (
     ConsistentHashWithBoundedLoadScorer,
+    DomainAffinityFilter,
     EndpointFilterPlugin,
     EndpointScorePicker,
     EndpointScorePlugin,
@@ -31,6 +32,7 @@ from router.scheduling.types import (
 __all__ = [
     "ConsistentHashEndpointPicker",
     "ConsistentHashWithBoundedLoadScorer",
+    "DomainAffinityFilter",
     "EndpointFilterPlugin",
     "EndpointInfo",
     "EndpointRouteDecision",

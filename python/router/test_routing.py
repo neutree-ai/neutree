@@ -3,6 +3,7 @@ import unittest
 from router.scheduling import (
     ConsistentHashEndpointPicker,
     ConsistentHashWithBoundedLoadScorer,
+    DomainAffinityFilter,
     EndpointInfo,
     PDSameHostProfileHandler,
     RequestStats,
@@ -148,7 +149,25 @@ class SchedulingTests(unittest.TestCase):
 
         self.assertEqual(got.url, "http://pod-b:8000")
 
-    def test_pd_profile_handler_selects_decode_endpoint_then_local_prefill_endpoint(self):
+    def test_domain_affinity_filter_matches_selected_endpoint_domain(self):
+        profile = SchedulingProfile(
+            [DomainAffinityFilter()],
+            [WeightedEndpointScorer(StaticScorePlugin({"prefill-a": 0.1, "prefill-b": 1.0}), 1.0)],
+        )
+        selected_decode = EndpointInfo(id="decode-a", url="http://decode-a:8000", model_names=["m"], domain="node-a")
+        endpoints = [
+            EndpointInfo(id="prefill-a", url="http://prefill-a:8000", model_names=["m"], domain="node-a"),
+            EndpointInfo(id="prefill-b", url="http://prefill-b:8000", model_names=["m"], domain="node-b"),
+        ]
+
+        got = profile.pick(
+            endpoints,
+            SchedulingContext({}, {}, {"model": "m"}, selected_endpoint=selected_decode),
+        )
+
+        self.assertEqual(got.id, "prefill-a")
+
+    def test_pd_profile_handler_selects_decode_endpoint_then_domain_affinity_prefill_endpoint(self):
         profile_handler = PDSameHostProfileHandler()
         prefill_a = EndpointInfo(
             url="pd://group-a/prefill/0?sidecar=http://10.0.0.1:8000",
@@ -157,6 +176,7 @@ class SchedulingTests(unittest.TestCase):
             endpoint="e",
             is_pd_collocated=True,
             dispatch_url="http://10.0.0.1:8000",
+            domain="group-a",
             pd_role_group_id="group-a",
             pd_role="prefill",
             pd_index=0,
@@ -168,6 +188,7 @@ class SchedulingTests(unittest.TestCase):
             endpoint="e",
             is_pd_collocated=True,
             dispatch_url="http://10.0.0.1:8000",
+            domain="group-a",
             pd_role_group_id="group-a",
             pd_role="decode",
             pd_index=0,
@@ -179,6 +200,7 @@ class SchedulingTests(unittest.TestCase):
             endpoint="e",
             is_pd_collocated=True,
             dispatch_url="http://10.0.0.2:8000",
+            domain="group-b",
             pd_role_group_id="group-b",
             pd_role="prefill",
             pd_index=0,
@@ -190,6 +212,7 @@ class SchedulingTests(unittest.TestCase):
             endpoint="e",
             is_pd_collocated=True,
             dispatch_url="http://10.0.0.2:8000",
+            domain="group-b",
             pd_role_group_id="group-b",
             pd_role="decode",
             pd_index=0,

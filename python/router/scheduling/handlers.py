@@ -4,8 +4,8 @@ from typing import List
 
 from router.scheduling.plugins import (
     ConsistentHashWithBoundedLoadScorer,
+    DomainAffinityFilter,
     PDRoleFilter,
-    PDSameRoleGroupFilter,
     ReadyEndpointFilter,
     WeightedEndpointScorer,
 )
@@ -35,7 +35,7 @@ class PDSameHostProfileHandler:
             name="decode",
         )
         self._prefill_profile = SchedulingProfile(
-            [ReadyEndpointFilter(), PDRoleFilter("prefill"), PDSameRoleGroupFilter()],
+            [ReadyEndpointFilter(), PDRoleFilter("prefill"), DomainAffinityFilter()],
             scorers,
             name="prefill",
         )
@@ -54,7 +54,7 @@ class PDSameHostProfileHandler:
             prefill = self._prefill_profile.pick(endpoints, context.with_selected_endpoint(decode))
         except ValueError as exc:
             raise ValueError(
-                f"no ready prefill endpoint in role group {decode.pd_role_group_id}"
+                f"no ready prefill endpoint in domain {decode.scheduling_domain}"
             ) from exc
         return EndpointRouteDecision(endpoint=decode, prefill=prefill, decode=decode)
 

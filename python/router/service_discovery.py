@@ -223,6 +223,7 @@ class K8sPodServiceDiscovery:
                     sleep=not container.ready,
                     is_pd_collocated=True,
                     dispatch_url=sidecar_url,
+                    domain=role_group_id,
                     pd_role_group_id=role_group_id,
                     pd_role=role,
                     pd_index=index,

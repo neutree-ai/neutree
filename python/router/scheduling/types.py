@@ -56,14 +56,20 @@ class EndpointInfo:
     sleep: bool = False
     is_pd_collocated: bool = False
     dispatch_url: Optional[str] = None
+    domain: Optional[str] = None
     pd_role_group_id: Optional[str] = None
     pd_role: Optional[str] = None
     pd_index: Optional[int] = None
 
     @property
+    def scheduling_domain(self) -> Optional[str]:
+        return self.domain or self.pd_role_group_id
+
+    @property
     def route_key(self) -> str:
-        if self.is_pd_collocated and self.pd_role_group_id and self.pd_role is not None and self.pd_index is not None:
-            return f"{self.pd_role_group_id}:{self.pd_role}:{self.pd_index}"
+        domain = self.scheduling_domain
+        if self.is_pd_collocated and domain and self.pd_role is not None and self.pd_index is not None:
+            return f"{domain}:{self.pd_role}:{self.pd_index}"
         return self.id or self.pod_name or self.url
 
     @property

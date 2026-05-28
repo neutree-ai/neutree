@@ -59,13 +59,19 @@ class PDRoleFilter:
         return endpoint.pd_role == self._role
 
 
-class PDSameRoleGroupFilter:
-    name = "pd-same-role-group"
+class DomainAffinityFilter:
+    name = "domain-affinity"
 
     def filter(self, endpoint: EndpointInfo, context: SchedulingContext) -> bool:
         if context.selected_endpoint is None:
             return False
-        return endpoint.pd_role_group_id == context.selected_endpoint.pd_role_group_id
+        if context.selected_endpoint.scheduling_domain is None:
+            return False
+        return endpoint.scheduling_domain == context.selected_endpoint.scheduling_domain
+
+
+class PDSameRoleGroupFilter(DomainAffinityFilter):
+    name = "pd-same-role-group"
 
 
 class ConsistentHashWithBoundedLoadScorer:

@@ -5,6 +5,7 @@ from typing import Any, List, Mapping
 from router.scheduling import (
     ConsistentHashEndpointPicker,
     ConsistentHashWithBoundedLoadScorer,
+    DomainAffinityFilter,
     EndpointFilterPlugin,
     EndpointInfo,
     EndpointRouteDecision,
@@ -63,6 +64,7 @@ __all__ = [
     "ConsistentHashEndpointPicker",
     "ConsistentHashRouter",
     "ConsistentHashWithBoundedLoadScorer",
+    "DomainAffinityFilter",
     "EndpointFilterPlugin",
     "EndpointInfo",
     "EndpointRouteDecision",

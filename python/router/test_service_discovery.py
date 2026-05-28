@@ -139,6 +139,8 @@ class RouterServiceDiscoveryTests(unittest.TestCase):
             self.assertEqual(endpoint.dispatch_url, "http://10.0.0.1:8000")
             self.assertEqual(endpoint.model_names, ["m"])
             self.assertTrue(endpoint.is_pd_collocated)
+            self.assertEqual(endpoint.domain, "pod-uid")
+            self.assertEqual(endpoint.scheduling_domain, "pod-uid")
             self.assertEqual(endpoint.pd_role_group_id, "pod-uid")
             self.assertFalse(endpoint.sleep)
 
