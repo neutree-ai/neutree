@@ -8,7 +8,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 from urllib import error as urlerror
 from urllib import parse, request
 
@@ -270,6 +270,33 @@ class PDRouterSidecar:
             "units": units,
         }
 
+    def metrics(self) -> str:
+        checks = self._container_health()
+        ready = 1 if checks and all(entry["ready"] for entry in checks.values()) else 0
+        lines = [
+            "# HELP neutree_pd_sidecar_ready Whether the PD sidecar local RoleGroup is ready.",
+            "# TYPE neutree_pd_sidecar_ready gauge",
+            (
+                "neutree_pd_sidecar_ready"
+                f'{{engine="{_metric_escape(self.config.engine)}",'
+                f'engine_version="{_metric_escape(self.config.engine_version)}",'
+                f'workspace="{_metric_escape(self.config.workspace)}",'
+                f'endpoint="{_metric_escape(self.config.endpoint)}"}} {ready}'
+            ),
+            "# HELP neutree_pd_sidecar_container_ready Whether a local PD role container is ready.",
+            "# TYPE neutree_pd_sidecar_container_ready gauge",
+        ]
+        for name, entry in sorted(checks.items()):
+            rank = "" if entry.get("rank") is None else str(entry.get("rank"))
+            value = 1 if entry.get("ready") else 0
+            lines.append(
+                "neutree_pd_sidecar_container_ready"
+                f'{{container="{_metric_escape(name)}",'
+                f'role="{_metric_escape(str(entry.get("role") or ""))}",'
+                f'rank="{_metric_escape(rank)}"}} {value}'
+            )
+        return "\n".join(lines) + "\n"
+
     def _handle_vllm_chat(
         self,
         payload: Mapping[str, Any],
@@ -431,6 +458,15 @@ class SidecarHTTPRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/pd/topology":
             self._send_response(EngineHTTPResponse.json(self.runtime.topology()))
             return
+        if path == "/metrics":
+            self._send_response(
+                EngineHTTPResponse(
+                    status_code=200,
+                    body=self.runtime.metrics().encode("utf-8"),
+                    headers={"content-type": "text/plain; version=0.0.4"},
+                )
+            )
+            return
         self._send_response(_error_response("not found", 404))
 
     def do_POST(self) -> None:  # noqa: N802
@@ -479,6 +515,8 @@ class SidecarHTTPRequestHandler(BaseHTTPRequestHandler):
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 LOG.info("client disconnected while streaming")
+            finally:
+                _close_iterable(response.stream)
             return
 
         body = response.body or b""
@@ -561,14 +599,51 @@ def _iter_response(resp: Any) -> Iterable[bytes]:
         resp.close()
 
 
+class _SGLangJoinedStream:
+    def __init__(self, stream: Iterable[bytes], future: Any, req_id: str):
+        self._stream = stream
+        self._iterator = iter(stream)
+        self._future = future
+        self._req_id = req_id
+        self._closed = False
+
+    def __iter__(self) -> "_SGLangJoinedStream":
+        return self
+
+    def __next__(self) -> bytes:
+        if self._closed:
+            raise StopIteration
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            try:
+                self._future.result()
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("SGLang prefill stream failed for req=%s: %s", self._req_id, exc)
+                raise
+            raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        _close_iterable(self._stream)
+        cancel = getattr(self._future, "cancel", None)
+        if callable(cancel):
+            cancel()
+
+
 def _join_stream_with_future(stream: Iterable[bytes], future: Any, req_id: str) -> Iterable[bytes]:
-    try:
-        for chunk in stream:
-            yield chunk
-        future.result()
-    except Exception as exc:  # noqa: BLE001
-        LOG.warning("SGLang prefill stream failed for req=%s: %s", req_id, exc)
-        raise
+    return _SGLangJoinedStream(stream, future, req_id)
+
+
+def _close_iterable(stream: Any) -> None:
+    close: Optional[Callable[[], Any]] = getattr(stream, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("failed to close upstream stream: %s", exc)
 
 
 def _first_value(value: Any) -> Any:
@@ -594,3 +669,7 @@ def _env_bool(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _metric_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')

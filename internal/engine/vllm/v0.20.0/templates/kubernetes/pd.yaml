@@ -181,9 +181,11 @@ spec:
              value: "{{ $value }}"
            {{ end }}
           ports:
-            - containerPort: {{ .Port }}
+            - name: http
+              containerPort: {{ .Port }}
             {{- if gt .SideChannelPort 0 }}
-            - containerPort: {{ .SideChannelPort }}
+            - name: side-channel
+              containerPort: {{ .SideChannelPort }}
             {{- end }}
           startupProbe:
             httpGet:

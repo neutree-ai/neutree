@@ -5,6 +5,7 @@ from neutree.pd_router_sidecar.runtime import (
     EngineHTTPResponse,
     PDRouterSidecar,
     SidecarConfig,
+    SidecarHTTPRequestHandler,
     extract_route_indices,
 )
 
@@ -61,6 +62,51 @@ class FakeEngineClient:
 
     def get_health(self, container, path="/health", timeout=0.5):
         return bool(self.health.get(container.name, True))
+
+
+class CloseAwareStream:
+    def __init__(self, chunks):
+        self._chunks = iter(chunks)
+        self.closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._chunks)
+
+    def close(self):
+        self.closed = True
+
+
+class FakeFuture:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+        return True
+
+    def result(self):
+        return None
+
+
+class FakeExecutor:
+    def __init__(self):
+        self.future = FakeFuture()
+        self.submitted = []
+
+    def submit(self, fn, *args):
+        self.submitted.append((fn, args))
+        return self.future
+
+
+class BrokenPipeWriter:
+    def write(self, _chunk):
+        raise BrokenPipeError()
+
+    def flush(self):
+        pass
 
 
 class PDRouterSidecarTests(unittest.TestCase):
@@ -226,6 +272,50 @@ class PDRouterSidecarTests(unittest.TestCase):
         self.assertEqual(posts_by_role["prefill"]["payload"]["bootstrap_room"], 99)
         self.assertEqual(posts_by_role["decode"]["payload"]["bootstrap_room"], 99)
 
+    def test_sglang_stream_close_cancels_pending_prefill_and_closes_decode_stream(self):
+        decode_stream = CloseAwareStream([b"data: decode\n\n", b"data: [DONE]\n\n"])
+        client = FakeEngineClient(
+            responses={
+                ("decode", 0, True): EngineHTTPResponse(
+                    status_code=200,
+                    headers={"content-type": "text/event-stream"},
+                    stream=decode_stream,
+                ),
+            }
+        )
+        sidecar = PDRouterSidecar(SidecarConfig.from_dict(_config("sglang")), client)
+        fake_executor = FakeExecutor()
+        sidecar._executor = fake_executor
+
+        result = sidecar.handle_chat(
+            {"messages": [], "stream": True},
+            prefill_index=0,
+            decode_index=0,
+        )
+
+        iterator = iter(result.stream)
+        self.assertEqual(next(iterator), b"data: decode\n\n")
+        iterator.close()
+        self.assertTrue(decode_stream.closed)
+        self.assertTrue(fake_executor.future.cancelled)
+
+    def test_http_handler_closes_upstream_stream_when_client_disconnects(self):
+        stream = CloseAwareStream([b"data: decode\n\n"])
+        response = EngineHTTPResponse(
+            status_code=200,
+            headers={"content-type": "text/event-stream"},
+            stream=stream,
+        )
+        handler = object.__new__(SidecarHTTPRequestHandler)
+        handler.wfile = BrokenPipeWriter()
+        handler.send_response = lambda _status: None
+        handler.send_header = lambda _key, _value: None
+        handler.end_headers = lambda: None
+
+        handler._send_response(response)
+
+        self.assertTrue(stream.closed)
+
     def test_extract_route_indices_accepts_query_headers_or_payload_and_strips_payload_fields(self):
         payload = {"messages": [], "prefill_index": "1"}
         prefill, decode, clean = extract_route_indices(
@@ -252,6 +342,7 @@ class PDRouterSidecarTests(unittest.TestCase):
 
         health = sidecar.health()
         topology = sidecar.topology()
+        metrics = sidecar.metrics()
 
         self.assertEqual(health.status_code, 503)
         body = json.loads(health.body)
@@ -262,6 +353,15 @@ class PDRouterSidecarTests(unittest.TestCase):
         units = {(u["role"], u["rank"]): u for u in topology["units"]}
         self.assertTrue(units[("prefill", 0)]["ready"])
         self.assertFalse(units[("decode", 0)]["ready"])
+        self.assertIn('neutree_pd_sidecar_ready{engine="vllm"', metrics)
+        self.assertIn(
+            'neutree_pd_sidecar_container_ready{container="prefill-0",role="prefill",rank="0"} 1',
+            metrics,
+        )
+        self.assertIn(
+            'neutree_pd_sidecar_container_ready{container="decode-0",role="decode",rank="0"} 0',
+            metrics,
+        )
 
 
 if __name__ == "__main__":

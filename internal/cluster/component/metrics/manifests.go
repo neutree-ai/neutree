@@ -79,6 +79,12 @@ data:
       - source_labels: [__meta_kubernetes_pod_label_workspace]
         action: keep
         regex: {{ .Workspace }}
+      # PD collocated Pods expose multiple role containers. Scrape them in the
+      # dedicated container-aware job below to avoid duplicate sidecar-only
+      # targets from the legacy fixed-port path.
+      - source_labels: [__meta_kubernetes_pod_label_neutree_io_component]
+        action: drop
+        regex: pd-collocated
       # Set the __address__ to pod IP and port 8000
       - source_labels: [__meta_kubernetes_pod_ip]
         action: replace
@@ -110,6 +116,84 @@ data:
       - source_labels: [__meta_kubernetes_pod_label_engine_version]
         action: replace
         target_label: engine_version
+    - job_name: 'neutree-inference-pd'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - {{ .Namespace }}
+        selectors:
+        - role: pod
+          label: app=inference
+      relabel_configs:
+      # Only scrape pods with cluster and workspace labels matching
+      - source_labels: [__meta_kubernetes_pod_label_cluster]
+        action: keep
+        regex: {{ .ClusterName }}
+      - source_labels: [__meta_kubernetes_pod_label_workspace]
+        action: keep
+        regex: {{ .Workspace }}
+      # PD collocated Pods expose sidecar/prefill/decode container ports.
+      - source_labels: [__meta_kubernetes_pod_label_neutree_io_component]
+        action: keep
+        regex: pd-collocated
+      # Scrape only the HTTP metric endpoint, not side-channel transfer ports.
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        action: keep
+        regex: http
+      # Set the __address__ to pod IP and the discovered container HTTP port.
+      - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_container_port_number]
+        action: replace
+        target_label: __address__
+        regex: (.+);(.+)
+        replacement: $1:$2
+      # Add pod metadata as labels
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_label_cluster]
+        action: replace
+        target_label: neutree_cluster
+      - source_labels: [__meta_kubernetes_pod_label_workspace]
+        action: replace
+        target_label: workspace
+      - source_labels: [__meta_kubernetes_pod_label_endpoint]
+        action: replace
+        target_label: application
+      - target_label: deployment
+        replacement: Backend
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: replica
+      - source_labels: [__meta_kubernetes_pod_label_engine]
+        action: replace
+        target_label: engine
+      - source_labels: [__meta_kubernetes_pod_label_engine_version]
+        action: replace
+        target_label: engine_version
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: container
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: role
+        regex: prefill-[0-9]+
+        replacement: prefill
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: role
+        regex: decode-[0-9]+
+        replacement: decode
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: role
+        regex: pd-router-sidecar
+        replacement: sidecar
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: rank
+        regex: (prefill|decode)-([0-9]+)
+        replacement: $2
     # Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
     - job_name: 'node-exporter-http'
       kubernetes_sd_configs:
