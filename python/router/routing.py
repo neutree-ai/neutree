@@ -212,39 +212,17 @@ class PDSameRoleGroupFilter:
         return endpoint.pd_role_group_id == context.selected_endpoint.pd_role_group_id
 
 
-class EndpointLoadScorer:
-    name = "endpoint-load"
-
-    def score(
-        self,
-        endpoints: List[EndpointInfo],
-        context: SchedulingContext,
-    ) -> Dict[str, float]:
-        if not endpoints:
-            return {}
-        loads = {
-            endpoint.route_key: context.request_stats.get(endpoint.stats_key, RequestStats()).active_requests
-            for endpoint in endpoints
-        }
-        min_load = min(loads.values())
-        max_load = max(loads.values())
-        if min_load == max_load:
-            return {endpoint.route_key: 1.0 for endpoint in endpoints}
-        return {
-            endpoint.route_key: (max_load - loads[endpoint.route_key]) / (max_load - min_load)
-            for endpoint in endpoints
-        }
-
-
-class EndpointHashScorer:
+class ConsistentHashWithBoundedLoadScorer:
     def __init__(
         self,
         virtual_nodes_per_replica: int = 100,
+        load_factor: float = 1.25,
         max_user_messages_for_cache: int = 2,
     ):
         self._virtual_nodes = virtual_nodes_per_replica
+        self._load_factor = load_factor
         self._max_user_messages_for_cache = max_user_messages_for_cache
-        self.name = "endpoint-hash"
+        self.name = "consistent-hash-with-bounded-load"
 
     def score(
         self,
@@ -255,38 +233,59 @@ class EndpointHashScorer:
             return {}
         cache_key = maybe_extract_cache_key(context.request_json, self._max_user_messages_for_cache)
         if cache_key is None:
-            return {endpoint.route_key: 1.0 for endpoint in endpoints}
+            selected = min(endpoints, key=lambda endpoint: (self._load(endpoint, context), endpoint.route_key))
+            return self._single_winner_scores(endpoints, selected)
 
-        route_keys = sorted(endpoint.route_key for endpoint in endpoints)
-        ring = self._build_ring(route_keys)
+        ring = self._build_ring(endpoints)
         payload_hash = _hash64(cache_key)
         index = bisect.bisect_left([point for point, _ in ring], payload_hash)
         if index >= len(ring):
             index = 0
 
         checked: set[str] = set()
-        rank_by_key: Dict[str, int] = {}
-        while len(checked) < len(route_keys):
-            _, route_key = ring[index]
+        fallback: Optional[EndpointInfo] = None
+        threshold = self._bounded_load_threshold(endpoints, context)
+        while len(checked) < len(endpoints):
+            _, endpoint = ring[index]
             index = (index + 1) % len(ring)
+            route_key = endpoint.route_key
             if route_key in checked:
                 continue
-            rank_by_key[route_key] = len(rank_by_key)
             checked.add(route_key)
-        if len(route_keys) == 1:
-            return {route_keys[0]: 1.0}
-        return {
-            route_key: 1.0 - (rank_by_key[route_key] / (len(route_keys) - 1))
-            for route_key in route_keys
-        }
+            if fallback is None:
+                fallback = endpoint
+            if self._load(endpoint, context) + 1 <= threshold:
+                return self._single_winner_scores(endpoints, endpoint)
+        return self._single_winner_scores(endpoints, fallback or endpoints[0])
 
-    def _build_ring(self, route_keys: List[str]) -> List[Tuple[int, str]]:
-        ring: List[Tuple[int, str]] = []
-        for route_key in route_keys:
+    def _build_ring(self, endpoints: List[EndpointInfo]) -> List[Tuple[int, EndpointInfo]]:
+        ring: List[Tuple[int, EndpointInfo]] = []
+        for endpoint in sorted(endpoints, key=lambda item: item.route_key):
             for virtual_node in range(self._virtual_nodes):
-                ring.append((_hash64(f"{route_key}:{virtual_node}"), route_key))
+                ring.append((_hash64(f"{endpoint.route_key}:{virtual_node}"), endpoint))
         ring.sort(key=lambda item: item[0])
         return ring
+
+    def _bounded_load_threshold(
+        self,
+        endpoints: List[EndpointInfo],
+        context: SchedulingContext,
+    ) -> float:
+        total_load = sum(self._load(endpoint, context) for endpoint in endpoints)
+        return ((total_load + 1) / len(endpoints)) * self._load_factor
+
+    def _load(self, endpoint: EndpointInfo, context: SchedulingContext) -> int:
+        return context.request_stats.get(endpoint.stats_key, RequestStats()).active_requests
+
+    def _single_winner_scores(
+        self,
+        endpoints: List[EndpointInfo],
+        selected: EndpointInfo,
+    ) -> Dict[str, float]:
+        return {
+            endpoint.route_key: 1.0 if endpoint.route_key == selected.route_key else 0.0
+            for endpoint in endpoints
+        }
 
 
 class MaxScoreEndpointPicker:
@@ -358,20 +357,18 @@ class ConsistentHashRouter(WeightedScoringRouter):
     def __init__(
         self,
         virtual_nodes_per_replica: int = 100,
-        load_weight: float = 2.0,
-        hash_weight: float = 1.0,
+        load_factor: float = 1.25,
         max_user_messages_for_cache: int = 2,
-        load_factor: Optional[float] = None,
     ):
-        if load_factor is not None:
-            load_weight = 2.0 / max(load_factor, 0.001)
         super().__init__(
             [
                 WeightedEndpointScorer(
-                    EndpointHashScorer(virtual_nodes_per_replica, max_user_messages_for_cache),
-                    hash_weight,
+                    ConsistentHashWithBoundedLoadScorer(
+                        virtual_nodes_per_replica,
+                        load_factor,
+                        max_user_messages_for_cache,
+                    )
                 ),
-                WeightedEndpointScorer(EndpointLoadScorer(), load_weight),
             ]
         )
 
@@ -380,16 +377,17 @@ class PDSameHostRouter:
     def __init__(
         self,
         virtual_nodes_per_replica: int = 100,
-        load_weight: float = 2.0,
-        hash_weight: float = 1.0,
+        load_factor: float = 1.25,
         max_user_messages_for_cache: int = 2,
     ):
         scorers = [
             WeightedEndpointScorer(
-                EndpointHashScorer(virtual_nodes_per_replica, max_user_messages_for_cache),
-                hash_weight,
+                ConsistentHashWithBoundedLoadScorer(
+                    virtual_nodes_per_replica,
+                    load_factor,
+                    max_user_messages_for_cache,
+                )
             ),
-            WeightedEndpointScorer(EndpointLoadScorer(), load_weight),
         ]
         self._decode_profile = SchedulingProfile(
             [ReadyEndpointFilter(), PDRoleFilter("decode")],

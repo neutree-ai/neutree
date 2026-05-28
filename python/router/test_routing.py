@@ -2,9 +2,8 @@ import unittest
 
 from router.routing import (
     ConsistentHashRouter,
+    ConsistentHashWithBoundedLoadScorer,
     EndpointInfo,
-    EndpointHashScorer,
-    EndpointLoadScorer,
     PDSameHostRouter,
     RequestStats,
     RoundRobinRouter,
@@ -23,6 +22,19 @@ class EndpointNameFilter:
 
     def filter(self, endpoint, _context):
         return endpoint.endpoint == self._endpoint_name
+
+
+class StaticScorePlugin:
+    name = "static-score"
+
+    def __init__(self, scores):
+        self._scores = scores
+
+    def score(self, endpoints, _context):
+        return {
+            endpoint.route_key: self._scores.get(endpoint.route_key, 0.0)
+            for endpoint in endpoints
+        }
 
 
 class RouterRoutingTests(unittest.TestCase):
@@ -83,45 +95,54 @@ class RouterRoutingTests(unittest.TestCase):
     def test_weighted_scoring_router_combines_multiple_plugin_scores(self):
         router = WeightedScoringRouter(
             [
-                WeightedEndpointScorer(EndpointHashScorer(), 1.0),
-                WeightedEndpointScorer(EndpointLoadScorer(), 2.0),
+                WeightedEndpointScorer(StaticScorePlugin({"pod-a": 1.0, "pod-b": 0.0}), 1.0),
+                WeightedEndpointScorer(StaticScorePlugin({"pod-a": 0.0, "pod-b": 1.0}), 2.0),
             ]
         )
         endpoints = [
-            EndpointInfo(url="http://pod-a:8000", model_names=["m"], workspace="w", endpoint="e"),
-            EndpointInfo(url="http://pod-b:8000", model_names=["m"], workspace="w", endpoint="e"),
+            EndpointInfo(id="pod-a", url="http://pod-a:8000", model_names=["m"]),
+            EndpointInfo(id="pod-b", url="http://pod-b:8000", model_names=["m"]),
         ]
-        stats = {
-            "http://pod-a:8000": RequestStats(active_requests=50),
-            "http://pod-b:8000": RequestStats(active_requests=0),
-        }
 
-        got = router.route(endpoints, {}, stats, {"model": "m", "prompt": "same"})
+        got = router.route(endpoints, {}, {}, {"model": "m", "prompt": "same"})
 
         self.assertEqual(got.url, "http://pod-b:8000")
 
     def test_scheduling_profile_filters_scores_and_picks_endpoint(self):
         profile = SchedulingProfile(
             [EndpointNameFilter("served")],
-            [WeightedEndpointScorer(EndpointLoadScorer(), 1.0)],
+            [WeightedEndpointScorer(StaticScorePlugin({"http://pod-c:8000": 1.0}), 1.0)],
         )
         endpoints = [
             EndpointInfo(url="http://pod-a:8000", model_names=["m"], endpoint="ignored"),
             EndpointInfo(url="http://pod-b:8000", model_names=["m"], endpoint="served"),
             EndpointInfo(url="http://pod-c:8000", model_names=["m"], endpoint="served"),
         ]
-        stats = {
-            "http://pod-a:8000": RequestStats(active_requests=0),
-            "http://pod-b:8000": RequestStats(active_requests=10),
-            "http://pod-c:8000": RequestStats(active_requests=0),
-        }
 
         got = profile.schedule(
             endpoints,
-            SchedulingContext({}, stats, {"model": "m", "prompt": "same"}),
+            SchedulingContext({}, {}, {"model": "m", "prompt": "same"}),
         )
 
         self.assertEqual(got.url, "http://pod-c:8000")
+
+    def test_chwbl_scorer_falls_back_to_lowest_load_without_cache_key(self):
+        profile = SchedulingProfile(
+            [],
+            [WeightedEndpointScorer(ConsistentHashWithBoundedLoadScorer(), 1.0)],
+        )
+        endpoints = [
+            EndpointInfo(url="http://pod-a:8000", model_names=["m"]),
+            EndpointInfo(url="http://pod-b:8000", model_names=["m"]),
+        ]
+        stats = {
+            "http://pod-a:8000": RequestStats(active_requests=3),
+            "http://pod-b:8000": RequestStats(active_requests=0),
+        }
+
+        got = profile.schedule(endpoints, SchedulingContext({}, stats, {"model": "m"}))
+
+        self.assertEqual(got.url, "http://pod-b:8000")
 
     def test_pd_router_selects_decode_endpoint_then_local_prefill_endpoint(self):
         router = PDSameHostRouter()
