@@ -12,6 +12,7 @@ NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
 NEUTREE_API_IMAGE := $(IMAGE_PREFIX)neutree-api
 NEUTREE_DB_SCRIPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
 NEUTREE_RUNTIME_IMAGE := $(IMAGE_PREFIX)neutree-runtime
+NEUTREE_ROUTER_IMAGE ?= $(IMAGE_REPO)/neutree/router
 PD_ROUTER_SIDECAR_IMAGE := $(IMAGE_PREFIX)pd-router-sidecar
 
 ARCH ?= amd64
@@ -120,6 +121,10 @@ docker-build-db-scripts:
 docker-build-runtime:
 	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.runtime
 
+.PHONY: docker-build-router
+docker-build-router:
+	docker build --build-arg ARCH=$(ARCH) --build-arg CLUSTER_VERSION=$(IMAGE_TAG) . -t $(NEUTREE_ROUTER_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.router
+
 .PHONY: docker-build-pd-router-sidecar
 docker-build-pd-router-sidecar:
 	docker build --build-arg ARCH=$(ARCH) . -t $(PD_ROUTER_SIDECAR_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.pd-router-sidecar
@@ -150,6 +155,10 @@ docker-push-db-scripts: # push db scripts docker image
 docker-push-runtime: # push runtime docker image
 	docker push $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG)
 
+.PHONY: docker-push-router
+docker-push-router: # push router docker image
+	docker push $(NEUTREE_ROUTER_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
 .PHONY: docker-push-pd-router-sidecar
 docker-push-pd-router-sidecar: # push pd-router-sidecar docker image
 	docker push $(PD_ROUTER_SIDECAR_IMAGE)-$(ARCH):$(IMAGE_TAG)
@@ -172,6 +181,10 @@ docker-push-manifest-db-scripts: ## Push the db scripts manifest docker image.
 .PHONY: docker-push-manifest-runtime
 docker-push-manifest-runtime: ## Push the runtime manifest docker image.
 	docker buildx imagetools create -t $(NEUTREE_RUNTIME_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_RUNTIME_IMAGE)\-&:$(IMAGE_TAG)~g")
+
+.PHONY: docker-push-manifest-router
+docker-push-manifest-router: ## Push the router manifest docker image.
+	docker buildx imagetools create -t $(NEUTREE_ROUTER_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ROUTER_IMAGE)\-&:$(IMAGE_TAG)~g")
 
 .PHONY: docker-push-manifest-pd-router-sidecar
 docker-push-manifest-pd-router-sidecar: ## Push the pd-router-sidecar manifest docker image.
