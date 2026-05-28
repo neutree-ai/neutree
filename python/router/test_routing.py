@@ -8,9 +8,21 @@ from router.routing import (
     PDSameHostRouter,
     RequestStats,
     RoundRobinRouter,
+    SchedulingContext,
+    SchedulingProfile,
     WeightedEndpointScorer,
     WeightedScoringRouter,
 )
+
+
+class EndpointNameFilter:
+    name = "endpoint-name"
+
+    def __init__(self, endpoint_name):
+        self._endpoint_name = endpoint_name
+
+    def filter(self, endpoint, _context):
+        return endpoint.endpoint == self._endpoint_name
 
 
 class RouterRoutingTests(unittest.TestCase):
@@ -87,6 +99,29 @@ class RouterRoutingTests(unittest.TestCase):
         got = router.route(endpoints, {}, stats, {"model": "m", "prompt": "same"})
 
         self.assertEqual(got.url, "http://pod-b:8000")
+
+    def test_scheduling_profile_filters_scores_and_picks_endpoint(self):
+        profile = SchedulingProfile(
+            [EndpointNameFilter("served")],
+            [WeightedEndpointScorer(EndpointLoadScorer(), 1.0)],
+        )
+        endpoints = [
+            EndpointInfo(url="http://pod-a:8000", model_names=["m"], endpoint="ignored"),
+            EndpointInfo(url="http://pod-b:8000", model_names=["m"], endpoint="served"),
+            EndpointInfo(url="http://pod-c:8000", model_names=["m"], endpoint="served"),
+        ]
+        stats = {
+            "http://pod-a:8000": RequestStats(active_requests=0),
+            "http://pod-b:8000": RequestStats(active_requests=10),
+            "http://pod-c:8000": RequestStats(active_requests=0),
+        }
+
+        got = profile.schedule(
+            endpoints,
+            SchedulingContext({}, stats, {"model": "m", "prompt": "same"}),
+        )
+
+        self.assertEqual(got.url, "http://pod-c:8000")
 
     def test_pd_router_selects_decode_endpoint_then_local_prefill_endpoint(self):
         router = PDSameHostRouter()

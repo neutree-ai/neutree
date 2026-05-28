@@ -126,6 +126,22 @@ class RequestStatsMonitor:
         stats._completed = [(ts, latency) for ts, latency in stats._completed if ts >= cutoff]
 
 
+@dataclass(frozen=True)
+class SchedulingContext:
+    engine_stats: Mapping[str, Any]
+    request_stats: Mapping[str, RequestStats]
+    request_json: Mapping[str, Any]
+    selected_endpoint: Optional[EndpointInfo] = None
+
+    def with_selected_endpoint(self, endpoint: EndpointInfo) -> "SchedulingContext":
+        return SchedulingContext(
+            engine_stats=self.engine_stats,
+            request_stats=self.request_stats,
+            request_json=self.request_json,
+            selected_endpoint=endpoint,
+        )
+
+
 class RoundRobinRouter:
     def __init__(self):
         self._index_by_key: Dict[Tuple[str, ...], int] = {}
@@ -147,22 +163,53 @@ class RoundRobinRouter:
         return chosen
 
 
-class EndpointScorer(Protocol):
+class EndpointFilterPlugin(Protocol):
+    name: str
+
+    def filter(self, endpoint: EndpointInfo, context: SchedulingContext) -> bool:
+        ...
+
+
+class EndpointScorePlugin(Protocol):
     name: str
 
     def score(
         self,
         endpoints: List[EndpointInfo],
-        request_stats: Mapping[str, RequestStats],
-        request_json: Mapping[str, Any],
+        context: SchedulingContext,
     ) -> Dict[str, float]:
         ...
 
 
 @dataclass(frozen=True)
 class WeightedEndpointScorer:
-    scorer: EndpointScorer
+    scorer: EndpointScorePlugin
     weight: float = 1.0
+
+
+class ReadyEndpointFilter:
+    name = "ready-endpoint"
+
+    def filter(self, endpoint: EndpointInfo, _context: SchedulingContext) -> bool:
+        return not endpoint.sleep
+
+
+class PDRoleFilter:
+    def __init__(self, role: str):
+        self._role = role
+        self.name = f"pd-role-{role}"
+
+    def filter(self, endpoint: EndpointInfo, _context: SchedulingContext) -> bool:
+        return endpoint.pd_role == self._role
+
+
+class PDSameRoleGroupFilter:
+    name = "pd-same-role-group"
+
+    def filter(self, endpoint: EndpointInfo, context: SchedulingContext) -> bool:
+        if context.selected_endpoint is None:
+            return False
+        return endpoint.pd_role_group_id == context.selected_endpoint.pd_role_group_id
 
 
 class EndpointLoadScorer:
@@ -171,13 +218,12 @@ class EndpointLoadScorer:
     def score(
         self,
         endpoints: List[EndpointInfo],
-        request_stats: Mapping[str, RequestStats],
-        _request_json: Mapping[str, Any],
+        context: SchedulingContext,
     ) -> Dict[str, float]:
         if not endpoints:
             return {}
         loads = {
-            endpoint.route_key: request_stats.get(endpoint.stats_key, RequestStats()).active_requests
+            endpoint.route_key: context.request_stats.get(endpoint.stats_key, RequestStats()).active_requests
             for endpoint in endpoints
         }
         min_load = min(loads.values())
@@ -203,12 +249,11 @@ class EndpointHashScorer:
     def score(
         self,
         endpoints: List[EndpointInfo],
-        _request_stats: Mapping[str, RequestStats],
-        request_json: Mapping[str, Any],
+        context: SchedulingContext,
     ) -> Dict[str, float]:
         if not endpoints:
             return {}
-        cache_key = maybe_extract_cache_key(request_json, self._max_user_messages_for_cache)
+        cache_key = maybe_extract_cache_key(context.request_json, self._max_user_messages_for_cache)
         if cache_key is None:
             return {endpoint.route_key: 1.0 for endpoint in endpoints}
 
@@ -257,26 +302,56 @@ class MaxScoreEndpointPicker:
 
 
 class WeightedScoringRouter:
-    def __init__(self, scorers: List[WeightedEndpointScorer], picker: Optional[MaxScoreEndpointPicker] = None):
-        self._scorers = scorers
-        self._picker = picker or MaxScoreEndpointPicker()
+    def __init__(
+        self,
+        scorers: List[WeightedEndpointScorer],
+        picker: Optional[MaxScoreEndpointPicker] = None,
+        filters: Optional[List[EndpointFilterPlugin]] = None,
+    ):
+        self._profile = SchedulingProfile(filters or [], scorers, picker)
 
     def route(
         self,
         endpoints: List[EndpointInfo],
-        _engine_stats: Mapping[str, Any],
+        engine_stats: Mapping[str, Any],
         request_stats: Mapping[str, RequestStats],
         request_json: Mapping[str, Any],
     ) -> EndpointInfo:
-        if not endpoints:
+        return self._profile.schedule(
+            endpoints,
+            SchedulingContext(engine_stats, request_stats, request_json),
+        )
+
+
+class SchedulingProfile:
+    def __init__(
+        self,
+        filters: List[EndpointFilterPlugin],
+        scorers: List[WeightedEndpointScorer],
+        picker: Optional[MaxScoreEndpointPicker] = None,
+    ):
+        self._filters = filters
+        self._scorers = scorers
+        self._picker = picker or MaxScoreEndpointPicker()
+
+    def schedule(
+        self,
+        endpoints: List[EndpointInfo],
+        context: SchedulingContext,
+    ) -> EndpointInfo:
+        candidates = [
+            endpoint for endpoint in endpoints
+            if all(filter_plugin.filter(endpoint, context) for filter_plugin in self._filters)
+        ]
+        if not candidates:
             raise ValueError("no endpoints available")
-        total_scores = {endpoint.route_key: 0.0 for endpoint in endpoints}
+        total_scores = {endpoint.route_key: 0.0 for endpoint in candidates}
         for weighted_scorer in self._scorers:
-            plugin_scores = weighted_scorer.scorer.score(endpoints, request_stats, request_json)
-            for endpoint in endpoints:
+            plugin_scores = weighted_scorer.scorer.score(candidates, context)
+            for endpoint in candidates:
                 score = _clamp_score(plugin_scores.get(endpoint.route_key, 0.0))
                 total_scores[endpoint.route_key] += score * weighted_scorer.weight
-        return self._picker.pick(endpoints, total_scores)
+        return self._picker.pick(candidates, total_scores)
 
 
 class ConsistentHashRouter(WeightedScoringRouter):
@@ -309,14 +384,20 @@ class PDSameHostRouter:
         hash_weight: float = 1.0,
         max_user_messages_for_cache: int = 2,
     ):
-        self._endpoint_router = WeightedScoringRouter(
-            [
-                WeightedEndpointScorer(
-                    EndpointHashScorer(virtual_nodes_per_replica, max_user_messages_for_cache),
-                    hash_weight,
-                ),
-                WeightedEndpointScorer(EndpointLoadScorer(), load_weight),
-            ]
+        scorers = [
+            WeightedEndpointScorer(
+                EndpointHashScorer(virtual_nodes_per_replica, max_user_messages_for_cache),
+                hash_weight,
+            ),
+            WeightedEndpointScorer(EndpointLoadScorer(), load_weight),
+        ]
+        self._decode_profile = SchedulingProfile(
+            [ReadyEndpointFilter(), PDRoleFilter("decode")],
+            scorers,
+        )
+        self._prefill_profile = SchedulingProfile(
+            [ReadyEndpointFilter(), PDRoleFilter("prefill"), PDSameRoleGroupFilter()],
+            scorers,
         )
 
     def route(
@@ -326,33 +407,18 @@ class PDSameHostRouter:
         request_stats: Mapping[str, RequestStats],
         request_json: Mapping[str, Any],
     ) -> EndpointRouteDecision:
-        decode_candidates = [
-            endpoint for endpoint in endpoints
-            if endpoint.pd_role == "decode" and not endpoint.sleep
-        ]
-        if not decode_candidates:
-            raise ValueError("no ready decode endpoints available")
+        context = SchedulingContext(_engine_stats, request_stats, request_json)
+        try:
+            decode = self._decode_profile.schedule(endpoints, context)
+        except ValueError as exc:
+            raise ValueError("no ready decode endpoints available") from exc
 
-        decode = self._endpoint_router.route(
-            decode_candidates,
-            {},
-            request_stats,
-            request_json,
-        )
-        prefill_candidates = [
-            endpoint for endpoint in endpoints
-            if endpoint.pd_role == "prefill"
-            and endpoint.pd_role_group_id == decode.pd_role_group_id
-            and not endpoint.sleep
-        ]
-        if not prefill_candidates:
-            raise ValueError(f"no ready prefill endpoint in role group {decode.pd_role_group_id}")
-        prefill = self._endpoint_router.route(
-            prefill_candidates,
-            {},
-            request_stats,
-            request_json,
-        )
+        try:
+            prefill = self._prefill_profile.schedule(endpoints, context.with_selected_endpoint(decode))
+        except ValueError as exc:
+            raise ValueError(
+                f"no ready prefill endpoint in role group {decode.pd_role_group_id}"
+            ) from exc
         return EndpointRouteDecision(endpoint=decode, prefill=prefill, decode=decode)
 
 
