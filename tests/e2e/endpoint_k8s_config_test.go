@@ -440,7 +440,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 	})
 
-	Describe("vLLM v0.17.1 Task Translation", Ordered, Label("config", "task-translation", "vllm"), func() {
+	Describe("vLLM Task Translation", Ordered, Label("config", "task-translation", "vllm"), func() {
 		type taskCase struct {
 			suffix      string
 			task        string
@@ -452,9 +452,6 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 			func(tc taskCase) {
 				if profileEngineName() != v1.EngineNameVLLM {
 					Skip("vLLM task translation is only applicable to the vLLM engine")
-				}
-				if !strings.HasPrefix(profileEngineVersion(), "v0.17.1") {
-					Skip("vLLM task translation is only applicable to v0.17.1-derived engine versions")
 				}
 
 				epName := "e2e-ep-k8s-task-" + tc.suffix + "-" + Cfg.RunID
