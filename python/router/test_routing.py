@@ -1,6 +1,13 @@
 import unittest
 
-from router.routing import ConsistentHashRouter, EndpointInfo, RequestStats, RoundRobinRouter
+from router.routing import (
+    ConsistentHashRouter,
+    EndpointInfo,
+    PDRouteUnit,
+    PDSameHostRouter,
+    RequestStats,
+    RoundRobinRouter,
+)
 
 
 class RouterRoutingTests(unittest.TestCase):
@@ -57,6 +64,101 @@ class RouterRoutingTests(unittest.TestCase):
         got = router.route(endpoints, {}, stats, {"model": "m", "prompt": "same"})
 
         self.assertEqual(got, "http://pod-b:8000")
+
+    def test_pd_router_selects_prefill_from_decode_local_role_group(self):
+        router = PDSameHostRouter(load_factor=1.0)
+        endpoint_a = EndpointInfo(
+            url="http://10.0.0.1:8000",
+            model_names=["m"],
+            workspace="w",
+            endpoint="e",
+            is_pd_collocated=True,
+            pd_route_units=[
+                PDRouteUnit("group-a", "prefill", 0, True, "http://10.0.0.1:8000"),
+                PDRouteUnit("group-a", "decode", 0, True, "http://10.0.0.1:8000"),
+            ],
+        )
+        endpoint_b = EndpointInfo(
+            url="http://10.0.0.2:8000",
+            model_names=["m"],
+            workspace="w",
+            endpoint="e",
+            is_pd_collocated=True,
+            pd_route_units=[
+                PDRouteUnit("group-b", "prefill", 0, True, "http://10.0.0.2:8000"),
+                PDRouteUnit("group-b", "decode", 0, True, "http://10.0.0.2:8000"),
+            ],
+        )
+        stats = {
+            "group-a:decode:0": RequestStats(active_requests=20),
+            "group-b:decode:0": RequestStats(active_requests=0),
+            "group-b:prefill:0": RequestStats(active_requests=0),
+        }
+
+        decision = router.route(
+            [endpoint_a, endpoint_b],
+            {},
+            stats,
+            {"model": "m", "messages": [{"role": "user", "content": "hello"}]},
+        )
+
+        self.assertEqual(decision.decode.role_group_id, "group-b")
+        self.assertEqual(decision.prefill.role_group_id, "group-b")
+        self.assertEqual(decision.sidecar_url, "http://10.0.0.2:8000")
+        self.assertEqual(decision.prefill_index, 0)
+        self.assertEqual(decision.decode_index, 0)
+
+    def test_pd_router_falls_back_to_load_only_when_cache_key_is_missing(self):
+        router = PDSameHostRouter()
+        endpoints = [
+            EndpointInfo(
+                url="http://10.0.0.1:8000",
+                model_names=["m"],
+                workspace="w",
+                endpoint="e",
+                is_pd_collocated=True,
+                pd_route_units=[
+                    PDRouteUnit("group-a", "prefill", 0, True, "http://10.0.0.1:8000"),
+                    PDRouteUnit("group-a", "decode", 0, True, "http://10.0.0.1:8000"),
+                ],
+            ),
+            EndpointInfo(
+                url="http://10.0.0.2:8000",
+                model_names=["m"],
+                workspace="w",
+                endpoint="e",
+                is_pd_collocated=True,
+                pd_route_units=[
+                    PDRouteUnit("group-b", "prefill", 0, True, "http://10.0.0.2:8000"),
+                    PDRouteUnit("group-b", "decode", 0, True, "http://10.0.0.2:8000"),
+                ],
+            ),
+        ]
+        stats = {
+            "group-a:decode:0": RequestStats(active_requests=3),
+            "group-b:decode:0": RequestStats(active_requests=0),
+        }
+
+        decision = router.route(endpoints, {}, stats, {"model": "m"})
+
+        self.assertEqual(decision.decode.role_group_id, "group-b")
+        self.assertEqual(decision.prefill.role_group_id, "group-b")
+
+    def test_pd_router_fails_closed_without_local_prefill(self):
+        router = PDSameHostRouter()
+        endpoint = EndpointInfo(
+            url="http://10.0.0.1:8000",
+            model_names=["m"],
+            workspace="w",
+            endpoint="e",
+            is_pd_collocated=True,
+            pd_route_units=[
+                PDRouteUnit("group-a", "decode", 0, True, "http://10.0.0.1:8000"),
+            ],
+        )
+
+        with self.assertRaisesRegex(ValueError, "no ready prefill"):
+            router.route([endpoint], {}, {}, {"model": "m"})
 
 
 if __name__ == "__main__":

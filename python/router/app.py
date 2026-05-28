@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import time
 import uuid
 from typing import Any, Dict, Iterable, Mapping, Optional
 
@@ -12,16 +11,10 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from router.metrics import MetricsRegistry, render_prometheus
-from router.routing import (
-    ConsistentHashRouter,
-    EndpointInfo,
-    RequestStatsMonitor,
-    RoundRobinRouter,
-)
+from router.metrics import render_prometheus
+from router.routing import EndpointInfo
+from router.runtime import BackendSelection, RouterRuntime
 from router.service_discovery import K8sPodServiceDiscovery
-
-LOG = logging.getLogger("router")
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -34,28 +27,6 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
-
-
-class RouterRuntime:
-    def __init__(self, service_discovery: K8sPodServiceDiscovery, request_stats_window: int = 60):
-        self.service_discovery = service_discovery
-        self.request_stats = RequestStatsMonitor(request_stats_window)
-        self.metrics = MetricsRegistry()
-        self.round_robin = RoundRobinRouter()
-        self.consistent_hash = ConsistentHashRouter()
-
-    def select_backend(
-        self,
-        endpoints: list[EndpointInfo],
-        request_json: Mapping[str, Any],
-    ) -> str:
-        routing_logic = endpoints[0].routing_logic or "roundrobin"
-        stats = self.request_stats.snapshot()
-        if routing_logic == "consistent_hash":
-            return self.consistent_hash.route(endpoints, {}, stats, request_json)
-        if routing_logic != "roundrobin":
-            LOG.warning("unsupported routing_logic=%s; falling back to roundrobin", routing_logic)
-        return self.round_robin.route(endpoints, {}, stats, request_json)
 
 
 app = FastAPI()
@@ -181,30 +152,36 @@ async def _route_backend_request(
             error = f"Model '{requested_model}' not found. Available models can be listed at /v1/models."
         return JSONResponse({"error": error}, status_code=status, headers={"X-Request-Id": request_id})
 
-    backend_url = runtime.select_backend(endpoints, request_json)
-    return await _proxy_request(request, backend_url, backend_path, body, request_id)
+    try:
+        selection = runtime.select_backend(endpoints, request_json)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503, headers={"X-Request-Id": request_id})
+    return await _proxy_request(request, selection, backend_path, body, request_id)
 
 
 async def _proxy_request(
     request: Request,
-    backend_url: str,
+    selection: BackendSelection,
     backend_path: str,
     body: bytes,
     request_id: str,
 ):
     runtime = _runtime()
-    runtime.request_stats.on_request_start(backend_url, request_id)
+    for stats_key in selection.stats_keys:
+        runtime.request_stats.on_request_start(stats_key, request_id)
     headers = _forward_headers(request.headers, request_id)
+    headers.update(selection.extra_headers)
     try:
         response = await request.app.state.http_client.request(
             method=request.method,
-            url=backend_url + backend_path,
+            url=selection.url + backend_path,
             headers=headers,
             data=body,
             timeout=aiohttp.ClientTimeout(total=None),
         )
     except aiohttp.ClientError as exc:
-        runtime.request_stats.on_request_complete(backend_url, request_id)
+        for stats_key in selection.stats_keys:
+            runtime.request_stats.on_request_complete(stats_key, request_id)
         return JSONResponse(
             {"error": f"Failed to connect to backend: {exc}"},
             status_code=503,
@@ -217,7 +194,8 @@ async def _proxy_request(
                 yield chunk
         finally:
             response.release()
-            runtime.request_stats.on_request_complete(backend_url, request_id)
+            for stats_key in selection.stats_keys:
+                runtime.request_stats.on_request_complete(stats_key, request_id)
 
     response_headers = {
         key: value
