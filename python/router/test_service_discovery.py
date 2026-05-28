@@ -1,7 +1,6 @@
 import unittest
 from types import SimpleNamespace
 
-from router.routing import PDRouteUnit
 from router.service_discovery import (
     K8sContainerSnapshot,
     K8sPodServiceDiscovery,
@@ -109,7 +108,7 @@ class RouterServiceDiscoveryTests(unittest.TestCase):
             ],
         )
 
-    def test_pd_endpoint_uses_sidecar_url_and_builds_route_units(self):
+    def test_pd_pod_expands_role_containers_into_endpoint_infos(self):
         discovery = object.__new__(K8sPodServiceDiscovery)
         discovery._get_model_names = (
             lambda pod_ip, port: ["m"] if (pod_ip, port) == ("10.0.0.1", 8100) else []
@@ -130,19 +129,18 @@ class RouterServiceDiscoveryTests(unittest.TestCase):
             ],
         )
 
-        endpoint = discovery._build_pd_endpoint(snapshot)
+        endpoints = discovery._build_pd_endpoints(snapshot)
 
-        self.assertIsNotNone(endpoint)
-        self.assertEqual(endpoint.url, "http://10.0.0.1:8000")
-        self.assertEqual(endpoint.model_names, ["m"])
-        self.assertTrue(endpoint.is_pd_collocated)
-        self.assertEqual(
-            endpoint.pd_route_units,
-            [
-                PDRouteUnit("pod-uid", "prefill", 0, True, "http://10.0.0.1:8000"),
-                PDRouteUnit("pod-uid", "decode", 1, True, "http://10.0.0.1:8000"),
-            ],
-        )
+        self.assertEqual(len(endpoints), 2)
+        by_role = {endpoint.pd_role: endpoint for endpoint in endpoints}
+        self.assertEqual(by_role["prefill"].route_key, "pod-uid:prefill:0")
+        self.assertEqual(by_role["decode"].route_key, "pod-uid:decode:1")
+        for endpoint in endpoints:
+            self.assertEqual(endpoint.dispatch_url, "http://10.0.0.1:8000")
+            self.assertEqual(endpoint.model_names, ["m"])
+            self.assertTrue(endpoint.is_pd_collocated)
+            self.assertEqual(endpoint.pd_role_group_id, "pod-uid")
+            self.assertFalse(endpoint.sleep)
 
 
 if __name__ == "__main__":

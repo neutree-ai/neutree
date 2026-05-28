@@ -4,42 +4,43 @@ import bisect
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Tuple
 
 
 @dataclass(frozen=True)
-class PDRouteUnit:
-    role_group_id: str
-    role: str
-    index: int
-    ready: bool
-    sidecar_url: str
+class EndpointRouteDecision:
+    endpoint: "EndpointInfo"
+    prefill: Optional["EndpointInfo"] = None
+    decode: Optional["EndpointInfo"] = None
 
     @property
-    def stats_key(self) -> str:
-        return f"{self.role_group_id}:{self.role}:{self.index}"
-
-    @property
-    def address(self) -> str:
-        return f"{self.role_group_id}:{self.sidecar_url}:{self.role}:{self.index}"
-
-
-@dataclass(frozen=True)
-class PDRouteDecision:
-    prefill: PDRouteUnit
-    decode: PDRouteUnit
+    def url(self) -> str:
+        return self.endpoint.dispatch_url or self.endpoint.url
 
     @property
     def sidecar_url(self) -> str:
-        return self.decode.sidecar_url
+        return self.url
 
     @property
-    def prefill_index(self) -> int:
-        return self.prefill.index
+    def prefill_index(self) -> Optional[int]:
+        if self.prefill is None:
+            return None
+        return self.prefill.pd_index
 
     @property
-    def decode_index(self) -> int:
-        return self.decode.index
+    def decode_index(self) -> Optional[int]:
+        if self.decode is None:
+            return None
+        return self.decode.pd_index
+
+    @property
+    def stats_keys(self) -> Tuple[str, ...]:
+        keys = [self.url]
+        if self.prefill is not None:
+            keys.append(self.prefill.stats_key)
+        if self.decode is not None:
+            keys.append(self.decode.stats_key)
+        return tuple(keys)
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,22 @@ class EndpointInfo:
     pod_name: Optional[str] = None
     sleep: bool = False
     is_pd_collocated: bool = False
-    pd_route_units: List[PDRouteUnit] = field(default_factory=list)
+    dispatch_url: Optional[str] = None
+    pd_role_group_id: Optional[str] = None
+    pd_role: Optional[str] = None
+    pd_index: Optional[int] = None
+
+    @property
+    def route_key(self) -> str:
+        if self.is_pd_collocated and self.pd_role_group_id and self.pd_role is not None and self.pd_index is not None:
+            return f"{self.pd_role_group_id}:{self.pd_role}:{self.pd_index}"
+        return self.id or self.pod_name or self.url
+
+    @property
+    def stats_key(self) -> str:
+        if self.is_pd_collocated:
+            return self.route_key
+        return self.url
 
 
 @dataclass
@@ -120,195 +136,232 @@ class RoundRobinRouter:
         _engine_stats: Mapping[str, Any],
         _request_stats: Mapping[str, RequestStats],
         _request_json: Mapping[str, Any],
-    ) -> str:
+    ) -> EndpointInfo:
         if not endpoints:
             raise ValueError("no endpoints available")
-        sorted_urls = tuple(sorted(endpoint.url for endpoint in endpoints))
-        index = self._index_by_key.get(sorted_urls, 0)
-        chosen = sorted_urls[index % len(sorted_urls)]
-        self._index_by_key[sorted_urls] = index + 1
+        sorted_endpoints = sorted(endpoints, key=lambda endpoint: endpoint.route_key)
+        route_keys = tuple(endpoint.route_key for endpoint in sorted_endpoints)
+        index = self._index_by_key.get(route_keys, 0)
+        chosen = sorted_endpoints[index % len(sorted_endpoints)]
+        self._index_by_key[route_keys] = index + 1
         return chosen
 
 
-class ConsistentHashRouter:
-    def __init__(
-        self,
-        virtual_nodes_per_replica: int = 100,
-        load_factor: float = 1.25,
-        max_user_messages_for_cache: int = 2,
-    ):
-        self._virtual_nodes = virtual_nodes_per_replica
-        self._load_factor = load_factor
-        self._max_user_messages_for_cache = max_user_messages_for_cache
+class EndpointScorer(Protocol):
+    name: str
 
-    def route(
+    def score(
         self,
         endpoints: List[EndpointInfo],
-        _engine_stats: Mapping[str, Any],
         request_stats: Mapping[str, RequestStats],
         request_json: Mapping[str, Any],
-    ) -> str:
+    ) -> Dict[str, float]:
+        ...
+
+
+@dataclass(frozen=True)
+class WeightedEndpointScorer:
+    scorer: EndpointScorer
+    weight: float = 1.0
+
+
+class EndpointLoadScorer:
+    name = "endpoint-load"
+
+    def score(
+        self,
+        endpoints: List[EndpointInfo],
+        request_stats: Mapping[str, RequestStats],
+        _request_json: Mapping[str, Any],
+    ) -> Dict[str, float]:
         if not endpoints:
-            raise ValueError("no endpoints available")
-
-        urls = sorted(endpoint.url for endpoint in endpoints)
-        ring = self._build_ring(urls)
-        payload_hash = _hash64(self._extract_cache_key(request_json))
-        index = bisect.bisect_left([point for point, _ in ring], payload_hash)
-        if index >= len(ring):
-            index = 0
-
-        checked: set[str] = set()
-        default_url: Optional[str] = None
-        while len(checked) < len(urls):
-            _, url = ring[index]
-            index = (index + 1) % len(ring)
-            if url in checked:
-                continue
-            checked.add(url)
-            if default_url is None:
-                default_url = url
-            if self._check_load(urls, url, request_stats):
-                return url
-
-        return default_url or urls[0]
-
-    def _build_ring(self, urls: List[str]) -> List[Tuple[int, str]]:
-        ring: List[Tuple[int, str]] = []
-        for url in urls:
-            for virtual_node in range(self._virtual_nodes):
-                ring.append((_hash64(f"{url}:{virtual_node}"), url))
-        ring.sort(key=lambda item: item[0])
-        return ring
-
-    def _check_load(
-        self,
-        urls: List[str],
-        candidate_url: str,
-        request_stats: Mapping[str, RequestStats],
-    ) -> bool:
-        if not urls:
-            return False
+            return {}
         loads = {
-            url: request_stats.get(url, RequestStats()).active_requests
-            for url in urls
+            endpoint.route_key: request_stats.get(endpoint.stats_key, RequestStats()).active_requests
+            for endpoint in endpoints
         }
-        total_load = sum(loads.values())
-        threshold = ((total_load + 1) / len(urls)) * self._load_factor
-        return loads[candidate_url] + 1 <= threshold
+        min_load = min(loads.values())
+        max_load = max(loads.values())
+        if min_load == max_load:
+            return {endpoint.route_key: 1.0 for endpoint in endpoints}
+        return {
+            endpoint.route_key: (max_load - loads[endpoint.route_key]) / (max_load - min_load)
+            for endpoint in endpoints
+        }
 
-    def _extract_cache_key(self, request_json: Mapping[str, Any]) -> str:
-        return extract_cache_key(request_json, self._max_user_messages_for_cache)
 
-
-class PDSameHostRouter:
+class EndpointHashScorer:
     def __init__(
         self,
         virtual_nodes_per_replica: int = 100,
-        load_factor: float = 1.25,
         max_user_messages_for_cache: int = 2,
     ):
         self._virtual_nodes = virtual_nodes_per_replica
-        self._load_factor = load_factor
         self._max_user_messages_for_cache = max_user_messages_for_cache
+        self.name = "endpoint-hash"
 
-    def route(
+    def score(
         self,
         endpoints: List[EndpointInfo],
-        _engine_stats: Mapping[str, Any],
-        request_stats: Mapping[str, RequestStats],
+        _request_stats: Mapping[str, RequestStats],
         request_json: Mapping[str, Any],
-    ) -> PDRouteDecision:
-        units = [
-            unit
-            for endpoint in endpoints
-            for unit in endpoint.pd_route_units
-            if unit.ready
-        ]
-        decode = self._select_unit(
-            [unit for unit in units if unit.role == "decode"],
-            request_stats,
-            request_json,
-            "decode",
-        )
-        local_prefill_candidates = [
-            unit
-            for unit in units
-            if unit.role == "prefill" and unit.role_group_id == decode.role_group_id
-        ]
-        if not local_prefill_candidates:
-            raise ValueError(f"no ready prefill in role group {decode.role_group_id}")
-        prefill = self._select_unit(local_prefill_candidates, request_stats, request_json, "prefill")
-        return PDRouteDecision(prefill=prefill, decode=decode)
-
-    def _select_unit(
-        self,
-        units: List[PDRouteUnit],
-        request_stats: Mapping[str, RequestStats],
-        request_json: Mapping[str, Any],
-        role: str,
-    ) -> PDRouteUnit:
-        if not units:
-            raise ValueError(f"no ready {role} units available")
-        sorted_units = sorted(units, key=lambda item: item.stats_key)
+    ) -> Dict[str, float]:
+        if not endpoints:
+            return {}
         cache_key = maybe_extract_cache_key(request_json, self._max_user_messages_for_cache)
         if cache_key is None:
-            return self._select_least_loaded(sorted_units, request_stats)
+            return {endpoint.route_key: 1.0 for endpoint in endpoints}
 
-        ring = self._build_ring(sorted_units)
+        route_keys = sorted(endpoint.route_key for endpoint in endpoints)
+        ring = self._build_ring(route_keys)
         payload_hash = _hash64(cache_key)
         index = bisect.bisect_left([point for point, _ in ring], payload_hash)
         if index >= len(ring):
             index = 0
 
         checked: set[str] = set()
-        default_unit: Optional[PDRouteUnit] = None
-        while len(checked) < len(sorted_units):
-            _, unit = ring[index]
+        rank_by_key: Dict[str, int] = {}
+        while len(checked) < len(route_keys):
+            _, route_key = ring[index]
             index = (index + 1) % len(ring)
-            if unit.stats_key in checked:
+            if route_key in checked:
                 continue
-            checked.add(unit.stats_key)
-            if default_unit is None:
-                default_unit = unit
-            if self._check_load(sorted_units, unit, request_stats):
-                return unit
-        return default_unit or sorted_units[0]
+            rank_by_key[route_key] = len(rank_by_key)
+            checked.add(route_key)
+        if len(route_keys) == 1:
+            return {route_keys[0]: 1.0}
+        return {
+            route_key: 1.0 - (rank_by_key[route_key] / (len(route_keys) - 1))
+            for route_key in route_keys
+        }
 
-    def _build_ring(self, units: List[PDRouteUnit]) -> List[Tuple[int, PDRouteUnit]]:
-        ring: List[Tuple[int, PDRouteUnit]] = []
-        for unit in units:
+    def _build_ring(self, route_keys: List[str]) -> List[Tuple[int, str]]:
+        ring: List[Tuple[int, str]] = []
+        for route_key in route_keys:
             for virtual_node in range(self._virtual_nodes):
-                ring.append((_hash64(f"{unit.stats_key}:{virtual_node}"), unit))
+                ring.append((_hash64(f"{route_key}:{virtual_node}"), route_key))
         ring.sort(key=lambda item: item[0])
         return ring
 
-    def _check_load(
-        self,
-        units: List[PDRouteUnit],
-        candidate: PDRouteUnit,
-        request_stats: Mapping[str, RequestStats],
-    ) -> bool:
-        loads = {
-            unit.stats_key: request_stats.get(unit.stats_key, RequestStats()).active_requests
-            for unit in units
-        }
-        total_load = sum(loads.values())
-        threshold = ((total_load + 1) / len(units)) * self._load_factor
-        return loads[candidate.stats_key] + 1 <= threshold
 
-    def _select_least_loaded(
+class MaxScoreEndpointPicker:
+    def pick(
         self,
-        units: List[PDRouteUnit],
-        request_stats: Mapping[str, RequestStats],
-    ) -> PDRouteUnit:
-        return min(
-            units,
-            key=lambda unit: (
-                request_stats.get(unit.stats_key, RequestStats()).active_requests,
-                unit.stats_key,
-            ),
+        endpoints: List[EndpointInfo],
+        scores: Mapping[str, float],
+    ) -> EndpointInfo:
+        return max(
+            sorted(endpoints, key=lambda endpoint: endpoint.route_key),
+            key=lambda endpoint: scores.get(endpoint.route_key, 0.0),
         )
+
+
+class WeightedScoringRouter:
+    def __init__(self, scorers: List[WeightedEndpointScorer], picker: Optional[MaxScoreEndpointPicker] = None):
+        self._scorers = scorers
+        self._picker = picker or MaxScoreEndpointPicker()
+
+    def route(
+        self,
+        endpoints: List[EndpointInfo],
+        _engine_stats: Mapping[str, Any],
+        request_stats: Mapping[str, RequestStats],
+        request_json: Mapping[str, Any],
+    ) -> EndpointInfo:
+        if not endpoints:
+            raise ValueError("no endpoints available")
+        total_scores = {endpoint.route_key: 0.0 for endpoint in endpoints}
+        for weighted_scorer in self._scorers:
+            plugin_scores = weighted_scorer.scorer.score(endpoints, request_stats, request_json)
+            for endpoint in endpoints:
+                score = _clamp_score(plugin_scores.get(endpoint.route_key, 0.0))
+                total_scores[endpoint.route_key] += score * weighted_scorer.weight
+        return self._picker.pick(endpoints, total_scores)
+
+
+class ConsistentHashRouter(WeightedScoringRouter):
+    def __init__(
+        self,
+        virtual_nodes_per_replica: int = 100,
+        load_weight: float = 2.0,
+        hash_weight: float = 1.0,
+        max_user_messages_for_cache: int = 2,
+        load_factor: Optional[float] = None,
+    ):
+        if load_factor is not None:
+            load_weight = 2.0 / max(load_factor, 0.001)
+        super().__init__(
+            [
+                WeightedEndpointScorer(
+                    EndpointHashScorer(virtual_nodes_per_replica, max_user_messages_for_cache),
+                    hash_weight,
+                ),
+                WeightedEndpointScorer(EndpointLoadScorer(), load_weight),
+            ]
+        )
+
+
+class PDSameHostRouter:
+    def __init__(
+        self,
+        virtual_nodes_per_replica: int = 100,
+        load_weight: float = 2.0,
+        hash_weight: float = 1.0,
+        max_user_messages_for_cache: int = 2,
+    ):
+        self._endpoint_router = WeightedScoringRouter(
+            [
+                WeightedEndpointScorer(
+                    EndpointHashScorer(virtual_nodes_per_replica, max_user_messages_for_cache),
+                    hash_weight,
+                ),
+                WeightedEndpointScorer(EndpointLoadScorer(), load_weight),
+            ]
+        )
+
+    def route(
+        self,
+        endpoints: List[EndpointInfo],
+        _engine_stats: Mapping[str, Any],
+        request_stats: Mapping[str, RequestStats],
+        request_json: Mapping[str, Any],
+    ) -> EndpointRouteDecision:
+        decode_candidates = [
+            endpoint for endpoint in endpoints
+            if endpoint.pd_role == "decode" and not endpoint.sleep
+        ]
+        if not decode_candidates:
+            raise ValueError("no ready decode endpoints available")
+
+        decode = self._endpoint_router.route(
+            decode_candidates,
+            {},
+            request_stats,
+            request_json,
+        )
+        prefill_candidates = [
+            endpoint for endpoint in endpoints
+            if endpoint.pd_role == "prefill"
+            and endpoint.pd_role_group_id == decode.pd_role_group_id
+            and not endpoint.sleep
+        ]
+        if not prefill_candidates:
+            raise ValueError(f"no ready prefill endpoint in role group {decode.pd_role_group_id}")
+        prefill = self._endpoint_router.route(
+            prefill_candidates,
+            {},
+            request_stats,
+            request_json,
+        )
+        return EndpointRouteDecision(endpoint=decode, prefill=prefill, decode=decode)
+
+
+def _clamp_score(score: float) -> float:
+    if score < 0:
+        return 0.0
+    if score > 1:
+        return 1.0
+    return score
 
 
 def extract_cache_key(request_json: Mapping[str, Any], max_user_messages: int = 2) -> str:

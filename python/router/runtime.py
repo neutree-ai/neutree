@@ -46,24 +46,20 @@ class RouterRuntime:
                 request_json,
             )
             return BackendSelection(
-                url=decision.sidecar_url,
+                url=decision.url,
                 extra_headers={
                     "x-neutree-prefill-index": str(decision.prefill_index),
                     "x-neutree-decode-index": str(decision.decode_index),
                 },
-                stats_keys=(
-                    decision.sidecar_url,
-                    decision.prefill.stats_key,
-                    decision.decode.stats_key,
-                ),
+                stats_keys=decision.stats_keys,
             )
 
         routing_logic = endpoints[0].routing_logic or "roundrobin"
         stats = self.request_stats.snapshot()
         if routing_logic == "consistent_hash":
-            url = self.consistent_hash.route(endpoints, {}, stats, request_json)
-            return BackendSelection(url=url, stats_keys=(url,))
+            endpoint = self.consistent_hash.route(endpoints, {}, stats, request_json)
+            return BackendSelection(url=endpoint.url, stats_keys=(endpoint.stats_key,))
         if routing_logic != "roundrobin":
             LOG.warning("unsupported routing_logic=%s; falling back to roundrobin", routing_logic)
-        url = self.round_robin.route(endpoints, {}, stats, request_json)
-        return BackendSelection(url=url, stats_keys=(url,))
+        endpoint = self.round_robin.route(endpoints, {}, stats, request_json)
+        return BackendSelection(url=endpoint.url, stats_keys=(endpoint.stats_key,))

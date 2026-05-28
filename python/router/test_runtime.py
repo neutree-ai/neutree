@@ -1,6 +1,6 @@
 import unittest
 
-from router.routing import EndpointInfo, PDRouteUnit
+from router.routing import EndpointInfo
 from router.runtime import RouterRuntime
 
 
@@ -11,19 +11,30 @@ class FakeServiceDiscovery:
 class RouterRuntimeTests(unittest.TestCase):
     def test_pd_backend_selection_targets_sidecar_with_route_headers_and_unit_stats(self):
         runtime = RouterRuntime(FakeServiceDiscovery())
-        endpoint = EndpointInfo(
-            url="http://10.0.0.1:8000",
+        prefill = EndpointInfo(
+            url="pd://group-a/prefill/1?sidecar=http://10.0.0.1:8000",
             model_names=["m"],
             workspace="w",
             endpoint="e",
             is_pd_collocated=True,
-            pd_route_units=[
-                PDRouteUnit("group-a", "prefill", 1, True, "http://10.0.0.1:8000"),
-                PDRouteUnit("group-a", "decode", 2, True, "http://10.0.0.1:8000"),
-            ],
+            dispatch_url="http://10.0.0.1:8000",
+            pd_role_group_id="group-a",
+            pd_role="prefill",
+            pd_index=1,
+        )
+        decode = EndpointInfo(
+            url="pd://group-a/decode/2?sidecar=http://10.0.0.1:8000",
+            model_names=["m"],
+            workspace="w",
+            endpoint="e",
+            is_pd_collocated=True,
+            dispatch_url="http://10.0.0.1:8000",
+            pd_role_group_id="group-a",
+            pd_role="decode",
+            pd_index=2,
         )
 
-        selection = runtime.select_backend([endpoint], {"model": "m", "prompt": "hello"})
+        selection = runtime.select_backend([prefill, decode], {"model": "m", "prompt": "hello"})
 
         self.assertEqual(selection.url, "http://10.0.0.1:8000")
         self.assertEqual(

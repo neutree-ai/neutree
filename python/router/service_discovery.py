@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-from router.routing import EndpointInfo, PDRouteUnit
+from router.routing import EndpointInfo
 
 
 PD_COMPONENT_LABEL = "pd-collocated"
@@ -98,6 +98,7 @@ class K8sPodServiceDiscovery:
         self.watcher_timeout_seconds = watcher_timeout_seconds
         self.health_check_timeout_seconds = health_check_timeout_seconds
         self._available: Dict[str, EndpointInfo] = {}
+        self._pod_endpoint_keys: Dict[str, Set[str]] = {}
         self._known_models: Set[str] = set()
         self._lock = threading.Lock()
         self._running = True
@@ -142,7 +143,7 @@ class K8sPodServiceDiscovery:
                     pod = event["object"]
                     event_type = event["type"]
                     snapshot = pod_snapshot_from_k8s_pod(pod)
-                    if event_type == "DELETED" or not snapshot.ready:
+                    if event_type == "DELETED" or (not snapshot.is_pd_collocated and not snapshot.ready):
                         self._remove(snapshot.name)
                     elif snapshot.ip:
                         self._add_or_update(snapshot)
@@ -151,13 +152,14 @@ class K8sPodServiceDiscovery:
 
     def _add_or_update(self, snapshot: K8sPodSnapshot) -> None:
         if snapshot.is_pd_collocated:
-            endpoint_info = self._build_pd_endpoint(snapshot)
-            if endpoint_info is None:
+            endpoint_infos = self._build_pd_endpoints(snapshot)
+            if not endpoint_infos:
                 self._remove(snapshot.name)
                 return
             with self._lock:
-                self._available[snapshot.name] = endpoint_info
-                self._known_models.update(endpoint_info.model_names)
+                self._replace_pod_endpoints(snapshot.name, endpoint_infos)
+                for endpoint_info in endpoint_infos:
+                    self._known_models.update(endpoint_info.model_names)
             return
 
         model_names = self._get_model_names(snapshot.ip, self.port)
@@ -174,39 +176,59 @@ class K8sPodServiceDiscovery:
             pod_name=snapshot.name,
         )
         with self._lock:
-            self._available[snapshot.name] = endpoint_info
+            self._replace_pod_endpoints(snapshot.name, [endpoint_info])
             self._known_models.update(model_names)
 
     def _remove(self, pod_name: str) -> None:
         with self._lock:
-            self._available.pop(pod_name, None)
+            keys = self._pod_endpoint_keys.pop(pod_name, {pod_name})
+            for key in keys:
+                self._available.pop(key, None)
 
-    def _build_pd_endpoint(self, snapshot: K8sPodSnapshot) -> Optional[EndpointInfo]:
+    def _replace_pod_endpoints(self, pod_name: str, endpoint_infos: List[EndpointInfo]) -> None:
+        for key in self._pod_endpoint_keys.pop(pod_name, set()):
+            self._available.pop(key, None)
+        keys = {endpoint_info.route_key for endpoint_info in endpoint_infos}
+        for endpoint_info in endpoint_infos:
+            self._available[endpoint_info.route_key] = endpoint_info
+        self._pod_endpoint_keys[pod_name] = keys
+
+    def _build_pd_endpoints(self, snapshot: K8sPodSnapshot) -> List[EndpointInfo]:
         sidecar = _find_container(snapshot.containers, "pd-router-sidecar")
         if sidecar is None or not sidecar.ready or not sidecar.http_port:
-            return None
+            return []
 
         model_port = _first_ready_role_http_port(snapshot.containers)
         model_names = self._get_model_names(snapshot.ip, model_port)
         if not model_names:
-            return None
+            return []
 
         sidecar_url = f"http://{snapshot.ip}:{sidecar.http_port}"
-        route_units = _pd_route_units(snapshot, sidecar_url)
-        if not route_units:
-            return None
-
-        return EndpointInfo(
-            url=sidecar_url,
-            model_names=model_names,
-            id=str(uuid.uuid5(uuid.NAMESPACE_DNS, snapshot.name)),
-            workspace=snapshot.workspace,
-            endpoint=snapshot.endpoint,
-            routing_logic=snapshot.routing_logic,
-            pod_name=snapshot.name,
-            is_pd_collocated=True,
-            pd_route_units=route_units,
-        )
+        endpoints = []
+        role_group_id = snapshot.uid or snapshot.name
+        for container in snapshot.containers:
+            role, index = _role_and_index(container.name)
+            if role not in {"prefill", "decode"} or index is None or container.http_port is None:
+                continue
+            address = _pd_endpoint_address(role_group_id, sidecar_url, role, index)
+            endpoints.append(
+                EndpointInfo(
+                    url=address,
+                    model_names=model_names,
+                    id=str(uuid.uuid5(uuid.NAMESPACE_DNS, address)),
+                    workspace=snapshot.workspace,
+                    endpoint=snapshot.endpoint,
+                    routing_logic=snapshot.routing_logic,
+                    pod_name=snapshot.name,
+                    sleep=not container.ready,
+                    is_pd_collocated=True,
+                    dispatch_url=sidecar_url,
+                    pd_role_group_id=role_group_id,
+                    pd_role=role,
+                    pd_index=index,
+                )
+            )
+        return endpoints
 
     def _get_model_names(self, pod_ip: Optional[str], port: Optional[int]) -> List[str]:
         if not port:
@@ -241,27 +263,12 @@ def _first_ready_role_http_port(containers: List[K8sContainerSnapshot]) -> Optio
     return None
 
 
-def _pd_route_units(snapshot: K8sPodSnapshot, sidecar_url: str) -> List[PDRouteUnit]:
-    units = []
-    role_group_id = snapshot.uid or snapshot.name
-    for container in snapshot.containers:
-        role, index = _role_and_index(container.name)
-        if role not in {"prefill", "decode"} or index is None:
-            continue
-        units.append(
-            PDRouteUnit(
-                role_group_id=role_group_id,
-                role=role,
-                index=index,
-                ready=container.ready and container.http_port is not None,
-                sidecar_url=sidecar_url,
-            )
-        )
-    return units
-
-
 def _role_and_index(container_name: str) -> tuple[Optional[str], Optional[int]]:
     match = re.match(r"^(prefill|decode)-([0-9]+)$", container_name)
     if not match:
         return None, None
     return match.group(1), int(match.group(2))
+
+
+def _pd_endpoint_address(role_group_id: str, sidecar_url: str, role: str, index: int) -> str:
+    return f"pd://{role_group_id}/{role}/{index}?sidecar={sidecar_url}"
