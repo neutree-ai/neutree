@@ -1,6 +1,6 @@
 import unittest
 
-from router.routing import EndpointInfo
+from router.scheduling import EndpointInfo
 from router.runtime import RouterRuntime
 
 

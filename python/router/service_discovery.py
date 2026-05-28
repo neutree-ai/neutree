@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-from router.routing import EndpointInfo
+from router.scheduling import EndpointInfo
 
 
 PD_COMPONENT_LABEL = "pd-collocated"

@@ -1,7 +1,7 @@
 import unittest
 
 from router.metrics import MetricsRegistry, render_prometheus
-from router.routing import EndpointInfo, RequestStats
+from router.scheduling import EndpointInfo, RequestStats
 
 
 class RouterMetricsTests(unittest.TestCase):

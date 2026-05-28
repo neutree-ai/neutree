@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from router.metrics import render_prometheus
-from router.routing import EndpointInfo
+from router.scheduling import EndpointInfo
 from router.runtime import BackendSelection, RouterRuntime
 from router.service_discovery import K8sPodServiceDiscovery
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Dict, Iterable, Tuple
 
-from router.routing import EndpointInfo, RequestStats
+from router.scheduling import EndpointInfo, RequestStats
 
 
 class MetricsRegistry:

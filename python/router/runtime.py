@@ -5,12 +5,13 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping
 
 from router.metrics import MetricsRegistry
-from router.routing import (
-    ConsistentHashRouter,
+from router.scheduling import (
+    ConsistentHashEndpointPicker,
     EndpointInfo,
-    PDSameHostRouter,
+    PDSameHostProfileHandler,
     RequestStatsMonitor,
-    RoundRobinRouter,
+    RoundRobinEndpointPicker,
+    SchedulingContext,
 )
 
 LOG = logging.getLogger("router")
@@ -28,9 +29,9 @@ class RouterRuntime:
         self.service_discovery = service_discovery
         self.request_stats = RequestStatsMonitor(request_stats_window)
         self.metrics = MetricsRegistry()
-        self.round_robin = RoundRobinRouter()
-        self.consistent_hash = ConsistentHashRouter()
-        self.pd_same_host = PDSameHostRouter()
+        self.round_robin = RoundRobinEndpointPicker()
+        self.consistent_hash = ConsistentHashEndpointPicker()
+        self.pd_same_host = PDSameHostProfileHandler()
 
     def select_backend(
         self,
@@ -38,12 +39,12 @@ class RouterRuntime:
         request_json: Mapping[str, Any],
     ) -> BackendSelection:
         pd_endpoints = [endpoint for endpoint in endpoints if endpoint.is_pd_collocated]
+        stats = self.request_stats.snapshot()
+        context = SchedulingContext({}, stats, request_json)
         if pd_endpoints:
-            decision = self.pd_same_host.route(
+            decision = self.pd_same_host.pick(
                 pd_endpoints,
-                {},
-                self.request_stats.snapshot(),
-                request_json,
+                context,
             )
             return BackendSelection(
                 url=decision.url,
@@ -55,11 +56,10 @@ class RouterRuntime:
             )
 
         routing_logic = endpoints[0].routing_logic or "roundrobin"
-        stats = self.request_stats.snapshot()
         if routing_logic == "consistent_hash":
-            endpoint = self.consistent_hash.route(endpoints, {}, stats, request_json)
+            endpoint = self.consistent_hash.pick(endpoints, context)
             return BackendSelection(url=endpoint.url, stats_keys=(endpoint.stats_key,))
         if routing_logic != "roundrobin":
             LOG.warning("unsupported routing_logic=%s; falling back to roundrobin", routing_logic)
-        endpoint = self.round_robin.route(endpoints, {}, stats, request_json)
+        endpoint = self.round_robin.pick(endpoints, context)
         return BackendSelection(url=endpoint.url, stats_keys=(endpoint.stats_key,))

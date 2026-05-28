@@ -1,16 +1,16 @@
 import unittest
 
-from router.routing import (
-    ConsistentHashRouter,
+from router.scheduling import (
+    ConsistentHashEndpointPicker,
     ConsistentHashWithBoundedLoadScorer,
     EndpointInfo,
-    PDSameHostRouter,
+    PDSameHostProfileHandler,
     RequestStats,
-    RoundRobinRouter,
+    RoundRobinEndpointPicker,
     SchedulingContext,
     SchedulingProfile,
     WeightedEndpointScorer,
-    WeightedScoringRouter,
+    WeightedScoringEndpointPicker,
 )
 
 
@@ -37,15 +37,19 @@ class StaticScorePlugin:
         }
 
 
-class RouterRoutingTests(unittest.TestCase):
+def _context(stats=None, request_json=None):
+    return SchedulingContext({}, stats or {}, request_json or {})
+
+
+class SchedulingTests(unittest.TestCase):
     def test_round_robin_cycles_over_sorted_endpoint_urls(self):
-        router = RoundRobinRouter()
+        picker = RoundRobinEndpointPicker()
         endpoints = [
             EndpointInfo(url="http://pod-b:8000", model_names=["m"]),
             EndpointInfo(url="http://pod-a:8000", model_names=["m"]),
         ]
 
-        got = [router.route(endpoints, {}, {}, {"model": "m"}).url for _ in range(4)]
+        got = [picker.pick(endpoints, _context(request_json={"model": "m"})).url for _ in range(4)]
 
         self.assertEqual(
             got,
@@ -58,7 +62,7 @@ class RouterRoutingTests(unittest.TestCase):
         )
 
     def test_consistent_hash_is_stable_for_same_chat_prefix(self):
-        router = ConsistentHashRouter()
+        picker = ConsistentHashEndpointPicker()
         endpoints = [
             EndpointInfo(url="http://pod-a:8000", model_names=["m"], workspace="w", endpoint="e"),
             EndpointInfo(url="http://pod-b:8000", model_names=["m"], workspace="w", endpoint="e"),
@@ -72,13 +76,13 @@ class RouterRoutingTests(unittest.TestCase):
             ],
         }
 
-        first = router.route(endpoints, {}, {}, payload)
-        second = router.route(list(reversed(endpoints)), {}, {}, payload)
+        first = picker.pick(endpoints, _context(request_json=payload))
+        second = picker.pick(list(reversed(endpoints)), _context(request_json=payload))
 
         self.assertEqual(first.url, second.url)
 
     def test_consistent_hash_skips_overloaded_replica_when_possible(self):
-        router = ConsistentHashRouter(load_factor=1.0)
+        picker = ConsistentHashEndpointPicker(load_factor=1.0)
         endpoints = [
             EndpointInfo(url="http://pod-a:8000", model_names=["m"], workspace="w", endpoint="e"),
             EndpointInfo(url="http://pod-b:8000", model_names=["m"], workspace="w", endpoint="e"),
@@ -88,12 +92,12 @@ class RouterRoutingTests(unittest.TestCase):
             "http://pod-b:8000": RequestStats(active_requests=0),
         }
 
-        got = router.route(endpoints, {}, stats, {"model": "m", "prompt": "same"})
+        got = picker.pick(endpoints, _context(stats=stats, request_json={"model": "m", "prompt": "same"}))
 
         self.assertEqual(got.url, "http://pod-b:8000")
 
-    def test_weighted_scoring_router_combines_multiple_plugin_scores(self):
-        router = WeightedScoringRouter(
+    def test_weighted_scoring_picker_combines_multiple_plugin_scores(self):
+        picker = WeightedScoringEndpointPicker(
             [
                 WeightedEndpointScorer(StaticScorePlugin({"pod-a": 1.0, "pod-b": 0.0}), 1.0),
                 WeightedEndpointScorer(StaticScorePlugin({"pod-a": 0.0, "pod-b": 1.0}), 2.0),
@@ -104,7 +108,7 @@ class RouterRoutingTests(unittest.TestCase):
             EndpointInfo(id="pod-b", url="http://pod-b:8000", model_names=["m"]),
         ]
 
-        got = router.route(endpoints, {}, {}, {"model": "m", "prompt": "same"})
+        got = picker.pick(endpoints, _context(request_json={"model": "m", "prompt": "same"}))
 
         self.assertEqual(got.url, "http://pod-b:8000")
 
@@ -119,7 +123,7 @@ class RouterRoutingTests(unittest.TestCase):
             EndpointInfo(url="http://pod-c:8000", model_names=["m"], endpoint="served"),
         ]
 
-        got = profile.schedule(
+        got = profile.pick(
             endpoints,
             SchedulingContext({}, {}, {"model": "m", "prompt": "same"}),
         )
@@ -140,12 +144,12 @@ class RouterRoutingTests(unittest.TestCase):
             "http://pod-b:8000": RequestStats(active_requests=0),
         }
 
-        got = profile.schedule(endpoints, SchedulingContext({}, stats, {"model": "m"}))
+        got = profile.pick(endpoints, SchedulingContext({}, stats, {"model": "m"}))
 
         self.assertEqual(got.url, "http://pod-b:8000")
 
-    def test_pd_router_selects_decode_endpoint_then_local_prefill_endpoint(self):
-        router = PDSameHostRouter()
+    def test_pd_profile_handler_selects_decode_endpoint_then_local_prefill_endpoint(self):
+        profile_handler = PDSameHostProfileHandler()
         prefill_a = EndpointInfo(
             url="pd://group-a/prefill/0?sidecar=http://10.0.0.1:8000",
             model_names=["m"],
@@ -195,11 +199,9 @@ class RouterRoutingTests(unittest.TestCase):
             decode_b.route_key: RequestStats(active_requests=0),
         }
 
-        decision = router.route(
+        decision = profile_handler.pick(
             [prefill_a, decode_a, prefill_b, decode_b],
-            {},
-            stats,
-            {"model": "m", "messages": [{"role": "user", "content": "hello"}]},
+            _context(stats=stats, request_json={"model": "m", "messages": [{"role": "user", "content": "hello"}]}),
         )
 
         self.assertEqual(decision.endpoint, decode_b)
@@ -209,8 +211,8 @@ class RouterRoutingTests(unittest.TestCase):
         self.assertEqual(decision.prefill_index, 0)
         self.assertEqual(decision.decode_index, 0)
 
-    def test_pd_router_falls_back_to_load_only_when_cache_key_is_missing(self):
-        router = PDSameHostRouter()
+    def test_pd_profile_handler_falls_back_to_load_only_when_cache_key_is_missing(self):
+        profile_handler = PDSameHostProfileHandler()
         endpoints = [
             EndpointInfo(
                 url="pd://group-a/prefill/0?sidecar=http://10.0.0.1:8000",
@@ -262,13 +264,13 @@ class RouterRoutingTests(unittest.TestCase):
             "group-b:decode:0": RequestStats(active_requests=0),
         }
 
-        decision = router.route(endpoints, {}, stats, {"model": "m"})
+        decision = profile_handler.pick(endpoints, _context(stats=stats, request_json={"model": "m"}))
 
         self.assertEqual(decision.endpoint.route_key, "group-b:decode:0")
         self.assertEqual(decision.prefill.route_key, "group-b:prefill:0")
 
-    def test_pd_router_fails_closed_without_local_prefill(self):
-        router = PDSameHostRouter()
+    def test_pd_profile_handler_fails_closed_without_local_prefill(self):
+        profile_handler = PDSameHostProfileHandler()
         endpoint = EndpointInfo(
             url="pd://group-a/decode/0?sidecar=http://10.0.0.1:8000",
             model_names=["m"],
@@ -282,7 +284,7 @@ class RouterRoutingTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "no ready prefill endpoint"):
-            router.route([endpoint], {}, {}, {"model": "m"})
+            profile_handler.pick([endpoint], _context(request_json={"model": "m"}))
 
 
 if __name__ == "__main__":
