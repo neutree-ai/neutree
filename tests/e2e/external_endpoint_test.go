@@ -110,6 +110,26 @@ func waitForUpstreamRequest() (last *RecordedRequest, body map[string]any) {
 	return last, body
 }
 
+func assertMalformedToolUseBlocks(content []anthropic.ContentBlockUnion) {
+	toolUses := make(map[string]anthropic.ContentBlockUnion)
+	for _, block := range content {
+		if block.Type == "tool_use" {
+			toolUses[block.ID] = block
+		}
+	}
+
+	Expect(toolUses).To(HaveLen(3))
+
+	Expect(toolUses["call-function-null"].Name).To(Equal(""))
+	Expect(string(toolUses["call-function-null"].Input)).To(MatchJSON(`{}`))
+
+	Expect(toolUses["call-name-null"].Name).To(Equal(""))
+	Expect(string(toolUses["call-name-null"].Input)).To(MatchJSON(`{"city":"shanghai"}`))
+
+	Expect(toolUses["call-arguments-null"].Name).To(Equal("lookup_weather"))
+	Expect(string(toolUses["call-arguments-null"].Input)).To(MatchJSON(`{}`))
+}
+
 // --- Tests ---
 
 var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func() {
@@ -360,6 +380,64 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 
 				Expect(string(message.Role)).To(Equal("assistant"))
 				Expect(len(message.Content)).To(BeNumerically(">", 0))
+
+				last, upstreamReq := waitForUpstreamRequest()
+				Expect(last.Path).To(Equal("/v1/chat/completions"))
+				Expect(upstreamReq["stream"]).To(BeTrue())
+			})
+		})
+
+		// NEU-404: some OpenAI-compatible upstreams can return a real tool_calls
+		// array whose nested function/name/arguments fields are JSON null. This is
+		// distinct from NEU-428's outer tool_calls:null case because the converter
+		// enters the per-tool-call path before seeing the null sentinel.
+		Context("when upstream emits malformed tool call function fields", Label("tool-call-function-null"), func() {
+			BeforeEach(func() {
+				mockUpstream.SetEmitMalformedToolCallFunction(true)
+				mockUpstream.ClearRequests()
+			})
+
+			AfterEach(func() {
+				mockUpstream.SetEmitMalformedToolCallFunction(false)
+			})
+
+			It("should normalize non-stream tool_use fields", func() {
+				msg, err := anthropicClient.Messages.New(context.Background(), anthropic.MessageNewParams{
+					Model:     "fast",
+					MaxTokens: 100,
+					Messages: []anthropic.MessageParam{
+						anthropic.NewUserMessage(anthropic.NewTextBlock("hello malformed tool calls")),
+					},
+				})
+				Expect(err).NotTo(HaveOccurred(),
+					"Anthropic conversion must not fail when tool_call.function/name/arguments contain JSON null")
+
+				assertMalformedToolUseBlocks(msg.Content)
+
+				last, _ := waitForUpstreamRequest()
+				Expect(last.Path).To(Equal("/v1/chat/completions"))
+			})
+
+			It("should normalize stream tool_use fields", func() {
+				stream := anthropicClient.Messages.NewStreaming(context.Background(), anthropic.MessageNewParams{
+					Model:     "smart",
+					MaxTokens: 100,
+					Messages: []anthropic.MessageParam{
+						anthropic.NewUserMessage(anthropic.NewTextBlock("hello stream malformed tool calls")),
+					},
+				})
+				defer stream.Close()
+
+				var message anthropic.Message
+				for stream.Next() {
+					event := stream.Current()
+					err := message.Accumulate(event)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				Expect(stream.Err()).NotTo(HaveOccurred(),
+					"stream must complete cleanly when nested tool_call function fields contain JSON null")
+
+				assertMalformedToolUseBlocks(message.Content)
 
 				last, upstreamReq := waitForUpstreamRequest()
 				Expect(last.Path).To(Equal("/v1/chat/completions"))
