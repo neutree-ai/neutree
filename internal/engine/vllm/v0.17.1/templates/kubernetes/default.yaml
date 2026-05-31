@@ -99,6 +99,22 @@ spec:
           - "8000"
           - --served-model-name
           - {{ .ModelArgs.serve_name }}
+          {{/* vLLM v0.17.1 removed --task; auto-detect can fall back to a
+               generate runner for multimodal embedding architectures, so
+               translate the registry-level task explicitly. The shared
+               serve/_utils/vllm_task_translate table mirrors these flags
+               on the Ray Serve path. */}}
+          {{- if eq .ModelArgs.task "text-embedding" }}
+          - --runner
+          - pooling
+          - --convert
+          - embed
+          {{- else if eq .ModelArgs.task "text-rerank" }}
+          - --runner
+          - pooling
+          - --convert
+          - classify
+          {{- end }}
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
           {{- if eq (printf "%v" $value) "true" }}

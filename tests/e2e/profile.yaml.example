@@ -60,16 +60,19 @@ model:
   version: "1.0"
   file: model.safetensors
   task: text-generation
+  engine_args: ""                  # merged with engines.<name>.engine_args; model value wins on duplicate keys
 
 # Optional: embedding inference tests (skip if not configured)
 embedding_model:
   name: ""
   version: ""
+  engine_args: ""                  # merged with engines.<name>.engine_args for text-embedding endpoints
 
 # Optional: rerank inference tests (skip if not configured)
 rerank_model:
   name: ""
   version: ""
+  engine_args: ""                  # merged with engines.<name>.engine_args for text-rerank endpoints
 
 endpoint:
   # accelerator_type and accelerator_product are auto-detected from cluster status
