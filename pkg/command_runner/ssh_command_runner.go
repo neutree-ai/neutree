@@ -15,6 +15,37 @@ var (
 	ErrConnectionFailed = errors.New("connection failed")
 )
 
+// staticClusterConnectionHint is appended to SSH connection-failure errors so
+// the user-facing message points at the most common root cause for static
+// clusters: head_ip mistakenly set to the management-plane IP instead of the
+// physical server's IP. All SSHCommandRunner callers operate on static-cluster
+// nodes (K8s clusters use kubernetes_command_runner), so the hint applies
+// universally.
+const staticClusterConnectionHint = "verify the node IP is the physical server " +
+	"address (not the management plane IP), the ssh_user can log in to that host, " +
+	"and the ssh_private_key matches"
+
+type sshConnectionError struct {
+	ip    string
+	cause error
+}
+
+func (e *sshConnectionError) Error() string {
+	if e.cause == nil {
+		return fmt.Sprintf("ssh connection failed to node %s (hint: %s)", e.ip, staticClusterConnectionHint)
+	}
+
+	return fmt.Sprintf("ssh connection failed to node %s: %v (hint: %s)", e.ip, e.cause, staticClusterConnectionHint)
+}
+
+func (e *sshConnectionError) Unwrap() []error {
+	if e.cause == nil {
+		return []error{ErrConnectionFailed}
+	}
+
+	return []error{ErrConnectionFailed, e.cause}
+}
+
 type ProcessExecute func(ctx context.Context, name string, args []string) ([]byte, error)
 
 // SSHCommandRunner represents an SSH command runner.
@@ -65,7 +96,11 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 	// before running the command, check if the connection is still alive
 	if err := s.checkConnection(ctx, sshCommand); err != nil {
 		klog.V(2).ErrorS(err, "SSH connection failed", "nodeID", s.nodeID)
-		return "", ErrConnectionFailed
+
+		return "", &sshConnectionError{
+			ip:    s.sshIP,
+			cause: err,
+		}
 	}
 
 	if shutdownAfterRun {
@@ -108,12 +143,24 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 }
 
 func (s *SSHCommandRunner) checkConnection(ctx context.Context, sshCommand []string) error {
-	var connectCommand []string
-	connectCommand = append(connectCommand, sshCommand...)
+	// sshCommand layout from Run(): ["ssh", <opts>..., "user@host"]. Insert
+	// "-o ConnectTimeout=10" before "user@host" so the bound applies only to
+	// the precheck — leaving long-running command argvs constructed elsewhere
+	// (cluster init, docker exec) untouched. The bound shortens unreachable-
+	// host stalls from the OpenSSH default ~75s TCP SYN timeout to ~10s.
+	last := len(sshCommand) - 1
+	connectCommand := make([]string, 0, len(sshCommand)+3)
+	connectCommand = append(connectCommand, sshCommand[:last]...)
+	connectCommand = append(connectCommand, "-o", "ConnectTimeout=10")
+	connectCommand = append(connectCommand, sshCommand[last])
 	connectCommand = append(connectCommand, "uptime")
 
-	_, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
+	output, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
 	if err != nil {
+		if outputText := strings.TrimSpace(string(output)); outputText != "" {
+			return fmt.Errorf("%w: %s", err, outputText)
+		}
+
 		return err
 	}
 

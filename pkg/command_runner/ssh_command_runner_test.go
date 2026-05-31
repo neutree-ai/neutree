@@ -218,6 +218,121 @@ func TestSSHCommandRunner_getSSHOptions_NoControlPath(t *testing.T) {
 	assert.NotContains(t, options, "ControlPersist=10s")
 }
 
+func TestSSHCommandRunner_CheckConnection_PreservesUnderlyingErrorAsConnectionFailed(t *testing.T) {
+	mockExec := new(commandmocks.MockExecutor)
+	runner := newSSHCommandRunner(mockExec)
+
+	underlying := errors.New("exit status 255: ssh: connect to host 127.0.0.1 port 22: Connection refused")
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte(""), underlying).Once()
+
+	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrConnectionFailed),
+		"errors.Is must report ErrConnectionFailed; got %v", err)
+	assert.True(t, errors.Is(err, underlying),
+		"errors.Is must preserve the original precheck error; got %v", err)
+	assert.Contains(t, err.Error(), "ssh connection failed",
+		"message should preserve the stable connection-failure substring used by e2e and operators")
+	assert.Contains(t, err.Error(), "ssh connection failed to node",
+		"message should identify the precheck phase")
+	assert.NotContains(t, err.Error(), "node 127.0.0.1 connection failed",
+		"message should not repeat the sentinel wording in the user-facing sentence")
+	assert.Contains(t, err.Error(), testSSHIP,
+		"message should include the target IP %q", testSSHIP)
+	assert.Contains(t, err.Error(), "Connection refused",
+		"message should preserve the underlying SSH stderr token")
+	assert.Contains(t, err.Error(), "hint:",
+		"message should include the static-cluster troubleshooting hint section")
+	assert.Contains(t, err.Error(), "physical server",
+		"hint should mention the physical-server IP guidance")
+	mockExec.AssertExpectations(t)
+}
+
+func TestSSHCommandRunner_CheckConnection_PreservesExecutorOutputAsConnectionFailureDetail(t *testing.T) {
+	mockExec := new(commandmocks.MockExecutor)
+	runner := newSSHCommandRunner(mockExec)
+
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime")
+	}).Return([]byte("ssh: connect to host 127.0.0.1 port 22: Connection refused\n"), errors.New("exit status 255")).Once()
+
+	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrConnectionFailed),
+		"errors.Is must report ErrConnectionFailed; got %v", err)
+	assert.Contains(t, err.Error(), "exit status 255",
+		"message should preserve the process exit status")
+	assert.Contains(t, err.Error(), "Connection refused",
+		"message should preserve SSH stderr returned as executor output")
+	assert.Contains(t, err.Error(), "hint:",
+		"message should include the static-cluster troubleshooting hint section")
+	mockExec.AssertExpectations(t)
+}
+
+func TestSSHCommandRunner_CheckConnection_AddsConnectTimeout(t *testing.T) {
+	mockExec := new(commandmocks.MockExecutor)
+	runner := newSSHCommandRunner(mockExec)
+
+	var precheckArgs []string
+	var mainArgs []string
+
+	// First call = precheck (uptime). Capture its argv.
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "uptime",
+			"first call must be the precheck (uptime)")
+		precheckArgs = append([]string{}, cmd...)
+	}).Return([]byte("ok"), nil).Once()
+
+	// Second call = main command. Capture its argv.
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), testCommand,
+			"second call must be the main command")
+		mainArgs = append([]string{}, cmd...)
+	}).Return([]byte("success"), nil).Once()
+
+	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
+	assert.NoError(t, err)
+
+	// Precheck argv MUST include ConnectTimeout=10.
+	preStr := strings.Join(precheckArgs, " ")
+	assert.Contains(t, preStr, "-o ConnectTimeout=10",
+		"precheck argv must carry ConnectTimeout=10; got %q", preStr)
+
+	// And it must appear BEFORE the user@host element (SSH only honors options
+	// listed before the destination).
+	hostElement := fmt.Sprintf("%s@%s", testSSHUser, testSSHIP)
+	hostIdx := -1
+	timeoutIdx := -1
+	for i, tok := range precheckArgs {
+		if tok == hostElement {
+			hostIdx = i
+		}
+		if tok == "ConnectTimeout=10" {
+			timeoutIdx = i
+		}
+	}
+	assert.GreaterOrEqual(t, hostIdx, 0, "user@host element must be present")
+	assert.GreaterOrEqual(t, timeoutIdx, 0, "ConnectTimeout token must be present")
+	assert.Less(t, timeoutIdx, hostIdx,
+		"ConnectTimeout must precede user@host (got timeout@%d, host@%d)", timeoutIdx, hostIdx)
+
+	// Main command argv MUST NOT carry ConnectTimeout — isolation assertion
+	// (Reviewer requested keeping the option out of getSSHOptions).
+	mainStr := strings.Join(mainArgs, " ")
+	assert.NotContains(t, mainStr, "ConnectTimeout=10",
+		"main command argv must not carry the precheck-only ConnectTimeout; got %q", mainStr)
+
+	mockExec.AssertExpectations(t)
+}
+
 func TestSSHCommandRunner_Run_WithOutputDisabled(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
