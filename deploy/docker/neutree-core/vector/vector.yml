@@ -91,6 +91,7 @@ transforms:
           "completion_tokens": .ai."statistics".usage.completion_tokens,
           "total_tokens":      .ai."statistics".usage.total_tokens,
           "finish_reason":  .ai."trace".finish_reason,
+          "stream":         .ai."trace".stream,
           "user_agent":     .request.headers."user-agent",
           "duration_ms":    .latencies.request,
           "request_body":   .ai."trace".request_body,

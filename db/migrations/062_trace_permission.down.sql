@@ -1,0 +1,2 @@
+-- PostgreSQL does not support removing enum values.
+-- The trace:read value will remain in the enum.

@@ -984,6 +984,7 @@ function AIGatewayHandler:access(conf)
     end
 
     kong.ctx.plugin.request_model = ai_request.model
+    kong.ctx.plugin.is_stream = ai_request.stream == true
 
     if conf.upstreams then
         if not ai_request.model or ai_request.model == "" then
@@ -1110,6 +1111,8 @@ function AIGatewayHandler:log(conf)
     if kong.ctx.plugin.finish_reason ~= nil then
         kong.log.set_serialize_value("ai.trace.finish_reason", kong.ctx.plugin.finish_reason)
     end
+    -- POC trace: whether the client requested a streaming response.
+    kong.log.set_serialize_value("ai.trace.stream", kong.ctx.plugin.is_stream == true)
 
     if response_status ~= 200 then
         return

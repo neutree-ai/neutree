@@ -37,6 +37,7 @@ type AITrace struct {
 	CompletionTokens *int   `json:"completion_tokens,omitempty"`
 	TotalTokens      *int   `json:"total_tokens,omitempty"`
 	FinishReason     string `json:"finish_reason,omitempty"`
+	Stream           bool   `json:"stream"`
 	UserAgent        string `json:"user_agent,omitempty"`
 	DurationMs       *int   `json:"duration_ms,omitempty"`
 	RequestBody      string `json:"request_body,omitempty"`
@@ -49,7 +50,7 @@ type AITrace struct {
 const listProjection = "_time, request_id, workspace, endpoint_type, " +
 	"endpoint_name, api_key_id, request_uri, request_model, response_model, " +
 	"response_status, prompt_tokens, completion_tokens, total_tokens, " +
-	"finish_reason, user_agent, duration_ms"
+	"finish_reason, stream, user_agent, duration_ms"
 
 // AITraceListResponse is the wire format for GET /api/v1/ai-traces/:workspace.
 //
@@ -77,7 +78,7 @@ type AITraceStatsResponse struct {
 func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	traces := group.Group("/ai-traces/:workspace")
 	traces.Use(middlewares...)
-	traces.Use(middleware.RequireWorkspacePermission("workspace:read", middleware.PermissionDependencies{
+	traces.Use(middleware.RequireWorkspacePermission("trace:read", middleware.PermissionDependencies{
 		Storage: deps.Storage,
 	}))
 
@@ -398,6 +399,7 @@ type vlRecord struct {
 	CompletionTokens string `json:"completion_tokens"`
 	TotalTokens      string `json:"total_tokens"`
 	FinishReason     string `json:"finish_reason"`
+	IsStream         string `json:"stream"`
 	UserAgent        string `json:"user_agent"`
 	DurationMs       string `json:"duration_ms"`
 	RequestBody      string `json:"request_body"`
@@ -421,6 +423,7 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 		RequestModel:  r.RequestModel,
 		ResponseModel: r.ResponseModel,
 		FinishReason:  r.FinishReason,
+		Stream:        r.IsStream == "true",
 		UserAgent:     r.UserAgent,
 		RequestBody:   r.RequestBody,
 		ResponseBody:  r.ResponseBody,
