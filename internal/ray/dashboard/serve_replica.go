@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const actorStateAlive = "ALIVE"
+
 // ExtractReplicaShortID parses a Ray Serve actor name of the form
 // "SERVE_REPLICA::<app>#<deployment>#<short_id>" and returns short_id.
 // Returns "" when the name does not have at least one '#' separator or
@@ -80,6 +82,57 @@ func FindFailedActorForDeployment(svc DashboardService, appName, deploymentName 
 	a := actors[pick]
 
 	return &a, nil
+}
+
+// ListActorsByName fetches actors whose Ray actor name exactly matches name.
+func ListActorsByName(svc DashboardService, name string) ([]Actor, error) {
+	resp, err := svc.ListActors([]ActorFilter{
+		{Key: "name", Predicate: "=", Value: name},
+	}, true, 100)
+
+	if err != nil {
+		return nil, fmt.Errorf("list actors by name %s: %w", name, err)
+	}
+
+	return resp.Data.Result.Result, nil
+}
+
+// FindActorByNamePreferAlive returns the actor with the given name, preferring
+// the ALIVE actor when Ray still retains older DEAD entries for the same name.
+func FindActorByNamePreferAlive(svc DashboardService, name string) (*Actor, error) {
+	actors, err := ListActorsByName(svc, name)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(actors) == 0 {
+		return nil, nil
+	}
+
+	pick := -1
+	for i := range actors {
+		if pick == -1 || actorRankLess(actors[pick], actors[i]) {
+			pick = i
+		}
+	}
+
+	return &actors[pick], nil
+}
+
+func actorRankLess(a, b Actor) bool {
+	if a.State == actorStateAlive && b.State != actorStateAlive {
+		return false
+	}
+
+	if a.State != actorStateAlive && b.State == actorStateAlive {
+		return true
+	}
+
+	if a.StartTime != b.StartTime {
+		return a.StartTime < b.StartTime
+	}
+
+	return a.ActorID < b.ActorID
 }
 
 // FindFailedActorByReplicaID returns the DEAD actor whose name encodes

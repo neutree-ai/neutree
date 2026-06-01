@@ -173,11 +173,7 @@ def _to_json_response(result) -> JSONResponse:
     return JSONResponse(content=result)
 
 
-@serve.deployment(
-    ray_actor_options={"num_cpus": 1, "num_gpus": 1},
-    graceful_shutdown_timeout_s=30,
-)
-class Backend:
+class _Backend:
     def __init__(
         self,
         # Model config parameters
@@ -390,6 +386,12 @@ class Backend:
             "context_len": context_len,
             "is_generation": getattr(tm, "is_generation", True),
         }
+
+
+Backend = serve.deployment(
+    ray_actor_options={"num_cpus": 1, "num_gpus": 1},
+    graceful_shutdown_timeout_s=30,
+)(_Backend)
 
 
 app = FastAPI()

@@ -20,6 +20,48 @@ ENGINE_VLLM_BASE_IMAGE_REPO ?= vllm/vllm-openai
 ENGINE_VLLM_ROCM_BASE_IMAGE_REPO ?= vllm/vllm-openai-rocm
 ENGINE_VLLM_VERSION ?= v0.11.2
 ENGINE_VLLM_DIR_VERSION ?= $(shell echo $(ENGINE_VLLM_VERSION) | sed 's/-.*//' | tr '.' '_')
+
+# vLLM CUDA major used for the nixl-cuXX reconcile in Dockerfile.engine-vllm.
+#
+# vLLM upstream packaging history:
+#   < 0.20.0           → CUDA 12.9 base → nixl-cu12 preinstalled
+#   0.20.0..0.20.x     → CUDA 13.0 base → nixl-cu13 preinstalled
+#   >= 0.21.0          → CUDA 13.0 base → nixl 1.1.0 META-WHEEL preinstalled.
+#                        The meta-wheel ships both cu12 and cu13 backends and
+#                        selects the right one at runtime from torch.version.cuda.
+#                        No reconcile needed → empty value, Dockerfile skips.
+#
+# Computed from ENGINE_VLLM_VERSION at make parse-time. Overridable for
+# non-standard forks or upstream packaging changes:
+#     make docker-build-engine-vllm VLLM_CUDA_MAJOR=13
+#     make docker-build-engine-vllm VLLM_CUDA_MAJOR=        # explicit skip
+#
+# For ROCm (Dockerfile.engine-vllm path with rocm base) the reconcile is
+# short-circuited by passing TARGET_CUDA="" — no nixl-cuXX wheel for ROCm.
+VLLM_CUDA_MAJOR ?= $(shell \
+    ver=$$(echo $(ENGINE_VLLM_VERSION) | sed 's/^v//;s/-.*//'); \
+    if ! echo "$$ver" | grep -Eq '^[0-9]+\.[0-9]+'; then \
+        echo ""; \
+    else \
+        cmp_020=$$(printf '%s\n0.20.0\n' "$$ver" | sort -V | head -1); \
+        cmp_021=$$(printf '0.21.0\n%s\n' "$$ver" | sort -V | head -1); \
+        if [ "$$cmp_020" = "$$ver" ] && [ "$$ver" != "0.20.0" ]; then \
+            echo 12; \
+        elif [ "$$cmp_021" = "0.21.0" ]; then \
+            echo ""; \
+        else \
+            echo 13; \
+        fi; \
+    fi)
+
+# Optional user-supplied nixl version specifier (PEP 440 form). Empty by
+# default — meaning "use the Dockerfile's vLLM-upstream-supported range
+# fallback on the reinstall path; do nothing on the skip path". Set to
+# something like '==0.10.0' or '>=0.9.0,<0.11.0' to pin a specific
+# version when reinstall is in play (TARGET_CUDA non-empty, i.e. vLLM
+# < 0.21.0). Has no effect when TARGET_CUDA is empty (vLLM >= 0.21.0 or
+# ROCm) because the Dockerfile skips the reinstall RUN entirely.
+NIXL_VERSION ?=
 # Optional override of the upstream vLLM base image tag (defaults to
 # ENGINE_VLLM_VERSION). Use to point at non-standard upstream tags (e.g. dev
 # builds) without editing the Makefile; release workflows expose this via the
@@ -77,12 +119,12 @@ docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
 
 .PHONY: docker-build-engine-vllm
 docker-build-engine-vllm: prepare ## Build the vLLM engine image (NVIDIA)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg TARGET_CUDA=$(VLLM_CUDA_MAJOR) --build-arg NIXL_VERSION='$(NIXL_VERSION)' --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-vllm-rocm
-docker-build-engine-vllm-rocm: prepare ## Build the vLLM engine image (ROCm)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+docker-build-engine-vllm-rocm: prepare ## Build the vLLM engine image (ROCm — TARGET_CUDA="" skips nixl-cuXX reconcile)
+	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg TARGET_CUDA="" --build-arg NIXL_VERSION='' --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-llama-cpp

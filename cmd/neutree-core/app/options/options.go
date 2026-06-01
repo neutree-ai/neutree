@@ -55,6 +55,10 @@ func (o *NeutreeCoreOptions) Validate() error {
 		return err
 	}
 
+	if err := o.Cluster.Validate(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -107,6 +111,11 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		return nil, errors.Wrapf(err, "failed to init storage")
 	}
 
+	portAllocationStorage, ok := s.(storage.PortAllocationStorage)
+	if !ok {
+		return nil, errors.New("storage backend does not support port allocations")
+	}
+
 	objStorage, err := storage.NewObjectStorage(storage.Options{
 		AccessURL: o.Storage.AccessURL,
 		Scheme:    "api",
@@ -119,6 +128,7 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 
 	c.ObjectStorage = objStorage
 	c.Storage = s
+	c.PortAllocationStorage = portAllocationStorage
 
 	imageService := registry.NewImageService()
 	c.ImageService = imageService
@@ -158,6 +168,8 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		DefaultClusterVersion: o.Cluster.DefaultClusterVersion,
 		MetricsRemoteWriteURL: o.Observability.MetricsRemoteWriteURL,
 	}
+	portRange := o.Cluster.PortRange()
+	c.PortRange = &portRange
 	c.ServerConfig = &config.ServerConfig{
 		Port: o.Server.Port,
 		Host: o.Server.Host,

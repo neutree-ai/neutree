@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"encoding/base64"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
@@ -22,6 +24,11 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 	}
 
 	vllmV0_17_1EngineSchema, err := GetVLLMV0_17_1EngineSchema()
+	if err != nil {
+		return nil, err
+	}
+
+	vllmV0_20_0EngineSchema, err := GetVLLMV0_20_0EngineSchema()
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +122,32 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 							},
 						},
 					},
+					{
+						Version:      "v0.20.0",
+						ValuesSchema: vllmV0_20_0EngineSchema,
+						Images: map[string]*v1.EngineImage{
+							"nvidia_gpu": {
+								ImageName: "neutree/engine-vllm",
+								Tag:       "v0.20.0-ray2.53.0",
+							},
+						},
+						DeployTemplate: map[string]map[string]string{
+							"kubernetes": {
+								"default":       GetVLLMV0_20_0DeployTemplate(),
+								v1.PDDeployMode: GetVLLMV0_20_0PDDeployTemplate(),
+							},
+							v1.RayServeDeployTarget: {
+								v1.PDDeployMode: rayServeEntrypoint("serve.vllm.v0_20_0.app_pd_collocated:app_builder"),
+							},
+						},
+						Sidecar: pdRouter("v0.20.0"),
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								KVConnectors:   []string{"nixl", "mooncake"},
+								SupportedTasks: []string{v1.TextGenerationModelTask},
+							},
+						},
+					},
 				},
 				SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
 			},
@@ -138,7 +171,18 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						},
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
-								"default": GetSGLangV0_5_10DeployTemplate(),
+								"default":       GetSGLangV0_5_10DeployTemplate(),
+								v1.PDDeployMode: GetSGLangV0_5_10PDDeployTemplate(),
+							},
+							v1.RayServeDeployTarget: {
+								v1.PDDeployMode: rayServeEntrypoint("serve.sglang.v0_5_10.app_pd_collocated:app_builder"),
+							},
+						},
+						Sidecar: pdRouter("v0.5.10"),
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								KVConnectors:   []string{"nixl", "mooncake"},
+								SupportedTasks: []string{v1.TextGenerationModelTask},
 							},
 						},
 					},
@@ -152,4 +196,19 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 	}
 
 	return engines, nil
+}
+
+func rayServeEntrypoint(importPath string) string {
+	return base64.StdEncoding.EncodeToString([]byte(importPath))
+}
+
+func pdRouter(tag string) *v1.EngineVersionSidecar {
+	return &v1.EngineVersionSidecar{
+		Image: &v1.EngineImage{
+			ImageName: "neutree/pd-router",
+			Tag:       tag,
+		},
+		Port:       8000,
+		HealthPath: "/health",
+	}
 }

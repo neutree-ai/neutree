@@ -110,6 +110,64 @@ func TestMergeEngineVersion(t *testing.T) {
 			},
 		},
 		{
+			name: "override capabilities",
+			existing: &v1.EngineVersion{
+				Version: "v1.0.0",
+				Images:  map[string]*v1.EngineImage{},
+				Capabilities: &v1.EngineVersionCapabilities{
+					PD: &v1.PDCapabilitySpec{KVConnectors: []string{"nixl"}},
+				},
+			},
+			new: &v1.EngineVersion{
+				Version: "v1.0.0",
+				Images:  map[string]*v1.EngineImage{},
+				Capabilities: &v1.EngineVersionCapabilities{
+					PD: &v1.PDCapabilitySpec{
+						KVConnectors:   []string{"mooncake"},
+						SupportedTasks: []string{v1.TextGenerationModelTask},
+					},
+				},
+			},
+			expected: &v1.EngineVersion{
+				Version:        "v1.0.0",
+				Images:         map[string]*v1.EngineImage{},
+				DeployTemplate: map[string]map[string]string{},
+				Capabilities: &v1.EngineVersionCapabilities{
+					PD: &v1.PDCapabilitySpec{
+						KVConnectors:   []string{"mooncake"},
+						SupportedTasks: []string{v1.TextGenerationModelTask},
+					},
+				},
+			},
+		},
+		{
+			name: "override sidecar config",
+			existing: &v1.EngineVersion{
+				Version: "v1.0.0",
+				Sidecar: &v1.EngineVersionSidecar{
+					Image: &v1.EngineImage{ImageName: "old/sidecar", Tag: "old"},
+				},
+			},
+			new: &v1.EngineVersion{
+				Version: "v1.0.0",
+				Sidecar: &v1.EngineVersionSidecar{
+					Image:      &v1.EngineImage{ImageName: "new/sidecar", Tag: "v1.0.0"},
+					Port:       9000,
+					HealthPath: "/ready",
+				},
+			},
+			expected: &v1.EngineVersion{
+				Version:        "v1.0.0",
+				Images:         map[string]*v1.EngineImage{},
+				DeployTemplate: map[string]map[string]string{},
+				Sidecar: &v1.EngineVersionSidecar{
+					Image:      &v1.EngineImage{ImageName: "new/sidecar", Tag: "v1.0.0"},
+					Port:       9000,
+					HealthPath: "/ready",
+				},
+			},
+		},
+		{
 			name: "override values schema",
 			existing: &v1.EngineVersion{
 				Version:      "v1.0.0",

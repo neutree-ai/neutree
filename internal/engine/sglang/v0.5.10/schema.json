@@ -1909,7 +1909,7 @@
       ]
     },
     "tool_server": {
-      "description": "Either 'demo' or a comma-separated list of tool server urls to use for the model. If not specified, no tool server will be used.",
+      "description": "Either the built-in sample tool server or a comma-separated list of tool server urls to use for the model. If not specified, no tool server will be used.",
       "type": "string"
     },
     "torch_compile_max_bs": {

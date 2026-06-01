@@ -939,6 +939,156 @@
       ],
       "title": "Number Queued Requests",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "P/D same-host view filtered by role and rank.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      },
+      "id": 9201,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "count by (role, rank) (sglang_num_running_reqs{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\",role=~\"$Role\",rank=~\"$Rank\"})",
+          "instant": false,
+          "legendFormat": "{{role}}/{{rank}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "P/D Role Health",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "P/D same-host view filtered by role and rank.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "id": 9202,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sglang_cache_hit_rate{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\",role=~\"$Role\",rank=~\"$Rank\"}",
+          "instant": false,
+          "legendFormat": "{{role}}/{{rank}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "P/D KV Cache",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "P/D same-host view filtered by role and rank.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "id": 9203,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (__name__, role, rank) (rate({__name__=~\"sglang_.*(kv|cache|transfer|bootstrap).*\",application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\",role=~\"$Role\",rank=~\"$Rank\"}[$__rate_interval]))",
+          "instant": false,
+          "legendFormat": "{{__name__}} {{role}}/{{rank}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "P/D KV Transfer",
+      "type": "timeseries"
     }
   ],
   "preload": false,
@@ -1042,6 +1192,68 @@
         "query": {
           "query": "label_values(replica)",
           "refId": "Var-Rep"
+        },
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "sort": 0
+      },
+      {
+        "name": "Role",
+        "label": "Role",
+        "type": "query",
+        "hide": 0,
+        "refresh": 2,
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(role)",
+        "query": {
+          "query": "label_values(role)",
+          "refId": "Var-Role"
+        },
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "sort": 0
+      },
+      {
+        "name": "Rank",
+        "label": "Rank",
+        "type": "query",
+        "hide": 0,
+        "refresh": 2,
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(rank)",
+        "query": {
+          "query": "label_values(rank)",
+          "refId": "Var-Rank"
         },
         "multi": true,
         "includeAll": true,

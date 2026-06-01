@@ -10,6 +10,8 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/internal/orchestrator/strategy"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -19,6 +21,8 @@ type EndpointController struct {
 
 	gw             gateway.Gateway
 	acceleratorMgr accelerator.Manager
+	portAllocator  portalloc.Allocator // may be nil — orchestrator only requires
+	// it for strategy=pd deployments that need stable per-role ports.
 }
 
 type EndpointControllerOption struct {
@@ -26,6 +30,7 @@ type EndpointControllerOption struct {
 
 	Gw             gateway.Gateway
 	AcceleratorMgr accelerator.Manager
+	PortAllocator  portalloc.Allocator
 }
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
@@ -33,6 +38,7 @@ func NewEndpointController(option *EndpointControllerOption) (*EndpointControlle
 		storage:        option.Storage,
 		gw:             option.Gw,
 		acceleratorMgr: option.AcceleratorMgr,
+		portAllocator:  option.PortAllocator,
 	}
 
 	c.syncHandler = c.sync
@@ -69,6 +75,24 @@ func (c *EndpointController) sync(obj *v1.Endpoint) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to get orchestrator for endpoint %s",
 			obj.Metadata.WorkspaceName())
+	}
+
+	// Validate strategy-specific API invariants at the controller layer so
+	// users get fast feedback before the heavier orchestrator path runs. Empty
+	// strategy resolves to the standard path.
+	if obj.Spec != nil {
+		s, sErr := strategy.Get(obj.Spec.Strategy)
+		if sErr != nil {
+			err = sErr
+			return errors.Wrapf(sErr, "failed to resolve strategy for endpoint %s",
+				obj.Metadata.WorkspaceName())
+		}
+
+		if vErr := s.Validate(obj); vErr != nil {
+			err = vErr
+			return errors.Wrapf(vErr, "strategy validation failed for endpoint %s",
+				obj.Metadata.WorkspaceName())
+		}
 	}
 
 	if orchestrator.IsEndpointPaused(obj) {
@@ -316,6 +340,7 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 		Cluster:        &cluster[0],
 		Storage:        c.storage,
 		AcceleratorMgr: c.acceleratorMgr,
+		PortAllocator:  c.portAllocator,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create orchestrator for cluster %s", cluster[0].Metadata.WorkspaceName())

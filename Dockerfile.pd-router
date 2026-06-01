@@ -1,0 +1,14 @@
+ARG ARCH
+
+FROM --platform=linux/${ARCH} python:3.11-slim
+WORKDIR /app
+
+RUN pip install --no-cache-dir "fastapi>=0.115.0,<1.0.0" "uvicorn>=0.30.0,<1.0.0"
+
+COPY python/neutree/__init__.py /app/neutree/__init__.py
+COPY python/neutree/pd_router /app/neutree/pd_router
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+ENTRYPOINT ["python", "-m", "neutree.pd_router"]

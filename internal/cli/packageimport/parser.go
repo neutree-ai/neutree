@@ -89,6 +89,14 @@ func (p *Parser) parseYAMLManifest(path string) (*PackageManifest, error) {
 				ev.Images[i].ImageName = extractImageNameWithoutRegistry(ev.Images[i].ImageName)
 			}
 
+			if ev.Sidecar != nil && ev.Sidecar.Image != nil {
+				if ev.Sidecar.Image.Tag == "" {
+					ev.Sidecar.Image.Tag = ev.Version
+				}
+
+				ev.Sidecar.Image.ImageName = extractImageNameWithoutRegistry(ev.Sidecar.Image.ImageName)
+			}
+
 			manifest.Engines[idx].EngineVersions[vidx] = ev
 		}
 	}

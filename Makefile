@@ -12,6 +12,7 @@ NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
 NEUTREE_API_IMAGE := $(IMAGE_PREFIX)neutree-api
 NEUTREE_DB_SCRIPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
 NEUTREE_RUNTIME_IMAGE := $(IMAGE_PREFIX)neutree-runtime
+PD_ROUTER_IMAGE := $(IMAGE_PREFIX)pd-router
 
 ARCH ?= amd64
 ALL_ARCH = amd64 arm64
@@ -119,6 +120,10 @@ docker-build-db-scripts:
 docker-build-runtime:
 	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.runtime
 
+.PHONY: docker-build-pd-router
+docker-build-pd-router:
+	docker build --build-arg ARCH=$(ARCH) . -t $(PD_ROUTER_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.pd-router
+
 .PHONY: docker-push-all ## Push all the architecture docker images
 docker-push-all:
 	$(MAKE) ALL_ARCH="$(ALL_ARCH)" $(addprefix docker-push-,$(ALL_DOCKER_BUILD))
@@ -145,6 +150,10 @@ docker-push-db-scripts: # push db scripts docker image
 docker-push-runtime: # push runtime docker image
 	docker push $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG)
 
+.PHONY: docker-push-pd-router
+docker-push-pd-router: # push pd-router docker image
+	docker push $(PD_ROUTER_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ALL_DOCKER_BUILD))
 
@@ -163,6 +172,10 @@ docker-push-manifest-db-scripts: ## Push the db scripts manifest docker image.
 .PHONY: docker-push-manifest-runtime
 docker-push-manifest-runtime: ## Push the runtime manifest docker image.
 	docker buildx imagetools create -t $(NEUTREE_RUNTIME_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_RUNTIME_IMAGE)\-&:$(IMAGE_TAG)~g")
+
+.PHONY: docker-push-manifest-pd-router
+docker-push-manifest-pd-router: ## Push the pd-router manifest docker image.
+	docker buildx imagetools create -t $(PD_ROUTER_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(PD_ROUTER_IMAGE)\-&:$(IMAGE_TAG)~g")
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 

@@ -193,7 +193,7 @@ func TestConfigStore_BuildConfigMapName(t *testing.T) {
 		want          string
 	}{
 		{"cluster-prod", "router", "neutree-cluster-prod-router-config"},
-		{"endpoint-demo", "deployment", "neutree-endpoint-demo-deployment-config"},
+		{"endpoint-sample", "deployment", "neutree-endpoint-sample-deployment-config"},
 		{"test", "metrics", "neutree-test-metrics-config"},
 	}
 

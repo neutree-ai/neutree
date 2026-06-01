@@ -38,6 +38,18 @@ type ClusterSpec struct {
 	Version string `json:"version"`
 }
 
+// PortRangeSpec defines a closed integer interval [Start, End] used by the
+// control-plane port allocator.
+type PortRangeSpec struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// DefaultPortRange is applied when neutree-core does not override the global
+// allocator range. It stays below the Kubernetes NodePort default range
+// (30000-32767) and the typical Linux ephemeral range.
+var DefaultPortRange = PortRangeSpec{Start: 20000, End: 29999}
+
 type ClusterConfig struct {
 	SSHConfig        *RaySSHProvisionClusterConfig `json:"ssh_config,omitempty" yaml:"ssh_config,omitempty"`
 	KubernetesConfig *KubernetesClusterConfig      `json:"kubernetes_config,omitempty" yaml:"kubernetes_config,omitempty"`

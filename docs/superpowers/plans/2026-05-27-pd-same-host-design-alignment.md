@@ -1,0 +1,111 @@
+# PD Same-Host Design Alignment Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Align the current branch with `feature/pd-same-host-phase1/design/pd-same-host-detail-design-zh.md`.
+
+**Architecture:** Keep the existing Endpoint API, orchestrator, engine template, and log API shapes. Fill the remaining gaps by extending the existing DB composite schema, Ray P/D runtime metadata, Endpoint log source discovery, status aggregation, and dashboard queries before taking on the larger K8s/SGLang runtime slices.
+
+**Tech Stack:** Go control plane, PostgreSQL migrations, Ray Serve Python apps, Kubernetes templates, Grafana dashboards, existing Neutree test harnesses.
+
+---
+
+### Task 1: Persist `EndpointSpec.KV`
+
+**Files:**
+- Modify: `db/migrations/060_endpoint_pd_fields.up.sql`
+- Modify: `db/migrations/060_endpoint_pd_fields.down.sql`
+- Test: existing API/schema tests that exercise EndpointSpec round-trip behavior
+
+- [x] Add a failing test or schema assertion showing `spec.kv.transfer` survives the DB composite path.
+- [x] Add `kv` to `api.endpoint_spec` in migration 060 up/down.
+- [x] Run targeted Go tests for API/internal endpoint spec serialization.
+
+### Task 2: Expose Ray P/D Role Actor Logs
+
+**Files:**
+- Modify: `cluster-image-builder/serve/vllm/v0_20_0/app_pd_collocated.py`
+- Modify: `internal/routes/logs/endpoint_logs.go`
+- Test: endpoint logs route tests and Python syntax checks
+
+- [x] Add failing tests for role actor log source discovery from deterministic actor names.
+- [x] Pass workspace, endpoint, and Serve replica runtime key into the P/D backend runtime metadata.
+- [x] Name `PrefillActor` and `DecodeActor` as `neutree:{workspace}:{endpoint}:replica:{role_group_key}:role:{role}:rank:{rank}`.
+- [x] Query Ray State API by actor name, prefer ALIVE actors, and expose role/rank/actor_name/actor_id on log items.
+- [x] Run targeted Go tests and Python compile checks.
+
+### Task 3: Improve PD Status Precision
+
+**Files:**
+- Modify: `internal/orchestrator/ray_orchestrator.go`
+- Modify: `internal/orchestrator/kubernetes_orchestrator.go` if the current K8s state can be safely decorated without adding the full K8s PD runtime.
+- Test: orchestrator status tests
+
+- [x] Add failing tests for RoleGroup status using runtime replica keys where available.
+- [x] Populate Ray PD `EndpointStatus.Replicas` from actual `PDCollocatedBackend` replica state instead of purely synthetic IDs.
+- [x] Add K8s PD status decoration only if existing Kubernetes deployment/pod status APIs already expose the needed data.
+
+### Task 4: Update Monitoring Surfaces
+
+**Files:**
+- Modify: `observability/grafana/dashboards/vllm_grafana_dashboard.json`
+- Modify: `observability/grafana/dashboards/sglang_grafana_dashboard.json`
+- Test: JSON validation and dashboard grep checks
+
+- [x] Add `role` and `rank` dashboard variables or filters.
+- [x] Add P/D role health and KV cache/transfer rows using engine-specific metric names.
+- [x] Validate dashboard JSON.
+
+### Task 5: K8s/SGLang PD Runtime Slice
+
+**Files:**
+- Likely modify: `internal/engine/builtin.go`
+- Modify: `cluster-image-builder/serve/sglang/v0_5_10/app.py`
+- Add: `cluster-image-builder/serve/sglang/v0_5_10/app_pd_collocated.py`
+- Modify: `cluster-image-builder/serve/_metrics/sglang_ray_bridge.py`
+- Modify: `cluster-image-builder/Dockerfile.engine-sglang`
+- Test: SGLang static PD app checks and builtin engine capability tests
+
+- [x] Re-read design sections 5.4.1, 5.5.4, and 5.6.2 before editing.
+- [x] Stop and ask for confirmation if implementing the full K8s multi-container Pod and production-stack router contract requires files outside this repo or a new router image contract.
+- [x] Confirm scope is SSH/Ray static cluster SGLang P/D only; leave full K8s router runtime out of this slice.
+- [x] Add failing tests for SGLang v0.5.10 `ray_serve/pd` capability and static PD app contract.
+- [x] Refactor SGLang standard backend to expose raw `_Backend` for PD inner actors.
+- [x] Implement `serve.sglang.v0_5_10.app_pd_collocated:app_builder` with `PDCollocatedBackend`, same-host placement group, deterministic role actor names, SGLang bootstrap payload injection, and async prefill/decode dispatch.
+- [x] Add SGLang metrics env fallback labels for PD inner actors.
+- [x] Copy `_router` into the SGLang engine image so `PDRouter` and `ObserverRouter` are available at runtime.
+- [x] Register SGLang v0.5.10 Ray Serve PD capability with NIXL/Mooncake connectors.
+- [x] Keep production-stack router business implementation outside this slice; implement K8s deployTemplate/control-plane rendering after confirming router image comes from `EngineVersion`.
+
+### Task 6: K8s PD DeployTemplate Support
+
+**Files:**
+- Modify: `api/v1/engine_types.go`
+- Modify: `internal/engine/template.go`
+- Modify: `internal/engine/builtin.go`
+- Add: `internal/engine/vllm/v0.20.0/templates/kubernetes/pd.yaml`
+- Add: `internal/engine/sglang/v0.5.10/templates/kubernetes/pd.yaml`
+- Modify: `internal/orchestrator/kubernetes_orchestrator.go`
+- Modify: `internal/orchestrator/kubernetes_orchestrator_resource.go`
+- Test: builtin engine, util merge, K8s orchestrator render tests
+
+- [x] Add `EngineVersion.Sidecar` so `pd-router` image/port/health config comes from the selected engine version.
+- [x] Register K8s `pd` deploy templates for vLLM v0.20.0 and SGLang v0.5.10.
+- [x] Make `strategy=pd` select K8s deploy mode `pd` without requiring `deployment_options.deploy_mode=pd`.
+- [x] Derive K8s PD manifest variables from `EndpointSpec.Roles`, KV transfer config, role env/resources/variables, router config, and port allocation results.
+- [x] Render a collocated Deployment whose Pod contains `pd-router`, `prefill-*`, and `decode-*` containers with PD labels for global router discovery.
+- [x] Keep production-stack `vllm_router` request-translation implementation outside this repo slice.
+
+### Task 7: Verification and PR Hygiene
+
+**Files:**
+- Modify only files touched by the tasks above.
+
+- [x] Run `gofmt` where needed.
+- [x] Run targeted Go tests.
+- [x] Run Python compile checks for touched app files.
+- [x] Run dashboard JSON validation after dashboard changes.
+- [x] Run `git diff --check`.
+- [x] Run `go test ./api/v1 ./db/migrations ./internal/... -count=1`.
+- [x] Run `./bin/golangci-lint run`.
+- [x] Commit and push after verified.
