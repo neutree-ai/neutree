@@ -22,9 +22,9 @@ func isPDStrategy(ep *v1.Endpoint) bool {
 	return pdconfig.EffectivePlacementRoles(ep) == pdconfig.DefaultPlacementRoles
 }
 
-// SerializePDConfig flattens a pdconfig.PDConfig into the dict shape
-// that the Python PD app_builder receives via Ray Serve Application Args.
-// Keep keys and nesting stable across all engine-side P/D entrypoints.
+// SerializePDConfig flattens a pdconfig.PDConfig into the dict shape that the
+// Python PD app_builder receives via deployment_options.backend. Keep keys and
+// nesting stable across all engine-side P/D entrypoints.
 func SerializePDConfig(cfg *pdconfig.PDConfig) map[string]interface{} {
 	if cfg == nil {
 		return nil
@@ -70,7 +70,7 @@ func serializeRoles(rs []*pdconfig.Role) []map[string]interface{} {
 		// + custom-resource map). raw ResourceSpec stays CP-internal for
 		// audit; do not leak it over the wire.
 		if r.RayResource != nil {
-			entry["resources"] = serializeRayResource(r.RayResource)
+			entry["resources"] = serializeRayResourceForRole(r)
 		}
 
 		out = append(out, entry)
@@ -139,6 +139,27 @@ func serializeRayResource(r *v1.RayResourceSpec) map[string]interface{} {
 	return out
 }
 
+func serializeRayResourceForRole(r *pdconfig.Role) map[string]interface{} {
+	out := serializeRayResource(r.RayResource)
+	if r.Resources == nil {
+		return out
+	}
+
+	if r.Resources.CPU != nil {
+		out["num_cpus"] = r.RayResource.NumCPUs
+	}
+
+	if r.Resources.GPU != nil {
+		out["num_gpus"] = r.RayResource.NumGPUs
+	}
+
+	if r.Resources.Memory != nil {
+		out["memory"] = r.RayResource.Memory
+	}
+
+	return out
+}
+
 // applyPDBranch rewrites the partially built RayServeApplication for
 // strategy=pd with placement.roles=same-host. Called by EndpointToApplication
 // right before return when isPDStrategy(ep) is true.
@@ -152,8 +173,8 @@ func serializeRayResource(r *v1.RayResourceSpec) map[string]interface{} {
 //     standard serving uses, without re-implementing the plugin matrix in Python.
 //  4. portAllocator.AllocateForPDConfig -> fills cfg.Ports deterministically
 //     (idempotent on retry; same endpoint -> same ports)
-//  5. SerializePDConfig + inject into Args so PDRouter / inner actors get
-//     both the topology and the per-actor port env on startup
+//  5. SerializePDConfig + inject into deployment_options.backend so PDRouter /
+//     inner actors get both the topology and the per-actor port env on startup
 func applyPDBranch(ctx context.Context, ep *v1.Endpoint, cluster *v1.Cluster, engine *v1.Engine,
 	acceleratorMgr accelerator.Manager, allocator portalloc.Allocator,
 	app *dashboard.RayServeApplication) error {
@@ -212,10 +233,27 @@ func applyPDBranch(ctx context.Context, ep *v1.Endpoint, cluster *v1.Cluster, en
 	pdConfig := SerializePDConfig(cfg)
 	if ep.Metadata != nil {
 		pdConfig["workspace"] = ep.Metadata.Workspace
-		pdConfig["endpoint"] = ep.Metadata.Name
 	}
 
-	app.Args["pd_config"] = pdConfig
+	deploymentOptions, ok := app.Args["deployment_options"].(map[string]interface{})
+	if !ok || deploymentOptions == nil {
+		deploymentOptions = map[string]interface{}{}
+	}
+
+	backendConfig := map[string]interface{}{}
+
+	if existingBackend, ok := deploymentOptions["backend"].(map[string]interface{}); ok {
+		for k, v := range existingBackend {
+			backendConfig[k] = v
+		}
+	}
+
+	for k, v := range pdConfig {
+		backendConfig[k] = v
+	}
+
+	deploymentOptions["backend"] = backendConfig
+	app.Args["deployment_options"] = deploymentOptions
 
 	return nil
 }

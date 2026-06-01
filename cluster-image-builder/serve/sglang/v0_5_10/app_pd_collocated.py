@@ -77,11 +77,11 @@ def _merge_user_wins(
 
 def _actor_options_to_bundle(actor_options: Dict[str, Any]) -> Dict[str, float]:
     bundle: Dict[str, float] = {}
-    if "num_cpus" in actor_options:
+    if float(actor_options.get("num_cpus") or 0) > 0:
         bundle["CPU"] = float(actor_options["num_cpus"])
-    if "num_gpus" in actor_options:
+    if float(actor_options.get("num_gpus") or 0) > 0:
         bundle["GPU"] = float(actor_options["num_gpus"])
-    if "memory" in actor_options:
+    if float(actor_options.get("memory") or 0) > 0:
         bundle["memory"] = float(actor_options["memory"])
     for key, value in (actor_options.get("resources") or {}).items():
         bundle[key] = float(value)
@@ -90,17 +90,14 @@ def _actor_options_to_bundle(actor_options: Dict[str, Any]) -> Dict[str, float]:
 
 def _role_resources_to_ray(role: Dict[str, Any]) -> Dict[str, Any]:
     res = role.get("resources") or {}
-    opts: Dict[str, Any] = {}
-    if "num_cpus" in res:
-        opts["num_cpus"] = float(res["num_cpus"])
-    if "num_gpus" in res:
-        opts["num_gpus"] = float(res["num_gpus"])
+    opts: Dict[str, Any] = {
+        "num_cpus": float(res["num_cpus"]) if "num_cpus" in res else 1,
+        "num_gpus": float(res["num_gpus"]) if "num_gpus" in res else 1,
+    }
     if "memory" in res:
         opts["memory"] = int(res["memory"])
     if res.get("resources"):
         opts["resources"] = dict(res["resources"])
-    if not opts:
-        opts = {"num_cpus": 1, "num_gpus": 1}
     return opts
 
 
@@ -149,15 +146,14 @@ def _extract_route_indices(payload: Dict[str, Any]):
 
 def _role_actor_name(pd_config: Dict[str, Any], role_group_key: str, role: str, rank: int) -> str:
     workspace = str((pd_config or {}).get("workspace") or "")
-    endpoint = str((pd_config or {}).get("endpoint") or "")
     role_group_key = str(role_group_key or "")
-    if not workspace or not endpoint or not role_group_key:
+    if not role_group_key:
         raise RuntimeError(
-            "SGLang PD role actor naming requires pd_config.workspace, "
-            "pd_config.endpoint, and a non-empty Serve replica key"
+            "SGLang PD role actor naming requires a non-empty Serve replica key"
         )
+    workspace_scope = f"workspace:{workspace}:" if workspace else ""
     return (
-        f"neutree:{workspace}:{endpoint}:replica:{role_group_key}:"
+        f"neutree:{workspace_scope}replica:{role_group_key}:"
         f"role:{role}:rank:{rank}"
     )
 
@@ -711,9 +707,17 @@ def _find_role(pd_config: Dict[str, Any], name: str) -> Dict[str, Any]:
     )
 
 
+def _pd_backend_config(args: Dict[str, Any]) -> Dict[str, Any]:
+    deployment_options = args.get("deployment_options") or {}
+    backend = deployment_options.get("backend") or {}
+    if backend.get("group") or backend.get("ports") or backend.get("transfer"):
+        return backend
+    return args.get("pd_config") or backend or {}
+
+
 def app_builder(args: Dict[str, Any]) -> Application:
     model = args.get("model") or {}
-    pd_config = args.get("pd_config") or {}
+    pd_config = _pd_backend_config(args)
 
     num_replicas = max(1, int(pd_config.get("num_replicas") or 1))
     transfer = pd_config.get("transfer") or {}

@@ -245,10 +245,10 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 		return errors.Wrapf(err, "failed to convert endpoint to application for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
-	// strategy=pd: override import_path, derive pd_config + allocate ports,
-	// then inject pd_config into Args. Side-effect: writes port-allocation
-	// rows to the configured Storage. Refuses to render without an allocator
-	// configured.
+	// strategy=pd: override import_path, derive the PD backend config +
+	// allocate ports, then inject it into deployment_options.backend.
+	// Side-effect: writes port-allocation rows to the configured Storage.
+	// Refuses to render without an allocator configured.
 	if isPDStrategy(ctx.Endpoint) {
 		if err := applyPDBranch(context.Background(), ctx.Endpoint, ctx.Cluster, ctx.Engine,
 			o.acceleratorMgr, o.portAllocator, &newApp); err != nil {

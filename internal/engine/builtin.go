@@ -148,6 +148,37 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 							},
 						},
 					},
+					{
+						Version:      "v0.20.0-pdsamehost2026060101",
+						ValuesSchema: vllmV0_20_0EngineSchema,
+						Images: map[string]*v1.EngineImage{
+							"nvidia_gpu": {
+								ImageName: "neutree/engine-vllm",
+								Tag:       "v0.20.0-pdsamehost2026060101-ray2.53.0",
+							},
+							v1.SSHImageKeyPrefix + "nvidia_gpu": {
+								ImageName: "neutree/engine-vllm",
+								Tag:       "v0.20.0-pdsamehost2026060101-ray2.53.0",
+							},
+						},
+						DeployTemplate: map[string]map[string]string{
+							"kubernetes": {
+								"default":       GetVLLMV0_20_0DeployTemplate(),
+								v1.PDDeployMode: GetVLLMV0_20_0PDDeployTemplate(),
+							},
+							v1.RayServeDeployTarget: {
+								v1.PDDeployMode: rayServeEntrypoint("serve.vllm.v0_20_0.app_pd_collocated:app_builder"),
+							},
+						},
+						Sidecar:        pdRouter("v0.20.0-pdsamehost2026060101"),
+						SupportedTasks: []string{v1.TextGenerationModelTask},
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								KVConnectors:   []string{"nixl", "mooncake"},
+								SupportedTasks: []string{v1.TextGenerationModelTask},
+							},
+						},
+					},
 				},
 				SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
 			},

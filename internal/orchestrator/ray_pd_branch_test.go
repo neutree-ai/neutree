@@ -169,7 +169,46 @@ func TestSerializePDConfig_PortsPassthrough(t *testing.T) {
 	}
 }
 
-func TestApplyPDBranch_RewritesImportAndInjectsPDConfig(t *testing.T) {
+func TestSerializePDConfig_PreservesExplicitZeroRayResources(t *testing.T) {
+	zero := "0"
+	cfg := &pdconfig.PDConfig{
+		NumReplicas: 1,
+		Group: &pdconfig.RoleGroup{
+			Roles: []*pdconfig.Role{
+				{
+					Name:      "prefill",
+					Instances: 1,
+					Resources: &v1.ResourceSpec{
+						CPU:    &zero,
+						GPU:    &zero,
+						Memory: &zero,
+					},
+					RayResource: &v1.RayResourceSpec{
+						Resources: map[string]float64{"NVIDIA_L20": 1},
+					},
+				},
+			},
+		},
+	}
+
+	out := SerializePDConfig(cfg)
+	roles := out["group"].(map[string]interface{})["roles"].([]map[string]interface{})
+	resources := roles[0]["resources"].(map[string]interface{})
+	if resources["num_cpus"] != float64(0) {
+		t.Errorf("num_cpus: got %v want 0", resources["num_cpus"])
+	}
+	if resources["num_gpus"] != float64(0) {
+		t.Errorf("num_gpus: got %v want 0", resources["num_gpus"])
+	}
+	if resources["memory"] != float64(0) {
+		t.Errorf("memory: got %v want 0", resources["memory"])
+	}
+	if resources["resources"].(map[string]float64)["NVIDIA_L20"] != 1 {
+		t.Errorf("custom resources: got %v", resources["resources"])
+	}
+}
+
+func TestApplyPDBranch_RewritesImportAndInjectsPDBackendConfig(t *testing.T) {
 	ep := &v1.Endpoint{
 		ID:       42,
 		Metadata: &v1.Metadata{Workspace: "ws1", Name: "ep1"},
@@ -198,20 +237,30 @@ func TestApplyPDBranch_RewritesImportAndInjectsPDConfig(t *testing.T) {
 	if app.ImportPath != "serve.vllm.v0_20_0.app_pd_collocated:app_builder" {
 		t.Errorf("import_path not rewritten: %q", app.ImportPath)
 	}
-	configArgs, ok := app.Args["pd_config"].(map[string]interface{})
+	if _, ok := app.Args["pd_config"]; ok {
+		t.Fatalf("pd_config should not be injected at top-level args: %v", app.Args["pd_config"])
+	}
+	deploymentOptions, ok := app.Args["deployment_options"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("pd_config not injected as map, got %T", app.Args["pd_config"])
+		t.Fatalf("deployment_options not injected as map, got %T", app.Args["deployment_options"])
+	}
+	configArgs, ok := deploymentOptions["backend"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("deployment_options.backend not injected as map, got %T", deploymentOptions["backend"])
 	}
 	if configArgs["num_replicas"] != 1 {
-		t.Errorf("pd_config.num_replicas: got %v want 1", configArgs["num_replicas"])
+		t.Errorf("backend.num_replicas: got %v want 1", configArgs["num_replicas"])
 	}
-	if configArgs["workspace"] != "ws1" || configArgs["endpoint"] != "ep1" {
-		t.Errorf("pd_config identity: got workspace=%v endpoint=%v", configArgs["workspace"], configArgs["endpoint"])
+	if configArgs["workspace"] != "ws1" {
+		t.Errorf("backend.workspace: got %v want ws1", configArgs["workspace"])
+	}
+	if _, ok := configArgs["endpoint"]; ok {
+		t.Errorf("backend.endpoint should be omitted, got %v", configArgs["endpoint"])
 	}
 	// portalloc must have populated group entry and prefill/decode ports.
 	ports, ok := configArgs["ports"].([]map[string][]map[string]int)
 	if !ok {
-		t.Fatalf("pd_config.ports not serialized as expected: %T %v", configArgs["ports"], configArgs["ports"])
+		t.Fatalf("backend.ports not serialized as expected: %T %v", configArgs["ports"], configArgs["ports"])
 	}
 	if len(ports) != 1 ||
 		len(ports[0]["router"][0]) != 1 ||
