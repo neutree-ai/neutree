@@ -261,6 +261,49 @@ def _summarize_kv_params(kv: Any, max_block_ids: int = 8) -> Any:
     return out
 
 
+def _positive_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _model_max_token_limit(model_config: Any) -> Optional[int]:
+    for attr in ("max_model_len", "max_total_tokens"):
+        limit = _positive_int(getattr(model_config, attr, None))
+        if limit is not None:
+            return limit
+    return None
+
+
+def _clamp_completion_limits(
+    payload: Dict[str, Any],
+    max_token_limit: Optional[int],
+    *,
+    request_id: Any = None,
+) -> Dict[str, Any]:
+    if max_token_limit is None:
+        return payload
+
+    out = dict(payload)
+    for key in ("max_tokens", "max_completion_tokens"):
+        requested = _positive_int(out.get(key))
+        if requested is None or requested <= max_token_limit:
+            continue
+        out[key] = max_token_limit
+        log.warning(
+            "[pd_generate][decode_limit_clamped] req=%s field=%s requested=%d "
+            "max_model_len=%d",
+            request_id or out.get("request_id"), key, requested, max_token_limit,
+        )
+    return out
+
+
 def _actor_options_to_bundle(actor_options: Dict[str, Any]) -> Dict[str, float]:
     """ray_actor_options → placement_group bundle.
 
@@ -438,6 +481,17 @@ class DecodeActor(Backend):
             "node_id": str(self.node_id),
             "gpu_ids": [int(g) for g in self.gpu_ids],
         }
+
+    def _normalize_decode_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        model_config = self._ensure_model_config()
+        return _clamp_completion_limits(
+            payload,
+            _model_max_token_limit(model_config),
+            request_id=payload.get("request_id"),
+        )
+
+    async def generate(self, payload: Dict[str, Any]):
+        return await super().generate(self._normalize_decode_payload(payload))
 
     async def generate_stream(self, payload: Dict[str, Any]):
         """Yield-based streaming wrapper for SSE chat completions.

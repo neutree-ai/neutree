@@ -69,6 +69,15 @@ log = logging.getLogger(SERVE_LOGGER_NAME)
 app = FastAPI()
 
 
+def _error_status_code(result: Dict[str, Any]) -> int:
+    error = result.get("error") if isinstance(result, dict) else None
+    if isinstance(error, dict):
+        code = error.get("code")
+        if isinstance(code, int) and 400 <= code < 600:
+            return code
+    return 500
+
+
 @serve.deployment(ray_actor_options={"num_cpus": 0.1})
 @serve.ingress(app)
 class PDRouter:
@@ -219,7 +228,7 @@ class PDRouter:
                 log.warning(
                     "[PDRouter][chat_error] err=%s", result.get("error"),
                 )
-                return JSONResponse(content=result, status_code=500)
+                return JSONResponse(content=result, status_code=_error_status_code(result))
             return JSONResponse(content=result)
         finally:
             self._finish_request_load_tracking(route)

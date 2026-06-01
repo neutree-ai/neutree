@@ -19,6 +19,7 @@ from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
 from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.exceptions import VLLMValidationError
 from vllm.v1.engine.async_llm import AsyncLLM
 # v0.19.0: same module paths as v0.17.1 for protocol/serving classes
 from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
@@ -375,7 +376,17 @@ class _Backend:
 
     async def generate(self, payload: Any):
         await self._ensure_chat()
-        result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
+        try:
+            result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
+        except VLLMValidationError as e:
+            logging.warning("Invalid chat completion request: %s", e)
+            return {
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                    "code": 400,
+                }
+            }
 
         is_stream = payload.get("stream") is True
 
