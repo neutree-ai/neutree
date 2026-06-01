@@ -56,6 +56,16 @@ class PDCollocatedAppStaticTest(unittest.TestCase):
                 self.assertIn("400 <= code < 600", source)
                 self.assertIn("status_code=_error_status_code(result)", source)
 
+    def test_pd_router_can_refresh_empty_topology_on_request_path(self) -> None:
+        for path in ROUTER_FILES:
+            with self.subTest(path=path):
+                source = path.read_text()
+                self.assertIn("async def _ensure_topology_ready", source)
+                self.assertIn("await self._ensure_topology_ready()", source)
+                self.assertIn("async def _pull_any_topology", source)
+                self.assertIn("self._upsert_topology_dict(topo_dict, requested_replica_id=\"\")", source)
+                self.assertIn("def _upsert_topology_dict", source)
+
 
 if __name__ == "__main__":
     unittest.main()

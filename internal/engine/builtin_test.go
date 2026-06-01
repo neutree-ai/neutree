@@ -68,7 +68,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 			}
 
 			switch v.Version {
-			case "v0.20.0", "v0.20.0-pdsamehost2026060102":
+			case "v0.20.0", "v0.20.0-pdsamehost2026060103":
 				if v.Capabilities == nil || v.Capabilities.PD == nil {
 					t.Errorf("vllm %s missing PD capability", v.Version)
 					continue
@@ -87,24 +87,24 @@ func TestGetBuiltinEngines(t *testing.T) {
 				}
 			}
 
-			if v.Version == "v0.20.0-pdsamehost2026060102" {
+			if v.Version == "v0.20.0-pdsamehost2026060103" {
 				nvidiaImg, ok := v.Images["nvidia_gpu"]
 				if !ok {
 					t.Errorf("vllm %s missing nvidia_gpu image", v.Version)
-				} else if got, want := nvidiaImg.Tag, "v0.20.0-pdsamehost2026060102-ray2.53.0"; got != want {
+				} else if got, want := nvidiaImg.Tag, "v0.20.0-pdsamehost2026060103-ray2.53.0"; got != want {
 					t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
 				}
 
 				sshImg, ok := v.Images[v1.SSHImageKeyPrefix+"nvidia_gpu"]
 				if !ok {
 					t.Errorf("vllm %s missing ssh_nvidia_gpu image", v.Version)
-				} else if got, want := sshImg.Tag, "v0.20.0-pdsamehost2026060102-ray2.53.0"; got != want {
+				} else if got, want := sshImg.Tag, "v0.20.0-pdsamehost2026060103-ray2.53.0"; got != want {
 					t.Errorf("vllm %s ssh_nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
 				}
 
 				if v.Sidecar == nil || v.Sidecar.Image == nil {
 					t.Errorf("vllm %s missing PD router image config", v.Version)
-				} else if got, want := v.Sidecar.Image.Tag, "v0.20.0-pdsamehost2026060102"; got != want {
+				} else if got, want := v.Sidecar.Image.Tag, "v0.20.0-pdsamehost2026060103"; got != want {
 					t.Errorf("vllm %s sidecar tag mismatch: got %q, want %q", v.Version, got, want)
 				}
 			}

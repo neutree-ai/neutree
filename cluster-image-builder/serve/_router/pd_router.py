@@ -167,6 +167,22 @@ class PDRouter:
         self._prime_scheduled = True
         await self._prime_topology()
 
+    async def _ensure_topology_ready(self) -> None:
+        """Refresh topology on demand when callback priming missed replicas.
+
+        ObserverRouter callbacks are still the steady-state source, but a
+        freshly restarted PDRouter can miss the initial update_replicas event.
+        A no-target backend RPC lets Ray Serve pick any healthy backend replica;
+        the returned topology is enough to make the first request routable.
+        """
+        if self._get_schedulable_route_units("decode"):
+            return
+        log.warning(
+            "[PDRouter][topology_empty] no decode unit in local cache; "
+            "pulling topology from any backend replica"
+        )
+        await self._pull_any_topology()
+
     # ----- routing surface -----
 
     @app.post("/v1/chat/completions")
@@ -174,6 +190,7 @@ class PDRouter:
         await self._ensure_primed()
         payload = await request.json()
         stream = payload.get("stream", False)
+        await self._ensure_topology_ready()
         # Decode-first CHWBL picks the domain and P/D unit ranks. We express
         # the selected domain through `multiplexed_model_id="<ReplicaID>"`
         # so ObserverRouter can direct dispatch to the chosen Serve replica.
@@ -259,6 +276,7 @@ class PDRouter:
     @app.get("/v1/topology")
     async def topology(self):
         await self._ensure_primed()
+        await self._ensure_topology_ready()
         """Return the current PDRouter global view of PDCollocatedBackend
         replicas + their inner actor placement. See shared_state.ActorTopology.
 
@@ -491,6 +509,13 @@ class PDRouter:
 
     # ----- internals -----
 
+    async def _pull_any_topology(self) -> None:
+        try:
+            topo_dict = await self.backend.get_actor_topology.remote()
+            self._upsert_topology_dict(topo_dict, requested_replica_id="")
+        except Exception as exc:  # noqa: BLE001 — diagnostics only
+            log.warning("[PDRouter] fallback topology pull failed: %s", exc)
+
     async def _pull_topology_for(self, replica_id: str) -> None:
         """Pull get_actor_topology() from the exact replica `replica_id`.
 
@@ -503,139 +528,138 @@ class PDRouter:
         try:
             handle = self.backend.options(multiplexed_model_id=replica_id)
             topo_dict = await handle.get_actor_topology.remote()
-            if not topo_dict:
-                return
-            group_id = str(
-                topo_dict.get("group_id") or topo_dict.get("replica_id") or ""
-            )
-            reported_replica_id = str(topo_dict.get("replica_id") or group_id)
-            if not group_id:
-                log.warning(
-                    "[PDRouter] backend topology missing group_id; "
-                    "skipping upsert (older Ray Serve API?)"
-                )
-                return
+            self._upsert_topology_dict(topo_dict, requested_replica_id=replica_id)
+        except Exception as exc:  # noqa: BLE001 — diagnostics only
+            log.warning("[PDRouter] topology pull failed for %s: %s", replica_id, exc)
 
+    def _upsert_topology_dict(
+        self,
+        topo_dict: Dict[str, Any],
+        *,
+        requested_replica_id: str,
+    ) -> None:
+        if not topo_dict:
+            return
+        group_id = str(topo_dict.get("group_id") or topo_dict.get("replica_id") or "")
+        reported_replica_id = str(topo_dict.get("replica_id") or group_id)
+        if not group_id:
+            log.warning(
+                "[PDRouter] backend topology missing group_id; "
+                "skipping upsert (older Ray Serve API?)"
+            )
+            return
+
+        topology_key = group_id
+        if requested_replica_id:
             known_replica_ids = set(self._shared.known_replica_ids())
             if group_id in known_replica_ids:
                 topology_key = group_id
             elif reported_replica_id in known_replica_ids:
                 topology_key = reported_replica_id
-            elif replica_id in known_replica_ids:
-                topology_key = replica_id
+            elif requested_replica_id in known_replica_ids:
+                topology_key = requested_replica_id
             else:
                 log.warning(
                     "[PDRouter] topology pull for stale replica skipped: "
                     "requested=%s group_id=%s reported_replica=%s known=%s",
-                    replica_id, group_id, reported_replica_id,
+                    requested_replica_id, group_id, reported_replica_id,
                     sorted(known_replica_ids),
                 )
                 return
 
-            def _to_info(raw: dict, default_kind: str) -> ActorInfo:
-                raw = raw or {}
-                return ActorInfo(
-                    kind=str(raw.get("kind", default_kind)),
-                    actor_id=str(raw.get("actor_id", "")),
-                    node_id=str(raw.get("node_id", "")),
-                    gpu_ids=[int(g) for g in (raw.get("gpu_ids") or [])],
-                    healthy=bool(raw.get("healthy", False)),
-                )
+        def _to_info(raw: dict, default_kind: str) -> ActorInfo:
+            raw = raw or {}
+            return ActorInfo(
+                kind=str(raw.get("kind", default_kind)),
+                actor_id=str(raw.get("actor_id", "")),
+                node_id=str(raw.get("node_id", "")),
+                gpu_ids=[int(g) for g in (raw.get("gpu_ids") or [])],
+                healthy=bool(raw.get("healthy", False)),
+            )
 
-            prefills_raw = topo_dict.get("prefills") or []
-            decodes_raw = topo_dict.get("decodes") or []
-            raw_units = topo_dict.get("units") or []
-            if not raw_units:
-                raw_units = [
-                    {"role": "prefill", "rank": rank}
-                    for rank, _ in enumerate(prefills_raw)
-                ] + [
-                    {"role": "decode", "rank": rank}
-                    for rank, _ in enumerate(decodes_raw)
-                ]
-            units: List[PDTopologyUnit] = []
-            for raw_unit in raw_units:
-                raw_unit = raw_unit or {}
-                role = str(raw_unit.get("role") or "")
-                if role not in {"prefill", "decode"}:
-                    continue
-                try:
-                    rank = int(raw_unit.get("rank"))
-                except (TypeError, ValueError):
-                    continue
-                if rank < 0:
-                    continue
-                units.append(PDTopologyUnit(role=role, rank=rank))
-            if not units:
-                log.warning(
-                    "[PDRouter] backend topology for %s has no schedulable "
-                    "P/D units; skipping upsert",
-                    topology_key,
-                )
-                return
-
-            self._shared.upsert_topology(
+        prefills_raw = topo_dict.get("prefills") or []
+        decodes_raw = topo_dict.get("decodes") or []
+        raw_units = topo_dict.get("units") or []
+        if not raw_units:
+            raw_units = [
+                {"role": "prefill", "rank": rank}
+                for rank, _ in enumerate(prefills_raw)
+            ] + [
+                {"role": "decode", "rank": rank}
+                for rank, _ in enumerate(decodes_raw)
+            ]
+        units: List[PDTopologyUnit] = []
+        for raw_unit in raw_units:
+            raw_unit = raw_unit or {}
+            role = str(raw_unit.get("role") or "")
+            if role not in {"prefill", "decode"}:
+                continue
+            try:
+                rank = int(raw_unit.get("rank"))
+            except (TypeError, ValueError):
+                continue
+            if rank < 0:
+                continue
+            units.append(PDTopologyUnit(role=role, rank=rank))
+        if not units:
+            log.warning(
+                "[PDRouter] backend topology for %s has no schedulable "
+                "P/D units; skipping upsert",
                 topology_key,
-                ActorTopology(
-                    group_id=topology_key,
-                    units=units,
-                    replica_id=reported_replica_id,
-                    replica_actor_id=str(topo_dict.get("replica_actor_id", "")),
-                    replica_node=str(topo_dict.get("replica_node", "")),
-                    # Ray Serve 2.53 native rank — populated by
-                    # PDCollocatedBackend reading serve.get_replica_context().rank
-                    global_rank=int(topo_dict.get("global_rank", -1)),
-                    node_rank=int(topo_dict.get("node_rank", -1)),
-                    local_rank=int(topo_dict.get("local_rank", -1)),
-                    world_size=int(topo_dict.get("world_size", 0) or 0),
-                    pg_id=str(topo_dict.get("pg_id", "")),
-                    prefills=[_to_info(p, "prefill") for p in prefills_raw],
-                    decodes=[_to_info(d, "decode") for d in decodes_raw],
-                    same_host=bool(topo_dict.get("same_host", False)),
-                ),
             )
-            # V12 / V13 / V14 — what the push or safety-net pull actually
-            # absorbed into _SHARED. Summary + per-actor identity breakdown
-            # so the operator can confirm placement (actor_id + node_id +
-            # gpu_ids) without hitting /v1/topology.
+            return
+
+        self._shared.upsert_topology(
+            topology_key,
+            ActorTopology(
+                group_id=topology_key,
+                units=units,
+                replica_id=reported_replica_id,
+                replica_actor_id=str(topo_dict.get("replica_actor_id", "")),
+                replica_node=str(topo_dict.get("replica_node", "")),
+                global_rank=int(topo_dict.get("global_rank", -1)),
+                node_rank=int(topo_dict.get("node_rank", -1)),
+                local_rank=int(topo_dict.get("local_rank", -1)),
+                world_size=int(topo_dict.get("world_size", 0) or 0),
+                pg_id=str(topo_dict.get("pg_id", "")),
+                prefills=[_to_info(p, "prefill") for p in prefills_raw],
+                decodes=[_to_info(d, "decode") for d in decodes_raw],
+                same_host=bool(topo_dict.get("same_host", False)),
+            ),
+        )
+        log.info(
+            "[PDRouter][topology_pull/summary] group_id=%s replica=%s "
+            "units=%s prefills=%d decodes=%d same_host=%s global_rank=%s "
+            "node_rank=%s local_rank=%s world_size=%s pg_id=%s "
+            "replica_actor=%s replica_node=%s",
+            topology_key, reported_replica_id,
+            [(u.role, u.rank) for u in units],
+            len(prefills_raw), len(decodes_raw),
+            topo_dict.get("same_host"), topo_dict.get("global_rank"),
+            topo_dict.get("node_rank"), topo_dict.get("local_rank"),
+            topo_dict.get("world_size"), topo_dict.get("pg_id"),
+            topo_dict.get("replica_actor_id"),
+            topo_dict.get("replica_node"),
+        )
+        for i, p in enumerate(prefills_raw):
+            p = p or {}
             log.info(
-                "[PDRouter][topology_pull/summary] group_id=%s replica=%s "
-                "units=%s prefills=%d decodes=%d same_host=%s global_rank=%s "
-                "node_rank=%s "
-                "local_rank=%s world_size=%s pg_id=%s replica_actor=%s "
-                "replica_node=%s",
-                topology_key, reported_replica_id,
-                [(u.role, u.rank) for u in units],
-                len(prefills_raw), len(decodes_raw),
-                topo_dict.get("same_host"), topo_dict.get("global_rank"),
-                topo_dict.get("node_rank"), topo_dict.get("local_rank"),
-                topo_dict.get("world_size"), topo_dict.get("pg_id"),
-                topo_dict.get("replica_actor_id"),
-                topo_dict.get("replica_node"),
+                "[PDRouter][topology_pull/prefill] replica=%s rank=%d "
+                "actor_id=%s node_id=%s gpu_ids=%s",
+                topology_key, i, p.get("actor_id"), p.get("node_id"),
+                p.get("gpu_ids"),
             )
-            for i, p in enumerate(prefills_raw):
-                p = p or {}
-                log.info(
-                    "[PDRouter][topology_pull/prefill] replica=%s rank=%d "
-                    "actor_id=%s node_id=%s gpu_ids=%s",
-                    topology_key, i, p.get("actor_id"), p.get("node_id"),
-                    p.get("gpu_ids"),
-                )
-            for i, d in enumerate(decodes_raw):
-                d = d or {}
-                log.info(
-                    "[PDRouter][topology_pull/decode] replica=%s rank=%d "
-                    "actor_id=%s node_id=%s gpu_ids=%s",
-                    topology_key, i, d.get("actor_id"), d.get("node_id"),
-                    d.get("gpu_ids"),
-                )
-            if topology_key != replica_id:
-                # Should only happen when `replica_id` died between the
-                # callback firing and the router resolving candidates.
-                log.warning(
-                    "[PDRouter] direct dispatch for %s degraded to %s; "
-                    "target likely just died",
-                    replica_id, topology_key,
-                )
-        except Exception as exc:  # noqa: BLE001 — diagnostics only
-            log.warning("[PDRouter] topology pull failed for %s: %s", replica_id, exc)
+        for i, d in enumerate(decodes_raw):
+            d = d or {}
+            log.info(
+                "[PDRouter][topology_pull/decode] replica=%s rank=%d "
+                "actor_id=%s node_id=%s gpu_ids=%s",
+                topology_key, i, d.get("actor_id"), d.get("node_id"),
+                d.get("gpu_ids"),
+            )
+        if requested_replica_id and topology_key != requested_replica_id:
+            log.warning(
+                "[PDRouter] direct dispatch for %s degraded to %s; "
+                "target likely just died",
+                requested_replica_id, topology_key,
+            )
