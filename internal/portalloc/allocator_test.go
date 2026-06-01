@@ -33,7 +33,7 @@ func pdConfig(numReplicas, prefillInstances, decodeInstances, portsPerRank int) 
 }
 
 func TestAllocateForPDConfig_1P1D_OneReplica(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 	p := pdConfig(1, 1, 1, 2)
@@ -41,8 +41,8 @@ func TestAllocateForPDConfig_1P1D_OneReplica(t *testing.T) {
 	if err := alloc.AllocateForPDConfig(context.Background(), cluster, 7, p); err != nil {
 		t.Fatalf("AllocateForPDConfig: %v", err)
 	}
-	if mem.Count() != 5 {
-		t.Errorf("expected 5 allocations (router + 1 prefill http/side-channel + 1 decode http/side-channel), got %d", mem.Count())
+	if mem.count() != 5 {
+		t.Errorf("expected 5 allocations (router + 1 prefill http/side-channel + 1 decode http/side-channel), got %d", mem.count())
 	}
 	if len(p.Ports) != 1 {
 		t.Fatalf("cfg.Ports len: got %d want 1", len(p.Ports))
@@ -65,7 +65,7 @@ func TestAllocateForPDConfig_1P1D_OneReplica(t *testing.T) {
 }
 
 func TestAllocateForPDConfig_PortsAreUnique_AcrossReplicas(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 	p := pdConfig(3, 1, 1, 2)
@@ -93,7 +93,7 @@ func TestAllocateForPDConfig_PortsAreUnique_AcrossReplicas(t *testing.T) {
 }
 
 func TestAllocateForPDConfig_Idempotent(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 	p1 := pdConfig(2, 1, 1, 2)
@@ -101,16 +101,16 @@ func TestAllocateForPDConfig_Idempotent(t *testing.T) {
 	if err := alloc.AllocateForPDConfig(context.Background(), cluster, 42, p1); err != nil {
 		t.Fatalf("first AllocateForPDConfig: %v", err)
 	}
-	firstCount := mem.Count()
+	firstCount := mem.count()
 
 	// Second call on a fresh config instance with same endpoint must reuse rows.
 	p2 := pdConfig(2, 1, 1, 2)
 	if err := alloc.AllocateForPDConfig(context.Background(), cluster, 42, p2); err != nil {
 		t.Fatalf("second AllocateForPDConfig: %v", err)
 	}
-	if mem.Count() != firstCount {
+	if mem.count() != firstCount {
 		t.Errorf("idempotent retry should not insert new rows: %d → %d",
-			firstCount, mem.Count())
+			firstCount, mem.count())
 	}
 	// Same ports materialized.
 	for r := 0; r < p1.NumReplicas; r++ {
@@ -128,7 +128,7 @@ func TestAllocateForPDConfig_Idempotent(t *testing.T) {
 }
 
 func TestAllocateForPDConfig_RangeExhausted(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := New(mem, WithPortRange(v1.PortRangeSpec{Start: 20000, End: 21000}))
 	// 1001 ports available, config needs 1005 (201 replicas × 5 ports).
 	cluster := newCluster(1)
@@ -138,32 +138,32 @@ func TestAllocateForPDConfig_RangeExhausted(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected exhaustion error, got nil")
 	}
-	if mem.Count() != 0 {
-		t.Errorf("partial commit on exhaustion: %d rows landed", mem.Count())
+	if mem.count() != 0 {
+		t.Errorf("partial commit on exhaustion: %d rows landed", mem.count())
 	}
 }
 
 func TestReleaseAll_Frees(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 	p := pdConfig(2, 1, 1, 2)
 
 	_ = alloc.AllocateForPDConfig(context.Background(), cluster, 99, p)
-	if mem.Count() != 10 {
-		t.Fatalf("expected 10 allocations before release, got %d", mem.Count())
+	if mem.count() != 10 {
+		t.Fatalf("expected 10 allocations before release, got %d", mem.count())
 	}
 	if err := alloc.ReleaseAll(context.Background(), 99); err != nil {
 		t.Fatalf("ReleaseAll: %v", err)
 	}
-	if mem.Count() != 0 {
-		t.Errorf("expected 0 after release, got %d", mem.Count())
+	if mem.count() != 0 {
+		t.Errorf("expected 0 after release, got %d", mem.count())
 	}
 }
 
 func TestAllocateForPDConfig_NoPortsForRoleSkipped(t *testing.T) {
 	// PortsPerRank=0 → role contributes no slots.
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 	p := &pdconfig.PDConfig{
@@ -177,8 +177,8 @@ func TestAllocateForPDConfig_NoPortsForRoleSkipped(t *testing.T) {
 	if err := alloc.AllocateForPDConfig(context.Background(), cluster, 5, p); err != nil {
 		t.Fatalf("AllocateForPDConfig: %v", err)
 	}
-	if mem.Count() != 2 {
-		t.Errorf("expected one router allocation per replica, got %d", mem.Count())
+	if mem.count() != 2 {
+		t.Errorf("expected one router allocation per replica, got %d", mem.count())
 	}
 	if len(p.Ports) != 2 {
 		t.Errorf("Ports should still have NumReplicas entries (empty maps), got %d", len(p.Ports))
@@ -193,7 +193,7 @@ func TestAllocateForPDConfig_StaleAllocationsSelfHeal(t *testing.T) {
 	// endpoint spec edit (role count, instances, port requirement changed).
 	// AllocateForPDConfig releases them and re-allocates fresh; reconcile is
 	// self-healing rather than demanding manual ReleaseAll.
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 
@@ -208,13 +208,13 @@ func TestAllocateForPDConfig_StaleAllocationsSelfHeal(t *testing.T) {
 	}
 	// After self-heal, exactly 5 rows for endpoint 7 (the partial row was
 	// dropped and replaced as part of the fresh allocation).
-	if mem.Count() != 5 {
-		t.Errorf("expected 5 rows after self-heal, got %d", mem.Count())
+	if mem.count() != 5 {
+		t.Errorf("expected 5 rows after self-heal, got %d", mem.count())
 	}
 }
 
 func TestAllocateForPDConfig_RejectsUnsupportedPortCountPerRank(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 	p := pdConfig(1, 1, 1, 3)
@@ -223,13 +223,13 @@ func TestAllocateForPDConfig_RejectsUnsupportedPortCountPerRank(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error for PortsPerRank=3")
 	}
-	if mem.Count() != 0 {
-		t.Errorf("unsupported port count rejection should not insert rows, got %d", mem.Count())
+	if mem.count() != 0 {
+		t.Errorf("unsupported port count rejection should not insert rows, got %d", mem.count())
 	}
 }
 
 func TestAllocateForPDConfig_DefaultPortRange(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := New(mem)
 	cluster := newCluster(1)
 	p := pdConfig(1, 1, 1, 2)
@@ -244,7 +244,7 @@ func TestAllocateForPDConfig_DefaultPortRange(t *testing.T) {
 }
 
 func TestAllocateForPDConfig_RejectsBadConfiguredRange(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := New(mem, WithPortRange(v1.PortRangeSpec{Start: 20000, End: 20010}))
 	cluster := newCluster(1)
 	p := pdConfig(1, 1, 1, 2)
@@ -255,7 +255,7 @@ func TestAllocateForPDConfig_RejectsBadConfiguredRange(t *testing.T) {
 }
 
 func TestAllocateForPDConfig_RejectsBadInput(t *testing.T) {
-	mem := NewMemoryStorage()
+	mem := newTestStorage()
 	alloc := newAllocator(mem)
 	cluster := newCluster(1)
 	p := pdConfig(1, 1, 1, 2)

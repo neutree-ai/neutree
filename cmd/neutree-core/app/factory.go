@@ -11,11 +11,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// portAllocStorageSingleton is the fallback for tests and single-process
-// configurations that do not inject pkg/storage's persistent port allocation
-// backend.
-var portAllocStorageSingleton = portalloc.NewMemoryStorage()
-
 type ControllerOptions struct {
 	config      *config.CoreConfig
 	beforeHooks []controllers.HookFunc
@@ -93,7 +88,7 @@ func NewEndpointControllerFactory() ControllerFactory {
 
 		portAllocStorage := opts.config.PortAllocationStorage
 		if portAllocStorage == nil {
-			portAllocStorage = portAllocStorageSingleton
+			return nil, errors.New("port allocation storage is required")
 		}
 
 		endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{

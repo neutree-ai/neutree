@@ -7,7 +7,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/orchestrator/pdconfig"
-	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 )
 
@@ -190,10 +189,7 @@ func TestApplyPDBranch_RewritesImportAndInjectsPDConfig(t *testing.T) {
 		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType},
 	}
 	engine := pdEngine("v0.20.0", "serve.vllm.v0_20_0.app_pd_collocated:app_builder")
-	allocator := portalloc.New(
-		portalloc.NewMemoryStorage(),
-		portalloc.WithPortRange(v1.PortRangeSpec{Start: 20000, End: 21000}),
-	)
+	allocator := newTestPortAllocator()
 	app := stubRayApp("serve.vllm.v0_20_0.app:app_builder")
 
 	if err := applyPDBranch(context.Background(), ep, cluster, engine, nil, allocator, &app); err != nil {

@@ -12,7 +12,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/orchestrator/pdconfig"
-	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -987,10 +986,7 @@ func Test_getDeployTemplate(t *testing.T) {
 
 func TestKubernetesOrchestrator_applyPDBranchVariables_UsesEngineVersionRouterAndRoles(t *testing.T) {
 	k := &kubernetesOrchestrator{
-		portAllocator: portalloc.New(
-			portalloc.NewMemoryStorage(),
-			portalloc.WithPortRange(v1.PortRangeSpec{Start: 20000, End: 21000}),
-		),
+		portAllocator: newTestPortAllocator(),
 	}
 	data := newDeploymentManifestVariables()
 	data.ImagePrefix = "registry.example.com"
@@ -1104,10 +1100,7 @@ func TestKubernetesOrchestrator_applyPDBranchVariables_UsesEngineVersionRouterAn
 
 func TestKubernetesOrchestrator_KubernetesPDTemplateRendersCollocatedPod(t *testing.T) {
 	k := &kubernetesOrchestrator{
-		portAllocator: portalloc.New(
-			portalloc.NewMemoryStorage(),
-			portalloc.WithPortRange(v1.PortRangeSpec{Start: 20000, End: 21000}),
-		),
+		portAllocator: newTestPortAllocator(),
 	}
 
 	cpu := "1"
@@ -1246,10 +1239,7 @@ func TestKubernetesOrchestrator_KubernetesPDTemplateRendersCollocatedPod(t *test
 
 func TestKubernetesOrchestrator_SGLangPDTemplateRendersKVTransferArgs(t *testing.T) {
 	k := &kubernetesOrchestrator{
-		portAllocator: portalloc.New(
-			portalloc.NewMemoryStorage(),
-			portalloc.WithPortRange(v1.PortRangeSpec{Start: 20000, End: 21000}),
-		),
+		portAllocator: newTestPortAllocator(),
 	}
 
 	cpu := "1"
