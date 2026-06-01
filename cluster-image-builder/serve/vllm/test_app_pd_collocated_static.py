@@ -33,7 +33,10 @@ class PDCollocatedAppStaticTest(unittest.TestCase):
             with self.subTest(path=path):
                 source = path.read_text()
                 self.assertIn("def _model_max_token_limit", source)
+                self.assertIn("def _decode_input_token_reserve", source)
                 self.assertIn("def _clamp_completion_limits", source)
+                self.assertIn("NEUTREE_PD_DECODE_INPUT_TOKEN_RESERVE", source)
+                self.assertIn("effective_limit = max(1, max_token_limit - input_reserve)", source)
                 self.assertIn('for key in ("max_tokens", "max_completion_tokens")', source)
                 self.assertIn("def _normalize_decode_payload", source)
                 self.assertIn("return await super().generate(self._normalize_decode_payload(payload))", source)

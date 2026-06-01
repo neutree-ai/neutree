@@ -36,6 +36,7 @@ Merge precedence:
 """
 import asyncio
 import logging
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -281,6 +282,15 @@ def _model_max_token_limit(model_config: Any) -> Optional[int]:
     return None
 
 
+def _decode_input_token_reserve(max_token_limit: int) -> int:
+    if max_token_limit <= 1:
+        return 0
+    reserve = _positive_int(os.environ.get("NEUTREE_PD_DECODE_INPUT_TOKEN_RESERVE"))
+    if reserve is None:
+        reserve = 4096
+    return min(reserve, max_token_limit - 1)
+
+
 def _clamp_completion_limits(
     payload: Dict[str, Any],
     max_token_limit: Optional[int],
@@ -291,15 +301,18 @@ def _clamp_completion_limits(
         return payload
 
     out = dict(payload)
+    input_reserve = _decode_input_token_reserve(max_token_limit)
+    effective_limit = max(1, max_token_limit - input_reserve)
     for key in ("max_tokens", "max_completion_tokens"):
         requested = _positive_int(out.get(key))
-        if requested is None or requested <= max_token_limit:
+        if requested is None or requested <= effective_limit:
             continue
-        out[key] = max_token_limit
+        out[key] = effective_limit
         log.warning(
             "[pd_generate][decode_limit_clamped] req=%s field=%s requested=%d "
-            "max_model_len=%d",
-            request_id or out.get("request_id"), key, requested, max_token_limit,
+            "effective_limit=%d max_model_len=%d input_reserve=%d",
+            request_id or out.get("request_id"), key, requested,
+            effective_limit, max_token_limit, input_reserve,
         )
     return out
 
