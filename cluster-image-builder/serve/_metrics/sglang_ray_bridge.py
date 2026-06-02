@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Dict, Tuple
 
 from ray import serve
@@ -59,16 +60,40 @@ def _sanitize_metric_name(name: str) -> str:
 
 def _replica_tags() -> Dict[str, str]:
     """Snapshot Ray Serve replica context once; tags are stable for the actor lifetime."""
+    tags: Dict[str, str] = {}
     try:
         ctx = serve.get_replica_context()
-        return {
+        tags.update({
             "deployment": ctx.deployment,
             "replica": ctx.replica_tag,
             "application": getattr(ctx, "app_name", ""),
-        }
-    except RuntimeError:
-        # Ran outside a Serve replica (unit tests, REPL); skip context labels.
-        return {}
+        })
+    except Exception as exc:  # noqa: BLE001
+        # PD same-host inner actors are plain Ray actors, not Serve replicas.
+        # The outer PDCollocatedBackend forwards its Serve identity through
+        # env vars so SGLang metrics keep the same dashboard dimensions.
+        logger.info(
+            "[PromToRayBridge] no Ray Serve context (%s); falling back to env labels",
+            type(exc).__name__,
+        )
+        for env_key, label in (
+            ("NEUTREE_RAY_STAT_DEPLOYMENT", "deployment"),
+            ("NEUTREE_RAY_STAT_REPLICA", "replica"),
+            ("NEUTREE_RAY_STAT_APPLICATION", "application"),
+        ):
+            value = os.environ.get(env_key)
+            if value:
+                tags[label] = value
+
+    for env_key, label in (
+        ("NEUTREE_RAY_STAT_ROLE", "role"),
+        ("NEUTREE_RAY_STAT_RANK", "rank"),
+    ):
+        value = os.environ.get(env_key)
+        if value:
+            tags[label] = value
+
+    return tags
 
 
 class PromToRayBridge:

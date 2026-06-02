@@ -51,6 +51,63 @@ func TestGetBuiltinEngines(t *testing.T) {
 					t.Errorf("vllm %s missing default kubernetes deploy template", v.Version)
 				}
 			}
+
+			if v.Version == "v0.17.1" {
+				if v.Capabilities != nil && v.Capabilities.PD != nil {
+					t.Errorf("vllm %s should not advertise PD capability", v.Version)
+				}
+				if v.HasDeployTemplate(v1.KubernetesClusterType, v1.PDDeployMode) {
+					t.Errorf("vllm %s should not register kubernetes/pd deploy template", v.Version)
+				}
+				if v.Sidecar != nil {
+					t.Errorf("vllm %s should not register PD router image config", v.Version)
+				}
+				if v.HasRayServeEntrypoint(v1.PDDeployMode) {
+					t.Errorf("vllm %s should not register ray_serve/pd entrypoint", v.Version)
+				}
+			}
+
+			switch v.Version {
+			case "v0.20.0", "v0.20.0-pdsamehost2026060104":
+				if v.Capabilities == nil || v.Capabilities.PD == nil {
+					t.Errorf("vllm %s missing PD capability", v.Version)
+					continue
+				}
+				if !v.HasDeployTemplate(v1.KubernetesClusterType, v1.PDDeployMode) {
+					t.Errorf("vllm %s missing kubernetes/pd deploy template", v.Version)
+				}
+				if v.Sidecar == nil || v.Sidecar.Image == nil {
+					t.Errorf("vllm %s missing PD router image config", v.Version)
+				}
+				if !v.HasRayServeEntrypoint(v1.PDDeployMode) {
+					t.Errorf("vllm %s missing ray_serve/pd entrypoint", v.Version)
+				}
+				if got, err := v.GetRayServeEntrypoint(v1.PDDeployMode); err != nil || got == "" {
+					t.Errorf("vllm %s invalid ray_serve/pd entrypoint: got %q err=%v", v.Version, got, err)
+				}
+			}
+
+			if v.Version == "v0.20.0-pdsamehost2026060104" {
+				nvidiaImg, ok := v.Images["nvidia_gpu"]
+				if !ok {
+					t.Errorf("vllm %s missing nvidia_gpu image", v.Version)
+				} else if got, want := nvidiaImg.Tag, "v0.20.0-pdsamehost2026060104-ray2.53.0"; got != want {
+					t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
+				}
+
+				sshImg, ok := v.Images[v1.SSHImageKeyPrefix+"nvidia_gpu"]
+				if !ok {
+					t.Errorf("vllm %s missing ssh_nvidia_gpu image", v.Version)
+				} else if got, want := sshImg.Tag, "v0.20.0-pdsamehost2026060104-ray2.53.0"; got != want {
+					t.Errorf("vllm %s ssh_nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
+				}
+
+				if v.Sidecar == nil || v.Sidecar.Image == nil {
+					t.Errorf("vllm %s missing PD router image config", v.Version)
+				} else if got, want := v.Sidecar.Image.Tag, "v0.20.0-pdsamehost2026060104"; got != want {
+					t.Errorf("vllm %s sidecar tag mismatch: got %q, want %q", v.Version, got, want)
+				}
+			}
 		}
 	}
 
@@ -88,6 +145,29 @@ func TestGetBuiltinEngines(t *testing.T) {
 			t.Errorf("sglang %s missing kubernetes deploy template", v.Version)
 		} else if _, ok := k8sTemplates["default"]; !ok {
 			t.Errorf("sglang %s missing default kubernetes deploy template", v.Version)
+		} else if _, ok := k8sTemplates[v1.PDDeployMode]; !ok {
+			t.Errorf("sglang %s missing kubernetes/pd deploy template", v.Version)
+		}
+		if v.Sidecar == nil || v.Sidecar.Image == nil {
+			t.Errorf("sglang %s missing PD router image config", v.Version)
+		}
+		if v.Capabilities == nil || v.Capabilities.PD == nil {
+			t.Errorf("sglang %s missing PD capability", v.Version)
+		} else {
+			if !v.HasRayServeEntrypoint(v1.PDDeployMode) {
+				t.Errorf("sglang %s missing ray_serve/pd entrypoint", v.Version)
+			}
+			got, err := v.GetRayServeEntrypoint(v1.PDDeployMode)
+			if err != nil || got != "serve.sglang.v0_5_10.app_pd_collocated:app_builder" {
+				t.Errorf("sglang %s ray_serve/pd entrypoint: got %q err=%v", v.Version, got, err)
+			}
+			wantConnectors := map[string]bool{"nixl": true, "mooncake": true}
+			for _, connector := range v.Capabilities.PD.KVConnectors {
+				delete(wantConnectors, connector)
+			}
+			if len(wantConnectors) != 0 {
+				t.Errorf("sglang %s missing PD connectors: %v", v.Version, wantConnectors)
+			}
 		}
 
 		wantTasks := map[string]bool{"text-generation": true, "text-embedding": true}

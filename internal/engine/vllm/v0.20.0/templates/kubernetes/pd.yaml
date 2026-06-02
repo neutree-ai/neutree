@@ -1,0 +1,237 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .EndpointName }}
+  namespace: {{ .Namespace }}
+  labels:
+    engine: {{ .EngineName }}
+    engine_version: {{ .EngineVersion }}
+    routing_logic: {{ .RoutingLogic }}
+    app: inference
+    neutree.io/component: pd-collocated
+spec:
+  replicas: {{ .Replicas }}
+  progressDeadlineSeconds: 1200
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      cluster: {{ .ClusterName }}
+      workspace: {{ .Workspace }}
+      endpoint: {{ .EndpointName }}
+      app: inference
+  template:
+    metadata:
+      annotations:
+        neutree.io/pd-deployment-type: group
+        neutree.io/pd-router-port: "{{ .PD.Router.Port }}"
+      labels:
+        engine: {{ .EngineName }}
+        engine_version: {{ .EngineVersion }}
+        cluster: {{ .ClusterName }}
+        workspace: {{ .Workspace }}
+        endpoint: {{ .EndpointName }}
+        routing_logic: {{ .RoutingLogic }}
+        app: inference
+        neutree.io/component: pd-collocated
+        neutree.io/leader: "true"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: endpoint
+                      operator: In
+                      values:
+                        - {{ .EndpointName }}
+                topologyKey: "kubernetes.io/hostname"
+      {{- if .NodeSelector }}
+      nodeSelector:
+        {{- range $key, $value := .NodeSelector }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
+      {{- if .ImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .ImagePullSecret }}
+      {{- end }}
+
+      {{- if .Volumes }}
+      volumes:
+{{ .Volumes | toYaml | indent 6 }}
+      {{- end }}
+      initContainers:
+        - name: model-downloader
+          image: {{ .ImagePrefix }}/neutree/neutree-runtime:{{ .NeutreeVersion }}
+          command:
+            - bash
+            - -c
+          args:
+            - >-
+              python3 -m neutree.downloader
+              --name="{{ .ModelArgs.name }}"
+              --registry_type="{{ .ModelArgs.registry_type }}"
+              --registry_path="{{ .ModelArgs.registry_path }}"
+              --path="{{ .ModelArgs.path }}"
+              --version="{{ .ModelArgs.version }}"
+              --file="{{ .ModelArgs.file }}"
+              --task="{{ .ModelArgs.task }}"
+          env:
+           {{ range $key, $value := .Env }}
+           - name: {{ $key }}
+             value: "{{ $value }}"
+           {{ end }}
+          {{- if .VolumeMounts }}
+          volumeMounts:
+{{ .VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
+
+      containers:
+        - name: pd-router
+          image: {{ .PD.Router.Image }}
+          env:
+            - name: NEUTREE_PD_CONFIG
+              value: {{ .PD.ConfigJSON | quote }}
+            - name: NEUTREE_PD_ROUTER_PORT
+              value: "{{ .PD.Router.Port }}"
+            - name: NEUTREE_PD_GROUP_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NEUTREE_PD_GROUP_RANK
+              value: "0"
+            {{- range $key, $value := .Env }}
+            - name: {{ $key }}
+              value: "{{ $value }}"
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .PD.Router.Port }}
+          startupProbe:
+            httpGet:
+              path: {{ .PD.Router.HealthPath }}
+              port: http
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: {{ .PD.Router.HealthPath }}
+              port: http
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+        {{- $pdPorts := index .PD.Ports 0 }}
+        {{- range .PD.Roles }}
+        {{- $role := . }}
+        {{- range $rank := until .Instances }}
+        {{- $rolePorts := index $pdPorts $role.Name }}
+        {{- $rankPorts := index $rolePorts $rank }}
+        - name: {{ $role.Name }}-{{ $rank }}
+          image: {{ $.ImagePrefix }}/{{ $.ImageRepo }}:{{ $.ImageTag }}
+          command:
+          - vllm
+          - serve
+          - {{ $.ModelArgs.path }}
+          - --host
+          - "0.0.0.0"
+          - "--port"
+          - "$(NEUTREE_PD_HTTP_PORT)"
+          - --served-model-name
+          - {{ $.ModelArgs.serve_name }}
+          {{- $engineArgs := $role.EngineArgs }}
+          {{- if and (not (hasKey $engineArgs "kv-transfer-config")) (not (hasKey $engineArgs "kv_transfer_config")) }}
+          {{- $kvConnector := "NixlConnector" }}
+          {{- if eq (lower $role.KVTransferConnector) "mooncake" }}
+          {{- $kvConnector = "MooncakeConnector" }}
+          {{- end }}
+          {{- $kvRole := "kv_producer" }}
+          {{- if eq $role.Name "decode" }}
+          {{- $kvRole = "kv_consumer" }}
+          {{- end }}
+          {{- $kvBufferSize := 5000000000 }}
+          {{- if hasKey $role.KVTransferExtra "buffer_size" }}
+          {{- $kvBufferSize = get $role.KVTransferExtra "buffer_size" }}
+          {{- end }}
+          {{- $kvConfig := dict "kv_connector" $kvConnector "kv_role" $kvRole "kv_buffer_size" $kvBufferSize }}
+          {{- if hasKey $role.KVTransferExtra "kv_buffer_device" }}
+          {{- $_ := set $kvConfig "kv_buffer_device" (get $role.KVTransferExtra "kv_buffer_device") }}
+          {{- end }}
+          - --kv-transfer-config
+          - {{ $kvConfig | toJson | quote }}
+          {{- end }}
+          {{- if $role.EngineArgs }}
+          {{- range $key, $value := $role.EngineArgs }}
+          - --{{ $key }}
+      {{- if ne (printf "%v" $value) "true"}}
+          - "{{ $value }}"
+      {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- if $role.Resources }}
+          resources:
+            limits:
+              {{- range $key, $value := $role.Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+            requests:
+              {{- range $key, $value := $role.Resources }}
+              {{ $key }}: {{ $value }}
+              {{- end }}
+          {{- end }}
+          env:
+            - name: NEUTREE_PD_ROLE
+              value: "{{ $role.Name }}"
+            - name: NEUTREE_PD_RANK
+              value: "{{ $rank }}"
+            - name: NEUTREE_PD_GROUP_RANK
+              value: "0"
+            - name: NEUTREE_PD_HTTP_PORT
+              value: "{{ index $rankPorts "http" }}"
+            - name: NEUTREE_PD_SIDE_CHANNEL_PORT
+              value: "{{ index $rankPorts "side_channel" }}"
+            {{ range $key, $value := $role.Env }}
+            - name: {{ $key }}
+              value: "{{ $value }}"
+            {{ end }}
+          ports:
+            - name: http
+              containerPort: {{ index $rankPorts "http" }}
+            {{- if gt (index $rankPorts "side_channel") 0 }}
+            - name: side-channel
+              containerPort: {{ index $rankPorts "side_channel" }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          {{- if $.VolumeMounts }}
+          volumeMounts:
+{{ $.VolumeMounts | toYaml | indent 10 }}
+          {{- end }}
+        {{- end }}
+        {{- end }}

@@ -50,8 +50,12 @@ SCHEDULER_CLASS_PATHS = {
 }
 
 
-@serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})
-class Backend:
+# Raw class kept undecorated so tests and wrappers can exercise backend
+# behavior without instantiating a Ray Serve Deployment directly.
+#
+# `Backend` (the wrapped Deployment, defined right below) stays the public
+# symbol for the standard app_builder.
+class _Backend:
     def __init__(self,
                  # Model config parameters
                  model_registry_type: str,
@@ -318,6 +322,12 @@ class Backend:
     async def show_available_models(self):
         models = await self._ensure_models()
         return await models.show_available_models()
+
+
+# Wrap the raw `_Backend` as a Ray Serve Deployment for the standard
+# app_builder. Defined here after the class body so tests can still import
+# `_Backend` without going through Ray Serve's Deployment wrapper.
+Backend = serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})(_Backend)
 
 
 app = FastAPI()

@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/gin-gonic/gin"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/engine"
@@ -30,6 +31,7 @@ type ServerConfig struct {
 type CoreConfig struct {
 	ObjectStorage           storage.ObjectStorage
 	Storage                 storage.Storage
+	PortAllocationStorage   storage.PortAllocationStorage
 	ImageService            registry.ImageService
 	Gateway                 gateway.Gateway
 	AcceleratorManager      accelerator.Manager
@@ -46,6 +48,9 @@ type CoreConfig struct {
 
 	// core server config
 	ServerConfig *ServerConfig
+
+	// global port allocator range for SSH / K8s side-channel and bootstrap ports
+	PortRange *v1.PortRangeSpec
 
 	Scheme *scheme.Scheme
 }

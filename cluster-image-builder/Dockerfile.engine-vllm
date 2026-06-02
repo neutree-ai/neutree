@@ -38,6 +38,28 @@ FROM ${ENGINE_BASE_IMAGE}
 ENV HOME=/home/ray
 WORKDIR ${HOME}
 
+# Reconcile preinstalled nixl-cuXX wheel for vLLM versions that ship a
+# single cuXX variant (not the 1.1.0 meta-wheel).
+#
+#   TARGET_CUDA:  computed by Makefile from ENGINE_VLLM_VERSION
+#                 (< 0.20.0 → 12, 0.20.0..0.20.x → 13, >= 0.21.0 → empty).
+#                 Empty means "skip reconcile" — meta-wheel handles it,
+#                 or this is a ROCm build with no nixl-cuXX wheel.
+#
+#   NIXL_VERSION: optional user-supplied PEP 440 specifier appended to
+#                 the pip install spec. Empty falls back to the
+#                 vLLM-upstream-supported range '>=0.7.1,<=0.10.1' for
+#                 the pre-0.21.0 packaging.
+ARG TARGET_CUDA=""
+ARG NIXL_VERSION=""
+RUN if [ -n "${TARGET_CUDA}" ]; then \
+        spec="${NIXL_VERSION:->=0.7.1,<=0.10.1}"; \
+        echo "[nixl-reconcile] force-reinstall nixl-cu${TARGET_CUDA}${spec}"; \
+        uv pip install --system --force-reinstall --no-deps "nixl-cu${TARGET_CUDA}${spec}"; \
+    else \
+        echo "[nixl-reconcile] TARGET_CUDA empty; skipping nixl reconcile"; \
+    fi
+
 # Install Ray neutree fork (same version as cluster image)
 RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
     cd /install \
@@ -53,6 +75,7 @@ ARG ENGINE_VERSION_DIR
 COPY serve/_metrics ./serve/_metrics
 COPY serve/_replica_scheduler ./serve/_replica_scheduler
 COPY serve/_utils ./serve/_utils
+COPY serve/_router ./serve/_router
 COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
 # Copy downloader sources only; do NOT `pip install` downloader/requirements.txt.
 # Its huggingface-hub<1.0 pin would downgrade the newer huggingface_hub already

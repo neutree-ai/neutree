@@ -1,7 +1,9 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"math"
 	"net/url"
@@ -15,6 +17,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/internal/orchestrator/pdconfig"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -39,6 +42,30 @@ type DeploymentManifestVariables struct {
 	Replicas        int32
 	NodeSelector    map[string]string
 	NeutreeVersion  string
+	PD              *PDDeploymentManifestVariables
+}
+
+type PDDeploymentManifestVariables struct {
+	Router     PDRouterManifestVariables
+	Roles      []PDRoleManifestVariables
+	Ports      []map[string][]map[string]int
+	ConfigJSON string
+}
+
+type PDRouterManifestVariables struct {
+	Image      string
+	Port       int32
+	HealthPath string
+}
+
+type PDRoleManifestVariables struct {
+	Name                string
+	Instances           int
+	Resources           map[string]string
+	Env                 map[string]string
+	EngineArgs          map[string]interface{}
+	KVTransferConnector string
+	KVTransferExtra     map[string]interface{}
 }
 
 func buildDeploymentObjects(deployTemplate string, renderVars DeploymentManifestVariables) (*unstructured.UnstructuredList, error) {
@@ -69,7 +96,7 @@ func (k *kubernetesOrchestrator) setDeployImageVariables(data *DeploymentManifes
 
 	data.ImagePrefix = imagePrefix
 
-	acceleratorType := endpoint.Spec.Resources.GetAcceleratorType()
+	acceleratorType := deriveAcceleratorType(endpoint)
 
 	imageName, imageTag, err := k.getImageForAccelerator(engine, endpoint.Spec.Engine.Version, acceleratorType)
 	if err != nil {
@@ -353,6 +380,309 @@ func (k *kubernetesOrchestrator) addSharedMemoryVolume(data *DeploymentManifestV
 	})
 }
 
+func (k *kubernetesOrchestrator) applyKubernetesPDBranchVariables(ctx context.Context, data *DeploymentManifestVariables,
+	endpoint *v1.Endpoint, deployedCluster *v1.Cluster, engine *v1.Engine) error {
+	resolution, err := pdconfig.ResolveEngineCapabilities(endpoint, deployedCluster, engine)
+	if err != nil {
+		return errors.Wrap(err, "PD engine capability resolution failed")
+	}
+
+	if resolution == nil || resolution.Version == nil {
+		return errors.New("PD engine capability resolution returned nil")
+	}
+
+	router := resolution.Version.Sidecar
+	if router == nil || router.Image == nil || router.Image.ImageName == "" {
+		return errors.Errorf("engine %s version %s has no PD router image config",
+			engine.Metadata.Name, endpoint.Spec.Engine.Version)
+	}
+
+	cfg, err := pdconfig.DerivePDConfig(endpoint, resolution.KVConnector)
+	if err != nil {
+		return errors.Wrap(err, "derive PD config failed")
+	}
+
+	if k.portAllocator == nil {
+		return errors.New("strategy=pd with placement.roles=same-host requires a port allocator; orchestrator.Options.PortAllocator is nil")
+	}
+
+	if err := k.portAllocator.AllocateForPDConfig(ctx, deployedCluster, endpoint.ID, cfg); err != nil {
+		return errors.Wrapf(err, "port allocation failed for endpoint %d", endpoint.ID)
+	}
+
+	routerImage := util.BuildEngineImageRef(data.ImagePrefix, router.Image)
+	if routerImage == "" {
+		return errors.Errorf("engine %s version %s has an empty PD router image",
+			engine.Metadata.Name, endpoint.Spec.Engine.Version)
+	}
+
+	routerPort, err := pdAllocatedPort(cfg, 0, pdconfig.PortRoleRouter, 0, pdconfig.PortPurposeHTTP)
+	if err != nil {
+		return err
+	}
+
+	pdVars := &PDDeploymentManifestVariables{
+		Router: PDRouterManifestVariables{
+			Image:      routerImage,
+			Port:       int32(routerPort),
+			HealthPath: effectiveRouterHealthPath(router),
+		},
+	}
+
+	roles, err := k.buildPDRoles(data, cfg)
+	if err != nil {
+		return err
+	}
+
+	pdVars.Roles = roles
+	pdVars.Ports = serializePDPorts(cfg.Ports)
+
+	pdConfig := SerializePDConfig(cfg)
+	if endpoint.Metadata != nil {
+		pdConfig["workspace"] = endpoint.Metadata.Workspace
+		pdConfig["endpoint"] = endpoint.Metadata.Name
+		pdConfig["group_id"] = endpoint.Metadata.Name
+	}
+
+	pdConfig["engine"] = engine.Metadata.Name
+	pdConfig["engine_version"] = endpoint.Spec.Engine.Version
+
+	pdConfig["router"] = map[string]interface{}{
+		"port":        pdVars.Router.Port,
+		"health_path": pdVars.Router.HealthPath,
+	}
+
+	runtimeContainers, err := serializePDRuntimeContainers(cfg)
+	if err != nil {
+		return err
+	}
+
+	pdConfig["containers"] = runtimeContainers
+
+	configJSON, err := json.Marshal(pdConfig)
+	if err != nil {
+		return errors.Wrap(err, "marshal PD config for kubernetes router failed")
+	}
+
+	pdVars.ConfigJSON = string(configJSON)
+
+	data.PD = pdVars
+
+	return nil
+}
+
+func effectiveRouterHealthPath(router *v1.EngineVersionSidecar) string {
+	if router == nil || strings.TrimSpace(router.HealthPath) == "" {
+		return "/health"
+	}
+
+	return router.HealthPath
+}
+
+func (k *kubernetesOrchestrator) buildPDRoles(data *DeploymentManifestVariables,
+	cfg *pdconfig.PDConfig) ([]PDRoleManifestVariables, error) {
+	if cfg == nil || cfg.Group == nil {
+		return nil, errors.New("PD config has no role group")
+	}
+
+	roles := make([]PDRoleManifestVariables, 0, len(cfg.Group.Roles))
+	kvTransferConnector, kvTransferExtra := kvTransferTemplateValues(cfg.Transfer)
+
+	for _, role := range cfg.Group.Roles {
+		if role == nil {
+			continue
+		}
+
+		resources, roleEnv, nodeSelector, err := k.kubernetesRoleResources(role)
+		if err != nil {
+			return nil, errors.Wrapf(err, "convert role %q resources to kubernetes shape", role.Name)
+		}
+
+		maps.Copy(data.NodeSelector, nodeSelector)
+
+		env := copyStringMap(data.Env)
+		maps.Copy(env, roleEnv)
+		maps.Copy(env, role.Env)
+
+		engineArgs := copyInterfaceMap(data.EngineArgs)
+		maps.Copy(engineArgs, roleEngineArgs(role.Variables))
+		escapeEngineArgsForTemplate(engineArgs)
+
+		roles = append(roles, PDRoleManifestVariables{
+			Name:                role.Name,
+			Instances:           role.Instances,
+			Resources:           resources,
+			Env:                 env,
+			EngineArgs:          engineArgs,
+			KVTransferConnector: kvTransferConnector,
+			KVTransferExtra:     copyInterfaceMap(kvTransferExtra),
+		})
+	}
+
+	return roles, nil
+}
+
+func (k *kubernetesOrchestrator) kubernetesRoleResources(role *pdconfig.Role) (map[string]string, map[string]string, map[string]string, error) {
+	resources := map[string]string{}
+	env := map[string]string{}
+	nodeSelector := map[string]string{}
+
+	if role == nil || role.Resources == nil {
+		return resources, env, nodeSelector, nil
+	}
+
+	resourceSpec, err := convertToKubernetes(k.acceleratorMgr, role.Resources)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if resourceSpec.Requests != nil {
+		maps.Copy(resources, resourceSpec.Requests)
+	}
+
+	if resourceSpec.NodeSelector != nil {
+		maps.Copy(nodeSelector, resourceSpec.NodeSelector)
+	}
+
+	if resourceSpec.Env != nil {
+		maps.Copy(env, resourceSpec.Env)
+	}
+
+	return resources, env, nodeSelector, nil
+}
+
+func pdAllocatedPort(cfg *pdconfig.PDConfig, roleGroupIndex int, role string, rank int, purpose string) (int, error) {
+	if cfg == nil || len(cfg.Ports) <= roleGroupIndex {
+		return 0, errors.Errorf("PD port allocation missing for role_group=%d role=%s rank=%d purpose=%s", roleGroupIndex, role, rank, purpose)
+	}
+
+	perRole := cfg.Ports[roleGroupIndex][role]
+
+	if len(perRole) <= rank || len(perRole[rank]) == 0 {
+		return 0, errors.Errorf("PD port allocation missing for role_group=%d role=%s rank=%d purpose=%s", roleGroupIndex, role, rank, purpose)
+	}
+
+	port := perRole[rank][purpose]
+	if port <= 0 {
+		return 0, errors.Errorf("PD port allocation missing for role_group=%d role=%s rank=%d purpose=%s", roleGroupIndex, role, rank, purpose)
+	}
+
+	return port, nil
+}
+
+func roleEngineArgs(variables map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{})
+
+	for key, value := range variables {
+		if key == "engine_args" {
+			if nested, ok := value.(map[string]interface{}); ok {
+				maps.Copy(out, nested)
+			}
+
+			continue
+		}
+
+		out[key] = value
+	}
+
+	return out
+}
+
+func kvTransferTemplateValues(transfer *pdconfig.KVTransferConfig) (string, map[string]interface{}) {
+	connector := ""
+	extra := map[string]interface{}{}
+
+	if transfer == nil {
+		return connector, extra
+	}
+
+	if trimmed := strings.TrimSpace(transfer.Connector); trimmed != "" {
+		connector = trimmed
+	}
+
+	maps.Copy(extra, transfer.Extra)
+
+	return connector, extra
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	maps.Copy(out, in)
+
+	return out
+}
+
+func copyInterfaceMap(in map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	maps.Copy(out, in)
+
+	return out
+}
+
+func serializePDPorts(ports []pdconfig.ReplicaPortMap) []map[string][]map[string]int {
+	out := make([]map[string][]map[string]int, 0, len(ports))
+
+	for _, replicaPorts := range ports {
+		replica := make(map[string][]map[string]int, len(replicaPorts))
+
+		for role, ranks := range replicaPorts {
+			serializedRanks := make([]map[string]int, len(ranks))
+
+			for rank, rankPorts := range ranks {
+				serializedRank := make(map[string]int, len(rankPorts))
+
+				for purpose, port := range rankPorts {
+					serializedRank[purpose] = port
+				}
+
+				serializedRanks[rank] = serializedRank
+			}
+
+			replica[role] = serializedRanks
+		}
+
+		out = append(out, replica)
+	}
+
+	return out
+}
+
+func serializePDRuntimeContainers(cfg *pdconfig.PDConfig) ([]map[string]interface{}, error) {
+	if cfg == nil || cfg.Group == nil {
+		return nil, errors.New("PD config has no role group")
+	}
+
+	out := []map[string]interface{}{}
+
+	for _, role := range cfg.Group.Roles {
+		if role == nil {
+			continue
+		}
+
+		for rank := 0; rank < role.Instances; rank++ {
+			httpPort, err := pdAllocatedPort(cfg, 0, role.Name, rank, pdconfig.PortPurposeHTTP)
+			if err != nil {
+				return nil, err
+			}
+
+			sideChannelPort, err := pdAllocatedPort(cfg, 0, role.Name, rank, pdconfig.PortPurposeSideChannel)
+			if err != nil {
+				return nil, err
+			}
+
+			out = append(out, map[string]interface{}{
+				"name":              fmt.Sprintf("%s-%d", role.Name, rank),
+				"role":              role.Name,
+				"rank":              rank,
+				"http_port":         httpPort,
+				"side_channel_port": sideChannelPort,
+			})
+		}
+	}
+
+	return out, nil
+}
+
 func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, modelRegistry *v1.ModelRegistry,
 	engine *v1.Engine, imageRegistry *v1.ImageRegistry) (DeploymentManifestVariables, error) {
 	// Initialize deployment manifest variables
@@ -372,9 +702,13 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	// Set engine args
 	k.setEngineArgs(&data, endpoint, engine)
 
-	// Set resource variables
-	if err := k.setResourceVariables(&data, endpoint); err != nil {
-		return DeploymentManifestVariables{}, err
+	// Set resource variables. strategy=pd endpoints usually carry per-role
+	// resources instead of endpoint-level resources; role resources are
+	// handled below by applyKubernetesPDBranchVariables.
+	if endpoint.Spec.Resources != nil {
+		if err := k.setResourceVariables(&data, endpoint); err != nil {
+			return DeploymentManifestVariables{}, err
+		}
 	}
 
 	// Set environment variables
@@ -396,13 +730,21 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	// Add shared memory volume
 	k.addSharedMemoryVolume(&data)
 
+	if isPDStrategy(endpoint) {
+		if err := k.applyKubernetesPDBranchVariables(context.Background(), &data, endpoint, deployedCluster, engine); err != nil {
+			return DeploymentManifestVariables{}, err
+		}
+	}
+
 	return data, nil
 }
 
 func (k *kubernetesOrchestrator) getDeployTemplate(endpoint *v1.Endpoint, engine *v1.Engine) (string, error) {
 	mode := "default"
 
-	if endpoint.Spec.DeploymentOptions != nil && endpoint.Spec.DeploymentOptions["deploy_mode"] != nil {
+	if isPDStrategy(endpoint) {
+		mode = v1.PDDeployMode
+	} else if endpoint.Spec.DeploymentOptions != nil && endpoint.Spec.DeploymentOptions["deploy_mode"] != nil {
 		deployMode, ok := endpoint.Spec.DeploymentOptions["deploy_mode"].(string)
 		if ok {
 			mode = deployMode

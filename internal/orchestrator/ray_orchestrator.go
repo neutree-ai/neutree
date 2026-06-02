@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"math"
@@ -15,6 +16,8 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/model_registry"
+	"github.com/neutree-ai/neutree/internal/orchestrator/pdconfig"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -54,6 +57,7 @@ type RayOrchestrator struct {
 
 	storage        storage.Storage
 	acceleratorMgr accelerator.Manager
+	portAllocator  portalloc.Allocator // may be nil for legacy (no Strategy) endpoints
 }
 
 type RayOptions struct {
@@ -65,6 +69,7 @@ func NewRayOrchestrator(opts RayOptions) *RayOrchestrator {
 		cluster:        opts.Cluster,
 		storage:        opts.Storage,
 		acceleratorMgr: opts.AcceleratorMgr,
+		portAllocator:  opts.PortAllocator,
 	}
 
 	return o
@@ -138,6 +143,12 @@ func (o *RayOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
 	// validate image registry status
 	if ctx.ImageRegistry.Status == nil || ctx.ImageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
 		return errors.Errorf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
+	}
+
+	if isPDStrategy(ctx.Endpoint) {
+		if _, err := pdconfig.ResolveEngineCapabilities(ctx.Endpoint, ctx.Cluster, ctx.Engine); err != nil {
+			return errors.Wrap(err, "failed to validate PD engine capabilities")
+		}
 	}
 
 	return nil
@@ -234,6 +245,18 @@ func (o *RayOrchestrator) createOrUpdate(ctx *OrchestratorContext) error {
 		return errors.Wrapf(err, "failed to convert endpoint to application for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
+	// strategy=pd: override import_path, derive the PD backend config +
+	// allocate ports, then inject it into deployment_options.backend.
+	// Side-effect: writes port-allocation rows to the configured Storage.
+	// Refuses to render without an allocator configured.
+	if isPDStrategy(ctx.Endpoint) {
+		if err := applyPDBranch(context.Background(), ctx.Endpoint, ctx.Cluster, ctx.Engine,
+			o.acceleratorMgr, o.portAllocator, &newApp); err != nil {
+			return errors.Wrapf(err, "failed to apply PD branch for endpoint %s",
+				ctx.Endpoint.Metadata.WorkspaceName())
+		}
+	}
+
 	// Build the list of applications for the PUT request
 	needAppend := true
 	needUpdate := true
@@ -319,7 +342,22 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 
 	ctx.logger.V(4).Info("Deleting endpoint from Ray Serve")
 
-	return o.deleteEndpoint(ctx)
+	if err := o.deleteEndpoint(ctx); err != nil {
+		return err
+	}
+
+	// Release port allocations *after* the Ray Serve app is gone so the
+	// reverse direction never reuses a port while a stale actor still binds
+	// it. Best-effort: log + continue if release fails — orphan rows are
+	// covered by the FK CASCADE when the endpoint row is deleted from PG.
+	if o.portAllocator != nil && endpoint != nil && endpoint.ID > 0 {
+		if err := o.portAllocator.ReleaseAll(context.Background(), endpoint.ID); err != nil {
+			ctx.logger.Error(err, "port-allocation release failed (continuing)",
+				"endpoint_id", endpoint.ID)
+		}
+	}
+
+	return nil
 }
 
 func (o *RayOrchestrator) deleteEndpoint(ctx *OrchestratorContext) error {
@@ -380,6 +418,153 @@ func allDeploymentsHealthy(deployments map[string]dashboard.Deployment) bool {
 	return true
 }
 
+func endpointReplicaCount(endpoint *v1.Endpoint) int {
+	if endpoint == nil || endpoint.Spec == nil ||
+		endpoint.Spec.Replicas.Num == nil || *endpoint.Spec.Replicas.Num <= 0 {
+		return 1
+	}
+
+	return *endpoint.Spec.Replicas.Num
+}
+
+const (
+	replicaPhasePending = "Pending"
+	replicaPhaseReady   = "Ready"
+	replicaPhaseFailed  = "Failed"
+)
+
+func decoratePDStatus(endpoint *v1.Endpoint, out *v1.EndpointStatus,
+	appStatus *dashboard.RayServeApplicationStatus) *v1.EndpointStatus {
+	if out == nil {
+		out = &v1.EndpointStatus{}
+	}
+
+	if !isPDStrategy(endpoint) {
+		return out
+	}
+
+	total := endpointReplicaCount(endpoint)
+	ready := 0
+
+	if out.Phase == v1.EndpointPhaseRUNNING &&
+		appStatus != nil &&
+		pdBackendDeploymentHealthy(appStatus.Deployments) {
+		ready = total
+	}
+
+	out.Strategy = endpoint.Spec.Strategy
+	out.Placement = pdconfig.EffectivePlacementRoles(endpoint)
+	out.TotalReplicas = total
+	out.ReadyReplicas = ready
+
+	if statuses, readyReplicas, ok := pdBackendReplicaStatuses(appStatus, out.Phase, total); ok {
+		out.Replicas = statuses
+		out.ReadyReplicas = readyReplicas
+
+		return out
+	}
+
+	out.Replicas = make([]v1.ReplicaStatus, 0, total)
+
+	for i := 0; i < total; i++ {
+		phase := replicaPhasePending
+
+		if i < ready {
+			phase = replicaPhaseReady
+		}
+
+		replica := v1.ReplicaStatus{
+			ID:    fmt.Sprintf("replica-%d", i),
+			Phase: phase,
+		}
+
+		out.Replicas = append(out.Replicas, replica)
+	}
+
+	return out
+}
+
+func pdBackendReplicaStatuses(appStatus *dashboard.RayServeApplicationStatus, phase v1.EndpointPhase, total int) ([]v1.ReplicaStatus, int, bool) {
+	deployment, ok := pdBackendDeployment(appStatus)
+	if !ok || len(deployment.Replicas) == 0 {
+		return nil, 0, false
+	}
+
+	statuses := make([]v1.ReplicaStatus, 0, total)
+	ready := 0
+	replicaPhase := replicaPhasePending
+
+	if phase == v1.EndpointPhaseRUNNING && deployment.Status == dashboard.DeploymentStatusHealthy {
+		replicaPhase = replicaPhaseReady
+	}
+
+	if deployment.Status == dashboard.DeploymentStatusUnhealthy {
+		replicaPhase = replicaPhaseFailed
+	}
+
+	for _, runtimeReplica := range deployment.Replicas {
+		id := runtimeReplicaStatusID(runtimeReplica, len(statuses))
+
+		if replicaPhase == replicaPhaseReady {
+			ready++
+		}
+
+		statuses = append(statuses, v1.ReplicaStatus{
+			ID:       id,
+			NodeName: runtimeReplica.NodeID,
+			Phase:    replicaPhase,
+		})
+	}
+
+	for len(statuses) < total {
+		statuses = append(statuses, v1.ReplicaStatus{
+			ID:    fmt.Sprintf("replica-%d", len(statuses)),
+			Phase: replicaPhasePending,
+		})
+	}
+
+	return statuses, ready, true
+}
+
+func runtimeReplicaStatusID(runtimeReplica dashboard.DeploymentReplica, fallbackIndex int) string {
+	if runtimeReplica.ReplicaID != "" {
+		return runtimeReplica.ReplicaID
+	}
+
+	if runtimeReplica.ActorID != "" {
+		return runtimeReplica.ActorID
+	}
+
+	return fmt.Sprintf("replica-%d", fallbackIndex)
+}
+
+func pdBackendDeploymentHealthy(deployments map[string]dashboard.Deployment) bool {
+	deployment, ok := pdBackendDeploymentFromMap(deployments)
+	if !ok {
+		return false
+	}
+
+	return deployment.Status == dashboard.DeploymentStatusHealthy
+}
+
+func pdBackendDeployment(appStatus *dashboard.RayServeApplicationStatus) (dashboard.Deployment, bool) {
+	if appStatus == nil {
+		return dashboard.Deployment{}, false
+	}
+
+	return pdBackendDeploymentFromMap(appStatus.Deployments)
+}
+
+func pdBackendDeploymentFromMap(deployments map[string]dashboard.Deployment) (dashboard.Deployment, bool) {
+	for name, deployment := range deployments {
+		if name == "PDCollocatedBackend" || deployment.Name == "PDCollocatedBackend" {
+			return deployment, true
+		}
+	}
+
+	return dashboard.Deployment{}, false
+}
+
 // mapDeployingPhase resolves the endpoint phase when Ray Serve reports the
 // application as DEPLOYING or NOT_STARTED. Returns Failed when any deployment
 // is UNHEALTHY; returns Running when the previous Neutree phase was Running,
@@ -436,38 +621,38 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	if isDeleting {
 		if !exists {
-			return &v1.EndpointStatus{
+			return decoratePDStatus(endpoint, &v1.EndpointStatus{
 				Phase:        v1.EndpointPhaseDELETED,
 				ErrorMessage: "",
-			}, nil
+			}, nil), nil
 		}
 
-		return &v1.EndpointStatus{
+		return decoratePDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDELETING,
 			ErrorMessage: "Endpoint deleting in progress: waiting for Ray Serve to delete the application",
-		}, nil
+		}, &status), nil
 	}
 
 	isPaused := IsEndpointPaused(endpoint)
 	if isPaused {
 		if !exists {
-			return &v1.EndpointStatus{
+			return decoratePDStatus(endpoint, &v1.EndpointStatus{
 				Phase:        v1.EndpointPhasePAUSED,
 				ErrorMessage: "",
-			}, nil
+			}, nil), nil
 		}
 
-		return &v1.EndpointStatus{
+		return decoratePDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDEPLOYING,
 			ErrorMessage: "Endpoint pausing in progress: waiting for Ray Serve to delete the application",
-		}, nil
+		}, &status), nil
 	}
 
 	if !exists {
-		return &v1.EndpointStatus{
+		return decoratePDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDEPLOYING,
 			ErrorMessage: "Endpoint deploying in progress: Endpoint not found in Ray Serve applications",
-		}, nil
+		}, nil), nil
 	}
 
 	proxyReady := true
@@ -508,10 +693,10 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	}
 
 	if phase == v1.EndpointPhaseRUNNING {
-		return &v1.EndpointStatus{
+		return decoratePDStatus(endpoint, &v1.EndpointStatus{
 			Phase:        phase,
 			ErrorMessage: "",
-		}, nil
+		}, &status), nil
 	}
 
 	// Merge Ray Serve error messages
@@ -542,10 +727,10 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}
 	}
 
-	endpointStatus := &v1.EndpointStatus{
+	endpointStatus := decoratePDStatus(endpoint, &v1.EndpointStatus{
 		Phase:        phase,
 		ErrorMessage: errorMsg, // Use merged error message
-	}
+	}, &status)
 
 	return endpointStatus, nil
 }
@@ -587,21 +772,30 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		}
 	}
 
-	rayResource, err := convertToRay(acceleratorMgr, endpoint.Spec.Resources)
-	if err != nil {
-		klog.Errorf("Failed to convert endpoint %s resources to Ray format: %v", endpoint.Metadata.WorkspaceName(), err)
-		return dashboard.RayServeApplication{}, err
-	}
+	// rayResource represents one Backend actor's footprint. Standard endpoints
+	// have one implicit Backend role under spec.resources; PD endpoints have
+	// multiple roles under spec.roles[*] and per-role rayResource is built by
+	// the PD branch (applyPDBranch) into the derived PD config. In the
+	// PD case there is no single top-level Backend deployment, so skip the
+	// top-level backend config here.
+	var rayResource *v1.RayResourceSpec
+	if endpoint.Spec.Resources != nil {
+		rayResource, err = convertToRay(acceleratorMgr, endpoint.Spec.Resources)
+		if err != nil {
+			klog.Errorf("Failed to convert endpoint %s resources to Ray format: %v", endpoint.Metadata.WorkspaceName(), err)
+			return dashboard.RayServeApplication{}, err
+		}
 
-	backendConfig := map[string]interface{}{
-		"num_replicas": endpoint.Spec.Replicas.Num,
-		"num_cpus":     rayResource.NumCPUs,
-		"memory":       rayResource.Memory,
-		"num_gpus":     rayResource.NumGPUs,
-		"resources":    rayResource.Resources,
-	}
+		backendConfig := map[string]interface{}{
+			"num_replicas": endpoint.Spec.Replicas.Num,
+			"num_cpus":     rayResource.NumCPUs,
+			"memory":       rayResource.Memory,
+			"num_gpus":     rayResource.NumGPUs,
+			"resources":    rayResource.Resources,
+		}
 
-	deploymentOptions["backend"] = backendConfig
+		deploymentOptions["backend"] = backendConfig
+	}
 
 	deploymentOptions["controller"] = map[string]interface{}{
 		"num_replicas": 1,
@@ -679,7 +873,11 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
-	setDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
+	// PD endpoints autoset TP per-role inside app_pd_collocated.py from pd_config;
+	// the top-level autoset only applies when spec.resources is present.
+	if rayResource != nil {
+		setDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
+	}
 
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
@@ -727,6 +925,10 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			app.Args["backend_container"] = backendConfig
 		}
 	}
+
+	// strategy=pd branch is applied separately by createOrUpdate
+	// (it needs portAllocator + context, which this pure-function path
+	// doesn't carry). See RayOrchestrator.createOrUpdate.
 
 	return app, nil
 }
@@ -804,14 +1006,10 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 		return nil, nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
 	}
 
-	// Get accelerator type from endpoint resources (consistent with K8s orchestrator).
-	// Default to "cpu" when no accelerator type is specified.
-	acceleratorType := ""
-
-	if endpoint.Spec.Resources != nil {
-		acceleratorType = endpoint.Spec.Resources.GetAcceleratorType()
-	}
-
+	// Get accelerator type strategy-aware: standard reads spec.Resources;
+	// strategy=pd has spec.Resources == nil so we fall back to spec.Roles[*].
+	// Default to "cpu" when neither path yields a type.
+	acceleratorType := deriveAcceleratorType(endpoint)
 	if acceleratorType == "" {
 		acceleratorType = acceleratorTypeCPU
 	}
@@ -903,6 +1101,20 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 
 	// Auto-remove engine container when it exits to prevent residual containers on the host.
 	backendRunOptions = append(backendRunOptions, "--rm")
+
+	// strategy=pd with placement.roles=same-host bind-mounts the host's
+	// nvidia-fabricmanager socket dir into every PD inner actor's engine
+	// container. Required on NVSwitch
+	// hosts (HGX H100 / A100 8-GPU SXM) where CUDA queries fabric_manager
+	// for NVSwitch routing. On non-NVSwitch hosts the bind target may not
+	// exist; docker auto-creates an empty dir on the host (cheap, harmless
+	// — CUDA never queries it there). Adding it here (CP, application-
+	// shared concern) instead of inside app_pd_collocated.py keeps the
+	// engine-side code path free of platform topology concerns.
+	if isPDStrategy(endpoint) {
+		const fmMount = "-v /var/run/nvidia-fabricmanager:/var/run/nvidia-fabricmanager:ro"
+		backendRunOptions = append(backendRunOptions, fmMount)
+	}
 
 	backendConfig = map[string]interface{}{
 		"image":       imageRef,

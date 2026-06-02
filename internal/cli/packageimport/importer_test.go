@@ -162,6 +162,61 @@ func TestValidateModelTasks(t *testing.T) {
 			expectError: true,
 			errorParts:  []string{"chat", "speech"},
 		},
+		{
+			name: "pd supported task known and subset → ok",
+			em: &EngineMetadata{
+				Name:           "vllm",
+				SupportedTasks: []string{v1.TextGenerationModelTask},
+				EngineVersions: []*v1.EngineVersion{
+					{
+						Version: "v1.0.0",
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								SupportedTasks: []string{v1.TextGenerationModelTask},
+							},
+						},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "unknown task at pd capability → error names capability path",
+			em: &EngineMetadata{
+				Name: "vllm",
+				EngineVersions: []*v1.EngineVersion{
+					{
+						Version: "v1.0.0",
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								SupportedTasks: []string{"chat"},
+							},
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"capabilities.pd.supported_tasks", "chat"},
+		},
+		{
+			name: "pd supported task must be subset of engine version tasks",
+			em: &EngineMetadata{
+				Name: "vllm",
+				EngineVersions: []*v1.EngineVersion{
+					{
+						Version:        "v1.0.0",
+						SupportedTasks: []string{v1.TextEmbeddingModelTask},
+						Capabilities: &v1.EngineVersionCapabilities{
+							PD: &v1.PDCapabilitySpec{
+								SupportedTasks: []string{v1.TextGenerationModelTask},
+							},
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"subset", v1.TextGenerationModelTask},
+		},
 	}
 
 	for _, tt := range tests {

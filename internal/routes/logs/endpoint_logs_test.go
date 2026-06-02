@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,6 +31,20 @@ func setupTestDeps(mockStorage *mocks.MockStorage) *Dependencies {
 		HTTPClient: &util.DefaultHTTPClient{},
 		K8sClient:  &util.DefaultK8sClient{},
 	}
+}
+
+func numPtr(n int) *int {
+	return &n
+}
+
+func hasActorNameFilter(filters []dashboard.ActorFilter, name string) bool {
+	for _, f := range filters {
+		if f.Key == "name" && f.Predicate == "=" && f.Value == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 // createLogsMockContext creates a mock Gin context for logs endpoints testing
@@ -530,7 +545,7 @@ func TestGetRayLogSources_Success(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil)
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -555,7 +570,7 @@ func TestGetRayLogSources_HTTPError(t *testing.T) {
 	// Mock HTTP error
 	mockHTTPClient.On("Get", mock.Anything).Return((*http.Response)(nil), errors.New("connection refused"))
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -582,7 +597,7 @@ func TestGetRayLogSources_InvalidJSON(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil)
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -609,7 +624,7 @@ func TestGetRayLogSources_Non200Status(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil)
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -643,7 +658,7 @@ func TestGetRayLogSources_ApplicationNotFound(t *testing.T) {
 		Header:     make(http.Header),
 	}, nil)
 
-	result, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	result, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -814,6 +829,102 @@ func TestStreamK8sLogs_Success(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, logContent, w.Body.String())
+}
+
+func TestStreamK8sLogs_UsesRequestedContainer(t *testing.T) {
+	mockK8sClient := utilmocks.NewMockK8sClient(t)
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-cluster",
+		},
+		Spec: &v1.ClusterSpec{
+			Type: v1.KubernetesClusterType,
+		},
+	}
+
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-endpoint",
+		},
+		Spec: &v1.EndpointSpec{
+			Strategy: "pd",
+		},
+	}
+
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "prefill-0"},
+				{Name: "decode-1"},
+			},
+		},
+	}
+	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").Return(pod, nil)
+
+	logContent := "decode log line\n"
+	mockK8sClient.On("GetPodLogs", mock.Anything, cluster, mock.Anything, "pod-123", mock.MatchedBy(func(opts *corev1.PodLogOptions) bool {
+		return opts != nil && opts.Container == "decode-1"
+	})).Return(io.NopCloser(strings.NewReader(logContent)), nil)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("GET", "/logs?container=decode-1", nil)
+	c.Request = req
+
+	err := streamK8sLogs(c, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+
+	assert.NoError(t, err)
+	assert.Equal(t, logContent, w.Body.String())
+}
+
+func TestStreamK8sLogs_PDMultiContainerRequiresContainer(t *testing.T) {
+	mockK8sClient := utilmocks.NewMockK8sClient(t)
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-cluster",
+		},
+		Spec: &v1.ClusterSpec{
+			Type: v1.KubernetesClusterType,
+		},
+	}
+
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "test-endpoint",
+		},
+		Spec: &v1.EndpointSpec{
+			Strategy: "pd",
+		},
+	}
+
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "pd-router"},
+				{Name: "prefill-0"},
+				{Name: "decode-0"},
+			},
+		},
+	}
+	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").Return(pod, nil)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("GET", "/logs", nil)
+	c.Request = req
+
+	err := streamK8sLogs(c, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "container query parameter is required")
 }
 
 func TestStreamK8sLogs_GetPodError(t *testing.T) {
@@ -1015,6 +1126,368 @@ func TestHandleGetLogSources_SSHCluster_Success(t *testing.T) {
 	assert.NotEmpty(t, response.Deployments)
 
 	mockStorage.AssertExpectations(t)
+}
+
+func TestGetRayLogSources_LiveReplicaIncludesActorID(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	responseBody := `{
+		"applications": {
+			"default_test-endpoint": {
+				"name": "default_test-endpoint",
+				"deployments": {
+					"deployment-1": {
+						"replicas": [
+							{
+								"replica_id": "replica-1",
+								"actor_id": "actor-1"
+							}
+						]
+					}
+				}
+			}
+		}
+	}`
+	mockHTTPClient.On("Get", "http://ray-dashboard:8265/api/serve/applications/").Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Deployments, 1)
+	require.Len(t, resp.Deployments[0].Replicas, 1)
+	for _, log := range resp.Deployments[0].Replicas[0].Logs {
+		assert.Equal(t, "actor-1", log.ActorID)
+	}
+}
+
+func TestGetRayLogSources_PDRoleActorsResolvedByName(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Strategy: "pd",
+			Roles: []v1.EndpointRoleSpec{
+				{Name: "prefill", Replicas: &v1.ReplicaSpec{Num: numPtr(1)}},
+				{Name: "decode", Replicas: &v1.ReplicaSpec{Num: numPtr(1)}},
+			},
+		},
+	}
+
+	responseBody := `{
+		"applications": {
+			"default_test-endpoint": {
+				"name": "default_test-endpoint",
+				"deployments": {
+					"PDCollocatedBackend": {
+						"replicas": [
+							{
+								"replica_id": "replica-aa",
+								"actor_id": "outer-actor"
+							}
+						]
+					}
+				}
+			}
+		}
+	}`
+	mockHTTPClient.On("Get", "http://ray-dashboard:8265/api/serve/applications/").Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	mockDashboardSvc.EXPECT().ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
+		return hasActorNameFilter(filters, "neutree:workspace:default:replica:replica-aa:role:prefill:rank:0")
+	}), true, 100).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
+			{
+				ActorID: "prefill-actor",
+				Name:    "neutree:workspace:default:replica:replica-aa:role:prefill:rank:0",
+				State:   "ALIVE",
+				NodeID:  "node-a",
+			},
+		}}},
+	}, nil).Once()
+	mockDashboardSvc.EXPECT().ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
+		return hasActorNameFilter(filters, "neutree:workspace:default:replica:replica-aa:role:decode:rank:0")
+	}), true, 100).Return(&dashboard.ActorsResponse{
+		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
+			{
+				ActorID: "decode-actor",
+				Name:    "neutree:workspace:default:replica:replica-aa:role:decode:rank:0",
+				State:   "ALIVE",
+				NodeID:  "node-a",
+			},
+		}}},
+	}, nil).Once()
+
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", endpoint)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Deployments, 1)
+	require.Len(t, resp.Deployments[0].Replicas, 1)
+	require.Len(t, resp.Deployments[0].Actors, 2)
+	roleActors := map[string]ActorInfo{}
+	for _, actor := range resp.Deployments[0].Actors {
+		roleActors[actor.Role] = actor
+	}
+	require.Contains(t, roleActors, "prefill")
+	require.Contains(t, roleActors, "decode")
+	assert.Equal(t, "prefill-actor", roleActors["prefill"].ActorID)
+	assert.Equal(t, "neutree:workspace:default:replica:replica-aa:role:prefill:rank:0", roleActors["prefill"].ActorName)
+	assert.Equal(t, "replica-aa", roleActors["prefill"].ReplicaID)
+	require.NotNil(t, roleActors["prefill"].Rank)
+	assert.Equal(t, 0, *roleActors["prefill"].Rank)
+	require.Len(t, roleActors["prefill"].Logs, 2)
+	assert.Contains(t, roleActors["prefill"].Logs[0].URL, "actor_id=prefill-actor")
+
+	for _, log := range resp.Deployments[0].Replicas[0].Logs {
+		if log.Role != "" {
+			t.Fatalf("role actor log should be returned under deployment actors, got nested role log: %+v", log)
+		}
+	}
+}
+
+func TestGetRayLogSources_PDRoleActorsUseRuntimeRoleInstances(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Strategy: "pd",
+			Roles: []v1.EndpointRoleSpec{
+				{Name: "prefill", Replicas: &v1.ReplicaSpec{Num: numPtr(1)}},
+				{Name: "decode", Replicas: &v1.ReplicaSpec{Num: numPtr(1)}},
+			},
+			DeploymentOptions: map[string]interface{}{
+				"backend": map[string]interface{}{
+					"group": map[string]interface{}{
+						"roles": []map[string]interface{}{
+							{"name": "prefill", "instances": 2},
+							{"name": "decode", "instances": 3},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	responseBody := `{
+		"applications": {
+			"default_test-endpoint": {
+				"name": "default_test-endpoint",
+				"deployments": {
+					"PDCollocatedBackend": {
+						"replicas": [
+							{
+								"replica_id": "replica-aa",
+								"actor_id": "outer-actor"
+							}
+						]
+					}
+				}
+			}
+		}
+	}`
+	mockHTTPClient.On("Get", "http://ray-dashboard:8265/api/serve/applications/").Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	expected := map[string]string{}
+	for _, role := range []string{"prefill", "decode"} {
+		count := map[string]int{"prefill": 2, "decode": 3}[role]
+		for rank := 0; rank < count; rank++ {
+			actorName := "neutree:workspace:default:replica:replica-aa:role:" + role + ":rank:" + strconv.Itoa(rank)
+			actorID := role + "-actor-" + strconv.Itoa(rank)
+			expected[role+":"+strconv.Itoa(rank)] = actorID
+
+			mockDashboardSvc.EXPECT().ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
+				return hasActorNameFilter(filters, actorName)
+			}), true, 100).Return(&dashboard.ActorsResponse{
+				Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
+					{
+						ActorID: actorID,
+						Name:    actorName,
+						State:   "ALIVE",
+						NodeID:  "node-a",
+					},
+				}}},
+			}, nil).Once()
+		}
+	}
+
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", endpoint)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Deployments, 1)
+	require.Len(t, resp.Deployments[0].Replicas, 1)
+
+	roleLogCounts := map[string]int{}
+	roleActorIDs := map[string]string{}
+	for _, actor := range resp.Deployments[0].Actors {
+		if actor.Rank == nil {
+			t.Fatalf("role actor rank is required: %+v", actor)
+		}
+
+		key := actor.Role + ":" + strconv.Itoa(*actor.Rank)
+		roleLogCounts[key] = len(actor.Logs)
+		roleActorIDs[key] = actor.ActorID
+	}
+
+	require.Len(t, roleLogCounts, len(expected))
+	for key, actorID := range expected {
+		assert.Equal(t, 2, roleLogCounts[key], "role actor should expose stderr and stdout logs")
+		assert.Equal(t, actorID, roleActorIDs[key])
+	}
+}
+
+func TestStreamRayLogs_ExplicitActorIDQueryStreamsRoleActorLog(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+
+	logContent := "role actor stderr\n"
+	mockHTTPClient.On("Get", mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "actor_id=role-actor") &&
+			strings.Contains(url, "suffix=err") &&
+			strings.Contains(url, "lines=500")
+	})).Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(logContent)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/logs/replica-aa/stderr?actor_id=role-actor", nil)
+
+	err := streamRayLogs(c, cluster, mockHTTPClient, "default", "test-endpoint", "replica-aa", "stderr", 500)
+
+	require.NoError(t, err)
+	assert.Equal(t, logContent, w.Body.String())
+}
+
+func TestBuildK8sReplicaLogSources_PDMultiContainerIncludesContainerMetadata(t *testing.T) {
+	infos := []util.EndpointLogInfo{
+		{
+			ReplicaID:     "pod-123",
+			PodName:       "pod-123",
+			ContainerName: "pd-router",
+			Status:        "Running",
+		},
+		{
+			ReplicaID:     "pod-123",
+			PodName:       "pod-123",
+			ContainerName: "prefill-0",
+			Status:        "Running",
+		},
+		{
+			ReplicaID:     "pod-123",
+			PodName:       "pod-123",
+			ContainerName: "decode-1",
+			Status:        "Running",
+		},
+	}
+
+	replicas := buildK8sReplicaLogSources(infos, "default", "test-endpoint")
+
+	require.Len(t, replicas, 1)
+	assert.Equal(t, "pod-123", replicas[0].ReplicaID)
+	require.Len(t, replicas[0].Logs, 3)
+
+	byContainer := map[string]LogInfo{}
+	for _, log := range replicas[0].Logs {
+		byContainer[log.ContainerName] = log
+	}
+
+	router := byContainer["pd-router"]
+	assert.Equal(t, "logs", router.Type)
+	assert.Equal(t, "router", router.Role)
+	assert.Nil(t, router.Rank)
+	assert.Contains(t, router.URL, "/api/v1/endpoints/default/test-endpoint/logs/pod-123/logs")
+	assert.Contains(t, router.URL, "container=pd-router")
+	assert.Contains(t, router.DownloadURL, "download=true")
+
+	prefill := byContainer["prefill-0"]
+	assert.Equal(t, "prefill", prefill.Role)
+	require.NotNil(t, prefill.Rank)
+	assert.Equal(t, 0, *prefill.Rank)
+	assert.Contains(t, prefill.URL, "container=prefill-0")
+
+	decode := byContainer["decode-1"]
+	assert.Equal(t, "decode", decode.Role)
+	require.NotNil(t, decode.Rank)
+	assert.Equal(t, 1, *decode.Rank)
+	assert.Contains(t, decode.URL, "container=decode-1")
+}
+
+func TestParseK8sContainerLogIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		wantRole string
+		wantRank *int
+	}{
+		{name: "prefill-0", wantRole: "prefill", wantRank: intPtr(0)},
+		{name: "decode-12", wantRole: "decode", wantRank: intPtr(12)},
+		{name: "pd-router", wantRole: "router"},
+		{name: "vllm", wantRole: ""},
+		{name: "decode-x", wantRole: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			role, rank := parseK8sContainerLogIdentity(tt.name)
+
+			assert.Equal(t, tt.wantRole, role)
+			if tt.wantRank == nil {
+				assert.Nil(t, rank)
+			} else {
+				require.NotNil(t, rank)
+				assert.Equal(t, *tt.wantRank, *rank)
+			}
+		})
+	}
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 // ===== Tests for handleGetLogs with mock clients =====
@@ -1238,7 +1711,7 @@ func TestGetRayLogSources_FailedActor_FallbackToDashboardActors(t *testing.T) {
 		}, nil).
 		Once()
 
-	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "test-endpoint")
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -1282,7 +1755,7 @@ func TestGetRayLogSources_FailedActor_NoDeadActors_ReturnsEmptyReplicas(t *testi
 		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: nil}},
 	}, nil).Once()
 
-	resp, err := getRayLogSources(cluster, mockHTTPClient, "default", "ep")
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "ep", nil)
 
 	require.NoError(t, err)
 	require.Len(t, resp.Deployments, 1)

@@ -31,7 +31,7 @@ func NewConfigStore(client client.Client) *ConfigStore {
 // Format: neutree-{resourceName}-{componentName}-config
 // Examples:
 //   - neutree-cluster-prod-router-config
-//   - neutree-endpoint-demo-deployment-config
+//   - neutree-endpoint-sample-deployment-config
 func (s *ConfigStore) buildConfigMapName(resourceName, componentName string) string {
 	return fmt.Sprintf("neutree-%s-%s-config", resourceName, componentName)
 }

@@ -39,6 +39,29 @@ type EndpointSpec struct {
 	DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
 	Variables         map[string]interface{} `json:"variables,omitempty"`
 	Env               map[string]string      `json:"env,omitempty"`
+
+	// PD fields. Empty strategy follows the existing standard path;
+	// strategy="pd" enables prefill / decode role-group deployment, with
+	// same-host behavior expressed by placement.roles.
+	Strategy  string             `json:"strategy,omitempty"`  // "standard" | "pd"
+	Placement *PlacementSpec     `json:"placement,omitempty"` // dual-axis placement constraint
+	Roles     []EndpointRoleSpec `json:"roles,omitempty"`
+	KV        *KVSpec            `json:"kv,omitempty"`
+}
+
+// KVSpec is the endpoint-level KV data-plane config container. Phase 1 only
+// exposes per-request P/D transfer; cache/offload can be added later without
+// mixing it into the transfer contract.
+type KVSpec struct {
+	Transfer *KVTransferSpec `json:"transfer,omitempty"`
+}
+
+// KVTransferSpec describes the prefill -> decode KV transfer for the current
+// request. When connector is empty, the runtime renderer or engine image
+// chooses its own default for the target engine and hardware ecosystem.
+type KVTransferSpec struct {
+	Connector string                 `json:"connector,omitempty"`
+	Extra     map[string]interface{} `json:"extra,omitempty"`
 }
 
 type EndpointPhase string
@@ -58,6 +81,14 @@ type EndpointStatus struct {
 	ServiceURL         string        `json:"service_url,omitempty"`
 	LastTransitionTime string        `json:"last_transition_time,omitempty"`
 	ErrorMessage       string        `json:"error_message,omitempty"`
+
+	// PD status fields. Replica counters are RoleGroup counts, not
+	// prefill + decode actor totals.
+	Strategy      string          `json:"strategy,omitempty"`
+	Placement     string          `json:"placement,omitempty"`
+	Replicas      []ReplicaStatus `json:"replicas,omitempty"`
+	TotalReplicas int             `json:"total_replicas,omitempty"`
+	ReadyReplicas int             `json:"ready_replicas,omitempty"`
 }
 
 type Endpoint struct {

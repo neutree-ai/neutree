@@ -12,11 +12,20 @@ var vllmV0_11_2DeployTemplate string
 //go:embed vllm/v0.17.1/templates/kubernetes/default.yaml
 var vllmV0_17_1DeployTemplate string
 
+//go:embed vllm/v0.20.0/templates/kubernetes/default.yaml
+var vllmV0_20_0DeployTemplate string
+
+//go:embed vllm/v0.20.0/templates/kubernetes/pd.yaml
+var vllmV0_20_0PDDeployTemplate string
+
 //go:embed llama-cpp/v0.3.7/templates/kubernetes/default.yaml
 var llamaCppDefaultDeployTemplate string
 
 //go:embed sglang/v0.5.10/templates/kubernetes/default.yaml
 var sglangV0_5_10DeployTemplate string
+
+//go:embed sglang/v0.5.10/templates/kubernetes/pd.yaml
+var sglangV0_5_10PDDeployTemplate string
 
 // GetVLLMV0_11_2DeployTemplate returns the default deployment template for vLLM V0.11.2 engine
 func GetVLLMV0_11_2DeployTemplate() string {
@@ -26,6 +35,16 @@ func GetVLLMV0_11_2DeployTemplate() string {
 // GetVLLMV0_17_1DeployTemplate returns the default deployment template for vLLM V0.17.1 engine
 func GetVLLMV0_17_1DeployTemplate() string {
 	return base64.StdEncoding.EncodeToString([]byte(vllmV0_17_1DeployTemplate))
+}
+
+// GetVLLMV0_20_0DeployTemplate returns the default deployment template for vLLM V0.20.0 engine
+func GetVLLMV0_20_0DeployTemplate() string {
+	return base64.StdEncoding.EncodeToString([]byte(vllmV0_20_0DeployTemplate))
+}
+
+// GetVLLMV0_20_0PDDeployTemplate returns the PD deployment template for vLLM V0.20.0 engine
+func GetVLLMV0_20_0PDDeployTemplate() string {
+	return base64.StdEncoding.EncodeToString([]byte(vllmV0_20_0PDDeployTemplate))
 }
 
 // GetLlamaCppDefaultDeployTemplate returns the default deployment template for Llama.cpp V0.3.7 engine
@@ -38,10 +57,16 @@ func GetSGLangV0_5_10DeployTemplate() string {
 	return base64.StdEncoding.EncodeToString([]byte(sglangV0_5_10DeployTemplate))
 }
 
+// GetSGLangV0_5_10PDDeployTemplate returns the PD deployment template for SGLang V0.5.10 engine
+func GetSGLangV0_5_10PDDeployTemplate() string {
+	return base64.StdEncoding.EncodeToString([]byte(sglangV0_5_10PDDeployTemplate))
+}
+
 // DeployTemplates contains all available deployment templates
 var DeployTemplates = map[string]func() string{
 	"vllm-v0.11.2":     GetVLLMV0_11_2DeployTemplate,
 	"vllm-v0.17.1":     GetVLLMV0_17_1DeployTemplate,
+	"vllm-v0.20.0":     GetVLLMV0_20_0DeployTemplate,
 	"llama-cpp-v0.3.7": GetLlamaCppDefaultDeployTemplate,
 	"sglang-v0.5.10":   GetSGLangV0_5_10DeployTemplate,
 }

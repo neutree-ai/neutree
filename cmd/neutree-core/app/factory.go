@@ -6,6 +6,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/internal/portalloc"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -80,10 +81,21 @@ func NewEngineControllerFactory() ControllerFactory {
 
 func NewEndpointControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		portAllocOpts := []portalloc.Option{}
+		if opts.config.PortRange != nil {
+			portAllocOpts = append(portAllocOpts, portalloc.WithPortRange(*opts.config.PortRange))
+		}
+
+		portAllocStorage := opts.config.PortAllocationStorage
+		if portAllocStorage == nil {
+			return nil, errors.New("port allocation storage is required")
+		}
+
 		endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
 			Storage:        opts.config.Storage,
 			Gw:             opts.config.Gateway,
 			AcceleratorMgr: opts.config.AcceleratorManager,
+			PortAllocator:  portalloc.New(portAllocStorage, portAllocOpts...),
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create endpoint controller")

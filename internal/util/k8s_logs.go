@@ -45,6 +45,8 @@ type EndpointLogInfo struct {
 	ReplicaID     string
 	PodName       string
 	ContainerName string
+	Role          string
+	Rank          *int
 	Status        string
 }
 
@@ -58,19 +60,24 @@ func GetEndpointLogsInfo(ctx context.Context, cluster *v1.Cluster, endpoint *v1.
 	var logInfos []EndpointLogInfo
 
 	for _, pod := range pods {
-		// Get main container name (first non-init container)
-		var containerName string
-		if len(pod.Spec.Containers) > 0 {
-			containerName = pod.Spec.Containers[0].Name
+		if len(pod.Spec.Containers) == 0 {
+			logInfos = append(logInfos, EndpointLogInfo{
+				ReplicaID: pod.Name,
+				PodName:   pod.Name,
+				Status:    string(pod.Status.Phase),
+			})
+
+			continue
 		}
 
-		logInfo := EndpointLogInfo{
-			ReplicaID:     pod.Name,
-			PodName:       pod.Name,
-			ContainerName: containerName,
-			Status:        string(pod.Status.Phase),
+		for _, container := range pod.Spec.Containers {
+			logInfos = append(logInfos, EndpointLogInfo{
+				ReplicaID:     pod.Name,
+				PodName:       pod.Name,
+				ContainerName: container.Name,
+				Status:        string(pod.Status.Phase),
+			})
 		}
-		logInfos = append(logInfos, logInfo)
 	}
 
 	return logInfos, nil

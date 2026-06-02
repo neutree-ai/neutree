@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/engine"
+	"github.com/neutree-ai/neutree/internal/orchestrator/pdconfig"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -167,6 +169,40 @@ func (f *FakeK8sClient) WithPods(count int) *FakeK8sClient {
 			f.t.Fatalf("failed to create pod: %v", err)
 		}
 	}
+	return f
+}
+
+func (f *FakeK8sClient) WithPDPod(name, nodeName string, ready bool) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: nodeName,
+			Containers: []corev1.Container{
+				{Name: "pd-router"},
+				{Name: "prefill-0"},
+				{Name: "decode-0"},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "pd-router", Ready: ready, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
+				{Name: "prefill-0", Ready: ready, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
+				{Name: "decode-0", Ready: ready, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
+			},
+		},
+	}
+	if err := f.Client.Create(context.Background(), pod); err != nil {
+		f.t.Fatalf("failed to create PD pod: %v", err)
+	}
+
 	return f
 }
 
@@ -856,6 +892,36 @@ func Test_getDeployTemplate(t *testing.T) {
 			expectedTemplate: vllmTemplateRaw,
 		},
 		{
+			name: "strategy pd selects kubernetes pd template",
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "test-endpoint"},
+				Spec: &v1.EndpointSpec{
+					Strategy: "pd",
+					Engine: &v1.EndpointEngineSpec{
+						Engine:  "vllm",
+						Version: "v0.5.0",
+					},
+				},
+			},
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{Name: "vllm"},
+				Spec: &v1.EngineSpec{
+					Versions: []*v1.EngineVersion{
+						{
+							Version: "v0.5.0",
+							DeployTemplate: map[string]map[string]string{
+								"kubernetes": {
+									"default": vllmTemplateB64,
+									"pd":      base64.StdEncoding.EncodeToString([]byte("pd-template")),
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedTemplate: "pd-template",
+		},
+		{
 			name: "template not found for orchestrator",
 			endpoint: &v1.Endpoint{
 				Metadata: &v1.Metadata{Name: "test-endpoint"},
@@ -916,6 +982,474 @@ func Test_getDeployTemplate(t *testing.T) {
 		})
 	}
 
+}
+
+func TestKubernetesOrchestrator_applyPDBranchVariables_UsesEngineVersionRouterAndRoles(t *testing.T) {
+	k := &kubernetesOrchestrator{
+		portAllocator: newTestPortAllocator(),
+	}
+	data := newDeploymentManifestVariables()
+	data.ImagePrefix = "registry.example.com"
+	data.EngineArgs["max-model-len"] = "4096"
+
+	cpu := "1"
+	gpu := "1"
+	mem := "4Gi"
+	endpoint := &v1.Endpoint{
+		ID: 77,
+		Metadata: &v1.Metadata{
+			Name:      "chat-model",
+			Workspace: "production",
+		},
+		Spec: &v1.EndpointSpec{
+			Strategy:  "pd",
+			Placement: &v1.PlacementSpec{Roles: "same-host"},
+			Replicas:  v1.ReplicaSpec{Num: pointer.Int(2)},
+			Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.20.0"},
+			Roles: []v1.EndpointRoleSpec{
+				{
+					Name:     "prefill",
+					Replicas: &v1.ReplicaSpec{Num: pointer.Int(1)},
+					Resources: &v1.ResourceSpec{
+						CPU:    &cpu,
+						GPU:    &gpu,
+						Memory: &mem,
+					},
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{"gpu-memory-utilization": "0.85"},
+					},
+					Env: map[string]string{"ROLE_ENV": "prefill"},
+				},
+				{
+					Name:     "decode",
+					Replicas: &v1.ReplicaSpec{Num: pointer.Int(2)},
+					Resources: &v1.ResourceSpec{
+						CPU:    &cpu,
+						GPU:    &gpu,
+						Memory: &mem,
+					},
+					Env: map[string]string{"ROLE_ENV": "decode"},
+				},
+			},
+			KV: &v1.KVSpec{Transfer: &v1.KVTransferSpec{}},
+		},
+	}
+	cluster := &v1.Cluster{
+		ID:       9,
+		Metadata: &v1.Metadata{Name: "cluster-a", Workspace: "production"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+	}
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{
+			{
+				Version: "v0.20.0",
+				Sidecar: &v1.EngineVersionSidecar{
+					Image:      &v1.EngineImage{ImageName: "neutree/pd-router", Tag: "v0.20.0"},
+					Port:       9000,
+					HealthPath: "/ready",
+				},
+				DeployTemplate: map[string]map[string]string{
+					v1.KubernetesClusterType: {v1.PDDeployMode: base64.StdEncoding.EncodeToString([]byte("pd"))},
+				},
+				Capabilities: &v1.EngineVersionCapabilities{
+					PD: &v1.PDCapabilitySpec{
+						KVConnectors:   []string{"nixl"},
+						SupportedTasks: []string{v1.TextGenerationModelTask},
+					},
+				},
+			},
+		}},
+	}
+
+	err := k.applyKubernetesPDBranchVariables(context.Background(), &data, endpoint, cluster, engine)
+
+	require.NoError(t, err)
+	require.NotNil(t, data.PD)
+	assert.Equal(t, "registry.example.com/neutree/pd-router:v0.20.0", data.PD.Router.Image)
+	assert.Equal(t, int32(20000), data.PD.Router.Port)
+	assert.Equal(t, "/ready", data.PD.Router.HealthPath)
+	require.Len(t, data.PD.Roles, 2)
+	assert.Equal(t, "prefill", data.PD.Roles[0].Name)
+	assert.Equal(t, 1, data.PD.Roles[0].Instances)
+	assert.Equal(t, "decode", data.PD.Roles[1].Name)
+	assert.Equal(t, 2, data.PD.Roles[1].Instances)
+	assert.Equal(t, 20001, data.PD.Ports[0]["prefill"][0][pdconfig.PortPurposeHTTP])
+	assert.Equal(t, 20002, data.PD.Ports[0]["prefill"][0][pdconfig.PortPurposeSideChannel])
+	assert.Equal(t, 20003, data.PD.Ports[0]["decode"][0][pdconfig.PortPurposeHTTP])
+	assert.Equal(t, 20004, data.PD.Ports[0]["decode"][0][pdconfig.PortPurposeSideChannel])
+	assert.Equal(t, 20005, data.PD.Ports[0]["decode"][1][pdconfig.PortPurposeHTTP])
+	assert.Equal(t, 20006, data.PD.Ports[0]["decode"][1][pdconfig.PortPurposeSideChannel])
+	assert.Equal(t, "prefill", data.PD.Roles[0].Env["ROLE_ENV"])
+	assert.Equal(t, "0.85", data.PD.Roles[0].EngineArgs["gpu-memory-utilization"])
+	for _, role := range data.PD.Roles {
+		assert.NotContains(t, role.EngineArgs, "kv-transfer-config")
+		assert.NotContains(t, role.EngineArgs, "disaggregation_mode")
+		assert.NotContains(t, role.EngineArgs, "disaggregation_transfer_backend")
+		assert.NotContains(t, role.EngineArgs, "disaggregation_bootstrap_port")
+	}
+	assert.Contains(t, data.PD.ConfigJSON, `"endpoint":"chat-model"`)
+
+	var routerConfig map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(data.PD.ConfigJSON), &routerConfig))
+	assert.Equal(t, "vllm", routerConfig["engine"])
+	assert.Equal(t, "v0.20.0", routerConfig["engine_version"])
+	assert.Contains(t, routerConfig, "router")
+	require.Len(t, routerConfig["containers"], 3)
+}
+
+func TestKubernetesOrchestrator_KubernetesPDTemplateRendersCollocatedPod(t *testing.T) {
+	k := &kubernetesOrchestrator{
+		portAllocator: newTestPortAllocator(),
+	}
+
+	cpu := "1"
+	mem := "4Gi"
+	endpoint := &v1.Endpoint{
+		ID:       78,
+		Metadata: &v1.Metadata{Name: "chat-model", Workspace: "production"},
+		Spec: &v1.EndpointSpec{
+			Strategy:  "pd",
+			Placement: &v1.PlacementSpec{Roles: "same-host"},
+			Replicas:  v1.ReplicaSpec{Num: pointer.Int(1)},
+			Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.20.0"},
+			Model: &v1.ModelSpec{
+				Registry: "hf",
+				Name:     "Qwen/Qwen2.5-7B-Instruct",
+				Version:  "main",
+				Task:     v1.TextGenerationModelTask,
+			},
+			Roles: []v1.EndpointRoleSpec{
+				{
+					Name:      "prefill",
+					Replicas:  &v1.ReplicaSpec{Num: pointer.Int(1)},
+					Resources: &v1.ResourceSpec{CPU: &cpu, Memory: &mem},
+				},
+				{
+					Name:      "decode",
+					Replicas:  &v1.ReplicaSpec{Num: pointer.Int(1)},
+					Resources: &v1.ResourceSpec{CPU: &cpu, Memory: &mem},
+				},
+			},
+			KV: &v1.KVSpec{Transfer: &v1.KVTransferSpec{}},
+		},
+	}
+	cluster := &v1.Cluster{
+		ID:       10,
+		Metadata: &v1.Metadata{Name: "cluster-a", Workspace: "production"},
+		Spec: &v1.ClusterSpec{
+			Type:    v1.KubernetesClusterType,
+			Version: "v1.1.0",
+		},
+	}
+	modelRegistry := &v1.ModelRegistry{
+		Metadata: &v1.Metadata{Name: "hf", Workspace: "production"},
+		Spec:     &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType, Url: "https://huggingface.co"},
+	}
+	imageRegistry := &v1.ImageRegistry{
+		Metadata: &v1.Metadata{Name: "default"},
+		Spec:     &v1.ImageRegistrySpec{URL: "https://registry.example.com", Repository: "neutree"},
+	}
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{
+			{
+				Version: "v0.20.0",
+				Images: map[string]*v1.EngineImage{
+					"cpu": {ImageName: "neutree/engine-vllm", Tag: "v0.20.0"},
+				},
+				Sidecar: &v1.EngineVersionSidecar{
+					Image:      &v1.EngineImage{ImageName: "neutree/pd-router", Tag: "v0.20.0"},
+					Port:       9000,
+					HealthPath: "/ready",
+				},
+				DeployTemplate: map[string]map[string]string{
+					v1.KubernetesClusterType: {v1.PDDeployMode: engine.GetVLLMV0_20_0PDDeployTemplate()},
+				},
+				Capabilities: &v1.EngineVersionCapabilities{
+					PD: &v1.PDCapabilitySpec{
+						KVConnectors:   []string{"nixl"},
+						SupportedTasks: []string{v1.TextGenerationModelTask},
+					},
+				},
+			},
+		}},
+	}
+
+	renderVars, err := k.buildManifestVariables(endpoint, cluster, modelRegistry, engine, imageRegistry)
+	require.NoError(t, err)
+	require.NotNil(t, renderVars.PD)
+	require.Len(t, renderVars.PD.Roles, 2)
+	assert.Empty(t, renderVars.PD.Roles[0].KVTransferConnector)
+	assert.Empty(t, renderVars.PD.Roles[1].KVTransferConnector)
+	deployTemplate, err := k.getDeployTemplate(endpoint, engine)
+	require.NoError(t, err)
+
+	objs, err := buildDeploymentObjects(deployTemplate, renderVars)
+
+	require.NoError(t, err)
+	require.Len(t, objs.Items, 1)
+	annotations, ok, err := unstructured.NestedStringMap(objs.Items[0].Object, "spec", "template", "metadata", "annotations")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "group", annotations["neutree.io/pd-deployment-type"])
+	assert.Equal(t, fmt.Sprintf("%d", renderVars.PD.Router.Port), annotations["neutree.io/pd-router-port"])
+
+	containers, ok, err := unstructured.NestedSlice(objs.Items[0].Object, "spec", "template", "spec", "containers")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Len(t, containers, 3)
+
+	names := make([]string, 0, len(containers))
+	for _, raw := range containers {
+		container, ok := raw.(map[string]interface{})
+		require.True(t, ok)
+		names = append(names, container["name"].(string))
+	}
+	assert.ElementsMatch(t, []string{"pd-router", "prefill-0", "decode-0"}, names)
+
+	router := containerByName(t, containers, "pd-router")
+	routerEnv := containerEnv(t, router)
+	assert.Equal(t, fmt.Sprintf("%d", renderVars.PD.Router.Port), routerEnv["NEUTREE_PD_ROUTER_PORT"])
+	assert.Contains(t, routerEnv, "NEUTREE_PD_GROUP_ID")
+	assert.Equal(t, "0", routerEnv["NEUTREE_PD_GROUP_RANK"])
+	assert.Equal(t, "http", containerHTTPGetProbePort(t, router, "startupProbe"))
+	assert.Equal(t, "http", containerHTTPGetProbePort(t, router, "readinessProbe"))
+
+	prefill := containerByName(t, containers, "prefill-0")
+	prefillEnv := containerEnv(t, prefill)
+	assert.Equal(t, "0", prefillEnv["NEUTREE_PD_GROUP_RANK"])
+	assert.Equal(t, "http", containerHTTPGetProbePort(t, prefill, "startupProbe"))
+	assert.Equal(t, "http", containerHTTPGetProbePort(t, prefill, "readinessProbe"))
+
+	prefillCommand := containerCommand(t, prefill)
+	assert.Equal(t, "$(NEUTREE_PD_HTTP_PORT)", commandValueAfterFlag(t, prefillCommand, "--port"))
+	prefillKVConfig := vllmKVTransferConfigAfterFlag(t, prefillCommand)
+	assert.Equal(t, "NixlConnector", prefillKVConfig.KVConnector)
+	assert.Equal(t, "kv_producer", prefillKVConfig.KVRole)
+	assert.Equal(t, float64(5_000_000_000), prefillKVConfig.KVBufferSize)
+
+	decodeCommand := containerCommand(t, containerByName(t, containers, "decode-0"))
+	assert.Equal(t, "$(NEUTREE_PD_HTTP_PORT)", commandValueAfterFlag(t, decodeCommand, "--port"))
+	decodeKVConfig := vllmKVTransferConfigAfterFlag(t, decodeCommand)
+	assert.Equal(t, "NixlConnector", decodeKVConfig.KVConnector)
+	assert.Equal(t, "kv_consumer", decodeKVConfig.KVRole)
+	assert.Equal(t, float64(5_000_000_000), decodeKVConfig.KVBufferSize)
+}
+
+func TestKubernetesOrchestrator_SGLangPDTemplateRendersKVTransferArgs(t *testing.T) {
+	k := &kubernetesOrchestrator{
+		portAllocator: newTestPortAllocator(),
+	}
+
+	cpu := "1"
+	mem := "4Gi"
+	endpoint := &v1.Endpoint{
+		ID:       79,
+		Metadata: &v1.Metadata{Name: "chat-model", Workspace: "production"},
+		Spec: &v1.EndpointSpec{
+			Strategy:  "pd",
+			Placement: &v1.PlacementSpec{Roles: "same-host"},
+			Replicas:  v1.ReplicaSpec{Num: pointer.Int(1)},
+			Engine:    &v1.EndpointEngineSpec{Engine: "sglang", Version: "v0.5.10"},
+			Model: &v1.ModelSpec{
+				Registry: "hf",
+				Name:     "Qwen/Qwen2.5-7B-Instruct",
+				Version:  "main",
+				Task:     v1.TextGenerationModelTask,
+			},
+			Roles: []v1.EndpointRoleSpec{
+				{
+					Name:      "prefill",
+					Replicas:  &v1.ReplicaSpec{Num: pointer.Int(1)},
+					Resources: &v1.ResourceSpec{CPU: &cpu, Memory: &mem},
+				},
+				{
+					Name:      "decode",
+					Replicas:  &v1.ReplicaSpec{Num: pointer.Int(1)},
+					Resources: &v1.ResourceSpec{CPU: &cpu, Memory: &mem},
+				},
+			},
+			KV: &v1.KVSpec{Transfer: &v1.KVTransferSpec{
+				Connector: "nixl",
+				Extra: map[string]interface{}{
+					"disaggregation_ib_device": "mlx5_0",
+				},
+			}},
+		},
+	}
+	cluster := &v1.Cluster{
+		ID:       11,
+		Metadata: &v1.Metadata{Name: "cluster-a", Workspace: "production"},
+		Spec: &v1.ClusterSpec{
+			Type:    v1.KubernetesClusterType,
+			Version: "v1.1.0",
+		},
+	}
+	modelRegistry := &v1.ModelRegistry{
+		Metadata: &v1.Metadata{Name: "hf", Workspace: "production"},
+		Spec:     &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType, Url: "https://huggingface.co"},
+	}
+	imageRegistry := &v1.ImageRegistry{
+		Metadata: &v1.Metadata{Name: "default"},
+		Spec:     &v1.ImageRegistrySpec{URL: "https://registry.example.com", Repository: "neutree"},
+	}
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "sglang"},
+		Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{
+			{
+				Version: "v0.5.10",
+				Images: map[string]*v1.EngineImage{
+					"cpu": {ImageName: "neutree/engine-sglang", Tag: "v0.5.10"},
+				},
+				Sidecar: &v1.EngineVersionSidecar{
+					Image:      &v1.EngineImage{ImageName: "neutree/pd-router", Tag: "v0.5.10"},
+					Port:       9000,
+					HealthPath: "/ready",
+				},
+				DeployTemplate: map[string]map[string]string{
+					v1.KubernetesClusterType: {v1.PDDeployMode: engine.GetSGLangV0_5_10PDDeployTemplate()},
+				},
+				Capabilities: &v1.EngineVersionCapabilities{
+					PD: &v1.PDCapabilitySpec{
+						KVConnectors:   []string{"nixl"},
+						SupportedTasks: []string{v1.TextGenerationModelTask},
+					},
+				},
+			},
+		}},
+	}
+
+	renderVars, err := k.buildManifestVariables(endpoint, cluster, modelRegistry, engine, imageRegistry)
+	require.NoError(t, err)
+	deployTemplate, err := k.getDeployTemplate(endpoint, engine)
+	require.NoError(t, err)
+
+	objs, err := buildDeploymentObjects(deployTemplate, renderVars)
+
+	require.NoError(t, err)
+	require.Len(t, objs.Items, 1)
+	containers, ok, err := unstructured.NestedSlice(objs.Items[0].Object, "spec", "template", "spec", "containers")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Len(t, containers, 3)
+
+	prefillCommand := containerCommand(t, containerByName(t, containers, "prefill-0"))
+	assert.Equal(t, "prefill", commandValueAfterFlag(t, prefillCommand, "--disaggregation-mode"))
+	assert.Equal(t, "nixl", commandValueAfterFlag(t, prefillCommand, "--disaggregation-transfer-backend"))
+	assert.Equal(t, "$(NEUTREE_PD_HTTP_PORT)", commandValueAfterFlag(t, prefillCommand, "--port"))
+	assert.Equal(t, "$(NEUTREE_PD_SIDE_CHANNEL_PORT)", commandValueAfterFlag(t, prefillCommand, "--disaggregation-bootstrap-port"))
+	assert.Equal(t, "mlx5_0", commandValueAfterFlag(t, prefillCommand, "--disaggregation-ib-device"))
+
+	decodeCommand := containerCommand(t, containerByName(t, containers, "decode-0"))
+	assert.Equal(t, "decode", commandValueAfterFlag(t, decodeCommand, "--disaggregation-mode"))
+	assert.Equal(t, "nixl", commandValueAfterFlag(t, decodeCommand, "--disaggregation-transfer-backend"))
+	assert.Equal(t, "$(NEUTREE_PD_HTTP_PORT)", commandValueAfterFlag(t, decodeCommand, "--port"))
+	assert.False(t, commandHasFlag(decodeCommand, "--disaggregation-bootstrap-port"))
+	assert.Equal(t, "mlx5_0", commandValueAfterFlag(t, decodeCommand, "--disaggregation-ib-device"))
+}
+
+type vllmKVTransferConfig struct {
+	KVConnector  string  `json:"kv_connector"`
+	KVRole       string  `json:"kv_role"`
+	KVBufferSize float64 `json:"kv_buffer_size"`
+}
+
+func containerByName(t *testing.T, containers []interface{}, name string) map[string]interface{} {
+	t.Helper()
+
+	for _, raw := range containers {
+		container, ok := raw.(map[string]interface{})
+		require.True(t, ok)
+		if container["name"] == name {
+			return container
+		}
+	}
+
+	require.Failf(t, "container not found", "container %q not found", name)
+	return nil
+}
+
+func containerCommand(t *testing.T, container map[string]interface{}) []string {
+	t.Helper()
+
+	rawCommand, ok := container["command"].([]interface{})
+	require.True(t, ok)
+
+	command := make([]string, 0, len(rawCommand))
+	for _, item := range rawCommand {
+		command = append(command, fmt.Sprintf("%v", item))
+	}
+
+	return command
+}
+
+func containerEnv(t *testing.T, container map[string]interface{}) map[string]string {
+	t.Helper()
+
+	rawEnv, ok := container["env"].([]interface{})
+	require.True(t, ok)
+
+	env := make(map[string]string, len(rawEnv))
+	for _, raw := range rawEnv {
+		entry, ok := raw.(map[string]interface{})
+		require.True(t, ok)
+		name := fmt.Sprintf("%v", entry["name"])
+		if value, ok := entry["value"]; ok {
+			env[name] = fmt.Sprintf("%v", value)
+			continue
+		}
+		if _, ok := entry["valueFrom"]; ok {
+			env[name] = "<valueFrom>"
+		}
+	}
+
+	return env
+}
+
+func containerHTTPGetProbePort(t *testing.T, container map[string]interface{}, probeName string) string {
+	t.Helper()
+
+	probe, ok := container[probeName].(map[string]interface{})
+	require.True(t, ok)
+	httpGet, ok := probe["httpGet"].(map[string]interface{})
+	require.True(t, ok)
+
+	return fmt.Sprintf("%v", httpGet["port"])
+}
+
+func vllmKVTransferConfigAfterFlag(t *testing.T, command []string) vllmKVTransferConfig {
+	t.Helper()
+
+	value := commandValueAfterFlag(t, command, "--kv-transfer-config")
+	var cfg vllmKVTransferConfig
+	require.NoError(t, json.Unmarshal([]byte(value), &cfg))
+
+	return cfg
+}
+
+func commandValueAfterFlag(t *testing.T, command []string, flag string) string {
+	t.Helper()
+
+	for i, item := range command {
+		if item == flag {
+			require.Less(t, i+1, len(command), "flag %q has no value", flag)
+			return command[i+1]
+		}
+	}
+
+	require.Failf(t, "flag not found", "flag %q not found in command %v", flag, command)
+	return ""
+}
+
+func commandHasFlag(command []string, flag string) bool {
+	for _, item := range command {
+		if item == flag {
+			return true
+		}
+	}
+
+	return false
 }
 
 func TestKubernetesOrchestrator_setBasicVariables(t *testing.T) {
@@ -2811,6 +3345,41 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 			assertFlagWithValue(t, tokens, "--max-num-seqs", "256")
 		})
 	}
+}
+
+func TestKubernetesOrchestrator_getEndpointStats_PDReplicaStatus(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "production",
+			Name:      "chat-model",
+		},
+		Spec: &v1.EndpointSpec{
+			Strategy:  "pd",
+			Placement: &v1.PlacementSpec{Roles: "same-host"},
+			Replicas:  v1.ReplicaSpec{Num: pointer.Int(2)},
+		},
+	}
+	fakeClient := NewFakeK8sClient(t).
+		WithDeployment(endpoint.Metadata.Name, 2, 2, 2).
+		WithPDPod("chat-model-pd-a", "node-a", true).
+		WithPDPod("chat-model-pd-b", "node-b", true)
+
+	o := &kubernetesOrchestrator{}
+	status, err := o.getEndpointStats(fakeClient, "test-namespace", endpoint)
+
+	require.NoError(t, err)
+	assert.Equal(t, v1.EndpointPhaseRUNNING, status.Phase)
+	assert.Equal(t, "pd", status.Strategy)
+	assert.Equal(t, "same-host", status.Placement)
+	assert.Equal(t, 2, status.TotalReplicas)
+	assert.Equal(t, 2, status.ReadyReplicas)
+	require.Len(t, status.Replicas, 2)
+	assert.Equal(t, "chat-model-pd-a", status.Replicas[0].ID)
+	assert.Equal(t, "node-a", status.Replicas[0].NodeName)
+	assert.Equal(t, "Ready", status.Replicas[0].Phase)
+	assert.Equal(t, "chat-model-pd-b", status.Replicas[1].ID)
+	assert.Equal(t, "node-b", status.Replicas[1].NodeName)
+	assert.Equal(t, "Ready", status.Replicas[1].Phase)
 }
 
 // makePauseTestCtx builds a minimal OrchestratorContext for pause/delete tests:
