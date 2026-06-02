@@ -36,6 +36,7 @@ type LogSourcesResponse struct {
 type DeploymentInfo struct {
 	Name     string        `json:"name"`
 	Replicas []ReplicaInfo `json:"replicas"`
+	Actors   []ActorInfo   `json:"actors,omitempty"`
 }
 
 // ReplicaInfo represents replica information.
@@ -47,6 +48,16 @@ type DeploymentInfo struct {
 type ReplicaInfo struct {
 	ReplicaID string    `json:"replica_id"`
 	Failed    bool      `json:"failed,omitempty"`
+	Logs      []LogInfo `json:"logs"`
+}
+
+// ActorInfo represents a non-Serve actor that belongs to a Serve replica.
+type ActorInfo struct {
+	ReplicaID string    `json:"replica_id"`
+	ActorID   string    `json:"actor_id"`
+	ActorName string    `json:"actor_name"`
+	Role      string    `json:"role,omitempty"`
+	Rank      *int      `json:"rank,omitempty"`
 	Logs      []LogInfo `json:"logs"`
 }
 
@@ -351,6 +362,7 @@ func getRayLogSourcesWithEndpoint(cluster *v1.Cluster, httpClient util.HTTPClien
 
 	for deploymentName, deployment := range app.Deployments {
 		replicas := []ReplicaInfo{}
+		actors := []ActorInfo{}
 
 		for _, replica := range deployment.Replicas {
 			logs := []LogInfo{
@@ -374,14 +386,16 @@ func getRayLogSourcesWithEndpoint(cluster *v1.Cluster, httpClient util.HTTPClien
 				},
 			}
 
-			if deploymentName == "PDCollocatedBackend" {
-				logs = appendPDRoleActorLogs(logs, dashboard.NewDashboardService(dashboardURL), endpoint, workspace, endpointName, replica.ReplicaID)
-			}
-
 			replicas = append(replicas, ReplicaInfo{
 				ReplicaID: replica.ReplicaID,
 				Logs:      logs,
 			})
+
+			if deploymentName == "PDCollocatedBackend" {
+				actors = append(actors, buildPDRoleActorSources(
+					dashboard.NewDashboardService(dashboardURL), endpoint, workspace, endpointName, replica.ReplicaID,
+				)...)
+			}
 		}
 
 		if len(replicas) == 0 {
@@ -400,17 +414,20 @@ func getRayLogSourcesWithEndpoint(cluster *v1.Cluster, httpClient util.HTTPClien
 		response.Deployments = append(response.Deployments, DeploymentInfo{
 			Name:     deploymentName,
 			Replicas: replicas,
+			Actors:   actors,
 		})
 	}
 
 	return response, nil
 }
 
-func appendPDRoleActorLogs(logs []LogInfo, svc dashboard.DashboardService, endpoint *v1.Endpoint, workspace, endpointName, replicaID string) []LogInfo {
+func buildPDRoleActorSources(svc dashboard.DashboardService, endpoint *v1.Endpoint, workspace, endpointName, replicaID string) []ActorInfo {
 	roleCounts := pdRoleCounts(endpoint)
 	if len(roleCounts) == 0 || replicaID == "" {
-		return logs
+		return nil
 	}
+
+	actors := []ActorInfo{}
 
 	for _, role := range []string{"prefill", "decode"} {
 		count := roleCounts[role]
@@ -427,14 +444,13 @@ func appendPDRoleActorLogs(logs []LogInfo, svc dashboard.DashboardService, endpo
 				continue
 			}
 
-			logs = append(logs,
-				buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logTypeStderr, role, rank, actorName, actor.ActorID),
-				buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logTypeStdout, role, rank, actorName, actor.ActorID),
-			)
+			actors = append(actors, buildRayRoleActorInfo(
+				workspace, endpointName, replicaID, role, rank, actorName, actor.ActorID,
+			))
 		}
 	}
 
-	return logs
+	return actors
 }
 
 func pdRoleCounts(endpoint *v1.Endpoint) map[string]int {
@@ -583,6 +599,22 @@ func pdRoleActorName(workspace, replicaID, role string, rank int) string {
 
 	return fmt.Sprintf("neutree:%sreplica:%s:role:%s:rank:%d",
 		workspaceScope, replicaID, role, rank)
+}
+
+func buildRayRoleActorInfo(workspace, endpointName, replicaID, role string, rank int, actorName, actorID string) ActorInfo {
+	rankValue := rank
+
+	return ActorInfo{
+		ReplicaID: replicaID,
+		ActorID:   actorID,
+		ActorName: actorName,
+		Role:      role,
+		Rank:      &rankValue,
+		Logs: []LogInfo{
+			buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logTypeStderr, role, rank, actorName, actorID),
+			buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logTypeStdout, role, rank, actorName, actorID),
+		},
+	}
 }
 
 func buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logType, role string, rank int, actorName, actorID string) LogInfo {

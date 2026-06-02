@@ -1247,19 +1247,26 @@ func TestGetRayLogSources_PDRoleActorsResolvedByName(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.Deployments, 1)
 	require.Len(t, resp.Deployments[0].Replicas, 1)
-	roleLogs := map[string]LogInfo{}
+	require.Len(t, resp.Deployments[0].Actors, 2)
+	roleActors := map[string]ActorInfo{}
+	for _, actor := range resp.Deployments[0].Actors {
+		roleActors[actor.Role] = actor
+	}
+	require.Contains(t, roleActors, "prefill")
+	require.Contains(t, roleActors, "decode")
+	assert.Equal(t, "prefill-actor", roleActors["prefill"].ActorID)
+	assert.Equal(t, "neutree:workspace:default:replica:replica-aa:role:prefill:rank:0", roleActors["prefill"].ActorName)
+	assert.Equal(t, "replica-aa", roleActors["prefill"].ReplicaID)
+	require.NotNil(t, roleActors["prefill"].Rank)
+	assert.Equal(t, 0, *roleActors["prefill"].Rank)
+	require.Len(t, roleActors["prefill"].Logs, 2)
+	assert.Contains(t, roleActors["prefill"].Logs[0].URL, "actor_id=prefill-actor")
+
 	for _, log := range resp.Deployments[0].Replicas[0].Logs {
 		if log.Role != "" {
-			roleLogs[log.Role] = log
+			t.Fatalf("role actor log should be returned under deployment actors, got nested role log: %+v", log)
 		}
 	}
-	require.Contains(t, roleLogs, "prefill")
-	require.Contains(t, roleLogs, "decode")
-	assert.Equal(t, "prefill-actor", roleLogs["prefill"].ActorID)
-	assert.Equal(t, "neutree:workspace:default:replica:replica-aa:role:prefill:rank:0", roleLogs["prefill"].ActorName)
-	require.NotNil(t, roleLogs["prefill"].Rank)
-	assert.Equal(t, 0, *roleLogs["prefill"].Rank)
-	assert.Contains(t, roleLogs["prefill"].URL, "actor_id=prefill-actor")
 }
 
 func TestGetRayLogSources_PDRoleActorsUseRuntimeRoleInstances(t *testing.T) {
@@ -1351,14 +1358,14 @@ func TestGetRayLogSources_PDRoleActorsUseRuntimeRoleInstances(t *testing.T) {
 
 	roleLogCounts := map[string]int{}
 	roleActorIDs := map[string]string{}
-	for _, log := range resp.Deployments[0].Replicas[0].Logs {
-		if log.Role == "" || log.Rank == nil {
-			continue
+	for _, actor := range resp.Deployments[0].Actors {
+		if actor.Rank == nil {
+			t.Fatalf("role actor rank is required: %+v", actor)
 		}
 
-		key := log.Role + ":" + strconv.Itoa(*log.Rank)
-		roleLogCounts[key]++
-		roleActorIDs[key] = log.ActorID
+		key := actor.Role + ":" + strconv.Itoa(*actor.Rank)
+		roleLogCounts[key] = len(actor.Logs)
+		roleActorIDs[key] = actor.ActorID
 	}
 
 	require.Len(t, roleLogCounts, len(expected))
