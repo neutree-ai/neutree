@@ -198,10 +198,9 @@ func TestReconcileHeadNode(t *testing.T) {
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				// checkHeadNodeHealth: dashboard unreachable → not alive
 				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
-				// rebuildHeadNode: downCluster (Execute) then upCluster (GetNodeRuntimeConfig + Execute)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// rebuildHeadNode: downCluster then static head start.
+				e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), nil).Once()
+				expectStaticHeadStart(acceleratorManager, e)
 				// initHeadNode: post-start GetClusterMetadata verify
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
 			},
@@ -213,7 +212,7 @@ func TestReconcileHeadNode(t *testing.T) {
 				// checkHeadNodeHealth: dashboard unreachable → not alive
 				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
 				// rebuildHeadNode: downCluster fails
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError).Once()
+				e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), assert.AnError).Once()
 			},
 			wantErr: true,
 		},
@@ -232,9 +231,8 @@ func TestReconcileHeadNode(t *testing.T) {
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				// checkHeadNodeHealth: dashboard unreachable → not alive
 				dashboardSvc.On("GetClusterMetadata").Return(nil, assert.AnError).Once()
-				// initHeadNode (no downCluster): upCluster (GetNodeRuntimeConfig + Execute)
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// initHeadNode (no downCluster): static head start.
+				expectStaticHeadStart(acceleratorManager, e)
 				// initHeadNode: post-start GetClusterMetadata verify
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
 			},
@@ -300,10 +298,8 @@ func TestReconcileHeadNode(t *testing.T) {
 					},
 				}, nil)
 				// downCluster: ray down (no workers)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
-				// upCluster: mutateAcceleratorRuntimeConfig + ray up
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), nil).Once()
+				expectStaticHeadStart(acceleratorManager, e)
 			},
 			wantErr: false,
 		},
@@ -311,7 +307,7 @@ func TestReconcileHeadNode(t *testing.T) {
 			name: "head raylet dead but dashboard reachable - rebuild",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				// Dashboard is reachable but head raylet is dead
-				// GetClusterMetadata called twice: once in checkHeadNodeHealth, once after upCluster
+				// GetClusterMetadata called twice: once in checkHeadNodeHealth, once after static head start.
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Times(2)
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
 					{
@@ -321,12 +317,10 @@ func TestReconcileHeadNode(t *testing.T) {
 						},
 					},
 				}, nil)
-				// downCluster first (ray stop), then upCluster (ray up)
+				// downCluster first, then static head start.
 				// downCluster: ray down
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
-				// upCluster: mutateAcceleratorRuntimeConfig + ray up
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), nil).Once()
+				expectStaticHeadStart(acceleratorManager, e)
 			},
 			wantErr: false,
 		},
@@ -359,7 +353,7 @@ func TestReconcileHeadNode(t *testing.T) {
 					},
 				}, nil)
 				// downCluster: ray down fails
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), assert.AnError).Once()
+				e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), assert.AnError).Once()
 			},
 			wantErr: true,
 		},
@@ -391,7 +385,7 @@ func TestReconcileHeadNode(t *testing.T) {
 			err := r.reconcileHeadNode(&ReconcileContext{
 				rayService:          dashboardSvc,
 				sshClusterConfig:    &v1.RaySSHProvisionClusterConfig{},
-				sshRayClusterConfig: &v1.RayClusterConfig{},
+				sshRayClusterConfig: staticHeadTestRayConfig(),
 				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
 				Cluster:             cluster,
 			})
@@ -410,6 +404,24 @@ func TestReconcileHeadNode(t *testing.T) {
 
 }
 
+func expectStaticHeadStart(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor) {
+	acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(v1.RuntimeConfig{}, nil).
+		Once()
+	e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("docker"), nil).Maybe()
+}
+
+func staticHeadTestRayConfig() *v1.RayClusterConfig {
+	return &v1.RayClusterConfig{
+		Docker: v1.Docker{
+			Image:         "test-image",
+			PullBeforeRun: true,
+			RunOptions:    []string{"--shm-size=1g"},
+		},
+		HeadStartRayCommands: []string{"ray stop"},
+	}
+}
+
 // TestReconcileHeadNode_RecoveryReason asserts that when a Running cluster's head
 // node becomes unhealthy, the recovery status message surfaces an actionable cause
 // (e.g. port 8265 occupancy) instead of a generic "dashboard unreachable or raylet
@@ -425,10 +437,9 @@ func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 			name: "dashboard unreachable - reason mentions port 8265",
 			setupMock: func(acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				dashboardSvc.On("GetClusterMetadata").Return(nil, errors.New("connection refused")).Once()
-				// rebuildHeadNode path: downCluster, then upCluster, then post-up GetClusterMetadata
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				// rebuildHeadNode path: downCluster, then static head start, then post-start GetClusterMetadata.
+				e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), nil).Once()
+				expectStaticHeadStart(acceleratorManager, e)
 				dashboardSvc.On("GetClusterMetadata").Return(nil, nil).Once()
 			},
 			wantReasonContain: []string{"port 8265", "192.168.1.10", "connection refused"},
@@ -441,9 +452,8 @@ func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{
 					{Raylet: v1.Raylet{IsHeadNode: true, State: v1.DeadNodeState}},
 				}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-				e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
+				e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), nil).Once()
+				expectStaticHeadStart(acceleratorManager, e)
 			},
 			wantReasonContain: []string{"raylet", "192.168.1.10"},
 			wantReasonAbsent:  []string{"port 8265"},
@@ -493,7 +503,7 @@ func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
 					Provider: v1.Provider{HeadIP: "192.168.1.10"},
 				},
-				sshRayClusterConfig: &v1.RayClusterConfig{},
+				sshRayClusterConfig: staticHeadTestRayConfig(),
 				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
 				Cluster:             cluster,
 			})
@@ -516,18 +526,16 @@ func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 	}
 }
 
-// TestInitHeadNode_DashboardVerifyFailureHint asserts that when ray up exits 0 but
-// the post-up GetClusterMetadata probe fails, the wrapped error mentions port 8265
-// so users learn the most likely cause.
+// TestInitHeadNode_DashboardVerifyFailureHint asserts that when static head
+// start exits 0 but the post-start GetClusterMetadata probe fails, the wrapped
+// error mentions port 8265 so users learn the most likely cause.
 func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 	acceleratorManager := &acceleratormocks.MockManager{}
 	e := &commandmocks.MockExecutor{}
 	dashboardSvc := &dashboardmocks.MockDashboardService{}
 
-	// upCluster: builds accelerator config and shells out to ray up
-	acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
-	e.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return([]byte(""), nil).Once()
-	// post-up verify probe fails
+	expectStaticHeadStart(acceleratorManager, e)
+	// post-start verify probe fails
 	dashboardSvc.On("GetClusterMetadata").Return(nil, errors.New("connection refused")).Once()
 
 	s := storagemocks.MockStorage{}
@@ -544,7 +552,7 @@ func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
 			Provider: v1.Provider{HeadIP: "192.168.1.10"},
 		},
-		sshRayClusterConfig: &v1.RayClusterConfig{},
+		sshRayClusterConfig: staticHeadTestRayConfig(),
 		sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
 		Cluster: &v1.Cluster{
 			ID:       *pointer.Int(1),
@@ -553,13 +561,13 @@ func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 			},
 		},
-	}, false)
+	})
 
 	require.Error(t, err)
 	msg := err.Error()
-	assert.Contains(t, msg, "port 8265", "post-up verify failure must hint at port 8265 (got: %q)", msg)
-	assert.Contains(t, msg, "192.168.1.10", "post-up verify failure must mention the head IP (got: %q)", msg)
-	assert.Contains(t, msg, "connection refused", "post-up verify failure must preserve underlying error (got: %q)", msg)
+	assert.Contains(t, msg, "port 8265", "post-start verify failure must hint at port 8265 (got: %q)", msg)
+	assert.Contains(t, msg, "192.168.1.10", "post-start verify failure must mention the head IP (got: %q)", msg)
+	assert.Contains(t, msg, "connection refused", "post-start verify failure must preserve underlying error (got: %q)", msg)
 }
 
 // TestCheckHeadNodeHealth_UnhealthyErrorContract pins the contract between
@@ -1319,8 +1327,6 @@ func TestUpgradeCluster(t *testing.T) {
 			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				// prePullImages: resolve image suffix
 				acceleratorManager.On("GetImageSuffix", mock.Anything).Return("")
-				// upCluster: mutate accelerator config
-				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
 				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
 				// SSH calls for pre-pulling cluster image on head node (uptime check + docker pull)
 				e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte(""), nil).Twice()
@@ -1328,10 +1334,7 @@ func TestUpgradeCluster(t *testing.T) {
 				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
 					return len(args) > 1 && strings.Contains(args[1], "ray down")
 				})).Return([]byte(""), nil).Once()
-				// upCluster: mutate accelerator config + ray up (reuses GetNodeRuntimeConfig mock above)
-				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
-					return len(args) > 1 && strings.Contains(args[1], "ray up")
-				})).Return([]byte(""), nil).Once()
+				expectStaticHeadStart(acceleratorManager, e)
 				// reconcileWorkerNode: list nodes (no workers to start)
 				dashboardSvc.On("ListNodes").Return([]v1.NodeSummary{}, nil)
 				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1359,7 +1362,7 @@ func TestUpgradeCluster(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "upgrade cluster fails on upCluster",
+			name: "upgrade cluster fails on startHeadNode",
 			setupMock: func(s *storagemocks.MockStorage, acceleratorManager *acceleratormocks.MockManager, e *commandmocks.MockExecutor, dashboardSvc *dashboardmocks.MockDashboardService) {
 				// prePullImages: resolve image suffix
 				acceleratorManager.On("GetImageSuffix", mock.Anything).Return("")
@@ -1369,7 +1372,7 @@ func TestUpgradeCluster(t *testing.T) {
 				e.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
 					return len(args) > 1 && strings.Contains(args[1], "ray down")
 				})).Return([]byte(""), nil).Once()
-				// upCluster: mutate accelerator config fails (second call)
+				// startHeadNode: mutate accelerator config fails.
 				acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, assert.AnError).Once()
 				s.On("UpdateCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
 			},
@@ -1418,11 +1421,9 @@ func TestUpgradeCluster(t *testing.T) {
 						HeadIP: "127.0.0.1",
 					},
 				},
-				sshRayClusterConfig: &v1.RayClusterConfig{
-					Docker: v1.Docker{},
-				},
-				sshConfigGenerator: newRaySSHLocalConfigGenerator("test-cluster"),
-				rayService:         dashboardSvc,
+				sshRayClusterConfig: staticHeadTestRayConfig(),
+				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test-cluster"),
+				rayService:          dashboardSvc,
 			})
 
 			if tt.wantErr {

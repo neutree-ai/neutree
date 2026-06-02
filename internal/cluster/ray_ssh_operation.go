@@ -25,53 +25,44 @@ import (
 // failure up the stack.
 var errHeadNodeUnhealthy = stderrors.New("head node unhealthy")
 
-func (c *sshRayClusterReconciler) upCluster(reconcileCtx *ReconcileContext, restart bool) (string, error) {
-	dockerConfig, changed, err := c.buildAcceleratorDockerConfig(reconcileCtx, reconcileCtx.sshClusterConfig.Provider.HeadIP)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to build accelerator docker config")
+func (c *sshRayClusterReconciler) startNode(reconcileCtx *ReconcileContext, nodeIP string) error {
+	env := map[string]interface{}{
+		"RAY_HEAD_IP": reconcileCtx.sshRayClusterConfig.Provider.HeadIP,
 	}
 
-	if changed {
-		// Build a temporary config copy with accelerator-specific Docker settings for ray up.
-		upConfig := *reconcileCtx.sshRayClusterConfig
-		upConfig.Docker = dockerConfig
-
-		err = reconcileCtx.sshConfigGenerator.Cleanup()
-		if err != nil {
-			return "", errors.Wrap(err, "failed to cleanup config")
-		}
-
-		err = reconcileCtx.sshConfigGenerator.Generate(&upConfig)
-		if err != nil {
-			return "", errors.Wrap(err, "failed to generate config")
-		}
-	}
-
-	// Set RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1 to keep head node shm size consistent with worker nodes
-	upArgs := []string{
-		fmt.Sprintf("RAY_TMPDIR=%s", reconcileCtx.sshConfigGenerator.BasePath()),
-		"RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.1",
-		"ray", "up", "--disable-usage-stats", "--no-config-cache", "-y", "-v",
-	}
-	if !restart {
-		upArgs = append(upArgs, "--no-restart")
-	}
-
-	upArgs = append(upArgs, reconcileCtx.sshConfigGenerator.ConfigPath())
-
-	klog.V(4).Infof("Up args: %s", strings.Join(upArgs, " "))
-
-	output, err := c.executor.Execute(reconcileCtx.Ctx, "bash", []string{"-c", strings.Join(upArgs, " ")})
-	if err != nil {
-		return "", errors.Wrap(err, "failed to run ray up: "+string(output))
-	}
-
-	klog.V(4).Infof("Ray cluster up output: %s", string(output))
-
-	return reconcileCtx.sshClusterConfig.Provider.HeadIP, nil
+	return c.startRayNode(
+		reconcileCtx,
+		nodeIP,
+		reconcileCtx.sshRayClusterConfig.Docker.WorkerRunOptions,
+		reconcileCtx.sshRayClusterConfig.StaticWorkerStartRayCommands,
+		env,
+	)
 }
 
-func (c *sshRayClusterReconciler) startNode(reconcileCtx *ReconcileContext, nodeIP string) error {
+func (c *sshRayClusterReconciler) startHeadNode(reconcileCtx *ReconcileContext) (string, error) {
+	headIP := reconcileCtx.sshClusterConfig.Provider.HeadIP
+
+	err := c.startRayNode(
+		reconcileCtx,
+		headIP,
+		reconcileCtx.sshRayClusterConfig.Docker.HeadRunOptions,
+		reconcileCtx.sshRayClusterConfig.HeadStartRayCommands,
+		nil,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return headIP, nil
+}
+
+func (c *sshRayClusterReconciler) startRayNode(
+	reconcileCtx *ReconcileContext,
+	nodeIP string,
+	roleRunOptions []string,
+	startCommands []string,
+	env map[string]interface{},
+) error {
 	dockerConfig, _, err := c.buildAcceleratorDockerConfig(reconcileCtx, nodeIP)
 	if err != nil {
 		return errors.Wrap(err, "failed to build accelerator docker config")
@@ -80,10 +71,6 @@ func (c *sshRayClusterReconciler) startNode(reconcileCtx *ReconcileContext, node
 	sshCommandArgs := c.buildSSHCommandArgs(reconcileCtx, nodeIP)
 	dockerCommandRunner := command_runner.NewDockerCommandRunner(&dockerConfig, sshCommandArgs)
 
-	env := map[string]interface{}{
-		"RAY_HEAD_IP": reconcileCtx.sshRayClusterConfig.Provider.HeadIP,
-	}
-
 	for _, command := range reconcileCtx.sshRayClusterConfig.InitializationCommands {
 		_, err = dockerCommandRunner.Run(reconcileCtx.Ctx, command, true, nil, false, env, "host", "", false)
 		if err != nil {
@@ -91,7 +78,7 @@ func (c *sshRayClusterReconciler) startNode(reconcileCtx *ReconcileContext, node
 		}
 	}
 
-	succeed, err := dockerCommandRunner.RunInit(reconcileCtx.Ctx)
+	succeed, err := dockerCommandRunner.RunInitWithRunOptions(reconcileCtx.Ctx, roleRunOptions)
 	if err != nil {
 		return errors.Wrap(err, "failed to run docker runtime init")
 	}
@@ -100,7 +87,7 @@ func (c *sshRayClusterReconciler) startNode(reconcileCtx *ReconcileContext, node
 		return errors.New("failed to run docker runtime init")
 	}
 
-	for _, command := range reconcileCtx.sshRayClusterConfig.StaticWorkerStartRayCommands {
+	for _, command := range startCommands {
 		_, err = dockerCommandRunner.Run(reconcileCtx.Ctx, command, true, nil, false, env, "docker", "", false)
 		if err != nil {
 			return errors.Wrap(err, "failed to run command "+command)
@@ -407,7 +394,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	commonArgs += fmt.Sprintf(` --metrics-export-port=%d`, v1.RayletMetricsPort)
 
 	headCmdParts := []string{
-		`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
+		`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --dashboard-host=0.0.0.0`,
 		commonArgs,
 	}
 	if includeDeprecatedGrpcFlags {
@@ -492,9 +479,9 @@ func (c *sshRayClusterReconciler) checkHeadNodeHealth(reconcileCtx *ReconcileCon
 		klog.V(4).Infof("Head node dashboard unreachable for cluster %s: %v",
 			reconcileCtx.Cluster.Metadata.WorkspaceName(), err)
 
-		// `ray up` exits 0 even when the dashboard fails to bind to :8265 (Ray
+		// Ray start exits 0 even when the dashboard fails to bind to :8265 (Ray
 		// only logs the bind failure to stderr). The most common cause of an
-		// unreachable dashboard right after a successful `ray up` is that
+		// unreachable dashboard right after a successful head start is that
 		// port 8265 was already in use on the head host.
 		return false, "", fmt.Errorf(
 			"%w: Ray dashboard on head node %s is unreachable (%v); "+
@@ -550,13 +537,13 @@ func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext)
 
 	c.logWithProcessMessage(reconcileCtx, "Cluster stopped")
 
-	// Step 3: Ray up with new image (restart=true)
+	// Step 3: Start head node with the new image.
 	c.logWithProcessMessage(reconcileCtx,
 		fmt.Sprintf("Starting head node with new version %s", newVersion))
 
-	headIP, err := c.upCluster(reconcileCtx, true)
+	headIP, err := c.startHeadNode(reconcileCtx)
 	if err != nil {
-		return errors.Wrap(err, "failed to up cluster during upgrade")
+		return errors.Wrap(err, "failed to start head node during upgrade")
 	}
 
 	c.logWithProcessMessage(reconcileCtx, "Head node started successfully")
@@ -581,7 +568,7 @@ func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext)
 }
 
 // prePullImages pre-pulls the new cluster image and engine images on all cluster nodes.
-// The cluster image (neutree-serve:<new_version>) is pre-pulled so upCluster/startNode
+// The cluster image (neutree-serve:<new_version>) is pre-pulled so startHeadNode/startNode
 // can start instantly. Engine images used by running endpoints are pre-pulled so inference
 // instances recover quickly after upgrade.
 func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) error {

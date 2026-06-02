@@ -276,7 +276,7 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 				klog.Infof("Head node version %s does not match spec version %s for cluster %s, rebuilding",
 					headVersion, reconcileCtx.Cluster.Spec.Version, reconcileCtx.Cluster.Metadata.WorkspaceName())
 
-				return c.rebuildHeadNode(reconcileCtx, true)
+				return c.rebuildHeadNode(reconcileCtx)
 			}
 		}
 
@@ -290,7 +290,7 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		fmt.Sprintf("%s, attempting recovery", healthErr.Error()))
 
 	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.Phase != v1.ClusterPhaseInitializing {
-		klog.Infof("Head node not ready, try to up cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
+		klog.Infof("Head node not ready, try to start head node for cluster %s", reconcileCtx.Cluster.Metadata.WorkspaceName())
 	}
 
 	provisioned, lastProvisionTime, err := getNodeLastProvisionTime(reconcileCtx, reconcileCtx.sshClusterConfig.Provider.HeadIP)
@@ -305,20 +305,20 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 		}
 	}
 
-	// Initialized cluster needs down first (raylet won't restart with --no-restart);
-	// uninitialized cluster just needs up.
+	// Initialized cluster needs down first to stop any previous head/container
+	// state before starting the head node again.
 	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.Initialized {
-		return c.rebuildHeadNode(reconcileCtx, false)
+		return c.rebuildHeadNode(reconcileCtx)
 	}
 
-	return c.initHeadNode(reconcileCtx, false)
+	return c.initHeadNode(reconcileCtx)
 }
 
 // initHeadNode starts the head node and verifies it is reachable.
-func (c *sshRayClusterReconciler) initHeadNode(reconcileCtx *ReconcileContext, versionChanged bool) error {
-	headIP, err := c.upCluster(reconcileCtx, versionChanged)
+func (c *sshRayClusterReconciler) initHeadNode(reconcileCtx *ReconcileContext) error {
+	headIP, err := c.startHeadNode(reconcileCtx)
 	if err != nil {
-		return errors.Wrap(err, "failed to up cluster")
+		return errors.Wrap(err, "failed to start head node")
 	}
 
 	if err := setNodePrivisionStatus(reconcileCtx, headIP, v1.ProvisionedNodeProvisionStatus, true); err != nil {
@@ -327,11 +327,11 @@ func (c *sshRayClusterReconciler) initHeadNode(reconcileCtx *ReconcileContext, v
 
 	_, err = reconcileCtx.rayService.GetClusterMetadata()
 	if err != nil {
-		// `ray up` exited 0 but the dashboard endpoint is unreachable. The most
-		// common cause is that port 8265 was already in use on the head host —
-		// `ray up` only logs that bind failure to stderr.
+		// The head start command exited 0 but the dashboard endpoint is
+		// unreachable. The most common cause is that port 8265 was already in
+		// use on the head host; Ray only logs that bind failure to stderr.
 		return errors.Wrapf(err,
-			"failed to verify Ray dashboard on head node %s after `ray up`; "+
+			"failed to verify Ray dashboard on head node %s after static head start; "+
 				"verify port 8265 is not already in use by another process on this host",
 			reconcileCtx.sshClusterConfig.Provider.HeadIP)
 	}
@@ -339,15 +339,13 @@ func (c *sshRayClusterReconciler) initHeadNode(reconcileCtx *ReconcileContext, v
 	return nil
 }
 
-// rebuildHeadNode stops the cluster then re-initializes the head node. The downCluster
-// call is necessary because ray up uses --no-restart, so it won't restart the raylet
-// if GCS/dashboard are still running.
-func (c *sshRayClusterReconciler) rebuildHeadNode(reconcileCtx *ReconcileContext, versionChanged bool) error {
+// rebuildHeadNode stops the cluster then re-initializes the head node.
+func (c *sshRayClusterReconciler) rebuildHeadNode(reconcileCtx *ReconcileContext) error {
 	if err := c.downCluster(reconcileCtx); err != nil {
 		return errors.Wrap(err, "failed to down cluster before rebuild")
 	}
 
-	return c.initHeadNode(reconcileCtx, versionChanged)
+	return c.initHeadNode(reconcileCtx)
 }
 
 func (c *sshRayClusterReconciler) reconcileWorkerNode(reconcileCtx *ReconcileContext) error { //nolint:gocyclo
