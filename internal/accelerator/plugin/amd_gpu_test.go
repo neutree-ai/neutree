@@ -9,6 +9,7 @@ import (
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -167,4 +168,23 @@ func TestAMDGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 			assert.Equal(t, tt.expectRuntimeConfig, runtimeConfig.RuntimeConfig)
 		})
 	}
+}
+
+func TestAMDGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
+	p := &AMDGPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.ClusterRuntime)
+	require.NotNil(t, profile.EndpointRuntime)
+	require.NotNil(t, profile.ResourceDefaults)
+	assert.Equal(t, string(v1.AcceleratorTypeAMDGPU), profile.AcceleratorType)
+	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
+	assert.Equal(t, "amd", profile.ClusterRuntime.Runtime)
+	assert.Equal(t, "amd", profile.EndpointRuntime.Runtime)
+	assert.Equal(t, "GPU", profile.ResourceDefaults.RayResourceName)
+	assert.Equal(t, string(AMDGPUKubernetesResource), profile.ResourceDefaults.KubernetesResourceName)
+	assert.Nil(t, profile.Metrics)
 }

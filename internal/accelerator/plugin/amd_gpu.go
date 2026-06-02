@@ -154,6 +154,31 @@ func (p *AMDGPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig,
 		},
 	}, nil
 }
+
+func (p *AMDGPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+	return &v1.AcceleratorProfile{
+		AcceleratorType: string(v1.AcceleratorTypeAMDGPU),
+		ClusterRuntime: &v1.RuntimeConfig{
+			ImageSuffix: "rocm",
+			Runtime:     "amd",
+			Env: map[string]string{
+				"ACCELERATOR_TYPE":    "amd_gpu",
+				"AMD_VISIBLE_DEVICES": "all",
+			},
+		},
+		EndpointRuntime: &v1.RuntimeConfig{
+			Runtime: "amd",
+			Env: map[string]string{
+				"AMD_VISIBLE_DEVICES": "all",
+			},
+		},
+		ResourceDefaults: &v1.AcceleratorResourceDefaults{
+			RayResourceName:        "GPU",
+			KubernetesResourceName: string(AMDGPUKubernetesResource),
+		},
+	}, nil
+}
+
 func (p *AMDGPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -166,4 +167,27 @@ func TestGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 			assert.Equal(t, tt.expectRuntimeConfig, runtimeConfig.RuntimeConfig)
 		})
 	}
+}
+
+func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
+	p := &GPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.ClusterRuntime)
+	require.NotNil(t, profile.EndpointRuntime)
+	require.NotNil(t, profile.ResourceDefaults)
+	require.NotNil(t, profile.Metrics)
+	require.NotNil(t, profile.Metrics.Exporter)
+	assert.Equal(t, string(v1.AcceleratorTypeNVIDIAGPU), profile.AcceleratorType)
+	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
+	assert.Equal(t, []string{"--gpus all"}, profile.EndpointRuntime.Options)
+	assert.Equal(t, "GPU", profile.ResourceDefaults.RayResourceName)
+	assert.Equal(t, string(NvidiaGPUKubernetesResource), profile.ResourceDefaults.KubernetesResourceName)
+	assert.Equal(t, "dcgm-exporter", profile.Metrics.Exporter.Kind)
+	assert.Equal(t, v1.NodeWorkerTypeAcceleratorExporter, profile.Metrics.Exporter.WorkerType)
+	assert.Equal(t, nvidiaDCGMExporterImage, profile.Metrics.Exporter.Image)
+	assert.Equal(t, nvidiaDCGMExporterPort, profile.Metrics.Exporter.Port)
 }

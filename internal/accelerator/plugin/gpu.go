@@ -19,6 +19,8 @@ import (
 const (
 	NvidiaGPUKubernetesResource        corev1.ResourceName = "nvidia.com/gpu"
 	NvidiaGPUKubernetesNodeSelectorKey string              = "nvidia.com/gpu.product"
+	nvidiaDCGMExporterImage            string              = "nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04"
+	nvidiaDCGMExporterPort             int                 = 9400
 )
 
 func init() { //nolint:gochecknoinits
@@ -138,6 +140,41 @@ func (p *GPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, er
 		Options: []string{"--gpus all"},
 	}, nil
 }
+
+func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+	return &v1.AcceleratorProfile{
+		AcceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
+		ClusterRuntime: &v1.RuntimeConfig{
+			Runtime: "nvidia",
+			Env: map[string]string{
+				"ACCELERATOR_TYPE": "gpu",
+			},
+			Options: []string{"--gpus all"},
+		},
+		EndpointRuntime: &v1.RuntimeConfig{
+			Runtime: "nvidia",
+			Options: []string{"--gpus all"},
+		},
+		Metrics: &v1.AcceleratorMetricsProfile{
+			Exporter: &v1.AcceleratorExporterProfile{
+				Kind:       "dcgm-exporter",
+				WorkerType: v1.NodeWorkerTypeAcceleratorExporter,
+				Image:      nvidiaDCGMExporterImage,
+				Port:       nvidiaDCGMExporterPort,
+				DockerRunOptions: []string{
+					"--net=host",
+					"--gpus all",
+					"--cap-add=SYS_ADMIN",
+				},
+			},
+		},
+		ResourceDefaults: &v1.AcceleratorResourceDefaults{
+			RayResourceName:        "GPU",
+			KubernetesResourceName: string(NvidiaGPUKubernetesResource),
+		},
+	}, nil
+}
+
 func (p *GPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
 }

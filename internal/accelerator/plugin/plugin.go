@@ -45,6 +45,10 @@ type AcceleratorPluginHandle interface {
 	GetContainerRuntimeConfig() (v1.RuntimeConfig, error)
 }
 
+type AcceleratorProfileProvider interface {
+	GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error)
+}
+
 // ResourceConverter is the interface for resource converters
 // Converts Neutree's unified resource specifications to resource configurations for different cluster types (Ray, Kubernetes)
 type ResourceConverter interface {

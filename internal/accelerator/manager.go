@@ -244,6 +244,46 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 	return runtimeConfigResp.RuntimeConfig, nil
 }
 
+func (a *manager) GetAcceleratorProfile(
+	ctx context.Context,
+	acceleratorType string,
+) (*v1.AcceleratorProfile, bool, error) {
+	if acceleratorType == "" {
+		return nil, false, nil
+	}
+
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		return nil, false, errors.Errorf("accelerator plugin %s not found", acceleratorType)
+	}
+
+	provider, ok := p.Handle().(plugin.AcceleratorProfileProvider)
+	if !ok {
+		return nil, false, nil
+	}
+
+	profile, err := provider.GetAcceleratorProfile(ctx)
+	if plugin.IsHTTPStatus(err, http.StatusNotFound) {
+		return nil, false, nil
+	}
+
+	if err != nil {
+		return nil, false, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
+	}
+
+	if profile == nil {
+		return nil, false, nil
+	}
+
+	if profile.AcceleratorType == "" {
+		copied := *profile
+		copied.AcceleratorType = acceleratorType
+		profile = &copied
+	}
+
+	return profile, true, nil
+}
+
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {
 	result := make(map[string]plugin.ResourceConverter)
 
