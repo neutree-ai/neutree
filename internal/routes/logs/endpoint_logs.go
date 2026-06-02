@@ -415,7 +415,7 @@ func appendPDRoleActorLogs(logs []LogInfo, svc dashboard.DashboardService, endpo
 	for _, role := range []string{"prefill", "decode"} {
 		count := roleCounts[role]
 		for rank := 0; rank < count; rank++ {
-			actorName := pdRoleActorName(workspace, endpointName, replicaID, role, rank)
+			actorName := pdRoleActorName(workspace, replicaID, role, rank)
 			actor, err := dashboard.FindActorByNamePreferAlive(svc, actorName)
 
 			if err != nil {
@@ -442,6 +442,10 @@ func pdRoleCounts(endpoint *v1.Endpoint) map[string]int {
 		return nil
 	}
 
+	if counts := pdRoleCountsFromDeploymentOptions(endpoint.Spec.DeploymentOptions); len(counts) > 0 {
+		return counts
+	}
+
 	counts := map[string]int{}
 
 	for _, role := range endpoint.Spec.Roles {
@@ -464,9 +468,121 @@ func pdRoleCounts(endpoint *v1.Endpoint) map[string]int {
 	return counts
 }
 
-func pdRoleActorName(workspace, endpointName, replicaID, role string, rank int) string {
-	return fmt.Sprintf("neutree:%s:%s:replica:%s:role:%s:rank:%d",
-		workspace, endpointName, replicaID, role, rank)
+func pdRoleCountsFromDeploymentOptions(deploymentOptions map[string]interface{}) map[string]int {
+	backend, ok := mapValue(deploymentOptions["backend"])
+	if !ok {
+		return nil
+	}
+
+	group, ok := mapValue(backend["group"])
+	if !ok {
+		return nil
+	}
+
+	roleItems, ok := roleListValue(group["roles"])
+	if !ok {
+		return nil
+	}
+
+	counts := map[string]int{}
+
+	for _, item := range roleItems {
+		roleMap, ok := mapValue(item)
+		if !ok {
+			continue
+		}
+
+		name, _ := roleMap["name"].(string)
+		if name != "prefill" && name != "decode" {
+			continue
+		}
+
+		instances, ok := positiveIntValue(roleMap["instances"])
+		if !ok {
+			instances = 1
+		}
+
+		counts[name] = instances
+	}
+
+	if counts["prefill"] == 0 || counts["decode"] == 0 {
+		return nil
+	}
+
+	return counts
+}
+
+func mapValue(v interface{}) (map[string]interface{}, bool) {
+	m, ok := v.(map[string]interface{})
+
+	return m, ok
+}
+
+func roleListValue(v interface{}) ([]interface{}, bool) {
+	switch roles := v.(type) {
+	case []interface{}:
+		return roles, true
+	case []map[string]interface{}:
+		out := make([]interface{}, 0, len(roles))
+		for _, role := range roles {
+			out = append(out, role)
+		}
+
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func positiveIntValue(v interface{}) (int, bool) {
+	switch value := v.(type) {
+	case int:
+		return positiveIntResult(value)
+	case int32:
+		return positiveIntResult(int(value))
+	case int64:
+		return positiveIntResult(int(value))
+	case float64:
+		if value != float64(int(value)) {
+			return 0, false
+		}
+
+		return positiveIntResult(int(value))
+	case json.Number:
+		parsed, err := strconv.Atoi(value.String())
+		if err != nil {
+			return 0, false
+		}
+
+		return positiveIntResult(parsed)
+	case string:
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return 0, false
+		}
+
+		return positiveIntResult(parsed)
+	default:
+		return 0, false
+	}
+}
+
+func positiveIntResult(value int) (int, bool) {
+	if value <= 0 {
+		return 0, false
+	}
+
+	return value, true
+}
+
+func pdRoleActorName(workspace, replicaID, role string, rank int) string {
+	workspaceScope := ""
+	if workspace != "" {
+		workspaceScope = fmt.Sprintf("workspace:%s:", workspace)
+	}
+
+	return fmt.Sprintf("neutree:%sreplica:%s:role:%s:rank:%d",
+		workspaceScope, replicaID, role, rank)
 }
 
 func buildRayRoleActorLogInfo(workspace, endpointName, replicaID, logType, role string, rank int, actorName, actorID string) LogInfo {

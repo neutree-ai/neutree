@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1217,24 +1218,24 @@ func TestGetRayLogSources_PDRoleActorsResolvedByName(t *testing.T) {
 	}, nil).Once()
 
 	mockDashboardSvc.EXPECT().ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
-		return hasActorNameFilter(filters, "neutree:default:test-endpoint:replica:replica-aa:role:prefill:rank:0")
+		return hasActorNameFilter(filters, "neutree:workspace:default:replica:replica-aa:role:prefill:rank:0")
 	}), true, 100).Return(&dashboard.ActorsResponse{
 		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
 			{
 				ActorID: "prefill-actor",
-				Name:    "neutree:default:test-endpoint:replica:replica-aa:role:prefill:rank:0",
+				Name:    "neutree:workspace:default:replica:replica-aa:role:prefill:rank:0",
 				State:   "ALIVE",
 				NodeID:  "node-a",
 			},
 		}}},
 	}, nil).Once()
 	mockDashboardSvc.EXPECT().ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
-		return hasActorNameFilter(filters, "neutree:default:test-endpoint:replica:replica-aa:role:decode:rank:0")
+		return hasActorNameFilter(filters, "neutree:workspace:default:replica:replica-aa:role:decode:rank:0")
 	}), true, 100).Return(&dashboard.ActorsResponse{
 		Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
 			{
 				ActorID: "decode-actor",
-				Name:    "neutree:default:test-endpoint:replica:replica-aa:role:decode:rank:0",
+				Name:    "neutree:workspace:default:replica:replica-aa:role:decode:rank:0",
 				State:   "ALIVE",
 				NodeID:  "node-a",
 			},
@@ -1255,10 +1256,116 @@ func TestGetRayLogSources_PDRoleActorsResolvedByName(t *testing.T) {
 	require.Contains(t, roleLogs, "prefill")
 	require.Contains(t, roleLogs, "decode")
 	assert.Equal(t, "prefill-actor", roleLogs["prefill"].ActorID)
-	assert.Equal(t, "neutree:default:test-endpoint:replica:replica-aa:role:prefill:rank:0", roleLogs["prefill"].ActorName)
+	assert.Equal(t, "neutree:workspace:default:replica:replica-aa:role:prefill:rank:0", roleLogs["prefill"].ActorName)
 	require.NotNil(t, roleLogs["prefill"].Rank)
 	assert.Equal(t, 0, *roleLogs["prefill"].Rank)
 	assert.Contains(t, roleLogs["prefill"].URL, "actor_id=prefill-actor")
+}
+
+func TestGetRayLogSources_PDRoleActorsUseRuntimeRoleInstances(t *testing.T) {
+	mockHTTPClient := utilmocks.NewMockHTTPClient(t)
+	mockDashboardSvc := dashboardmocks.NewMockDashboardService(t)
+
+	originalFactory := dashboard.NewDashboardService
+	defer func() { dashboard.NewDashboardService = originalFactory }()
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboardSvc
+	}
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+		Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+	}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "test-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Strategy: "pd",
+			Roles: []v1.EndpointRoleSpec{
+				{Name: "prefill", Replicas: &v1.ReplicaSpec{Num: numPtr(1)}},
+				{Name: "decode", Replicas: &v1.ReplicaSpec{Num: numPtr(1)}},
+			},
+			DeploymentOptions: map[string]interface{}{
+				"backend": map[string]interface{}{
+					"group": map[string]interface{}{
+						"roles": []map[string]interface{}{
+							{"name": "prefill", "instances": 2},
+							{"name": "decode", "instances": 3},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	responseBody := `{
+		"applications": {
+			"default_test-endpoint": {
+				"name": "default_test-endpoint",
+				"deployments": {
+					"PDCollocatedBackend": {
+						"replicas": [
+							{
+								"replica_id": "replica-aa",
+								"actor_id": "outer-actor"
+							}
+						]
+					}
+				}
+			}
+		}
+	}`
+	mockHTTPClient.On("Get", "http://ray-dashboard:8265/api/serve/applications/").Return(&http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
+		Header:     make(http.Header),
+	}, nil).Once()
+
+	expected := map[string]string{}
+	for _, role := range []string{"prefill", "decode"} {
+		count := map[string]int{"prefill": 2, "decode": 3}[role]
+		for rank := 0; rank < count; rank++ {
+			actorName := "neutree:workspace:default:replica:replica-aa:role:" + role + ":rank:" + strconv.Itoa(rank)
+			actorID := role + "-actor-" + strconv.Itoa(rank)
+			expected[role+":"+strconv.Itoa(rank)] = actorID
+
+			mockDashboardSvc.EXPECT().ListActors(mock.MatchedBy(func(filters []dashboard.ActorFilter) bool {
+				return hasActorNameFilter(filters, actorName)
+			}), true, 100).Return(&dashboard.ActorsResponse{
+				Data: dashboard.ActorsResponseData{Result: dashboard.ActorsListResult{Result: []dashboard.Actor{
+					{
+						ActorID: actorID,
+						Name:    actorName,
+						State:   "ALIVE",
+						NodeID:  "node-a",
+					},
+				}}},
+			}, nil).Once()
+		}
+	}
+
+	resp, err := getRayLogSourcesWithEndpoint(cluster, mockHTTPClient, "default", "test-endpoint", endpoint)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Deployments, 1)
+	require.Len(t, resp.Deployments[0].Replicas, 1)
+
+	roleLogCounts := map[string]int{}
+	roleActorIDs := map[string]string{}
+	for _, log := range resp.Deployments[0].Replicas[0].Logs {
+		if log.Role == "" || log.Rank == nil {
+			continue
+		}
+
+		key := log.Role + ":" + strconv.Itoa(*log.Rank)
+		roleLogCounts[key]++
+		roleActorIDs[key] = log.ActorID
+	}
+
+	require.Len(t, roleLogCounts, len(expected))
+	for key, actorID := range expected {
+		assert.Equal(t, 2, roleLogCounts[key], "role actor should expose stderr and stdout logs")
+		assert.Equal(t, actorID, roleActorIDs[key])
+	}
 }
 
 func TestStreamRayLogs_ExplicitActorIDQueryStreamsRoleActorLog(t *testing.T) {
