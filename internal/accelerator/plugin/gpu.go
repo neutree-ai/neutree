@@ -157,10 +157,10 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 		},
 		Metrics: &v1.AcceleratorMetricsProfile{
 			Exporter: &v1.AcceleratorExporterProfile{
-				Kind:       "dcgm-exporter",
-				WorkerType: v1.NodeWorkerTypeAcceleratorExporter,
-				Image:      nvidiaDCGMExporterImage,
-				Port:       nvidiaDCGMExporterPort,
+				Kind:          "dcgm-exporter",
+				ComponentType: v1.NodeComponentTypeAcceleratorExporter,
+				Image:         nvidiaDCGMExporterImage,
+				Port:          nvidiaDCGMExporterPort,
 				DockerRunOptions: []string{
 					"--net=host",
 					"--gpus all",

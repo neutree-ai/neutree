@@ -17,12 +17,12 @@ const (
 )
 
 type CanonicalLabels struct {
-	Workspace     string
-	StaticCluster string
-	ClusterType   string
-	Node          string
-	NodeIP        string
-	NodeRole      string
+	Workspace         string
+	StaticNodeCluster string
+	ClusterType       string
+	Node              string
+	NodeIP            string
+	NodeRole          string
 }
 
 type ScrapeResult struct {
@@ -224,13 +224,13 @@ func baseLabels(labels CanonicalLabels, source string) map[string]string {
 	}
 
 	return map[string]string{
-		"workspace":      labels.Workspace,
-		"static_cluster": labels.StaticCluster,
-		"cluster_type":   clusterType,
-		"node":           labels.Node,
-		"node_ip":        labels.NodeIP,
-		"node_role":      labels.NodeRole,
-		"source":         source,
+		"workspace":           labels.Workspace,
+		"static_node_cluster": labels.StaticNodeCluster,
+		"cluster_type":        clusterType,
+		"node":                labels.Node,
+		"node_ip":             labels.NodeIP,
+		"node_role":           labels.NodeRole,
+		"source":              source,
 	}
 }
 

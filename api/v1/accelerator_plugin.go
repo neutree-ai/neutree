@@ -110,7 +110,7 @@ type AcceleratorMetricsProfile struct {
 
 type AcceleratorExporterProfile struct {
 	Kind             string            `json:"kind,omitempty"`
-	WorkerType       NodeWorkerType    `json:"worker_type,omitempty"`
+	ComponentType    NodeComponentType `json:"component_type,omitempty"`
 	Image            string            `json:"image,omitempty"`
 	Port             int               `json:"port,omitempty"`
 	MetricsPath      string            `json:"metrics_path,omitempty"`

@@ -23,11 +23,11 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 		},
 		Metrics: &AcceleratorMetricsProfile{
 			Exporter: &AcceleratorExporterProfile{
-				Kind:        "dcgm-exporter",
-				WorkerType:  NodeWorkerTypeAcceleratorExporter,
-				Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04",
-				Port:        9400,
-				MetricsPath: "/metrics",
+				Kind:          "dcgm-exporter",
+				ComponentType: NodeComponentTypeAcceleratorExporter,
+				Image:         "nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04",
+				Port:          9400,
+				MetricsPath:   "/metrics",
 				DockerRunOptions: []string{
 					"--net=host",
 					"--gpus all",
@@ -43,7 +43,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 
 	data, err := json.Marshal(profile)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `"worker_type":"accelerator-exporter"`)
+	assert.Contains(t, string(data), `"component_type":"accelerator-exporter"`)
 	assert.Contains(t, string(data), `"ray_resource_name":"GPU"`)
 
 	decoded := AcceleratorProfile{}
@@ -55,7 +55,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "nvidia", decoded.EndpointRuntime.Runtime)
 	require.NotNil(t, decoded.Metrics)
 	require.NotNil(t, decoded.Metrics.Exporter)
-	assert.Equal(t, NodeWorkerTypeAcceleratorExporter, decoded.Metrics.Exporter.WorkerType)
+	assert.Equal(t, NodeComponentTypeAcceleratorExporter, decoded.Metrics.Exporter.ComponentType)
 	assert.Equal(t, 9400, decoded.Metrics.Exporter.Port)
 	require.NotNil(t, decoded.ResourceDefaults)
 	assert.Equal(t, "nvidia.com/gpu", decoded.ResourceDefaults.KubernetesResourceName)

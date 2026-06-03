@@ -9,32 +9,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStaticClusterKey(t *testing.T) {
+func TestStaticNodeClusterKey(t *testing.T) {
 	tests := []struct {
 		name    string
-		cluster *StaticCluster
+		cluster *StaticNodeCluster
 		want    string
 	}{
 		{
 			name:    "nil metadata",
-			cluster: &StaticCluster{ID: 1},
-			want:    "default-staticcluster-1",
+			cluster: &StaticNodeCluster{ID: 1},
+			want:    "default-staticnodecluster-1",
 		},
 		{
 			name: "default workspace",
-			cluster: &StaticCluster{
+			cluster: &StaticNodeCluster{
 				ID:       2,
 				Metadata: &Metadata{Name: "cluster-a"},
 			},
-			want: "default-staticcluster-2-cluster-a",
+			want: "default-staticnodecluster-2-cluster-a",
 		},
 		{
 			name: "explicit workspace",
-			cluster: &StaticCluster{
+			cluster: &StaticNodeCluster{
 				ID:       3,
 				Metadata: &Metadata{Name: "cluster-a", Workspace: "workspace-a"},
 			},
-			want: "workspace-a-staticcluster-3-cluster-a",
+			want: "workspace-a-staticnodecluster-3-cluster-a",
 		},
 	}
 
@@ -54,7 +54,7 @@ func TestStaticNodeKey(t *testing.T) {
 	assert.Equal(t, "workspace-a-staticnode-1-node-a", node.Key())
 }
 
-func TestStaticNodeWorkerJSONRoundTrip(t *testing.T) {
+func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	node := &StaticNode{
 		Kind: "StaticNode",
 		Metadata: &Metadata{
@@ -71,20 +71,20 @@ func TestStaticNodeWorkerJSONRoundTrip(t *testing.T) {
 					{Name: "ray-runtime", Ref: "registry.example.com/neutree/serve:v1.2.0", Required: true},
 				},
 			},
-			Workers: []NodeWorkerSpec{
+			Components: []NodeComponentSpec{
 				{
 					Name:             "ray-head",
-					Type:             NodeWorkerTypeRayHead,
+					Type:             NodeComponentTypeRayHead,
 					Image:            "registry.example.com/neutree/serve:v1.2.0",
 					Command:          []string{"python", "/home/ray/start.py"},
 					Args:             []string{"--head"},
 					Env:              map[string]string{"RAY_TMPDIR": "/tmp/ray"},
 					DockerRunOptions: []string{"--net=host"},
-					ConfigFiles: []NodeWorkerConfigFile{
+					ConfigFiles: []NodeComponentConfigFile{
 						{Path: "/etc/neutree/vmagent.yaml", Content: "scrape_configs: []", Mode: "0644", Atomic: true},
 					},
-					HealthCheck:   &NodeWorkerHealthCheck{HTTPPath: "/api/version", Port: 8265},
-					RestartPolicy: NodeWorkerRestartPolicyAlways,
+					HealthCheck:   &NodeComponentHealthCheck{HTTPPath: "/api/version", Port: 8265},
+					RestartPolicy: NodeComponentRestartPolicyAlways,
 					ConfigHash:    "hash-a",
 				},
 			},
@@ -97,12 +97,12 @@ func TestStaticNodeWorkerJSONRoundTrip(t *testing.T) {
 					{Name: "ray-runtime", Ready: true, Phase: WarmPhaseReady, Digest: "sha256:abc"},
 				},
 			},
-			Workers: []NodeWorkerStatus{
+			Components: []NodeComponentStatus{
 				{
 					Name:          "ray-head",
-					Type:          NodeWorkerTypeRayHead,
+					Type:          NodeComponentTypeRayHead,
 					Ready:         true,
-					Phase:         NodeWorkerPhaseRunning,
+					Phase:         NodeComponentPhaseRunning,
 					ObservedHash:  "hash-a",
 					ObservedImage: "registry.example.com/neutree/serve:v1.2.0",
 				},
@@ -118,22 +118,22 @@ func TestStaticNodeWorkerJSONRoundTrip(t *testing.T) {
 	decoded := &StaticNode{}
 	require.NoError(t, json.Unmarshal(data, decoded))
 	require.NotNil(t, decoded.Spec)
-	require.Len(t, decoded.Spec.Workers, 1)
-	assert.Equal(t, NodeWorkerTypeRayHead, decoded.Spec.Workers[0].Type)
-	assert.Equal(t, NodeWorkerRestartPolicyAlways, decoded.Spec.Workers[0].RestartPolicy)
+	require.Len(t, decoded.Spec.Components, 1)
+	assert.Equal(t, NodeComponentTypeRayHead, decoded.Spec.Components[0].Type)
+	assert.Equal(t, NodeComponentRestartPolicyAlways, decoded.Spec.Components[0].RestartPolicy)
 	require.NotNil(t, decoded.Status)
-	require.Len(t, decoded.Status.Workers, 1)
-	assert.Equal(t, NodeWorkerPhaseRunning, decoded.Status.Workers[0].Phase)
+	require.Len(t, decoded.Status.Components, 1)
+	assert.Equal(t, NodeComponentPhaseRunning, decoded.Status.Components[0].Phase)
 }
 
 func TestStaticResourcesSchemeRegistration(t *testing.T) {
 	s := scheme.NewScheme()
 	require.NoError(t, AddToScheme(s))
 
-	clusterObj, err := s.New("StaticCluster")
+	clusterObj, err := s.New("StaticNodeCluster")
 	require.NoError(t, err)
-	assert.IsType(t, &StaticCluster{}, clusterObj)
-	assert.Equal(t, "StaticCluster", clusterObj.GetKind())
+	assert.IsType(t, &StaticNodeCluster{}, clusterObj)
+	assert.Equal(t, "StaticNodeCluster", clusterObj.GetKind())
 
 	nodeObj, err := s.New("StaticNode")
 	require.NoError(t, err)
@@ -144,6 +144,34 @@ func TestStaticResourcesSchemeRegistration(t *testing.T) {
 	require.NoError(t, err)
 	assert.IsType(t, &StaticNodeList{}, listObj)
 	assert.Equal(t, "StaticNodeList", listObj.GetKind())
+
+	clusterListObj, err := s.NewList("StaticNodeClusterList")
+	require.NoError(t, err)
+	assert.IsType(t, &StaticNodeClusterList{}, clusterListObj)
+	assert.Equal(t, "StaticNodeClusterList", clusterListObj.GetKind())
+
+	tableObj, err := s.New("static_node_clusters")
+	require.NoError(t, err)
+	assert.IsType(t, &StaticNodeCluster{}, tableObj)
+	assert.Equal(t, "StaticNodeCluster", tableObj.GetKind())
+
+	nodeTableObj, err := s.New("static_nodes")
+	require.NoError(t, err)
+	assert.IsType(t, &StaticNode{}, nodeTableObj)
+	assert.Equal(t, "StaticNode", nodeTableObj.GetKind())
+}
+
+func TestStaticNodeClusterListSetItems(t *testing.T) {
+	list := &StaticNodeClusterList{}
+	list.SetItems([]scheme.Object{
+		&StaticNodeCluster{ID: 1, Metadata: &Metadata{Name: "cluster-1"}},
+		&StaticNodeCluster{ID: 2, Metadata: &Metadata{Name: "cluster-2"}},
+	})
+
+	require.Len(t, list.Items, 2)
+	assert.Equal(t, "cluster-1", list.Items[0].GetName())
+	assert.Equal(t, "cluster-2", list.Items[1].GetName())
+	assert.Len(t, list.GetItems(), 2)
 }
 
 func TestStaticNodeListSetItems(t *testing.T) {

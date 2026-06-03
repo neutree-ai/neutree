@@ -15,28 +15,28 @@ import (
 )
 
 const (
-	staticClusterLabelKey  = "neutree.ai/static-cluster"
-	staticNodeRoleLabelKey = "neutree.ai/static-node-role"
+	staticNodeClusterLabelKey = "neutree.ai/static-node-cluster"
+	staticNodeRoleLabelKey    = "neutree.ai/static-node-role"
 
-	nodeExporterWorkerName    = "node-exporter"
-	neutreeMetricsWorkerName  = "neutree-metrics"
-	vmagentWorkerName         = "vmagent"
-	acceleratorExporterName   = "accelerator-exporter"
-	defaultNeutreeMetricsPort = 19090
-	defaultVMAgentPort        = 8429
-	defaultNodeExporterPort   = 9100
-	defaultRayDashboardPort   = 8265
-	defaultPrometheusHTTPPath = "/metrics"
-	defaultHealthHTTPPath     = "/health"
-	neutreeMetricsConfigPath  = "/etc/neutree/neutree-metrics/config.json"
-	vmagentConfigPath         = "/etc/neutree/vmagent/config.yaml"
+	nodeExporterComponentName        = "node-exporter"
+	neutreeMetricsComponentName      = "neutree-metrics"
+	vmagentComponentName             = "vmagent"
+	acceleratorExporterComponentName = "accelerator-exporter"
+	defaultNeutreeMetricsPort        = 19090
+	defaultVMAgentPort               = 8429
+	defaultNodeExporterPort          = 9100
+	defaultRayDashboardPort          = 8265
+	defaultPrometheusHTTPPath        = "/metrics"
+	defaultHealthHTTPPath            = "/health"
+	neutreeMetricsConfigPath         = "/etc/neutree/neutree-metrics/config.json"
+	vmagentConfigPath                = "/etc/neutree/vmagent/config.yaml"
 )
 
-type StaticClusterReconciler struct{}
+type StaticNodeClusterReconciler struct{}
 
-type StaticClusterReconcilePlan struct {
+type StaticNodeClusterReconcilePlan struct {
 	DesiredNodes []*v1.StaticNode
-	Status       v1.StaticClusterStatus
+	Status       v1.StaticNodeClusterStatus
 }
 
 type metricsNormalizerConfig struct {
@@ -53,44 +53,44 @@ type metricsNormalizerTarget struct {
 	Timeout string `json:"timeout,omitempty"`
 }
 
-func (r *StaticClusterReconciler) Plan(
-	cluster *v1.StaticCluster,
+func (r *StaticNodeClusterReconciler) Plan(
+	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
 	acceleratorProfiles map[string]*v1.AcceleratorProfile,
-) (*StaticClusterReconcilePlan, error) {
+) (*StaticNodeClusterReconcilePlan, error) {
 	desiredNodes, err := r.BuildDesiredNodes(cluster, acceleratorProfiles)
 	if err != nil {
 		return nil, err
 	}
 
-	return &StaticClusterReconcilePlan{
+	return &StaticNodeClusterReconcilePlan{
 		DesiredNodes: desiredNodes,
 		Status:       r.AggregateStatus(cluster, currentNodes),
 	}, nil
 }
 
-func (r *StaticClusterReconciler) BuildDesiredNodes(
-	cluster *v1.StaticCluster,
+func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
+	cluster *v1.StaticNodeCluster,
 	acceleratorProfiles map[string]*v1.AcceleratorProfile,
 ) ([]*v1.StaticNode, error) {
 	if cluster == nil {
-		return nil, errors.New("static cluster is nil")
+		return nil, errors.New("static node cluster is nil")
 	}
 
 	if cluster.Metadata == nil || cluster.Metadata.Name == "" {
-		return nil, errors.New("static cluster metadata.name is required")
+		return nil, errors.New("static node cluster metadata.name is required")
 	}
 
 	if cluster.Spec == nil {
-		return nil, errors.New("static cluster spec is required")
+		return nil, errors.New("static node cluster spec is required")
 	}
 
 	if cluster.Spec.Head.NodeName == "" {
-		return nil, errors.New("static cluster spec.head.node_name is required")
+		return nil, errors.New("static node cluster spec.head.node_name is required")
 	}
 
 	if len(cluster.Spec.Nodes) == 0 {
-		return nil, errors.New("static cluster spec.nodes is required")
+		return nil, errors.New("static node cluster spec.nodes is required")
 	}
 
 	nodeNames := make(map[string]struct{}, len(cluster.Spec.Nodes))
@@ -134,14 +134,14 @@ func (r *StaticClusterReconciler) BuildDesiredNodes(
 				Role:            role,
 				AcceleratorType: nodeSpec.AcceleratorType,
 				SSHAuthRef:      nodeSpec.SSHAuthRef,
-				Warm:            copyWarmSpec(cluster.Spec.Warm),
-				Workers:         buildNodeWorkers(role, profile),
+				Warm:            buildNodeWarmSpec(cluster),
+				Components:      buildNodeComponents(role, profile),
 			},
 		})
 	}
 
 	if !headSeen {
-		return nil, fmt.Errorf("head node %s not found in static cluster nodes", cluster.Spec.Head.NodeName)
+		return nil, fmt.Errorf("head node %s not found in static node cluster nodes", cluster.Spec.Head.NodeName)
 	}
 
 	sort.SliceStable(desiredNodes, func(i, j int) bool {
@@ -153,40 +153,43 @@ func (r *StaticClusterReconciler) BuildDesiredNodes(
 	}
 
 	for _, node := range desiredNodes {
-		node.Spec.Workers = withWorkerConfigHashes(node.Spec.Workers)
+		node.Spec.Components = withComponentConfigHashes(node.Spec.Components)
 	}
 
 	return desiredNodes, nil
 }
 
-func (r *StaticClusterReconciler) AggregateStatus(
-	cluster *v1.StaticCluster,
+func (r *StaticNodeClusterReconciler) AggregateStatus(
+	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
-) v1.StaticClusterStatus {
-	desiredNodes := 0
+) v1.StaticNodeClusterStatus {
+	desiredNodeNames := map[string]struct{}{}
 	headName := ""
 
 	if cluster != nil && cluster.Spec != nil {
-		desiredNodes = len(cluster.Spec.Nodes)
+		for _, node := range cluster.Spec.Nodes {
+			if node.Name != "" {
+				desiredNodeNames[node.Name] = struct{}{}
+			}
+		}
 		headName = cluster.Spec.Head.NodeName
 	}
 
-	status := v1.StaticClusterStatus{
-		Phase:        v1.StaticClusterPhaseProvisioning,
-		DesiredNodes: desiredNodes,
+	status := v1.StaticNodeClusterStatus{
+		Phase:        v1.StaticNodeClusterPhaseProvisioning,
+		DesiredNodes: len(desiredNodeNames),
 	}
 
-	if desiredNodes == 0 {
-		status.Phase = v1.StaticClusterPhaseFailed
-		status.ErrorMessage = "static cluster has no desired nodes"
+	if status.DesiredNodes == 0 {
+		status.Phase = v1.StaticNodeClusterPhaseFailed
+		status.ErrorMessage = "static node cluster has no desired nodes"
 
 		return status
 	}
 
-	warmKnown := len(nodes) > 0
-	metricsKnown := len(nodes) > 0
-	warmReady := warmKnown
-	metricsReady := metricsKnown
+	seenDesiredNodes := map[string]struct{}{}
+	warmReady := true
+	metricsReady := true
 	anyNodeFailed := false
 
 	for _, node := range nodes {
@@ -196,6 +199,12 @@ func (r *StaticClusterReconciler) AggregateStatus(
 
 			continue
 		}
+
+		if _, desired := desiredNodeNames[node.Metadata.Name]; !desired {
+			continue
+		}
+
+		seenDesiredNodes[node.Metadata.Name] = struct{}{}
 
 		if node.Status.Phase == v1.StaticNodePhaseReady {
 			status.ReadyNodes++
@@ -218,18 +227,23 @@ func (r *StaticClusterReconciler) AggregateStatus(
 		}
 	}
 
+	if len(seenDesiredNodes) < status.DesiredNodes {
+		warmReady = false
+		metricsReady = false
+	}
+
 	status.WarmReady = warmReady
 	status.MetricsReady = metricsReady
 
 	switch {
 	case anyNodeFailed:
-		status.Phase = v1.StaticClusterPhaseFailed
-	case status.ReadyNodes == desiredNodes && status.HeadReady && status.WarmReady && status.MetricsReady:
-		status.Phase = v1.StaticClusterPhaseReady
+		status.Phase = v1.StaticNodeClusterPhaseFailed
+	case status.ReadyNodes == status.DesiredNodes && status.HeadReady && status.WarmReady && status.MetricsReady:
+		status.Phase = v1.StaticNodeClusterPhaseReady
 	case status.HeadReady && status.ReadyNodes > 0:
-		status.Phase = v1.StaticClusterPhaseDegraded
+		status.Phase = v1.StaticNodeClusterPhaseDegraded
 	default:
-		status.Phase = v1.StaticClusterPhaseProvisioning
+		status.Phase = v1.StaticNodeClusterPhaseProvisioning
 	}
 
 	return status
@@ -245,86 +259,86 @@ func normalizeStaticNodeRole(role v1.StaticNodeRole) v1.StaticNodeRole {
 
 func staticNodeLabels(clusterName string, role v1.StaticNodeRole) map[string]string {
 	return map[string]string{
-		staticClusterLabelKey:  clusterName,
-		staticNodeRoleLabelKey: string(role),
+		staticNodeClusterLabelKey: clusterName,
+		staticNodeRoleLabelKey:    string(role),
 	}
 }
 
-func buildNodeWorkers(role v1.StaticNodeRole, profile *v1.AcceleratorProfile) []v1.NodeWorkerSpec {
-	workers := []v1.NodeWorkerSpec{
-		buildRayWorker(role),
+func buildNodeComponents(role v1.StaticNodeRole, profile *v1.AcceleratorProfile) []v1.NodeComponentSpec {
+	components := []v1.NodeComponentSpec{
+		buildRayComponent(role),
 		{
-			Name:          nodeExporterWorkerName,
-			Type:          v1.NodeWorkerTypeNodeExporter,
-			RestartPolicy: v1.NodeWorkerRestartPolicyAlways,
-			Ports: []v1.NodeWorkerPort{
+			Name:          nodeExporterComponentName,
+			Type:          v1.NodeComponentTypeNodeExporter,
+			RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+			Ports: []v1.NodeComponentPort{
 				{Name: "metrics", Port: defaultNodeExporterPort, Protocol: "TCP"},
 			},
-			HealthCheck: &v1.NodeWorkerHealthCheck{
+			HealthCheck: &v1.NodeComponentHealthCheck{
 				HTTPPath: defaultPrometheusHTTPPath,
 				Port:     defaultNodeExporterPort,
 			},
 		},
 	}
 
-	metricsDependencies := []string{nodeExporterWorkerName}
+	metricsDependencies := []string{nodeExporterComponentName}
 
 	if profile != nil && profile.Metrics != nil && profile.Metrics.Exporter != nil {
 		exporter := profile.Metrics.Exporter
 
-		workers = append(workers, v1.NodeWorkerSpec{
-			Name:             acceleratorExporterName,
-			Type:             exporter.WorkerType,
+		components = append(components, v1.NodeComponentSpec{
+			Name:             acceleratorExporterComponentName,
+			Type:             exporter.ComponentType,
 			Image:            exporter.Image,
 			DockerRunOptions: append([]string{}, exporter.DockerRunOptions...),
-			RestartPolicy:    v1.NodeWorkerRestartPolicyAlways,
-			Ports: []v1.NodeWorkerPort{
+			RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
+			Ports: []v1.NodeComponentPort{
 				{Name: "metrics", Port: exporter.Port, Protocol: "TCP"},
 			},
-			HealthCheck: &v1.NodeWorkerHealthCheck{
+			HealthCheck: &v1.NodeComponentHealthCheck{
 				HTTPPath: defaultPrometheusHTTPPath,
 				Port:     exporter.Port,
 			},
 		})
 
-		metricsDependencies = append(metricsDependencies, acceleratorExporterName)
+		metricsDependencies = append(metricsDependencies, acceleratorExporterComponentName)
 	}
 
-	workers = append(workers, v1.NodeWorkerSpec{
-		Name:          neutreeMetricsWorkerName,
-		Type:          v1.NodeWorkerTypeMetricsNormalizer,
+	components = append(components, v1.NodeComponentSpec{
+		Name:          neutreeMetricsComponentName,
+		Type:          v1.NodeComponentTypeMetricsNormalizer,
 		Dependencies:  metricsDependencies,
-		RestartPolicy: v1.NodeWorkerRestartPolicyAlways,
-		Ports: []v1.NodeWorkerPort{
+		RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNeutreeMetricsPort, Protocol: "TCP"},
 		},
-		HealthCheck: &v1.NodeWorkerHealthCheck{
+		HealthCheck: &v1.NodeComponentHealthCheck{
 			HTTPPath: defaultHealthHTTPPath,
 			Port:     defaultNeutreeMetricsPort,
 		},
 	})
 
 	if role == v1.StaticNodeRoleHead {
-		workers = append(workers, v1.NodeWorkerSpec{
-			Name:          vmagentWorkerName,
-			Type:          v1.NodeWorkerTypeMetricsAgent,
-			Dependencies:  []string{neutreeMetricsWorkerName},
-			RestartPolicy: v1.NodeWorkerRestartPolicyAlways,
-			Ports: []v1.NodeWorkerPort{
+		components = append(components, v1.NodeComponentSpec{
+			Name:          vmagentComponentName,
+			Type:          v1.NodeComponentTypeMetricsAgent,
+			Dependencies:  []string{neutreeMetricsComponentName},
+			RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+			Ports: []v1.NodeComponentPort{
 				{Name: "http", Port: defaultVMAgentPort, Protocol: "TCP"},
 			},
-			HealthCheck: &v1.NodeWorkerHealthCheck{
+			HealthCheck: &v1.NodeComponentHealthCheck{
 				HTTPPath: defaultHealthHTTPPath,
 				Port:     defaultVMAgentPort,
 			},
 		})
 	}
 
-	return workers
+	return components
 }
 
 func attachMetricsConfigFiles(
-	cluster *v1.StaticCluster,
+	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
 	acceleratorProfiles map[string]*v1.AcceleratorProfile,
 ) error {
@@ -340,7 +354,7 @@ func attachMetricsConfigFiles(
 			return err
 		}
 
-		appendWorkerConfigFile(node, neutreeMetricsWorkerName, v1.NodeWorkerConfigFile{
+		appendComponentConfigFile(node, neutreeMetricsComponentName, v1.NodeComponentConfigFile{
 			Path:         neutreeMetricsConfigPath,
 			Content:      content,
 			Mode:         "0644",
@@ -355,7 +369,7 @@ func attachMetricsConfigFiles(
 			continue
 		}
 
-		appendWorkerConfigFile(node, vmagentWorkerName, v1.NodeWorkerConfigFile{
+		appendComponentConfigFile(node, vmagentComponentName, v1.NodeComponentConfigFile{
 			Path:         vmagentConfigPath,
 			Content:      renderVMAgentConfig(cluster),
 			Mode:         "0644",
@@ -371,30 +385,30 @@ func attachMetricsConfigFiles(
 }
 
 func renderNeutreeMetricsConfig(
-	cluster *v1.StaticCluster,
+	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
 	profile *v1.AcceleratorProfile,
 ) (string, error) {
 	config := metricsNormalizerConfig{
 		Labels: map[string]string{
-			"workspace":      node.Metadata.Workspace,
-			"static_cluster": node.Spec.Cluster,
-			"cluster_type":   "ray",
-			"node":           node.Metadata.Name,
-			"node_ip":        node.Spec.IP,
-			"node_role":      string(node.Spec.Role),
+			"workspace":           node.Metadata.Workspace,
+			"static_node_cluster": node.Spec.Cluster,
+			"cluster_type":        "ray",
+			"node":                node.Metadata.Name,
+			"node_ip":             node.Spec.IP,
+			"node_role":           string(node.Spec.Role),
 		},
 		Targets: []metricsNormalizerTarget{
 			{
-				Name:    nodeExporterWorkerName,
+				Name:    nodeExporterComponentName,
 				URL:     fmt.Sprintf("http://127.0.0.1:%d%s", defaultNodeExporterPort, defaultPrometheusHTTPPath),
 				Timeout: "5s",
 			},
 		},
 	}
 
-	if cluster != nil && cluster.Metadata != nil && config.Labels["static_cluster"] == "" {
-		config.Labels["static_cluster"] = cluster.Metadata.Name
+	if cluster != nil && cluster.Metadata != nil && config.Labels["static_node_cluster"] == "" {
+		config.Labels["static_node_cluster"] = cluster.Metadata.Name
 	}
 
 	if profile != nil && profile.Metrics != nil && profile.Metrics.Exporter != nil {
@@ -408,7 +422,7 @@ func renderNeutreeMetricsConfig(
 		config.AcceleratorType = node.Spec.AcceleratorType
 		config.ExporterKind = exporter.Kind
 		config.Targets = append(config.Targets, metricsNormalizerTarget{
-			Name:    acceleratorExporterName,
+			Name:    acceleratorExporterComponentName,
 			URL:     fmt.Sprintf("http://127.0.0.1:%d%s", exporter.Port, metricsPath),
 			Kind:    exporter.Kind,
 			Timeout: "5s",
@@ -423,7 +437,7 @@ func renderNeutreeMetricsConfig(
 	return string(content) + "\n", nil
 }
 
-func renderVMAgentConfig(cluster *v1.StaticCluster) string {
+func renderVMAgentConfig(cluster *v1.StaticNodeCluster) string {
 	var builder strings.Builder
 	builder.WriteString("global:\n")
 	builder.WriteString("  scrape_interval: 15s\n")
@@ -432,7 +446,7 @@ func renderVMAgentConfig(cluster *v1.StaticCluster) string {
 	builder.WriteString("  static_configs:\n")
 	builder.WriteString("  - targets:\n")
 
-	nodes := append([]v1.StaticClusterNodeSpec{}, cluster.Spec.Nodes...)
+	nodes := append([]v1.StaticNodeClusterNodeSpec{}, cluster.Spec.Nodes...)
 	sort.SliceStable(nodes, func(i, j int) bool {
 		return nodes[i].Name < nodes[j].Name
 	})
@@ -450,7 +464,7 @@ func renderVMAgentConfig(cluster *v1.StaticCluster) string {
 	builder.WriteString("      workspace: ")
 	builder.WriteString(strconv.Quote(cluster.Metadata.Workspace))
 	builder.WriteString("\n")
-	builder.WriteString("      static_cluster: ")
+	builder.WriteString("      static_node_cluster: ")
 	builder.WriteString(strconv.Quote(cluster.Metadata.Name))
 	builder.WriteString("\n")
 	builder.WriteString("      cluster_type: ")
@@ -467,34 +481,34 @@ func renderVMAgentConfig(cluster *v1.StaticCluster) string {
 	return builder.String()
 }
 
-func appendWorkerConfigFile(node *v1.StaticNode, workerName string, configFile v1.NodeWorkerConfigFile) {
-	for i := range node.Spec.Workers {
-		if node.Spec.Workers[i].Name != workerName {
+func appendComponentConfigFile(node *v1.StaticNode, componentName string, configFile v1.NodeComponentConfigFile) {
+	for i := range node.Spec.Components {
+		if node.Spec.Components[i].Name != componentName {
 			continue
 		}
 
-		worker := node.Spec.Workers[i]
-		worker.ConfigFiles = append(append([]v1.NodeWorkerConfigFile{}, worker.ConfigFiles...), configFile)
-		node.Spec.Workers[i] = worker
+		component := node.Spec.Components[i]
+		component.ConfigFiles = append(append([]v1.NodeComponentConfigFile{}, component.ConfigFiles...), configFile)
+		node.Spec.Components[i] = component
 
 		return
 	}
 }
 
-func withWorkerConfigHashes(workers []v1.NodeWorkerSpec) []v1.NodeWorkerSpec {
-	result := make([]v1.NodeWorkerSpec, len(workers))
-	for i, worker := range workers {
-		result[i] = worker
-		result[i].ConfigHash = nodeWorkerConfigHash(worker)
+func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeComponentSpec {
+	result := make([]v1.NodeComponentSpec, len(components))
+	for i, component := range components {
+		result[i] = component
+		result[i].ConfigHash = nodeComponentConfigHash(component)
 	}
 
 	return result
 }
 
-func nodeWorkerConfigHash(worker v1.NodeWorkerSpec) string {
-	worker.ConfigHash = ""
+func nodeComponentConfigHash(component v1.NodeComponentSpec) string {
+	component.ConfigHash = ""
 
-	content, err := json.Marshal(worker)
+	content, err := json.Marshal(component)
 	if err != nil {
 		return ""
 	}
@@ -504,39 +518,39 @@ func nodeWorkerConfigHash(worker v1.NodeWorkerSpec) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func buildRayWorker(role v1.StaticNodeRole) v1.NodeWorkerSpec {
+func buildRayComponent(role v1.StaticNodeRole) v1.NodeComponentSpec {
 	if role == v1.StaticNodeRoleHead {
-		return v1.NodeWorkerSpec{
+		return v1.NodeComponentSpec{
 			Name:          "ray-head",
-			Type:          v1.NodeWorkerTypeRayHead,
-			RestartPolicy: v1.NodeWorkerRestartPolicyAlways,
-			HealthCheck: &v1.NodeWorkerHealthCheck{
+			Type:          v1.NodeComponentTypeRayHead,
+			RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+			HealthCheck: &v1.NodeComponentHealthCheck{
 				HTTPPath: defaultHealthHTTPPath,
 				Port:     defaultRayDashboardPort,
 			},
 		}
 	}
 
-	return v1.NodeWorkerSpec{
+	return v1.NodeComponentSpec{
 		Name:          "ray-worker",
-		Type:          v1.NodeWorkerTypeRayWorker,
-		RestartPolicy: v1.NodeWorkerRestartPolicyAlways,
+		Type:          v1.NodeComponentTypeRayWorker,
+		RestartPolicy: v1.NodeComponentRestartPolicyAlways,
 	}
 }
 
 func nodeMetricsReady(node *v1.StaticNode) bool {
 	required := map[string]bool{
-		nodeExporterWorkerName:   false,
-		neutreeMetricsWorkerName: false,
+		nodeExporterComponentName:   false,
+		neutreeMetricsComponentName: false,
 	}
 
 	if node.Spec != nil && node.Spec.Role == v1.StaticNodeRoleHead {
-		required[vmagentWorkerName] = false
+		required[vmagentComponentName] = false
 	}
 
-	for _, worker := range node.Status.Workers {
-		if _, ok := required[worker.Name]; ok && worker.Ready && worker.Phase == v1.NodeWorkerPhaseRunning {
-			required[worker.Name] = true
+	for _, component := range node.Status.Components {
+		if _, ok := required[component.Name]; ok && component.Ready && component.Phase == v1.NodeComponentPhaseRunning {
+			required[component.Name] = true
 		}
 	}
 
@@ -549,15 +563,20 @@ func nodeMetricsReady(node *v1.StaticNode) bool {
 	return true
 }
 
-func copyWarmSpec(warm *v1.WarmSpec) *v1.WarmSpec {
-	if warm == nil {
+func buildNodeWarmSpec(cluster *v1.StaticNodeCluster) *v1.WarmSpec {
+	if cluster == nil || cluster.Spec == nil || cluster.Spec.Version == "" || cluster.Spec.ImageRegistry == "" {
 		return nil
 	}
 
-	images := make([]v1.WarmImageSpec, len(warm.Images))
-	copy(images, warm.Images)
-
-	return &v1.WarmSpec{Images: images}
+	return &v1.WarmSpec{
+		Images: []v1.WarmImageSpec{
+			{
+				Name:     "ray-runtime",
+				Ref:      strings.TrimRight(cluster.Spec.ImageRegistry, "/") + "/neutree-serve:" + cluster.Spec.Version,
+				Required: true,
+			},
+		},
+	}
 }
 
 func copyStringMap(values map[string]string) map[string]string {

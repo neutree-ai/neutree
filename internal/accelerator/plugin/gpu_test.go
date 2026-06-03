@@ -187,7 +187,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "GPU", profile.ResourceDefaults.RayResourceName)
 	assert.Equal(t, string(NvidiaGPUKubernetesResource), profile.ResourceDefaults.KubernetesResourceName)
 	assert.Equal(t, "dcgm-exporter", profile.Metrics.Exporter.Kind)
-	assert.Equal(t, v1.NodeWorkerTypeAcceleratorExporter, profile.Metrics.Exporter.WorkerType)
+	assert.Equal(t, v1.NodeComponentTypeAcceleratorExporter, profile.Metrics.Exporter.ComponentType)
 	assert.Equal(t, nvidiaDCGMExporterImage, profile.Metrics.Exporter.Image)
 	assert.Equal(t, nvidiaDCGMExporterPort, profile.Metrics.Exporter.Port)
 }
