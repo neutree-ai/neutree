@@ -397,7 +397,8 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	// --dashboard-agent-grpc-port and --dashboard-grpc-port are deprecated in Ray 2.53.0 (serving version > v1.0.0)
 	includeDeprecatedGrpcFlags := !isNewCluster
 
-	commonArgs := `--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 ` +
+	commonArgs := `--system-config={"num_workers_soft_limit":0} ` +
+		`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 ` +
 		"--min-worker-port=10002 --max-worker-port=20000 " +
 		`--runtime-env-agent-port=56999`
 	if includeDeprecatedGrpcFlags {

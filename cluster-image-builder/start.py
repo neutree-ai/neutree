@@ -39,6 +39,7 @@ def main():
     # Construct the ray start command with the head address and default parameters
     cmd = [
         "ray", "start",
+        "--system-config", json.dumps({"num_workers_soft_limit": 0}),
         "--object-manager-port=8076",
         "--resources", resources_param
     ]

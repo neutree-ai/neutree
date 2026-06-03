@@ -905,7 +905,8 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 		v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType,
 		v1.NeutreeServingVersionLabel, clusterVersion)
 
-	commonArgs := fmt.Sprintf(`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
+	commonArgs := fmt.Sprintf(`--system-config={"num_workers_soft_limit":0} `+
+			`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
 		"--min-worker-port=10002 --max-worker-port=20000 "+
 		`--runtime-env-agent-port=56999 --dashboard-agent-grpc-port=8078 --metrics-export-port=%d`, v1.RayletMetricsPort)
 	defaultExpectedConfig := func() *v1.RayClusterConfig {
@@ -1142,7 +1143,8 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				newStaticWorkerLabel := fmt.Sprintf(`--labels='{"%s":"%s","%s":"%s"}'`,
 					v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType,
 					v1.NeutreeServingVersionLabel, newVersion)
-				newCommonArgs := fmt.Sprintf(`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
+				newCommonArgs := fmt.Sprintf(`--system-config={"num_workers_soft_limit":0} `+
+						`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
 					"--min-worker-port=10002 --max-worker-port=20000 "+
 					`--runtime-env-agent-port=56999 --metrics-export-port=%d`, v1.RayletMetricsPort)
 
@@ -1241,7 +1243,8 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 				newStaticWorkerLabel := fmt.Sprintf(`--labels='{"%s":"%s","%s":"%s"}'`,
 					v1.NeutreeNodeProvisionTypeLabel, v1.StaticNodeProvisionType,
 					v1.NeutreeServingVersionLabel, newVersion)
-				newCommonArgs := fmt.Sprintf(`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
+				newCommonArgs := fmt.Sprintf(`--system-config={"num_workers_soft_limit":0} `+
+						`--disable-usage-stats --node-manager-port=8077 --dashboard-agent-listen-port=52365 `+
 					"--min-worker-port=10002 --max-worker-port=20000 "+
 					`--runtime-env-agent-port=56999 --metrics-export-port=%d`, v1.RayletMetricsPort)
 
