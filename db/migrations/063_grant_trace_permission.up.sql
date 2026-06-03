@@ -1,12 +1,12 @@
--- Grant the trace:read permission (added in 062) to the built-in roles.
--- Separate migration because a newly added enum value cannot be referenced
--- in the same transaction that adds it.
+-- Grant the trace-read permissions (added in 062) to the built-in roles.
+-- Separate migration because newly added enum values cannot be referenced in
+-- the same transaction that adds them.
 
--- admin: refresh to every permission in the enum (picks up trace:read).
+-- admin: refresh to every permission in the enum (picks up the trace perms).
 SELECT api.update_admin_permissions();
 
--- workspace-user: add trace:read so workspace members keep access to the
--- ai-trace endpoints after they switch from workspace:read to trace:read.
+-- workspace-user: grant both endpoint:trace-read and external_endpoint:trace-read
+-- so workspace members can read inference traces by default.
 CREATE OR REPLACE FUNCTION api.update_workspace_user_permissions()
 RETURNS VOID AS $$
 DECLARE
@@ -46,7 +46,8 @@ BEGIN
         'external_endpoint:create',
         'external_endpoint:update',
         'external_endpoint:delete',
-        'trace:read'
+        'endpoint:trace-read',
+        'external_endpoint:trace-read'
     ]::api.permission_action[];
 
     UPDATE api.roles

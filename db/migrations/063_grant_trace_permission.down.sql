@@ -1,5 +1,5 @@
 -- Revert workspace-user permissions to the pre-trace set (mirrors 057).
--- admin retains trace:read because the enum value cannot be removed.
+-- admin retains the trace-read perms because enum values cannot be removed.
 CREATE OR REPLACE FUNCTION api.update_workspace_user_permissions()
 RETURNS VOID AS $$
 DECLARE

@@ -78,13 +78,94 @@ type AITraceStatsResponse struct {
 func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	traces := group.Group("/ai-traces/:workspace")
 	traces.Use(middlewares...)
-	traces.Use(middleware.RequireWorkspacePermission("trace:read", middleware.PermissionDependencies{
-		Storage: deps.Storage,
-	}))
+	traces.Use(requireTracePermission(deps))
 
 	traces.GET("", handleListAITraces(deps))
 	traces.GET("/stats", handleAITraceStats(deps))
 	traces.GET("/:request_id", handleGetAITrace(deps))
+}
+
+const (
+	permEndpointTraceRead         = "endpoint:trace-read"
+	permExternalEndpointTraceRead = "external_endpoint:trace-read"
+	// traceEndpointTypeKey holds, in the gin context, the single endpoint_type a
+	// caller is restricted to ("endpoint" or "external-endpoint"); empty = both.
+	traceEndpointTypeKey = "trace_endpoint_type"
+)
+
+// requireTracePermission gates the ai-trace routes on endpoint:trace-read OR
+// external_endpoint:trace-read for the workspace. A caller holding only one of
+// the two is restricted to that endpoint type (recorded in the context for the
+// handlers to scope their LogsQL query). Both checks pass the workspace to
+// has_permission, which the enterprise edition overrides to be workspace-aware.
+func requireTracePermission(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.GetString("user_id")
+		if userID == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+			c.Abort()
+
+			return
+		}
+
+		workspace := c.Param("workspace")
+		if workspace == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace parameter is required"})
+			c.Abort()
+
+			return
+		}
+
+		canEndpoint, err := middleware.CheckWorkspacePermission(deps.Storage, userID, workspace, permEndpointTraceRead)
+		if err != nil {
+			tracePermError(c, userID, err)
+
+			return
+		}
+
+		canExternal, err := middleware.CheckWorkspacePermission(deps.Storage, userID, workspace, permExternalEndpointTraceRead)
+		if err != nil {
+			tracePermError(c, userID, err)
+
+			return
+		}
+
+		if !canEndpoint && !canExternal {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":    "insufficient permissions",
+				"required": permEndpointTraceRead + " or " + permExternalEndpointTraceRead,
+			})
+			c.Abort()
+
+			return
+		}
+
+		// Holding only one permission restricts the caller to that endpoint type.
+		if canEndpoint && !canExternal {
+			c.Set(traceEndpointTypeKey, "endpoint")
+		} else if canExternal && !canEndpoint {
+			c.Set(traceEndpointTypeKey, "external-endpoint")
+		}
+
+		c.Next()
+	}
+}
+
+func tracePermError(c *gin.Context, userID string, err error) {
+	klog.Errorf("ai-trace: permission check failed for user %s: %v", userID, err)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check permissions"})
+	c.Abort()
+}
+
+// traceEndpointTypeFilter returns a LogsQL clause restricting results to the
+// endpoint_type the caller is permitted to see, or "" when unrestricted.
+func traceEndpointTypeFilter(c *gin.Context) string {
+	et := c.GetString(traceEndpointTypeKey)
+	if et == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("endpoint_type:=%s", logsQLQuoteValue(et))
 }
 
 func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
@@ -135,6 +216,11 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 				"(request_model:=%s OR response_model:=%s)",
 				logsQLQuoteValue(model), logsQLQuoteValue(model),
 			))
+		}
+
+		// Restrict to the endpoint_type the caller is permitted to see.
+		if f := traceEndpointTypeFilter(c); f != "" {
+			queryParts = append(queryParts, f)
 		}
 
 		// The list view never renders request/response bodies — project them
@@ -202,9 +288,14 @@ func handleGetAITrace(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		etFilter := traceEndpointTypeFilter(c)
+		if etFilter != "" {
+			etFilter = " " + etFilter
+		}
+
 		query := fmt.Sprintf(
-			"workspace:=%s request_id:=%s | sort by (_time) desc | limit 1",
-			logsQLQuoteValue(workspace), logsQLQuoteValue(requestID),
+			"workspace:=%s request_id:=%s%s | sort by (_time) desc | limit 1",
+			logsQLQuoteValue(workspace), logsQLQuoteValue(requestID), etFilter,
 		)
 
 		items, err := queryAITraces(deps, query, url.Values{})
@@ -256,9 +347,14 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 		// `days` days up to and including the current (partial) day.
 		startDay := now.Truncate(24*time.Hour).AddDate(0, 0, -(days - 1))
 
+		etFilter := traceEndpointTypeFilter(c)
+		if etFilter != "" {
+			etFilter = " " + etFilter
+		}
+
 		query := fmt.Sprintf(
-			"workspace:=%s | stats by (_time:1d) count() total",
-			logsQLQuoteValue(workspace),
+			"workspace:=%s%s | stats by (_time:1d) count() total",
+			logsQLQuoteValue(workspace), etFilter,
 		)
 
 		params := url.Values{}
