@@ -39,6 +39,9 @@ spec:
             {{- else if .Values.system.grafana.url }}
             - --grafana-url={{ .Values.system.grafana.url }}
             {{- end }}
+            {{- if .Values.featureGates }}
+            - --feature-gates={{ .Values.featureGates }}
+            {{- end }}
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.api.image.registry "repository" .Values.api.image.repository "tag" .Values.api.image.tag "defaultTag" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:

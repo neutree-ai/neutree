@@ -26,6 +26,7 @@ type neutreeCoreInstallOptions struct {
 	grafanaURL            string
 	version               string
 	adminPassword         string
+	featureGates          string
 }
 
 func NewNeutreeCoreInstallCmd(exector command.Executor, commonOptions *commonOptions) *cobra.Command {
@@ -80,6 +81,8 @@ Examples:
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
 		"it is valid when starting neutree core for the first time. "+
 		"It is recommended to change it quickly after installation.")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.featureGates, "feature-gates", "",
+		"feature gates for alpha/beta features (format: Feature1=true,Feature2=false)")
 
 	return neutreeCoreInstallCmd
 }
@@ -169,6 +172,7 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		"KongVersion":            componentversion.Kong,
 		"NodeIP":                 options.nodeIP,
 		"AdminPassword":          options.adminPassword,
+		"FeatureGates":           options.featureGates,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)

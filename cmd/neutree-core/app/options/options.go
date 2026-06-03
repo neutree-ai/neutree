@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/featuregate"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -48,6 +49,7 @@ func (o *NeutreeCoreOptions) AddFlags(fs *pflag.FlagSet) {
 	o.Observability.AddFlags(fs)
 	o.Cluster.AddFlags(fs)
 	o.Auth.AddFlags(fs)
+	featuregate.DefaultMutableFeatureGate.AddFlag(fs)
 }
 
 func (o *NeutreeCoreOptions) Validate() error {
