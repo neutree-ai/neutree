@@ -234,6 +234,8 @@ services:
     depends_on:
       postgrest:
         condition: service_started
+      victorialogs:
+        condition: service_started
     logging:
       driver: "json-file"
       options:
@@ -312,6 +314,25 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  victorialogs:
+    container_name: victorialogs
+    image: victoriametrics/victoria-logs:v1.50.0
+    command:
+      - -storageDataPath=/victoria-logs-data
+      # AI-trace request/response bodies can be large; raise the per-line
+      # ingest limit to 16MiB so VictoriaLogs does not drop them.
+      - -insert.maxLineSizeBytes=16777216
+    volumes:
+      - vl_data:/victoria-logs-data
+    networks:
+      - neutree
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   vector:
     container_name: vector
     image: timberio/vector:{{ .VectorVersion }}
@@ -326,6 +347,8 @@ services:
       - neutree
     depends_on:
       neutree-api:
+        condition: service_started
+      victorialogs:
         condition: service_started
     logging:
       driver: "json-file"
@@ -385,6 +408,7 @@ networks:
 
 volumes:
   pg_data:
+  vl_data:
 {{ if .MetricsRemoteWriteURL }}
   vmagentdata:
 {{ end }}
