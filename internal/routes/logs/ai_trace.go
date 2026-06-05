@@ -320,7 +320,11 @@ func handleGetAITrace(deps *Dependencies) gin.HandlerFunc {
 	}
 }
 
-// handleAITraceStats returns per-day request counts for the trailing window,
+// maxStatsDays caps the number of UTC day buckets the stats endpoint returns,
+// bounding both the trailing-`days` fallback and an explicit [start, end] window.
+const maxStatsDays = 90
+
+// handleAITraceStats returns per-day request counts for the requested window,
 // powering the activity bar chart at the top of the SPA's trace list.
 func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -334,18 +338,14 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 
 		workspace := c.Param("workspace")
 
-		days := 7
+		startDay, endDay, ok := statsWindow(c)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid start/end parameter",
+			})
 
-		if v := c.Query("days"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 90 {
-				days = n
-			}
+			return
 		}
-
-		now := time.Now().UTC()
-		// Day buckets are aligned to UTC midnight; the window covers the last
-		// `days` days up to and including the current (partial) day.
-		startDay := now.Truncate(24*time.Hour).AddDate(0, 0, -(days - 1))
 
 		etFilter := traceEndpointTypeFilter(c)
 		if etFilter != "" {
@@ -359,7 +359,10 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 
 		params := url.Values{}
 		params.Set("start", startDay.Format(time.RFC3339))
-		params.Set("end", now.Format(time.RFC3339))
+		// `end` is pushed to the start of the day after endDay so the final
+		// (possibly partial) day is always fully covered, regardless of whether
+		// VictoriaLogs treats the bound as inclusive or exclusive.
+		params.Set("end", endDay.AddDate(0, 0, 1).Format(time.RFC3339))
 
 		counts, err := queryAITraceDayCounts(deps, query, params)
 		if err != nil {
@@ -371,15 +374,73 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		out := make([]AITraceDayCount, 0, days)
+		out := make([]AITraceDayCount, 0)
 
-		for i := 0; i < days; i++ {
-			date := startDay.AddDate(0, 0, i).Format("2006-01-02")
+		for d := startDay; !d.After(endDay); d = d.AddDate(0, 0, 1) {
+			date := d.Format("2006-01-02")
 			out = append(out, AITraceDayCount{Date: date, Count: counts[date]})
 		}
 
 		c.JSON(http.StatusOK, AITraceStatsResponse{Days: out})
 	}
+}
+
+// statsWindow resolves the inclusive UTC day-bucket range for the stats query.
+//
+// It prefers an explicit [start, end] window (RFC3339, the same params the list
+// endpoint accepts); when neither is given it falls back to the trailing `days`
+// count (default 7). Both bounds are truncated to their UTC day and the span is
+// clamped to maxStatsDays buckets. ok is false only when start/end is malformed.
+func statsWindow(c *gin.Context) (startDay, endDay time.Time, ok bool) {
+	now := time.Now().UTC()
+
+	startStr := strings.TrimSpace(c.Query("start"))
+	endStr := strings.TrimSpace(c.Query("end"))
+
+	if startStr != "" || endStr != "" {
+		start, err := time.Parse(time.RFC3339, startStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, false
+		}
+
+		end := now
+
+		if endStr != "" {
+			end, err = time.Parse(time.RFC3339, endStr)
+			if err != nil {
+				return time.Time{}, time.Time{}, false
+			}
+		}
+
+		startDay = start.UTC().Truncate(24 * time.Hour)
+		endDay = end.UTC().Truncate(24 * time.Hour)
+
+		if endDay.Before(startDay) {
+			return time.Time{}, time.Time{}, false
+		}
+
+		// Clamp to maxStatsDays buckets, keeping the most recent end.
+		if minStart := endDay.AddDate(0, 0, -(maxStatsDays - 1)); startDay.Before(minStart) {
+			startDay = minStart
+		}
+
+		return startDay, endDay, true
+	}
+
+	days := 7
+
+	if v := c.Query("days"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= maxStatsDays {
+			days = n
+		}
+	}
+
+	// Day buckets are aligned to UTC midnight; the window covers the last
+	// `days` days up to and including the current (partial) day.
+	endDay = now.Truncate(24 * time.Hour)
+	startDay = endDay.AddDate(0, 0, -(days - 1))
+
+	return startDay, endDay, true
 }
 
 // queryAITraceDayCounts runs a `stats by (_time:1d)` LogsQL query and returns
