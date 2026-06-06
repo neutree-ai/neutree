@@ -18,10 +18,6 @@ local function is_table(v)
     return type(v) == "table"
 end
 
-local function string_or_empty(v)
-    return type(v) == "string" and v or ""
-end
-
 local SUPPORTED_ROUTE_TYPES = {
     "/v1/chat/completions",
     "/v1/embeddings",
@@ -257,6 +253,10 @@ local function convert_tools(tools)
             },
         }
     end
+    -- An empty Lua table serialises to a JSON object `{}`, which upstreams
+    -- (e.g. vLLM) reject for the array-typed `tools` field. Omit `tools`
+    -- entirely when the client sent an empty list.
+    if #result == 0 then return nil end
     return result
 end
 
@@ -472,20 +472,22 @@ local function convert_response(openai_resp, request_model)
     if is_table(message.tool_calls) then
         for _, tc in ipairs(message.tool_calls) do
             local input = {}
-            local fn = is_table(tc["function"]) and tc["function"] or EMPTY
-            local args = fn.arguments
-            if type(args) == "string" then
-                local parsed, err = cjson.decode(args)
+            if tc["function"] and tc["function"].arguments then
+                local parsed, err = cjson.decode(tc["function"].arguments)
                 if err or parsed == nil then
-                    input = { raw = args }
+                    input = { raw = tc["function"].arguments }
                 else
                     input = parsed
                 end
             end
+            local fn_name = (tc["function"] or EMPTY).name
+            if fn_name == nil or fn_name == cjson.null then
+                fn_name = ""
+            end
             content[#content + 1] = {
                 type = "tool_use",
                 id = tc.id,
-                name = string_or_empty(fn.name),
+                name = fn_name,
                 input = input,
             }
         end
@@ -617,6 +619,8 @@ local function handle_openai_json_response()
         return
     end
 
+    kong.ctx.plugin.response_body_raw = response_body
+
     local ai_response, err = cjson.decode(response_body)
     if err then
         return
@@ -624,6 +628,10 @@ local function handle_openai_json_response()
 
     local route_type = kong.ctx.plugin.route_type
     kong.ctx.plugin.response_model = ai_response.model
+    local first_choice = ((ai_response.choices or EMPTY)[1]) or EMPTY
+    if first_choice.finish_reason and first_choice.finish_reason ~= cjson.null then
+        kong.ctx.plugin.finish_reason = first_choice.finish_reason
+    end
     if is_table(ai_response.usage) then
         if route_type == "/v1/chat/completions" then
             kong.ctx.plugin.completions_tokens = ai_response.usage.completion_tokens
@@ -644,6 +652,10 @@ local function handle_openai_stream_response(chunk, finished)
     end
 
     local body_buffer = kong.ctx.plugin.sse_body_buffer
+    local raw_buffer = kong.ctx.plugin.sse_raw_buffer
+    if raw_buffer and type(chunk) == "string" and chunk ~= "" then
+        raw_buffer:put(chunk)
+    end
     if type(chunk) == "string" and chunk ~= "" then
         local events = ai_shared.frame_to_events(chunk, normalized_content_type)
         if not events then
@@ -657,6 +669,10 @@ local function handle_openai_stream_response(chunk, finished)
                 if not err then
                     if event_t.choices and #event_t.choices > 0 and body_buffer ~= nil then
                         body_buffer:put(get_token_text(event_t))
+                    end
+                    if event_t.choices and event_t.choices[1] and event_t.choices[1].finish_reason
+                        and event_t.choices[1].finish_reason ~= cjson.null then
+                        kong.ctx.plugin.finish_reason = event_t.choices[1].finish_reason
                     end
                     if kong.ctx.plugin.response_model == nil and event_t.model then
                         kong.ctx.plugin.response_model = event_t.model
@@ -687,6 +703,8 @@ local function handle_anthropic_non_stream_body()
     ctx.body_buffer = ctx.body_buffer .. (ngx.arg[1] or "")
 
     if ngx.arg[2] then
+        ctx.response_body_raw = ctx.body_buffer
+
         local openai_resp, err = cjson.decode(ctx.body_buffer)
         if err or openai_resp == nil then
             ngx.arg[1] = ctx.body_buffer
@@ -694,6 +712,10 @@ local function handle_anthropic_non_stream_body()
         end
 
         ctx.response_model = openai_resp.model
+        local first_choice = ((openai_resp.choices or EMPTY)[1]) or EMPTY
+        if first_choice.finish_reason and first_choice.finish_reason ~= cjson.null then
+            ctx.finish_reason = first_choice.finish_reason
+        end
         if is_table(openai_resp.usage) then
             ctx.input_tokens = openai_resp.usage.prompt_tokens or 0
             ctx.output_tokens = openai_resp.usage.completion_tokens or 0
@@ -711,6 +733,9 @@ local function handle_anthropic_stream_body()
     local chunk = ngx.arg[1] or ""
     local is_last = ngx.arg[2]
     ctx.sse_buffer = (ctx.sse_buffer or "") .. chunk
+    -- POC trace: the anthropic streaming path never reaches the SSE buffer
+    -- set up in header_filter, so accumulate the raw upstream response here.
+    ctx.response_body_raw = (ctx.response_body_raw or "") .. chunk
 
     local output_parts = {}
     while true do
@@ -772,6 +797,9 @@ local function handle_anthropic_stream_body()
 
         local delta = choice.delta or EMPTY
         local finish_reason = choice.finish_reason
+        if finish_reason and finish_reason ~= cjson.null then
+            ctx.finish_reason = finish_reason
+        end
 
         if not ctx.message_started then
             output_parts[#output_parts + 1] = sse_frame("message_start", make_message_start(ctx.request_model, ctx.input_tokens))
@@ -788,7 +816,6 @@ local function handle_anthropic_stream_body()
 
         if is_table(delta.tool_calls) then
             for _, tc in ipairs(delta.tool_calls) do
-                local fn = is_table(tc["function"]) and tc["function"] or EMPTY
                 local tc_index = tc.index or 0
                 if tc_index ~= ctx.current_tool_index then
                     if ctx.current_tool_index ~= nil then
@@ -801,12 +828,12 @@ local function handle_anthropic_stream_body()
                     ctx.current_tool_index = tc_index
                     ctx.anthropic_block_index = ctx.anthropic_block_index + 1
                     local tc_id = tc.id or ""
-                    local tc_name = string_or_empty(fn.name)
+                    local tc_name = (tc["function"] or EMPTY).name or ""
                     output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_tool_use(ctx.anthropic_block_index, tc_id, tc_name))
                 end
 
-                local args = fn.arguments
-                if type(args) == "string" and args ~= "" then
+                local args = (tc["function"] or EMPTY).arguments
+                if args and args ~= "" then
                     output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_json(ctx.anthropic_block_index, args))
                 end
             end
@@ -865,6 +892,8 @@ function AIGatewayHandler:access(conf)
         if request_body == nil or request_body == "" then
             return anthropic_error(400, "invalid_request_error", "Request body is required")
         end
+
+        kong.ctx.plugin.request_body_raw = request_body
 
         local anthropic_req, err = cjson.decode(request_body)
         if err or anthropic_req == nil then
@@ -947,12 +976,15 @@ function AIGatewayHandler:access(conf)
         return fail(400, "request body can not be null")
     end
 
+    kong.ctx.plugin.request_body_raw = request_body
+
     local ai_request, err = cjson.decode(request_body)
     if err then
         return fail(400, "request body is not json format")
     end
 
     kong.ctx.plugin.request_model = ai_request.model
+    kong.ctx.plugin.is_stream = ai_request.stream == true
 
     if conf.upstreams then
         if not ai_request.model or ai_request.model == "" then
@@ -1018,6 +1050,7 @@ function AIGatewayHandler:header_filter(conf)
     local normalized_content_type = content_type and content_type:sub(1, (content_type:find(";") or 0) - 1)
     if normalized_content_type and normalized_content_type == "text/event-stream" then
         kong.ctx.plugin.sse_body_buffer = buffer.new()
+        kong.ctx.plugin.sse_raw_buffer = buffer.new()
         return true
     end
 
@@ -1031,6 +1064,11 @@ function AIGatewayHandler:body_filter(conf)
 
     local response_status = kong.service.response.get_status()
     if response_status ~= 200 then
+        -- POC trace: error responses bypass the transform paths below, and
+        -- streaming requests have no response buffering — so capture the raw
+        -- error body here for the log phase to surface.
+        local ctx = kong.ctx.plugin
+        ctx.response_body_raw = (ctx.response_body_raw or "") .. (ngx.arg[1] or "")
         return
     end
 
@@ -1052,6 +1090,30 @@ function AIGatewayHandler:log(conf)
     end
 
     local response_status = kong.service.response.get_status()
+
+    -- POC: emit raw req/res trace for every request (incl. failures)
+    local response_body = kong.ctx.plugin.response_body_raw
+    if response_body == nil and kong.ctx.plugin.sse_raw_buffer ~= nil then
+        response_body = kong.ctx.plugin.sse_raw_buffer:get()
+    end
+    if response_body == nil then
+        local ok, body = pcall(kong.service.response.get_raw_body)
+        if ok and body ~= nil then
+            response_body = body
+        end
+    end
+    if kong.ctx.plugin.request_body_raw ~= nil then
+        kong.log.set_serialize_value("ai.trace.request_body", kong.ctx.plugin.request_body_raw)
+    end
+    if response_body ~= nil then
+        kong.log.set_serialize_value("ai.trace.response_body", response_body)
+    end
+    if kong.ctx.plugin.finish_reason ~= nil then
+        kong.log.set_serialize_value("ai.trace.finish_reason", kong.ctx.plugin.finish_reason)
+    end
+    -- POC trace: whether the client requested a streaming response.
+    kong.log.set_serialize_value("ai.trace.stream", kong.ctx.plugin.is_stream == true)
+
     if response_status ~= 200 then
         return
     end

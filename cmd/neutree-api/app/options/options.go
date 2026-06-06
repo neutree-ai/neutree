@@ -109,6 +109,7 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		StorageAccessURL: o.Storage.AccessURL,
 		AuthEndpoint:     o.External.AuthEndpoint,
 		GrafanaURL:       grafanaExternalURL,
+		AITraceStoreURL:  o.External.AITraceStoreURL,
 		Version:          version.Get().AppVersion,
 	}, nil
 }

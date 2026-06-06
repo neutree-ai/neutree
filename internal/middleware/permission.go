@@ -97,6 +97,13 @@ func RequirePermission(permission string, deps PermissionDependencies) gin.Handl
 	}
 }
 
+// CheckWorkspacePermission reports whether the user holds the permission in the
+// given workspace. It delegates to the has_permission DB function, which the
+// enterprise edition overrides to honour workspace scope (community is global).
+func CheckWorkspacePermission(s storage.Storage, userID, workspace, permission string) (bool, error) {
+	return checkPermission(s, userID, workspace, permission)
+}
+
 func checkPermission(s storage.Storage, userID string, workspace, permission string) (bool, error) {
 	var result bool
 
