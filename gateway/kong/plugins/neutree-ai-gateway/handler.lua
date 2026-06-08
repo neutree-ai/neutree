@@ -18,6 +18,10 @@ local function is_table(v)
     return type(v) == "table"
 end
 
+local function string_or_empty(v)
+    return type(v) == "string" and v or ""
+end
+
 local SUPPORTED_ROUTE_TYPES = {
     "/v1/chat/completions",
     "/v1/embeddings",
@@ -472,22 +476,22 @@ local function convert_response(openai_resp, request_model)
     if is_table(message.tool_calls) then
         for _, tc in ipairs(message.tool_calls) do
             local input = {}
-            if tc["function"] and tc["function"].arguments then
-                local parsed, err = cjson.decode(tc["function"].arguments)
+            -- `tc["function"]` may be cjson.null (a truthy userdata), so guard
+            -- with is_table before indexing it (NEU-404).
+            local fn = is_table(tc["function"]) and tc["function"] or EMPTY
+            local args = fn.arguments
+            if type(args) == "string" then
+                local parsed, err = cjson.decode(args)
                 if err or parsed == nil then
-                    input = { raw = tc["function"].arguments }
+                    input = { raw = args }
                 else
                     input = parsed
                 end
             end
-            local fn_name = (tc["function"] or EMPTY).name
-            if fn_name == nil or fn_name == cjson.null then
-                fn_name = ""
-            end
             content[#content + 1] = {
                 type = "tool_use",
                 id = tc.id,
-                name = fn_name,
+                name = string_or_empty(fn.name),
                 input = input,
             }
         end
@@ -733,8 +737,8 @@ local function handle_anthropic_stream_body()
     local chunk = ngx.arg[1] or ""
     local is_last = ngx.arg[2]
     ctx.sse_buffer = (ctx.sse_buffer or "") .. chunk
-    -- POC trace: the anthropic streaming path never reaches the SSE buffer
-    -- set up in header_filter, so accumulate the raw upstream response here.
+    -- The anthropic streaming path never reaches the SSE buffer set up in
+    -- header_filter, so accumulate the raw upstream response here for tracing.
     ctx.response_body_raw = (ctx.response_body_raw or "") .. chunk
 
     local output_parts = {}
@@ -816,6 +820,9 @@ local function handle_anthropic_stream_body()
 
         if is_table(delta.tool_calls) then
             for _, tc in ipairs(delta.tool_calls) do
+                -- `tc["function"]` may be cjson.null (a truthy userdata), so
+                -- guard with is_table before indexing it (NEU-404).
+                local fn = is_table(tc["function"]) and tc["function"] or EMPTY
                 local tc_index = tc.index or 0
                 if tc_index ~= ctx.current_tool_index then
                     if ctx.current_tool_index ~= nil then
@@ -828,19 +835,15 @@ local function handle_anthropic_stream_body()
                     ctx.current_tool_index = tc_index
                     ctx.anthropic_block_index = ctx.anthropic_block_index + 1
                     local tc_id = tc.id or ""
-                    -- Normalise nullish names the same way the non-stream path
-                    -- does: `name or ""` alone leaves cjson.null (a truthy
-                    -- userdata) intact, which would serialise as a non-string
-                    -- name in the emitted SSE frame and break JSON clients.
-                    local tc_name = (tc["function"] or EMPTY).name
-                    if tc_name == nil or tc_name == cjson.null then
-                        tc_name = ""
-                    end
+                    -- Coerce the name through string_or_empty so nil/cjson.null
+                    -- collapse to "" and never leak a non-string into the SSE
+                    -- frame (which would break JSON clients).
+                    local tc_name = string_or_empty(fn.name)
                     output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_tool_use(ctx.anthropic_block_index, tc_id, tc_name))
                 end
 
-                local args = (tc["function"] or EMPTY).arguments
-                if args and args ~= "" then
+                local args = fn.arguments
+                if type(args) == "string" and args ~= "" then
                     output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_json(ctx.anthropic_block_index, args))
                 end
             end
@@ -1071,9 +1074,9 @@ function AIGatewayHandler:body_filter(conf)
 
     local response_status = kong.service.response.get_status()
     if response_status ~= 200 then
-        -- POC trace: error responses bypass the transform paths below, and
-        -- streaming requests have no response buffering — so capture the raw
-        -- error body here for the log phase to surface.
+        -- Error responses bypass the transform paths below, and streaming
+        -- requests have no response buffering — so capture the raw error body
+        -- here for the log phase to surface.
         local ctx = kong.ctx.plugin
         ctx.response_body_raw = (ctx.response_body_raw or "") .. (ngx.arg[1] or "")
         return
@@ -1098,7 +1101,7 @@ function AIGatewayHandler:log(conf)
 
     local response_status = kong.service.response.get_status()
 
-    -- POC: emit raw req/res trace for every request (incl. failures)
+    -- Emit raw req/res trace for every request (incl. failures).
     local response_body = kong.ctx.plugin.response_body_raw
     if response_body == nil and kong.ctx.plugin.sse_raw_buffer ~= nil then
         response_body = kong.ctx.plugin.sse_raw_buffer:get()
@@ -1118,7 +1121,7 @@ function AIGatewayHandler:log(conf)
     if kong.ctx.plugin.finish_reason ~= nil then
         kong.log.set_serialize_value("ai.trace.finish_reason", kong.ctx.plugin.finish_reason)
     end
-    -- POC trace: whether the client requested a streaming response.
+    -- Whether the client requested a streaming response.
     kong.log.set_serialize_value("ai.trace.stream", kong.ctx.plugin.is_stream == true)
 
     if response_status ~= 200 then
