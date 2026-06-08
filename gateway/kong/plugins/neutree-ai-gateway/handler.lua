@@ -828,7 +828,14 @@ local function handle_anthropic_stream_body()
                     ctx.current_tool_index = tc_index
                     ctx.anthropic_block_index = ctx.anthropic_block_index + 1
                     local tc_id = tc.id or ""
-                    local tc_name = (tc["function"] or EMPTY).name or ""
+                    -- Normalise nullish names the same way the non-stream path
+                    -- does: `name or ""` alone leaves cjson.null (a truthy
+                    -- userdata) intact, which would serialise as a non-string
+                    -- name in the emitted SSE frame and break JSON clients.
+                    local tc_name = (tc["function"] or EMPTY).name
+                    if tc_name == nil or tc_name == cjson.null then
+                        tc_name = ""
+                    end
                     output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_tool_use(ctx.anthropic_block_index, tc_id, tc_name))
                 end
 

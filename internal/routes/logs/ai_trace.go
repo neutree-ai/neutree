@@ -387,33 +387,46 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 
 // statsWindow resolves the inclusive UTC day-bucket range for the stats query.
 //
-// It prefers an explicit [start, end] window (RFC3339, the same params the list
-// endpoint accepts); when neither is given it falls back to the trailing `days`
-// count (default 7). Both bounds are truncated to their UTC day and the span is
-// clamped to maxStatsDays buckets. ok is false only when start/end is malformed.
+// `start` and `end` (RFC3339, the same params the list endpoint accepts) are
+// independent, optional bounds:
+//   - `end` defaults to the current (partial) UTC day when omitted.
+//   - `start` present anchors an explicit [start, end] window.
+//   - `start` absent falls back to a trailing `days` window (default 7) ending
+//     at `end`. This means an `end`-only request is a valid trailing window
+//     rather than a 400 — only a malformed start/end is rejected.
+//
+// Both bounds are truncated to their UTC day and the span is clamped to
+// maxStatsDays buckets. ok is false only when start/end is malformed RFC3339 or
+// end precedes start.
 func statsWindow(c *gin.Context) (startDay, endDay time.Time, ok bool) {
 	now := time.Now().UTC()
 
 	startStr := strings.TrimSpace(c.Query("start"))
 	endStr := strings.TrimSpace(c.Query("end"))
 
-	if startStr != "" || endStr != "" {
+	// `end` defaults to now; an explicit value overrides it. Day buckets are
+	// aligned to UTC midnight.
+	end := now
+
+	if endStr != "" {
+		parsed, err := time.Parse(time.RFC3339, endStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, false
+		}
+
+		end = parsed
+	}
+
+	endDay = end.UTC().Truncate(24 * time.Hour)
+
+	if startStr != "" {
+		// Explicit window: [start, end].
 		start, err := time.Parse(time.RFC3339, startStr)
 		if err != nil {
 			return time.Time{}, time.Time{}, false
 		}
 
-		end := now
-
-		if endStr != "" {
-			end, err = time.Parse(time.RFC3339, endStr)
-			if err != nil {
-				return time.Time{}, time.Time{}, false
-			}
-		}
-
 		startDay = start.UTC().Truncate(24 * time.Hour)
-		endDay = end.UTC().Truncate(24 * time.Hour)
 
 		if endDay.Before(startDay) {
 			return time.Time{}, time.Time{}, false
@@ -427,6 +440,7 @@ func statsWindow(c *gin.Context) (startDay, endDay time.Time, ok bool) {
 		return startDay, endDay, true
 	}
 
+	// No `start`: trailing `days` window (default 7) ending at `endDay`.
 	days := 7
 
 	if v := c.Query("days"); v != "" {
@@ -435,9 +449,6 @@ func statsWindow(c *gin.Context) (startDay, endDay time.Time, ok bool) {
 		}
 	}
 
-	// Day buckets are aligned to UTC midnight; the window covers the last
-	// `days` days up to and including the current (partial) day.
-	endDay = now.Truncate(24 * time.Hour)
 	startDay = endDay.AddDate(0, 0, -(days - 1))
 
 	return startDay, endDay, true
