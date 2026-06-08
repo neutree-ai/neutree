@@ -260,11 +260,33 @@ local function convert_tools(tools)
     return result
 end
 
+local function append_system_content(parts, content)
+    if type(content) == "string" then
+        if content ~= "" then
+            parts[#parts + 1] = content
+        end
+    elseif type(content) == "table" then
+        for _, block in ipairs(content) do
+            if type(block) == "table" and type(block.text) == "string" and block.text ~= "" then
+                parts[#parts + 1] = block.text
+            elseif type(block) == "string" and block ~= "" then
+                parts[#parts + 1] = block
+            end
+        end
+    end
+end
+
 local function convert_messages(anthropic_messages)
     local openai_messages = {}
+    local system_parts = {}
 
     for _, msg in ipairs(anthropic_messages) do
-        if msg.role == "user" then
+        local role = msg.role
+        if role == "ctx" or role == "msg" then
+            role = "user"
+        end
+
+        if role == "user" then
             if type(msg.content) == "string" then
                 openai_messages[#openai_messages + 1] = {
                     role = "user",
@@ -362,7 +384,7 @@ local function convert_messages(anthropic_messages)
                     }
                 end
             end
-        elseif msg.role == "assistant" then
+        elseif role == "assistant" then
             if type(msg.content) == "string" then
                 openai_messages[#openai_messages + 1] = {
                     role = "assistant",
@@ -401,12 +423,14 @@ local function convert_messages(anthropic_messages)
                 end
                 openai_messages[#openai_messages + 1] = assistant_msg
             end
+        elseif role == "system" then
+            append_system_content(system_parts, msg.content)
         else
             openai_messages[#openai_messages + 1] = msg
         end
     end
 
-    return openai_messages
+    return openai_messages, system_parts
 end
 
 local function convert_request(anthropic_req)
@@ -419,23 +443,18 @@ local function convert_request(anthropic_req)
     }
 
     local messages = {}
+    local system_parts = {}
     if anthropic_req.system then
-        if type(anthropic_req.system) == "string" then
-            messages[#messages + 1] = { role = "system", content = anthropic_req.system }
-        elseif type(anthropic_req.system) == "table" then
-            local parts = {}
-            for _, block in ipairs(anthropic_req.system) do
-                if type(block) == "table" and block.text then
-                    parts[#parts + 1] = block.text
-                elseif type(block) == "string" then
-                    parts[#parts + 1] = block
-                end
-            end
-            messages[#messages + 1] = { role = "system", content = table.concat(parts, "\n\n") }
-        end
+        append_system_content(system_parts, anthropic_req.system)
     end
 
-    local converted = convert_messages(anthropic_req.messages or {})
+    local converted, inline_system_parts = convert_messages(anthropic_req.messages or {})
+    for _, part in ipairs(inline_system_parts) do
+        system_parts[#system_parts + 1] = part
+    end
+    if #system_parts > 0 then
+        messages[#messages + 1] = { role = "system", content = table.concat(system_parts, "\n\n") }
+    end
     for _, m in ipairs(converted) do
         messages[#messages + 1] = m
     end
