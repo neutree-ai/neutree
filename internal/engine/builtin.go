@@ -26,6 +26,11 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 		return nil, err
 	}
 
+	vllmV0_22_1EngineSchema, err := GetVLLMV0_22_1EngineSchema()
+	if err != nil {
+		return nil, err
+	}
+
 	sglangV0_5_10EngineSchema, err := GetSGLangV0_5_10EngineSchema()
 	if err != nil {
 		return nil, err
@@ -112,6 +117,21 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						DeployTemplate: map[string]map[string]string{
 							"kubernetes": {
 								"default": GetVLLMV0_17_1DeployTemplate(),
+							},
+						},
+					},
+					{
+						Version:      "v0.22.1",
+						ValuesSchema: vllmV0_22_1EngineSchema,
+						Images: map[string]*v1.EngineImage{
+							"nvidia_gpu": {
+								ImageName: "neutree/engine-vllm",
+								Tag:       "v0.22.1-ray2.53.0",
+							},
+						},
+						DeployTemplate: map[string]map[string]string{
+							"kubernetes": {
+								"default": GetVLLMV0_22_1DeployTemplate(),
 							},
 						},
 					},

@@ -2724,6 +2724,10 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 			templateKey: "vllm-v0.17.1",
 		},
 		{
+			name:        "vllm-v0.22.1",
+			templateKey: "vllm-v0.22.1",
+		},
+		{
 			name:        "sglang-v0.5.10",
 			templateKey: "sglang-v0.5.10",
 		},

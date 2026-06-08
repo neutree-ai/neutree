@@ -41,8 +41,9 @@ func TestGetBuiltinEngines(t *testing.T) {
 
 		for _, v := range e.Spec.Versions {
 			switch v.Version {
-			case "v0.11.2", "v0.17.1":
-				if _, ok := v.Images["nvidia_gpu"]; !ok {
+			case "v0.11.2", "v0.17.1", "v0.22.1":
+				nvidiaImg, ok := v.Images["nvidia_gpu"]
+				if !ok {
 					t.Errorf("vllm %s missing nvidia_gpu image", v.Version)
 				}
 				if k8sTemplates, ok := v.DeployTemplate["kubernetes"]; !ok {
@@ -50,8 +51,26 @@ func TestGetBuiltinEngines(t *testing.T) {
 				} else if _, ok := k8sTemplates["default"]; !ok {
 					t.Errorf("vllm %s missing default kubernetes deploy template", v.Version)
 				}
+				if v.Version == "v0.22.1" && ok {
+					if got, want := nvidiaImg.ImageName, "neutree/engine-vllm"; got != want {
+						t.Errorf("vllm %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
+					}
+					if got, want := nvidiaImg.Tag, v.Version+"-ray2.53.0"; got != want {
+						t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
+					}
+					if _, ok := v.Images[v1.SSHImageKeyPrefix+"nvidia_gpu"]; ok {
+						t.Errorf("vllm %s should register only the plain nvidia_gpu image", v.Version)
+					}
+				}
 			}
 		}
+	}
+
+	if _, err := GetEngineSchema("vllm-v0.22.1"); err != nil {
+		t.Errorf("vllm v0.22.1 schema lookup failed: %v", err)
+	}
+	if _, err := GetDeployTemplate("vllm-v0.22.1"); err != nil {
+		t.Errorf("vllm v0.22.1 deploy template lookup failed: %v", err)
 	}
 
 	// Verify sglang v0.5.10 has nvidia_gpu image, k8s default template, and supported tasks (rerank excluded).
