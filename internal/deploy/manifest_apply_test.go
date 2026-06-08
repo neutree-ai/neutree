@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -21,6 +23,28 @@ func newFakeClient(objs ...client.Object) client.Client {
 		WithScheme(scheme).
 		WithObjects(objs...).
 		Build()
+}
+
+type fakeApplyClient struct {
+	client.Client
+}
+
+func (c *fakeApplyClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	if patch.Type() != types.ApplyPatchType {
+		return c.Client.Patch(ctx, obj, patch, opts...)
+	}
+
+	current := obj.DeepCopyObject().(client.Object)
+	err := c.Client.Get(ctx, client.ObjectKeyFromObject(obj), current)
+	if apierrors.IsNotFound(err) {
+		return c.Client.Create(ctx, obj)
+	}
+	if err != nil {
+		return err
+	}
+
+	obj.SetResourceVersion(current.GetResourceVersion())
+	return c.Client.Update(ctx, obj)
 }
 
 func createTestDeployment(name, namespace string, replicas int64) *unstructured.Unstructured {
@@ -57,7 +81,7 @@ func createTestService(name, namespace string) *unstructured.Unstructured {
 			"spec": map[string]interface{}{
 				"ports": []interface{}{
 					map[string]interface{}{
-						"port": 80,
+						"port": int64(80),
 					},
 				},
 			},
@@ -295,9 +319,8 @@ func TestComputeManifestDiff_InvalidLastAppliedJSON(t *testing.T) {
 }
 
 func TestApplyManifests_NoChanges(t *testing.T) {
-	fakeClient := newFakeClient()
-
 	deployment := createTestDeployment("nginx", "test-ns", 3)
+	fakeClient := newFakeClient(deployment)
 
 	lastApplied := []unstructured.Unstructured{*deployment}
 	lastAppliedJSON, _ := json.Marshal(lastApplied)
@@ -315,6 +338,130 @@ func TestApplyManifests_NoChanges(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
+}
+
+func TestApplyManifests_IgnoresLiveDeploymentDefaultedSpecFields(t *testing.T) {
+	desiredDeployment := createTestDeployment("nginx", "test-ns", 1)
+	liveDeployment := createTestDeployment("nginx", "test-ns", 1)
+	assert.NoError(t, unstructured.SetNestedField(liveDeployment.Object, int64(10), "spec", "revisionHistoryLimit"))
+
+	lastApplied := []unstructured.Unstructured{*desiredDeployment}
+	lastAppliedJSON, _ := json.Marshal(lastApplied)
+
+	newObjects := &unstructured.UnstructuredList{
+		Items: []unstructured.Unstructured{*desiredDeployment},
+	}
+
+	fakeClient := &fakeApplyClient{Client: newFakeClient(liveDeployment)}
+	ma := NewManifestApply(fakeClient, "test-ns").
+		WithLastAppliedConfig(string(lastAppliedJSON)).
+		WithNewObjects(newObjects).
+		WithLogger(klog.NewKlogr())
+
+	count, err := ma.ApplyManifests(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+func TestApplyManifests_ReappliesWhenLiveDeploymentDriftsFromLastApplied(t *testing.T) {
+	desiredDeployment := createTestDeployment("nginx", "test-ns", 1)
+	liveDeployment := createTestDeployment("nginx", "test-ns", 0)
+
+	lastApplied := []unstructured.Unstructured{*desiredDeployment}
+	lastAppliedJSON, _ := json.Marshal(lastApplied)
+
+	newObjects := &unstructured.UnstructuredList{
+		Items: []unstructured.Unstructured{*desiredDeployment},
+	}
+
+	fakeClient := &fakeApplyClient{Client: newFakeClient(liveDeployment)}
+	ma := NewManifestApply(fakeClient, "test-ns").
+		WithLastAppliedConfig(string(lastAppliedJSON)).
+		WithNewObjects(newObjects).
+		WithLogger(klog.NewKlogr())
+
+	count, err := ma.ApplyManifests(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	current := createTestDeployment("nginx", "test-ns", 0)
+	err = fakeClient.Get(context.Background(), client.ObjectKey{
+		Namespace: "test-ns",
+		Name:      "nginx",
+	}, current)
+	assert.NoError(t, err)
+
+	replicas, found, err := unstructured.NestedInt64(current.Object, "spec", "replicas")
+	assert.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, int64(1), replicas)
+}
+
+func TestApplyManifests_RecreatesMissingLiveObjectWhenLastAppliedMatchesDesired(t *testing.T) {
+	desiredService := createTestService("nginx", "test-ns")
+
+	lastApplied := []unstructured.Unstructured{*desiredService}
+	lastAppliedJSON, _ := json.Marshal(lastApplied)
+
+	newObjects := &unstructured.UnstructuredList{
+		Items: []unstructured.Unstructured{*desiredService},
+	}
+
+	fakeClient := &fakeApplyClient{Client: newFakeClient()}
+	ma := NewManifestApply(fakeClient, "test-ns").
+		WithLastAppliedConfig(string(lastAppliedJSON)).
+		WithNewObjects(newObjects).
+		WithLogger(klog.NewKlogr())
+
+	count, err := ma.ApplyManifests(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	current := createTestService("nginx", "test-ns")
+	err = fakeClient.Get(context.Background(), client.ObjectKey{
+		Namespace: "test-ns",
+		Name:      "nginx",
+	}, current)
+	assert.NoError(t, err)
+	assert.Equal(t, "Service", current.GetKind())
+}
+
+func TestApplyManifests_ReappliesWhenLiveNoSpecObjectDriftsFromLastApplied(t *testing.T) {
+	desiredConfigMap := createTestConfigMap("settings", "test-ns", "mode", "expected")
+	liveConfigMap := createTestConfigMap("settings", "test-ns", "mode", "stale")
+
+	lastApplied := []unstructured.Unstructured{*desiredConfigMap}
+	lastAppliedJSON, _ := json.Marshal(lastApplied)
+
+	newObjects := &unstructured.UnstructuredList{
+		Items: []unstructured.Unstructured{*desiredConfigMap},
+	}
+
+	fakeClient := &fakeApplyClient{Client: newFakeClient(liveConfigMap)}
+	ma := NewManifestApply(fakeClient, "test-ns").
+		WithLastAppliedConfig(string(lastAppliedJSON)).
+		WithNewObjects(newObjects).
+		WithLogger(klog.NewKlogr())
+
+	count, err := ma.ApplyManifests(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	current := createTestConfigMap("settings", "test-ns", "mode", "stale")
+	err = fakeClient.Get(context.Background(), client.ObjectKey{
+		Namespace: "test-ns",
+		Name:      "settings",
+	}, current)
+	assert.NoError(t, err)
+
+	mode, found, err := unstructured.NestedString(current.Object, "data", "mode")
+	assert.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "expected", mode)
 }
 
 func TestDelete_NoLastAppliedConfig(t *testing.T) {

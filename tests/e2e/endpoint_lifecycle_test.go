@@ -312,6 +312,46 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
 		})
 
+		// TestRail: C2705752
+		It("should resume deployment after pause", Label("C2705752", "resume"), func() {
+			epName := "e2e-ep-lc-pause-resume-" + Cfg.RunID
+			DeferCleanup(func() { deleteEndpoint(epName) })
+
+			By("Creating endpoint with replicas=1 and waiting for Running")
+			yamlPath := applyEndpoint(epName, clusterName, withReplicas(1))
+			defer os.Remove(yamlPath)
+			waitEndpointRunning(epName)
+
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
+			code, body, err := inferChat(ep.Status.ServiceURL, "Hello before pause")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(http.StatusOK), "inference failed before pause: %s", body)
+			Expect(body).To(ContainSubstring("choices"))
+
+			By("Re-applying endpoint with replicas=0 (pause)")
+			pauseYAMLPath := applyEndpoint(epName, clusterName, withReplicas(0))
+			defer os.Remove(pauseYAMLPath)
+			waitEndpointPaused(epName)
+
+			ep = getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Paused"))
+
+			By("Re-applying endpoint with replicas=1 (resume)")
+			resumeYAMLPath := applyEndpoint(epName, clusterName, withReplicas(1))
+			defer os.Remove(resumeYAMLPath)
+			waitEndpointRunning(epName)
+
+			ep = getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
+			code, body, err = inferChat(ep.Status.ServiceURL, "Hello after resume")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(http.StatusOK), "inference failed after resume: %s", body)
+			Expect(body).To(ContainSubstring("choices"))
+
+			deleteEndpoint(epName)
+		})
+
 		// TestRail: C2682160
 		It("should ignore generated status sort column during full-row PATCH", Label("C2682160"), func() {
 			epName := "e2e-ep-lc-fullpatch-" + Cfg.RunID
