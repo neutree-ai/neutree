@@ -360,13 +360,23 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(last.Path).To(Equal("/v1/chat/completions"))
 
 			messages := upstreamMessages(upstreamReq)
-			Expect(messages).NotTo(BeEmpty())
+			Expect(messages).To(HaveLen(3))
 			Expect(countMessagesByRole(messages, "system")).To(Equal(1))
 
 			first, ok := messages[0].(map[string]any)
 			Expect(ok).To(BeTrue())
 			Expect(first["role"]).To(Equal("system"))
 			Expect(first["content"]).To(Equal("Top-level system.\n\nInline system hint."))
+
+			second, ok := messages[1].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(second["role"]).To(Equal("user"))
+			Expect(second["content"]).To(Equal("Hi"))
+
+			third, ok := messages[2].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(third["role"]).To(Equal("assistant"))
+			Expect(third["content"]).To(Equal("Previous answer."))
 		})
 
 		It("should normalize Claude Code ctx and msg roles to user messages", Label("C2705750", "role-normalization"), func() {
