@@ -105,6 +105,8 @@ is set — callers treat the empty result as "AI inference trace disabled".
 {{- if .Values.victorialogs.enabled -}}
 {{- printf "http://%s-victorialogs-service:9428" (include "neutree.fullname" .) -}}
 {{- else if .Values.system.aiTraceStoreUrl -}}
-{{- .Values.system.aiTraceStoreUrl -}}
+{{- /* Trim a trailing slash so callers (e.g. the Vector sink) never render a
+       double-slash path like https://host//insert/... */ -}}
+{{- .Values.system.aiTraceStoreUrl | trimSuffix "/" -}}
 {{- end -}}
 {{- end -}}
