@@ -48,10 +48,15 @@ func (c *StaticNodeClusterController) Reconcile(
 		return err
 	}
 
+	headReady := staticNodeClusterHeadReady(cluster, currentNodes)
 	desiredByName := make(map[string]*v1.StaticNode, len(plan.DesiredNodes))
 
 	for _, node := range plan.DesiredNodes {
 		if node == nil || node.Metadata == nil {
+			continue
+		}
+
+		if deferStaticWorkerNode(cluster, node, headReady) {
 			continue
 		}
 
@@ -81,4 +86,34 @@ func (c *StaticNodeClusterController) Reconcile(
 	}
 
 	return nil
+}
+
+func staticNodeClusterHeadReady(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
+	if cluster == nil || cluster.Spec == nil || cluster.Spec.Head.NodeName == "" {
+		return false
+	}
+
+	for _, node := range nodes {
+		if node == nil || node.Metadata == nil || node.Status == nil {
+			continue
+		}
+
+		if node.Metadata.Name == cluster.Spec.Head.NodeName {
+			return node.Status.Phase == v1.StaticNodePhaseReady
+		}
+	}
+
+	return false
+}
+
+func deferStaticWorkerNode(cluster *v1.StaticNodeCluster, node *v1.StaticNode, headReady bool) bool {
+	if headReady || cluster == nil || cluster.Spec == nil || node == nil || node.Metadata == nil || node.Spec == nil {
+		return false
+	}
+
+	if node.Metadata.Name == cluster.Spec.Head.NodeName {
+		return false
+	}
+
+	return node.Spec.Role == v1.StaticNodeRoleWorker
 }

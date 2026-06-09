@@ -13,8 +13,9 @@ func TestStaticNodeClusterControllerReconcileSyncsStaticNodes(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	store := &fakeStaticNodeClusterStore{
 		currentNodes: []*v1.StaticNode{
-			staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
+			staticNodeStatus("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
 				readyComponent(nodeExporterComponentName),
+				readyComponent(vmagentComponentName),
 			}),
 			staticNodeStatus("stale-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, nil),
 		},
@@ -28,10 +29,26 @@ func TestStaticNodeClusterControllerReconcileSyncsStaticNodes(t *testing.T) {
 	assert.Equal(t, "worker-0", store.upsertedNodes[1].Metadata.Name)
 	require.Len(t, store.deletedNodes, 1)
 	assert.Equal(t, "stale-0", store.deletedNodes[0].Metadata.Name)
-	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, store.updatedStatus.Phase)
+	assert.Equal(t, v1.StaticNodeClusterPhaseDegraded, store.updatedStatus.Phase)
 	assert.Equal(t, 1, store.updatedStatus.ReadyNodes)
 	assert.Equal(t, "default", store.listWorkspace)
 	assert.Equal(t, "static-a", store.listClusterName)
+}
+
+func TestStaticNodeClusterControllerReconcileDefersWorkersUntilHeadReady(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	store := &fakeStaticNodeClusterStore{}
+
+	err := (&StaticNodeClusterController{Store: store}).Reconcile(context.Background(), cluster, nil)
+
+	require.NoError(t, err)
+	require.Len(t, store.upsertedNodes, 1)
+	assert.Equal(t, "head-0", store.upsertedNodes[0].Metadata.Name)
+	assert.Equal(t, v1.StaticNodeRoleHead, store.upsertedNodes[0].Spec.Role)
+	assert.Empty(t, store.deletedNodes)
+	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, store.updatedStatus.Phase)
+	assert.Equal(t, 0, store.updatedStatus.ReadyNodes)
+	assert.False(t, store.updatedStatus.HeadReady)
 }
 
 type fakeStaticNodeClusterStore struct {
