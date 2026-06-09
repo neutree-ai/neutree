@@ -91,6 +91,8 @@ func buildStaticNodeStatus(node *v1.StaticNode, result *StaticNodeReconcileResul
 		return status
 	}
 
+	status.ErrorMessage = ""
+
 	if status.Warm != nil && !status.Warm.Ready {
 		status.Phase = v1.StaticNodePhaseWarming
 

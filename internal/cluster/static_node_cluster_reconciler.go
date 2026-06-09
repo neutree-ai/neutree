@@ -318,14 +318,19 @@ func buildNodeComponents(
 	}
 
 	if role == v1.StaticNodeRoleHead {
+		vmagentArgs := []string{
+			"-promscrape.config=" + vmagentConfigPath,
+			fmt.Sprintf("-httpListenAddr=:%d", defaultVMAgentPort),
+		}
+		if cluster.Spec.MetricsRemoteWriteURL != "" {
+			vmagentArgs = append(vmagentArgs, "-remoteWrite.url="+cluster.Spec.MetricsRemoteWriteURL)
+		}
+
 		components = append(components, v1.NodeComponentSpec{
-			Name:  vmagentComponentName,
-			Type:  v1.NodeComponentTypeMetricsAgent,
-			Image: defaultVMAgentImage,
-			Args: []string{
-				"-promscrape.config=" + vmagentConfigPath,
-				fmt.Sprintf("-httpListenAddr=:%d", defaultVMAgentPort),
-			},
+			Name:             vmagentComponentName,
+			Type:             v1.NodeComponentTypeMetricsAgent,
+			Image:            defaultVMAgentImage,
+			Args:             vmagentArgs,
 			DockerRunOptions: []string{"--net=host"},
 			Volumes: []v1.NodeComponentVolume{
 				{
@@ -415,13 +420,6 @@ func renderVMAgentConfig(
 			}
 			writeVMAgentStaticConfig(&builder, cluster, node, acceleratorExporterComponentName, profile.Metrics.Exporter.Port, extraLabels)
 		}
-	}
-
-	if cluster.Spec.MetricsRemoteWriteURL != "" {
-		builder.WriteString("remote_write:\n")
-		builder.WriteString("- url: ")
-		builder.WriteString(strconv.Quote(cluster.Spec.MetricsRemoteWriteURL))
-		builder.WriteString("\n")
 	}
 
 	return builder.String()

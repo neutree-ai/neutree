@@ -84,6 +84,7 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
 	require.NotNil(t, vmagentComponent)
 	assert.Equal(t, defaultVMAgentImage, vmagentComponent.Image)
+	assert.Contains(t, vmagentComponent.Args, "-remoteWrite.url=http://vm:8480/insert/0/prometheus/")
 	assert.NotEmpty(t, vmagentComponent.ConfigHash)
 	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
 	require.NotNil(t, vmagentConfig)
@@ -93,8 +94,8 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
 	assert.Contains(t, vmagentConfig.Content, `"10.0.0.10:9400"`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:9400"`)
-	assert.Contains(t, vmagentConfig.Content, `remote_write:`)
-	assert.Contains(t, vmagentConfig.Content, `"http://vm:8480/insert/0/prometheus/"`)
+	assert.NotContains(t, vmagentConfig.Content, `remote_write:`)
+	assert.NotContains(t, vmagentConfig.Content, `"http://vm:8480/insert/0/prometheus/"`)
 
 	worker := nodes[1]
 	require.NotNil(t, worker.Metadata)

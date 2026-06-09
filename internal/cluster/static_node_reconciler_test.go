@@ -166,6 +166,30 @@ func TestStaticNodeReconcilerReconcileWarmImages(t *testing.T) {
 	}
 }
 
+func TestBuildStaticNodeStatusClearsPreviousErrorOnSuccess(t *testing.T) {
+	node := &v1.StaticNode{
+		Status: &v1.StaticNodeStatus{
+			Phase:        v1.StaticNodePhaseFailed,
+			ErrorMessage: "previous pull failure",
+		},
+	}
+	result := &StaticNodeReconcileResult{
+		Warm: &v1.WarmStatus{Ready: true},
+		Components: []v1.NodeComponentStatus{
+			{
+				Name:  "ray-head",
+				Ready: true,
+				Phase: v1.NodeComponentPhaseRunning,
+			},
+		},
+	}
+
+	status := buildStaticNodeStatus(node, result, nil)
+
+	assert.Equal(t, v1.StaticNodePhaseReady, status.Phase)
+	assert.Empty(t, status.ErrorMessage)
+}
+
 func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
