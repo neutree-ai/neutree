@@ -426,6 +426,132 @@ func (e *errorClient) Get(ctx context.Context, key client.ObjectKey, obj client.
 	return e.Client.Get(ctx, key, obj, opts...)
 }
 
+func TestKubernetesOrchestratorValidateDependenciesForAcceleratorVirtualization(t *testing.T) {
+	baseContext := func() *OrchestratorContext {
+		return &OrchestratorContext{
+			Cluster: &v1.Cluster{
+				Metadata: &v1.Metadata{Name: "cluster", Workspace: "workspace"},
+				Spec: &v1.ClusterSpec{
+					Type: v1.KubernetesClusterType,
+				},
+				Status: &v1.ClusterStatus{
+					Phase:        v1.ClusterPhaseRunning,
+					ResourceInfo: validVirtualizationResourceInfo(),
+				},
+			},
+			Engine: &v1.Engine{
+				Metadata: &v1.Metadata{Name: "engine", Workspace: "workspace"},
+				Status:   &v1.EngineStatus{Phase: v1.EnginePhaseCreated},
+			},
+			ModelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{Name: "model-registry", Workspace: "workspace"},
+				Status:   &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
+			},
+			ImageRegistry: &v1.ImageRegistry{
+				Metadata: &v1.Metadata{Name: "image-registry", Workspace: "workspace"},
+				Status:   &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
+			},
+			Endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "endpoint", Workspace: "workspace"},
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("1"),
+						Accelerator: map[string]string{
+							v1.AcceleratorTypeKey:                      string(v1.AcceleratorTypeNVIDIAGPU),
+							v1.AcceleratorProductKey:                   "NVIDIA_A100",
+							v1.AcceleratorVirtualizationMemoryMiBKey:   "1024",
+							v1.AcceleratorVirtualizationCorePercentKey: "30",
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("rejects vGPU endpoint when cluster does not enable accelerator virtualization", func(t *testing.T) {
+		err := newKubernetesOrchestrator(Options{}).validateDependencies(baseContext())
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "accelerator virtualization is not enabled")
+	})
+
+	t.Run("rejects vGPU endpoint when accelerator virtualization component is not ready", func(t *testing.T) {
+		ctx := baseContext()
+		ctx.Cluster.Spec.AcceleratorVirtualization = &v1.AcceleratorVirtualizationSpec{Enabled: true}
+		ctx.Cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{
+			v1.ComponentStatusAcceleratorVirtualizationKey: {
+				Phase:   v1.ComponentPhaseNotReady,
+				Reason:  "Installing",
+				Message: "waiting for device plugin",
+			},
+		}
+
+		err := newKubernetesOrchestrator(Options{}).validateDependencies(ctx)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "accelerator virtualization component is not ready")
+	})
+
+	t.Run("allows vGPU endpoint when accelerator virtualization component is ready", func(t *testing.T) {
+		ctx := baseContext()
+		ctx.Cluster.Spec.AcceleratorVirtualization = &v1.AcceleratorVirtualizationSpec{Enabled: true}
+		ctx.Cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{
+			v1.ComponentStatusAcceleratorVirtualizationKey: {
+				Phase: v1.ComponentPhaseReady,
+			},
+		}
+
+		err := newKubernetesOrchestrator(Options{}).validateDependencies(ctx)
+
+		require.NoError(t, err)
+	})
+
+	t.Run("allows vGPU endpoint with legacy component status during rolling upgrade", func(t *testing.T) {
+		ctx := baseContext()
+		ctx.Cluster.Spec.AcceleratorVirtualization = &v1.AcceleratorVirtualizationSpec{Enabled: true}
+		ctx.Cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{
+			legacyAcceleratorVirtualizationComponentStatusKey: {
+				Phase: v1.ComponentPhaseReady,
+			},
+		}
+
+		err := newKubernetesOrchestrator(Options{}).validateDependencies(ctx)
+
+		require.NoError(t, err)
+	})
+}
+
+func validVirtualizationResourceInfo() *v1.ClusterResources {
+	return &v1.ClusterResources{
+		ResourceStatus: v1.ResourceStatus{
+			Available: &v1.ResourceInfo{
+				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorTypeNVIDIAGPU: {
+						Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
+							"NVIDIA_A100": {
+								Quantity: 2,
+								Virtualization: &v1.AcceleratorVirtualizationResource{
+									MemoryMiB: 32768,
+									CoreUnits: 200,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+			v1.AcceleratorTypeNVIDIAGPU: {
+				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
+					"NVIDIA_A100": {
+						MemoryTotalMiB: 40960,
+					},
+				},
+			},
+		},
+	}
+}
+
 // TestBuildVllmDeployment only tests the building of a VLLM default deployment manifest.
 func TestBuildVllmDeployment(t *testing.T) {
 	data := DeploymentManifestVariables{
@@ -489,6 +615,50 @@ func TestBuildVllmDeployment(t *testing.T) {
 	}
 
 	// Additional checks can be added here to validate the structure of the generated object
+}
+
+func TestBuildVllmDeploymentWithPodAnnotations(t *testing.T) {
+	data := DeploymentManifestVariables{
+		NeutreeVersion:  "v0.1.0",
+		ClusterName:     "test-cluster",
+		Workspace:       "test-workspace",
+		Namespace:       "default",
+		ImagePrefix:     "registry.example.com",
+		ImageRepo:       "myrepo",
+		ImageTag:        "v1.0.0",
+		ImagePullSecret: "my-secret",
+		EngineName:      "vllm",
+		EngineVersion:   "v0.17.1",
+		EndpointName:    "test-endpoint",
+		ModelArgs: map[string]interface{}{
+			"name":          "gpt-4",
+			"task":          "text-generation",
+			"path":          "/mnt/models/gpt-4",
+			"registry_type": "bentoml",
+			"registry_path": "/mnt/registry/gpt-4-model",
+			"serve_name":    "gpt-4-serve",
+		},
+		Resources: map[string]string{
+			"nvidia.com/gpu":      "1",
+			"nvidia.com/gpumem":   "10240",
+			"nvidia.com/gpucores": "30",
+		},
+		Annotations: map[string]string{
+			"hami.io/gpu-scheduler-policy": "topology-aware",
+			"nvidia.com/use-gputype":       "Tesla-T4",
+		},
+		RoutingLogic: "roundrobin",
+		Replicas:     1,
+	}
+
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.17.1"), data)
+	require.NoError(t, err)
+	require.Len(t, objs.Items, 1)
+
+	var deployment appsv1.Deployment
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(objs.Items[0].Object, &deployment))
+	assert.Equal(t, "topology-aware", deployment.Spec.Template.Annotations["hami.io/gpu-scheduler-policy"])
+	assert.Equal(t, "Tesla-T4", deployment.Spec.Template.Annotations["nvidia.com/use-gputype"])
 }
 
 // TestBuildLlamacppDeployment only tests the building of a Llamacpp default deployment manifest.
@@ -2680,7 +2850,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 
 			o := &kubernetesOrchestrator{}
 
-			status, err := o.getEndpointStats(fakeClient, "test-namespace", tt.inputEndpoint())
+			status, err := o.getEndpointStats(fakeClient, "test-namespace", &v1.Cluster{Spec: &v1.ClusterSpec{}}, tt.inputEndpoint())
 
 			if tt.expectError {
 				assert.Error(t, err)

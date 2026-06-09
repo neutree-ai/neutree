@@ -144,6 +144,143 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 	}
 }
 
+func TestNVIDIAGPU_ConvertToKubernetesWithHAMiMemoryMiB(t *testing.T) {
+	converter := NewGPUConverter()
+	resourceInfo := &v1.ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:                      string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey:                   "Tesla-T4",
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "10240",
+			v1.AcceleratorVirtualizationCorePercentKey: "30",
+		},
+	}
+
+	k8sResource, err := converter.ConvertToKubernetes(resourceInfo)
+	if err != nil {
+		t.Fatalf("ConvertToKubernetes() error = %v", err)
+	}
+
+	expectedResource := &v1.KubernetesResourceSpec{
+		Requests: map[string]string{
+			NvidiaGPUKubernetesResource.String(): "1",
+			NvidiaGPUMemoryResource.String():     "10240",
+			NvidiaGPUCoreResource.String():       "30",
+		},
+		Limits: map[string]string{
+			NvidiaGPUKubernetesResource.String(): "1",
+			NvidiaGPUMemoryResource.String():     "10240",
+			NvidiaGPUCoreResource.String():       "30",
+		},
+		NodeSelector: map[string]string{},
+		Annotations: map[string]string{
+			NvidiaGPUTopologyPolicyAnnotation: NvidiaGPUTopologyAwarePolicy,
+			NvidiaGPUUseTypeAnnotation:        "Tesla-T4,Tesla T4",
+		},
+	}
+
+	equal, diff, err := util.JsonEqual(k8sResource, expectedResource)
+	if err != nil {
+		t.Fatalf("JsonEqual() error = %v", err)
+	}
+	if !equal {
+		t.Fatalf("ConvertToKubernetes() differs from expected:\n%s", diff)
+	}
+}
+
+func TestNVIDIAGPU_ConvertToKubernetesWithHAMiMemoryPercent(t *testing.T) {
+	converter := NewGPUConverter()
+	resourceInfo := &v1.ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:                        string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey:                     "Tesla-T4",
+			v1.AcceleratorVirtualizationMemoryPercentKey: "50",
+			v1.AcceleratorVirtualizationCorePercentKey:   "30",
+		},
+	}
+
+	k8sResource, err := converter.ConvertToKubernetes(resourceInfo)
+	if err != nil {
+		t.Fatalf("ConvertToKubernetes() error = %v", err)
+	}
+
+	expectedResource := &v1.KubernetesResourceSpec{
+		Requests: map[string]string{
+			NvidiaGPUKubernetesResource.String():       "1",
+			NvidiaGPUMemoryPercentageResource.String(): "50",
+			NvidiaGPUCoreResource.String():             "30",
+		},
+		Limits: map[string]string{
+			NvidiaGPUKubernetesResource.String():       "1",
+			NvidiaGPUMemoryPercentageResource.String(): "50",
+			NvidiaGPUCoreResource.String():             "30",
+		},
+		NodeSelector: map[string]string{},
+		Annotations: map[string]string{
+			NvidiaGPUTopologyPolicyAnnotation: NvidiaGPUTopologyAwarePolicy,
+			NvidiaGPUUseTypeAnnotation:        "Tesla-T4,Tesla T4",
+		},
+	}
+
+	equal, diff, err := util.JsonEqual(k8sResource, expectedResource)
+	if err != nil {
+		t.Fatalf("JsonEqual() error = %v", err)
+	}
+	if !equal {
+		t.Fatalf("ConvertToKubernetes() differs from expected:\n%s", diff)
+	}
+}
+
+func TestNVIDIAGPU_ConvertToKubernetesRejectsInvalidHAMiVirtualization(t *testing.T) {
+	converter := NewGPUConverter()
+	resourceInfo := &v1.ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:                        string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorVirtualizationMemoryMiBKey:     "10240",
+			v1.AcceleratorVirtualizationMemoryPercentKey: "50",
+		},
+	}
+
+	_, err := converter.ConvertToKubernetes(resourceInfo)
+	if err == nil {
+		t.Fatal("expected mutual-exclusive memory validation error")
+	}
+}
+
+func TestHAMiNvidiaUseGPUTypeValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		product  string
+		expected string
+	}{
+		{
+			name:     "nfd tesla product",
+			product:  "Tesla-T4",
+			expected: "Tesla-T4,Tesla T4",
+		},
+		{
+			name:     "nfd nvidia product",
+			product:  "NVIDIA-A100-SXM4-80GB",
+			expected: "NVIDIA-A100-SXM4-80GB,NVIDIA A100-SXM4-80GB,NVIDIA A100 SXM4 80GB,A100-SXM4-80GB,A100 SXM4-80GB,A100 SXM4 80GB",
+		},
+		{
+			name:     "plain product",
+			product:  "L20",
+			expected: "L20",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hamiNvidiaUseGPUTypeValue(tt.product); got != tt.expected {
+				t.Fatalf("hamiNvidiaUseGPUTypeValue() = %q, expected %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestNVIDIAGPU_ConvertToRay(t *testing.T) {
 	tests := []struct {
 		name             string

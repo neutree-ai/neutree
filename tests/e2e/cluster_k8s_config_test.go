@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	neutreeSemver "github.com/neutree-ai/neutree/internal/semver"
 )
 
 var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"), func() {
@@ -36,6 +37,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			kubeconfig  string
 			k8sH        *K8sHelper
 			namespace   string
+			cluster     v1.Cluster
 		)
 
 		BeforeAll(func() {
@@ -57,8 +59,8 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 
 			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
-			c := parseClusterJSON(r.Stdout)
-			namespace = ClusterNamespace(c.Metadata.Workspace, c.Metadata.Name, c.ID)
+			cluster = parseClusterJSON(r.Stdout)
+			namespace = ClusterNamespace(cluster.Metadata.Workspace, cluster.Metadata.Name, cluster.ID)
 		})
 
 		AfterAll(func() {
@@ -132,7 +134,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			Expect(s.Type).To(Equal(corev1.SecretTypeDockerConfigJson))
 		})
 
-		It("should create vmagent observability resources (Deployment, ConfigMap, SA, Role, RoleBinding)", Label("C2612763"), func() {
+		It("should create observability resources", Label("C2612763"), func() {
 			ctx := context.Background()
 
 			_, err := k8sH.GetDeployment(ctx, namespace, "vmagent")
@@ -149,6 +151,27 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 
 			_, err = k8sH.GetRoleBinding(ctx, namespace, "vmagent-rolebinding")
 			Expect(err).NotTo(HaveOccurred(), "vmagent RoleBinding should exist")
+
+			if !clusterVersionSupportsHAMiMonitoring(cluster.Spec.Version) {
+				_, err = k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
+				Expect(err).To(HaveOccurred(), "kube-state-metrics deployment should not exist before cluster version v1.1.0")
+				return
+			}
+
+			_, err = k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
+			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics deployment should exist")
+
+			_, err = k8sH.GetService(ctx, namespace, "neutree-kube-state-metrics")
+			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics Service should exist")
+
+			_, err = k8sH.GetServiceAccount(ctx, namespace, "neutree-kube-state-metrics")
+			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics ServiceAccount should exist")
+
+			_, err = k8sH.GetRole(ctx, namespace, "neutree-kube-state-metrics")
+			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics Role should exist")
+
+			_, err = k8sH.GetRoleBinding(ctx, namespace, "neutree-kube-state-metrics")
+			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics RoleBinding should exist")
 		})
 
 		It("should create router resources (SA, Role, RoleBinding, Deployment, Service)", Label("C2612779"), func() {
@@ -669,3 +692,17 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 	})
 })
+
+func clusterVersionSupportsHAMiMonitoring(version string) bool {
+	baseVersion, err := neutreeSemver.BaseVersion(version)
+	if err != nil {
+		return false
+	}
+
+	lessThanMinVersion, err := neutreeSemver.LessThan(baseVersion, "v1.1.0")
+	if err != nil {
+		return false
+	}
+
+	return !lessThanMinVersion
+}

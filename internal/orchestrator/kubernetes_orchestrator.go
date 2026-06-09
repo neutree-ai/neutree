@@ -13,6 +13,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/deploy"
+	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 
@@ -28,6 +29,8 @@ import (
 const (
 	annEndpointSpecHash = "neutree.ai/endpoint-spec-hash"
 	annNeutreeVersion   = "neutree.ai/neutree-version"
+
+	legacyAcceleratorVirtualizationComponentStatusKey = "hami"
 )
 
 var _ Orchestrator = &kubernetesOrchestrator{}
@@ -92,6 +95,10 @@ func (k *kubernetesOrchestrator) validateDependencies(ctx *OrchestratorContext) 
 		return errors.Errorf("deploy cluster %s is not kubernetes type", ctx.Cluster.Metadata.WorkspaceName())
 	}
 
+	if err := validateAcceleratorVirtualizationDependencies(ctx); err != nil {
+		return err
+	}
+
 	// validate engine status
 	if ctx.Engine.Status == nil || ctx.Engine.Status.Phase != v1.EnginePhaseCreated {
 		return errors.Errorf("engine %s not ready", ctx.Engine.Metadata.WorkspaceName())
@@ -108,6 +115,51 @@ func (k *kubernetesOrchestrator) validateDependencies(ctx *OrchestratorContext) 
 	}
 
 	return nil
+}
+
+func validateAcceleratorVirtualizationDependencies(ctx *OrchestratorContext) error {
+	if ctx.Endpoint == nil ||
+		ctx.Endpoint.Spec == nil ||
+		ctx.Endpoint.Spec.Resources == nil ||
+		!ctx.Endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+		return nil
+	}
+
+	if ctx.Cluster.Spec == nil || !ctx.Cluster.Spec.AcceleratorVirtualizationEnabled() {
+		return errors.Errorf(
+			"endpoint %s requests accelerator virtualization, but deploy cluster %s accelerator virtualization is not enabled",
+			ctx.Endpoint.Metadata.WorkspaceName(),
+			ctx.Cluster.Metadata.WorkspaceName(),
+		)
+	}
+
+	acceleratorVirtualizationStatus := acceleratorVirtualizationComponentStatus(ctx.Cluster)
+	if acceleratorVirtualizationStatus == nil || acceleratorVirtualizationStatus.Phase != v1.ComponentPhaseReady {
+		statusDetails := ""
+		if acceleratorVirtualizationStatus != nil {
+			statusDetails = fmt.Sprintf(": %s %s", acceleratorVirtualizationStatus.Reason, acceleratorVirtualizationStatus.Message)
+		}
+
+		return errors.Errorf(
+			"endpoint %s requests accelerator virtualization, but deploy cluster %s accelerator virtualization component is not ready%s",
+			ctx.Endpoint.Metadata.WorkspaceName(),
+			ctx.Cluster.Metadata.WorkspaceName(),
+			statusDetails,
+		)
+	}
+
+	return nil
+}
+
+func acceleratorVirtualizationComponentStatus(cluster *v1.Cluster) *v1.ComponentStatus {
+	if cluster == nil || cluster.Status == nil || cluster.Status.ComponentStatus == nil {
+		return nil
+	}
+	statuses := cluster.Status.ComponentStatus
+	if status := statuses[v1.ComponentStatusAcceleratorVirtualizationKey]; status != nil {
+		return status
+	}
+	return statuses[legacyAcceleratorVirtualizationComponentStatusKey]
 }
 
 func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
@@ -424,10 +476,15 @@ func (k *kubernetesOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.E
 		return nil, errors.Wrapf(err, "failed to get kubernetes client for cluster %s", deployedCluster.Metadata.Name)
 	}
 
-	return k.getEndpointStats(ctrlClient, util.ClusterNamespace(deployedCluster), endpoint)
+	return k.getEndpointStats(ctrlClient, util.ClusterNamespace(deployedCluster), deployedCluster, endpoint)
 }
 
-func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, namespace string, endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
+func (k *kubernetesOrchestrator) getEndpointStats(
+	ctrlClient client.Client,
+	namespace string,
+	cluster *v1.Cluster,
+	endpoint *v1.Endpoint,
+) (*v1.EndpointStatus, error) {
 	var exists bool
 
 	// now we only use deployment to deploy endpoint,
@@ -515,10 +572,16 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		}
 	}
 
+	resources, err := k.buildEndpointResourceStatus(ctrlClient, namespace, cluster, endpoint, dep.Spec.Selector.MatchLabels)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to build resource status for endpoint %s", endpoint.Metadata.WorkspaceName())
+	}
+
 	// Check if all pods are ready and updated
 	if util.IsDeploymentUpdatedAndReady(dep) {
 		return &v1.EndpointStatus{
-			Phase: v1.EndpointPhaseRUNNING,
+			Phase:     v1.EndpointPhaseRUNNING,
+			Resources: resources,
 		}, nil
 	}
 
@@ -526,6 +589,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseFAILED,
 			ErrorMessage: "Endpoint failed: " + failedMsg,
+			Resources:    resources,
 		}, nil
 	}
 
@@ -535,7 +599,31 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 	return &v1.EndpointStatus{
 		Phase:        v1.EndpointPhaseDEPLOYING,
 		ErrorMessage: "Endpoint deploying in progress: " + errorMessage,
+		Resources:    resources,
 	}, nil
+}
+
+func (k *kubernetesOrchestrator) buildEndpointResourceStatus(
+	ctrlClient client.Client,
+	namespace string,
+	cluster *v1.Cluster,
+	endpoint *v1.Endpoint,
+	selectorLabels map[string]string,
+) (*v1.EndpointResourceStatus, error) {
+	if k.acceleratorMgr == nil {
+		return nil, nil
+	}
+
+	parsers := k.acceleratorMgr.GetAllParsers()
+	resourceClient := resourceview.NewK8sResourceClient(ctrlClient, parsers)
+	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
+
+	return resourceBuilder.BuildEndpointResources(context.Background(), resourceview.ListEndpointInstancesOptions{
+		EndpointName:                     endpoint.Metadata.Name,
+		Namespace:                        namespace,
+		SelectorLabels:                   selectorLabels,
+		AcceleratorVirtualizationEnabled: cluster != nil && cluster.Spec != nil && cluster.Spec.AcceleratorVirtualizationEnabled(),
+	})
 }
 
 // listPods lists pods matching the given labels in the specified namespace.
