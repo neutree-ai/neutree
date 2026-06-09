@@ -9,6 +9,8 @@ local AIStatisticsPluginHandler = {
     VERSION = "0.0.1",
 }
 
+local EMPTY = {}
+
 local function is_table(v)
     return type(v) == "table"
 end
@@ -84,7 +86,7 @@ local function handle_json_response()
     if ai_response.id ~= nil then
         kong.ctx.plugin.message_id = ai_response.id
     end
-    if ai_response.usage then
+    if is_table(ai_response.usage) then
         if route_type == "/v1/chat/completions" then
             kong.ctx.plugin.completions_tokens = ai_response.usage.completion_tokens
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
@@ -132,7 +134,7 @@ local function handle_stream_response(conf, chunk, finished)
                         kong.ctx.plugin.message_id = event_t.id
                     end
                     -- some upstream stream api return token usage in the last event, if exist, record it.
-                    if event_t.usage then
+                    if is_table(event_t.usage) then
                         kong.ctx.plugin.prompt_tokens = event_t.usage.prompt_tokens
                         kong.ctx.plugin.completions_tokens = event_t.usage.completion_tokens
                         kong.ctx.plugin.total_tokens = event_t.usage.total_tokens
