@@ -281,12 +281,14 @@ func (m *ManifestApply) addLiveDriftedObjects(ctx context.Context, diff *Manifes
 				continue
 			}
 
-			return errors.Wrapf(err, "failed to get live object %s/%s", newObj.GetKind(), newObj.GetName())
+			return errors.Wrapf(err, "failed to get live object %s/%s/%s",
+				newObj.GetKind(), newObj.GetNamespace(), newObj.GetName())
 		}
 
 		drifted, err := specDrifted(newObj, liveObj)
 		if err != nil {
-			return errors.Wrapf(err, "failed to compare live object %s/%s", newObj.GetKind(), newObj.GetName())
+			return errors.Wrapf(err, "failed to compare live object %s/%s/%s",
+				newObj.GetKind(), newObj.GetNamespace(), newObj.GetName())
 		}
 
 		if !drifted {
