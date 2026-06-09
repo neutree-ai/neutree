@@ -7,38 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
 )
-
-type GPUStandardResourceAdapter struct{}
-
-func (a *GPUStandardResourceAdapter) MatchKubernetesNode(input resourceview.KubernetesNodeResourceContext) bool {
-	if input.Labels[NvidiaGPUVirtualizationLabelKey] == "true" {
-		return false
-	}
-
-	_, ok := input.AllocatableResources[NvidiaGPUKubernetesResource]
-	return ok
-}
-
-func (a *GPUStandardResourceAdapter) ParseKubernetesNode(
-	input resourceview.KubernetesNodeResourceContext,
-) (*resourceview.KubernetesResourceAdapterResult, error) {
-	allocatable, err := parseStandardNvidiaKubernetesResources(input.AllocatableResources, input.Labels)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse allocatable NVIDIA Kubernetes resources: %w", err)
-	}
-
-	available, err := parseStandardNvidiaKubernetesResources(input.AvailableResources, input.Labels)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse available NVIDIA Kubernetes resources: %w", err)
-	}
-
-	return &resourceview.KubernetesResourceAdapterResult{
-		Allocatable: allocatable,
-		Available:   available,
-	}, nil
-}
 
 func parseStandardNvidiaKubernetesResources(
 	resources map[corev1.ResourceName]resource.Quantity,

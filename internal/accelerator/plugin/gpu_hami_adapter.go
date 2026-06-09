@@ -19,11 +19,6 @@ const (
 
 type GPUHAMiResourceAdapter struct{}
 
-type GPUVirtualizationResourceAdapter struct {
-	hami     GPUHAMiResourceAdapter
-	standard GPUStandardResourceAdapter
-}
-
 type hamiNvidiaRegisteredDevice struct {
 	ID      string `json:"id"`
 	DevMem  int64  `json:"devmem"`
@@ -44,47 +39,38 @@ type hamiNvidiaDeviceUsage struct {
 	coreUnits int64
 }
 
-func (p *GPUResourceParser) KubernetesResourceAdapters(
-	ctx resourceview.KubernetesResourceAdapterContext,
-) []resourceview.KubernetesResourceAdapter {
-	if ctx.AcceleratorVirtualizationEnabled {
-		return []resourceview.KubernetesResourceAdapter{
-			&GPUVirtualizationResourceAdapter{},
-		}
-	}
-
-	return []resourceview.KubernetesResourceAdapter{
-		&GPUStandardResourceAdapter{},
-	}
-}
-
-func (p *GPUResourceParser) KubernetesEndpointResourceAdapters(
-	ctx resourceview.KubernetesResourceAdapterContext,
-) []resourceview.KubernetesEndpointResourceAdapter {
-	if !ctx.AcceleratorVirtualizationEnabled {
-		return nil
-	}
-
-	return []resourceview.KubernetesEndpointResourceAdapter{
-		&GPUHAMiResourceAdapter{},
-	}
-}
-
-func (a *GPUVirtualizationResourceAdapter) MatchKubernetesNode(input resourceview.KubernetesNodeResourceContext) bool {
-	return a.hami.MatchKubernetesNode(input) || a.standard.MatchKubernetesNode(input)
-}
-
-func (a *GPUVirtualizationResourceAdapter) ParseKubernetesNode(
+func (p *GPUResourceParser) ParseKubernetesVirtualizationNode(
 	input resourceview.KubernetesNodeResourceContext,
-) (*resourceview.KubernetesResourceAdapterResult, error) {
-	if a.hami.MatchKubernetesNode(input) {
-		return a.hami.ParseKubernetesNode(input)
-	}
-	if a.standard.MatchKubernetesNode(input) {
-		return a.standard.ParseKubernetesNode(input)
+) (*resourceview.KubernetesResourceParseResult, bool, error) {
+	if input.Labels[NvidiaGPUVirtualizationLabelKey] != "true" {
+		return nil, false, nil
 	}
 
-	return nil, fmt.Errorf("NVIDIA virtualization resource adapter does not match node %s", input.NodeName)
+	devices, err := parseHAMiNvidiaRegisteredDevices(input.Annotations[HAMiNodeNvidiaRegisterAnnotation])
+	if err != nil {
+		return nil, true, err
+	}
+	if len(devices) == 0 {
+		return &resourceview.KubernetesResourceParseResult{}, true, nil
+	}
+
+	usage, err := parseHAMiNvidiaPodUsage(input.Pods)
+	if err != nil {
+		return nil, true, err
+	}
+
+	return buildHAMiNvidiaResourceParseResult(input.Labels, devices, usage), true, nil
+}
+
+func (p *GPUResourceParser) ParseKubernetesVirtualizationEndpoint(
+	input resourceview.KubernetesEndpointResourceContext,
+) ([]resourceview.EndpointInstanceResource, bool, error) {
+	adapter := &GPUHAMiResourceAdapter{}
+	if !adapter.MatchKubernetesEndpoint(input) {
+		return nil, false, nil
+	}
+	instances, err := adapter.ParseKubernetesEndpoint(input)
+	return instances, true, err
 }
 
 func (a *GPUHAMiResourceAdapter) MatchKubernetesNode(input resourceview.KubernetesNodeResourceContext) bool {
@@ -98,7 +84,7 @@ func (a *GPUHAMiResourceAdapter) MatchKubernetesNode(input resourceview.Kubernet
 
 func (a *GPUHAMiResourceAdapter) ParseKubernetesNode(
 	input resourceview.KubernetesNodeResourceContext,
-) (*resourceview.KubernetesResourceAdapterResult, error) {
+) (*resourceview.KubernetesResourceParseResult, error) {
 	devices, err := parseHAMiNvidiaRegisteredDevices(input.Annotations[HAMiNodeNvidiaRegisterAnnotation])
 	if err != nil {
 		return nil, err
@@ -112,7 +98,7 @@ func (a *GPUHAMiResourceAdapter) ParseKubernetesNode(
 		return nil, err
 	}
 
-	return buildHAMiNvidiaResourceAdapterResult(input.Labels, devices, usage), nil
+	return buildHAMiNvidiaResourceParseResult(input.Labels, devices, usage), nil
 }
 
 func (a *GPUHAMiResourceAdapter) MatchKubernetesEndpoint(input resourceview.KubernetesEndpointResourceContext) bool {
@@ -276,11 +262,11 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 	return allocations, nil
 }
 
-func buildHAMiNvidiaResourceAdapterResult(
+func buildHAMiNvidiaResourceParseResult(
 	labels map[string]string,
 	devices []hamiNvidiaRegisteredDevice,
 	usage map[string]hamiNvidiaDeviceUsage,
-) *resourceview.KubernetesResourceAdapterResult {
+) *resourceview.KubernetesResourceParseResult {
 	allocatableGroup := newNvidiaAcceleratorGroup()
 	availableGroup := newNvidiaAcceleratorGroup()
 	metadata := &v1.AcceleratorMetadata{
@@ -319,7 +305,7 @@ func buildHAMiNvidiaResourceAdapterResult(
 		}
 	}
 
-	return &resourceview.KubernetesResourceAdapterResult{
+	return &resourceview.KubernetesResourceParseResult{
 		Allocatable: &v1.ResourceInfo{
 			AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 				v1.AcceleratorTypeNVIDIAGPU: allocatableGroup,

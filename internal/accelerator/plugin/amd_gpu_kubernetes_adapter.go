@@ -7,42 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
 )
-
-type AMDGPUStandardResourceAdapter struct{}
-
-func (p *AMDGPUResourceParser) KubernetesResourceAdapters(
-	_ resourceview.KubernetesResourceAdapterContext,
-) []resourceview.KubernetesResourceAdapter {
-	return []resourceview.KubernetesResourceAdapter{
-		&AMDGPUStandardResourceAdapter{},
-	}
-}
-
-func (a *AMDGPUStandardResourceAdapter) MatchKubernetesNode(input resourceview.KubernetesNodeResourceContext) bool {
-	_, ok := input.AllocatableResources[AMDGPUKubernetesResource]
-	return ok
-}
-
-func (a *AMDGPUStandardResourceAdapter) ParseKubernetesNode(
-	input resourceview.KubernetesNodeResourceContext,
-) (*resourceview.KubernetesResourceAdapterResult, error) {
-	allocatable, err := parseStandardAMDKubernetesResources(input.AllocatableResources, input.Labels)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse allocatable AMD Kubernetes resources: %w", err)
-	}
-
-	available, err := parseStandardAMDKubernetesResources(input.AvailableResources, input.Labels)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse available AMD Kubernetes resources: %w", err)
-	}
-
-	return &resourceview.KubernetesResourceAdapterResult{
-		Allocatable: allocatable,
-		Available:   available,
-	}, nil
-}
 
 func parseStandardAMDKubernetesResources(
 	resources map[corev1.ResourceName]resource.Quantity,

@@ -26,28 +26,6 @@ type ResourceParser interface {
 	ParseFromKubernetes(resource map[corev1.ResourceName]k8sresource.Quantity, labels map[string]string) (*v1.ResourceInfo, error)
 }
 
-type KubernetesResourceAdapterContext struct {
-	AcceleratorVirtualizationEnabled bool
-}
-
-type KubernetesResourceAdapterProvider interface {
-	KubernetesResourceAdapters(ctx KubernetesResourceAdapterContext) []KubernetesResourceAdapter
-}
-
-type KubernetesEndpointResourceAdapterProvider interface {
-	KubernetesEndpointResourceAdapters(ctx KubernetesResourceAdapterContext) []KubernetesEndpointResourceAdapter
-}
-
-type KubernetesResourceAdapter interface {
-	MatchKubernetesNode(input KubernetesNodeResourceContext) bool
-	ParseKubernetesNode(input KubernetesNodeResourceContext) (*KubernetesResourceAdapterResult, error)
-}
-
-type KubernetesEndpointResourceAdapter interface {
-	MatchKubernetesEndpoint(input KubernetesEndpointResourceContext) bool
-	ParseKubernetesEndpoint(input KubernetesEndpointResourceContext) ([]EndpointInstanceResource, error)
-}
-
 type KubernetesNodeResourceContext struct {
 	NodeName             string
 	AllocatableResources map[corev1.ResourceName]k8sresource.Quantity
@@ -81,11 +59,19 @@ type KubernetesEndpointResourceContext struct {
 	Nodes        map[string]KubernetesEndpointNodeResourceContext
 }
 
-type KubernetesResourceAdapterResult struct {
+type KubernetesResourceParseResult struct {
 	Allocatable         *v1.ResourceInfo
 	Available           *v1.ResourceInfo
 	Devices             []*v1.DeviceResource
 	AcceleratorMetadata map[v1.AcceleratorType]*v1.AcceleratorMetadata
+}
+
+type KubernetesVirtualizationResourceParser interface {
+	ParseKubernetesVirtualizationNode(input KubernetesNodeResourceContext) (*KubernetesResourceParseResult, bool, error)
+}
+
+type KubernetesVirtualizationEndpointResourceParser interface {
+	ParseKubernetesVirtualizationEndpoint(input KubernetesEndpointResourceContext) ([]EndpointInstanceResource, bool, error)
 }
 
 const BytesPerGiB = 1024 * 1024 * 1024
@@ -127,13 +113,6 @@ func NewK8sResourceClient(ctrClient client.Client, parsers map[string]ResourcePa
 }
 
 func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions) ([]ResourceNode, error) {
-	adapters := kubernetesResourceAdaptersFromParsers(
-		c.parsers,
-		KubernetesResourceAdapterContext{
-			AcceleratorVirtualizationEnabled: opts.AcceleratorVirtualizationEnabled,
-		},
-	)
-
 	nodeList := &corev1.NodeList{}
 	if err := c.client.List(ctx, nodeList); err != nil {
 		return nil, fmt.Errorf("failed to list k8s nodes: %w", err)
@@ -217,7 +196,8 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 				Annotations:          nodeInfo.annotations,
 				Pods:                 nodeInfo.pods,
 			},
-			adapters,
+			c.parsers,
+			opts.AcceleratorVirtualizationEnabled,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to transform resources for node %s: %w", nodeID, err)
@@ -255,6 +235,9 @@ func (c *K8sResourceClient) ListEndpointInstances(
 	}
 	if len(selectorLabels) == 0 {
 		return nil, fmt.Errorf("endpoint selector labels are empty")
+	}
+	if !opts.AcceleratorVirtualizationEnabled {
+		return nil, nil
 	}
 
 	podList := &corev1.PodList{}
@@ -297,13 +280,7 @@ func (c *K8sResourceClient) ListEndpointInstances(
 		Pods:         pods,
 		Nodes:        nodes,
 	}
-	endpointAdapters := kubernetesEndpointResourceAdaptersFromParsers(
-		c.parsers,
-		KubernetesResourceAdapterContext{
-			AcceleratorVirtualizationEnabled: opts.AcceleratorVirtualizationEnabled,
-		},
-	)
-	if instances, ok, err := transformKubernetesEndpointResourcesWithAdapters(input, endpointAdapters); ok || err != nil {
+	if instances, ok, err := transformKubernetesVirtualizationEndpointResources(input, c.parsers); ok || err != nil {
 		if err != nil {
 			return nil, err
 		}
@@ -345,48 +322,14 @@ func (c *K8sResourceClient) listEndpointNodes(
 	return nodes, nil
 }
 
-func kubernetesResourceAdaptersFromParsers(
-	parsers map[string]ResourceParser,
-	ctx KubernetesResourceAdapterContext,
-) []KubernetesResourceAdapter {
+func sortedParserKeys(parsers map[string]ResourceParser) []string {
 	keys := make([]string, 0, len(parsers))
 	for key := range parsers {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
-	var adapters []KubernetesResourceAdapter
-	for _, key := range keys {
-		provider, ok := parsers[key].(KubernetesResourceAdapterProvider)
-		if !ok {
-			continue
-		}
-		adapters = append(adapters, provider.KubernetesResourceAdapters(ctx)...)
-	}
-
-	return adapters
-}
-
-func kubernetesEndpointResourceAdaptersFromParsers(
-	parsers map[string]ResourceParser,
-	ctx KubernetesResourceAdapterContext,
-) []KubernetesEndpointResourceAdapter {
-	keys := make([]string, 0, len(parsers))
-	for key := range parsers {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var adapters []KubernetesEndpointResourceAdapter
-	for _, key := range keys {
-		provider, ok := parsers[key].(KubernetesEndpointResourceAdapterProvider)
-		if !ok {
-			continue
-		}
-		adapters = append(adapters, provider.KubernetesEndpointResourceAdapters(ctx)...)
-	}
-
-	return adapters
+	return keys
 }
 
 type RayDashboardClient interface {
@@ -468,68 +411,102 @@ func resourceNodeFromStatus(nodeID string, status *v1.ResourceStatus) ResourceNo
 
 func transformKubernetesNodeResources(
 	input KubernetesNodeResourceContext,
-	adapters []KubernetesResourceAdapter,
+	parsers map[string]ResourceParser,
+	acceleratorVirtualizationEnabled bool,
 ) (*v1.ResourceStatus, []*v1.DeviceResource, map[v1.AcceleratorType]*v1.AcceleratorMetadata, error) {
-	if result, ok, err := transformKubernetesResourcesWithAdapters(input, adapters); ok || err != nil {
-		if err != nil {
-			return nil, nil, nil, err
-		}
+	if acceleratorVirtualizationEnabled {
+		if result, ok, err := transformKubernetesVirtualizationNodeResources(input, parsers); ok || err != nil {
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if result == nil {
+				return nil, nil, nil, fmt.Errorf("kubernetes virtualization resource parser returned nil result")
+			}
 
-		return result.status, result.devices, result.metadata, nil
+			status := newKubernetesResourceStatus(input.AvailableResources, input.AllocatableResources)
+			mergeResourceInfoAccelerators(status.Allocatable, result.Allocatable)
+			mergeResourceInfoAccelerators(status.Available, result.Available)
+
+			return status, result.Devices, result.AcceleratorMetadata, nil
+		}
 	}
 
-	return newKubernetesResourceStatus(input.AvailableResources, input.AllocatableResources), nil, nil, nil
+	status, err := transformKubernetesStandardResources(input.AvailableResources, input.AllocatableResources, input.Labels, parsers)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return status, nil, nil, nil
 }
 
-type kubernetesResourceAdapterTransformResult struct {
-	status   *v1.ResourceStatus
-	devices  []*v1.DeviceResource
-	metadata map[v1.AcceleratorType]*v1.AcceleratorMetadata
-}
-
-func transformKubernetesResourcesWithAdapters(
+func transformKubernetesVirtualizationNodeResources(
 	input KubernetesNodeResourceContext,
-	adapters []KubernetesResourceAdapter,
-) (*kubernetesResourceAdapterTransformResult, bool, error) {
-	for _, adapter := range adapters {
-		if !adapter.MatchKubernetesNode(input) {
+	parsers map[string]ResourceParser,
+) (*KubernetesResourceParseResult, bool, error) {
+	for _, key := range sortedParserKeys(parsers) {
+		parser, ok := parsers[key].(KubernetesVirtualizationResourceParser)
+		if !ok {
 			continue
 		}
 
-		adapterResult, err := adapter.ParseKubernetesNode(input)
+		result, matched, err := parser.ParseKubernetesVirtualizationNode(input)
 		if err != nil {
-			return nil, true, err
+			return nil, true, fmt.Errorf("failed to parse Kubernetes virtualization resources for parser %s: %w", key, err)
 		}
-		if adapterResult == nil {
-			return nil, true, fmt.Errorf("kubernetes resource adapter returned nil result")
+		if matched {
+			return result, true, nil
 		}
-
-		status := newKubernetesResourceStatus(input.AvailableResources, input.AllocatableResources)
-		mergeResourceInfoAccelerators(status.Allocatable, adapterResult.Allocatable)
-		mergeResourceInfoAccelerators(status.Available, adapterResult.Available)
-
-		return &kubernetesResourceAdapterTransformResult{
-			status:   status,
-			devices:  adapterResult.Devices,
-			metadata: adapterResult.AcceleratorMetadata,
-		}, true, nil
 	}
 
 	return nil, false, nil
 }
 
-func transformKubernetesEndpointResourcesWithAdapters(
+func transformKubernetesStandardResources(
+	availableResources, allocatableResources map[corev1.ResourceName]k8sresource.Quantity,
+	labels map[string]string,
+	parsers map[string]ResourceParser,
+) (*v1.ResourceStatus, error) {
+	result := newKubernetesResourceStatus(availableResources, allocatableResources)
+	for _, key := range sortedParserKeys(parsers) {
+		parser := parsers[key]
+		allocatableInfo, err := parser.ParseFromKubernetes(allocatableResources, labels)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse allocatable Kubernetes resources for parser %s: %w", key, err)
+		}
+		if allocatableInfo != nil && len(allocatableInfo.AcceleratorGroups) > 0 {
+			mergeAcceleratorGroups(result.Allocatable.AcceleratorGroups, allocatableInfo.AcceleratorGroups)
+			mergeResourceInfoMetadata(result.Allocatable, allocatableInfo.AcceleratorMetadata)
+		}
+
+		availableInfo, err := parser.ParseFromKubernetes(availableResources, labels)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse available Kubernetes resources for parser %s: %w", key, err)
+		}
+		if availableInfo != nil && len(availableInfo.AcceleratorGroups) > 0 {
+			mergeAcceleratorGroups(result.Available.AcceleratorGroups, availableInfo.AcceleratorGroups)
+			mergeResourceInfoMetadata(result.Available, availableInfo.AcceleratorMetadata)
+		}
+	}
+
+	return result, nil
+}
+
+func transformKubernetesVirtualizationEndpointResources(
 	input KubernetesEndpointResourceContext,
-	adapters []KubernetesEndpointResourceAdapter,
+	parsers map[string]ResourceParser,
 ) ([]EndpointInstanceResource, bool, error) {
-	for _, adapter := range adapters {
-		if !adapter.MatchKubernetesEndpoint(input) {
+	for _, key := range sortedParserKeys(parsers) {
+		parser, ok := parsers[key].(KubernetesVirtualizationEndpointResourceParser)
+		if !ok {
 			continue
 		}
 
-		instances, err := adapter.ParseKubernetesEndpoint(input)
+		instances, matched, err := parser.ParseKubernetesVirtualizationEndpoint(input)
 		if err != nil {
-			return nil, true, err
+			return nil, true, fmt.Errorf("failed to parse Kubernetes virtualization endpoint resources for parser %s: %w", key, err)
+		}
+		if !matched {
+			continue
 		}
 
 		return instances, true, nil

@@ -8,7 +8,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
-const MinHAMiMonitoringClusterVersion = "v1.1.0"
+const MinKubeStateMetricsClusterVersion = "v1.1.0"
 
 var metricsManifestTemplate = `
 apiVersion: v1
@@ -202,7 +202,7 @@ data:
         replacement: {{ .ClusterName }}
       - target_label: workspace
         replacement: {{ .Workspace }}
-{{ if .EnableHAMiMonitoring }}
+{{ if .EnableHAMiMonitorScrape }}
     # Scrape HAMi vGPU monitor metrics from the managed HAMi device-plugin pods
     - job_name: 'hami-vgpu-monitor'
       kubernetes_sd_configs:
@@ -236,8 +236,9 @@ data:
         replacement: {{ .ClusterName }}
       - target_label: workspace
         replacement: {{ .Workspace }}
-    # Scrape kube-state-metrics for Neutree pod ownership labels used by
-    # HAMi Endpoint dashboards.
+{{ end }}
+{{ if .EnableKubeStateMetrics }}
+    # Scrape kube-state-metrics for Neutree pod ownership labels.
     - job_name: 'neutree-kube-state-metrics'
       kubernetes_sd_configs:
       - role: pod
@@ -343,7 +344,7 @@ roleRef:
   kind: ClusterRole
   name: vmagent-node-reader-{{ .HashSuffix }}
   apiGroup: rbac.authorization.k8s.io
-{{ if .EnableHAMiMonitoring }}
+{{ if .EnableKubeStateMetrics }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -527,7 +528,8 @@ type MetricsManifestVariables struct {
 	Resources                 map[string]string
 	KubeStateMetricsResources map[string]string
 	HashSuffix                string
-	EnableHAMiMonitoring      bool
+	EnableHAMiMonitorScrape   bool
+	EnableKubeStateMetrics    bool
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
@@ -561,11 +563,11 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 	}
 }
 
-func (m *MetricsComponent) supportsHAMiMonitoring() (bool, error) {
-	return supportsHAMiMonitoringClusterVersion(m.cluster.GetVersion())
+func (m *MetricsComponent) supportsKubeStateMetrics() (bool, error) {
+	return supportsKubeStateMetricsClusterVersion(m.cluster.GetVersion())
 }
 
-func supportsHAMiMonitoringClusterVersion(version string) (bool, error) {
+func supportsKubeStateMetricsClusterVersion(version string) (bool, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return false, nil
@@ -576,7 +578,7 @@ func supportsHAMiMonitoringClusterVersion(version string) (bool, error) {
 		return false, err
 	}
 
-	lessThanMinVersion, err := semver.LessThan(baseVersion, MinHAMiMonitoringClusterVersion)
+	lessThanMinVersion, err := semver.LessThan(baseVersion, MinKubeStateMetricsClusterVersion)
 	if err != nil {
 		return false, err
 	}

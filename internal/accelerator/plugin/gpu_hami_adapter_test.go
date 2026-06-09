@@ -59,6 +59,64 @@ func TestGPUHAMiResourceAdapter_ParseKubernetesNode(t *testing.T) {
 	require.Equal(t, float64(15360), metadata.Products["Tesla-T4"].MemoryTotalMiB)
 }
 
+func TestGPUResourceParser_ParseKubernetesVirtualizationNode(t *testing.T) {
+	parser := &GPUResourceParser{}
+	input := resourceview.KubernetesNodeResourceContext{
+		NodeName: "gpu-node",
+		Labels: map[string]string{
+			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+			NvidiaGPUVirtualizationLabelKey:    "true",
+		},
+		Annotations: map[string]string{
+			HAMiNodeNvidiaRegisterAnnotation: `[
+				{"id":"GPU-1","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true}
+			]`,
+		},
+	}
+
+	result, matched, err := parser.ParseKubernetesVirtualizationNode(input)
+
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Len(t, result.Devices, 1)
+	group := result.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.Equal(t, float64(1), group.Quantity)
+	require.Equal(t, float64(15360), group.Products["Tesla-T4"].Virtualization.MemoryMiB)
+	require.Equal(t, float64(100), group.Products["Tesla-T4"].Virtualization.CoreUnits)
+}
+
+func TestGPUResourceParser_ParseKubernetesVirtualizationNodeDoesNotMatchStandardNode(t *testing.T) {
+	parser := &GPUResourceParser{}
+
+	result, matched, err := parser.ParseKubernetesVirtualizationNode(resourceview.KubernetesNodeResourceContext{
+		Labels: map[string]string{
+			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		},
+	})
+
+	require.NoError(t, err)
+	require.False(t, matched)
+	require.Nil(t, result)
+}
+
+func TestGPUResourceParser_ParseKubernetesVirtualizationNodeMatchesEmptyHAMiRegistration(t *testing.T) {
+	parser := &GPUResourceParser{}
+
+	result, matched, err := parser.ParseKubernetesVirtualizationNode(resourceview.KubernetesNodeResourceContext{
+		Labels: map[string]string{
+			NvidiaGPUVirtualizationLabelKey: "true",
+			NvidiaGPUCountResource:          "2",
+		},
+	})
+
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.NotNil(t, result)
+	require.Nil(t, result.Allocatable)
+	require.Nil(t, result.Available)
+	require.Empty(t, result.Devices)
+}
+
 func TestGPUHAMiResourceAdapter_DoesNotMatchWithoutRegisteredDevices(t *testing.T) {
 	adapter := &GPUHAMiResourceAdapter{}
 

@@ -89,7 +89,7 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 	t.Fatalf("vmagent config map not found in resources")
 }
 
-func TestBuildMetricsResourcesSkipsHAMiMonitoringBeforeV110(t *testing.T) {
+func TestBuildMetricsResourcesSkipsKubeStateMetricsAndHAMiScrapeBeforeV110(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{
