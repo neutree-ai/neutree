@@ -1,0 +1,2 @@
+-- PostgreSQL does not support removing enum values.
+-- The endpoint:trace-read and external_endpoint:trace-read values will remain.
