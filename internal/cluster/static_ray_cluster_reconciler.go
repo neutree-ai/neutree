@@ -119,7 +119,7 @@ func (r *staticRayClusterReconciler) buildStaticNodeCluster(cluster *v1.Cluster)
 		return nil, errors.Wrap(err, "failed to build image prefix")
 	}
 
-	headName := cluster.Metadata.Name + "-head"
+	headName := sshConfig.Provider.HeadIP
 	nodes := []v1.StaticNodeClusterNodeSpec{
 		{
 			Name:    headName,
@@ -129,13 +129,13 @@ func (r *staticRayClusterReconciler) buildStaticNodeCluster(cluster *v1.Cluster)
 		},
 	}
 
-	for i, workerIP := range sshConfig.Provider.WorkerIPs {
+	for _, workerIP := range sshConfig.Provider.WorkerIPs {
 		if workerIP == "" {
 			continue
 		}
 
 		nodes = append(nodes, v1.StaticNodeClusterNodeSpec{
-			Name:    fmt.Sprintf("%s-worker-%d", cluster.Metadata.Name, i),
+			Name:    workerIP,
 			IP:      workerIP,
 			Role:    v1.StaticNodeRoleWorker,
 			SSHAuth: copyAuth(&sshConfig.Auth),
