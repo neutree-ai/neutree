@@ -22,6 +22,52 @@ local function string_or_empty(v)
     return type(v) == "string" and v or ""
 end
 
+-- Capture usage breakdown fields (cache / reasoning / cost) from an
+-- OpenAI-compatible `usage` object into kong.ctx.plugin so the log phase can
+-- forward them to the usage ledger. Only sets values that are actually present.
+local function record_extended_usage(ctx, usage)
+    if not is_table(usage) then
+        return
+    end
+    local ptd = is_table(usage.prompt_tokens_details) and usage.prompt_tokens_details or EMPTY
+    local ctd = is_table(usage.completion_tokens_details) and usage.completion_tokens_details or EMPTY
+    if ptd.cached_tokens ~= nil then
+        ctx.cache_read_tokens = ptd.cached_tokens
+    end
+    local cache_creation = ptd.cache_write_tokens or ptd.cache_creation_tokens
+    if cache_creation ~= nil then
+        ctx.cache_creation_tokens = cache_creation
+    end
+    if ctd.reasoning_tokens ~= nil then
+        ctx.reasoning_tokens = ctd.reasoning_tokens
+    end
+    if usage.cost ~= nil then
+        ctx.cost_usd = usage.cost
+    end
+end
+
+-- Anthropic reports cache tokens separately from input_tokens, while OpenAI
+-- `prompt_tokens` already includes cached tokens. So the Anthropic input_tokens
+-- is prompt_tokens minus the cache read/creation portions.
+local function anthropic_usage_from_openai(usage)
+    usage = is_table(usage) and usage or EMPTY
+    local ptd = is_table(usage.prompt_tokens_details) and usage.prompt_tokens_details or EMPTY
+    local prompt = usage.prompt_tokens or 0
+    local cache_read = ptd.cached_tokens or 0
+    local cache_creation = ptd.cache_write_tokens or ptd.cache_creation_tokens or 0
+    local input = prompt - cache_read - cache_creation
+    if input < 0 then
+        -- provider did not include cache tokens inside prompt_tokens; keep raw
+        input = prompt
+    end
+    return {
+        input_tokens = input,
+        output_tokens = usage.completion_tokens or 0,
+        cache_read_input_tokens = cache_read,
+        cache_creation_input_tokens = cache_creation,
+    }
+end
+
 local SUPPORTED_ROUTE_TYPES = {
     "/v1/chat/completions",
     "/v1/embeddings",
@@ -523,7 +569,6 @@ local function convert_response(openai_resp, request_model)
         }
     end
 
-    local usage = is_table(openai_resp.usage) and openai_resp.usage or EMPTY
     return {
         id = openai_resp.id or ("msg_" .. ngx.now()),
         type = "message",
@@ -532,12 +577,7 @@ local function convert_response(openai_resp, request_model)
         content = content,
         stop_reason = map_finish_reason(choice.finish_reason),
         stop_sequence = cjson.null,
-        usage = {
-            input_tokens = usage.prompt_tokens or 0,
-            output_tokens = usage.completion_tokens or 0,
-            cache_creation_input_tokens = 0,
-            cache_read_input_tokens = 0,
-        },
+        usage = anthropic_usage_from_openai(openai_resp.usage),
     }
 end
 
@@ -655,6 +695,9 @@ local function handle_openai_json_response()
     if first_choice.finish_reason and first_choice.finish_reason ~= cjson.null then
         kong.ctx.plugin.finish_reason = first_choice.finish_reason
     end
+    if ai_response.id ~= nil then
+        kong.ctx.plugin.message_id = ai_response.id
+    end
     if is_table(ai_response.usage) then
         if route_type == "/v1/chat/completions" then
             kong.ctx.plugin.completions_tokens = ai_response.usage.completion_tokens
@@ -664,6 +707,7 @@ local function handle_openai_json_response()
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
             kong.ctx.plugin.total_tokens = ai_response.usage.total_tokens
         end
+        record_extended_usage(kong.ctx.plugin, ai_response.usage)
     end
 end
 
@@ -700,10 +744,14 @@ local function handle_openai_stream_response(chunk, finished)
                     if kong.ctx.plugin.response_model == nil and event_t.model then
                         kong.ctx.plugin.response_model = event_t.model
                     end
+                    if event_t.id ~= nil then
+                        kong.ctx.plugin.message_id = event_t.id
+                    end
                     if is_table(event_t.usage) then
                         kong.ctx.plugin.prompt_tokens = event_t.usage.prompt_tokens
                         kong.ctx.plugin.completions_tokens = event_t.usage.completion_tokens
                         kong.ctx.plugin.total_tokens = event_t.usage.total_tokens
+                        record_extended_usage(kong.ctx.plugin, event_t.usage)
                     end
                 end
             end
@@ -739,9 +787,13 @@ local function handle_anthropic_non_stream_body()
         if first_choice.finish_reason and first_choice.finish_reason ~= cjson.null then
             ctx.finish_reason = first_choice.finish_reason
         end
+        if openai_resp.id ~= nil then
+            ctx.message_id = openai_resp.id
+        end
         if is_table(openai_resp.usage) then
             ctx.input_tokens = openai_resp.usage.prompt_tokens or 0
             ctx.output_tokens = openai_resp.usage.completion_tokens or 0
+            record_extended_usage(ctx, openai_resp.usage)
         end
 
         local anthropic_resp = convert_response(openai_resp, ctx.request_model)
@@ -808,9 +860,13 @@ local function handle_anthropic_stream_body()
         if event_t.model and ctx.response_model == nil then
             ctx.response_model = event_t.model
         end
+        if event_t.id ~= nil then
+            ctx.message_id = event_t.id
+        end
         if is_table(event_t.usage) then
             ctx.input_tokens = event_t.usage.prompt_tokens or ctx.input_tokens
             ctx.output_tokens = event_t.usage.completion_tokens or ctx.output_tokens
+            record_extended_usage(ctx, event_t.usage)
         end
 
         local choice = ((event_t.choices or EMPTY)[1]) or nil
@@ -1151,6 +1207,7 @@ function AIGatewayHandler:log(conf)
         plugin_id = conf.__plugin_id,
         request_model = kong.ctx.plugin.request_model,
         response_model = kong.ctx.plugin.response_model,
+        message_id = kong.ctx.plugin.message_id,
     }
     kong.log.set_serialize_value("ai.statistics.meta", meta)
 
@@ -1168,6 +1225,11 @@ function AIGatewayHandler:log(conf)
             total_tokens = kong.ctx.plugin.total_tokens,
         }
     end
+    -- Usage breakdown fields (nil when upstream did not provide them).
+    usage.cache_read_tokens = kong.ctx.plugin.cache_read_tokens
+    usage.cache_creation_tokens = kong.ctx.plugin.cache_creation_tokens
+    usage.reasoning_tokens = kong.ctx.plugin.reasoning_tokens
+    usage.cost = kong.ctx.plugin.cost_usd
     kong.log.set_serialize_value("ai.statistics.usage", usage)
 end
 
