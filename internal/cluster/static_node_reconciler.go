@@ -275,7 +275,7 @@ func restartComponentContainer(
 	component v1.NodeComponentSpec,
 	componentHash string,
 ) error {
-	if _, err := runner.Run(ctx, "docker pull "+shellArg(component.Image)); err != nil {
+	if err := ensureComponentImage(ctx, runner, component.Image); err != nil {
 		return errors.Wrapf(err, "failed to pull component image %s", component.Image)
 	}
 
@@ -286,6 +286,16 @@ func restartComponentContainer(
 
 	if _, err := runner.Run(ctx, buildDockerRunCommand(node, component, componentHash)); err != nil {
 		return errors.Wrapf(err, "failed to run component container %s", containerName)
+	}
+
+	return nil
+}
+
+func ensureComponentImage(ctx context.Context, runner StaticNodeCommandRunner, image string) error {
+	if _, err := runner.Run(ctx, "docker pull "+shellArg(image)); err == nil {
+		return nil
+	} else if _, inspectErr := runner.Run(ctx, "docker image inspect "+shellArg(image)+" >/dev/null"); inspectErr != nil {
+		return err
 	}
 
 	return nil

@@ -266,6 +266,10 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 				err:     errors.New("pull denied"),
 			},
 			{
+				command: "docker image inspect 'registry.example.com/neutree/neutree-serve:v1.2.0' >/dev/null",
+				err:     errors.New("not found"),
+			},
+			{
 				contains: []string{"docker inspect", "'neutree-static-a-node-exporter'"},
 				err:      errors.New("not found"),
 			},
@@ -296,6 +300,62 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 	assert.Equal(t, componentReasonRunFailed, statuses[0].Reason)
 	assert.True(t, statuses[1].Ready)
 	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[1].Phase)
+	assert.Equal(t, len(runner.responses), runner.calls)
+}
+
+func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:       nodeExporterComponentName,
+					Type:       v1.NodeComponentTypeNodeExporter,
+					Image:      defaultNodeExporterImage,
+					ConfigHash: "hash-node-exporter",
+					HealthCheck: &v1.NodeComponentHealthCheck{
+						HTTPPath: defaultPrometheusHTTPPath,
+						Port:     defaultNodeExporterPort,
+					},
+				},
+			},
+		},
+	}
+	runner := &fakeStaticNodeRunner{
+		responses: []fakeStaticNodeResponse{
+			{
+				contains: []string{"docker inspect", "'neutree-static-a-node-exporter'"},
+				err:      errors.New("not found"),
+			},
+			{
+				command: "docker pull 'quay.io/prometheus/node-exporter:v1.8.2'",
+				err:     errors.New("quay unavailable"),
+			},
+			{
+				command: "docker image inspect 'quay.io/prometheus/node-exporter:v1.8.2' >/dev/null",
+			},
+			{
+				command: "docker rm -f 'neutree-static-a-node-exporter' >/dev/null 2>&1 || true",
+			},
+			{
+				contains: []string{
+					"docker run -d",
+					"--name 'neutree-static-a-node-exporter'",
+					"'quay.io/prometheus/node-exporter:v1.8.2'",
+				},
+			},
+			{
+				command: "curl -fsS --max-time 5 'http://127.0.0.1:9100/metrics'",
+			},
+		},
+	}
+
+	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].Ready)
+	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
