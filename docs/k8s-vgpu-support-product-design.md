@@ -114,6 +114,7 @@ Kubernetes vGPU 支持将物理 GPU 切分为可调度的 vGPU 资源。Neutree 
 
 - 集群类型不是 Kubernetes：页面不展示虚拟化开关。
 - GPU device plugin 冲突：集群详情展示 vGPU 支持 `NotReady` 和后端 reason。
+- NVIDIA MIG 虚拟化模式已开启：集群详情展示 vGPU 支持 `NotReady` 和后端 reason。
 - 不存在可虚拟化 GPU 节点：集群详情展示无候选节点状态。
 
 ### 创建 vGPU Endpoint
@@ -220,6 +221,7 @@ Endpoint
 - 集群类型不支持。
 - 没有加速器插件支持虚拟化。
 - GPU device plugin 冲突。
+- NVIDIA MIG 虚拟化模式已开启。
 - 已存在非 Neutree 管理的 vGPU 支持组件。
 - 没有可开启虚拟化的 GPU 节点。
 

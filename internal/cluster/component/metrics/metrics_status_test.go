@@ -208,7 +208,7 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	assert.False(t, status.KubeStateMetricsDeploymentReady)
 }
 
-func TestSupportsHAMiMonitoringClusterVersion(t *testing.T) {
+func TestSupportsKubeStateMetricsClusterVersion(t *testing.T) {
 	tests := []struct {
 		name    string
 		version string
@@ -224,7 +224,7 @@ func TestSupportsHAMiMonitoringClusterVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := supportsHAMiMonitoringClusterVersion(tt.version)
+			got, err := supportsKubeStateMetricsClusterVersion(tt.version)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return

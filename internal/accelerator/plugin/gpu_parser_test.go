@@ -122,7 +122,7 @@ func TestNVIDIAGPU_ParseFromKubernetes(t *testing.T) {
 	}
 }
 
-func TestNVIDIAGPU_ParseFromKubernetesHAMiVirtualization(t *testing.T) {
+func TestNVIDIAGPU_ParseFromKubernetesVirtualizationLabelUsesStandardSemantics(t *testing.T) {
 	parser := &GPUResourceParser{}
 	result, err := parser.ParseFromKubernetes(map[corev1.ResourceName]resource.Quantity{
 		NvidiaGPUKubernetesResource: resource.MustParse("20"),
@@ -150,17 +150,13 @@ func TestNVIDIAGPU_ParseFromKubernetesHAMiVirtualization(t *testing.T) {
 		},
 		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 			v1.AcceleratorTypeNVIDIAGPU: {
-				Quantity: 2,
+				Quantity: 20,
 				ProductGroups: map[v1.AcceleratorProduct]float64{
-					"Tesla-T4": 2,
+					"Tesla-T4": 20,
 				},
 				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 					"Tesla-T4": {
-						Quantity: 2,
-						Virtualization: &v1.AcceleratorVirtualizationResource{
-							MemoryMiB: 40960,
-							CoreUnits: 200,
-						},
+						Quantity: 20,
 					},
 				},
 			},
@@ -225,7 +221,7 @@ func TestNVIDIAGPU_ParseFromKubernetesDoesNotInferVirtualizationFromHAMiResource
 	}
 }
 
-func TestNVIDIAGPU_ParseFromKubernetesVirtualizationRequiresGPUCountLabel(t *testing.T) {
+func TestNVIDIAGPU_ParseFromKubernetesVirtualizationLabelDoesNotRequireGPUCountLabel(t *testing.T) {
 	parser := &GPUResourceParser{}
 	result, err := parser.ParseFromKubernetes(map[corev1.ResourceName]resource.Quantity{
 		NvidiaGPUKubernetesResource: resource.MustParse("20"),
@@ -240,9 +236,8 @@ func TestNVIDIAGPU_ParseFromKubernetesVirtualizationRequiresGPUCountLabel(t *tes
 	}
 
 	group := result.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	if group.Quantity != 0 {
-		t.Fatalf("expected missing %s label to report 0 physical GPUs, got %v",
-			NvidiaGPUCountResource, group.Quantity)
+	if group.Quantity != 20 {
+		t.Fatalf("expected base parser to keep Kubernetes GPU quantity, got %v", group.Quantity)
 	}
 }
 

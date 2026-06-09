@@ -56,9 +56,9 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		status.TotalPods = totalPods
 	}
 
-	kubeStateMetricsRequired, err := m.supportsHAMiMonitoring()
+	kubeStateMetricsRequired, err := m.supportsKubeStateMetrics()
 	if err != nil {
-		status.Errors = append(status.Errors, fmt.Sprintf("HAMi monitoring support check failed: %v", err))
+		status.Errors = append(status.Errors, fmt.Sprintf("kube-state-metrics support check failed: %v", err))
 		return status, nil
 	}
 	status.KubeStateMetricsRequired = kubeStateMetricsRequired

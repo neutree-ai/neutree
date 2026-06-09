@@ -152,7 +152,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			_, err = k8sH.GetRoleBinding(ctx, namespace, "vmagent-rolebinding")
 			Expect(err).NotTo(HaveOccurred(), "vmagent RoleBinding should exist")
 
-			if !clusterVersionSupportsHAMiMonitoring(cluster.Spec.Version) {
+			if !clusterVersionSupportsKubeStateMetrics(cluster.Spec.Version) {
 				_, err = k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
 				Expect(err).To(HaveOccurred(), "kube-state-metrics deployment should not exist before cluster version v1.1.0")
 				return
@@ -693,7 +693,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 	})
 })
 
-func clusterVersionSupportsHAMiMonitoring(version string) bool {
+func clusterVersionSupportsKubeStateMetrics(version string) bool {
 	baseVersion, err := neutreeSemver.BaseVersion(version)
 	if err != nil {
 		return false

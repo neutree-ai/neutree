@@ -276,6 +276,17 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 		}
 	}
 
+	if err := validateEndpointVirtualizationDeviceFit(
+		cluster.Status,
+		existing,
+		productName,
+		gpuCount,
+		requiredMemoryMiB,
+		requiredCoreUnits,
+	); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -400,6 +411,141 @@ func existingEndpointVirtualizationAllocation(endpoint *v1.Endpoint, productName
 	}
 
 	return 0, float64(usage.MemoryMiB), float64(usage.CoreUnits)
+}
+
+type endpointVirtualizationDeviceCapacity struct {
+	uuid      string
+	memoryMiB int64
+	coreUnits int64
+}
+
+func validateEndpointVirtualizationDeviceFit(
+	status *v1.ClusterStatus,
+	existing *v1.Endpoint,
+	productName string,
+	gpuCount int64,
+	requiredMemoryMiB float64,
+	requiredCoreUnits float64,
+) *endpointValidationError {
+	devices := availableEndpointVirtualizationDevices(status, productName)
+	if len(devices) == 0 {
+		return nil
+	}
+
+	reclaims := existingEndpointVirtualizationDeviceReclaims(existing, productName)
+	for i, device := range devices {
+		reclaim := reclaims[device.uuid]
+		devices[i].memoryMiB += reclaim.memoryMiB
+		devices[i].coreUnits += reclaim.coreUnits
+	}
+
+	requiredCount := int(gpuCount)
+	compatibleCount := 0
+	memoryFitCount := 0
+	coreFitCount := 0
+	for _, device := range devices {
+		memoryFits := requiredMemoryMiB <= 0 || float64(device.memoryMiB) >= requiredMemoryMiB
+		coreFits := requiredCoreUnits <= 0 || float64(device.coreUnits) >= requiredCoreUnits
+
+		if memoryFits {
+			memoryFitCount++
+		}
+		if coreFits {
+			coreFitCount++
+		}
+		if memoryFits && coreFits {
+			compatibleCount++
+		}
+	}
+
+	if compatibleCount >= requiredCount {
+		return nil
+	}
+
+	if requiredMemoryMiB > 0 && memoryFitCount < requiredCount {
+		return &endpointValidationError{
+			Code: "10223",
+			Message: fmt.Sprintf("endpoint requires %.0f MiB vGPU memory per device, but only %d %s device(s) can satisfy it",
+				requiredMemoryMiB, memoryFitCount, productName),
+			Hint: "Reduce virtualization.memory_mib, virtualization.memory_percent, or spec.resources.gpu",
+		}
+	}
+
+	if requiredCoreUnits > 0 && coreFitCount < requiredCount {
+		return &endpointValidationError{
+			Code: "10224",
+			Message: fmt.Sprintf("endpoint requires %.0f vGPU core units per device, but only %d %s device(s) can satisfy it",
+				requiredCoreUnits, coreFitCount, productName),
+			Hint: "Reduce virtualization.core_percent or spec.resources.gpu",
+		}
+	}
+
+	return &endpointValidationError{
+		Code: "10222",
+		Message: fmt.Sprintf("endpoint requires %d %s vGPU device(s) satisfying memory and core requirements, but available compatible device quantity is %d",
+			gpuCount, productName, compatibleCount),
+		Hint: "Reduce virtualization.memory_mib, virtualization.memory_percent, virtualization.core_percent, or spec.resources.gpu",
+	}
+}
+
+func availableEndpointVirtualizationDevices(status *v1.ClusterStatus, productName string) []endpointVirtualizationDeviceCapacity {
+	if status == nil ||
+		status.ResourceInfo == nil ||
+		status.ResourceInfo.NodeResources == nil {
+		return nil
+	}
+
+	devices := []endpointVirtualizationDeviceCapacity{}
+	for _, node := range status.ResourceInfo.NodeResources {
+		if node == nil {
+			continue
+		}
+
+		for _, device := range node.Devices {
+			if device == nil ||
+				!device.Health ||
+				device.Product != productName ||
+				device.Available == nil {
+				continue
+			}
+
+			devices = append(devices, endpointVirtualizationDeviceCapacity{
+				uuid:      device.UUID,
+				memoryMiB: device.Available.MemoryMiB,
+				coreUnits: device.Available.CoreUnits,
+			})
+		}
+	}
+
+	return devices
+}
+
+func existingEndpointVirtualizationDeviceReclaims(
+	endpoint *v1.Endpoint,
+	productName string,
+) map[string]endpointVirtualizationDeviceCapacity {
+	result := make(map[string]endpointVirtualizationDeviceCapacity)
+	if endpoint == nil ||
+		endpoint.Status == nil ||
+		endpoint.Status.Resources == nil {
+		return result
+	}
+
+	for _, replica := range endpoint.Status.Resources.Replicas {
+		for _, device := range replica.Devices {
+			if device.UUID == "" || device.Product != productName {
+				continue
+			}
+
+			reclaim := result[device.UUID]
+			reclaim.uuid = device.UUID
+			reclaim.memoryMiB += device.MemoryMiB
+			reclaim.coreUnits += device.CoreUnits
+			result[device.UUID] = reclaim
+		}
+	}
+
+	return result
 }
 
 func getAvailableVirtualizationProduct(status *v1.ClusterStatus, acceleratorType string, productName string) (*v1.AcceleratorProductResource, bool) {
