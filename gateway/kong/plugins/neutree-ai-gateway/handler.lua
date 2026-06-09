@@ -932,8 +932,23 @@ local function handle_anthropic_stream_body()
     end
 
     local function finish_stream(stop_reason)
-        if ctx.finish_events_sent or not ctx.message_started then
+        if ctx.finish_events_sent then
             return
+        end
+        -- Only synthesise terminal events for a genuine SSE stream. ctx.saw_event
+        -- is set once we have decoded an upstream SSE event (or seen [DONE]); a
+        -- non-SSE 200 body (e.g. an error JSON) leaves it false, so we don't
+        -- fabricate a fake successful message for it.
+        if not ctx.message_started and not ctx.saw_event then
+            return
+        end
+        ensure_started()
+        -- An upstream stream with no content/tool deltas (only a usage chunk or
+        -- a role-only delta) still needs a content block to be a valid Anthropic
+        -- sequence; emit an empty text block when nothing was opened.
+        if (ctx.next_block_index or 0) == 0 then
+            local idx = open_block("text")
+            output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_text(idx))
         end
         close_block()
         output_parts[#output_parts + 1] = sse_frame("message_delta", make_message_delta(stop_reason or map_finish_reason(ctx.finish_reason), anthropic_stream_final_usage(ctx)))
@@ -965,6 +980,7 @@ local function handle_anthropic_stream_body()
         if data_line == "[DONE]" then
             -- By the time [DONE] arrives the trailing usage-only chunk has
             -- already been processed, so finish_stream sees the final usage.
+            ctx.saw_event = true
             finish_stream(map_finish_reason(ctx.finish_reason))
             output_parts[#output_parts + 1] = "data: [DONE]\n\n"
             ctx.done_emitted = true
@@ -975,6 +991,7 @@ local function handle_anthropic_stream_body()
         if parse_err or event_t == nil then
             goto continue
         end
+        ctx.saw_event = true
 
         if event_t.model and ctx.response_model == nil then
             ctx.response_model = event_t.model
@@ -1152,12 +1169,18 @@ function AIGatewayHandler:access(conf)
             kong.ctx.plugin.output_tokens = 0
             kong.ctx.plugin.output_chars = 0
             kong.ctx.plugin.usage_seen = false
+            kong.ctx.plugin.saw_event = false
             kong.ctx.plugin.finish_events_sent = false
             kong.ctx.plugin.done_emitted = false
             -- Streaming never returns usage until the trailing chunk, so the
             -- message_start input_tokens can only be a best-effort estimate
             -- (Anthropic emits input_tokens up front; we approximate it here).
+            -- Unlike the OpenAI path we do not fail the request on an estimation
+            -- error, but we log it so an unexpected 0 input_tokens is traceable.
             local est, est_err = ai_shared.calculate_cost(openai_req or {}, {}, 1.0)
+            if est_err then
+                kong.log.warn("unable to estimate anthropic stream input tokens: ", est_err)
+            end
             kong.ctx.plugin.input_tokens_estimate = (not est_err and est) or 0
         end
 
