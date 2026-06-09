@@ -1,0 +1,19 @@
+{{- if and .Values.victorialogs.enabled .Values.victorialogs.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "neutree.fullname" . }}-victorialogs-pvc
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.victorialogs.persistence.storageClassName }}
+  storageClassName: {{ .Values.victorialogs.persistence.storageClassName }}
+  {{- end }}
+  accessModes:
+  {{- range .Values.victorialogs.persistence.accessModes }}
+    - {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.victorialogs.persistence.size | quote }}
+{{- end }}

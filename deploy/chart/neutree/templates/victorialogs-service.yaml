@@ -1,0 +1,18 @@
+{{- if .Values.victorialogs.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "neutree.fullname" . }}-victorialogs-service
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+    app.kubernetes.io/component: neutree-victorialogs
+spec:
+  type: {{ .Values.victorialogs.service.type }}
+  ports:
+    - port: 9428
+      targetPort: 9428
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/component: neutree-victorialogs
+{{- end }}
