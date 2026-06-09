@@ -3,9 +3,11 @@ package cluster
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -164,6 +166,217 @@ func TestStaticNodeReconcilerReconcileWarmImages(t *testing.T) {
 	}
 }
 
+func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:          nodeExporterComponentName,
+					Type:          v1.NodeComponentTypeNodeExporter,
+					Image:         defaultNodeExporterImage,
+					Args:          []string{"--path.rootfs=/host"},
+					ConfigHash:    "hash-node-exporter",
+					RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+					DockerRunOptions: []string{
+						"--net=host",
+					},
+					HealthCheck: &v1.NodeComponentHealthCheck{
+						HTTPPath: defaultPrometheusHTTPPath,
+						Port:     defaultNodeExporterPort,
+					},
+				},
+			},
+		},
+	}
+	runner := &fakeStaticNodeRunner{
+		responses: []fakeStaticNodeResponse{
+			{
+				contains: []string{"docker inspect", "'neutree-static-a-node-exporter'"},
+				err:      errors.New("not found"),
+			},
+			{
+				command: "docker pull 'quay.io/prometheus/node-exporter:v1.8.2'",
+			},
+			{
+				command: "docker rm -f 'neutree-static-a-node-exporter' >/dev/null 2>&1 || true",
+			},
+			{
+				contains: []string{
+					"docker run -d",
+					"--name 'neutree-static-a-node-exporter'",
+					"--label 'neutree.ai/component-hash=hash-node-exporter'",
+					"--restart unless-stopped",
+					"--net=host",
+					"'quay.io/prometheus/node-exporter:v1.8.2'",
+					"'--path.rootfs=/host'",
+				},
+			},
+			{
+				command: "curl -fsS --max-time 5 'http://127.0.0.1:9100/metrics'",
+			},
+		},
+	}
+
+	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
+	assert.True(t, statuses[0].Ready)
+	assert.Equal(t, "hash-node-exporter", statuses[0].ObservedHash)
+	assert.Equal(t, len(runner.responses), runner.calls)
+}
+
+func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:       "ray-head",
+					Type:       v1.NodeComponentTypeRayHead,
+					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
+					ConfigHash: "hash-ray",
+				},
+				{
+					Name:       nodeExporterComponentName,
+					Type:       v1.NodeComponentTypeNodeExporter,
+					Image:      defaultNodeExporterImage,
+					ConfigHash: "hash-node-exporter",
+					DockerRunOptions: []string{
+						"--net=host",
+					},
+					HealthCheck: &v1.NodeComponentHealthCheck{
+						HTTPPath: defaultPrometheusHTTPPath,
+						Port:     defaultNodeExporterPort,
+					},
+				},
+			},
+		},
+	}
+	runner := &fakeStaticNodeRunner{
+		responses: []fakeStaticNodeResponse{
+			{
+				contains: []string{"docker inspect", "'neutree-static-a-ray-head'"},
+				err:      errors.New("not found"),
+			},
+			{
+				command: "docker pull 'registry.example.com/neutree/neutree-serve:v1.2.0'",
+				err:     errors.New("pull denied"),
+			},
+			{
+				contains: []string{"docker inspect", "'neutree-static-a-node-exporter'"},
+				err:      errors.New("not found"),
+			},
+			{
+				command: "docker pull 'quay.io/prometheus/node-exporter:v1.8.2'",
+			},
+			{
+				command: "docker rm -f 'neutree-static-a-node-exporter' >/dev/null 2>&1 || true",
+			},
+			{
+				contains: []string{
+					"docker run -d",
+					"--name 'neutree-static-a-node-exporter'",
+					"'quay.io/prometheus/node-exporter:v1.8.2'",
+				},
+			},
+			{
+				command: "curl -fsS --max-time 5 'http://127.0.0.1:9100/metrics'",
+			},
+		},
+	}
+
+	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+
+	require.Error(t, err)
+	require.Len(t, statuses, 2)
+	assert.Equal(t, v1.NodeComponentPhaseFailed, statuses[0].Phase)
+	assert.Equal(t, componentReasonRunFailed, statuses[0].Reason)
+	assert.True(t, statuses[1].Ready)
+	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[1].Phase)
+	assert.Equal(t, len(runner.responses), runner.calls)
+}
+
+func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:          vmagentComponentName,
+					Type:          v1.NodeComponentTypeMetricsAgent,
+					Image:         defaultVMAgentImage,
+					ConfigHash:    "hash-vmagent",
+					RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+					DockerRunOptions: []string{
+						"--net=host",
+					},
+					ConfigFiles: []v1.NodeComponentConfigFile{
+						{
+							Path:         vmagentConfigPath,
+							Content:      "scrape_configs: []\n",
+							Mode:         "0644",
+							Sudo:         true,
+							Atomic:       true,
+							CreateParent: true,
+						},
+					},
+					Volumes: []v1.NodeComponentVolume{
+						{
+							HostPath:  vmagentConfigPath,
+							MountPath: vmagentConfigPath,
+							ReadOnly:  true,
+						},
+					},
+					HealthCheck: &v1.NodeComponentHealthCheck{
+						HTTPPath: defaultHealthHTTPPath,
+						Port:     defaultVMAgentPort,
+					},
+				},
+			},
+		},
+	}
+	fileClient := &fakeStaticNodeFileClient{changed: true}
+	runner := &fakeStaticNodeRunner{
+		fileClient: fileClient,
+		responses: []fakeStaticNodeResponse{
+			{
+				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-vmagent'",
+				output:  "hash-vmagent true\n",
+			},
+			{
+				command: "docker pull 'victoriametrics/vmagent:v1.115.0'",
+			},
+			{
+				command: "docker rm -f 'neutree-static-a-vmagent' >/dev/null 2>&1 || true",
+			},
+			{
+				contains: []string{
+					"docker run -d",
+					"--name 'neutree-static-a-vmagent'",
+					"-v '/etc/neutree/vmagent/config.yaml:/etc/neutree/vmagent/config.yaml:ro'",
+					"'victoriametrics/vmagent:v1.115.0'",
+				},
+			},
+			{
+				command: "curl -fsS --max-time 5 'http://127.0.0.1:8429/health'",
+			},
+		},
+	}
+
+	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].Ready)
+	assert.Equal(t, 1, fileClient.calls)
+	assert.Equal(t, vmagentConfigPath, fileClient.path)
+	assert.Equal(t, []byte("scrape_configs: []\n"), fileClient.content)
+	assert.Equal(t, len(runner.responses), runner.calls)
+}
+
 func staticNodeWithWarmImages(images []v1.WarmImageSpec) *v1.StaticNode {
 	return &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
@@ -175,14 +388,16 @@ func staticNodeWithWarmImages(images []v1.WarmImageSpec) *v1.StaticNode {
 }
 
 type fakeStaticNodeRunner struct {
-	responses []fakeStaticNodeResponse
-	calls     int
+	responses  []fakeStaticNodeResponse
+	fileClient *fakeStaticNodeFileClient
+	calls      int
 }
 
 type fakeStaticNodeResponse struct {
-	command string
-	output  string
-	err     error
+	command  string
+	contains []string
+	output   string
+	err      error
 }
 
 func (f *fakeStaticNodeRunner) Run(_ context.Context, command string) (string, error) {
@@ -193,9 +408,76 @@ func (f *fakeStaticNodeRunner) Run(_ context.Context, command string) (string, e
 	response := f.responses[f.calls]
 	f.calls++
 
-	if response.command != command {
+	if response.command != "" && response.command != command {
 		return "", errors.New("unexpected command: " + command + ", want: " + response.command)
 	}
 
+	for _, value := range response.contains {
+		if !strings.Contains(command, value) {
+			return "", errors.New("unexpected command: " + command + ", missing: " + value)
+		}
+	}
+
 	return response.output, response.err
+}
+
+func (f *fakeStaticNodeRunner) Files() commandrunner.FileClient {
+	return f.fileClient
+}
+
+type fakeStaticNodeFileClient struct {
+	changed bool
+	path    string
+	content []byte
+	calls   int
+}
+
+func (f *fakeStaticNodeFileClient) WriteFileIfChanged(
+	_ context.Context,
+	remotePath string,
+	content []byte,
+	_ commandrunner.WriteFileOptions,
+) (bool, error) {
+	f.calls++
+	f.path = remotePath
+	f.content = append([]byte{}, content...)
+
+	return f.changed, nil
+}
+
+func (f *fakeStaticNodeFileClient) WriteFile(
+	_ context.Context,
+	remotePath string,
+	content []byte,
+	_ commandrunner.WriteFileOptions,
+) error {
+	f.calls++
+	f.path = remotePath
+	f.content = append([]byte{}, content...)
+
+	return nil
+}
+
+func (f *fakeStaticNodeFileClient) ReadFile(
+	_ context.Context,
+	_ string,
+	_ commandrunner.ReadFileOptions,
+) ([]byte, error) {
+	return nil, nil
+}
+
+func (f *fakeStaticNodeFileClient) Stat(
+	_ context.Context,
+	_ string,
+	_ commandrunner.StatFileOptions,
+) (*commandrunner.FileStat, error) {
+	return nil, nil
+}
+
+func (f *fakeStaticNodeFileClient) Remove(
+	_ context.Context,
+	_ string,
+	_ commandrunner.RemoveFileOptions,
+) error {
+	return nil
 }

@@ -34,6 +34,7 @@ type StaticNodeClusterNodeSpec struct {
 	Role            StaticNodeRole `json:"role,omitempty"`
 	AcceleratorType string         `json:"accelerator_type,omitempty"`
 	SSHAuthRef      string         `json:"ssh_auth_ref,omitempty"`
+	SSHAuth         *Auth          `json:"ssh_auth,omitempty" api:"-"`
 }
 
 type StaticNodeClusterUpgradeStrategy struct {
@@ -80,6 +81,7 @@ type StaticNodeSpec struct {
 	Role            StaticNodeRole      `json:"role,omitempty"`
 	AcceleratorType string              `json:"accelerator_type,omitempty"`
 	SSHAuthRef      string              `json:"ssh_auth_ref,omitempty"`
+	SSHAuth         *Auth               `json:"ssh_auth,omitempty" api:"-"`
 	Warm            *WarmSpec           `json:"warm,omitempty"`
 	Components      []NodeComponentSpec `json:"components,omitempty"`
 }

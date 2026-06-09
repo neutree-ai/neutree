@@ -29,6 +29,7 @@ func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, profileProvider.called)
+	assert.Equal(t, []string{v1.AcceleratorTypeNVIDIAGPU.String()}, profileProvider.acceleratorTypes)
 	require.Len(t, store.upsertedNodes, 2)
 	assert.Equal(t, "head-0", store.upsertedNodes[0].Metadata.Name)
 	assert.Equal(t, "worker-0", store.upsertedNodes[1].Metadata.Name)
@@ -50,14 +51,17 @@ func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 }
 
 type fakeAcceleratorProfileProvider struct {
-	profiles map[string]*v1.AcceleratorProfile
-	called   bool
+	profiles         map[string]*v1.AcceleratorProfile
+	called           bool
+	acceleratorTypes []string
 }
 
 func (f *fakeAcceleratorProfileProvider) GetAcceleratorProfiles(
 	_ context.Context,
+	acceleratorTypes []string,
 ) (map[string]*v1.AcceleratorProfile, error) {
 	f.called = true
+	f.acceleratorTypes = acceleratorTypes
 
 	return f.profiles, nil
 }
@@ -120,8 +124,9 @@ func controllerStaticNodeCluster() *v1.StaticNodeCluster {
 			},
 			Nodes: []v1.StaticNodeClusterNodeSpec{
 				{
-					Name: "head-0",
-					IP:   "10.0.0.10",
+					Name:            "head-0",
+					IP:              "10.0.0.10",
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 				},
 				{
 					Name: "worker-0",

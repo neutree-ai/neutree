@@ -268,6 +268,12 @@ type Patcher interface {
 	UpdateStatus(id string, data scheme.Object) error
 }
 
+type Writer interface {
+	Create(data scheme.Object) error
+	Update(id string, data scheme.Object) error
+	Delete(id string, data scheme.Object) error
+}
+
 type Reader interface {
 	Get(id string, obj scheme.Object) error
 	List(obj scheme.ObjectList, option ListOption) error
@@ -275,6 +281,7 @@ type Reader interface {
 
 type ObjectStorage interface {
 	Patcher
+	Writer
 	Reader
 }
 

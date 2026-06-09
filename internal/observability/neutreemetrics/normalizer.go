@@ -11,9 +11,6 @@ import (
 const (
 	TargetNodeExporter        = "node-exporter"
 	TargetAcceleratorExporter = "accelerator-exporter"
-
-	AcceleratorTypeNvidiaGPU = "nvidia_gpu"
-	ExporterKindDCGM         = "dcgm-exporter"
 )
 
 type CanonicalLabels struct {
@@ -36,8 +33,6 @@ type NormalizeRequest struct {
 	Labels              CanonicalLabels
 	NodeExporter        ScrapeResult
 	AcceleratorExporter *ScrapeResult
-	AcceleratorType     string
-	ExporterKind        string
 }
 
 type Normalizer struct{}
@@ -64,20 +59,6 @@ func (n *Normalizer) Normalize(req NormalizeRequest) string {
 
 	if req.AcceleratorExporter != nil {
 		samples = append(samples, scrapeUpSample(req.Labels, TargetAcceleratorExporter, req.AcceleratorExporter.Up))
-
-		if req.AcceleratorExporter.Up {
-			acceleratorSamples, supported := normalizeAcceleratorSamples(
-				req.Labels,
-				req.AcceleratorType,
-				req.ExporterKind,
-				req.AcceleratorExporter.Body,
-			)
-			samples = append(samples, acceleratorSamples...)
-
-			if !supported {
-				samples = append(samples, mappingSupportedSample(req.Labels, req.AcceleratorType, req.ExporterKind, false))
-			}
-		}
 	}
 
 	sort.SliceStable(samples, func(i, j int) bool {
@@ -139,46 +120,6 @@ func normalizeNodeSamples(labels CanonicalLabels, raw string) []canonicalSample 
 	return result
 }
 
-func normalizeAcceleratorSamples(
-	labels CanonicalLabels,
-	acceleratorType string,
-	exporterKind string,
-	raw string,
-) ([]canonicalSample, bool) {
-	if acceleratorType != AcceleratorTypeNvidiaGPU || exporterKind != ExporterKindDCGM {
-		return nil, false
-	}
-
-	var result []canonicalSample
-
-	for _, rawSample := range parsePrometheusText(raw) {
-		metricLabels := acceleratorLabels(labels, exporterKind, rawSample.labels)
-
-		switch rawSample.name {
-		case "DCGM_FI_DEV_GPU_UTIL":
-			result = append(result, canonicalSample{
-				name:   "neutree_gpu_utilization_ratio",
-				labels: metricLabels,
-				value:  rawSample.value / 100,
-			})
-		case "DCGM_FI_DEV_FB_USED":
-			result = append(result, canonicalSample{
-				name:   "neutree_gpu_memory_used_bytes",
-				labels: metricLabels,
-				value:  rawSample.value * 1024 * 1024,
-			})
-		case "DCGM_FI_DEV_FB_TOTAL":
-			result = append(result, canonicalSample{
-				name:   "neutree_gpu_memory_total_bytes",
-				labels: metricLabels,
-				value:  rawSample.value * 1024 * 1024,
-			})
-		}
-	}
-
-	return result, true
-}
-
 func scrapeUpSample(labels CanonicalLabels, target string, up bool) canonicalSample {
 	value := float64(0)
 	if up {
@@ -190,28 +131,6 @@ func scrapeUpSample(labels CanonicalLabels, target string, up bool) canonicalSam
 
 	return canonicalSample{
 		name:   "neutree_metrics_scrape_up",
-		labels: metricLabels,
-		value:  value,
-	}
-}
-
-func mappingSupportedSample(
-	labels CanonicalLabels,
-	acceleratorType string,
-	exporterKind string,
-	supported bool,
-) canonicalSample {
-	value := float64(0)
-	if supported {
-		value = 1
-	}
-
-	metricLabels := baseLabels(labels, "neutree-metrics")
-	metricLabels["accelerator_type"] = acceleratorType
-	metricLabels["exporter_kind"] = exporterKind
-
-	return canonicalSample{
-		name:   "neutree_metrics_mapping_supported",
 		labels: metricLabels,
 		value:  value,
 	}
@@ -232,29 +151,6 @@ func baseLabels(labels CanonicalLabels, source string) map[string]string {
 		"node_role":           labels.NodeRole,
 		"source":              source,
 	}
-}
-
-func acceleratorLabels(labels CanonicalLabels, exporterKind string, rawLabels map[string]string) map[string]string {
-	result := baseLabels(labels, TargetAcceleratorExporter)
-	result["exporter_kind"] = exporterKind
-
-	if gpu := rawLabels["gpu"]; gpu != "" {
-		result["gpu"] = gpu
-	}
-
-	if uuid := rawLabels["UUID"]; uuid != "" {
-		result["gpu_uuid"] = uuid
-	}
-
-	if device := rawLabels["device"]; device != "" {
-		result["device"] = device
-	}
-
-	if model := rawLabels["modelName"]; model != "" {
-		result["gpu_model"] = model
-	}
-
-	return result
 }
 
 func parsePrometheusText(raw string) []sample {

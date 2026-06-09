@@ -38,7 +38,7 @@ func (c *StaticNodeController) Reconcile(ctx context.Context, node *v1.StaticNod
 
 	var runner StaticNodeCommandRunner
 
-	if node.Spec != nil && node.Spec.Warm != nil && len(node.Spec.Warm.Images) > 0 {
+	if needsStaticNodeRunner(node) {
 		if c.RunnerFactory == nil {
 			return errors.New("static node runner factory is required")
 		}
@@ -51,8 +51,8 @@ func (c *StaticNodeController) Reconcile(ctx context.Context, node *v1.StaticNod
 		runner = nodeRunner
 	}
 
-	warmStatus, err := reconciler.ReconcileWarmImages(ctx, node, runner)
-	status := buildStaticNodeStatus(node, warmStatus, err)
+	result, err := reconciler.Reconcile(ctx, node, runner)
+	status := buildStaticNodeStatus(node, result, err)
 
 	if updateErr := c.Store.UpdateStaticNodeStatus(ctx, node, status); updateErr != nil {
 		return errors.Wrap(updateErr, "failed to update static node status")
@@ -61,13 +61,29 @@ func (c *StaticNodeController) Reconcile(ctx context.Context, node *v1.StaticNod
 	return err
 }
 
-func buildStaticNodeStatus(node *v1.StaticNode, warmStatus *v1.WarmStatus, reconcileErr error) v1.StaticNodeStatus {
+func needsStaticNodeRunner(node *v1.StaticNode) bool {
+	if node == nil || node.Spec == nil {
+		return false
+	}
+
+	if node.Spec.Warm != nil && len(node.Spec.Warm.Images) > 0 {
+		return true
+	}
+
+	return len(node.Spec.Components) > 0
+}
+
+func buildStaticNodeStatus(node *v1.StaticNode, result *StaticNodeReconcileResult, reconcileErr error) v1.StaticNodeStatus {
 	status := v1.StaticNodeStatus{}
 	if node != nil && node.Status != nil {
 		status = *node.Status
 	}
 
-	status.Warm = warmStatus
+	if result != nil {
+		status.Warm = result.Warm
+		status.Components = result.Components
+	}
+
 	if reconcileErr != nil {
 		status.Phase = v1.StaticNodePhaseFailed
 		status.ErrorMessage = reconcileErr.Error()
@@ -75,11 +91,29 @@ func buildStaticNodeStatus(node *v1.StaticNode, warmStatus *v1.WarmStatus, recon
 		return status
 	}
 
-	if warmStatus == nil || warmStatus.Ready {
-		status.Phase = v1.StaticNodePhaseReady
-	} else {
+	if status.Warm != nil && !status.Warm.Ready {
 		status.Phase = v1.StaticNodePhaseWarming
+
+		return status
 	}
 
+	if !allNodeComponentsReady(status.Components) {
+		status.Phase = v1.StaticNodePhaseReconciling
+
+		return status
+	}
+
+	status.Phase = v1.StaticNodePhaseReady
+
 	return status
+}
+
+func allNodeComponentsReady(components []v1.NodeComponentStatus) bool {
+	for _, component := range components {
+		if !component.Ready || component.Phase != v1.NodeComponentPhaseRunning {
+			return false
+		}
+	}
+
+	return true
 }

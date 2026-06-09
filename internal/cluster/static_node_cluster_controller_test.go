@@ -15,7 +15,6 @@ func TestStaticNodeClusterControllerReconcileSyncsStaticNodes(t *testing.T) {
 		currentNodes: []*v1.StaticNode{
 			staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
 				readyComponent(nodeExporterComponentName),
-				readyComponent(neutreeMetricsComponentName),
 			}),
 			staticNodeStatus("stale-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, nil),
 		},

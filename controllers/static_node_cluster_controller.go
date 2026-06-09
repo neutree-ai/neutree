@@ -11,7 +11,7 @@ import (
 )
 
 type AcceleratorProfileProvider interface {
-	GetAcceleratorProfiles(ctx context.Context) (map[string]*v1.AcceleratorProfile, error)
+	GetAcceleratorProfiles(ctx context.Context, acceleratorTypes []string) (map[string]*v1.AcceleratorProfile, error)
 }
 
 type StaticNodeClusterController struct {
@@ -43,7 +43,10 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 		profiles := map[string]*v1.AcceleratorProfile{}
 
 		if option.AcceleratorProfileProvider != nil {
-			providerProfiles, err := option.AcceleratorProfileProvider.GetAcceleratorProfiles(context.Background())
+			providerProfiles, err := option.AcceleratorProfileProvider.GetAcceleratorProfiles(
+				context.Background(),
+				staticNodeClusterAcceleratorTypes(cluster),
+			)
 			if err != nil {
 				return errors.Wrap(err, "failed to get accelerator profiles")
 			}
@@ -68,4 +71,28 @@ func (c *StaticNodeClusterController) Reconcile(obj interface{}) error {
 	}
 
 	return c.syncHandler(cluster)
+}
+
+func staticNodeClusterAcceleratorTypes(cluster *v1.StaticNodeCluster) []string {
+	if cluster == nil || cluster.Spec == nil {
+		return nil
+	}
+
+	seen := map[string]struct{}{}
+	acceleratorTypes := make([]string, 0, len(cluster.Spec.Nodes))
+
+	for _, node := range cluster.Spec.Nodes {
+		if node.AcceleratorType == "" {
+			continue
+		}
+
+		if _, ok := seen[node.AcceleratorType]; ok {
+			continue
+		}
+
+		seen[node.AcceleratorType] = struct{}{}
+		acceleratorTypes = append(acceleratorTypes, node.AcceleratorType)
+	}
+
+	return acceleratorTypes
 }

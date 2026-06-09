@@ -267,6 +267,61 @@ func NewModelRegistryControllerFactory() ControllerFactory {
 	}
 }
 
+func NewStaticNodeClusterControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		var acceleratorProfileProvider controllers.AcceleratorProfileProvider
+		if getter, ok := opts.config.AcceleratorManager.(controllers.AcceleratorProfileGetter); ok {
+			acceleratorProfileProvider = controllers.NewAcceleratorManagerProfileProvider(getter)
+		}
+
+		staticNodeClusterController, err := controllers.NewStaticNodeClusterController(
+			&controllers.StaticNodeClusterControllerOption{
+				Store:                      controllers.NewStaticNodeObjectStore(opts.storage),
+				AcceleratorProfileProvider: acceleratorProfileProvider,
+			},
+		)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create static node cluster controller")
+		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(staticNodeClusterController),
+			controllers.WithObject(&v1.StaticNodeCluster{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		)
+
+		return ctrl, nil
+	}
+}
+
+func NewStaticNodeControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		staticNodeController, err := controllers.NewStaticNodeController(&controllers.StaticNodeControllerOption{
+			Store:         controllers.NewStaticNodeObjectStore(opts.storage),
+			RunnerFactory: controllers.NewStaticNodeSSHRunnerFactory(),
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create static node controller")
+		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(staticNodeController),
+			controllers.WithObject(&v1.StaticNode{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		)
+
+		return ctrl, nil
+	}
+}
+
 func NewUserProfileControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		userProfileController, err := controllers.NewUserProfileController(&controllers.UserProfileControllerOption{

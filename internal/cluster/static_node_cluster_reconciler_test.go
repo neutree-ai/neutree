@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"encoding/json"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -14,6 +13,13 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	profiles := map[string]*v1.AcceleratorProfile{
 		v1.AcceleratorTypeNVIDIAGPU.String(): {
 			AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+			ClusterRuntime: &v1.RuntimeConfig{
+				Runtime: "nvidia",
+				Env: map[string]string{
+					"ACCELERATOR_TYPE": "gpu",
+				},
+				Options: []string{"--gpus all"},
+			},
 			Metrics: &v1.AcceleratorMetricsProfile{
 				Exporter: &v1.AcceleratorExporterProfile{
 					Kind:             "dcgm-exporter",
@@ -40,51 +46,53 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Equal(t, v1.StaticNodeRoleHead, head.Spec.Role)
 	assert.Equal(t, "10.0.0.10", head.Spec.IP)
 	assert.Equal(t, "ssh-ref", head.Spec.SSHAuthRef)
+	require.NotNil(t, head.Spec.SSHAuth)
+	assert.Equal(t, "ray", head.Spec.SSHAuth.SSHUser)
 	assert.Equal(t, map[string]string{
 		staticNodeClusterLabelKey: "static-a",
 		staticNodeRoleLabelKey:    string(v1.StaticNodeRoleHead),
 	}, head.Metadata.Labels)
+	rayHead := findComponent(head.Spec.Components, "ray-head")
+	require.NotNil(t, rayHead)
+	assert.Equal(t, "registry.example.com/neutree/neutree-serve:v1.2.0", rayHead.Image)
+	assert.Equal(t, []string{"/bin/bash", "-lc"}, rayHead.Command)
+	require.Len(t, rayHead.Args, 1)
+	assert.Contains(t, rayHead.Args[0], "python /home/ray/start.py --head")
+	assert.Contains(t, rayHead.Args[0], "--dashboard-port=8265")
+	assert.Contains(t, rayHead.Args[0], v1.NeutreeServingVersionLabel)
+	assert.NotContains(t, rayHead.Args[0], "--autoscaling-config")
+	assert.Equal(t, "gpu", rayHead.Env["ACCELERATOR_TYPE"])
+	assert.Contains(t, rayHead.DockerRunOptions, "--runtime=nvidia")
+	assert.Contains(t, rayHead.DockerRunOptions, "--gpus all")
 	require.NotNil(t, head.Spec.Warm)
 	assert.Equal(t, "registry.example.com/neutree/neutree-serve:v1.2.0", head.Spec.Warm.Images[0].Ref)
 	assertNodeComponentTypes(t, head.Spec.Components, []v1.NodeComponentType{
 		v1.NodeComponentTypeRayHead,
 		v1.NodeComponentTypeNodeExporter,
 		v1.NodeComponentTypeAcceleratorExporter,
-		v1.NodeComponentTypeMetricsNormalizer,
 		v1.NodeComponentTypeMetricsAgent,
 	})
+	nodeExporter := findComponent(head.Spec.Components, nodeExporterComponentName)
+	require.NotNil(t, nodeExporter)
+	assert.Equal(t, defaultNodeExporterImage, nodeExporter.Image)
 	exporter := findComponent(head.Spec.Components, acceleratorExporterComponentName)
 	require.NotNil(t, exporter)
 	assert.Equal(t, "nvcr.io/nvidia/k8s/dcgm-exporter:test", exporter.Image)
 	assert.Equal(t, []string{"--gpus all", "--cap-add=SYS_ADMIN"}, exporter.DockerRunOptions)
 	assert.Equal(t, 9400, exporter.Ports[0].Port)
 
-	metricsComponent := findComponent(head.Spec.Components, neutreeMetricsComponentName)
-	require.NotNil(t, metricsComponent)
-	assert.NotEmpty(t, metricsComponent.ConfigHash)
-	metricsConfig := findConfigFile(metricsComponent.ConfigFiles, neutreeMetricsConfigPath)
-	require.NotNil(t, metricsConfig)
-	assert.True(t, metricsConfig.Sudo)
-	assert.True(t, metricsConfig.Atomic)
-	assert.True(t, metricsConfig.CreateParent)
-	var parsedMetricsConfig metricsNormalizerConfig
-	require.NoError(t, json.Unmarshal([]byte(metricsConfig.Content), &parsedMetricsConfig))
-	assert.Equal(t, "default", parsedMetricsConfig.Labels["workspace"])
-	assert.Equal(t, "static-a", parsedMetricsConfig.Labels["static_node_cluster"])
-	assert.Equal(t, "head-0", parsedMetricsConfig.Labels["node"])
-	assert.Equal(t, "nvidia_gpu", parsedMetricsConfig.AcceleratorType)
-	assert.Equal(t, "dcgm-exporter", parsedMetricsConfig.ExporterKind)
-	require.Len(t, parsedMetricsConfig.Targets, 2)
-	assert.Equal(t, "http://127.0.0.1:9100/metrics", parsedMetricsConfig.Targets[0].URL)
-	assert.Equal(t, "http://127.0.0.1:9400/metrics", parsedMetricsConfig.Targets[1].URL)
-
 	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
 	require.NotNil(t, vmagentComponent)
+	assert.Equal(t, defaultVMAgentImage, vmagentComponent.Image)
 	assert.NotEmpty(t, vmagentComponent.ConfigHash)
 	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
 	require.NotNil(t, vmagentConfig)
-	assert.Contains(t, vmagentConfig.Content, `"10.0.0.10:19090"`)
-	assert.Contains(t, vmagentConfig.Content, `"10.0.0.11:19090"`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
+	assert.Contains(t, vmagentConfig.Content, `"10.0.0.10:9100"`)
+	assert.Contains(t, vmagentConfig.Content, `"10.0.0.11:9100"`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
+	assert.Contains(t, vmagentConfig.Content, `"10.0.0.10:9400"`)
+	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:9400"`)
 	assert.Contains(t, vmagentConfig.Content, `remote_write:`)
 	assert.Contains(t, vmagentConfig.Content, `"http://vm:8480/insert/0/prometheus/"`)
 
@@ -93,10 +101,15 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	require.NotNil(t, worker.Spec)
 	assert.Equal(t, "worker-0", worker.Metadata.Name)
 	assert.Equal(t, v1.StaticNodeRoleWorker, worker.Spec.Role)
+	rayWorker := findComponent(worker.Spec.Components, "ray-worker")
+	require.NotNil(t, rayWorker)
+	assert.Equal(t, "registry.example.com/neutree/neutree-serve:v1.2.0", rayWorker.Image)
+	require.Len(t, rayWorker.Args, 1)
+	assert.Contains(t, rayWorker.Args[0], "python /home/ray/start.py --address=10.0.0.10:6379")
+	assert.Contains(t, rayWorker.Args[0], v1.StaticNodeProvisionType)
 	assertNodeComponentTypes(t, worker.Spec.Components, []v1.NodeComponentType{
 		v1.NodeComponentTypeRayWorker,
 		v1.NodeComponentTypeNodeExporter,
-		v1.NodeComponentTypeMetricsNormalizer,
 	})
 
 	cluster.Spec.Version = "mutated"
@@ -115,6 +128,20 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodesValidation(t *testing.T) {
 				cluster.Spec.Head.NodeName = "missing"
 			},
 			wantErr: "head node missing not found",
+		},
+		{
+			name: "missing version",
+			mutate: func(cluster *v1.StaticNodeCluster) {
+				cluster.Spec.Version = ""
+			},
+			wantErr: "static node cluster spec.version is required",
+		},
+		{
+			name: "missing image registry",
+			mutate: func(cluster *v1.StaticNodeCluster) {
+				cluster.Spec.ImageRegistry = ""
+			},
+			wantErr: "static node cluster spec.image_registry is required",
 		},
 		{
 			name: "duplicate node",
@@ -163,12 +190,10 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 			nodes: []*v1.StaticNode{
 				staticNodeStatus("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
 					readyComponent(nodeExporterComponentName),
-					readyComponent(neutreeMetricsComponentName),
 					readyComponent(vmagentComponentName),
 				}),
 				staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
 					readyComponent(nodeExporterComponentName),
-					readyComponent(neutreeMetricsComponentName),
 				}),
 			},
 			wantStatus: v1.StaticNodeClusterStatus{
@@ -185,7 +210,6 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 			nodes: []*v1.StaticNode{
 				staticNodeStatus("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
 					readyComponent(nodeExporterComponentName),
-					readyComponent(neutreeMetricsComponentName),
 					readyComponent(vmagentComponentName),
 				}),
 				staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReconciling, false, nil),
@@ -218,11 +242,9 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 			nodes: []*v1.StaticNode{
 				staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
 					readyComponent(nodeExporterComponentName),
-					readyComponent(neutreeMetricsComponentName),
 				}),
 				staticNodeStatus("stale-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
 					readyComponent(nodeExporterComponentName),
-					readyComponent(neutreeMetricsComponentName),
 				}),
 			},
 			wantStatus: v1.StaticNodeClusterStatus{
@@ -264,6 +286,7 @@ func testStaticNodeCluster() *v1.StaticNodeCluster {
 					IP:              "10.0.0.11",
 					Role:            v1.StaticNodeRoleWorker,
 					SSHAuthRef:      "ssh-ref",
+					SSHAuth:         &v1.Auth{SSHUser: "ray", SSHPrivateKey: "/tmp/key"},
 					AcceleratorType: "",
 				},
 				{
@@ -271,6 +294,7 @@ func testStaticNodeCluster() *v1.StaticNodeCluster {
 					IP:              "10.0.0.10",
 					Role:            v1.StaticNodeRoleWorker,
 					SSHAuthRef:      "ssh-ref",
+					SSHAuth:         &v1.Auth{SSHUser: "ray", SSHPrivateKey: "/tmp/key"},
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 				},
 			},
