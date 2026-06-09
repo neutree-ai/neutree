@@ -260,7 +260,7 @@ func componentContainerMatches(
 		return false, err
 	}
 
-	fields := strings.Fields(strings.TrimSpace(output))
+	fields := strings.Fields(lastNonEmptyLine(output))
 	if len(fields) != 2 {
 		return false, nil
 	}
@@ -527,7 +527,19 @@ func inspectDockerImage(ctx context.Context, runner StaticNodeCommandRunner, ima
 		return "", err
 	}
 
-	return strings.TrimSpace(output), nil
+	return lastNonEmptyLine(output), nil
+}
+
+func lastNonEmptyLine(output string) string {
+	lines := strings.Split(output, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			return line
+		}
+	}
+
+	return ""
 }
 
 func shellArg(value string) string {

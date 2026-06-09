@@ -25,6 +25,7 @@ var (
 	testSSHOptions    = []string{
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
 		"-o", "IdentitiesOnly=yes",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ServerAliveInterval=5",
@@ -186,6 +187,7 @@ func TestSSHCommandRunner_Run_WithSSHOptionsOverride(t *testing.T) {
 		"ssh",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
 		"-o", "IdentitiesOnly=yes",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ServerAliveInterval=5",

@@ -129,6 +129,7 @@ func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []stri
 	sshOptions := []string{
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
 		"-o", "IdentitiesOnly=yes",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ServerAliveInterval=5",

@@ -190,6 +190,38 @@ func TestBuildStaticNodeStatusClearsPreviousErrorOnSuccess(t *testing.T) {
 	assert.Empty(t, status.ErrorMessage)
 }
 
+func TestInspectDockerImageIgnoresSSHWarning(t *testing.T) {
+	runner := &fakeStaticNodeRunner{
+		responses: []fakeStaticNodeResponse{
+			{
+				command: "docker image inspect --format='{{index .RepoDigests 0}}' 'registry.example.com/neutree/serve:v1.2.0'",
+				output:  "Warning: Permanently added '10.0.0.10' (ED25519) to the list of known hosts.\r\nregistry.example.com/neutree/serve@sha256:ready\n",
+			},
+		},
+	}
+
+	digest, err := inspectDockerImage(context.Background(), runner, "registry.example.com/neutree/serve:v1.2.0")
+
+	require.NoError(t, err)
+	assert.Equal(t, "registry.example.com/neutree/serve@sha256:ready", digest)
+}
+
+func TestComponentContainerMatchesIgnoresSSHWarning(t *testing.T) {
+	runner := &fakeStaticNodeRunner{
+		responses: []fakeStaticNodeResponse{
+			{
+				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-ray-head'",
+				output:  "Warning: Permanently added '10.0.0.10' (ED25519) to the list of known hosts.\r\nhash-ray true\n",
+			},
+		},
+	}
+
+	matches, err := componentContainerMatches(context.Background(), runner, "neutree-static-a-ray-head", "hash-ray")
+
+	require.NoError(t, err)
+	assert.True(t, matches)
+}
+
 func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
