@@ -43,9 +43,17 @@ data:
               .extracted_data.total_tokens = .ai."statistics".usage.total_tokens
               .extracted_data.prompt_tokens = .ai."statistics".usage.prompt_tokens
               .extracted_data.completion_tokens = .ai."statistics".usage.completion_tokens
+              .extracted_data.cache_read_tokens = .ai."statistics".usage.cache_read_tokens
+              .extracted_data.cache_creation_tokens = .ai."statistics".usage.cache_creation_tokens
+              .extracted_data.reasoning_tokens = .ai."statistics".usage.reasoning_tokens
+              .extracted_data.cost_usd = .ai."statistics".usage.cost
 
               if exists(.ai."statistics".meta) && exists(.ai."statistics".meta.request_model) {
                   .extracted_data.model_name = .ai."statistics".meta.request_model
+              }
+
+              if exists(.ai."statistics".meta) && exists(.ai."statistics".meta.message_id) {
+                  .extracted_data.message_id = .ai."statistics".meta.message_id
               }
 
               if to_int!(.extracted_data.total_tokens) > 0 {
@@ -74,7 +82,12 @@ data:
               "p_endpoint_type": .extracted_data.endpoint_type,
               "p_model_name": .extracted_data.model_name,
               "p_prompt_tokens": .extracted_data.prompt_tokens,
-              "p_completion_tokens": .extracted_data.completion_tokens
+              "p_completion_tokens": .extracted_data.completion_tokens,
+              "p_cache_read_tokens": .extracted_data.cache_read_tokens,
+              "p_cache_creation_tokens": .extracted_data.cache_creation_tokens,
+              "p_reasoning_tokens": .extracted_data.reasoning_tokens,
+              "p_cost_usd": .extracted_data.cost_usd,
+              "p_message_id": .extracted_data.message_id
           }
       {{- if $aiTraceStoreUrl }}
       filter_trace_logs:
