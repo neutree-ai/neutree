@@ -33,6 +33,7 @@ type DeploymentManifestVariables struct {
 	EngineArgs      map[string]interface{}
 	Resources       map[string]string
 	Env             map[string]string
+	Annotations     map[string]string
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
 	RoutingLogic    string
@@ -209,6 +210,10 @@ func (k *kubernetesOrchestrator) setResourceVariables(data *DeploymentManifestVa
 
 	if resourceSpec.NodeSelector != nil {
 		maps.Copy(data.NodeSelector, resourceSpec.NodeSelector)
+	}
+
+	if resourceSpec.Annotations != nil {
+		maps.Copy(data.Annotations, resourceSpec.Annotations)
 	}
 
 	if resourceSpec.Env != nil {
@@ -561,6 +566,7 @@ func newDeploymentManifestVariables() DeploymentManifestVariables {
 	return DeploymentManifestVariables{
 		Resources:    make(map[string]string),
 		NodeSelector: make(map[string]string),
+		Annotations:  make(map[string]string),
 		Env:          make(map[string]string),
 		ModelArgs:    make(map[string]interface{}),
 		EngineArgs:   make(map[string]interface{}),

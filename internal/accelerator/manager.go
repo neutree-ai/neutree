@@ -3,6 +3,7 @@ package accelerator
 import (
 	"context"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -13,9 +14,12 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	resourceview "github.com/neutree-ai/neutree/internal/resource"
 )
 
 type Manager interface {
+	plugin.AcceleratorPluginProvider
+
 	Start(ctx context.Context)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
@@ -24,13 +28,13 @@ type Manager interface {
 	GetAllConverters() map[string]plugin.ResourceConverter
 
 	// GetAllParsers returns all registered resource parsers
-	GetAllParsers() map[string]plugin.ResourceParser
+	GetAllParsers() map[string]resourceview.ResourceParser
 
 	// GetConverter retrieves a resource converter by accelerator type
 	GetConverter(acceleratorType string) (plugin.ResourceConverter, bool)
 
 	// GetParser retrieves a resource parser by accelerator type
-	GetParser(acceleratorType string) (plugin.ResourceParser, bool)
+	GetParser(acceleratorType string) (resourceview.ResourceParser, bool)
 
 	// GetEngineContainerRunOptions returns Docker run_options for engine containers.
 	// Delegates to the registered plugin's GetContainerRuntimeConfig() and converts
@@ -264,8 +268,8 @@ func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {
 	return result
 }
 
-func (a *manager) GetAllParsers() map[string]plugin.ResourceParser {
-	result := make(map[string]plugin.ResourceParser)
+func (a *manager) GetAllParsers() map[string]resourceview.ResourceParser {
+	result := make(map[string]resourceview.ResourceParser)
 
 	a.acceleratorsMap.Range(func(key, value any) bool {
 		p, ok := value.(registerPlugin)
@@ -280,6 +284,26 @@ func (a *manager) GetAllParsers() map[string]plugin.ResourceParser {
 
 		return true
 	})
+
+	return result
+}
+
+func (a *manager) SupportPlugins() []string {
+	result := []string{}
+
+	a.acceleratorsMap.Range(func(key, value any) bool {
+		resource, ok := key.(string)
+		if !ok {
+			klog.Warning("assert registered plugin key type failed")
+			return true
+		}
+
+		result = append(result, resource)
+
+		return true
+	})
+
+	sort.Strings(result)
 
 	return result
 }
@@ -310,7 +334,7 @@ func (a *manager) GetConverter(acceleratorType string) (plugin.ResourceConverter
 	return converter, converter != nil
 }
 
-func (a *manager) GetParser(acceleratorType string) (plugin.ResourceParser, bool) {
+func (a *manager) GetParser(acceleratorType string) (resourceview.ResourceParser, bool) {
 	p, ok := a.GetPlugin(acceleratorType)
 	if !ok {
 		return nil, false

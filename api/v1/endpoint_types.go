@@ -54,10 +54,40 @@ const (
 )
 
 type EndpointStatus struct {
-	Phase              EndpointPhase `json:"phase,omitempty"`
-	ServiceURL         string        `json:"service_url,omitempty"`
-	LastTransitionTime string        `json:"last_transition_time,omitempty"`
-	ErrorMessage       string        `json:"error_message,omitempty"`
+	Phase              EndpointPhase           `json:"phase,omitempty"`
+	ServiceURL         string                  `json:"service_url,omitempty"`
+	LastTransitionTime string                  `json:"last_transition_time,omitempty"`
+	ErrorMessage       string                  `json:"error_message,omitempty"`
+	Resources          *EndpointResourceStatus `json:"resources,omitempty"`
+}
+
+type EndpointResourceStatus struct {
+	Replicas []ReplicaDeviceAllocation `json:"replicas,omitempty"`
+	Summary  *EndpointResourceSummary  `json:"summary,omitempty"`
+}
+
+type ReplicaDeviceAllocation struct {
+	InstanceID string             `json:"instance_id"`
+	ReplicaID  string             `json:"replica_id,omitempty"`
+	NodeID     string             `json:"node_id,omitempty"`
+	Devices    []DeviceAllocation `json:"devices,omitempty"`
+}
+
+type DeviceAllocation struct {
+	UUID      string `json:"uuid"`
+	Product   string `json:"product"`
+	MemoryMiB int64  `json:"memory_mib"`
+	CoreUnits int64  `json:"core_units"`
+	NodeID    string `json:"node_id"`
+}
+
+type EndpointResourceSummary struct {
+	Products map[AcceleratorProduct]*ProductUsage `json:"products,omitempty"`
+}
+
+type ProductUsage struct {
+	MemoryMiB int64 `json:"memory_mib"`
+	CoreUnits int64 `json:"core_units"`
 }
 
 type Endpoint struct {

@@ -1,14 +1,28 @@
 package proxies
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+type clusterValidationError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Hint    string `json:"hint"`
+}
 
 func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
 	return func(workspace, name string) error {
@@ -32,6 +46,219 @@ func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc
 	}
 }
 
+func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
+			c.Next()
+			return
+		}
+
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.Abort()
+			return
+		}
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+
+		if len(bytes.TrimSpace(body)) == 0 {
+			c.Next()
+			return
+		}
+
+		if validationErr := validateClusterAcceleratorVirtualizationBody(c.Request.Method, body, c.Request.URL.RawQuery, s); validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func validateClusterAcceleratorVirtualizationBody(
+	method string,
+	body []byte,
+	rawQuery string,
+	s storage.Storage,
+) *clusterValidationError {
+	var payload map[string]interface{}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := decoder.Decode(&payload); err != nil {
+		return &clusterValidationError{
+			Code:    "10209",
+			Message: "invalid cluster payload",
+			Hint:    err.Error(),
+		}
+	}
+
+	spec, ok := payload["spec"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	rawVirtualization, ok := spec["accelerator_virtualization"]
+	if !ok || rawVirtualization == nil {
+		return nil
+	}
+
+	virtualization, ok := rawVirtualization.(map[string]interface{})
+	if !ok {
+		return &clusterValidationError{
+			Code:    "10209",
+			Message: "spec.accelerator_virtualization must be an object",
+			Hint:    "Provide accelerator_virtualization as an object",
+		}
+	}
+
+	if rawEnabled, ok := virtualization["enabled"]; ok {
+		if _, ok := rawEnabled.(bool); !ok {
+			return &clusterValidationError{
+				Code:    "10210",
+				Message: "spec.accelerator_virtualization.enabled must be a boolean",
+				Hint:    "Provide enabled as true or false",
+			}
+		}
+	}
+
+	if rawConfigPatch, ok := virtualization["config_patch"]; ok && rawConfigPatch != nil {
+		if _, ok := rawConfigPatch.(map[string]interface{}); !ok {
+			return &clusterValidationError{
+				Code:    "10209",
+				Message: "spec.accelerator_virtualization.config_patch must be an object",
+				Hint:    "Provide config_patch as an object",
+			}
+		}
+	}
+
+	enabled, _ := virtualization["enabled"].(bool)
+	if !enabled {
+		return nil
+	}
+
+	clusterType, _ := spec["type"].(string)
+	clusterVersion, _ := spec["version"].(string)
+	if method == http.MethodPatch && (clusterType == "" || clusterVersion == "") {
+		existingSpec, err := existingClusterSpec(rawQuery, s)
+		if err != nil {
+			return &clusterValidationError{
+				Code:    "10208",
+				Message: "spec.accelerator_virtualization is only supported for Kubernetes clusters",
+				Hint:    err.Error(),
+			}
+		}
+		if clusterType == "" {
+			clusterType = existingSpec.Type
+		}
+		if clusterVersion == "" {
+			clusterVersion = existingSpec.Version
+		}
+	}
+
+	if clusterType != v1.KubernetesClusterType {
+		return &clusterValidationError{
+			Code:    "10208",
+			Message: "spec.accelerator_virtualization is only supported for Kubernetes clusters",
+			Hint:    "Use a Kubernetes cluster when enabling accelerator virtualization",
+		}
+	}
+
+	if err := validateAcceleratorVirtualizationClusterVersion(clusterVersion); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateAcceleratorVirtualizationClusterVersion(version string) *clusterValidationError {
+	supported, err := accelerator.SupportsVirtualizationClusterVersion(version)
+	if err != nil {
+		return &clusterValidationError{
+			Code:    "10209",
+			Message: "invalid cluster version",
+			Hint:    fmt.Sprintf("failed to parse spec.version %q: %v", version, err),
+		}
+	}
+	if !supported {
+		return &clusterValidationError{
+			Code: "10208",
+			Message: fmt.Sprintf("spec.accelerator_virtualization requires cluster version >= %s",
+				accelerator.MinVirtualizationClusterVersion),
+			Hint: fmt.Sprintf("Upgrade cluster version to %s or later before enabling accelerator virtualization",
+				accelerator.MinVirtualizationClusterVersion),
+		}
+	}
+
+	return nil
+}
+
+func existingClusterSpec(rawQuery string, s storage.Storage) (*v1.ClusterSpec, error) {
+	if s == nil {
+		return nil, fmt.Errorf("include spec.type and spec.version when enabling accelerator virtualization")
+	}
+
+	filters := filtersFromRawQuery(rawQuery)
+	if len(filters) == 0 {
+		return nil, fmt.Errorf("include spec.type and spec.version when enabling accelerator virtualization")
+	}
+
+	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
+	if err != nil {
+		return nil, fmt.Errorf("failed to load existing cluster: %w", err)
+	}
+	if len(clusters) != 1 {
+		return nil, fmt.Errorf("cluster patch must match exactly one existing cluster")
+	}
+	if clusters[0].Spec == nil {
+		return nil, fmt.Errorf("existing cluster has no spec")
+	}
+
+	return clusters[0].Spec, nil
+}
+
+func filtersFromRawQuery(rawQuery string) []storage.Filter {
+	queryValues, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return nil
+	}
+
+	filters := make([]storage.Filter, 0, len(queryValues))
+	columns := make([]string, 0, len(queryValues))
+	for column := range queryValues {
+		columns = append(columns, column)
+	}
+	sort.Strings(columns)
+
+	for _, column := range columns {
+		values := queryValues[column]
+		if isNonFilterQueryParam(column) || len(values) == 0 {
+			continue
+		}
+
+		operator, value, ok := strings.Cut(values[0], ".")
+		if !ok || operator == "" || value == "" {
+			continue
+		}
+
+		filters = append(filters, storage.Filter{
+			Column:   column,
+			Operator: operator,
+			Value:    value,
+		})
+	}
+
+	return filters
+}
+
+func isNonFilterQueryParam(key string) bool {
+	switch key {
+	case "select", "order", "limit", "offset", "columns":
+		return true
+	default:
+		return false
+	}
+}
+
 func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	proxyGroup := group.Group("/clusters")
 	proxyGroup.Use(middlewares...)
@@ -41,8 +268,9 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 		validateClusterDeletion(deps.Storage),
 	)
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
+	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", deletionValidation, handler)
+	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
+	proxyGroup.PATCH("", deletionValidation, acceleratorVirtualizationValidation, handler)
 }

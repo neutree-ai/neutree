@@ -15,6 +15,11 @@ import (
 // GetMetricsResources returns all Kubernetes resources for the metrics component
 func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList, error) {
 	variables := m.buildManifestVariables()
+	enableHAMiMonitoring, err := m.supportsHAMiMonitoring()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to check HAMi monitoring support for cluster %s", m.cluster.Metadata.Name)
+	}
+	variables.EnableHAMiMonitoring = enableHAMiMonitoring
 
 	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)
 	if err != nil {

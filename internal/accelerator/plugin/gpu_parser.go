@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -26,22 +27,95 @@ func (p *GPUResourceParser) ParseFromKubernetes(resource map[corev1.ResourceName
 	}
 
 	totalGPUs := float64(gpuQuantity.Value())
+	virtualized := labels[NvidiaGPUVirtualizationLabelKey] == "true"
+	if virtualized {
+		totalGPUs = parseNvidiaPhysicalGPUCount(labels)
+	}
 
 	resourceInfo := &v1.ResourceInfo{
 		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 			v1.AcceleratorTypeNVIDIAGPU: {
-				Quantity:      totalGPUs,
-				ProductGroups: map[v1.AcceleratorProduct]float64{},
+				Quantity: totalGPUs,
 			},
 		},
 	}
 
 	// set GPU product model from node labels (if available)
 	if product, ok := labels[NvidiaGPUKubernetesNodeSelectorKey]; ok {
-		resourceInfo.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups[v1.AcceleratorProduct(product)] = totalGPUs
+		group := resourceInfo.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+		group.ProductGroups = map[v1.AcceleratorProduct]float64{
+			v1.AcceleratorProduct(product): totalGPUs,
+		}
+		var virtualization *v1.AcceleratorVirtualizationResource
+		if virtualized {
+			virtualization = parseHAMiVirtualization(resource)
+		}
+		memoryTotalMiB := parseNodeMemoryMiB(labels[NvidiaGPUMemoryNodeLabelKey])
+		if virtualized || virtualization != nil || memoryTotalMiB > 0 {
+			group.Products = map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
+				v1.AcceleratorProduct(product): {
+					Quantity: totalGPUs,
+				},
+			}
+			if virtualization != nil {
+				group.Products[v1.AcceleratorProduct(product)].Virtualization = virtualization
+			}
+		}
+
+		if memoryTotalMiB > 0 {
+			resourceInfo.AcceleratorMetadata = map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+				v1.AcceleratorTypeNVIDIAGPU: {
+					Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
+						v1.AcceleratorProduct(product): {
+							MemoryTotalMiB: memoryTotalMiB,
+						},
+					},
+				},
+			}
+		}
 	}
 
 	return resourceInfo, nil
+}
+
+func parseNvidiaPhysicalGPUCount(labels map[string]string) float64 {
+	count, err := strconv.ParseFloat(labels[NvidiaGPUCountResource], 64)
+	if err != nil {
+		return 0
+	}
+
+	return count
+}
+
+func parseHAMiVirtualization(resources map[corev1.ResourceName]resource.Quantity) *v1.AcceleratorVirtualizationResource {
+	virtualization := &v1.AcceleratorVirtualizationResource{}
+
+	if memory, ok := resources[NvidiaGPUMemoryResource]; ok {
+		virtualization.MemoryMiB = float64(memory.Value())
+	}
+
+	if cores, ok := resources[NvidiaGPUCoreResource]; ok {
+		virtualization.CoreUnits = float64(cores.Value())
+	}
+
+	if virtualization.MemoryMiB == 0 && virtualization.CoreUnits == 0 {
+		return nil
+	}
+
+	return virtualization
+}
+
+func parseNodeMemoryMiB(value string) float64 {
+	if value == "" {
+		return 0
+	}
+
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0
+	}
+
+	return parsed
 }
 
 // ParseFromRay parses NVIDIA GPU resources from Ray cluster resources

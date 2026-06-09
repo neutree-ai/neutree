@@ -13,6 +13,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
+	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
@@ -1041,28 +1042,30 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 						},
 					},
 				},
-				NodeResources: map[string]*v1.ResourceStatus{
+				NodeResources: map[string]*v1.NodeResourceStatus{
 					"192.168.1.1": {
-						Allocatable: &v1.ResourceInfo{
-							CPU:    8,
-							Memory: 16,
-							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
-								v1.AcceleratorTypeNVIDIAGPU: {
-									Quantity: 2,
-									ProductGroups: map[v1.AcceleratorProduct]float64{
-										"NVIDIA_L20": 2,
+						ResourceStatus: v1.ResourceStatus{
+							Allocatable: &v1.ResourceInfo{
+								CPU:    8,
+								Memory: 16,
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {
+										Quantity: 2,
+										ProductGroups: map[v1.AcceleratorProduct]float64{
+											"NVIDIA_L20": 2,
+										},
 									},
 								},
 							},
-						},
-						Available: &v1.ResourceInfo{
-							CPU:    4,
-							Memory: 8,
-							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
-								v1.AcceleratorTypeNVIDIAGPU: {
-									Quantity: 1,
-									ProductGroups: map[v1.AcceleratorProduct]float64{
-										"NVIDIA_L20": 1,
+							Available: &v1.ResourceInfo{
+								CPU:    4,
+								Memory: 8,
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {
+										Quantity: 1,
+										ProductGroups: map[v1.AcceleratorProduct]float64{
+											"NVIDIA_L20": 1,
+										},
 									},
 								},
 							},
@@ -1197,28 +1200,30 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 						},
 					},
 				},
-				NodeResources: map[string]*v1.ResourceStatus{
+				NodeResources: map[string]*v1.NodeResourceStatus{
 					"192.168.1.1": {
-						Allocatable: &v1.ResourceInfo{
-							CPU:    8,
-							Memory: 16,
-							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
-								v1.AcceleratorTypeNVIDIAGPU: {
-									Quantity: 2,
-									ProductGroups: map[v1.AcceleratorProduct]float64{
-										"NVIDIA_L20": 2,
+						ResourceStatus: v1.ResourceStatus{
+							Allocatable: &v1.ResourceInfo{
+								CPU:    8,
+								Memory: 16,
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {
+										Quantity: 2,
+										ProductGroups: map[v1.AcceleratorProduct]float64{
+											"NVIDIA_L20": 2,
+										},
 									},
 								},
 							},
-						},
-						Available: &v1.ResourceInfo{
-							CPU:    4,
-							Memory: 8,
-							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
-								v1.AcceleratorTypeNVIDIAGPU: {
-									Quantity: 1,
-									ProductGroups: map[v1.AcceleratorProduct]float64{
-										"NVIDIA_L20": 1,
+							Available: &v1.ResourceInfo{
+								CPU:    4,
+								Memory: 8,
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {
+										Quantity: 1,
+										ProductGroups: map[v1.AcceleratorProduct]float64{
+											"NVIDIA_L20": 1,
+										},
 									},
 								},
 							},
@@ -1234,7 +1239,7 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 			dashboardSvc := &dashboardmocks.MockDashboardService{}
 			tt.setMock(dashboardSvc)
 			acceleratorMgr := acceleratormocks.NewMockManager(t)
-			acceleratorMgr.On("GetAllParsers").Return(map[string]plugin.ResourceParser{
+			acceleratorMgr.On("GetAllParsers").Return(map[string]resourceview.ResourceParser{
 				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 			})
 
