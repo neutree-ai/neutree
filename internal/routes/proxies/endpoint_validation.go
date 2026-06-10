@@ -85,6 +85,8 @@ func validateEndpointAcceleratorVirtualizationBody(
 	if method == http.MethodPatch {
 		loadedEndpoint, err := existingEndpointForPatch(rawQuery, s)
 		if err != nil {
+			// PATCH can still be validated without loading the existing row when
+			// the payload carries enough context for cluster resource lookup.
 			if endpoint.Spec.Cluster == "" || endpoint.GetWorkspace() == "" {
 				return &validationError{
 					Code:    "10215",
@@ -106,6 +108,8 @@ func validateEndpointAcceleratorVirtualizationBody(
 }
 
 func endpointPayloadHasResources(body []byte) (bool, error) {
+	// PATCH is partial. Only requests that explicitly touch spec.resources
+	// should trigger accelerator virtualization validation.
 	var payload map[string]interface{}
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&payload); err != nil {
 		return false, err
@@ -399,6 +403,9 @@ func existingEndpointVirtualizationAllocation(endpoint *v1.Endpoint, productName
 		return quantity, memoryMiB, coreUnits
 	}
 
+	// Older status records may only have summary-level usage. Quantity cannot be
+	// safely reclaimed without per-replica devices, but memory/core can still be
+	// excluded from the current endpoint's own update check.
 	if endpoint.Status.Resources.Summary == nil ||
 		endpoint.Status.Resources.Summary.Products == nil {
 		return 0, 0, 0
@@ -434,6 +441,8 @@ func validateEndpointVirtualizationDeviceFit(
 	reclaims := existingEndpointVirtualizationDeviceReclaims(existing, productName)
 	for i, device := range devices {
 		reclaim := reclaims[device.uuid]
+		// When updating an Endpoint, its current allocation should be available
+		// to itself. Add those device-local resources back before fit checks.
 		devices[i].memoryMiB += reclaim.memoryMiB
 		devices[i].coreUnits += reclaim.coreUnits
 	}
@@ -583,6 +592,8 @@ func getRequiredVirtualizationMemoryMiB(resources *v1.ResourceSpec, status *v1.C
 		return 0, fmt.Errorf("accelerator product %s memory metadata is not available", resources.GetAcceleratorProduct())
 	}
 
+	// Round up so percentage-based requests never under-reserve memory after
+	// converting from product total memory to MiB.
 	return math.Ceil(productMetadata.MemoryTotalMiB * memoryPercent / 100), nil
 }
 

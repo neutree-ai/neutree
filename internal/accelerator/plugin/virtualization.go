@@ -28,7 +28,9 @@ type VirtualizationConfig struct {
 	BlockingReasons []string
 	CandidateNodes  []string
 	NodeScopeLabel  VirtualizationNodeScopeLabel
-	ConfigPatch     map[string]interface{}
+	// ConfigPatch contains accelerator-specific Helm values for the shared
+	// virtualization solution. The component still applies protected values last.
+	ConfigPatch map[string]interface{}
 }
 
 type VirtualizationConfigResolver interface {

@@ -50,6 +50,8 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 
 	for _, policy := range input.GPUOperatorClusterPolicies {
 		if boolAtPathDefault(policy.Spec, true, "driver", "enabled") {
+			// GPU Operator managed drivers are usually mounted under this root.
+			// HAMi device-plugin needs the same path to discover host devices.
 			setNestedString(configPatch, NvidiaGPUOperatorDriverRoot, "devicePlugin", "nvidiaDriverRoot")
 		}
 		if boolAtPathDefault(policy.Spec, true, "devicePlugin", "enabled") {
@@ -71,10 +73,14 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	}, nil
 }
 
+// NvidiaVirtualizationCandidateNodes returns NVIDIA GPU nodes that can be
+// labeled for HAMi vGPU support.
 func NvidiaVirtualizationCandidateNodes(nodes []corev1.Node) []string {
 	candidates := make([]string, 0)
 	for _, node := range nodes {
 		if nvidiaMIGStrategyEnabled(node.Labels) {
+			// The current vGPU support does not model MIG partitions, so skip
+			// nodes that GPU Feature Discovery reports as MIG-enabled.
 			continue
 		}
 

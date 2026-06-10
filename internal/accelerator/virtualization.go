@@ -8,6 +8,8 @@ import (
 
 const MinVirtualizationClusterVersion = "v1.1.0"
 
+// SupportsVirtualizationClusterVersion gates accelerator virtualization by the
+// Neutree cluster package version, not by the Kubernetes server version.
 func SupportsVirtualizationClusterVersion(version string) (bool, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {

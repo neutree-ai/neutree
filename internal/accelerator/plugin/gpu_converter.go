@@ -87,6 +87,8 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 	}
 
 	if spec.HasAcceleratorVirtualization() {
+		// Keep the public API in Neutree resource terms. The HAMi raw resource
+		// names are introduced only at the Kubernetes manifest boundary.
 		if err := c.setHAMiVirtualizationResources(k8s, spec); err != nil {
 			return nil, err
 		}
@@ -121,6 +123,8 @@ func (c *GPUConverter) setHAMiVirtualizationResources(k8s *v1.KubernetesResource
 		if err := validatePercent(memoryPercent, v1.AcceleratorVirtualizationMemoryPercentKey); err != nil {
 			return err
 		}
+		// HAMi accepts percentage memory as a Pod resource, while Neutree
+		// converts it back to MiB in resource views using product metadata.
 		setKubernetesResource(k8s, NvidiaGPUMemoryPercentageResource.String(), memoryPercent)
 	}
 
