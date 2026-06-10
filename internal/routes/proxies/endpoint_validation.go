@@ -15,12 +15,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-type endpointValidationError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Hint    string `json:"hint"`
-}
-
 func validateEndpointAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
@@ -30,7 +24,11 @@ func validateEndpointAcceleratorVirtualization(s storage.Storage) gin.HandlerFun
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, &validationError{
+				Code:    "10214",
+				Message: "invalid endpoint payload",
+				Hint:    err.Error(),
+			})
 			c.Abort()
 			return
 		}
@@ -56,7 +54,7 @@ func validateEndpointAcceleratorVirtualizationBody(
 	body []byte,
 	rawQuery string,
 	s storage.Storage,
-) *endpointValidationError {
+) *validationError {
 	hasResources, err := endpointPayloadHasResources(body)
 	if err != nil {
 		return invalidEndpointPayloadError(err)
@@ -88,7 +86,7 @@ func validateEndpointAcceleratorVirtualizationBody(
 		loadedEndpoint, err := existingEndpointForPatch(rawQuery, s)
 		if err != nil {
 			if endpoint.Spec.Cluster == "" || endpoint.GetWorkspace() == "" {
-				return &endpointValidationError{
+				return &validationError{
 					Code:    "10215",
 					Message: "failed to load existing endpoint for resource validation",
 					Hint:    err.Error(),
@@ -127,11 +125,11 @@ func endpointPayloadHasResources(body []byte) (bool, error) {
 	return ok, nil
 }
 
-func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.ResourceSpec) *endpointValidationError {
+func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.ResourceSpec) *validationError {
 	for key := range resources.Accelerator {
 		switch key {
 		case "nvidia.com/gpumem", "nvidia.com/gpumem-percentage", "nvidia.com/gpucores":
-			return &endpointValidationError{
+			return &validationError{
 				Code:    "10216",
 				Message: "raw HAMi resource keys are not supported in endpoint accelerator resources",
 				Hint:    "Use accelerator virtualization fields instead of nvidia.com/gpumem, nvidia.com/gpumem-percentage, or nvidia.com/gpucores",
@@ -144,7 +142,7 @@ func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.Resour
 	}
 
 	if resources.GetAcceleratorType() != string(v1.AcceleratorTypeNVIDIAGPU) {
-		return &endpointValidationError{
+		return &validationError{
 			Code:    "10217",
 			Message: "accelerator virtualization is only supported for NVIDIA GPU endpoints",
 			Hint:    "Set spec.resources.accelerator.type to nvidia_gpu",
@@ -152,7 +150,7 @@ func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.Resour
 	}
 
 	if resources.GetAcceleratorProduct() == "" {
-		return &endpointValidationError{
+		return &validationError{
 			Code:    "10218",
 			Message: "endpoint accelerator virtualization requires accelerator product",
 			Hint:    "Set spec.resources.accelerator.product to the target GPU product",
@@ -160,7 +158,7 @@ func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.Resour
 	}
 
 	if resources.GetAcceleratorVirtualizationMemoryMiB() != "" && resources.GetAcceleratorVirtualizationMemoryPercent() != "" {
-		return &endpointValidationError{
+		return &validationError{
 			Code:    "10219",
 			Message: "virtualization memory_mib and memory_percent are mutually exclusive",
 			Hint:    "Set only one of virtualization.memory_mib or virtualization.memory_percent",
@@ -183,19 +181,19 @@ func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.Resour
 	return nil
 }
 
-func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint, existing *v1.Endpoint, s storage.Storage) *endpointValidationError {
+func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint, existing *v1.Endpoint, s storage.Storage) *validationError {
 	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
 		return nil
 	}
 	if endpoint.Spec.Cluster == "" {
-		return &endpointValidationError{
+		return &validationError{
 			Code:    "10220",
 			Message: "endpoint accelerator virtualization requires deploy cluster",
 			Hint:    "Set spec.cluster before configuring accelerator virtualization resources",
 		}
 	}
 	if s == nil {
-		return &endpointValidationError{
+		return &validationError{
 			Code:    "10215",
 			Message: "failed to load endpoint deploy cluster for resource validation",
 			Hint:    "storage is not configured",
@@ -204,7 +202,7 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 
 	cluster, err := endpointDeployClusterForValidation(endpoint, s)
 	if err != nil {
-		return &endpointValidationError{
+		return &validationError{
 			Code:    "10215",
 			Message: "failed to load endpoint deploy cluster for resource validation",
 			Hint:    err.Error(),
@@ -220,7 +218,7 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 	productName := resources.GetAcceleratorProduct()
 	availableProduct, ok := getAvailableVirtualizationProduct(cluster.Status, resources.GetAcceleratorType(), productName)
 	if !ok {
-		return &endpointValidationError{
+		return &validationError{
 			Code:    "10221",
 			Message: fmt.Sprintf("endpoint requires vGPU product %s, but it is not available", productName),
 			Hint:    "Refresh cluster resources or select an available accelerator product",
@@ -230,7 +228,7 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 	reclaimedQuantity, reclaimedMemoryMiB, reclaimedCoreUnits := existingEndpointVirtualizationAllocation(existing, productName)
 	availableQuantity := availableProduct.Quantity + reclaimedQuantity
 	if float64(gpuCount) > availableQuantity {
-		return &endpointValidationError{
+		return &validationError{
 			Code:    "10222",
 			Message: fmt.Sprintf("endpoint requires %d %s vGPU device(s), but available vGPU product quantity is %.0f", gpuCount, productName, availableQuantity),
 			Hint:    "Reduce spec.resources.gpu or select a product with enough available GPU devices",
@@ -249,7 +247,7 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 		availableMemoryMiB += reclaimedMemoryMiB
 		totalRequiredMemoryMiB := float64(gpuCount) * requiredMemoryMiB
 		if totalRequiredMemoryMiB > availableMemoryMiB {
-			return &endpointValidationError{
+			return &validationError{
 				Code:    "10223",
 				Message: fmt.Sprintf("endpoint requires %.0f MiB vGPU memory, but available vGPU memory for %s is %.0f MiB", totalRequiredMemoryMiB, productName, availableMemoryMiB),
 				Hint:    "Reduce virtualization.memory_mib, virtualization.memory_percent, or spec.resources.gpu",
@@ -269,7 +267,7 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 		availableCoreUnits += reclaimedCoreUnits
 		totalRequiredCoreUnits := float64(gpuCount) * requiredCoreUnits
 		if totalRequiredCoreUnits > availableCoreUnits {
-			return &endpointValidationError{
+			return &validationError{
 				Code:    "10224",
 				Message: fmt.Sprintf("endpoint requires %.0f vGPU core units, but available vGPU core units for %s is %.0f", totalRequiredCoreUnits, productName, availableCoreUnits),
 				Hint:    "Reduce virtualization.core_percent or spec.resources.gpu",
@@ -427,7 +425,7 @@ func validateEndpointVirtualizationDeviceFit(
 	gpuCount int64,
 	requiredMemoryMiB float64,
 	requiredCoreUnits float64,
-) *endpointValidationError {
+) *validationError {
 	devices := availableEndpointVirtualizationDevices(status, productName)
 	if len(devices) == 0 {
 		return nil
@@ -464,7 +462,7 @@ func validateEndpointVirtualizationDeviceFit(
 	}
 
 	if requiredMemoryMiB > 0 && memoryFitCount < requiredCount {
-		return &endpointValidationError{
+		return &validationError{
 			Code: "10223",
 			Message: fmt.Sprintf("endpoint requires %.0f MiB vGPU memory per device, but only %d %s device(s) can satisfy it",
 				requiredMemoryMiB, memoryFitCount, productName),
@@ -473,7 +471,7 @@ func validateEndpointVirtualizationDeviceFit(
 	}
 
 	if requiredCoreUnits > 0 && coreFitCount < requiredCount {
-		return &endpointValidationError{
+		return &validationError{
 			Code: "10224",
 			Message: fmt.Sprintf("endpoint requires %.0f vGPU core units per device, but only %d %s device(s) can satisfy it",
 				requiredCoreUnits, coreFitCount, productName),
@@ -481,7 +479,7 @@ func validateEndpointVirtualizationDeviceFit(
 		}
 	}
 
-	return &endpointValidationError{
+	return &validationError{
 		Code: "10222",
 		Message: fmt.Sprintf("endpoint requires %d %s vGPU device(s) satisfying memory and core requirements, but available compatible device quantity is %d",
 			gpuCount, productName, compatibleCount),
@@ -654,16 +652,16 @@ func parsePercent(value string, field string) (float64, error) {
 	return parsed, nil
 }
 
-func invalidEndpointPayloadError(err error) *endpointValidationError {
-	return &endpointValidationError{
+func invalidEndpointPayloadError(err error) *validationError {
+	return &validationError{
 		Code:    "10214",
 		Message: "invalid endpoint payload",
 		Hint:    err.Error(),
 	}
 }
 
-func endpointResourceValueError(err error) *endpointValidationError {
-	return &endpointValidationError{
+func endpointResourceValueError(err error) *validationError {
+	return &validationError{
 		Code:    "10216",
 		Message: "invalid endpoint accelerator virtualization resources",
 		Hint:    err.Error(),

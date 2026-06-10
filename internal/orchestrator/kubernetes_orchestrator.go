@@ -29,8 +29,6 @@ import (
 const (
 	annEndpointSpecHash = "neutree.ai/endpoint-spec-hash"
 	annNeutreeVersion   = "neutree.ai/neutree-version"
-
-	legacyAcceleratorVirtualizationComponentStatusKey = "hami"
 )
 
 var _ Orchestrator = &kubernetesOrchestrator{}
@@ -155,11 +153,7 @@ func acceleratorVirtualizationComponentStatus(cluster *v1.Cluster) *v1.Component
 	if cluster == nil || cluster.Status == nil || cluster.Status.ComponentStatus == nil {
 		return nil
 	}
-	statuses := cluster.Status.ComponentStatus
-	if status := statuses[v1.ComponentStatusAcceleratorVirtualizationKey]; status != nil {
-		return status
-	}
-	return statuses[legacyAcceleratorVirtualizationComponentStatusKey]
+	return cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
 }
 
 func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {

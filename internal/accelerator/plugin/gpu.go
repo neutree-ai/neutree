@@ -30,7 +30,6 @@ const (
 	NvidiaGPUDiscoveryLabelValue       string              = "true"
 	NvidiaGPUMIGStrategyLabelKey       string              = "nvidia.com/mig.strategy"
 	NvidiaGPUMIGStrategyNone           string              = "none"
-	NvidiaGPUUseTypeAnnotation         string              = "nvidia.com/use-gputype"
 	NvidiaGPUTopologyPolicyAnnotation  string              = "hami.io/gpu-scheduler-policy"
 	NvidiaGPUTopologyAwarePolicy       string              = "topology-aware"
 	NvidiaGPUDefaultDeviceSplitCount   float64             = 100

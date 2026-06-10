@@ -2,47 +2,42 @@ package plugin
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
-type VirtualizationNodeScopeLabel struct {
-	Key           string
-	EnabledValue  string
-	DisabledValue string
-}
-
-type GPUOperatorClusterPolicy struct {
-	Name string
-	Spec map[string]interface{}
-}
-
-type VirtualizationConfigInput struct {
-	Nodes                      []corev1.Node
-	GPUOperatorClusterPolicies []GPUOperatorClusterPolicy
-}
-
-type VirtualizationConfig struct {
-	Supported       bool
-	BlockingReasons []string
-	CandidateNodes  []string
-	NodeScopeLabel  VirtualizationNodeScopeLabel
-	ConfigPatch     map[string]interface{}
-}
-
-type VirtualizationConfigResolver interface {
-	ResolveVirtualizationConfig(ctx context.Context, input VirtualizationConfigInput) (*VirtualizationConfig, error)
-}
-
-func NewUnsupportedVirtualizationConfig(acceleratorType string) *VirtualizationConfig {
-	return &VirtualizationConfig{
-		Supported: false,
-		BlockingReasons: []string{
-			fmt.Sprintf("accelerator %s does not support HAMi virtualization", acceleratorType),
-		},
+func (p *GPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
+	ctx context.Context,
+	cluster *v1.Cluster,
+) (*VirtualizationConfig, error) {
+	ctrlClient, err := kubernetesClientForVirtualizationConfig(cluster)
+	if err != nil {
+		return nil, err
 	}
+
+	nodes, err := listNvidiaVirtualizationNodes(ctx, ctrlClient)
+	if err != nil {
+		return nil, err
+	}
+
+	clusterPolicies, err := listGPUOperatorClusterPolicies(ctx, ctrlClient)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.ResolveVirtualizationConfig(ctx, VirtualizationConfigInput{
+		Nodes:                      nodes,
+		GPUOperatorClusterPolicies: clusterPolicies,
+	})
 }
 
 func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
@@ -83,9 +78,7 @@ func NvidiaVirtualizationCandidateNodes(nodes []corev1.Node) []string {
 			continue
 		}
 
-		if node.Labels[NvidiaGPUDiscoveryLabelKey] == NvidiaGPUDiscoveryLabelValue ||
-			hasPositiveResource(node.Status.Capacity, NvidiaGPUKubernetesResource) ||
-			hasPositiveResource(node.Status.Allocatable, NvidiaGPUKubernetesResource) {
+		if node.Labels[NvidiaGPUDiscoveryLabelKey] == NvidiaGPUDiscoveryLabelValue {
 			candidates = append(candidates, node.Name)
 		}
 	}
@@ -104,11 +97,6 @@ func nvidiaMIGStrategyEnabled(labels map[string]string) bool {
 func nvidiaMIGStrategyIsEnabled(strategy string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(strategy))
 	return normalized != "" && normalized != NvidiaGPUMIGStrategyNone
-}
-
-func hasPositiveResource(resources corev1.ResourceList, name corev1.ResourceName) bool {
-	quantity, ok := resources[name]
-	return ok && !quantity.IsZero()
 }
 
 func boolAtPathDefault(values map[string]interface{}, defaultValue bool, path ...string) bool {
@@ -168,4 +156,58 @@ func valueAtPath(values map[string]interface{}, path ...string) (interface{}, bo
 	}
 
 	return current, true
+}
+
+func kubernetesClientForVirtualizationConfig(cluster *v1.Cluster) (client.Reader, error) {
+	if cluster == nil {
+		return nil, errors.New("cluster is required to resolve NVIDIA GPU virtualization config")
+	}
+
+	ctrlClient, err := util.GetClientFromCluster(cluster)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create kubernetes client for NVIDIA GPU virtualization config")
+	}
+
+	return ctrlClient, nil
+}
+
+func listNvidiaVirtualizationNodes(ctx context.Context, ctrlClient client.Reader) ([]corev1.Node, error) {
+	nodeList := &corev1.NodeList{}
+	if err := ctrlClient.List(ctx, nodeList); err != nil {
+		return nil, errors.Wrap(err, "failed to list nodes for NVIDIA GPU virtualization config")
+	}
+
+	return nodeList.Items, nil
+}
+
+func listGPUOperatorClusterPolicies(
+	ctx context.Context,
+	ctrlClient client.Reader,
+) ([]GPUOperatorClusterPolicy, error) {
+	list := &unstructured.UnstructuredList{}
+	list.SetAPIVersion("nvidia.com/v1")
+	list.SetKind("ClusterPolicyList")
+
+	if err := ctrlClient.List(ctx, list); err != nil {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return nil, nil
+		}
+
+		return nil, errors.Wrap(err, "failed to list NVIDIA GPU Operator ClusterPolicy resources")
+	}
+
+	policies := make([]GPUOperatorClusterPolicy, 0, len(list.Items))
+	for _, item := range list.Items {
+		spec, _, err := unstructured.NestedMap(item.Object, "spec")
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to read NVIDIA GPU Operator ClusterPolicy %s spec", item.GetName())
+		}
+
+		policies = append(policies, GPUOperatorClusterPolicy{
+			Name: item.GetName(),
+			Spec: spec,
+		})
+	}
+
+	return policies, nil
 }

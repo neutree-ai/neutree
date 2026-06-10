@@ -59,7 +59,12 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 				Name:      "test-cluster",
 				Workspace: "test-workspace",
 			},
-			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.1.0",
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+					Enabled: true,
+				},
+			},
 		},
 		namespace:       "test-namespace",
 		imagePrefix:     "test-image-prefix",
@@ -89,7 +94,7 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 	t.Fatalf("vmagent config map not found in resources")
 }
 
-func TestBuildMetricsResourcesSkipsKubeStateMetricsAndHAMiScrapeBeforeV110(t *testing.T) {
+func TestBuildMetricsResourcesSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{
@@ -117,10 +122,75 @@ func TestBuildMetricsResourcesSkipsKubeStateMetricsAndHAMiScrapeBeforeV110(t *te
 
 		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
 			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
-			assert.Assert(t, !strings.Contains(config, "job_name: 'hami-vgpu-monitor'"))
 			assert.Assert(t, !strings.Contains(config, "job_name: 'neutree-kube-state-metrics'"))
 		}
 	}
+}
+
+func TestBuildVMAgentConfigSkipsHAMiMonitorScrapeWhenAcceleratorVirtualizationDisabled(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources()
+	if err != nil {
+		t.Fatalf("Failed to build vmagent resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
+			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
+			assert.Assert(t, !strings.Contains(config, "job_name: 'hami-vgpu-monitor'"))
+			return
+		}
+	}
+
+	t.Fatalf("vmagent config map not found in resources")
+}
+
+func TestBuildVMAgentConfigIncludesHAMiMonitorScrapeBeforeV110WhenAcceleratorVirtualizationEnabled(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.0.0",
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+					Enabled: true,
+				},
+			},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources()
+	if err != nil {
+		t.Fatalf("Failed to build vmagent resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
+			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
+			assert.Assert(t, strings.Contains(config, "job_name: 'hami-vgpu-monitor'"))
+			assert.Assert(t, !strings.Contains(config, "job_name: 'neutree-kube-state-metrics'"))
+			return
+		}
+	}
+
+	t.Fatalf("vmagent config map not found in resources")
 }
 
 func TestBuildMetricsResourcesIncludesKubeStateMetrics(t *testing.T) {
