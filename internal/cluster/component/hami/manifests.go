@@ -123,10 +123,12 @@ func mergeChartValues(base map[string]interface{}, overrides map[string]interfac
 
 func deepCopyChartValues(values map[string]interface{}) map[string]interface{} {
 	copied := map[string]interface{}{}
+
 	data, err := yaml.Marshal(values)
 	if err != nil {
 		return copied
 	}
+
 	if err := yaml.Unmarshal(data, &copied); err != nil {
 		return map[string]interface{}{}
 	}
@@ -174,6 +176,7 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 	if nodeScopeLabel.Key == "" {
 		nodeScopeLabel = NvidiaNodeScopeLabel
 	}
+
 	values = mergeChartValues(values, map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
 			"nvidiaNodeSelector": map[string]interface{}{
@@ -223,10 +226,12 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 		h.logger.Info("Failed to detect Kubernetes server version for HAMi scheduler image, using default",
 			"error", err,
 			"defaultVersion", DefaultKubeSchedulerVersion())
+
 		return DefaultKubeSchedulerVersion()
 	}
 
 	minorVersion := kubernetesMajorMinor(serverVersion)
+
 	schedulerVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]
 	if !ok {
 		// For an unmapped Kubernetes minor, use the exact detected scheduler
@@ -237,6 +242,7 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 				"kubernetesVersion", serverVersion.GitVersion,
 				"minorVersion", minorVersion,
 				"detectedVersion", detectedVersion)
+
 			return detectedVersion
 		}
 
@@ -244,6 +250,7 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 			"kubernetesVersion", serverVersion.GitVersion,
 			"minorVersion", minorVersion,
 			"defaultVersion", DefaultKubeSchedulerVersion())
+
 		return DefaultKubeSchedulerVersion()
 	}
 
@@ -260,6 +267,7 @@ func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
 		h.logger.Info("Failed to detect Kubernetes server version for HAMi chart render, using default",
 			"error", err,
 			"defaultVersion", DefaultKubeSchedulerVersion())
+
 		return kubeVersionFromBaseVersion(DefaultKubeSchedulerVersion())
 	}
 
@@ -286,6 +294,7 @@ func kubeVersionFromBaseVersion(version string) chartutil.KubeVersion {
 	}
 
 	parts := strings.SplitN(majorMinor, ".", 2)
+
 	return chartutil.KubeVersion{
 		Version: version,
 		Major:   parts[0],
@@ -322,6 +331,7 @@ func kubernetesMajorMinor(serverVersion *kubeversion.Info) string {
 func kubernetesBaseVersionFromMajorMinor(major, minor string) string {
 	major = kubernetesVersionNumber(strings.TrimPrefix(major, "v"))
 	minor = kubernetesVersionNumber(minor)
+
 	if major == "" || minor == "" {
 		return ""
 	}

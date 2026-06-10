@@ -124,6 +124,7 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 			Limits:      totalLimits,
 			Annotations: pod.Annotations,
 		})
+
 		for resourceName, quantity := range totalRequested {
 			if existingQty, exists := nodeInfo.availableResource[resourceName]; exists {
 				existingQty.Sub(quantity)
@@ -139,6 +140,7 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 	}
 
 	nodes := make([]ResourceNode, 0, len(nodesByID))
+
 	for nodeID, nodeInfo := range nodesByID {
 		klog.V(4).Infof("Node %s allocatable resources: %+v", nodeID, nodeInfo.allocatableResource)
 		klog.V(4).Infof("Node %s available resources: %+v", nodeID, nodeInfo.availableResource)
@@ -163,10 +165,12 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 		if node.Status != nil && len(devices) > 0 {
 			node.Status.Devices = devices
 		}
+
 		mergeAcceleratorMetadata(node.AcceleratorMetadata, metadata)
 
 		nodes = append(nodes, node)
 	}
+
 	sort.Slice(nodes, func(i, j int) bool {
 		return nodes[i].ID < nodes[j].ID
 	})
@@ -189,9 +193,11 @@ func (c *K8sResourceClient) ListEndpointInstances(
 			"endpoint": opts.EndpointName,
 		}
 	}
+
 	if len(selectorLabels) == 0 {
 		return nil, fmt.Errorf("endpoint selector labels are empty")
 	}
+
 	if !opts.AcceleratorVirtualizationEnabled {
 		return nil, nil
 	}
@@ -206,6 +212,7 @@ func (c *K8sResourceClient) ListEndpointInstances(
 
 	pods := make([]KubernetesPodResourceContext, 0, len(podList.Items))
 	nodeNames := make(map[string]struct{})
+
 	for _, pod := range podList.Items {
 		if pod.Spec.NodeName == "" || pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
 			continue
@@ -283,6 +290,7 @@ func sortedParserKeys(parsers map[string]ResourceParser) []string {
 	for key := range parsers {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
 
 	return keys
@@ -307,6 +315,7 @@ func (c *RayResourceClient) ListNodes(_ context.Context, _ ListNodesOptions) ([]
 	}
 
 	nodes := make([]ResourceNode, 0, len(nodeList))
+
 	for _, node := range nodeList {
 		if node.Raylet.State != v1.AliveNodeState {
 			continue
@@ -314,6 +323,7 @@ func (c *RayResourceClient) ListNodes(_ context.Context, _ ListNodesOptions) ([]
 
 		availableResources := map[string]float64{}
 		allocatableResources := map[string]float64{}
+
 		for resourceKey, quantity := range node.Raylet.Resources {
 			allocatableResources[resourceKey] = quantity
 			availableResources[resourceKey] = quantity
@@ -335,6 +345,7 @@ func (c *RayResourceClient) ListNodes(_ context.Context, _ ListNodesOptions) ([]
 
 		nodes = append(nodes, resourceNodeFromStatus(node.IP, resourceStatus))
 	}
+
 	sort.Slice(nodes, func(i, j int) bool {
 		return nodes[i].ID < nodes[j].ID
 	})
@@ -376,6 +387,7 @@ func transformKubernetesNodeResources(
 			if err != nil {
 				return nil, nil, nil, err
 			}
+
 			if result == nil {
 				return nil, nil, nil, fmt.Errorf("kubernetes virtualization resource parser returned nil result")
 			}
@@ -408,6 +420,7 @@ func transformKubernetesVirtualizationNodeResources(
 		if err != nil {
 			return nil, true, fmt.Errorf("failed to parse Kubernetes virtualization resources for parser %s: %w", key, err)
 		}
+
 		if matched {
 			// Use only one virtualization parser per node. Mixing parser results
 			// would blend incompatible accelerator resource semantics.
@@ -425,6 +438,7 @@ func mergeKubernetesVirtualizationAccelerators(
 	if status == nil || result == nil {
 		return
 	}
+
 	mergeKubernetesResourceInfoAccelerators(status.Allocatable, result.Allocatable)
 	mergeKubernetesResourceInfoAccelerators(status.Available, result.Available)
 }
@@ -438,9 +452,11 @@ func mergeKubernetesStandardAccelerators(
 	for _, key := range sortedParserKeys(parsers) {
 		parser := parsers[key]
 		allocatableInfo, err := parser.ParseFromKubernetes(allocatableResources, labels)
+
 		if err != nil {
 			return fmt.Errorf("failed to parse allocatable Kubernetes resources for parser %s: %w", key, err)
 		}
+
 		if allocatableInfo != nil && len(allocatableInfo.AcceleratorGroups) > 0 {
 			mergeAcceleratorGroups(result.Allocatable.AcceleratorGroups, allocatableInfo.AcceleratorGroups)
 			mergeResourceInfoMetadata(result.Allocatable, allocatableInfo.AcceleratorMetadata)
@@ -450,6 +466,7 @@ func mergeKubernetesStandardAccelerators(
 		if err != nil {
 			return fmt.Errorf("failed to parse available Kubernetes resources for parser %s: %w", key, err)
 		}
+
 		if availableInfo != nil && len(availableInfo.AcceleratorGroups) > 0 {
 			mergeAcceleratorGroups(result.Available.AcceleratorGroups, availableInfo.AcceleratorGroups)
 			mergeResourceInfoMetadata(result.Available, availableInfo.AcceleratorMetadata)
@@ -473,6 +490,7 @@ func transformKubernetesVirtualizationEndpointResources(
 		if err != nil {
 			return nil, true, fmt.Errorf("failed to parse Kubernetes virtualization endpoint resources for parser %s: %w", key, err)
 		}
+
 		if !matched {
 			continue
 		}
@@ -524,6 +542,7 @@ func transformRayResources(
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse allocatable resources from Ray for resource %s: %w", resourceKey, err)
 		}
+
 		if allocatableInfo != nil && len(allocatableInfo.AcceleratorGroups) > 0 {
 			mergeAcceleratorGroups(result.Allocatable.AcceleratorGroups, allocatableInfo.AcceleratorGroups)
 			mergeResourceInfoMetadata(result.Allocatable, allocatableInfo.AcceleratorMetadata)
@@ -533,6 +552,7 @@ func transformRayResources(
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse available resources from Ray for resource %s: %w", resourceKey, err)
 		}
+
 		if availableInfo != nil && len(availableInfo.AcceleratorGroups) > 0 {
 			mergeAcceleratorGroups(result.Available.AcceleratorGroups, availableInfo.AcceleratorGroups)
 			mergeResourceInfoMetadata(result.Available, availableInfo.AcceleratorMetadata)
@@ -575,12 +595,14 @@ func sortEndpointInstanceResources(instances []EndpointInstanceResource) {
 		if instances[i].NodeID != instances[j].NodeID {
 			return instances[i].NodeID < instances[j].NodeID
 		}
+
 		if instances[i].InstanceID != instances[j].InstanceID {
 			return instances[i].InstanceID < instances[j].InstanceID
 		}
 
 		return instances[i].ReplicaID < instances[j].ReplicaID
 	})
+
 	for i := range instances {
 		sort.Slice(instances[i].Devices, func(j, k int) bool {
 			if instances[i].Devices[j].NodeID != instances[i].Devices[k].NodeID {
@@ -599,9 +621,11 @@ func mergeResourceInfoMetadata(
 	if info == nil || len(metadata) == 0 {
 		return
 	}
+
 	if info.AcceleratorMetadata == nil {
 		info.AcceleratorMetadata = make(map[v1.AcceleratorType]*v1.AcceleratorMetadata)
 	}
+
 	mergeAcceleratorMetadata(info.AcceleratorMetadata, metadata)
 }
 
@@ -609,6 +633,7 @@ func mergeKubernetesResourceInfoAccelerators(target, source *v1.ResourceInfo) {
 	if target == nil || source == nil {
 		return
 	}
+
 	mergeAcceleratorGroups(target.AcceleratorGroups, source.AcceleratorGroups)
 	mergeResourceInfoMetadata(target, source.AcceleratorMetadata)
 }
@@ -625,6 +650,7 @@ func detachAcceleratorMetadata(status *v1.ResourceStatus) map[v1.AcceleratorType
 		mergeAcceleratorMetadata(metadata, status.Allocatable.AcceleratorMetadata)
 		status.Allocatable.AcceleratorMetadata = nil
 	}
+
 	if status.Available != nil {
 		mergeAcceleratorMetadata(metadata, status.Available.AcceleratorMetadata)
 		status.Available.AcceleratorMetadata = nil
@@ -651,6 +677,7 @@ func mergeAcceleratorGroups(target, source map[v1.AcceleratorType]*v1.Accelerato
 			if targetGroup.ProductGroups == nil {
 				targetGroup.ProductGroups = make(map[v1.AcceleratorProduct]float64)
 			}
+
 			for productType, quantity := range sourceGroup.ProductGroups {
 				targetGroup.ProductGroups[productType] += quantity
 			}
@@ -660,6 +687,7 @@ func mergeAcceleratorGroups(target, source map[v1.AcceleratorType]*v1.Accelerato
 			if targetGroup.Products == nil {
 				targetGroup.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource)
 			}
+
 			for productType, sourceProduct := range sourceGroup.Products {
 				if sourceProduct == nil {
 					continue
@@ -670,12 +698,14 @@ func mergeAcceleratorGroups(target, source map[v1.AcceleratorType]*v1.Accelerato
 					targetProduct = &v1.AcceleratorProductResource{}
 					targetGroup.Products[productType] = targetProduct
 				}
+
 				targetProduct.Quantity += sourceProduct.Quantity
 
 				if sourceProduct.Virtualization != nil {
 					if targetProduct.Virtualization == nil {
 						targetProduct.Virtualization = &v1.AcceleratorVirtualizationResource{}
 					}
+
 					targetProduct.Virtualization.MemoryMiB += sourceProduct.Virtualization.MemoryMiB
 					targetProduct.Virtualization.CoreUnits += sourceProduct.Virtualization.CoreUnits
 				}
@@ -697,6 +727,7 @@ func mergeAcceleratorMetadata(target, source map[v1.AcceleratorType]*v1.Accelera
 			}
 			target[acceleratorType] = targetMetadata
 		}
+
 		if targetMetadata.Products == nil {
 			targetMetadata.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata)
 		}
@@ -705,6 +736,7 @@ func mergeAcceleratorMetadata(target, source map[v1.AcceleratorType]*v1.Accelera
 			if sourceProduct == nil {
 				continue
 			}
+
 			if _, exists := targetMetadata.Products[product]; !exists {
 				targetMetadata.Products[product] = &v1.AcceleratorProductMetadata{
 					MemoryTotalMiB: sourceProduct.MemoryTotalMiB,

@@ -116,6 +116,7 @@ func (c *GPUConverter) setHAMiVirtualizationResources(k8s *v1.KubernetesResource
 		if err := validatePositiveInteger(memoryMiB, v1.AcceleratorVirtualizationMemoryMiBKey); err != nil {
 			return err
 		}
+
 		setKubernetesResource(k8s, NvidiaGPUMemoryResource.String(), memoryMiB)
 	}
 
@@ -132,6 +133,7 @@ func (c *GPUConverter) setHAMiVirtualizationResources(k8s *v1.KubernetesResource
 		if err := validatePercent(corePercent, v1.AcceleratorVirtualizationCorePercentKey); err != nil {
 			return err
 		}
+
 		setKubernetesResource(k8s, NvidiaGPUCoreResource.String(), corePercent)
 	}
 

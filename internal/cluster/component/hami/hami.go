@@ -48,57 +48,58 @@ func NewHAMiComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecr
 
 func (h *HAMiComponent) Reconcile() error {
 	if err := h.Preflight(context.Background()); err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "PreflightFailed", err.Error())
+		h.setNotReadyStatus("PreflightFailed", err.Error())
 		return err
 	}
 
 	scopePlan, err := h.ReconcileNodeScope(context.Background())
 	if err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "NodeScopeFailed", err.Error())
+		h.setNotReadyStatus("NodeScopeFailed", err.Error())
 		return errors.Wrap(err, "failed to reconcile HAMi node scope")
 	}
 
 	schedulerExisted, err := h.schedulerDeploymentExists(context.Background())
 	if err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "SchedulerLookupFailed", err.Error())
+		h.setNotReadyStatus("SchedulerLookupFailed", err.Error())
 		return errors.Wrap(err, "failed to get HAMi scheduler deployment")
 	}
 
 	tlsChanged, err := h.EnsureTLS(context.Background())
 	if err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "TLSFailed", err.Error())
+		h.setNotReadyStatus("TLSFailed", err.Error())
 		return errors.Wrap(err, "failed to ensure HAMi webhook TLS")
 	}
 
 	if err := h.ApplyResources(context.Background(), scopePlan); err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "ApplyFailed", err.Error())
+		h.setNotReadyStatus("ApplyFailed", err.Error())
 		return errors.Wrap(err, "failed to apply HAMi resources")
 	}
 
 	if _, err := h.PatchWebhookCABundle(context.Background()); err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "WebhookCABundleFailed", err.Error())
+		h.setNotReadyStatus("WebhookCABundleFailed", err.Error())
 		return errors.Wrap(err, "failed to patch HAMi webhook caBundle")
 	}
 
 	if tlsChanged && schedulerExisted {
 		if err := h.rolloutScheduler(context.Background()); err != nil {
-			h.setStatus(v1.ComponentPhaseNotReady, "SchedulerRolloutFailed", err.Error())
+			h.setNotReadyStatus("SchedulerRolloutFailed", err.Error())
 			return errors.Wrap(err, "failed to rollout HAMi scheduler")
 		}
 	}
 
 	status, err := h.CheckResourcesStatus(context.Background())
 	if err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "StatusCheckFailed", err.Error())
+		h.setNotReadyStatus("StatusCheckFailed", err.Error())
 		return errors.Wrap(err, "failed to check HAMi status")
 	}
 
 	if !status.Ready {
-		h.setStatus(v1.ComponentPhaseNotReady, status.Reason, status.Message)
+		h.setNotReadyStatus(status.Reason, status.Message)
 		return fmt.Errorf("accelerator virtualization component is not fully ready: %s", status.Message)
 	}
 
 	h.writeStatus(status.ComponentStatus())
+
 	return nil
 }
 
@@ -109,33 +110,35 @@ func (h *HAMiComponent) Delete() error {
 	}
 
 	if !deleted {
-		h.setStatus(v1.ComponentPhaseNotReady, "Deleting", "HAMi resources are still deleting")
+		h.setNotReadyStatus("Deleting", "HAMi resources are still deleting")
 		return errors.New("HAMi resources are not fully deleted, please wait")
 	}
 
 	if err := h.CleanupTLS(context.Background()); err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "TLSCleanupFailed", err.Error())
+		h.setNotReadyStatus("TLSCleanupFailed", err.Error())
 		return errors.Wrap(err, "failed to clean up HAMi TLS secret")
 	}
 
-	h.setStatus(v1.ComponentPhaseNotReady, "Disabled", "accelerator virtualization is disabled")
+	h.setNotReadyStatus("Disabled", "accelerator virtualization is disabled")
+
 	return nil
 }
 
 func (h *HAMiComponent) UpdateStatus(ctx context.Context) error {
 	status, err := h.CheckResourcesStatus(ctx)
 	if err != nil {
-		h.setStatus(v1.ComponentPhaseNotReady, "StatusCheckFailed", err.Error())
+		h.setNotReadyStatus("StatusCheckFailed", err.Error())
 		return nil
 	}
 
 	h.writeStatus(status.ComponentStatus())
+
 	return nil
 }
 
-func (h *HAMiComponent) setStatus(phase v1.ComponentPhase, reason, message string) {
+func (h *HAMiComponent) setNotReadyStatus(reason, message string) {
 	h.writeStatus(&v1.ComponentStatus{
-		Phase:   phase,
+		Phase:   v1.ComponentPhaseNotReady,
 		Managed: true,
 		Version: Version,
 		Reason:  reason,
@@ -147,8 +150,10 @@ func (h *HAMiComponent) writeStatus(status *v1.ComponentStatus) {
 	if h.cluster.Status == nil {
 		h.cluster.Status = &v1.ClusterStatus{}
 	}
+
 	if h.cluster.Status.ComponentStatus == nil {
 		h.cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{}
 	}
+
 	h.cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey] = status
 }

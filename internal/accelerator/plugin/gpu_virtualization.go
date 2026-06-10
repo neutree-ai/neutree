@@ -46,6 +46,7 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 ) (*VirtualizationConfig, error) {
 	configPatch := map[string]interface{}{}
 	blockingReasons := make([]string, 0)
+
 	setNestedString(configPatch, NvidiaGPUTopologyAwarePolicy, "scheduler", "defaultSchedulerPolicy", "gpuSchedulerPolicy")
 
 	for _, policy := range input.GPUOperatorClusterPolicies {
@@ -54,6 +55,7 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 			// HAMi device-plugin needs the same path to discover host devices.
 			setNestedString(configPatch, NvidiaGPUOperatorDriverRoot, "devicePlugin", "nvidiaDriverRoot")
 		}
+
 		if boolAtPathDefault(policy.Spec, true, "devicePlugin", "enabled") {
 			blockingReasons = append(blockingReasons,
 				"NVIDIA GPU Operator devicePlugin is enabled; disable it before enabling HAMi NVIDIA vGPU")
@@ -77,6 +79,7 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 // labeled for HAMi vGPU support.
 func NvidiaVirtualizationCandidateNodes(nodes []corev1.Node) []string {
 	candidates := make([]string, 0)
+
 	for _, node := range nodes {
 		if nvidiaMIGStrategyEnabled(node.Labels) {
 			// The current vGPU support does not model MIG partitions, so skip
@@ -119,20 +122,6 @@ func boolAtPathDefault(values map[string]interface{}, defaultValue bool, path ..
 	return boolValue
 }
 
-func stringAtPath(values map[string]interface{}, path ...string) (string, bool) {
-	value, ok := valueAtPath(values, path...)
-	if !ok {
-		return "", false
-	}
-
-	stringValue, ok := value.(string)
-	if !ok {
-		return "", false
-	}
-
-	return stringValue, true
-}
-
 func setNestedString(values map[string]interface{}, value string, path ...string) {
 	current := values
 	for _, key := range path[:len(path)-1] {
@@ -141,6 +130,7 @@ func setNestedString(values map[string]interface{}, value string, path ...string
 			next = map[string]interface{}{}
 			current[key] = next
 		}
+
 		current = next
 	}
 
@@ -203,6 +193,7 @@ func listGPUOperatorClusterPolicies(
 	}
 
 	policies := make([]GPUOperatorClusterPolicy, 0, len(list.Items))
+
 	for _, item := range list.Items {
 		spec, _, err := unstructured.NestedMap(item.Object, "spec")
 		if err != nil {

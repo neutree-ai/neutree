@@ -3,7 +3,6 @@ package cluster
 import (
 	"encoding/base64"
 	"fmt"
-	"math"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -107,8 +106,4 @@ func getUsedImageRegistries(cluster *v1.Cluster, s storage.Storage) (*v1.ImageRe
 	}
 
 	return targetImageRegistry, nil
-}
-
-func roundFloat64ToTwoDecimals(input float64) float64 {
-	return math.Round(input*100) / 100
 }

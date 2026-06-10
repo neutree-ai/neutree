@@ -58,6 +58,7 @@ func PlanNodeScope(nodes []corev1.Node, candidateNodes []string, label NodeScope
 			if value == label.EnabledValue {
 				plan.StaleEnabledNodes = append(plan.StaleEnabledNodes, node.Name)
 			}
+
 			continue
 		}
 

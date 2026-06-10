@@ -57,6 +57,7 @@ func (p *GPUResourceParser) ParseKubernetesVirtualizationNode(
 	if err != nil {
 		return nil, true, err
 	}
+
 	if len(devices) == 0 {
 		return &resourceparser.KubernetesResourceParseResult{}, true, nil
 	}
@@ -75,7 +76,9 @@ func (p *GPUResourceParser) ParseKubernetesVirtualizationEndpoint(
 	if !hasHAMiNvidiaEndpointAllocations(input) {
 		return nil, false, nil
 	}
+
 	instances, err := parseHAMiNvidiaEndpointResources(input)
+
 	return instances, true, err
 }
 
@@ -103,12 +106,14 @@ func parseHAMiNvidiaEndpointResources(
 	}
 
 	instances := make([]resourceparser.EndpointInstanceResource, 0, len(input.Pods))
+
 	for _, pod := range input.Pods {
 		allocations, err := parseHAMiNvidiaDeviceAllocations(pod.Annotations[HAMiVGPUDevicesAllocatedAnnotation])
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse HAMi NVIDIA allocation for endpoint pod %s/%s: %w",
 				pod.Namespace, pod.Name, err)
 		}
+
 		if len(allocations) == 0 {
 			continue
 		}
@@ -119,11 +124,13 @@ func parseHAMiNvidiaEndpointResources(
 			NodeID:     pod.NodeName,
 			Devices:    make([]v1.DeviceAllocation, 0, len(allocations)),
 		}
+
 		for _, allocation := range allocations {
 			product := deviceProducts[pod.NodeName][allocation.DeviceID]
 			if product == "" {
 				product = allocation.Product
 			}
+
 			if product == "" {
 				product = "unknown"
 			}
@@ -153,6 +160,7 @@ func hamiNvidiaDeviceProductsByNode(
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse HAMi NVIDIA registered devices for node %s: %w", nodeName, err)
 		}
+
 		if len(devices) == 0 {
 			continue
 		}
@@ -206,6 +214,7 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 	}
 
 	var allocations []hamiNvidiaDeviceAllocation
+
 	for _, entry := range strings.Split(value, ";") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
@@ -218,6 +227,7 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 		if colon := strings.Index(entry, ":"); colon >= 0 {
 			entry = entry[:colon]
 		}
+
 		fields := strings.Split(entry, ",")
 		if len(fields) < hamiNvidiaDeviceAllocationFieldCount {
 			continue
@@ -227,6 +237,7 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 		if err != nil {
 			return nil, fmt.Errorf("invalid memory value %q: %w", fields[2], err)
 		}
+
 		coreUnits, err := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid core value %q: %w", fields[3], err)
@@ -275,6 +286,7 @@ func buildHAMiNvidiaResourceParseResult(
 
 		productKey := v1.AcceleratorProduct(product)
 		addHAMiNvidiaProductResource(allocatableGroup, productKey, 1, allocatable)
+
 		if hamiNvidiaDeviceHasAvailableCapacity(available) {
 			// A device is counted as available only when one more vGPU slice can
 			// fit both memory and core requirements. Exposing only memory or only
@@ -311,6 +323,7 @@ func hamiNvidiaDeviceProduct(labels map[string]string, device hamiNvidiaRegister
 	if product := labels[NvidiaGPUKubernetesNodeSelectorKey]; product != "" {
 		return product
 	}
+
 	if device.Type != "" {
 		return device.Type
 	}
@@ -353,10 +366,13 @@ func addHAMiNvidiaProductResource(
 		productResource = &v1.AcceleratorProductResource{}
 		group.Products[product] = productResource
 	}
+
 	productResource.Quantity += quantity
+
 	if productResource.Virtualization == nil {
 		productResource.Virtualization = &v1.AcceleratorVirtualizationResource{}
 	}
+
 	productResource.Virtualization.MemoryMiB += float64(pool.MemoryMiB)
 	productResource.Virtualization.CoreUnits += float64(pool.CoreUnits)
 }

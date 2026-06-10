@@ -43,10 +43,12 @@ func (h *HAMiComponent) Preflight(ctx context.Context) error {
 
 func (h *HAMiComponent) validateClusterVersion() error {
 	version := h.cluster.GetVersion()
+
 	supported, err := accelerator.SupportsVirtualizationClusterVersion(version)
 	if err != nil {
 		return fmt.Errorf("failed to parse cluster version %q: %w", version, err)
 	}
+
 	if !supported {
 		return fmt.Errorf("accelerator virtualization component requires cluster version >= %s",
 			accelerator.MinVirtualizationClusterVersion)
@@ -71,12 +73,15 @@ func validateConfigPatch(configPatch map[string]interface{}) error {
 	if dra, ok := nestedBool(configPatch, "dra", "enabled"); ok && dra {
 		return errors.New("HAMi DRA is not supported")
 	}
+
 	if schedulerPatch, ok := nestedBool(configPatch, "scheduler", "patch", "enabled"); ok && schedulerPatch {
 		return errors.New("HAMi scheduler patch hook is managed by Neutree and cannot be enabled")
 	}
+
 	if certManager, ok := nestedBool(configPatch, "scheduler", "certManager", "enabled"); ok && certManager {
 		return errors.New("HAMi cert-manager integration is managed by Neutree and cannot be enabled")
 	}
+
 	// Neutree vGPU support is based on HAMi core mode. MIG mode requires
 	// different node/device semantics and is intentionally rejected here.
 	if migStrategy, ok := nestedString(configPatch, "devicePlugin", "migStrategy"); ok &&
@@ -94,6 +99,7 @@ func nestedBool(values map[string]interface{}, path ...string) (bool, bool) {
 		if !ok {
 			return false, false
 		}
+
 		current, ok = asMap[key]
 		if !ok {
 			return false, false
@@ -101,6 +107,7 @@ func nestedBool(values map[string]interface{}, path ...string) (bool, bool) {
 	}
 
 	value, ok := current.(bool)
+
 	return value, ok
 }
 
@@ -111,6 +118,7 @@ func nestedString(values map[string]interface{}, path ...string) (string, bool) 
 		if !ok {
 			return "", false
 		}
+
 		current, ok = asMap[key]
 		if !ok {
 			return "", false
@@ -118,6 +126,7 @@ func nestedString(values map[string]interface{}, path ...string) (string, bool) 
 	}
 
 	value, ok := current.(string)
+
 	return value, ok
 }
 
@@ -188,6 +197,7 @@ func objectKind(obj client.Object) string {
 		if kind := obj.GetObjectKind().GroupVersionKind().Kind; kind != "" {
 			return kind
 		}
+
 		return "Object"
 	}
 }
@@ -196,8 +206,10 @@ func clientIgnoreNotFound(err error) error {
 	if err == nil {
 		return nil
 	}
+
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
+
 	return err
 }

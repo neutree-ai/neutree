@@ -30,8 +30,10 @@ func validateEndpointAcceleratorVirtualization(s storage.Storage) gin.HandlerFun
 				Hint:    err.Error(),
 			})
 			c.Abort()
+
 			return
 		}
+
 		c.Request.Body = io.NopCloser(bytes.NewReader(body))
 
 		if len(bytes.TrimSpace(body)) == 0 {
@@ -42,6 +44,7 @@ func validateEndpointAcceleratorVirtualization(s storage.Storage) gin.HandlerFun
 		if validationErr := validateEndpointAcceleratorVirtualizationBody(c.Request.Method, body, c.Request.URL.RawQuery, s); validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
+
 			return
 		}
 
@@ -59,6 +62,7 @@ func validateEndpointAcceleratorVirtualizationBody(
 	if err != nil {
 		return invalidEndpointPayloadError(err)
 	}
+
 	if !hasResources {
 		return nil
 	}
@@ -82,6 +86,7 @@ func validateEndpointAcceleratorVirtualizationBody(
 	}
 
 	var existing *v1.Endpoint
+
 	if method == http.MethodPatch {
 		loadedEndpoint, err := existingEndpointForPatch(rawQuery, s)
 		if err != nil {
@@ -126,6 +131,7 @@ func endpointPayloadHasResources(body []byte) (bool, error) {
 	}
 
 	_, ok = spec["resources"]
+
 	return ok, nil
 }
 
@@ -172,12 +178,15 @@ func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.Resour
 	if _, err := parsePositiveIntegerResource(resources.GPU, "spec.resources.gpu"); err != nil {
 		return endpointResourceValueError(err)
 	}
+
 	if _, err := parsePositiveFloat(resources.GetAcceleratorVirtualizationMemoryMiB(), "virtualization.memory_mib"); err != nil {
 		return endpointResourceValueError(err)
 	}
+
 	if _, err := parsePercent(resources.GetAcceleratorVirtualizationMemoryPercent(), "virtualization.memory_percent"); err != nil {
 		return endpointResourceValueError(err)
 	}
+
 	if _, err := parsePercent(resources.GetAcceleratorVirtualizationCorePercent(), "virtualization.core_percent"); err != nil {
 		return endpointResourceValueError(err)
 	}
@@ -189,6 +198,7 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
 		return nil
 	}
+
 	if endpoint.Spec.Cluster == "" {
 		return &validationError{
 			Code:    "10220",
@@ -196,6 +206,7 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 			Hint:    "Set spec.cluster before configuring accelerator virtualization resources",
 		}
 	}
+
 	if s == nil {
 		return &validationError{
 			Code:    "10215",
@@ -215,12 +226,14 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 
 	resources := endpoint.Spec.Resources
 	gpuCount, err := parsePositiveIntegerResource(resources.GPU, "spec.resources.gpu")
+
 	if err != nil {
 		return endpointResourceValueError(err)
 	}
 
 	productName := resources.GetAcceleratorProduct()
 	availableProduct, ok := getAvailableVirtualizationProduct(cluster.Status, resources.GetAcceleratorType(), productName)
+
 	if !ok {
 		return &validationError{
 			Code:    "10221",
@@ -231,6 +244,7 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 
 	reclaimedQuantity, reclaimedMemoryMiB, reclaimedCoreUnits := existingEndpointVirtualizationAllocation(existing, productName)
 	availableQuantity := availableProduct.Quantity + reclaimedQuantity
+
 	if float64(gpuCount) > availableQuantity {
 		return &validationError{
 			Code:    "10222",
@@ -243,13 +257,16 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 	if err != nil {
 		return endpointResourceValueError(err)
 	}
+
 	if requiredMemoryMiB > 0 {
 		availableMemoryMiB := float64(0)
 		if availableProduct.Virtualization != nil {
 			availableMemoryMiB = availableProduct.Virtualization.MemoryMiB
 		}
+
 		availableMemoryMiB += reclaimedMemoryMiB
 		totalRequiredMemoryMiB := float64(gpuCount) * requiredMemoryMiB
+
 		if totalRequiredMemoryMiB > availableMemoryMiB {
 			return &validationError{
 				Code:    "10223",
@@ -263,13 +280,16 @@ func validateEndpointAcceleratorVirtualizationResourcePool(endpoint *v1.Endpoint
 	if err != nil {
 		return endpointResourceValueError(err)
 	}
+
 	if requiredCoreUnits > 0 {
 		availableCoreUnits := float64(0)
 		if availableProduct.Virtualization != nil {
 			availableCoreUnits = availableProduct.Virtualization.CoreUnits
 		}
+
 		availableCoreUnits += reclaimedCoreUnits
 		totalRequiredCoreUnits := float64(gpuCount) * requiredCoreUnits
+
 		if totalRequiredCoreUnits > availableCoreUnits {
 			return &validationError{
 				Code:    "10224",
@@ -309,6 +329,7 @@ func endpointDeployClusterForValidation(endpoint *v1.Endpoint, s storage.Storage
 	if err != nil {
 		return nil, fmt.Errorf("failed to list cluster: %w", err)
 	}
+
 	if len(clusters) == 0 {
 		return nil, fmt.Errorf("cluster %s not found", endpoint.Spec.Cluster)
 	}
@@ -330,6 +351,7 @@ func existingEndpointForPatch(rawQuery string, s storage.Storage) (*v1.Endpoint,
 	if err != nil {
 		return nil, fmt.Errorf("failed to load existing endpoint: %w", err)
 	}
+
 	if len(endpoints) != 1 {
 		return nil, fmt.Errorf("endpoint patch must match exactly one existing endpoint")
 	}
@@ -358,9 +380,11 @@ func mergeEndpointForResourceValidation(existing *v1.Endpoint, patch v1.Endpoint
 		if metadata.Name == "" {
 			metadata.Name = existing.Metadata.Name
 		}
+
 		if metadata.Workspace == "" {
 			metadata.Workspace = existing.Metadata.Workspace
 		}
+
 		merged.Metadata = &metadata
 	}
 
@@ -371,6 +395,7 @@ func mergeEndpointForResourceValidation(existing *v1.Endpoint, patch v1.Endpoint
 		if spec.Cluster == "" {
 			spec.Cluster = existing.Spec.Cluster
 		}
+
 		merged.Spec = &spec
 	}
 
@@ -387,6 +412,7 @@ func existingEndpointVirtualizationAllocation(endpoint *v1.Endpoint, productName
 	var quantity float64
 	var memoryMiB float64
 	var coreUnits float64
+
 	for _, replica := range endpoint.Status.Resources.Replicas {
 		for _, device := range replica.Devices {
 			if device.Product != productName {
@@ -451,6 +477,7 @@ func validateEndpointVirtualizationDeviceFit(
 	compatibleCount := 0
 	memoryFitCount := 0
 	coreFitCount := 0
+
 	for _, device := range devices {
 		memoryFits := requiredMemoryMiB <= 0 || float64(device.memoryMiB) >= requiredMemoryMiB
 		coreFits := requiredCoreUnits <= 0 || float64(device.coreUnits) >= requiredCoreUnits
@@ -458,9 +485,11 @@ func validateEndpointVirtualizationDeviceFit(
 		if memoryFits {
 			memoryFitCount++
 		}
+
 		if coreFits {
 			coreFitCount++
 		}
+
 		if memoryFits && coreFits {
 			compatibleCount++
 		}
@@ -504,6 +533,7 @@ func availableEndpointVirtualizationDevices(status *v1.ClusterStatus, productNam
 	}
 
 	devices := []endpointVirtualizationDeviceCapacity{}
+
 	for _, node := range status.ResourceInfo.NodeResources {
 		if node == nil {
 			continue
@@ -656,6 +686,7 @@ func parsePercent(value string, field string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	if parsed > 100 {
 		return 0, fmt.Errorf("%s must be between 1 and 100", field)
 	}

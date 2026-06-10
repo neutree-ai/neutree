@@ -84,18 +84,21 @@ func buildClusterResourcesFromResourceNodes(nodes []ResourceNode) *v1.ClusterRes
 		if node.Status == nil {
 			continue
 		}
+
 		if node.Status.Allocatable != nil {
 			result.Allocatable.CPU += node.Status.Allocatable.CPU
 			result.Allocatable.Memory += node.Status.Allocatable.Memory
 			mergeAcceleratorGroups(result.Allocatable.AcceleratorGroups, node.Status.Allocatable.AcceleratorGroups)
 			mergeAcceleratorMetadata(result.AcceleratorMetadata, node.Status.Allocatable.AcceleratorMetadata)
 		}
+
 		if node.Status.Available != nil {
 			result.Available.CPU += node.Status.Available.CPU
 			result.Available.Memory += node.Status.Available.Memory
 			mergeAcceleratorGroups(result.Available.AcceleratorGroups, node.Status.Available.AcceleratorGroups)
 			mergeAcceleratorMetadata(result.AcceleratorMetadata, node.Status.Available.AcceleratorMetadata)
 		}
+
 		mergeAcceleratorMetadata(result.AcceleratorMetadata, node.AcceleratorMetadata)
 		result.NodeResources[node.ID] = node.Status
 	}
@@ -135,6 +138,7 @@ func buildEndpointResourcesFromEndpointInstances(instances []EndpointInstanceRes
 				usage = &v1.ProductUsage{}
 				result.Summary.Products[product] = usage
 			}
+
 			usage.MemoryMiB += device.MemoryMiB
 			usage.CoreUnits += device.CoreUnits
 		}
