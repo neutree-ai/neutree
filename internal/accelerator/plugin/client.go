@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 type acceleratorPluginClient struct {
@@ -85,7 +85,7 @@ func (u *acceleratorPluginClient) GetResourceConverter() ResourceConverter {
 	return u
 }
 
-func (u *acceleratorPluginClient) GetResourceParser() resourceview.ResourceParser {
+func (u *acceleratorPluginClient) GetResourceParser() resourceparser.ResourceParser {
 	return u
 }
 

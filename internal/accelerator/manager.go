@@ -14,7 +14,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 type Manager interface {
@@ -28,13 +28,13 @@ type Manager interface {
 	GetAllConverters() map[string]plugin.ResourceConverter
 
 	// GetAllParsers returns all registered resource parsers
-	GetAllParsers() map[string]resourceview.ResourceParser
+	GetAllParsers() map[string]resourceparser.ResourceParser
 
 	// GetConverter retrieves a resource converter by accelerator type
 	GetConverter(acceleratorType string) (plugin.ResourceConverter, bool)
 
 	// GetParser retrieves a resource parser by accelerator type
-	GetParser(acceleratorType string) (resourceview.ResourceParser, bool)
+	GetParser(acceleratorType string) (resourceparser.ResourceParser, bool)
 
 	// GetEngineContainerRunOptions returns Docker run_options for engine containers.
 	// Delegates to the registered plugin's GetContainerRuntimeConfig() and converts
@@ -268,8 +268,8 @@ func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {
 	return result
 }
 
-func (a *manager) GetAllParsers() map[string]resourceview.ResourceParser {
-	result := make(map[string]resourceview.ResourceParser)
+func (a *manager) GetAllParsers() map[string]resourceparser.ResourceParser {
+	result := make(map[string]resourceparser.ResourceParser)
 
 	a.acceleratorsMap.Range(func(key, value any) bool {
 		p, ok := value.(registerPlugin)
@@ -334,7 +334,7 @@ func (a *manager) GetConverter(acceleratorType string) (plugin.ResourceConverter
 	return converter, converter != nil
 }
 
-func (a *manager) GetParser(acceleratorType string) (resourceview.ResourceParser, bool) {
+func (a *manager) GetParser(acceleratorType string) (resourceparser.ResourceParser, bool) {
 	p, ok := a.GetPlugin(acceleratorType)
 	if !ok {
 		return nil, false

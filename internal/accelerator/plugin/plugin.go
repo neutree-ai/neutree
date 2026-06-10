@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 const (
@@ -44,7 +44,7 @@ type AcceleratorPluginHandle interface {
 	GetResourceConverter() ResourceConverter
 
 	// GetResourceParser returns the resource parser
-	GetResourceParser() resourceview.ResourceParser
+	GetResourceParser() resourceparser.ResourceParser
 
 	// GetContainerRuntimeConfig returns the static RuntimeConfig for engine containers.
 	// Unlike GetNodeRuntimeConfig, this does NOT require SSH access to a node.

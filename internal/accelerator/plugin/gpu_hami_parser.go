@@ -7,16 +7,22 @@ import (
 	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 const (
+	// These annotation keys mirror HAMi v2.9.0 NVIDIA device-plugin output.
+	// Keep them local instead of importing HAMi implementation packages so
+	// Neutree depends only on the Kubernetes annotation contract it observes.
 	HAMiNodeNvidiaRegisterAnnotation     = "hami.io/node-nvidia-register"
 	HAMiVGPUDevicesAllocatedAnnotation   = "hami.io/vgpu-devices-allocated"
 	hamiDefaultNvidiaDeviceCoreUnits     = int64(100)
 	hamiNvidiaDeviceAllocationFieldCount = 4
 )
 
+// hamiNvidiaRegisteredDevice is the subset of HAMi node registration data that
+// Neutree needs for resource views. HAMi may add fields to the annotation; the
+// parser intentionally ignores everything outside this stable subset.
 type hamiNvidiaRegisteredDevice struct {
 	ID      string `json:"id"`
 	DevMem  int64  `json:"devmem"`
@@ -38,8 +44,8 @@ type hamiNvidiaDeviceUsage struct {
 }
 
 func (p *GPUResourceParser) ParseKubernetesVirtualizationNode(
-	input resourceview.KubernetesNodeResourceContext,
-) (*resourceview.KubernetesResourceParseResult, bool, error) {
+	input resourceparser.KubernetesNodeResourceContext,
+) (*resourceparser.KubernetesResourceParseResult, bool, error) {
 	// The node label is the virtualization switch. A virtualized cluster can
 	// still contain standard NVIDIA nodes, so non-matching nodes must fall back
 	// to the standard parser instead of returning an empty vGPU result.
@@ -52,7 +58,7 @@ func (p *GPUResourceParser) ParseKubernetesVirtualizationNode(
 		return nil, true, err
 	}
 	if len(devices) == 0 {
-		return &resourceview.KubernetesResourceParseResult{}, true, nil
+		return &resourceparser.KubernetesResourceParseResult{}, true, nil
 	}
 
 	usage, err := parseHAMiNvidiaPodUsage(input.Pods)
@@ -64,8 +70,8 @@ func (p *GPUResourceParser) ParseKubernetesVirtualizationNode(
 }
 
 func (p *GPUResourceParser) ParseKubernetesVirtualizationEndpoint(
-	input resourceview.KubernetesEndpointResourceContext,
-) ([]resourceview.EndpointInstanceResource, bool, error) {
+	input resourceparser.KubernetesEndpointResourceContext,
+) ([]resourceparser.EndpointInstanceResource, bool, error) {
 	if !hasHAMiNvidiaEndpointAllocations(input) {
 		return nil, false, nil
 	}
@@ -73,7 +79,7 @@ func (p *GPUResourceParser) ParseKubernetesVirtualizationEndpoint(
 	return instances, true, err
 }
 
-func hasHAMiNvidiaEndpointAllocations(input resourceview.KubernetesEndpointResourceContext) bool {
+func hasHAMiNvidiaEndpointAllocations(input resourceparser.KubernetesEndpointResourceContext) bool {
 	for _, pod := range input.Pods {
 		if strings.TrimSpace(pod.Annotations[HAMiVGPUDevicesAllocatedAnnotation]) == "" {
 			continue
@@ -89,14 +95,14 @@ func hasHAMiNvidiaEndpointAllocations(input resourceview.KubernetesEndpointResou
 }
 
 func parseHAMiNvidiaEndpointResources(
-	input resourceview.KubernetesEndpointResourceContext,
-) ([]resourceview.EndpointInstanceResource, error) {
+	input resourceparser.KubernetesEndpointResourceContext,
+) ([]resourceparser.EndpointInstanceResource, error) {
 	deviceProducts, err := hamiNvidiaDeviceProductsByNode(input.Nodes)
 	if err != nil {
 		return nil, err
 	}
 
-	instances := make([]resourceview.EndpointInstanceResource, 0, len(input.Pods))
+	instances := make([]resourceparser.EndpointInstanceResource, 0, len(input.Pods))
 	for _, pod := range input.Pods {
 		allocations, err := parseHAMiNvidiaDeviceAllocations(pod.Annotations[HAMiVGPUDevicesAllocatedAnnotation])
 		if err != nil {
@@ -107,7 +113,7 @@ func parseHAMiNvidiaEndpointResources(
 			continue
 		}
 
-		instance := resourceview.EndpointInstanceResource{
+		instance := resourceparser.EndpointInstanceResource{
 			InstanceID: pod.Name,
 			ReplicaID:  pod.Name,
 			NodeID:     pod.NodeName,
@@ -138,7 +144,7 @@ func parseHAMiNvidiaEndpointResources(
 }
 
 func hamiNvidiaDeviceProductsByNode(
-	nodes map[string]resourceview.KubernetesEndpointNodeResourceContext,
+	nodes map[string]resourceparser.KubernetesEndpointNodeResourceContext,
 ) (map[string]map[string]string, error) {
 	result := make(map[string]map[string]string)
 
@@ -173,7 +179,7 @@ func parseHAMiNvidiaRegisteredDevices(value string) ([]hamiNvidiaRegisteredDevic
 	return devices, nil
 }
 
-func parseHAMiNvidiaPodUsage(pods []resourceview.KubernetesPodResourceContext) (map[string]hamiNvidiaDeviceUsage, error) {
+func parseHAMiNvidiaPodUsage(pods []resourceparser.KubernetesPodResourceContext) (map[string]hamiNvidiaDeviceUsage, error) {
 	result := make(map[string]hamiNvidiaDeviceUsage)
 
 	for _, pod := range pods {
@@ -241,7 +247,7 @@ func buildHAMiNvidiaResourceParseResult(
 	labels map[string]string,
 	devices []hamiNvidiaRegisteredDevice,
 	usage map[string]hamiNvidiaDeviceUsage,
-) *resourceview.KubernetesResourceParseResult {
+) *resourceparser.KubernetesResourceParseResult {
 	allocatableGroup := newNvidiaAcceleratorGroup()
 	availableGroup := newNvidiaAcceleratorGroup()
 	metadata := &v1.AcceleratorMetadata{
@@ -283,7 +289,7 @@ func buildHAMiNvidiaResourceParseResult(
 		}
 	}
 
-	return &resourceview.KubernetesResourceParseResult{
+	return &resourceparser.KubernetesResourceParseResult{
 		Allocatable: &v1.ResourceInfo{
 			AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 				v1.AcceleratorTypeNVIDIAGPU: allocatableGroup,

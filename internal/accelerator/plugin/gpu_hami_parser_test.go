@@ -4,13 +4,13 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGPUResourceParser_ParseKubernetesVirtualizationNodeWithUsage(t *testing.T) {
 	parser := &GPUResourceParser{}
-	input := resourceview.KubernetesNodeResourceContext{
+	input := resourceparser.KubernetesNodeResourceContext{
 		NodeName: "gpu-node",
 		Labels: map[string]string{
 			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
@@ -23,7 +23,7 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationNodeWithUsage(t *testing
 				{"id":"GPU-2","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true}
 			]`,
 		},
-		Pods: []resourceview.KubernetesPodResourceContext{
+		Pods: []resourceparser.KubernetesPodResourceContext{
 			{
 				Namespace: "default",
 				Name:      "infer-1",
@@ -61,7 +61,7 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationNodeWithUsage(t *testing
 
 func TestGPUResourceParser_ParseKubernetesVirtualizationNode(t *testing.T) {
 	parser := &GPUResourceParser{}
-	input := resourceview.KubernetesNodeResourceContext{
+	input := resourceparser.KubernetesNodeResourceContext{
 		NodeName: "gpu-node",
 		Labels: map[string]string{
 			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
@@ -88,7 +88,7 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationNode(t *testing.T) {
 func TestGPUResourceParser_ParseKubernetesVirtualizationNodeDoesNotMatchStandardNode(t *testing.T) {
 	parser := &GPUResourceParser{}
 
-	result, matched, err := parser.ParseKubernetesVirtualizationNode(resourceview.KubernetesNodeResourceContext{
+	result, matched, err := parser.ParseKubernetesVirtualizationNode(resourceparser.KubernetesNodeResourceContext{
 		Labels: map[string]string{
 			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
 		},
@@ -102,7 +102,7 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationNodeDoesNotMatchStandard
 func TestGPUResourceParser_ParseKubernetesVirtualizationNodeMatchesEmptyHAMiRegistration(t *testing.T) {
 	parser := &GPUResourceParser{}
 
-	result, matched, err := parser.ParseKubernetesVirtualizationNode(resourceview.KubernetesNodeResourceContext{
+	result, matched, err := parser.ParseKubernetesVirtualizationNode(resourceparser.KubernetesNodeResourceContext{
 		Labels: map[string]string{
 			NvidiaGPUVirtualizationLabelKey: "true",
 			NvidiaGPUCountResource:          "2",
@@ -119,10 +119,10 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationNodeMatchesEmptyHAMiRegi
 
 func TestGPUResourceParser_ParseKubernetesVirtualizationEndpoint(t *testing.T) {
 	parser := &GPUResourceParser{}
-	input := resourceview.KubernetesEndpointResourceContext{
+	input := resourceparser.KubernetesEndpointResourceContext{
 		EndpointName: "chat",
 		Namespace:    "default",
-		Nodes: map[string]resourceview.KubernetesEndpointNodeResourceContext{
+		Nodes: map[string]resourceparser.KubernetesEndpointNodeResourceContext{
 			"gpu-node": {
 				Name: "gpu-node",
 				Labels: map[string]string{
@@ -137,7 +137,7 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationEndpoint(t *testing.T) {
 				},
 			},
 		},
-		Pods: []resourceview.KubernetesPodResourceContext{
+		Pods: []resourceparser.KubernetesPodResourceContext{
 			{
 				Namespace: "default",
 				Name:      "chat-abc",
