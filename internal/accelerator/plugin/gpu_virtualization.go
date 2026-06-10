@@ -46,8 +46,6 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	configPatch := map[string]interface{}{}
 	blockingReasons := make([]string, 0)
 
-	setNestedString(configPatch, NvidiaGPUTopologyAwarePolicy, "scheduler", "defaultSchedulerPolicy", "gpuSchedulerPolicy")
-
 	for _, policy := range input.GPUOperatorClusterPolicies {
 		if boolAtPathDefault(policy.Spec, true, "driver", "enabled") {
 			// GPU Operator managed drivers are usually mounted under this root.

@@ -26,6 +26,9 @@ mockDevicePlugin:
 prometheus:
   enabled: false
 scheduler:
+  defaultSchedulerPolicy:
+    nodeSchedulerPolicy: binpack
+    gpuSchedulerPolicy: topology-aware
   admissionWebhook:
     enabled: true
   certManager:

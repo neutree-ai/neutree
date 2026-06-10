@@ -246,20 +246,6 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		assert.Contains(t, err.Message, "MIG")
 	})
 
-	t.Run("mutates default GPU scheduler policy when missing", func(t *testing.T) {
-		mutated, err := mutateClusterAcceleratorVirtualizationDefaults([]byte(`{
-			"metadata": {"name": "cluster", "workspace": "default"},
-			"spec": {
-				"type": "kubernetes",
-				"version": "v1.1.0",
-				"accelerator_virtualization": {"enabled": true}
-			}
-		}`))
-
-		assert.NoError(t, err)
-		assert.Contains(t, string(mutated), `"gpuSchedulerPolicy":"topology-aware"`)
-	})
-
 	t.Run("loads existing cluster type for partial patch", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		mockStorage.On("ListCluster", storage.ListOption{

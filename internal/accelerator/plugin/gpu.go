@@ -28,7 +28,6 @@ const (
 	NvidiaGPUVirtualizationLabelKey    string              = "neutree.ai/nvidia-vgpu-enabled"
 	NvidiaGPUDiscoveryLabelKey         string              = "nvidia.com/gpu.present"
 	NvidiaGPUDiscoveryLabelValue       string              = "true"
-	NvidiaGPUTopologyPolicyAnnotation  string              = "hami.io/gpu-scheduler-policy"
 	NvidiaGPUTopologyAwarePolicy       string              = "topology-aware"
 	NvidiaGPUDefaultDeviceSplitCount   int                 = 100
 	NvidiaGPUOperatorDriverRoot        string              = "/run/nvidia/driver"
