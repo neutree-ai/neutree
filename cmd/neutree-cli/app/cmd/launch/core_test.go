@@ -484,15 +484,21 @@ func captureStdout(t *testing.T, fn func()) string {
 	oldStdout := os.Stdout
 	reader, writer, err := os.Pipe()
 	require.NoError(t, err)
+	defer reader.Close()
 
 	os.Stdout = writer
+	writerClosed := false
 	defer func() {
 		os.Stdout = oldStdout
+		if !writerClosed {
+			writer.Close()
+		}
 	}()
 
 	fn()
 
 	require.NoError(t, writer.Close())
+	writerClosed = true
 	output, err := io.ReadAll(reader)
 	require.NoError(t, err)
 
