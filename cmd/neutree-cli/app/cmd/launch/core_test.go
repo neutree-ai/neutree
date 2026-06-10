@@ -189,6 +189,12 @@ func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 			wantErr:       "not compatible",
 		},
 		{
+			name:          "rejects previous release line because only current release policy is configured",
+			cliVersion:    "v1.0.1-enterprise",
+			targetVersion: "v1.0.1-enterprise",
+			wantErr:       "no configured",
+		},
+		{
 			name:          "rejects invalid target version",
 			cliVersion:    "v1.1.0-nightly-20260608",
 			targetVersion: "not-a-version",
@@ -234,8 +240,8 @@ func TestDefaultNeutreeCoreVersion(t *testing.T) {
 		},
 		{
 			name:       "exact enterprise tag defaults to CLI app version",
-			cliVersion: "v1.0.1-enterprise",
-			want:       "v1.0.1-enterprise",
+			cliVersion: "v1.1.0-enterprise",
+			want:       "v1.1.0-enterprise",
 		},
 		{
 			name:       "git describe commit suffix falls back",

@@ -26,19 +26,11 @@ var (
 		return version.Get().AppVersion
 	}
 
-	neutreeCoreCompatibilityPolicies = []neutreeCoreCompatibilityPolicy{
-		{
-			cliMin:    "v1.0.0-0",
-			cliMax:    "v1.1.0-0",
-			targetMin: "v1.0.0-0",
-			targetMax: "v1.1.0-0",
-		},
-		{
-			cliMin:    "v1.1.0-0",
-			cliMax:    "v1.2.0-0",
-			targetMin: "v1.1.0-0",
-			targetMax: "v1.2.0-0",
-		},
+	neutreeCoreCompatibilityPolicyForCurrentRelease = neutreeCoreCompatibilityPolicy{
+		cliMin:    "v1.1.0-0",
+		cliMax:    "v1.2.0-0",
+		targetMin: "v1.1.0-0",
+		targetMax: "v1.2.0-0",
 	}
 )
 
@@ -62,12 +54,9 @@ func validateNeutreeCoreVersionCompatibility(cliVersion, targetVersion string) e
 	}
 
 	cli := semver.MustParse(cliVersion)
+	policy := neutreeCoreCompatibilityPolicyForCurrentRelease
 
-	for _, policy := range neutreeCoreCompatibilityPolicies {
-		if !versionInRange(cli, policy.cliMin, policy.cliMax) {
-			continue
-		}
-
+	if versionInRange(cli, policy.cliMin, policy.cliMax) {
 		if versionInRange(target, policy.targetMin, policy.targetMax) {
 			return nil
 		}
