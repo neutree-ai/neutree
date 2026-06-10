@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -223,6 +224,29 @@ func (k *kubernetesOrchestrator) setResourceVariables(data *DeploymentManifestVa
 	return nil
 }
 
+func (k *kubernetesOrchestrator) setAcceleratorVirtualizationAnnotations(
+	data *DeploymentManifestVariables,
+	endpoint *v1.Endpoint,
+	deployedCluster *v1.Cluster,
+) {
+	if endpoint == nil ||
+		endpoint.Spec == nil ||
+		endpoint.Spec.Resources == nil ||
+		!endpoint.Spec.Resources.HasAcceleratorVirtualization() ||
+		endpoint.Spec.Resources.GetAcceleratorType() != string(v1.AcceleratorTypeNVIDIAGPU) ||
+		deployedCluster == nil ||
+		deployedCluster.Spec == nil ||
+		!deployedCluster.Spec.AcceleratorVirtualizationEnabled() {
+		return
+	}
+
+	if nvidiaVirtualizationSchedulerPolicy(deployedCluster) != plugin.NvidiaGPUTopologyAwarePolicy {
+		return
+	}
+
+	data.Annotations[plugin.NvidiaGPUTopologyPolicyAnnotation] = plugin.NvidiaGPUTopologyAwarePolicy
+}
+
 // setEnvironmentVariables initializes environment variables from endpoint spec
 func (k *kubernetesOrchestrator) setEnvironmentVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
 	if endpoint.Spec.Env != nil {
@@ -382,6 +406,8 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 		return DeploymentManifestVariables{}, err
 	}
 
+	k.setAcceleratorVirtualizationAnnotations(&data, endpoint, deployedCluster)
+
 	// Set environment variables
 	k.setEnvironmentVariables(&data, endpoint)
 
@@ -402,6 +428,45 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	k.addSharedMemoryVolume(&data)
 
 	return data, nil
+}
+
+func nvidiaVirtualizationSchedulerPolicy(cluster *v1.Cluster) string {
+	if cluster == nil ||
+		cluster.Spec == nil ||
+		cluster.Spec.AcceleratorVirtualization == nil {
+		return ""
+	}
+
+	configPatch := cluster.Spec.AcceleratorVirtualization.ConfigPatch
+	if configPatch == nil {
+		return plugin.NvidiaGPUTopologyAwarePolicy
+	}
+
+	policy, ok := nestedStringValue(configPatch, "scheduler", "defaultSchedulerPolicy", "gpuSchedulerPolicy")
+	if !ok || strings.TrimSpace(policy) == "" {
+		return plugin.NvidiaGPUTopologyAwarePolicy
+	}
+
+	return strings.TrimSpace(policy)
+}
+
+func nestedStringValue(values map[string]interface{}, path ...string) (string, bool) {
+	var current interface{} = values
+	for _, key := range path {
+		asMap, ok := current.(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+
+		current, ok = asMap[key]
+		if !ok {
+			return "", false
+		}
+	}
+
+	value, ok := current.(string)
+
+	return value, ok
 }
 
 func (k *kubernetesOrchestrator) getDeployTemplate(endpoint *v1.Endpoint, engine *v1.Engine) (string, error) {

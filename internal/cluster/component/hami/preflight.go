@@ -64,14 +64,10 @@ func validateConfigPatch(configPatch map[string]interface{}) error {
 
 	for key := range configPatch {
 		switch key {
-		case "devicePlugin", "scheduler", "global", "dra":
+		case "devicePlugin", "scheduler", "global":
 		default:
 			return fmt.Errorf("unsupported accelerator_virtualization.config_patch key %q", key)
 		}
-	}
-
-	if dra, ok := nestedBool(configPatch, "dra", "enabled"); ok && dra {
-		return errors.New("HAMi DRA is not supported")
 	}
 
 	if schedulerPatch, ok := nestedBool(configPatch, "scheduler", "patch", "enabled"); ok && schedulerPatch {

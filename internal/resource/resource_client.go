@@ -24,13 +24,6 @@ type ResourceClient interface {
 }
 
 type ResourceParser = resourceparser.ResourceParser
-type KubernetesNodeResourceContext = resourceparser.KubernetesNodeResourceContext
-type KubernetesPodResourceContext = resourceparser.KubernetesPodResourceContext
-type KubernetesEndpointNodeResourceContext = resourceparser.KubernetesEndpointNodeResourceContext
-type KubernetesEndpointResourceContext = resourceparser.KubernetesEndpointResourceContext
-type KubernetesResourceParseResult = resourceparser.KubernetesResourceParseResult
-type KubernetesVirtualizationResourceParser = resourceparser.KubernetesVirtualizationResourceParser
-type KubernetesVirtualizationEndpointResourceParser = resourceparser.KubernetesVirtualizationEndpointResourceParser
 
 const BytesPerGiB = 1024 * 1024 * 1024
 
@@ -85,7 +78,7 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 		availableResource   map[corev1.ResourceName]k8sresource.Quantity
 		labels              map[string]string
 		annotations         map[string]string
-		pods                []KubernetesPodResourceContext
+		pods                []resourceparser.KubernetesPodResourceContext
 	}
 	nodesByID := make(map[string]*nodeResourceInfo)
 
@@ -114,7 +107,7 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 		}
 
 		totalRequested, totalLimits := resourceutil.PodRequestsAndLimits(&pod)
-		nodeInfo.pods = append(nodeInfo.pods, KubernetesPodResourceContext{
+		nodeInfo.pods = append(nodeInfo.pods, resourceparser.KubernetesPodResourceContext{
 			Namespace:   pod.Namespace,
 			Name:        pod.Name,
 			UID:         string(pod.UID),
@@ -146,7 +139,7 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 		klog.V(4).Infof("Node %s available resources: %+v", nodeID, nodeInfo.availableResource)
 
 		resourceStatus, devices, metadata, err := transformKubernetesNodeResources(
-			KubernetesNodeResourceContext{
+			resourceparser.KubernetesNodeResourceContext{
 				NodeName:             nodeID,
 				AllocatableResources: nodeInfo.allocatableResource,
 				AvailableResources:   nodeInfo.availableResource,
@@ -210,7 +203,7 @@ func (c *K8sResourceClient) ListEndpointInstances(
 		return nil, fmt.Errorf("failed to list endpoint pods: %w", err)
 	}
 
-	pods := make([]KubernetesPodResourceContext, 0, len(podList.Items))
+	pods := make([]resourceparser.KubernetesPodResourceContext, 0, len(podList.Items))
 	nodeNames := make(map[string]struct{})
 
 	for _, pod := range podList.Items {
@@ -219,7 +212,7 @@ func (c *K8sResourceClient) ListEndpointInstances(
 		}
 
 		totalRequested, totalLimits := resourceutil.PodRequestsAndLimits(&pod)
-		pods = append(pods, KubernetesPodResourceContext{
+		pods = append(pods, resourceparser.KubernetesPodResourceContext{
 			Namespace:   pod.Namespace,
 			Name:        pod.Name,
 			UID:         string(pod.UID),
@@ -237,7 +230,7 @@ func (c *K8sResourceClient) ListEndpointInstances(
 		return nil, err
 	}
 
-	input := KubernetesEndpointResourceContext{
+	input := resourceparser.KubernetesEndpointResourceContext{
 		EndpointName: opts.EndpointName,
 		Namespace:    opts.Namespace,
 		Pods:         pods,
@@ -259,8 +252,8 @@ func (c *K8sResourceClient) ListEndpointInstances(
 func (c *K8sResourceClient) listEndpointNodes(
 	ctx context.Context,
 	nodeNames map[string]struct{},
-) (map[string]KubernetesEndpointNodeResourceContext, error) {
-	nodes := make(map[string]KubernetesEndpointNodeResourceContext)
+) (map[string]resourceparser.KubernetesEndpointNodeResourceContext, error) {
+	nodes := make(map[string]resourceparser.KubernetesEndpointNodeResourceContext)
 	if len(nodeNames) == 0 {
 		return nodes, nil
 	}
@@ -275,7 +268,7 @@ func (c *K8sResourceClient) listEndpointNodes(
 			continue
 		}
 
-		nodes[node.Name] = KubernetesEndpointNodeResourceContext{
+		nodes[node.Name] = resourceparser.KubernetesEndpointNodeResourceContext{
 			Name:        node.Name,
 			Labels:      node.Labels,
 			Annotations: node.Annotations,
@@ -373,7 +366,7 @@ func resourceNodeFromStatus(nodeID string, status *v1.ResourceStatus) ResourceNo
 }
 
 func transformKubernetesNodeResources(
-	input KubernetesNodeResourceContext,
+	input resourceparser.KubernetesNodeResourceContext,
 	parsers map[string]ResourceParser,
 	acceleratorVirtualizationEnabled bool,
 ) (*v1.ResourceStatus, []*v1.DeviceResource, map[v1.AcceleratorType]*v1.AcceleratorMetadata, error) {
@@ -407,11 +400,11 @@ func transformKubernetesNodeResources(
 }
 
 func transformKubernetesVirtualizationNodeResources(
-	input KubernetesNodeResourceContext,
+	input resourceparser.KubernetesNodeResourceContext,
 	parsers map[string]ResourceParser,
-) (*KubernetesResourceParseResult, bool, error) {
+) (*resourceparser.KubernetesResourceParseResult, bool, error) {
 	for _, key := range sortedParserKeys(parsers) {
-		parser, ok := parsers[key].(KubernetesVirtualizationResourceParser)
+		parser, ok := parsers[key].(resourceparser.KubernetesVirtualizationResourceParser)
 		if !ok {
 			continue
 		}
@@ -433,7 +426,7 @@ func transformKubernetesVirtualizationNodeResources(
 
 func mergeKubernetesVirtualizationAccelerators(
 	status *v1.ResourceStatus,
-	result *KubernetesResourceParseResult,
+	result *resourceparser.KubernetesResourceParseResult,
 ) {
 	if status == nil || result == nil {
 		return
@@ -477,11 +470,11 @@ func mergeKubernetesStandardAccelerators(
 }
 
 func transformKubernetesVirtualizationEndpointResources(
-	input KubernetesEndpointResourceContext,
+	input resourceparser.KubernetesEndpointResourceContext,
 	parsers map[string]ResourceParser,
 ) ([]EndpointInstanceResource, bool, error) {
 	for _, key := range sortedParserKeys(parsers) {
-		parser, ok := parsers[key].(KubernetesVirtualizationEndpointResourceParser)
+		parser, ok := parsers[key].(resourceparser.KubernetesVirtualizationEndpointResourceParser)
 		if !ok {
 			continue
 		}

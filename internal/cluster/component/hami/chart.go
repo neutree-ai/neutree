@@ -3,7 +3,6 @@ package hami
 import (
 	"bytes"
 	"embed"
-	"io"
 	"path"
 	"sort"
 	"strings"
@@ -14,7 +13,8 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/engine"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 const embeddedHAMiChartPackage = "chart/hami-2.9.0.tgz"
@@ -58,7 +58,12 @@ func renderEmbeddedHAMiChart(
 
 	manifest := joinRenderedManifests(renderedFiles)
 
-	return decodeRenderedManifest(manifest)
+	objList, err := util.DecodeKubernetesManifest(manifest)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to decode rendered HAMi manifest")
+	}
+
+	return objList, nil
 }
 
 func loadEmbeddedHAMiChart() (*chart.Chart, error) {
@@ -109,32 +114,4 @@ func isRenderedManifestFile(filePath string) bool {
 	default:
 		return false
 	}
-}
-
-func decodeRenderedManifest(manifest string) (*unstructured.UnstructuredList, error) {
-	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewBufferString(manifest), 4096)
-	objList := &unstructured.UnstructuredList{}
-
-	for {
-		obj := &unstructured.Unstructured{}
-		if err := decoder.Decode(obj); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-
-			return nil, errors.Wrap(err, "failed to decode rendered HAMi manifest")
-		}
-
-		if len(obj.Object) == 0 {
-			continue
-		}
-
-		objList.Items = append(objList.Items, *obj)
-	}
-
-	if len(objList.Items) == 0 {
-		return nil, errors.New("HAMi chart rendered no Kubernetes objects")
-	}
-
-	return objList, nil
 }

@@ -175,9 +175,7 @@ func TestNVIDIAGPU_ConvertToKubernetesWithHAMiMemoryMiB(t *testing.T) {
 		NodeSelector: map[string]string{
 			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
 		},
-		Annotations: map[string]string{
-			NvidiaGPUTopologyPolicyAnnotation: NvidiaGPUTopologyAwarePolicy,
-		},
+		Annotations: map[string]string{},
 	}
 
 	equal, diff, err := util.JsonEqual(k8sResource, expectedResource)
@@ -220,9 +218,7 @@ func TestNVIDIAGPU_ConvertToKubernetesWithHAMiMemoryPercent(t *testing.T) {
 		NodeSelector: map[string]string{
 			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
 		},
-		Annotations: map[string]string{
-			NvidiaGPUTopologyPolicyAnnotation: NvidiaGPUTopologyAwarePolicy,
-		},
+		Annotations: map[string]string{},
 	}
 
 	equal, diff, err := util.JsonEqual(k8sResource, expectedResource)

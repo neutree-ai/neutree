@@ -93,8 +93,6 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 			return nil, err
 		}
 
-		k8s.Annotations[NvidiaGPUTopologyPolicyAnnotation] = NvidiaGPUTopologyAwarePolicy
-
 		return k8s, nil
 	}
 

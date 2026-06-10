@@ -6,14 +6,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
-const NvidiaVGPUEnabledLabelKey = plugin.NvidiaGPUVirtualizationLabelKey
-
-var NvidiaNodeScopeLabel = NodeScopeLabel{
-	Key:           NvidiaVGPUEnabledLabelKey,
-	EnabledValue:  "true",
-	DisabledValue: "false",
-}
-
 type NodeScopeLabel struct {
 	Key           string
 	EnabledValue  string
@@ -76,4 +68,12 @@ func PlanNodeScope(nodes []corev1.Node, candidateNodes []string, label NodeScope
 	}
 
 	return plan
+}
+
+func defaultNodeScopeLabel() NodeScopeLabel {
+	return NodeScopeLabel{
+		Key:           plugin.NvidiaGPUVirtualizationLabelKey,
+		EnabledValue:  "true",
+		DisabledValue: "false",
+	}
 }

@@ -25,14 +25,12 @@ const (
 	NvidiaGPUCountResource             string              = "nvidia.com/gpu.count"
 	NvidiaGPUKubernetesNodeSelectorKey string              = "nvidia.com/gpu.product"
 	NvidiaGPUMemoryNodeLabelKey        string              = "nvidia.com/gpu.memory"
-	NvidiaGPUVirtualizationLabelKey    string              = "neutree.ai/nvidia_vgpu_enabled"
+	NvidiaGPUVirtualizationLabelKey    string              = "neutree.ai/nvidia-vgpu-enabled"
 	NvidiaGPUDiscoveryLabelKey         string              = "nvidia.com/gpu.present"
 	NvidiaGPUDiscoveryLabelValue       string              = "true"
-	NvidiaGPUMIGStrategyLabelKey       string              = "nvidia.com/mig.strategy"
-	NvidiaGPUMIGStrategyNone           string              = "none"
 	NvidiaGPUTopologyPolicyAnnotation  string              = "hami.io/gpu-scheduler-policy"
 	NvidiaGPUTopologyAwarePolicy       string              = "topology-aware"
-	NvidiaGPUDefaultDeviceSplitCount   float64             = 100
+	NvidiaGPUDefaultDeviceSplitCount   int                 = 100
 	NvidiaGPUOperatorDriverRoot        string              = "/run/nvidia/driver"
 )
 

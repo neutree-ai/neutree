@@ -213,6 +213,19 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 		return nil, nil
 	}
 
+	// HAMi v2.9.0 writes allocated devices as a semicolon-delimited string.
+	// Empty fields are common because the annotation keeps slots for each
+	// container/device position. Example:
+	//
+	//	;;GPU-5ad72eb2,NVIDIA,15360,100:;GPU-cd4432b1,NVIDIA,15360,100:;
+	//
+	// Each non-empty record is parsed as:
+	//
+	//	<device_uuid>,<vendor>,<memory_mib>,<core_units>[:optional_suffix]
+	//
+	// Neutree only needs the UUID plus the memory/core allocation. The vendor
+	// is kept as Product only as a fallback when node registration metadata is
+	// missing.
 	var allocations []hamiNvidiaDeviceAllocation
 
 	for _, entry := range strings.Split(value, ";") {
@@ -221,9 +234,6 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 			continue
 		}
 
-		// HAMi stores allocation records as semicolon-delimited fragments and
-		// may append a colon-delimited suffix. The resource view only needs
-		// device UUID, product, memory MiB, and core units.
 		if colon := strings.Index(entry, ":"); colon >= 0 {
 			entry = entry[:colon]
 		}
