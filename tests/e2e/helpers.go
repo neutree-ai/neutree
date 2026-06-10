@@ -504,17 +504,19 @@ func renderSSHClusterYAML(overrides map[string]any) string {
 //   - "router_cpu"       (string)         defaults to "1"
 //   - "router_memory"    (string)         defaults to "2Gi"
 //   - "model_caches"     ([]ModelCache)   optional
+//   - "accelerator_virtualization_enabled" (bool) optional
 func renderK8sClusterYAML(overrides map[string]any) string {
 	data := map[string]any{
-		"CLUSTER_NAME":            stringOr(overrides, "name", ""),
-		"CLUSTER_WORKSPACE":       profileWorkspace(),
-		"CLUSTER_IMAGE_REGISTRY":  stringOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":         stringOr(overrides, "version", profileClusterVersion()),
-		"CLUSTER_KUBECONFIG":      stringOr(overrides, "kubeconfig", ""),
-		"CLUSTER_ROUTER_REPLICAS": stringOr(overrides, "router_replicas", "1"),
-		"CLUSTER_ROUTER_CPU":      stringOr(overrides, "router_cpu", "1"),
-		"CLUSTER_ROUTER_MEMORY":   stringOr(overrides, "router_memory", "2Gi"),
-		"CLUSTER_MODEL_CACHES":    anySliceOr[ModelCache](overrides, "model_caches", nil),
+		"CLUSTER_NAME":                               stringOr(overrides, "name", ""),
+		"CLUSTER_WORKSPACE":                          profileWorkspace(),
+		"CLUSTER_IMAGE_REGISTRY":                     stringOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":                            stringOr(overrides, "version", profileClusterVersion()),
+		"CLUSTER_KUBECONFIG":                         stringOr(overrides, "kubeconfig", ""),
+		"CLUSTER_ROUTER_REPLICAS":                    stringOr(overrides, "router_replicas", "1"),
+		"CLUSTER_ROUTER_CPU":                         stringOr(overrides, "router_cpu", "1"),
+		"CLUSTER_ROUTER_MEMORY":                      stringOr(overrides, "router_memory", "2Gi"),
+		"CLUSTER_MODEL_CACHES":                       anySliceOr[ModelCache](overrides, "model_caches", nil),
+		"CLUSTER_ACCELERATOR_VIRTUALIZATION_ENABLED": boolOr(overrides, "accelerator_virtualization_enabled", false),
 	}
 
 	path, err := renderTemplateToTempFile(filepath.Join("testdata", "k8s-cluster.yaml"), data)
@@ -528,6 +530,16 @@ func stringOr(m map[string]any, key, fallback string) string {
 	if v, ok := m[key]; ok {
 		if s, ok := v.(string); ok && s != "" {
 			return s
+		}
+	}
+
+	return fallback
+}
+
+func boolOr(m map[string]any, key string, fallback bool) bool {
+	if v, ok := m[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
 		}
 	}
 
@@ -1357,20 +1369,23 @@ func defaultEndpointEngineArgs(engineName, task string) []EngineArg {
 
 // endpointOpts holds configurable fields for applyEndpoint.
 type endpointOpts struct {
-	engineName    string
-	engineVersion string
-	model         string
-	modelVersion  string
-	task          string
-	engineArgs    []EngineArg
-	gpu           string
-	cpu           string
-	memory        string
-	accType       string
-	accProduct    string
-	env           map[string]string
-	forceUpdate   bool
-	replicas      int
+	engineName        string
+	engineVersion     string
+	model             string
+	modelVersion      string
+	task              string
+	engineArgs        []EngineArg
+	gpu               string
+	cpu               string
+	memory            string
+	accType           string
+	accProduct        string
+	vgpuMemoryMiB     string
+	vgpuMemoryPercent string
+	vgpuCorePercent   string
+	env               map[string]string
+	forceUpdate       bool
+	replicas          int
 }
 
 // EndpointOption configures a single field of endpointOpts.
@@ -1411,6 +1426,14 @@ func withEngineArgs(args []EngineArg) EndpointOption {
 
 func withGPU(n string) EndpointOption {
 	return func(o *endpointOpts) { o.gpu = n }
+}
+
+func withAcceleratorVirtualization(memoryMiB, memoryPercent, corePercent string) EndpointOption {
+	return func(o *endpointOpts) {
+		o.vgpuMemoryMiB = memoryMiB
+		o.vgpuMemoryPercent = memoryPercent
+		o.vgpuCorePercent = corePercent
+	}
 }
 
 func withCPU(cpu string) EndpointOption {
@@ -1463,23 +1486,26 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 	}
 
 	data := map[string]any{
-		"E2E_ENDPOINT_NAME":       name,
-		"E2E_WORKSPACE":           profileWorkspace(),
-		"E2E_CLUSTER_NAME":        cluster,
-		"E2E_ENGINE_NAME":         o.engineName,
-		"E2E_ENGINE_VERSION":      o.engineVersion,
-		"E2E_MODEL_REGISTRY":      testRegistry(),
-		"E2E_MODEL_NAME":          o.model,
-		"E2E_MODEL_VERSION":       o.modelVersion,
-		"E2E_MODEL_TASK":          o.task,
-		"E2E_ACCELERATOR_TYPE":    o.accType,
-		"E2E_ACCELERATOR_PRODUCT": o.accProduct,
-		"E2E_GPU":                 o.gpu,
-		"E2E_CPU":                 o.cpu,
-		"E2E_MEMORY":              o.memory,
-		"E2E_ENGINE_ARGS":         o.engineArgs,
-		"E2E_ENV":                 o.env,
-		"E2E_REPLICAS_NUM":        o.replicas,
+		"E2E_ENDPOINT_NAME":                             name,
+		"E2E_WORKSPACE":                                 profileWorkspace(),
+		"E2E_CLUSTER_NAME":                              cluster,
+		"E2E_ENGINE_NAME":                               o.engineName,
+		"E2E_ENGINE_VERSION":                            o.engineVersion,
+		"E2E_MODEL_REGISTRY":                            testRegistry(),
+		"E2E_MODEL_NAME":                                o.model,
+		"E2E_MODEL_VERSION":                             o.modelVersion,
+		"E2E_MODEL_TASK":                                o.task,
+		"E2E_ACCELERATOR_TYPE":                          o.accType,
+		"E2E_ACCELERATOR_PRODUCT":                       o.accProduct,
+		"E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_MIB":     o.vgpuMemoryMiB,
+		"E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_PERCENT": o.vgpuMemoryPercent,
+		"E2E_ACCELERATOR_VIRTUALIZATION_CORE_PERCENT":   o.vgpuCorePercent,
+		"E2E_GPU":                                       o.gpu,
+		"E2E_CPU":                                       o.cpu,
+		"E2E_MEMORY":                                    o.memory,
+		"E2E_ENGINE_ARGS":                               o.engineArgs,
+		"E2E_ENV":                                       o.env,
+		"E2E_REPLICAS_NUM":                              o.replicas,
 	}
 
 	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), data)
