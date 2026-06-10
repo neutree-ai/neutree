@@ -71,7 +71,7 @@ all: build
 install-hooks: ## Enable .githooks as local git hooks (run once per clone)
 	git config core.hooksPath .githooks
 	chmod +x .githooks/pre-commit
-	chmod +x scripts/check-boundaries.sh scripts/check-migration-pairs.sh
+	chmod +x scripts/check-boundaries.sh scripts/check-migration-pairs.sh scripts/builder/sync-controlplane-images.sh
 	@echo "Git hooks installed. Pre-commit will run on every 'git commit'."
 
 build: test build-neutree-core build-neutree-cli build-neutree-api
@@ -369,9 +369,8 @@ build-engine-manifest: ## Build engine manifest only (no Docker image export, co
 
 .PHONY: sync-images-list
 sync-images-list: ## Sync images list for building package
-	helm template neutree ./deploy/chart/neutree \
-	  --set api.image.tag=latest \
-	  --set core.image.tag=latest \
-	  --set dbScripts.image.tag=latest | \
-	  grep -Eoh 'image:\s*["]?[a-zA-Z0-9./_-]+:[a-zA-Z0-9._-]+["]?' | \
-	  awk '{print $$2}' | tr -d '"' | sort -u > scripts/builder/image-lists/controlplane/images.txt
+	bash scripts/builder/sync-controlplane-images.sh --write
+
+.PHONY: check-images-list
+check-images-list: ## Check controlplane images list is up to date
+	bash scripts/builder/sync-controlplane-images.sh --check
