@@ -1,22 +1,22 @@
 package hami
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/pem"
 	"math/big"
 	"time"
 
 	"github.com/pkg/errors"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -233,50 +233,25 @@ func (h *HAMiComponent) PatchWebhookCABundle(ctx context.Context) (bool, error) 
 		return false, errors.Wrap(err, "failed to get HAMi TLS secret")
 	}
 
-	webhook := &unstructured.Unstructured{}
-	webhook.SetAPIVersion("admissionregistration.k8s.io/v1")
-	webhook.SetKind("MutatingWebhookConfiguration")
-
+	webhook := &admissionregistrationv1.MutatingWebhookConfiguration{}
 	if err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: WebhookName}, webhook); err != nil {
 		return false, errors.Wrap(err, "failed to get HAMi webhook")
 	}
 
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	if err != nil {
-		return false, errors.Wrap(err, "failed to read HAMi webhook list")
-	}
-
-	if !found || len(webhooks) == 0 {
+	if len(webhook.Webhooks) == 0 {
 		return false, errors.New("HAMi webhook has no webhooks")
 	}
 
-	desiredCABundle := base64.StdEncoding.EncodeToString(secret.Data["ca.crt"])
+	desiredCABundle := secret.Data["ca.crt"]
 	changed := false
 
-	for i := range webhooks {
-		webhookItem, ok := webhooks[i].(map[string]interface{})
-		if !ok {
+	for i := range webhook.Webhooks {
+		if bytes.Equal(webhook.Webhooks[i].ClientConfig.CABundle, desiredCABundle) {
 			continue
 		}
 
-		clientConfig, ok := webhookItem["clientConfig"].(map[string]interface{})
-		if !ok {
-			clientConfig = map[string]interface{}{}
-			webhookItem["clientConfig"] = clientConfig
-		}
-
-		if clientConfig["caBundle"] == desiredCABundle {
-			continue
-		}
-
-		// admissionregistration.k8s.io stores caBundle as base64 text inside
-		// the object, while Secrets hold the decoded PEM bytes.
-		clientConfig["caBundle"] = desiredCABundle
+		webhook.Webhooks[i].ClientConfig.CABundle = desiredCABundle
 		changed = true
-	}
-
-	if err := unstructured.SetNestedSlice(webhook.Object, webhooks, "webhooks"); err != nil {
-		return false, errors.Wrap(err, "failed to set HAMi webhook caBundle")
 	}
 
 	if !changed {

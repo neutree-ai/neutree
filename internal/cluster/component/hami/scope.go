@@ -77,7 +77,7 @@ func (h *HAMiComponent) resolveVirtualizationConfig(
 
 		configProvider, ok := acceleratorPlugin.(plugin.ClusterVirtualizationConfigProvider)
 		if !ok {
-			configs = append(configs, unsupportedVirtualizationConfig(acceleratorType))
+			configs = append(configs, plugin.NewUnsupportedVirtualizationConfig(acceleratorType))
 			continue
 		}
 
@@ -105,10 +105,6 @@ func (h *HAMiComponent) resolveVirtualizationConfig(
 	}
 
 	return config, nil
-}
-
-func unsupportedVirtualizationConfig(acceleratorType string) *plugin.VirtualizationConfig {
-	return plugin.NewUnsupportedVirtualizationConfig(acceleratorType)
 }
 
 func mergeVirtualizationConfigs(configs []*plugin.VirtualizationConfig) (*plugin.VirtualizationConfig, error) {
@@ -141,11 +137,19 @@ func mergeVirtualizationConfigs(configs []*plugin.VirtualizationConfig) (*plugin
 		merged.BlockingReasons = append(merged.BlockingReasons, config.BlockingReasons...)
 		merged.CandidateNodes = appendUniqueStrings(merged.CandidateNodes, config.CandidateNodes)
 
-		if merged.NodeScopeLabel.Key == "" && config.NodeScopeLabel.Key != "" {
+		if config.NodeScopeLabel.Key != "" {
+			if merged.NodeScopeLabel.Key != "" && merged.NodeScopeLabel.Key != config.NodeScopeLabel.Key {
+				return nil, errors.Errorf(
+					"accelerator plugins returned different virtualization node scope labels: %s and %s",
+					merged.NodeScopeLabel.Key,
+					config.NodeScopeLabel.Key,
+				)
+			}
+
 			merged.NodeScopeLabel = config.NodeScopeLabel
 		}
 
-		merged.ConfigPatch = mergeConfigPatch(merged.ConfigPatch, config.ConfigPatch)
+		merged.ConfigPatch = mergeChartValues(merged.ConfigPatch, config.ConfigPatch)
 	}
 
 	if !merged.Supported {
@@ -173,28 +177,6 @@ func appendUniqueStrings(target []string, values []string) []string {
 	return target
 }
 
-func mergeConfigPatch(target map[string]interface{}, patch map[string]interface{}) map[string]interface{} {
-	if target == nil {
-		target = map[string]interface{}{}
-	}
-
-	for key, patchValue := range patch {
-		patchMap, patchIsMap := patchValue.(map[string]interface{})
-		targetMap, targetIsMap := target[key].(map[string]interface{})
-
-		if patchIsMap && targetIsMap {
-			// Config patches are Helm values. Preserve nested maps so plugins can
-			// override only the keys they own without replacing sibling values.
-			target[key] = mergeConfigPatch(targetMap, patchMap)
-			continue
-		}
-
-		target[key] = patchValue
-	}
-
-	return target
-}
-
 func virtualizationConfigBlocked(config *plugin.VirtualizationConfig) error {
 	if !config.Supported {
 		return errors.New("no accelerator plugin supports HAMi virtualization on this cluster")
@@ -209,16 +191,18 @@ func virtualizationConfigBlocked(config *plugin.VirtualizationConfig) error {
 }
 
 func nodeScopeLabelFromPlugin(label plugin.VirtualizationNodeScopeLabel) NodeScopeLabel {
+	defaultLabel := defaultNodeScopeLabel()
+
 	if label.Key == "" {
-		return NvidiaNodeScopeLabel
+		return defaultLabel
 	}
 
 	if label.EnabledValue == "" {
-		label.EnabledValue = NvidiaNodeScopeLabel.EnabledValue
+		label.EnabledValue = defaultLabel.EnabledValue
 	}
 
 	if label.DisabledValue == "" {
-		label.DisabledValue = NvidiaNodeScopeLabel.DisabledValue
+		label.DisabledValue = defaultLabel.DisabledValue
 	}
 
 	return NodeScopeLabel{

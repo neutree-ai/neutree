@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
@@ -1762,6 +1763,49 @@ func TestKubernetesOrchestrator_addSharedMemoryVolume(t *testing.T) {
 	require.Len(t, data.VolumeMounts, 1)
 	assert.Equal(t, "dshm", data.VolumeMounts[0].Name)
 	assert.Equal(t, "/dev/shm", data.VolumeMounts[0].MountPath)
+}
+
+func TestKubernetesOrchestratorSetAcceleratorVirtualizationAnnotations(t *testing.T) {
+	k := &kubernetesOrchestrator{}
+	endpoint := &v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Resources: &v1.ResourceSpec{
+				GPU: pointer.String("1"),
+				Accelerator: map[string]string{
+					v1.AcceleratorTypeKey:                      string(v1.AcceleratorTypeNVIDIAGPU),
+					v1.AcceleratorProductKey:                   "Tesla-T4",
+					v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
+					v1.AcceleratorVirtualizationCorePercentKey: "50",
+				},
+			},
+		},
+	}
+	cluster := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: true},
+		},
+	}
+
+	data := newDeploymentManifestVariables()
+	k.setAcceleratorVirtualizationAnnotations(&data, endpoint, cluster)
+	assert.Equal(t, plugin.NvidiaGPUTopologyAwarePolicy, data.Annotations[plugin.NvidiaGPUTopologyPolicyAnnotation])
+
+	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
+		"scheduler": map[string]interface{}{
+			"defaultSchedulerPolicy": map[string]interface{}{
+				"gpuSchedulerPolicy": "binpack",
+			},
+		},
+	}
+	data = newDeploymentManifestVariables()
+	k.setAcceleratorVirtualizationAnnotations(&data, endpoint, cluster)
+	assert.NotContains(t, data.Annotations, plugin.NvidiaGPUTopologyPolicyAnnotation)
+
+	delete(endpoint.Spec.Resources.Accelerator, v1.AcceleratorVirtualizationMemoryMiBKey)
+	delete(endpoint.Spec.Resources.Accelerator, v1.AcceleratorVirtualizationCorePercentKey)
+	data = newDeploymentManifestVariables()
+	k.setAcceleratorVirtualizationAnnotations(&data, endpoint, cluster)
+	assert.NotContains(t, data.Annotations, plugin.NvidiaGPUTopologyPolicyAnnotation)
 }
 
 func TestKubernetesOrchestrator_setModelRegistryVariables_HuggingFace(t *testing.T) {

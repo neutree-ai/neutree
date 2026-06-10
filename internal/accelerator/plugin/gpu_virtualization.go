@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"strings"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -81,31 +80,12 @@ func NvidiaVirtualizationCandidateNodes(nodes []corev1.Node) []string {
 	candidates := make([]string, 0)
 
 	for _, node := range nodes {
-		if nvidiaMIGStrategyEnabled(node.Labels) {
-			// The current vGPU support does not model MIG partitions, so skip
-			// nodes that GPU Feature Discovery reports as MIG-enabled.
-			continue
-		}
-
 		if node.Labels[NvidiaGPUDiscoveryLabelKey] == NvidiaGPUDiscoveryLabelValue {
 			candidates = append(candidates, node.Name)
 		}
 	}
 
 	return candidates
-}
-
-func nvidiaMIGStrategyEnabled(labels map[string]string) bool {
-	if labels == nil {
-		return false
-	}
-
-	return nvidiaMIGStrategyIsEnabled(labels[NvidiaGPUMIGStrategyLabelKey])
-}
-
-func nvidiaMIGStrategyIsEnabled(strategy string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(strategy))
-	return normalized != "" && normalized != NvidiaGPUMIGStrategyNone
 }
 
 func boolAtPathDefault(values map[string]interface{}, defaultValue bool, path ...string) bool {

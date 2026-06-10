@@ -98,7 +98,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 					"config_patch": {"devicePlugin": {"nvidiaDriverRoot": "/run/nvidia/driver"}}
 				}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.Nil(t, err)
 	})
@@ -110,7 +110,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"version": "v1.1.0-nightly-20260603",
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.Nil(t, err)
 	})
@@ -122,7 +122,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"version": "v1.0.9",
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10208", err.Code)
@@ -135,7 +135,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"type": "kubernetes",
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10208", err.Code)
@@ -149,7 +149,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"version": "nightly",
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10209", err.Code)
@@ -162,7 +162,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"type": "ssh",
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10208", err.Code)
@@ -175,7 +175,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"version": "v1.1.0",
 				"accelerator_virtualization": {"enabled": "true"}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10209", err.Code)
@@ -189,7 +189,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"version": "v1.1.0",
 				"accelerator_virtualization": {"enabled": true, "config_patch": ["invalid"]}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10209", err.Code)
@@ -207,9 +207,57 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"type": "ssh",
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "", nil)
+		}`), nil)
 
 		assert.Nil(t, err)
+	})
+
+	t.Run("rejects unsupported config patch key", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody(http.MethodPost, []byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {
+					"enabled": true,
+					"config_patch": {"dra": {"enabled": true}}
+				}
+			}
+		}`), nil)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10210", err.Code)
+		assert.Contains(t, err.Message, "unsupported")
+	})
+
+	t.Run("rejects MIG virtualization config patch", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody(http.MethodPost, []byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {
+					"enabled": true,
+					"config_patch": {"devicePlugin": {"migStrategy": "mixed"}}
+				}
+			}
+		}`), nil)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10210", err.Code)
+		assert.Contains(t, err.Message, "MIG")
+	})
+
+	t.Run("mutates default GPU scheduler policy when missing", func(t *testing.T) {
+		mutated, err := mutateClusterAcceleratorVirtualizationDefaults([]byte(`{
+			"metadata": {"name": "cluster", "workspace": "default"},
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.Contains(t, string(mutated), `"gpuSchedulerPolicy":"topology-aware"`)
 	})
 
 	t.Run("loads existing cluster type for partial patch", func(t *testing.T) {
@@ -226,10 +274,11 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		}, nil)
 
 		err := validateClusterAcceleratorVirtualizationBody(http.MethodPatch, []byte(`{
+			"metadata": {"name": "cluster", "workspace": "default"},
 			"spec": {
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "metadata->>name=eq.cluster&metadata->>workspace=eq.default", mockStorage)
+		}`), mockStorage)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10208", err.Code)
@@ -250,10 +299,11 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		}, nil)
 
 		err := validateClusterAcceleratorVirtualizationBody(http.MethodPatch, []byte(`{
+			"metadata": {"name": "cluster", "workspace": "default"},
 			"spec": {
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "metadata->>name=eq.cluster&metadata->>workspace=eq.default", mockStorage)
+		}`), mockStorage)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10208", err.Code)
@@ -275,10 +325,11 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		}, nil)
 
 		err := validateClusterAcceleratorVirtualizationBody(http.MethodPatch, []byte(`{
+			"metadata": {"name": "cluster", "workspace": "default"},
 			"spec": {
 				"accelerator_virtualization": {"enabled": true}
 			}
-		}`), "metadata->>name=eq.cluster&metadata->>workspace=eq.default", mockStorage)
+		}`), mockStorage)
 
 		assert.Nil(t, err)
 		mockStorage.AssertExpectations(t)

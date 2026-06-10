@@ -174,7 +174,7 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 
 	nodeScopeLabel := scopePlan.NodeScopeLabel
 	if nodeScopeLabel.Key == "" {
-		nodeScopeLabel = NvidiaNodeScopeLabel
+		nodeScopeLabel = defaultNodeScopeLabel()
 	}
 
 	values = mergeChartValues(values, map[string]interface{}{
@@ -184,16 +184,6 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 			},
 		},
 	})
-
-	if root := h.resolveNvidiaDriverRoot(scopePlan.ConfigPatch); root != "" {
-		// The NVIDIA plugin derives this from GPU Operator ClusterPolicy. Users
-		// can still override it explicitly through accelerator_virtualization.
-		values = mergeChartValues(values, map[string]interface{}{
-			"devicePlugin": map[string]interface{}{
-				"nvidiaDriverRoot": root,
-			},
-		})
-	}
 
 	return values
 }
@@ -230,7 +220,7 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 		return DefaultKubeSchedulerVersion()
 	}
 
-	minorVersion := kubernetesMajorMinor(serverVersion)
+	minorVersion := kubeServerMajorMinor(serverVersion)
 
 	schedulerVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]
 	if !ok {
@@ -258,7 +248,7 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 }
 
 func kubeSchedulerVersionFromServerVersion(serverVersion *kubeversion.Info) string {
-	return kubernetesBaseVersion(serverVersion)
+	return kubeServerSemver(serverVersion)
 }
 
 func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
@@ -275,7 +265,7 @@ func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
 }
 
 func kubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {
-	version := kubernetesBaseVersion(serverVersion)
+	version := kubeServerSemver(serverVersion)
 	if version == "" {
 		return kubeVersionFromBaseVersion(DefaultKubeSchedulerVersion())
 	}
@@ -302,7 +292,7 @@ func kubeVersionFromBaseVersion(version string) chartutil.KubeVersion {
 	}
 }
 
-func kubernetesBaseVersion(serverVersion *kubeversion.Info) string {
+func kubeServerSemver(serverVersion *kubeversion.Info) string {
 	if serverVersion == nil {
 		return ""
 	}
@@ -311,11 +301,11 @@ func kubernetesBaseVersion(serverVersion *kubeversion.Info) string {
 		return version
 	}
 
-	return kubernetesBaseVersionFromMajorMinor(serverVersion.Major, serverVersion.Minor)
+	return kubeServerSemverFromMajorMinor(serverVersion.Major, serverVersion.Minor)
 }
 
-func kubernetesMajorMinor(serverVersion *kubeversion.Info) string {
-	version := kubernetesBaseVersion(serverVersion)
+func kubeServerMajorMinor(serverVersion *kubeversion.Info) string {
+	version := kubeServerSemver(serverVersion)
 	if version == "" {
 		return ""
 	}
@@ -328,9 +318,9 @@ func kubernetesMajorMinor(serverVersion *kubeversion.Info) string {
 	return majorMinor
 }
 
-func kubernetesBaseVersionFromMajorMinor(major, minor string) string {
-	major = kubernetesVersionNumber(strings.TrimPrefix(major, "v"))
-	minor = kubernetesVersionNumber(minor)
+func kubeServerSemverFromMajorMinor(major, minor string) string {
+	major = kubeVersionNumericPrefix(strings.TrimPrefix(major, "v"))
+	minor = kubeVersionNumericPrefix(minor)
 
 	if major == "" || minor == "" {
 		return ""
@@ -339,7 +329,7 @@ func kubernetesBaseVersionFromMajorMinor(major, minor string) string {
 	return "v" + major + "." + minor + ".0"
 }
 
-func kubernetesVersionNumber(value string) string {
+func kubeVersionNumericPrefix(value string) string {
 	for i, r := range value {
 		if r < '0' || r > '9' {
 			return value[:i]
@@ -348,42 +338,6 @@ func kubernetesVersionNumber(value string) string {
 
 	return value
 }
-
-func (h *HAMiComponent) resolveNvidiaDriverRoot(pluginConfigPatch map[string]interface{}) string {
-	if h.cluster.Spec != nil &&
-		h.cluster.Spec.AcceleratorVirtualization != nil &&
-		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch != nil {
-		if root := nvidiaDriverRootFromPatch(h.cluster.Spec.AcceleratorVirtualization.ConfigPatch); root != "" {
-			return root
-		}
-	}
-
-	if root := nvidiaDriverRootFromPatch(pluginConfigPatch); root != "" {
-		return root
-	}
-
-	return ""
-}
-
-func nvidiaDriverRootFromPatch(configPatch map[string]interface{}) string {
-	if configPatch == nil {
-		return ""
-	}
-
-	devicePlugin, ok := configPatch["devicePlugin"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-
-	root, ok := devicePlugin["nvidiaDriverRoot"].(string)
-	if !ok {
-		return ""
-	}
-
-	return root
-}
-
-const NvidiaGPUDefaultDeviceSplitCount = 100
 
 func shouldDeployDevicePlugin(plan NodeScopePlan) bool {
 	// When every candidate node is explicitly disabled, HAMi should still keep

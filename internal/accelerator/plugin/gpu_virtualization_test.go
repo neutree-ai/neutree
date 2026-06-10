@@ -32,8 +32,8 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "mig-node",
 					Labels: map[string]string{
-						NvidiaGPUDiscoveryLabelKey:   NvidiaGPUDiscoveryLabelValue,
-						NvidiaGPUMIGStrategyLabelKey: "mixed",
+						NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue,
+						"nvidia.com/mig.strategy":  "mixed",
 					},
 				},
 			},
@@ -55,7 +55,7 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, config.Supported)
-	assert.Equal(t, []string{"gpu-label"}, config.CandidateNodes)
+	assert.Equal(t, []string{"gpu-label", "mig-node"}, config.CandidateNodes)
 	assert.Equal(t, VirtualizationNodeScopeLabel{
 		Key:           NvidiaGPUVirtualizationLabelKey,
 		EnabledValue:  "true",

@@ -2,12 +2,12 @@ package hami
 
 import (
 	"context"
-	"encoding/base64"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -163,7 +163,7 @@ func TestHAMiComponentProtectedValuesUseDefaultDeviceSplitCount(t *testing.T) {
 
 	values := component.buildChartValues(NodeScopePlan{})
 
-	assert.Equal(t, NvidiaGPUDefaultDeviceSplitCount, nestedMap(t, values, "devicePlugin")["deviceSplitCount"])
+	assert.Equal(t, plugin.NvidiaGPUDefaultDeviceSplitCount, nestedMap(t, values, "devicePlugin")["deviceSplitCount"])
 }
 
 func TestHAMiComponentUsesGPUTopologyAwareSchedulerPolicy(t *testing.T) {
@@ -191,14 +191,14 @@ func TestHAMiComponentStatusReadyWhenDaemonSetAndNodeScopeAreReady(t *testing.T)
 		newHAMiReadyDaemonSet("neutree-system", 2),
 		newHAMiMonitorService("neutree-system"),
 		tlsSecret,
-		newHAMiWebhook(string(tlsSecret.Data["ca.crt"])),
+		newHAMiWebhook(tlsSecret.Data["ca.crt"]),
 		newHAMiNode("gpu-1", map[string]string{
-			NvidiaVGPUEnabledLabelKey: "true",
-			"nvidia.com/gpu.present":  "true",
+			plugin.NvidiaGPUVirtualizationLabelKey: "true",
+			"nvidia.com/gpu.present":               "true",
 		}),
 		newHAMiNode("gpu-2", map[string]string{
-			NvidiaVGPUEnabledLabelKey: "true",
-			"nvidia.com/gpu.present":  "true",
+			plugin.NvidiaGPUVirtualizationLabelKey: "true",
+			"nvidia.com/gpu.present":               "true",
 		}),
 	)
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
@@ -219,10 +219,10 @@ func TestHAMiComponentReconcileWritesNotReadyStatusWhenDaemonSetMissing(t *testi
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t,
 			newHAMiReadyDeployment("neutree-system"),
 			tlsSecret,
-			newHAMiWebhook(string(tlsSecret.Data["ca.crt"])),
+			newHAMiWebhook(tlsSecret.Data["ca.crt"]),
 			newHAMiNode("gpu-1", map[string]string{
-				NvidiaVGPUEnabledLabelKey: "true",
-				"nvidia.com/gpu.present":  "true",
+				plugin.NvidiaGPUVirtualizationLabelKey: "true",
+				"nvidia.com/gpu.present":               "true",
 			}),
 		), newTestPluginProvider("gpu-1"))
 
@@ -307,12 +307,12 @@ func TestHAMiPreflightRejectsProtectedConfigPatch(t *testing.T) {
 	err := component.Preflight(context.Background())
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "DRA is not supported")
+	assert.Contains(t, err.Error(), `unsupported accelerator_virtualization.config_patch key "dra"`)
 }
 
 func TestHAMiPreflightRejectsUnmanagedWebhook(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t, newHAMiWebhook("")))
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t, newHAMiWebhook(nil)))
 
 	err := component.Preflight(context.Background())
 
@@ -404,9 +404,9 @@ func TestHAMiRolloutSchedulerPatchesPodTemplateAnnotation(t *testing.T) {
 	assert.NotEmpty(t, deployment.Spec.Template.Annotations[schedulerTLSRolloutAnnotation])
 }
 
-func TestHAMiPatchWebhookCABundleWritesBase64CA(t *testing.T) {
+func TestHAMiPatchWebhookCABundleWritesCA(t *testing.T) {
 	tlsSecret := newHAMiTLSSecret(t, "neutree-system")
-	fakeClient := newHAMiFakeClient(t, tlsSecret, newHAMiWebhook(""))
+	fakeClient := newHAMiFakeClient(t, tlsSecret, newHAMiWebhook(nil))
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
 
@@ -414,21 +414,15 @@ func TestHAMiPatchWebhookCABundleWritesBase64CA(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, changed)
-	webhook := newHAMiWebhook("")
+	webhook := &admissionregistrationv1.MutatingWebhookConfiguration{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: WebhookName}, webhook))
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	require.NoError(t, err)
-	require.True(t, found)
-	actual, found, err := unstructured.NestedString(webhooks[0].(map[string]interface{}), "clientConfig", "caBundle")
-	require.NoError(t, err)
-	require.True(t, found)
-	assert.Equal(t, base64.StdEncoding.EncodeToString(tlsSecret.Data["ca.crt"]), actual)
+	require.Len(t, webhook.Webhooks, 1)
+	assert.Equal(t, tlsSecret.Data["ca.crt"], webhook.Webhooks[0].ClientConfig.CABundle)
 }
 
 func TestHAMiPatchWebhookCABundleNoopWhenCAIsCurrent(t *testing.T) {
 	tlsSecret := newHAMiTLSSecret(t, "neutree-system")
-	caBundle := base64.StdEncoding.EncodeToString(tlsSecret.Data["ca.crt"])
-	fakeClient := newHAMiFakeClient(t, tlsSecret, newHAMiWebhook(caBundle))
+	fakeClient := newHAMiFakeClient(t, tlsSecret, newHAMiWebhook(tlsSecret.Data["ca.crt"]))
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
 
@@ -602,6 +596,7 @@ func newHAMiFakeClient(t *testing.T, objs ...client.Object) client.Client {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
+	require.NoError(t, admissionregistrationv1.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
 	require.NoError(t, appsv1.AddToScheme(scheme))
 	require.NoError(t, rbacv1.AddToScheme(scheme))
@@ -693,20 +688,16 @@ func newHAMiTLSSecret(t *testing.T, namespace string) *corev1.Secret {
 	}
 }
 
-func newHAMiWebhook(caBundle string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "admissionregistration.k8s.io/v1",
-			"kind":       "MutatingWebhookConfiguration",
-			"metadata": map[string]interface{}{
-				"name": WebhookName,
-			},
-			"webhooks": []interface{}{
-				map[string]interface{}{
-					"name": "hami-webhook.projecthami.io",
-					"clientConfig": map[string]interface{}{
-						"caBundle": caBundle,
-					},
+func newHAMiWebhook(caBundle []byte) *admissionregistrationv1.MutatingWebhookConfiguration {
+	return &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: WebhookName,
+		},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{
+				Name: "hami-webhook.projecthami.io",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					CABundle: caBundle,
 				},
 			},
 		},

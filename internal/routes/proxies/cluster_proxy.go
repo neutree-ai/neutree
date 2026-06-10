@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -66,12 +65,24 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 			return
 		}
 
-		if validationErr := validateClusterAcceleratorVirtualizationBody(c.Request.Method, body, c.Request.URL.RawQuery, s); validationErr != nil {
+		if validationErr := validateClusterAcceleratorVirtualizationBody(c.Request.Method, body, s); validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
 
 			return
 		}
+
+		mutatedBody, err := mutateClusterAcceleratorVirtualizationDefaults(body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		c.Request.Body = io.NopCloser(bytes.NewReader(mutatedBody))
+		c.Request.ContentLength = int64(len(mutatedBody))
+		c.Request.Header.Set("Content-Length", fmt.Sprintf("%d", len(mutatedBody)))
 
 		c.Next()
 	}
@@ -80,7 +91,6 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 func validateClusterAcceleratorVirtualizationBody(
 	method string,
 	body []byte,
-	rawQuery string,
 	s storage.Storage,
 ) *validationError {
 	var cluster v1.Cluster
@@ -104,11 +114,15 @@ func validateClusterAcceleratorVirtualizationBody(
 		return nil
 	}
 
+	if err := validateClusterAcceleratorVirtualizationConfigPatch(cluster.Spec.AcceleratorVirtualization.ConfigPatch); err != nil {
+		return err
+	}
+
 	if method == http.MethodPatch && (cluster.Spec.Type == "" || cluster.Spec.Version == "") {
 		// Enabling virtualization through PATCH may only send the changed
 		// accelerator_virtualization object. Load immutable cluster attributes
 		// from the existing row before validating support.
-		existingSpec, err := existingClusterSpec(rawQuery, s)
+		existingSpec, err := existingClusterSpec(cluster, s)
 		if err != nil {
 			return &validationError{
 				Code:    "10208",
@@ -139,6 +153,139 @@ func validateClusterAcceleratorVirtualizationBody(
 	}
 
 	return nil
+}
+
+func mutateClusterAcceleratorVirtualizationDefaults(body []byte) ([]byte, error) {
+	var payload map[string]interface{}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	spec, ok := payload["spec"].(map[string]interface{})
+	if !ok {
+		return body, nil
+	}
+
+	acceleratorVirtualization, ok := spec["accelerator_virtualization"].(map[string]interface{})
+	if !ok {
+		return body, nil
+	}
+
+	enabled, ok := acceleratorVirtualization["enabled"].(bool)
+	if !ok || !enabled {
+		return body, nil
+	}
+
+	configPatch, ok := acceleratorVirtualization["config_patch"].(map[string]interface{})
+	if !ok {
+		configPatch = map[string]interface{}{}
+		acceleratorVirtualization["config_patch"] = configPatch
+	}
+
+	if policy, ok := nestedStringFromMap(configPatch, "scheduler", "defaultSchedulerPolicy", "gpuSchedulerPolicy"); ok &&
+		strings.TrimSpace(policy) != "" {
+		return body, nil
+	}
+
+	setNestedStringToMap(configPatch, plugin.NvidiaGPUTopologyAwarePolicy,
+		"scheduler", "defaultSchedulerPolicy", "gpuSchedulerPolicy")
+
+	return json.Marshal(payload)
+}
+
+func validateClusterAcceleratorVirtualizationConfigPatch(configPatch map[string]interface{}) *validationError {
+	for key := range configPatch {
+		switch key {
+		case "devicePlugin", "scheduler", "global":
+		default:
+			return &validationError{
+				Code:    "10210",
+				Message: fmt.Sprintf("unsupported accelerator_virtualization.config_patch key %q", key),
+				Hint:    "Only devicePlugin, scheduler, and global config_patch keys are supported",
+			}
+		}
+	}
+
+	if schedulerPatch, ok := nestedBoolFromMap(configPatch, "scheduler", "patch", "enabled"); ok && schedulerPatch {
+		return &validationError{
+			Code:    "10210",
+			Message: "HAMi scheduler patch hook is managed by Neutree and cannot be enabled",
+			Hint:    "Remove scheduler.patch.enabled from accelerator_virtualization.config_patch",
+		}
+	}
+
+	if certManager, ok := nestedBoolFromMap(configPatch, "scheduler", "certManager", "enabled"); ok && certManager {
+		return &validationError{
+			Code:    "10210",
+			Message: "HAMi cert-manager integration is managed by Neutree and cannot be enabled",
+			Hint:    "Remove scheduler.certManager.enabled from accelerator_virtualization.config_patch",
+		}
+	}
+
+	if migStrategy, ok := nestedStringFromMap(configPatch, "devicePlugin", "migStrategy"); ok &&
+		strings.ToLower(strings.TrimSpace(migStrategy)) != "none" {
+		return &validationError{
+			Code:    "10210",
+			Message: "HAMi MIG virtualization mode is not supported",
+			Hint:    "Set devicePlugin.migStrategy to none or remove it from accelerator_virtualization.config_patch",
+		}
+	}
+
+	return nil
+}
+
+func nestedBoolFromMap(values map[string]interface{}, path ...string) (bool, bool) {
+	value, ok := nestedValueFromMap(values, path...)
+	if !ok {
+		return false, false
+	}
+
+	boolValue, ok := value.(bool)
+
+	return boolValue, ok
+}
+
+func nestedStringFromMap(values map[string]interface{}, path ...string) (string, bool) {
+	value, ok := nestedValueFromMap(values, path...)
+	if !ok {
+		return "", false
+	}
+
+	stringValue, ok := value.(string)
+
+	return stringValue, ok
+}
+
+func nestedValueFromMap(values map[string]interface{}, path ...string) (interface{}, bool) {
+	var current interface{} = values
+	for _, key := range path {
+		asMap, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+
+		current, ok = asMap[key]
+		if !ok {
+			return nil, false
+		}
+	}
+
+	return current, true
+}
+
+func setNestedStringToMap(values map[string]interface{}, value string, path ...string) {
+	current := values
+	for _, key := range path[:len(path)-1] {
+		next, ok := current[key].(map[string]interface{})
+		if !ok {
+			next = map[string]interface{}{}
+			current[key] = next
+		}
+
+		current = next
+	}
+
+	current[path[len(path)-1]] = value
 }
 
 func invalidClusterPayloadError(err error) *validationError {
@@ -172,14 +319,21 @@ func validateAcceleratorVirtualizationClusterVersion(version string) *validation
 	return nil
 }
 
-func existingClusterSpec(rawQuery string, s storage.Storage) (*v1.ClusterSpec, error) {
+func existingClusterSpec(cluster v1.Cluster, s storage.Storage) (*v1.ClusterSpec, error) {
 	if s == nil {
-		return nil, fmt.Errorf("include spec.type and spec.version when enabling accelerator virtualization")
+		return nil, fmt.Errorf("include metadata.name, metadata.workspace, spec.type, and spec.version when enabling accelerator virtualization")
 	}
 
-	filters := filtersFromRawQuery(rawQuery)
-	if len(filters) == 0 {
-		return nil, fmt.Errorf("include spec.type and spec.version when enabling accelerator virtualization")
+	name := cluster.GetName()
+	workspace := cluster.GetWorkspace()
+
+	if name == "" || workspace == "" {
+		return nil, fmt.Errorf("include metadata.name and metadata.workspace when enabling accelerator virtualization")
+	}
+
+	filters := []storage.Filter{
+		{Column: "metadata->>name", Operator: "eq", Value: name},
+		{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
 	}
 
 	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
@@ -196,51 +350,6 @@ func existingClusterSpec(rawQuery string, s storage.Storage) (*v1.ClusterSpec, e
 	}
 
 	return clusters[0].Spec, nil
-}
-
-func filtersFromRawQuery(rawQuery string) []storage.Filter {
-	queryValues, err := url.ParseQuery(rawQuery)
-	if err != nil {
-		return nil
-	}
-
-	filters := make([]storage.Filter, 0, len(queryValues))
-	columns := make([]string, 0, len(queryValues))
-
-	for column := range queryValues {
-		columns = append(columns, column)
-	}
-
-	sort.Strings(columns)
-
-	for _, column := range columns {
-		values := queryValues[column]
-		if isNonFilterQueryParam(column) || len(values) == 0 {
-			continue
-		}
-
-		operator, value, ok := strings.Cut(values[0], ".")
-		if !ok || operator == "" || value == "" {
-			continue
-		}
-
-		filters = append(filters, storage.Filter{
-			Column:   column,
-			Operator: operator,
-			Value:    value,
-		})
-	}
-
-	return filters
-}
-
-func isNonFilterQueryParam(key string) bool {
-	switch key {
-	case "select", "order", "limit", "offset", "columns":
-		return true
-	default:
-		return false
-	}
 }
 
 func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
