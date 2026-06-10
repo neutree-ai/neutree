@@ -47,14 +47,14 @@ Configuration Options:
   --jwt-secret             JWT secret for authentication
   --metrics-remote-write-url Remote metrics storage URL
   --grafana-url            Grafana dashboard URL for system info API
-  --version                Component version (default: CLI release version, or v0.0.1 for dev builds)
+  --version                Component version (default: CLI release version, or v0.0.1 for non-release/local builds)
 
 Examples:
   # Basic installation
   neutree-cli launch neutree-core
 
-  # Custom version installation
-  neutree-cli launch neutree-core --version v1.1.0
+  # Compatible version installation
+  neutree-cli launch neutree-core --version <compatible-version-for-your-cli-release-line>
 
   # With remote metrics storage and Grafana
   neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com --grafana-url http://grafana.example.com:3030`,
