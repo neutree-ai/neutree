@@ -17,8 +17,6 @@ const (
 	hamiNvidiaDeviceAllocationFieldCount = 4
 )
 
-type GPUHAMiResourceAdapter struct{}
-
 type hamiNvidiaRegisteredDevice struct {
 	ID      string `json:"id"`
 	DevMem  int64  `json:"devmem"`
@@ -65,43 +63,14 @@ func (p *GPUResourceParser) ParseKubernetesVirtualizationNode(
 func (p *GPUResourceParser) ParseKubernetesVirtualizationEndpoint(
 	input resourceview.KubernetesEndpointResourceContext,
 ) ([]resourceview.EndpointInstanceResource, bool, error) {
-	adapter := &GPUHAMiResourceAdapter{}
-	if !adapter.MatchKubernetesEndpoint(input) {
+	if !hasHAMiNvidiaEndpointAllocations(input) {
 		return nil, false, nil
 	}
-	instances, err := adapter.ParseKubernetesEndpoint(input)
+	instances, err := parseHAMiNvidiaEndpointResources(input)
 	return instances, true, err
 }
 
-func (a *GPUHAMiResourceAdapter) MatchKubernetesNode(input resourceview.KubernetesNodeResourceContext) bool {
-	if input.Labels[NvidiaGPUVirtualizationLabelKey] != "true" {
-		return false
-	}
-
-	devices, err := parseHAMiNvidiaRegisteredDevices(input.Annotations[HAMiNodeNvidiaRegisterAnnotation])
-	return err == nil && len(devices) > 0
-}
-
-func (a *GPUHAMiResourceAdapter) ParseKubernetesNode(
-	input resourceview.KubernetesNodeResourceContext,
-) (*resourceview.KubernetesResourceParseResult, error) {
-	devices, err := parseHAMiNvidiaRegisteredDevices(input.Annotations[HAMiNodeNvidiaRegisterAnnotation])
-	if err != nil {
-		return nil, err
-	}
-	if len(devices) == 0 {
-		return nil, fmt.Errorf("HAMi NVIDIA node %s has no registered devices", input.NodeName)
-	}
-
-	usage, err := parseHAMiNvidiaPodUsage(input.Pods)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildHAMiNvidiaResourceParseResult(input.Labels, devices, usage), nil
-}
-
-func (a *GPUHAMiResourceAdapter) MatchKubernetesEndpoint(input resourceview.KubernetesEndpointResourceContext) bool {
+func hasHAMiNvidiaEndpointAllocations(input resourceview.KubernetesEndpointResourceContext) bool {
 	for _, pod := range input.Pods {
 		if strings.TrimSpace(pod.Annotations[HAMiVGPUDevicesAllocatedAnnotation]) == "" {
 			continue
@@ -116,7 +85,7 @@ func (a *GPUHAMiResourceAdapter) MatchKubernetesEndpoint(input resourceview.Kube
 	return false
 }
 
-func (a *GPUHAMiResourceAdapter) ParseKubernetesEndpoint(
+func parseHAMiNvidiaEndpointResources(
 	input resourceview.KubernetesEndpointResourceContext,
 ) ([]resourceview.EndpointInstanceResource, error) {
 	deviceProducts, err := hamiNvidiaDeviceProductsByNode(input.Nodes)

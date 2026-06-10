@@ -144,15 +144,6 @@ func IsAcceleratorVirtualizationKey(key string) bool {
 		key == AcceleratorVirtualizationCorePercentKey
 }
 
-func IsHAMiRawNvidiaResourceKey(key string) bool {
-	switch key {
-	case "nvidia.com/gpumem", "nvidia.com/gpumem-percentage", "nvidia.com/gpucores":
-		return true
-	default:
-		return false
-	}
-}
-
 // GetGPUCount returns the GPU count
 // If GPU is nil or cannot be parsed, it returns 0.
 func (r *ResourceSpec) GetGPUCount() float64 {

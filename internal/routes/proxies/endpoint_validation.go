@@ -129,7 +129,8 @@ func endpointPayloadHasResources(body []byte) (bool, error) {
 
 func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.ResourceSpec) *endpointValidationError {
 	for key := range resources.Accelerator {
-		if v1.IsHAMiRawNvidiaResourceKey(key) {
+		switch key {
+		case "nvidia.com/gpumem", "nvidia.com/gpumem-percentage", "nvidia.com/gpucores":
 			return &endpointValidationError{
 				Code:    "10216",
 				Message: "raw HAMi resource keys are not supported in endpoint accelerator resources",

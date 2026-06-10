@@ -2,7 +2,7 @@
 
 本文定义 Neutree 在 Kubernetes 集群中接入 HAMi vGPU 的后端设计。文档描述 API 契约、虚拟化语义、集群资源视图、Endpoint 资源视图、HAMi 组件、监控和约束边界，不展开底层解析器、适配器和聚合器的代码细节。
 
-相关产品设计文档：`docs/k8s-vgpu-support-product-design.md`。
+相关产品设计文档：`k8s-vgpu-support-product-design.md`。
 
 ## 背景与目标
 
