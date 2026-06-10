@@ -10,7 +10,7 @@ After cloning the repo, install the local git hooks:
 make install-hooks
 ```
 
-This enables the pre-commit gate (`gofmt` / `go vet` / architecture boundaries / migration-pair check / incremental lint / short tests on affected packages).
+This enables the pre-commit gate (`gofmt` / `go vet` / architecture boundaries / migration-pair check / full lint / short tests on affected packages).
 
 ## Playbooks
 
@@ -35,4 +35,3 @@ For everything else, open the relevant file under [Files in this Directory](#fil
 | [`coding-standards.md`](coding-standards.md) | golangci-lint rules, import organization, commit convention, lint fix cheatsheet |
 | [`database.md`](database.md) | PostgREST + RLS model, migration rules (incl. pairing), auth token layers, common errors |
 | [`playbooks.md`](playbooks.md) | Step-by-step checklists — new engine version, new resource type |
-
