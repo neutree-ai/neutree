@@ -62,11 +62,6 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 		DisabledValue: "false",
 	}, config.NodeScopeLabel)
 	assert.Equal(t, map[string]interface{}{
-		"scheduler": map[string]interface{}{
-			"defaultSchedulerPolicy": map[string]interface{}{
-				"gpuSchedulerPolicy": NvidiaGPUTopologyAwarePolicy,
-			},
-		},
 		"devicePlugin": map[string]interface{}{
 			"nvidiaDriverRoot": NvidiaGPUOperatorDriverRoot,
 		},

@@ -12,7 +12,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -71,18 +70,6 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 
 			return
 		}
-
-		mutatedBody, err := mutateClusterAcceleratorVirtualizationDefaults(body)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
-			c.Abort()
-
-			return
-		}
-
-		c.Request.Body = io.NopCloser(bytes.NewReader(mutatedBody))
-		c.Request.ContentLength = int64(len(mutatedBody))
-		c.Request.Header.Set("Content-Length", fmt.Sprintf("%d", len(mutatedBody)))
 
 		c.Next()
 	}
@@ -153,44 +140,6 @@ func validateClusterAcceleratorVirtualizationBody(
 	}
 
 	return nil
-}
-
-func mutateClusterAcceleratorVirtualizationDefaults(body []byte) ([]byte, error) {
-	var payload map[string]interface{}
-	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&payload); err != nil {
-		return nil, err
-	}
-
-	spec, ok := payload["spec"].(map[string]interface{})
-	if !ok {
-		return body, nil
-	}
-
-	acceleratorVirtualization, ok := spec["accelerator_virtualization"].(map[string]interface{})
-	if !ok {
-		return body, nil
-	}
-
-	enabled, ok := acceleratorVirtualization["enabled"].(bool)
-	if !ok || !enabled {
-		return body, nil
-	}
-
-	configPatch, ok := acceleratorVirtualization["config_patch"].(map[string]interface{})
-	if !ok {
-		configPatch = map[string]interface{}{}
-		acceleratorVirtualization["config_patch"] = configPatch
-	}
-
-	if policy, ok := nestedStringFromMap(configPatch, "scheduler", "defaultSchedulerPolicy", "gpuSchedulerPolicy"); ok &&
-		strings.TrimSpace(policy) != "" {
-		return body, nil
-	}
-
-	setNestedStringToMap(configPatch, plugin.NvidiaGPUTopologyAwarePolicy,
-		"scheduler", "defaultSchedulerPolicy", "gpuSchedulerPolicy")
-
-	return json.Marshal(payload)
 }
 
 func validateClusterAcceleratorVirtualizationConfigPatch(configPatch map[string]interface{}) *validationError {
@@ -271,21 +220,6 @@ func nestedValueFromMap(values map[string]interface{}, path ...string) (interfac
 	}
 
 	return current, true
-}
-
-func setNestedStringToMap(values map[string]interface{}, value string, path ...string) {
-	current := values
-	for _, key := range path[:len(path)-1] {
-		next, ok := current[key].(map[string]interface{})
-		if !ok {
-			next = map[string]interface{}{}
-			current[key] = next
-		}
-
-		current = next
-	}
-
-	current[path[len(path)-1]] = value
 }
 
 func invalidClusterPayloadError(err error) *validationError {

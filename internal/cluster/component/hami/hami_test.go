@@ -170,15 +170,7 @@ func TestHAMiComponentUsesGPUTopologyAwareSchedulerPolicy(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{
-		ConfigPatch: map[string]interface{}{
-			"scheduler": map[string]interface{}{
-				"defaultSchedulerPolicy": map[string]interface{}{
-					"gpuSchedulerPolicy": plugin.NvidiaGPUTopologyAwarePolicy,
-				},
-			},
-		},
-	})
+	values := component.buildChartValues(NodeScopePlan{})
 
 	defaultSchedulerPolicy := nestedMap(t, values, "scheduler", "defaultSchedulerPolicy")
 	assert.Equal(t, plugin.NvidiaGPUTopologyAwarePolicy, defaultSchedulerPolicy["gpuSchedulerPolicy"])
