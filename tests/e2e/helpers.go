@@ -74,11 +74,22 @@ func BuildCLI() {
 
 	cliBinary = filepath.Join(tmpDir, "neutree-cli")
 	projectRoot := filepath.Join(".", "..", "..")
-	buildCmd := exec.Command("go", "build", "-o", cliBinary, "./cmd/neutree-cli/")
+
+	buildCmd := exec.Command("go", cliBuildArgs(cliBinary)...) //nolint:gosec // e2e helper builds local CLI with profile version.
 	buildCmd.Dir = projectRoot
 	buildCmd.Stdout = GinkgoWriter
 	buildCmd.Stderr = GinkgoWriter
 	Expect(buildCmd.Run()).To(Succeed(), "failed to build neutree-cli")
+}
+
+func cliBuildArgs(outputPath string) []string {
+	args := []string{"build", "-o", outputPath}
+
+	if cpVersion := profileCPVersion(); cpVersion != "" {
+		args = append(args, "-ldflags", "-X github.com/neutree-ai/neutree/internal/version.appVersion="+cpVersion)
+	}
+
+	return append(args, "./cmd/neutree-cli/")
 }
 
 // CleanupCLI removes the compiled binary and its temp directory.

@@ -1,6 +1,7 @@
 package launch
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -153,6 +154,68 @@ func TestPrepareNeutreeCoreDeployConfig(t *testing.T) {
 	}
 }
 
+func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
+	tests := []struct {
+		name          string
+		cliVersion    string
+		targetVersion string
+		wantErr       string
+	}{
+		{
+			name:          "allows target version in same v1.1 release line",
+			cliVersion:    "v1.1.0-nightly-20260608",
+			targetVersion: "v1.1.0-nightly-20260609",
+		},
+		{
+			name:          "allows git describe prerelease version in same release line",
+			cliVersion:    "v1.1.0-nightly-20260608-5-g1e6a9fc8",
+			targetVersion: "v1.1.0-nightly-20260609",
+		},
+		{
+			name:          "rejects target version below v1.1 release line",
+			cliVersion:    "v1.1.0-nightly-20260608",
+			targetVersion: "v1.0.1",
+			wantErr:       "not compatible",
+		},
+		{
+			name:          "rejects target version above v1.1 release line",
+			cliVersion:    "v1.1.0-nightly-20260608",
+			targetVersion: "v1.2.0",
+			wantErr:       "not compatible",
+		},
+		{
+			name:          "rejects invalid target version",
+			cliVersion:    "v1.1.0-nightly-20260608",
+			targetVersion: "not-a-version",
+			wantErr:       "invalid target version",
+		},
+		{
+			name:          "development CLI still validates target version format",
+			cliVersion:    "dev",
+			targetVersion: "v1.1.0",
+		},
+		{
+			name:          "development CLI rejects invalid target version",
+			cliVersion:    "dev",
+			targetVersion: "not-a-version",
+			wantErr:       "invalid target version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateNeutreeCoreVersionCompatibility(tt.cliVersion, tt.targetVersion)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 	// Setup test cases
 	tests := []struct {
@@ -230,4 +293,104 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMutation(t *testing.T) {
+	tempDir := t.TempDir()
+	composeDir := filepath.Join(tempDir, "neutree-core")
+	require.NoError(t, os.MkdirAll(composeDir, 0755))
+
+	composeFile := filepath.Join(composeDir, "docker-compose.yml")
+	const sentinel = "sentinel: keep-this-file\n"
+	require.NoError(t, os.WriteFile(composeFile, []byte(sentinel), 0600))
+
+	oldGetCLIAppVersion := getCLIAppVersion
+	getCLIAppVersion = func() string {
+		return "v1.1.0-nightly-20260608"
+	}
+	t.Cleanup(func() {
+		getCLIAppVersion = oldGetCLIAppVersion
+	})
+
+	mockExecutor := &mocks.MockExecutor{}
+	err := installNeutreeCoreSingleNodeByDocker(mockExecutor, neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.2.0",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not compatible")
+	mockExecutor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything, mock.Anything)
+
+	got, readErr := os.ReadFile(composeFile)
+	require.NoError(t, readErr)
+	assert.Equal(t, sentinel, string(got))
+}
+
+func TestInstallNeutreeCoreSingleNodeByDockerDryRunDoesNotOverwriteExistingCompose(t *testing.T) {
+	tempDir := t.TempDir()
+	composeDir := filepath.Join(tempDir, "neutree-core")
+	require.NoError(t, os.MkdirAll(composeDir, 0755))
+
+	composeFile := filepath.Join(composeDir, "docker-compose.yml")
+	const sentinel = "sentinel: keep-this-file\n"
+	require.NoError(t, os.WriteFile(composeFile, []byte(sentinel), 0600))
+
+	oldGetCLIAppVersion := getCLIAppVersion
+	getCLIAppVersion = func() string {
+		return "v1.1.0-nightly-20260608"
+	}
+	t.Cleanup(func() {
+		getCLIAppVersion = oldGetCLIAppVersion
+	})
+
+	mockExecutor := &mocks.MockExecutor{}
+	var err error
+	captureStdout(t, func() {
+		err = installNeutreeCoreSingleNodeByDocker(mockExecutor, neutreeCoreInstallOptions{
+			commonOptions: &commonOptions{
+				workDir:    tempDir,
+				nodeIP:     "192.168.1.1",
+				deployType: constants.DeployTypeLocal,
+				deployMode: constants.DeployModeSingle,
+				dryRun:     true,
+			},
+			jwtSecret: "test-secret",
+			version:   "v1.1.0",
+		})
+	})
+
+	require.NoError(t, err)
+	mockExecutor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything, mock.Anything)
+
+	got, readErr := os.ReadFile(composeFile)
+	require.NoError(t, readErr)
+	assert.Equal(t, sentinel, string(got))
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	fn()
+
+	require.NoError(t, writer.Close())
+	output, err := io.ReadAll(reader)
+	require.NoError(t, err)
+
+	return string(output)
 }
