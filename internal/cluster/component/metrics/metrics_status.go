@@ -25,7 +25,9 @@ type MetricsStatus struct {
 }
 
 func (m MetricsStatus) String() string {
-	return fmt.Sprintf("DeploymentReady: %v, PodsReady: %d/%d, KubeStateMetricsRequired: %v, KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, Errors: %v",
+	return fmt.Sprintf(
+		"DeploymentReady: %v, PodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
+			"KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, Errors: %v",
 		m.DeploymentReady, m.PodsReady, m.TotalPods,
 		m.KubeStateMetricsRequired,
 		m.KubeStateMetricsDeploymentReady, m.KubeStateMetricsPodsReady, m.KubeStateMetricsTotalPods,
@@ -61,7 +63,9 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		status.Errors = append(status.Errors, fmt.Sprintf("kube-state-metrics support check failed: %v", err))
 		return status, nil
 	}
+
 	status.KubeStateMetricsRequired = kubeStateMetricsRequired
+
 	if !kubeStateMetricsRequired {
 		// Older cluster releases do not render the extra kube-state-metrics
 		// deployment, so vmagent readiness is the complete metrics status.

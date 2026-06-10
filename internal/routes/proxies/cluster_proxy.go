@@ -55,8 +55,10 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 				Hint:    err.Error(),
 			})
 			c.Abort()
+
 			return
 		}
+
 		c.Request.Body = io.NopCloser(bytes.NewReader(body))
 
 		if len(bytes.TrimSpace(body)) == 0 {
@@ -67,6 +69,7 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 		if validationErr := validateClusterAcceleratorVirtualizationBody(c.Request.Method, body, c.Request.URL.RawQuery, s); validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
+
 			return
 		}
 
@@ -82,6 +85,7 @@ func validateClusterAcceleratorVirtualizationBody(
 ) *validationError {
 	var cluster v1.Cluster
 	decoder := json.NewDecoder(bytes.NewReader(body))
+
 	if err := decoder.Decode(&cluster); err != nil {
 		return invalidClusterPayloadError(err)
 	}
@@ -112,9 +116,11 @@ func validateClusterAcceleratorVirtualizationBody(
 				Hint:    err.Error(),
 			}
 		}
+
 		if cluster.Spec.Type == "" {
 			cluster.Spec.Type = existingSpec.Type
 		}
+
 		if cluster.Spec.Version == "" {
 			cluster.Spec.Version = existingSpec.Version
 		}
@@ -152,6 +158,7 @@ func validateAcceleratorVirtualizationClusterVersion(version string) *validation
 			Hint:    fmt.Sprintf("failed to parse spec.version %q: %v", version, err),
 		}
 	}
+
 	if !supported {
 		return &validationError{
 			Code: "10208",
@@ -179,9 +186,11 @@ func existingClusterSpec(rawQuery string, s storage.Storage) (*v1.ClusterSpec, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to load existing cluster: %w", err)
 	}
+
 	if len(clusters) != 1 {
 		return nil, fmt.Errorf("cluster patch must match exactly one existing cluster")
 	}
+
 	if clusters[0].Spec == nil {
 		return nil, fmt.Errorf("existing cluster has no spec")
 	}
@@ -197,9 +206,11 @@ func filtersFromRawQuery(rawQuery string) []storage.Filter {
 
 	filters := make([]storage.Filter, 0, len(queryValues))
 	columns := make([]string, 0, len(queryValues))
+
 	for column := range queryValues {
 		columns = append(columns, column)
 	}
+
 	sort.Strings(columns)
 
 	for _, column := range columns {

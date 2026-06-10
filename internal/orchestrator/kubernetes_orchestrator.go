@@ -153,6 +153,7 @@ func acceleratorVirtualizationComponentStatus(cluster *v1.Cluster) *v1.Component
 	if cluster == nil || cluster.Status == nil || cluster.Status.ComponentStatus == nil {
 		return nil
 	}
+
 	return cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
 }
 

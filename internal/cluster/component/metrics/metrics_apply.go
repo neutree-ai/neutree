@@ -15,6 +15,7 @@ import (
 // GetMetricsResources returns all Kubernetes resources for the metrics component
 func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList, error) {
 	variables := m.buildManifestVariables()
+
 	enableKubeStateMetrics, err := m.supportsKubeStateMetrics()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to check kube-state-metrics support for cluster %s", m.cluster.Metadata.Name)

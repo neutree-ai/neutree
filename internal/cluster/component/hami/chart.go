@@ -57,6 +57,7 @@ func renderEmbeddedHAMiChart(
 	}
 
 	manifest := joinRenderedManifests(renderedFiles)
+
 	return decodeRenderedManifest(manifest)
 }
 
@@ -79,9 +80,11 @@ func joinRenderedManifests(renderedFiles map[string]string) string {
 	for key := range renderedFiles {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
 
 	var buf bytes.Buffer
+
 	for _, key := range keys {
 		content := strings.TrimSpace(renderedFiles[key])
 		if content == "" || !isRenderedManifestFile(key) {

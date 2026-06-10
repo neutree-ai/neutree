@@ -35,10 +35,13 @@ type certificateBundle struct {
 func (h *HAMiComponent) EnsureTLS(ctx context.Context) (bool, error) {
 	secret := &corev1.Secret{}
 	err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: TLSSecretName, Namespace: h.namespace}, secret)
+
 	if err == nil && !servingCertificateNeedsRenewal(secret, time.Now()) {
 		return false, nil
 	}
+
 	secretNotFound := apierrors.IsNotFound(err)
+
 	if err != nil && !secretNotFound {
 		return false, errors.Wrap(err, "failed to get HAMi TLS secret")
 	}
@@ -72,6 +75,7 @@ func (h *HAMiComponent) EnsureTLS(ctx context.Context) (bool, error) {
 		if err := h.ctrlClient.Create(ctx, secret); err != nil {
 			return false, errors.Wrap(err, "failed to create HAMi TLS secret")
 		}
+
 		return true, nil
 	}
 
@@ -85,26 +89,32 @@ func (h *HAMiComponent) EnsureTLS(ctx context.Context) (bool, error) {
 func (h *HAMiComponent) schedulerDeploymentExists(ctx context.Context) (bool, error) {
 	deployment := &appsv1.Deployment{}
 	err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: SchedulerName, Namespace: h.namespace}, deployment)
+
 	if err == nil {
 		return true, nil
 	}
+
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
+
 	return false, errors.Wrap(err, "failed to get HAMi scheduler deployment")
 }
 
 func (h *HAMiComponent) rolloutScheduler(ctx context.Context) error {
 	deployment := &appsv1.Deployment{}
 	err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: SchedulerName, Namespace: h.namespace}, deployment)
+
 	if err != nil {
 		return clientIgnoreNotFound(err)
 	}
 
 	patch := client.MergeFrom(deployment.DeepCopy())
+
 	if deployment.Spec.Template.Annotations == nil {
 		deployment.Spec.Template.Annotations = map[string]string{}
 	}
+
 	// The scheduler reads serving certs from the Secret. Changing the Pod
 	// template is the least invasive way to reload a regenerated bundle.
 	deployment.Spec.Template.Annotations[schedulerTLSRolloutAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
@@ -143,6 +153,7 @@ func servingCertificateNeedsRenewal(secret *corev1.Secret, now time.Time) bool {
 	certPEM := secret.Data[corev1.TLSCertKey]
 	keyPEM := secret.Data[corev1.TLSPrivateKeyKey]
 	caPEM := secret.Data["ca.crt"]
+
 	if len(certPEM) == 0 || len(keyPEM) == 0 || len(caPEM) == 0 {
 		return true
 	}
@@ -225,6 +236,7 @@ func (h *HAMiComponent) PatchWebhookCABundle(ctx context.Context) (bool, error) 
 	webhook := &unstructured.Unstructured{}
 	webhook.SetAPIVersion("admissionregistration.k8s.io/v1")
 	webhook.SetKind("MutatingWebhookConfiguration")
+
 	if err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: WebhookName}, webhook); err != nil {
 		return false, errors.Wrap(err, "failed to get HAMi webhook")
 	}
@@ -233,33 +245,40 @@ func (h *HAMiComponent) PatchWebhookCABundle(ctx context.Context) (bool, error) 
 	if err != nil {
 		return false, errors.Wrap(err, "failed to read HAMi webhook list")
 	}
+
 	if !found || len(webhooks) == 0 {
 		return false, errors.New("HAMi webhook has no webhooks")
 	}
 
 	desiredCABundle := base64.StdEncoding.EncodeToString(secret.Data["ca.crt"])
 	changed := false
+
 	for i := range webhooks {
 		webhookItem, ok := webhooks[i].(map[string]interface{})
 		if !ok {
 			continue
 		}
+
 		clientConfig, ok := webhookItem["clientConfig"].(map[string]interface{})
 		if !ok {
 			clientConfig = map[string]interface{}{}
 			webhookItem["clientConfig"] = clientConfig
 		}
+
 		if clientConfig["caBundle"] == desiredCABundle {
 			continue
 		}
+
 		// admissionregistration.k8s.io stores caBundle as base64 text inside
 		// the object, while Secrets hold the decoded PEM bytes.
 		clientConfig["caBundle"] = desiredCABundle
 		changed = true
 	}
+
 	if err := unstructured.SetNestedSlice(webhook.Object, webhooks, "webhooks"); err != nil {
 		return false, errors.Wrap(err, "failed to set HAMi webhook caBundle")
 	}
+
 	if !changed {
 		return false, nil
 	}
@@ -267,5 +286,6 @@ func (h *HAMiComponent) PatchWebhookCABundle(ctx context.Context) (bool, error) 
 	if err := h.ctrlClient.Update(ctx, webhook); err != nil {
 		return false, err
 	}
+
 	return true, nil
 }
