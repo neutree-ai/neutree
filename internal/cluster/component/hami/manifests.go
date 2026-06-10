@@ -88,6 +88,9 @@ var getKubernetesServerVersion = func(cluster *v1.Cluster) (*kubeversion.Info, e
 
 func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan) map[string]interface{} {
 	values := defaultChartValues(h.normalizedImagePrefix())
+	// Merge order is intentional: chart defaults < plugin discovery patch <
+	// user config_patch < Neutree protected values. Protected values keep
+	// lifecycle, TLS, MIG, and device-split semantics under Neutree control.
 	values = mergeChartValues(values, scopePlan.ConfigPatch)
 
 	if h.cluster.Spec != nil &&
@@ -113,6 +116,8 @@ func mergeChartValues(base map[string]interface{}, overrides map[string]interfac
 		return base
 	}
 
+	// chartutil.MergeTables keeps the first argument's scalar values and fills
+	// missing keys from the second, so overrides must be passed first.
 	return chartutil.MergeTables(deepCopyChartValues(overrides), base)
 }
 
@@ -178,6 +183,8 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 	})
 
 	if root := h.resolveNvidiaDriverRoot(scopePlan.ConfigPatch); root != "" {
+		// The NVIDIA plugin derives this from GPU Operator ClusterPolicy. Users
+		// can still override it explicitly through accelerator_virtualization.
 		values = mergeChartValues(values, map[string]interface{}{
 			"devicePlugin": map[string]interface{}{
 				"nvidiaDriverRoot": root,
@@ -204,6 +211,8 @@ func (h *HAMiComponent) normalizedImagePrefix() string {
 	return strings.TrimRight(strings.TrimSpace(h.imagePrefix), "/")
 }
 
+// DefaultKubeSchedulerVersion is used when the target cluster version cannot be
+// detected or parsed.
 func DefaultKubeSchedulerVersion() string {
 	return KubeSchedulerVersionsByMinor["1.32"]
 }
@@ -220,6 +229,8 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 	minorVersion := kubernetesMajorMinor(serverVersion)
 	schedulerVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]
 	if !ok {
+		// For an unmapped Kubernetes minor, use the exact detected scheduler
+		// version and rely on the customer's offline image package to provide it.
 		detectedVersion := kubeSchedulerVersionFromServerVersion(serverVersion)
 		if detectedVersion != "" {
 			h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image, using detected version",
@@ -365,6 +376,8 @@ func nvidiaDriverRootFromPatch(configPatch map[string]interface{}) string {
 const NvidiaGPUDefaultDeviceSplitCount = 100
 
 func shouldDeployDevicePlugin(plan NodeScopePlan) bool {
+	// When every candidate node is explicitly disabled, HAMi should still keep
+	// scheduler/webhook resources but skip the device-plugin DaemonSet.
 	return len(plan.DisabledNodes) == 0 || len(plan.EnabledNodes) > 0 || len(plan.PatchedNodes) > 0
 }
 

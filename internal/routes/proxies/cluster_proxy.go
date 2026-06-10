@@ -87,6 +87,8 @@ func validateClusterAcceleratorVirtualizationBody(
 	}
 
 	if cluster.GetDeletionTimestamp() != "" {
+		// Soft delete PATCH reuses the same route but should not be blocked by
+		// accelerator virtualization validation.
 		return nil
 	}
 
@@ -99,6 +101,9 @@ func validateClusterAcceleratorVirtualizationBody(
 	}
 
 	if method == http.MethodPatch && (cluster.Spec.Type == "" || cluster.Spec.Version == "") {
+		// Enabling virtualization through PATCH may only send the changed
+		// accelerator_virtualization object. Load immutable cluster attributes
+		// from the existing row before validating support.
 		existingSpec, err := existingClusterSpec(rawQuery, s)
 		if err != nil {
 			return &validationError{

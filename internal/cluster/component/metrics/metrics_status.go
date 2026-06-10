@@ -63,6 +63,8 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 	}
 	status.KubeStateMetricsRequired = kubeStateMetricsRequired
 	if !kubeStateMetricsRequired {
+		// Older cluster releases do not render the extra kube-state-metrics
+		// deployment, so vmagent readiness is the complete metrics status.
 		return status, nil
 	}
 

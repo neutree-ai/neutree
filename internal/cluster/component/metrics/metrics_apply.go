@@ -19,6 +19,9 @@ func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to check kube-state-metrics support for cluster %s", m.cluster.Metadata.Name)
 	}
+	// HAMi monitor scraping depends on virtualization being enabled. The
+	// kube-state-metrics sidecar is a cluster-version capability and is not
+	// HAMi-specific.
 	variables.EnableHAMiMonitorScrape = m.cluster.Spec.AcceleratorVirtualizationEnabled()
 	variables.EnableKubeStateMetrics = enableKubeStateMetrics
 

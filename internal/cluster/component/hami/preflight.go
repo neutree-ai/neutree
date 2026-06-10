@@ -77,6 +77,8 @@ func validateConfigPatch(configPatch map[string]interface{}) error {
 	if certManager, ok := nestedBool(configPatch, "scheduler", "certManager", "enabled"); ok && certManager {
 		return errors.New("HAMi cert-manager integration is managed by Neutree and cannot be enabled")
 	}
+	// Neutree vGPU support is based on HAMi core mode. MIG mode requires
+	// different node/device semantics and is intentionally rejected here.
 	if migStrategy, ok := nestedString(configPatch, "devicePlugin", "migStrategy"); ok &&
 		strings.ToLower(strings.TrimSpace(migStrategy)) != "none" {
 		return errors.New("HAMi MIG virtualization mode is not supported")
@@ -120,6 +122,8 @@ func nestedString(values map[string]interface{}, path ...string) (string, bool) 
 }
 
 func (h *HAMiComponent) validateUnmanagedHAMi(ctx context.Context) error {
+	// Avoid adopting a pre-existing HAMi installation. Neutree relies on labels
+	// and lifecycle ownership to render, update, and delete the component safely.
 	webhook := &unstructured.Unstructured{}
 	webhook.SetAPIVersion("admissionregistration.k8s.io/v1")
 	webhook.SetKind("MutatingWebhookConfiguration")

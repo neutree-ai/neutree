@@ -30,6 +30,8 @@ type certificateBundle struct {
 	NotAfter time.Time
 }
 
+// EnsureTLS creates or renews the HAMi scheduler serving certificate Secret.
+// It returns true when the Secret changed and the scheduler should reload it.
 func (h *HAMiComponent) EnsureTLS(ctx context.Context) (bool, error) {
 	secret := &corev1.Secret{}
 	err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: TLSSecretName, Namespace: h.namespace}, secret)
@@ -103,6 +105,8 @@ func (h *HAMiComponent) rolloutScheduler(ctx context.Context) error {
 	if deployment.Spec.Template.Annotations == nil {
 		deployment.Spec.Template.Annotations = map[string]string{}
 	}
+	// The scheduler reads serving certs from the Secret. Changing the Pod
+	// template is the least invasive way to reload a regenerated bundle.
 	deployment.Spec.Template.Annotations[schedulerTLSRolloutAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
 
 	if err := h.ctrlClient.Patch(ctx, deployment, patch); err != nil {
@@ -210,6 +214,8 @@ func generateTLSBundle(namespace string, now time.Time) (*certificateBundle, err
 	}, nil
 }
 
+// PatchWebhookCABundle syncs the generated CA into HAMi's admission webhook.
+// It returns true only when the MutatingWebhookConfiguration was changed.
 func (h *HAMiComponent) PatchWebhookCABundle(ctx context.Context) (bool, error) {
 	secret := &corev1.Secret{}
 	if err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: TLSSecretName, Namespace: h.namespace}, secret); err != nil {
@@ -246,6 +252,8 @@ func (h *HAMiComponent) PatchWebhookCABundle(ctx context.Context) (bool, error) 
 		if clientConfig["caBundle"] == desiredCABundle {
 			continue
 		}
+		// admissionregistration.k8s.io stores caBundle as base64 text inside
+		// the object, while Secrets hold the decoded PEM bytes.
 		clientConfig["caBundle"] = desiredCABundle
 		changed = true
 	}

@@ -40,6 +40,9 @@ type hamiNvidiaDeviceUsage struct {
 func (p *GPUResourceParser) ParseKubernetesVirtualizationNode(
 	input resourceview.KubernetesNodeResourceContext,
 ) (*resourceview.KubernetesResourceParseResult, bool, error) {
+	// The node label is the virtualization switch. A virtualized cluster can
+	// still contain standard NVIDIA nodes, so non-matching nodes must fall back
+	// to the standard parser instead of returning an empty vGPU result.
 	if input.Labels[NvidiaGPUVirtualizationLabelKey] != "true" {
 		return nil, false, nil
 	}
@@ -203,6 +206,9 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 			continue
 		}
 
+		// HAMi stores allocation records as semicolon-delimited fragments and
+		// may append a colon-delimited suffix. The resource view only needs
+		// device UUID, product, memory MiB, and core units.
 		if colon := strings.Index(entry, ":"); colon >= 0 {
 			entry = entry[:colon]
 		}
@@ -264,6 +270,9 @@ func buildHAMiNvidiaResourceParseResult(
 		productKey := v1.AcceleratorProduct(product)
 		addHAMiNvidiaProductResource(allocatableGroup, productKey, 1, allocatable)
 		if hamiNvidiaDeviceHasAvailableCapacity(available) {
+			// A device is counted as available only when one more vGPU slice can
+			// fit both memory and core requirements. Exposing only memory or only
+			// core capacity would let middleware accept an unschedulable endpoint.
 			addHAMiNvidiaProductResource(availableGroup, productKey, 1, available)
 		}
 

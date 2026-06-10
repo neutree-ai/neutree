@@ -30,6 +30,9 @@ type NodeScopePlan struct {
 	ConfigPatch       map[string]interface{}
 }
 
+// PlanNodeScope decides which candidate nodes need the virtualization label.
+// Existing disabled labels are respected; only unlabeled candidate nodes are
+// patched to opt in.
 func PlanNodeScope(nodes []corev1.Node, candidateNodes []string, label NodeScopeLabel, enabled bool) NodeScopePlan {
 	plan := NodeScopePlan{
 		Patches:        map[string]map[string]string{},
@@ -50,6 +53,8 @@ func PlanNodeScope(nodes []corev1.Node, candidateNodes []string, label NodeScope
 		_, candidate := candidates[node.Name]
 
 		if !candidate {
+			// Do not clear stale labels automatically. A node that no longer
+			// matches plugin discovery is reported to status for operator action.
 			if value == label.EnabledValue {
 				plan.StaleEnabledNodes = append(plan.StaleEnabledNodes, node.Name)
 			}

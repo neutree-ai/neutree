@@ -89,6 +89,8 @@ func (h *HAMiComponent) resolveVirtualizationConfig(
 		configs = append(configs, config)
 	}
 
+	// HAMi is the current virtualization solution, but each accelerator plugin
+	// owns whether that accelerator can use it and which nodes/config it needs.
 	config, err := mergeVirtualizationConfigs(configs)
 	if err != nil {
 		return nil, err
@@ -126,6 +128,9 @@ func mergeVirtualizationConfigs(configs []*plugin.VirtualizationConfig) (*plugin
 			continue
 		}
 
+		// Multiple accelerator types can contribute to the same HAMi release.
+		// Unsupported plugins are ignored once at least one supported plugin
+		// provides a concrete node scope and chart patch.
 		merged.Supported = true
 		merged.BlockingReasons = append(merged.BlockingReasons, config.BlockingReasons...)
 		merged.CandidateNodes = appendUniqueStrings(merged.CandidateNodes, config.CandidateNodes)
@@ -167,6 +172,8 @@ func mergeConfigPatch(target map[string]interface{}, patch map[string]interface{
 		patchMap, patchIsMap := patchValue.(map[string]interface{})
 		targetMap, targetIsMap := target[key].(map[string]interface{})
 		if patchIsMap && targetIsMap {
+			// Config patches are Helm values. Preserve nested maps so plugins can
+			// override only the keys they own without replacing sibling values.
 			target[key] = mergeConfigPatch(targetMap, patchMap)
 			continue
 		}

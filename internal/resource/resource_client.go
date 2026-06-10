@@ -22,6 +22,9 @@ type ResourceClient interface {
 	ListEndpointInstances(ctx context.Context, opts ListEndpointInstancesOptions) ([]EndpointInstanceResource, error)
 }
 
+// ResourceParser handles the standard resource semantics for an accelerator.
+// Virtualized Kubernetes resources can extend this interface with the optional
+// KubernetesVirtualization* parser interfaces below.
 type ResourceParser interface {
 	ParseFromRay(resource map[string]float64) (*v1.ResourceInfo, error)
 	ParseFromKubernetes(resource map[corev1.ResourceName]k8sresource.Quantity, labels map[string]string) (*v1.ResourceInfo, error)
@@ -67,10 +70,15 @@ type KubernetesResourceParseResult struct {
 	AcceleratorMetadata map[v1.AcceleratorType]*v1.AcceleratorMetadata
 }
 
+// KubernetesVirtualizationResourceParser parses a node only when its labels,
+// annotations, and Pod allocations match the parser's virtualization backend.
+// The matched flag deliberately separates "not my node" from an empty result.
 type KubernetesVirtualizationResourceParser interface {
 	ParseKubernetesVirtualizationNode(input KubernetesNodeResourceContext) (*KubernetesResourceParseResult, bool, error)
 }
 
+// KubernetesVirtualizationEndpointResourceParser converts backend-specific Pod
+// allocation annotations into Neutree Endpoint replica resource semantics.
 type KubernetesVirtualizationEndpointResourceParser interface {
 	ParseKubernetesVirtualizationEndpoint(input KubernetesEndpointResourceContext) ([]EndpointInstanceResource, bool, error)
 }
@@ -177,6 +185,9 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 				existingQty.Sub(quantity)
 				nodeInfo.availableResource[resourceName] = existingQty
 			} else {
+				// HAMi-only Pod resources such as nvidia.com/gpucores are not
+				// exposed on Node allocatable. They are accounted by the
+				// virtualization parser using HAMi annotations instead.
 				klog.V(4).Infof("pod %s requests resource %s that is not exposed in node %s allocatable resources",
 					pod.Name, resourceName, nodeName)
 			}
@@ -414,6 +425,9 @@ func transformKubernetesNodeResources(
 	status := newKubernetesResourceStatus(input.AvailableResources, input.AllocatableResources)
 
 	if acceleratorVirtualizationEnabled {
+		// CPU and memory always come from Kubernetes native allocatable/requests.
+		// Accelerator semantics switch only when a virtualization parser matches
+		// the node; otherwise standard GPU parsing still applies.
 		if result, ok, err := transformKubernetesVirtualizationNodeResources(input, parsers); ok || err != nil {
 			if err != nil {
 				return nil, nil, nil, err
@@ -451,6 +465,8 @@ func transformKubernetesVirtualizationNodeResources(
 			return nil, true, fmt.Errorf("failed to parse Kubernetes virtualization resources for parser %s: %w", key, err)
 		}
 		if matched {
+			// Use only one virtualization parser per node. Mixing parser results
+			// would blend incompatible accelerator resource semantics.
 			return result, true, nil
 		}
 	}
@@ -517,6 +533,8 @@ func transformKubernetesVirtualizationEndpointResources(
 			continue
 		}
 
+		// Endpoint resource details are backend-specific. Stop after the first
+		// match so resource semantics come from one parser only.
 		return instances, true, nil
 	}
 
@@ -656,6 +674,9 @@ func detachAcceleratorMetadata(status *v1.ResourceStatus) map[v1.AcceleratorType
 	if status == nil {
 		return metadata
 	}
+	// Product metadata describes the accelerator type, not node capacity. Keep
+	// node resources focused on Used/Total and aggregate metadata at cluster
+	// level to avoid repeating it under every node.
 	if status.Allocatable != nil {
 		mergeAcceleratorMetadata(metadata, status.Allocatable.AcceleratorMetadata)
 		status.Allocatable.AcceleratorMetadata = nil
