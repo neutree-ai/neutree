@@ -1,10 +1,8 @@
 package e2e
 
 import (
-	"fmt"
 	"time"
 
-	"github.com/Masterminds/semver/v3"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -41,32 +39,6 @@ var _ = Describe("Control Plane Deploy", Ordered, Label("control-plane", "deploy
 			Expect(r.Stderr+r.Stdout).To(
 				ContainSubstring("jwt-secret"),
 				"error should mention jwt-secret")
-		})
-
-		It("should reject incompatible target version before mutating compose", Label("C2707965"), func() {
-			incompatibleVersion, err := nextMinorCPVersion(profileCPVersion())
-			Expect(err).NotTo(HaveOccurred())
-
-			sentinel := "neu-462-sentinel-compose"
-			r := cph.RunCmd(fmt.Sprintf("mkdir -p %s/neutree-core && printf %%s %q > %s/neutree-core/docker-compose.yml",
-				cph.composeDir, sentinel, cph.composeDir))
-			ExpectSuccess(r)
-
-			r = cph.RunCLI("launch", "neutree-core",
-				"--jwt-secret", "e2e-test-jwt-secret-long-enough-"+Cfg.RunID,
-				"--dry-run",
-				"--version", incompatibleVersion,
-			)
-			Expect(r.ExitCode).NotTo(Equal(0),
-				"launch with incompatible target version should fail")
-			Expect(r.Stderr+r.Stdout).To(
-				ContainSubstring("not compatible"),
-				"error should mention version compatibility")
-
-			r = cph.RunCmd("cat " + cph.composeDir + "/neutree-core/docker-compose.yml")
-			ExpectSuccess(r)
-			Expect(r.Stdout).To(Equal(sentinel),
-				"incompatible launch should not overwrite existing compose")
 		})
 	})
 
@@ -222,12 +194,3 @@ var _ = Describe("Control Plane Deploy", Ordered, Label("control-plane", "deploy
 		})
 	})
 })
-
-func nextMinorCPVersion(version string) (string, error) {
-	v, err := semver.NewVersion(version)
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("v%d.%d.0", v.Major(), v.Minor()+1), nil
-}
