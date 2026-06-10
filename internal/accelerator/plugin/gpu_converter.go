@@ -3,7 +3,6 @@ package plugin
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -82,6 +81,11 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 	k8s.Requests[c.kubernetesResourceName.String()] = gpuCount
 	k8s.Limits[c.kubernetesResourceName.String()] = gpuCount
 
+	// Set GPU product model as nodeSelector
+	if product := spec.GetAcceleratorProduct(); product != "" {
+		k8s.NodeSelector[c.nodeSelectorKey] = product
+	}
+
 	if spec.HasAcceleratorVirtualization() {
 		if err := c.setHAMiVirtualizationResources(k8s, spec); err != nil {
 			return nil, err
@@ -89,16 +93,7 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 
 		k8s.Annotations[NvidiaGPUTopologyPolicyAnnotation] = NvidiaGPUTopologyAwarePolicy
 
-		if product := spec.GetAcceleratorProduct(); product != "" {
-			k8s.Annotations[NvidiaGPUUseTypeAnnotation] = hamiNvidiaUseGPUTypeValue(product)
-		}
-
 		return k8s, nil
-	}
-
-	// Set GPU product model as nodeSelector
-	if product := spec.GetAcceleratorProduct(); product != "" {
-		k8s.NodeSelector[c.nodeSelectorKey] = product
 	}
 
 	return k8s, nil
@@ -142,47 +137,6 @@ func (c *GPUConverter) setHAMiVirtualizationResources(k8s *v1.KubernetesResource
 func setKubernetesResource(k8s *v1.KubernetesResourceSpec, key, value string) {
 	k8s.Requests[key] = value
 	k8s.Limits[key] = value
-}
-
-// HAMi matches use-gputype against raw device types, while NFD labels often encode spaces as separators.
-func hamiNvidiaUseGPUTypeValue(product string) string {
-	product = strings.TrimSpace(product)
-	if product == "" {
-		return ""
-	}
-
-	candidates := make([]string, 0, 6)
-	seen := make(map[string]struct{})
-	addCandidate := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		if _, ok := seen[value]; ok {
-			return
-		}
-		seen[value] = struct{}{}
-		candidates = append(candidates, value)
-	}
-	addProductVariants := func(value string) {
-		addCandidate(value)
-		for _, sep := range []string{"-", "_"} {
-			if !strings.Contains(value, sep) {
-				continue
-			}
-			addCandidate(strings.Replace(value, sep, " ", 1))
-			addCandidate(strings.ReplaceAll(value, sep, " "))
-		}
-	}
-
-	addProductVariants(product)
-	for _, prefix := range []string{"NVIDIA-", "NVIDIA_"} {
-		if strings.HasPrefix(product, prefix) {
-			addProductVariants(strings.TrimPrefix(product, prefix))
-		}
-	}
-
-	return strings.Join(candidates, ",")
 }
 
 func validatePositiveInteger(value, field string) error {

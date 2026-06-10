@@ -18,12 +18,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-type clusterValidationError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Hint    string `json:"hint"`
-}
-
 func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
 	return func(workspace, name string) error {
 		count, err := s.Count(storage.ENDPOINT_TABLE, []storage.Filter{
@@ -55,7 +49,11 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, &validationError{
+				Code:    "10209",
+				Message: "invalid cluster payload",
+				Hint:    err.Error(),
+			})
 			c.Abort()
 			return
 		}
@@ -81,106 +79,76 @@ func validateClusterAcceleratorVirtualizationBody(
 	body []byte,
 	rawQuery string,
 	s storage.Storage,
-) *clusterValidationError {
-	var payload map[string]interface{}
+) *validationError {
+	var cluster v1.Cluster
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := decoder.Decode(&payload); err != nil {
-		return &clusterValidationError{
-			Code:    "10209",
-			Message: "invalid cluster payload",
-			Hint:    err.Error(),
-		}
+	if err := decoder.Decode(&cluster); err != nil {
+		return invalidClusterPayloadError(err)
 	}
 
-	spec, ok := payload["spec"].(map[string]interface{})
-	if !ok {
+	if cluster.GetDeletionTimestamp() != "" {
 		return nil
 	}
 
-	rawVirtualization, ok := spec["accelerator_virtualization"]
-	if !ok || rawVirtualization == nil {
+	if cluster.Spec == nil || cluster.Spec.AcceleratorVirtualization == nil {
 		return nil
 	}
 
-	virtualization, ok := rawVirtualization.(map[string]interface{})
-	if !ok {
-		return &clusterValidationError{
-			Code:    "10209",
-			Message: "spec.accelerator_virtualization must be an object",
-			Hint:    "Provide accelerator_virtualization as an object",
-		}
-	}
-
-	if rawEnabled, ok := virtualization["enabled"]; ok {
-		if _, ok := rawEnabled.(bool); !ok {
-			return &clusterValidationError{
-				Code:    "10210",
-				Message: "spec.accelerator_virtualization.enabled must be a boolean",
-				Hint:    "Provide enabled as true or false",
-			}
-		}
-	}
-
-	if rawConfigPatch, ok := virtualization["config_patch"]; ok && rawConfigPatch != nil {
-		if _, ok := rawConfigPatch.(map[string]interface{}); !ok {
-			return &clusterValidationError{
-				Code:    "10209",
-				Message: "spec.accelerator_virtualization.config_patch must be an object",
-				Hint:    "Provide config_patch as an object",
-			}
-		}
-	}
-
-	enabled, _ := virtualization["enabled"].(bool)
-	if !enabled {
+	if !cluster.Spec.AcceleratorVirtualization.Enabled {
 		return nil
 	}
 
-	clusterType, _ := spec["type"].(string)
-	clusterVersion, _ := spec["version"].(string)
-	if method == http.MethodPatch && (clusterType == "" || clusterVersion == "") {
+	if method == http.MethodPatch && (cluster.Spec.Type == "" || cluster.Spec.Version == "") {
 		existingSpec, err := existingClusterSpec(rawQuery, s)
 		if err != nil {
-			return &clusterValidationError{
+			return &validationError{
 				Code:    "10208",
 				Message: "spec.accelerator_virtualization is only supported for Kubernetes clusters",
 				Hint:    err.Error(),
 			}
 		}
-		if clusterType == "" {
-			clusterType = existingSpec.Type
+		if cluster.Spec.Type == "" {
+			cluster.Spec.Type = existingSpec.Type
 		}
-		if clusterVersion == "" {
-			clusterVersion = existingSpec.Version
+		if cluster.Spec.Version == "" {
+			cluster.Spec.Version = existingSpec.Version
 		}
 	}
 
-	if clusterType != v1.KubernetesClusterType {
-		return &clusterValidationError{
+	if cluster.Spec.Type != v1.KubernetesClusterType {
+		return &validationError{
 			Code:    "10208",
 			Message: "spec.accelerator_virtualization is only supported for Kubernetes clusters",
 			Hint:    "Use a Kubernetes cluster when enabling accelerator virtualization",
 		}
 	}
 
-	if err := validateAcceleratorVirtualizationClusterVersion(clusterVersion); err != nil {
+	if err := validateAcceleratorVirtualizationClusterVersion(cluster.Spec.Version); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func validateAcceleratorVirtualizationClusterVersion(version string) *clusterValidationError {
+func invalidClusterPayloadError(err error) *validationError {
+	return &validationError{
+		Code:    "10209",
+		Message: "invalid cluster payload",
+		Hint:    err.Error(),
+	}
+}
+
+func validateAcceleratorVirtualizationClusterVersion(version string) *validationError {
 	supported, err := accelerator.SupportsVirtualizationClusterVersion(version)
 	if err != nil {
-		return &clusterValidationError{
+		return &validationError{
 			Code:    "10209",
 			Message: "invalid cluster version",
 			Hint:    fmt.Sprintf("failed to parse spec.version %q: %v", version, err),
 		}
 	}
 	if !supported {
-		return &clusterValidationError{
+		return &validationError{
 			Code: "10208",
 			Message: fmt.Sprintf("spec.accelerator_virtualization requires cluster version >= %s",
 				accelerator.MinVirtualizationClusterVersion),

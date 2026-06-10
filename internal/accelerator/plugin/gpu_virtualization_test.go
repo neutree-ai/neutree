@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -21,16 +20,6 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 					Name: "gpu-label",
 					Labels: map[string]string{
 						NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue,
-					},
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "gpu-resource",
-				},
-				Status: corev1.NodeStatus{
-					Allocatable: corev1.ResourceList{
-						NvidiaGPUKubernetesResource: resource.MustParse("1"),
 					},
 				},
 			},
@@ -66,7 +55,7 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, config.Supported)
-	assert.Equal(t, []string{"gpu-label", "gpu-resource"}, config.CandidateNodes)
+	assert.Equal(t, []string{"gpu-label"}, config.CandidateNodes)
 	assert.Equal(t, VirtualizationNodeScopeLabel{
 		Key:           NvidiaGPUVirtualizationLabelKey,
 		EnabledValue:  "true",

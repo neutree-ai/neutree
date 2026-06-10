@@ -3,13 +3,79 @@ package hami
 import (
 	"strings"
 
+	"gopkg.in/yaml.v3"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kubeversion "k8s.io/apimachinery/pkg/version"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	ntsemver "github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 )
+
+const defaultChartValuesYAML = `
+fullnameOverride: hami
+global:
+  imageRegistry: ""
+  imageTag: v2.9.0
+schedulerName: hami-scheduler
+dra:
+  enabled: false
+mockDevicePlugin:
+  enabled: false
+prometheus:
+  enabled: false
+scheduler:
+  admissionWebhook:
+    enabled: true
+  certManager:
+    enabled: false
+  patch:
+    enabled: false
+  service:
+    type: ClusterIP
+  kubeScheduler:
+    enabled: true
+    image:
+      repository: kube-scheduler
+      pullPolicy: IfNotPresent
+  extender:
+    image:
+      repository: projecthami/hami
+      pullPolicy: IfNotPresent
+      tag: v2.9.0
+devicePlugin:
+  enabled: true
+  image:
+    repository: projecthami/hami
+    pullPolicy: IfNotPresent
+    tag: v2.9.0
+  monitor:
+    image:
+      repository: projecthami/hami
+      pullPolicy: IfNotPresent
+      tag: v2.9.0
+  service:
+    type: ClusterIP
+  deviceSplitCount: 100
+`
+
+const protectedChartValuesYAML = `
+dra:
+  enabled: false
+scheduler:
+  patch:
+    enabled: false
+  certManager:
+    enabled: false
+  service:
+    type: ClusterIP
+devicePlugin:
+  service:
+    type: ClusterIP
+  migStrategy: none
+  deviceSplitCount: 100
+`
 
 var getKubernetesServerVersion = func(cluster *v1.Cluster) (*kubeversion.Info, error) {
 	clientSet, err := util.GetClientSetFromCluster(cluster)
@@ -22,102 +88,104 @@ var getKubernetesServerVersion = func(cluster *v1.Cluster) (*kubeversion.Info, e
 
 func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan) map[string]interface{} {
 	values := defaultChartValues(h.normalizedImagePrefix())
-	values = mergeConfigPatch(values, scopePlan.ConfigPatch)
+	values = mergeChartValues(values, scopePlan.ConfigPatch)
 
 	if h.cluster.Spec != nil &&
 		h.cluster.Spec.AcceleratorVirtualization != nil &&
 		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch != nil {
-		values = mergeConfigPatch(values, h.cluster.Spec.AcceleratorVirtualization.ConfigPatch)
+		values = mergeChartValues(values, h.cluster.Spec.AcceleratorVirtualization.ConfigPatch)
 	}
 
-	h.enforceProtectedChartValues(values, scopePlan)
-
-	return values
+	return mergeChartValues(values, h.protectedChartValues(scopePlan))
 }
 
 func defaultChartValues(imageRegistry string) map[string]interface{} {
-	return map[string]interface{}{
-		"fullnameOverride": ChartReleaseName,
+	return mergeChartValues(chartValuesFromYAML(defaultChartValuesYAML), map[string]interface{}{
 		"global": map[string]interface{}{
 			"imageRegistry": imageRegistry,
 			"imageTag":      Version,
 		},
-		"schedulerName": SchedulerName,
-		"dra": map[string]interface{}{
-			"enabled": false,
-		},
-		"mockDevicePlugin": map[string]interface{}{
-			"enabled": false,
-		},
-		"prometheus": map[string]interface{}{
-			"enabled": false,
-		},
+	})
+}
+
+func mergeChartValues(base map[string]interface{}, overrides map[string]interface{}) map[string]interface{} {
+	if len(overrides) == 0 {
+		return base
+	}
+
+	return chartutil.MergeTables(deepCopyChartValues(overrides), base)
+}
+
+func deepCopyChartValues(values map[string]interface{}) map[string]interface{} {
+	copied := map[string]interface{}{}
+	data, err := yaml.Marshal(values)
+	if err != nil {
+		return copied
+	}
+	if err := yaml.Unmarshal(data, &copied); err != nil {
+		return map[string]interface{}{}
+	}
+
+	return copied
+}
+
+func chartValuesFromYAML(valuesYAML string) map[string]interface{} {
+	values := map[string]interface{}{}
+	if err := yaml.Unmarshal([]byte(valuesYAML), &values); err != nil {
+		return map[string]interface{}{}
+	}
+
+	return values
+}
+
+func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string]interface{} {
+	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
 		"scheduler": map[string]interface{}{
-			"admissionWebhook": map[string]interface{}{
-				"enabled": true,
-			},
-			"certManager": map[string]interface{}{
-				"enabled": false,
-			},
-			"patch": map[string]interface{}{
-				"enabled": false,
-			},
-			"service": map[string]interface{}{
-				"type": "ClusterIP",
-			},
 			"kubeScheduler": map[string]interface{}{
-				"enabled": true,
-				"image":   chartImageValues(KubeSchedulerImage, ""),
+				"image": chartImageValues(KubeSchedulerImage, h.resolveKubeSchedulerVersion()),
 			},
 			"extender": map[string]interface{}{
 				"image": chartImageValues(HAMiImage, Version),
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"enabled": true,
+			"enabled": shouldDeployDevicePlugin(scopePlan),
 			"image":   chartImageValues(HAMiImage, Version),
 			"monitor": map[string]interface{}{
 				"image": chartImageValues(HAMiImage, Version),
 			},
-			"service": map[string]interface{}{
-				"type": "ClusterIP",
-			},
-			"deviceSplitCount": NvidiaGPUDefaultDeviceSplitCount,
 		},
-	}
-}
-
-func (h *HAMiComponent) enforceProtectedChartValues(values map[string]interface{}, scopePlan NodeScopePlan) {
-	setNestedChartValue(values, false, "dra", "enabled")
-	setNestedChartValue(values, false, "scheduler", "patch", "enabled")
-	setNestedChartValue(values, false, "scheduler", "certManager", "enabled")
-	setNestedChartValue(values, "ClusterIP", "scheduler", "service", "type")
-	setNestedChartValue(values, "ClusterIP", "devicePlugin", "service", "type")
-	setNestedChartValue(values, shouldDeployDevicePlugin(scopePlan), "devicePlugin", "enabled")
-	setNestedChartValue(values, "none", "devicePlugin", "migStrategy")
-	setNestedChartValue(values, NvidiaGPUDefaultDeviceSplitCount, "devicePlugin", "deviceSplitCount")
-
-	setNestedChartValue(values, chartImageValues(KubeSchedulerImage, h.resolveKubeSchedulerVersion()),
-		"scheduler", "kubeScheduler", "image")
-	setNestedChartValue(values, chartImageValues(HAMiImage, Version), "scheduler", "extender", "image")
-	setNestedChartValue(values, chartImageValues(HAMiImage, Version), "devicePlugin", "image")
-	setNestedChartValue(values, chartImageValues(HAMiImage, Version), "devicePlugin", "monitor", "image")
+	})
 
 	if h.imagePullSecret != "" {
-		setNestedChartValue(values, []string{h.imagePullSecret}, "global", "imagePullSecrets")
+		values = mergeChartValues(values, map[string]interface{}{
+			"global": map[string]interface{}{
+				"imagePullSecrets": []string{h.imagePullSecret},
+			},
+		})
 	}
 
 	nodeScopeLabel := scopePlan.NodeScopeLabel
 	if nodeScopeLabel.Key == "" {
 		nodeScopeLabel = NvidiaNodeScopeLabel
 	}
-	setNestedChartValue(values, map[string]interface{}{
-		nodeScopeLabel.Key: nodeScopeLabel.EnabledValue,
-	}, "devicePlugin", "nvidiaNodeSelector")
+	values = mergeChartValues(values, map[string]interface{}{
+		"devicePlugin": map[string]interface{}{
+			"nvidiaNodeSelector": map[string]interface{}{
+				nodeScopeLabel.Key: nodeScopeLabel.EnabledValue,
+			},
+		},
+	})
 
 	if root := h.resolveNvidiaDriverRoot(scopePlan.ConfigPatch); root != "" {
-		setNestedChartValue(values, root, "devicePlugin", "nvidiaDriverRoot")
+		values = mergeChartValues(values, map[string]interface{}{
+			"devicePlugin": map[string]interface{}{
+				"nvidiaDriverRoot": root,
+			},
+		})
 	}
+
+	return values
 }
 
 func chartImageValues(repository, tag string) map[string]interface{} {
@@ -130,20 +198,6 @@ func chartImageValues(repository, tag string) map[string]interface{} {
 	}
 
 	return values
-}
-
-func setNestedChartValue(values map[string]interface{}, value interface{}, path ...string) {
-	current := values
-	for _, key := range path[:len(path)-1] {
-		next, ok := current[key].(map[string]interface{})
-		if !ok {
-			next = map[string]interface{}{}
-			current[key] = next
-		}
-		current = next
-	}
-
-	current[path[len(path)-1]] = value
 }
 
 func (h *HAMiComponent) normalizedImagePrefix() string {
@@ -186,47 +240,7 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 }
 
 func kubeSchedulerVersionFromServerVersion(serverVersion *kubeversion.Info) string {
-	if serverVersion == nil {
-		return ""
-	}
-
-	if version := kubeSchedulerVersionFromGitVersion(serverVersion.GitVersion); version != "" {
-		return version
-	}
-
-	major := leadingVersionDigits(strings.TrimPrefix(serverVersion.Major, "v"))
-	minor := leadingVersionDigits(serverVersion.Minor)
-	if major == "" || minor == "" {
-		return ""
-	}
-
-	return "v" + major + "." + minor + ".0"
-}
-
-func kubeSchedulerVersionFromGitVersion(gitVersion string) string {
-	version := strings.TrimSpace(gitVersion)
-	if version == "" {
-		return ""
-	}
-
-	version = strings.SplitN(version, "+", 2)[0]
-	normalized := strings.TrimPrefix(version, "v")
-	parts := strings.Split(normalized, ".")
-	if len(parts) < 2 {
-		return ""
-	}
-
-	major := leadingVersionDigits(parts[0])
-	minor := leadingVersionDigits(parts[1])
-	if major == "" || minor == "" {
-		return ""
-	}
-
-	if !strings.HasPrefix(version, "v") {
-		version = "v" + version
-	}
-
-	return version
+	return kubernetesBaseVersion(serverVersion)
 }
 
 func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
@@ -235,64 +249,76 @@ func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
 		h.logger.Info("Failed to detect Kubernetes server version for HAMi chart render, using default",
 			"error", err,
 			"defaultVersion", DefaultKubeSchedulerVersion())
-		return kubeVersionFromGitVersion(DefaultKubeSchedulerVersion())
+		return kubeVersionFromBaseVersion(DefaultKubeSchedulerVersion())
 	}
 
 	return kubeVersionFromServerVersion(serverVersion)
 }
 
 func kubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {
-	if serverVersion == nil {
-		return kubeVersionFromGitVersion(DefaultKubeSchedulerVersion())
+	version := kubernetesBaseVersion(serverVersion)
+	if version == "" {
+		return kubeVersionFromBaseVersion(DefaultKubeSchedulerVersion())
 	}
 
-	major := leadingVersionDigits(strings.TrimPrefix(serverVersion.Major, "v"))
-	minor := leadingVersionDigits(serverVersion.Minor)
-	version := serverVersion.GitVersion
-	if version == "" && major != "" && minor != "" {
-		version = "v" + major + "." + minor + ".0"
-	}
-
-	return chartutil.KubeVersion{
-		Version: version,
-		Major:   major,
-		Minor:   minor,
-	}
+	return kubeVersionFromBaseVersion(version)
 }
 
-func kubeVersionFromGitVersion(gitVersion string) chartutil.KubeVersion {
-	trimmed := strings.TrimPrefix(gitVersion, "v")
-	parts := strings.Split(trimmed, ".")
-	if len(parts) < 2 {
+func kubeVersionFromBaseVersion(version string) chartutil.KubeVersion {
+	majorMinor, err := ntsemver.MajorMinor(version)
+	if err != nil {
 		return chartutil.KubeVersion{
-			Version: gitVersion,
+			Version: version,
 			Major:   "1",
 			Minor:   "32",
 		}
 	}
 
+	parts := strings.SplitN(majorMinor, ".", 2)
 	return chartutil.KubeVersion{
-		Version: gitVersion,
-		Major:   leadingVersionDigits(parts[0]),
-		Minor:   leadingVersionDigits(parts[1]),
+		Version: version,
+		Major:   parts[0],
+		Minor:   parts[1],
 	}
 }
 
-func kubernetesMajorMinor(serverVersion *kubeversion.Info) string {
+func kubernetesBaseVersion(serverVersion *kubeversion.Info) string {
 	if serverVersion == nil {
 		return ""
 	}
 
-	major := leadingVersionDigits(strings.TrimPrefix(serverVersion.Major, "v"))
-	minor := leadingVersionDigits(serverVersion.Minor)
+	if version, err := ntsemver.BaseVersion(serverVersion.GitVersion); err == nil && version != "" {
+		return version
+	}
+
+	return kubernetesBaseVersionFromMajorMinor(serverVersion.Major, serverVersion.Minor)
+}
+
+func kubernetesMajorMinor(serverVersion *kubeversion.Info) string {
+	version := kubernetesBaseVersion(serverVersion)
+	if version == "" {
+		return ""
+	}
+
+	majorMinor, err := ntsemver.MajorMinor(version)
+	if err != nil {
+		return ""
+	}
+
+	return majorMinor
+}
+
+func kubernetesBaseVersionFromMajorMinor(major, minor string) string {
+	major = kubernetesVersionNumber(strings.TrimPrefix(major, "v"))
+	minor = kubernetesVersionNumber(minor)
 	if major == "" || minor == "" {
 		return ""
 	}
 
-	return major + "." + minor
+	return "v" + major + "." + minor + ".0"
 }
 
-func leadingVersionDigits(value string) string {
+func kubernetesVersionNumber(value string) string {
 	for i, r := range value {
 		if r < '0' || r > '9' {
 			return value[:i]

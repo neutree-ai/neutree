@@ -172,10 +172,11 @@ func TestNVIDIAGPU_ConvertToKubernetesWithHAMiMemoryMiB(t *testing.T) {
 			NvidiaGPUMemoryResource.String():     "10240",
 			NvidiaGPUCoreResource.String():       "30",
 		},
-		NodeSelector: map[string]string{},
+		NodeSelector: map[string]string{
+			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		},
 		Annotations: map[string]string{
 			NvidiaGPUTopologyPolicyAnnotation: NvidiaGPUTopologyAwarePolicy,
-			NvidiaGPUUseTypeAnnotation:        "Tesla-T4,Tesla T4",
 		},
 	}
 
@@ -216,10 +217,11 @@ func TestNVIDIAGPU_ConvertToKubernetesWithHAMiMemoryPercent(t *testing.T) {
 			NvidiaGPUMemoryPercentageResource.String(): "50",
 			NvidiaGPUCoreResource.String():             "30",
 		},
-		NodeSelector: map[string]string{},
+		NodeSelector: map[string]string{
+			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		},
 		Annotations: map[string]string{
 			NvidiaGPUTopologyPolicyAnnotation: NvidiaGPUTopologyAwarePolicy,
-			NvidiaGPUUseTypeAnnotation:        "Tesla-T4,Tesla T4",
 		},
 	}
 
@@ -246,38 +248,6 @@ func TestNVIDIAGPU_ConvertToKubernetesRejectsInvalidHAMiVirtualization(t *testin
 	_, err := converter.ConvertToKubernetes(resourceInfo)
 	if err == nil {
 		t.Fatal("expected mutual-exclusive memory validation error")
-	}
-}
-
-func TestHAMiNvidiaUseGPUTypeValue(t *testing.T) {
-	tests := []struct {
-		name     string
-		product  string
-		expected string
-	}{
-		{
-			name:     "nfd tesla product",
-			product:  "Tesla-T4",
-			expected: "Tesla-T4,Tesla T4",
-		},
-		{
-			name:     "nfd nvidia product",
-			product:  "NVIDIA-A100-SXM4-80GB",
-			expected: "NVIDIA-A100-SXM4-80GB,NVIDIA A100-SXM4-80GB,NVIDIA A100 SXM4 80GB,A100-SXM4-80GB,A100 SXM4-80GB,A100 SXM4 80GB",
-		},
-		{
-			name:     "plain product",
-			product:  "L20",
-			expected: "L20",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := hamiNvidiaUseGPUTypeValue(tt.product); got != tt.expected {
-				t.Fatalf("hamiNvidiaUseGPUTypeValue() = %q, expected %q", got, tt.expected)
-			}
-		})
 	}
 }
 

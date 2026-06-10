@@ -506,19 +506,6 @@ func TestKubernetesOrchestratorValidateDependenciesForAcceleratorVirtualization(
 		require.NoError(t, err)
 	})
 
-	t.Run("allows vGPU endpoint with legacy component status during rolling upgrade", func(t *testing.T) {
-		ctx := baseContext()
-		ctx.Cluster.Spec.AcceleratorVirtualization = &v1.AcceleratorVirtualizationSpec{Enabled: true}
-		ctx.Cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{
-			legacyAcceleratorVirtualizationComponentStatusKey: {
-				Phase: v1.ComponentPhaseReady,
-			},
-		}
-
-		err := newKubernetesOrchestrator(Options{}).validateDependencies(ctx)
-
-		require.NoError(t, err)
-	})
 }
 
 func validVirtualizationResourceInfo() *v1.ClusterResources {
@@ -645,7 +632,9 @@ func TestBuildVllmDeploymentWithPodAnnotations(t *testing.T) {
 		},
 		Annotations: map[string]string{
 			"hami.io/gpu-scheduler-policy": "topology-aware",
-			"nvidia.com/use-gputype":       "Tesla-T4",
+		},
+		NodeSelector: map[string]string{
+			"nvidia.com/gpu.product": "Tesla-T4",
 		},
 		RoutingLogic: "roundrobin",
 		Replicas:     1,
@@ -658,7 +647,7 @@ func TestBuildVllmDeploymentWithPodAnnotations(t *testing.T) {
 	var deployment appsv1.Deployment
 	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(objs.Items[0].Object, &deployment))
 	assert.Equal(t, "topology-aware", deployment.Spec.Template.Annotations["hami.io/gpu-scheduler-policy"])
-	assert.Equal(t, "Tesla-T4", deployment.Spec.Template.Annotations["nvidia.com/use-gputype"])
+	assert.Equal(t, "Tesla-T4", deployment.Spec.Template.Spec.NodeSelector["nvidia.com/gpu.product"])
 }
 
 // TestBuildLlamacppDeployment only tests the building of a Llamacpp default deployment manifest.

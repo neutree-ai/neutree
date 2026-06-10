@@ -19,7 +19,7 @@ func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to check kube-state-metrics support for cluster %s", m.cluster.Metadata.Name)
 	}
-	variables.EnableHAMiMonitorScrape = enableKubeStateMetrics
+	variables.EnableHAMiMonitorScrape = m.cluster.Spec.AcceleratorVirtualizationEnabled()
 	variables.EnableKubeStateMetrics = enableKubeStateMetrics
 
 	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)

@@ -7,22 +7,12 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/deploy"
-
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
-
-func (h *HAMiComponent) GetResources() (*unstructured.UnstructuredList, error) {
-	return h.renderResources(NodeScopePlan{})
-}
 
 func (h *HAMiComponent) ApplyResources(ctx context.Context, scopePlan NodeScopePlan) error {
 	objs, err := h.renderResources(scopePlan)
 	if err != nil {
 		return errors.Wrap(err, "failed to render HAMi manifests")
-	}
-
-	if err := h.replaceWorkloadsWithImmutableSelectorChanges(ctx, objs); err != nil {
-		return err
 	}
 
 	applier := deploy.NewKubernetesDeployer(

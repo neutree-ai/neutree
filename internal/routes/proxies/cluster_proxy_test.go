@@ -178,7 +178,8 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		}`), "", nil)
 
 		assert.NotNil(t, err)
-		assert.Equal(t, "10210", err.Code)
+		assert.Equal(t, "10209", err.Code)
+		assert.Equal(t, "invalid cluster payload", err.Message)
 	})
 
 	t.Run("rejects non-object config_patch", func(t *testing.T) {
@@ -192,6 +193,23 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10209", err.Code)
+		assert.Equal(t, "invalid cluster payload", err.Message)
+	})
+
+	t.Run("skips accelerator virtualization validation for soft delete patch", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody(http.MethodPatch, []byte(`{
+			"metadata": {
+				"name": "cluster",
+				"workspace": "default",
+				"deletion_timestamp": "2026-06-10T00:00:00Z"
+			},
+			"spec": {
+				"type": "ssh",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`), "", nil)
+
+		assert.Nil(t, err)
 	})
 
 	t.Run("loads existing cluster type for partial patch", func(t *testing.T) {

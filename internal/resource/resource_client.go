@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 )
 
 type ResourceClient interface {
@@ -332,16 +333,12 @@ func sortedParserKeys(parsers map[string]ResourceParser) []string {
 	return keys
 }
 
-type RayDashboardClient interface {
-	ListNodes() ([]v1.NodeSummary, error)
-}
-
 type RayResourceClient struct {
-	client  RayDashboardClient
+	client  dashboard.DashboardService
 	parsers map[string]ResourceParser
 }
 
-func NewRayResourceClient(dashboardClient RayDashboardClient, parsers map[string]ResourceParser) *RayResourceClient {
+func NewRayResourceClient(dashboardClient dashboard.DashboardService, parsers map[string]ResourceParser) *RayResourceClient {
 	return &RayResourceClient{
 		client:  dashboardClient,
 		parsers: parsers,
@@ -414,6 +411,8 @@ func transformKubernetesNodeResources(
 	parsers map[string]ResourceParser,
 	acceleratorVirtualizationEnabled bool,
 ) (*v1.ResourceStatus, []*v1.DeviceResource, map[v1.AcceleratorType]*v1.AcceleratorMetadata, error) {
+	status := newKubernetesResourceStatus(input.AvailableResources, input.AllocatableResources)
+
 	if acceleratorVirtualizationEnabled {
 		if result, ok, err := transformKubernetesVirtualizationNodeResources(input, parsers); ok || err != nil {
 			if err != nil {
@@ -423,16 +422,14 @@ func transformKubernetesNodeResources(
 				return nil, nil, nil, fmt.Errorf("kubernetes virtualization resource parser returned nil result")
 			}
 
-			status := newKubernetesResourceStatus(input.AvailableResources, input.AllocatableResources)
-			mergeResourceInfoAccelerators(status.Allocatable, result.Allocatable)
-			mergeResourceInfoAccelerators(status.Available, result.Available)
+			mergeKubernetesVirtualizationAccelerators(status, result)
 
 			return status, result.Devices, result.AcceleratorMetadata, nil
 		}
 	}
 
-	status, err := transformKubernetesStandardResources(input.AvailableResources, input.AllocatableResources, input.Labels, parsers)
-	if err != nil {
+	if err := mergeKubernetesStandardAccelerators(status, input.AvailableResources, input.AllocatableResources,
+		input.Labels, parsers); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -461,17 +458,28 @@ func transformKubernetesVirtualizationNodeResources(
 	return nil, false, nil
 }
 
-func transformKubernetesStandardResources(
+func mergeKubernetesVirtualizationAccelerators(
+	status *v1.ResourceStatus,
+	result *KubernetesResourceParseResult,
+) {
+	if status == nil || result == nil {
+		return
+	}
+	mergeKubernetesResourceInfoAccelerators(status.Allocatable, result.Allocatable)
+	mergeKubernetesResourceInfoAccelerators(status.Available, result.Available)
+}
+
+func mergeKubernetesStandardAccelerators(
+	result *v1.ResourceStatus,
 	availableResources, allocatableResources map[corev1.ResourceName]k8sresource.Quantity,
 	labels map[string]string,
 	parsers map[string]ResourceParser,
-) (*v1.ResourceStatus, error) {
-	result := newKubernetesResourceStatus(availableResources, allocatableResources)
+) error {
 	for _, key := range sortedParserKeys(parsers) {
 		parser := parsers[key]
 		allocatableInfo, err := parser.ParseFromKubernetes(allocatableResources, labels)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse allocatable Kubernetes resources for parser %s: %w", key, err)
+			return fmt.Errorf("failed to parse allocatable Kubernetes resources for parser %s: %w", key, err)
 		}
 		if allocatableInfo != nil && len(allocatableInfo.AcceleratorGroups) > 0 {
 			mergeAcceleratorGroups(result.Allocatable.AcceleratorGroups, allocatableInfo.AcceleratorGroups)
@@ -480,7 +488,7 @@ func transformKubernetesStandardResources(
 
 		availableInfo, err := parser.ParseFromKubernetes(availableResources, labels)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse available Kubernetes resources for parser %s: %w", key, err)
+			return fmt.Errorf("failed to parse available Kubernetes resources for parser %s: %w", key, err)
 		}
 		if availableInfo != nil && len(availableInfo.AcceleratorGroups) > 0 {
 			mergeAcceleratorGroups(result.Available.AcceleratorGroups, availableInfo.AcceleratorGroups)
@@ -488,7 +496,7 @@ func transformKubernetesStandardResources(
 		}
 	}
 
-	return result, nil
+	return nil
 }
 
 func transformKubernetesVirtualizationEndpointResources(
@@ -635,7 +643,7 @@ func mergeResourceInfoMetadata(
 	mergeAcceleratorMetadata(info.AcceleratorMetadata, metadata)
 }
 
-func mergeResourceInfoAccelerators(target, source *v1.ResourceInfo) {
+func mergeKubernetesResourceInfoAccelerators(target, source *v1.ResourceInfo) {
 	if target == nil || source == nil {
 		return
 	}

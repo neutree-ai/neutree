@@ -12,8 +12,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
-const legacyComponentStatusHAMiKey = "hami"
-
 type HAMiComponent struct {
 	cluster         *v1.Cluster
 	namespace       string
@@ -60,7 +58,14 @@ func (h *HAMiComponent) Reconcile() error {
 		return errors.Wrap(err, "failed to reconcile HAMi node scope")
 	}
 
-	if err := h.EnsureTLS(context.Background()); err != nil {
+	schedulerExisted, err := h.schedulerDeploymentExists(context.Background())
+	if err != nil {
+		h.setStatus(v1.ComponentPhaseNotReady, "SchedulerLookupFailed", err.Error())
+		return errors.Wrap(err, "failed to get HAMi scheduler deployment")
+	}
+
+	tlsChanged, err := h.EnsureTLS(context.Background())
+	if err != nil {
 		h.setStatus(v1.ComponentPhaseNotReady, "TLSFailed", err.Error())
 		return errors.Wrap(err, "failed to ensure HAMi webhook TLS")
 	}
@@ -70,9 +75,16 @@ func (h *HAMiComponent) Reconcile() error {
 		return errors.Wrap(err, "failed to apply HAMi resources")
 	}
 
-	if err := h.PatchWebhookCABundle(context.Background()); err != nil {
+	if _, err := h.PatchWebhookCABundle(context.Background()); err != nil {
 		h.setStatus(v1.ComponentPhaseNotReady, "WebhookCABundleFailed", err.Error())
 		return errors.Wrap(err, "failed to patch HAMi webhook caBundle")
+	}
+
+	if tlsChanged && schedulerExisted {
+		if err := h.rolloutScheduler(context.Background()); err != nil {
+			h.setStatus(v1.ComponentPhaseNotReady, "SchedulerRolloutFailed", err.Error())
+			return errors.Wrap(err, "failed to rollout HAMi scheduler")
+		}
 	}
 
 	status, err := h.CheckResourcesStatus(context.Background())
@@ -139,5 +151,4 @@ func (h *HAMiComponent) writeStatus(status *v1.ComponentStatus) {
 		h.cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{}
 	}
 	h.cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey] = status
-	delete(h.cluster.Status.ComponentStatus, legacyComponentStatusHAMiKey)
 }

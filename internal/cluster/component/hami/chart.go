@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"embed"
 	"io"
-	"io/fs"
 	"path"
 	"sort"
 	"strings"
@@ -18,9 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
-const embeddedHAMiChartRoot = "chart/hami"
+const embeddedHAMiChartPackage = "chart/hami-2.9.0.tgz"
 
-//go:embed chart/hami/** chart/hami/templates/_commons.tpl chart/hami/templates/_helpers.tpl
+//go:embed chart/hami-2.9.0.tgz
 var embeddedHAMiChartFS embed.FS
 
 func renderEmbeddedHAMiChart(
@@ -62,36 +61,12 @@ func renderEmbeddedHAMiChart(
 }
 
 func loadEmbeddedHAMiChart() (*chart.Chart, error) {
-	files := make([]*loader.BufferedFile, 0)
-	err := fs.WalkDir(embeddedHAMiChartFS, embeddedHAMiChartRoot, func(filePath string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-
-		data, err := embeddedHAMiChartFS.ReadFile(filePath)
-		if err != nil {
-			return err
-		}
-
-		files = append(files, &loader.BufferedFile{
-			Name: strings.TrimPrefix(filePath, embeddedHAMiChartRoot+"/"),
-			Data: data,
-		})
-
-		return nil
-	})
+	data, err := embeddedHAMiChartFS.ReadFile(embeddedHAMiChartPackage)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read embedded HAMi chart")
 	}
 
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].Name < files[j].Name
-	})
-
-	hamiChart, err := loader.LoadFiles(files)
+	hamiChart, err := loader.LoadArchive(bytes.NewReader(data))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load embedded HAMi chart")
 	}

@@ -28,7 +28,7 @@ func TestHAMiComponentResources(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	objs, err := component.GetResources()
+	objs, err := component.renderResources(NodeScopePlan{})
 
 	require.NoError(t, err)
 	assertHasObject(t, objs.Items, "ServiceAccount", "hami-scheduler")
@@ -46,7 +46,7 @@ func TestHAMiComponentResourcesUseHAMiEntrypoints(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	objs, err := component.GetResources()
+	objs, err := component.renderResources(NodeScopePlan{})
 	require.NoError(t, err)
 
 	scheduler := findContainer(t, objs.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")
@@ -108,6 +108,18 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedVersionWhenMinorIsUnmapped
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
 }
 
+func TestHAMiPreflightRejectsUnsupportedClusterVersion(t *testing.T) {
+	cluster := newTestCluster()
+	cluster.Spec.Version = "v1.0.9"
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	err := component.Preflight(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires cluster version >= v1.1.0")
+}
+
 func TestHAMiComponentRejectsMIGStrategyConfigPatch(t *testing.T) {
 	cluster := newTestCluster()
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
@@ -122,18 +134,6 @@ func TestHAMiComponentRejectsMIGStrategyConfigPatch(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "MIG virtualization mode is not supported")
-}
-
-func TestHAMiPreflightRejectsUnsupportedClusterVersion(t *testing.T) {
-	cluster := newTestCluster()
-	cluster.Spec.Version = "v1.0.9"
-	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
-
-	err := component.Preflight(context.Background())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "requires cluster version >= v1.1.0")
 }
 
 func TestHAMiComponentProtectedValuesKeepMIGStrategyDisabled(t *testing.T) {
@@ -214,13 +214,6 @@ func TestHAMiComponentStatusReadyWhenDaemonSetAndNodeScopeAreReady(t *testing.T)
 
 func TestHAMiComponentReconcileWritesNotReadyStatusWhenDaemonSetMissing(t *testing.T) {
 	cluster := newTestCluster()
-	cluster.Status = &v1.ClusterStatus{
-		ComponentStatus: map[string]*v1.ComponentStatus{
-			legacyComponentStatusHAMiKey: {
-				Phase: v1.ComponentPhaseReady,
-			},
-		},
-	}
 	tlsSecret := newHAMiTLSSecret(t, "neutree-system")
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t,
@@ -239,7 +232,6 @@ func TestHAMiComponentReconcileWritesNotReadyStatusWhenDaemonSetMissing(t *testi
 	require.NotNil(t, cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey])
 	assert.Equal(t, v1.ComponentPhaseNotReady, cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey].Phase)
 	assert.Equal(t, "DaemonSetNotReady", cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey].Reason)
-	assert.Nil(t, cluster.Status.ComponentStatus[legacyComponentStatusHAMiKey])
 }
 
 func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
@@ -302,52 +294,6 @@ func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
 	assert.NotContains(t, unselected.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
 }
 
-func TestHAMiMigrationDeletesManagedWorkloadsWithChangedSelector(t *testing.T) {
-	existingDeployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      SchedulerName,
-			Namespace: "neutree-system",
-			Labels: map[string]string{
-				ManagedComponentLabelKey: ManagedComponentLabelValue,
-			},
-		},
-		Spec: appsv1.DeploymentSpec{
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": "hami-scheduler"},
-			},
-		},
-	}
-	existingDaemonSet := &appsv1.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DevicePluginDaemonSetName,
-			Namespace: "neutree-system",
-			Labels: map[string]string{
-				ManagedComponentLabelKey: ManagedComponentLabelValue,
-			},
-		},
-		Spec: appsv1.DaemonSetSpec{
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": "hami-device-plugin"},
-			},
-		},
-	}
-	fakeClient := newHAMiFakeClient(t, existingDeployment, existingDaemonSet)
-	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
-	objs, err := component.renderResources(NodeScopePlan{})
-	require.NoError(t, err)
-
-	err = component.replaceWorkloadsWithImmutableSelectorChanges(context.Background(), objs)
-
-	require.NoError(t, err)
-	err = fakeClient.Get(context.Background(), client.ObjectKey{Name: SchedulerName, Namespace: "neutree-system"},
-		&appsv1.Deployment{})
-	assert.True(t, apierrors.IsNotFound(err))
-	err = fakeClient.Get(context.Background(), client.ObjectKey{Name: DevicePluginDaemonSetName, Namespace: "neutree-system"},
-		&appsv1.DaemonSet{})
-	assert.True(t, apierrors.IsNotFound(err))
-}
-
 func TestHAMiPreflightRejectsProtectedConfigPatch(t *testing.T) {
 	cluster := newTestCluster()
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
@@ -406,15 +352,68 @@ func TestHAMiServingCertificateRenewalWindow(t *testing.T) {
 	assert.True(t, servingCertificateNeedsRenewal(expiring, now))
 }
 
+func TestHAMiEnsureTLSReportsChangeWhenCertificateNeedsRenewal(t *testing.T) {
+	expiringBundle, err := generateTLSBundle("neutree-system",
+		time.Now().AddDate(-1, 0, 0).Add((ServingCertificateRenewDays-1)*24*time.Hour))
+	require.NoError(t, err)
+	expiring := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      TLSSecretName,
+			Namespace: "neutree-system",
+		},
+		Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			corev1.TLSCertKey:       expiringBundle.CertPEM,
+			corev1.TLSPrivateKeyKey: expiringBundle.KeyPEM,
+			"ca.crt":                expiringBundle.CAPEM,
+		},
+	}
+	fakeClient := newHAMiFakeClient(t, expiring)
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
+
+	changed, err := component.EnsureTLS(context.Background())
+
+	require.NoError(t, err)
+	assert.True(t, changed)
+}
+
+func TestHAMiEnsureTLSReportsNoChangeWhenCertificateIsFresh(t *testing.T) {
+	tlsSecret := newHAMiTLSSecret(t, "neutree-system")
+	fakeClient := newHAMiFakeClient(t, tlsSecret)
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
+
+	changed, err := component.EnsureTLS(context.Background())
+
+	require.NoError(t, err)
+	assert.False(t, changed)
+}
+
+func TestHAMiRolloutSchedulerPatchesPodTemplateAnnotation(t *testing.T) {
+	fakeClient := newHAMiFakeClient(t, newHAMiReadyDeployment("neutree-system"))
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
+
+	err := component.rolloutScheduler(context.Background())
+
+	require.NoError(t, err)
+	deployment := &appsv1.Deployment{}
+	require.NoError(t, fakeClient.Get(context.Background(),
+		client.ObjectKey{Name: SchedulerName, Namespace: "neutree-system"}, deployment))
+	assert.NotEmpty(t, deployment.Spec.Template.Annotations[schedulerTLSRolloutAnnotation])
+}
+
 func TestHAMiPatchWebhookCABundleWritesBase64CA(t *testing.T) {
 	tlsSecret := newHAMiTLSSecret(t, "neutree-system")
 	fakeClient := newHAMiFakeClient(t, tlsSecret, newHAMiWebhook(""))
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
 
-	err := component.PatchWebhookCABundle(context.Background())
+	changed, err := component.PatchWebhookCABundle(context.Background())
 
 	require.NoError(t, err)
+	assert.True(t, changed)
 	webhook := newHAMiWebhook("")
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: WebhookName}, webhook))
 	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
@@ -424,6 +423,19 @@ func TestHAMiPatchWebhookCABundleWritesBase64CA(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, base64.StdEncoding.EncodeToString(tlsSecret.Data["ca.crt"]), actual)
+}
+
+func TestHAMiPatchWebhookCABundleNoopWhenCAIsCurrent(t *testing.T) {
+	tlsSecret := newHAMiTLSSecret(t, "neutree-system")
+	caBundle := base64.StdEncoding.EncodeToString(tlsSecret.Data["ca.crt"])
+	fakeClient := newHAMiFakeClient(t, tlsSecret, newHAMiWebhook(caBundle))
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
+
+	changed, err := component.PatchWebhookCABundle(context.Background())
+
+	require.NoError(t, err)
+	assert.False(t, changed)
 }
 
 func TestHAMiDeleteRemovesTLSSecret(t *testing.T) {
