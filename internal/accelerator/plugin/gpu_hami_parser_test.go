@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGPUHAMiResourceAdapter_ParseKubernetesNode(t *testing.T) {
-	adapter := &GPUHAMiResourceAdapter{}
+func TestGPUResourceParser_ParseKubernetesVirtualizationNodeWithUsage(t *testing.T) {
+	parser := &GPUResourceParser{}
 	input := resourceview.KubernetesNodeResourceContext{
 		NodeName: "gpu-node",
 		Labels: map[string]string{
@@ -34,10 +34,10 @@ func TestGPUHAMiResourceAdapter_ParseKubernetesNode(t *testing.T) {
 		},
 	}
 
-	require.True(t, adapter.MatchKubernetesNode(input))
-	result, err := adapter.ParseKubernetesNode(input)
+	result, matched, err := parser.ParseKubernetesVirtualizationNode(input)
 
 	require.NoError(t, err)
+	require.True(t, matched)
 	require.Len(t, result.Devices, 2)
 	require.Equal(t, int64(15360), result.Devices[0].Allocatable.MemoryMiB)
 	require.Equal(t, int64(0), result.Devices[0].Available.MemoryMiB)
@@ -117,18 +117,8 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationNodeMatchesEmptyHAMiRegi
 	require.Empty(t, result.Devices)
 }
 
-func TestGPUHAMiResourceAdapter_DoesNotMatchWithoutRegisteredDevices(t *testing.T) {
-	adapter := &GPUHAMiResourceAdapter{}
-
-	require.False(t, adapter.MatchKubernetesNode(resourceview.KubernetesNodeResourceContext{
-		Labels: map[string]string{
-			NvidiaGPUVirtualizationLabelKey: "true",
-		},
-	}))
-}
-
-func TestGPUHAMiResourceAdapter_ParseKubernetesEndpoint(t *testing.T) {
-	adapter := &GPUHAMiResourceAdapter{}
+func TestGPUResourceParser_ParseKubernetesVirtualizationEndpoint(t *testing.T) {
+	parser := &GPUResourceParser{}
 	input := resourceview.KubernetesEndpointResourceContext{
 		EndpointName: "chat",
 		Namespace:    "default",
@@ -160,10 +150,10 @@ func TestGPUHAMiResourceAdapter_ParseKubernetesEndpoint(t *testing.T) {
 		},
 	}
 
-	require.True(t, adapter.MatchKubernetesEndpoint(input))
-	instances, err := adapter.ParseKubernetesEndpoint(input)
+	instances, matched, err := parser.ParseKubernetesVirtualizationEndpoint(input)
 
 	require.NoError(t, err)
+	require.True(t, matched)
 	require.Len(t, instances, 1)
 	require.Equal(t, "chat-abc", instances[0].InstanceID)
 	require.Equal(t, "chat-abc", instances[0].ReplicaID)
