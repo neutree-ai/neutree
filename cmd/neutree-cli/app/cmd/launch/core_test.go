@@ -172,6 +172,11 @@ func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 			targetVersion: "v1.1.0-nightly-20260609",
 		},
 		{
+			name:          "git describe CLI keeps development build flexibility",
+			cliVersion:    "v1.1.0-nightly-20260608-5-g1e6a9fc8",
+			targetVersion: fallbackNeutreeCoreVersion,
+		},
+		{
 			name:          "rejects target version below v1.1 release line",
 			cliVersion:    "v1.1.0-nightly-20260608",
 			targetVersion: "v1.0.1",
@@ -216,6 +221,65 @@ func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 	}
 }
 
+func TestDefaultNeutreeCoreVersion(t *testing.T) {
+	tests := []struct {
+		name       string
+		cliVersion string
+		want       string
+	}{
+		{
+			name:       "exact nightly tag defaults to CLI app version",
+			cliVersion: "v1.1.0-nightly-20260610",
+			want:       "v1.1.0-nightly-20260610",
+		},
+		{
+			name:       "exact enterprise tag defaults to CLI app version",
+			cliVersion: "v1.0.1-enterprise",
+			want:       "v1.0.1-enterprise",
+		},
+		{
+			name:       "git describe commit suffix falls back",
+			cliVersion: "v1.1.0-nightly-20260608-5-g1e6a9fc8",
+			want:       fallbackNeutreeCoreVersion,
+		},
+		{
+			name:       "dirty tag falls back",
+			cliVersion: "v1.1.0-nightly-20260608-dirty",
+			want:       fallbackNeutreeCoreVersion,
+		},
+		{
+			name:       "dev build falls back",
+			cliVersion: "dev",
+			want:       fallbackNeutreeCoreVersion,
+		},
+		{
+			name:       "unknown build falls back",
+			cliVersion: "unknown",
+			want:       fallbackNeutreeCoreVersion,
+		},
+		{
+			name:       "commit-only build falls back",
+			cliVersion: "1e6a9fc8",
+			want:       fallbackNeutreeCoreVersion,
+		},
+	}
+
+	oldGetCLIAppVersion := getCLIAppVersion
+	t.Cleanup(func() {
+		getCLIAppVersion = oldGetCLIAppVersion
+	})
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			getCLIAppVersion = func() string {
+				return tt.cliVersion
+			}
+
+			assert.Equal(t, tt.want, defaultNeutreeCoreVersion())
+		})
+	}
+}
+
 func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 	// Setup test cases
 	tests := []struct {
@@ -253,6 +317,8 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 					deployType: constants.DeployTypeLocal,
 					deployMode: constants.DeployModeSingle,
 				},
+				jwtSecret: "test-secret",
+				version:   "v1.0.0",
 			},
 			setupMock: func(m *mocks.MockExecutor) {
 				m.On("Execute", mock.Anything, "docker", mock.Anything).Return([]byte("error"), errors.New("docker error"))
@@ -326,6 +392,44 @@ func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMut
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not compatible")
+	mockExecutor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything, mock.Anything)
+
+	got, readErr := os.ReadFile(composeFile)
+	require.NoError(t, readErr)
+	assert.Equal(t, sentinel, string(got))
+}
+
+func TestInstallNeutreeCoreSingleNodeByDockerRejectsEmptyVersionBeforeMutation(t *testing.T) {
+	tempDir := t.TempDir()
+	composeDir := filepath.Join(tempDir, "neutree-core")
+	require.NoError(t, os.MkdirAll(composeDir, 0755))
+
+	composeFile := filepath.Join(composeDir, "docker-compose.yml")
+	const sentinel = "sentinel: keep-this-file\n"
+	require.NoError(t, os.WriteFile(composeFile, []byte(sentinel), 0600))
+
+	oldGetCLIAppVersion := getCLIAppVersion
+	getCLIAppVersion = func() string {
+		return "dev"
+	}
+	t.Cleanup(func() {
+		getCLIAppVersion = oldGetCLIAppVersion
+	})
+
+	mockExecutor := &mocks.MockExecutor{}
+	err := installNeutreeCoreSingleNodeByDocker(mockExecutor, neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid target version")
 	mockExecutor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything, mock.Anything)
 
 	got, readErr := os.ReadFile(composeFile)

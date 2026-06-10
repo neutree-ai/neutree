@@ -2,6 +2,8 @@ package launch
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/Masterminds/semver/v3"
 
@@ -9,6 +11,8 @@ import (
 )
 
 const fallbackNeutreeCoreVersion = "v0.0.1"
+
+var gitDescribeLocalBuildPattern = regexp.MustCompile(`-\d+-g[0-9a-fA-F]+(?:-dirty)?$`)
 
 type neutreeCoreCompatibilityPolicy struct {
 	cliMin    string
@@ -44,10 +48,6 @@ func defaultNeutreeCoreVersion() string {
 		return fallbackNeutreeCoreVersion
 	}
 
-	if _, err := semver.NewVersion(cliVersion); err != nil {
-		return fallbackNeutreeCoreVersion
-	}
-
 	return cliVersion
 }
 
@@ -61,10 +61,7 @@ func validateNeutreeCoreVersionCompatibility(cliVersion, targetVersion string) e
 		return nil
 	}
 
-	cli, err := semver.NewVersion(cliVersion)
-	if err != nil {
-		return fmt.Errorf("invalid CLI version %q: %w", cliVersion, err)
-	}
+	cli := semver.MustParse(cliVersion)
 
 	for _, policy := range neutreeCoreCompatibilityPolicies {
 		if !versionInRange(cli, policy.cliMin, policy.cliMax) {
@@ -83,7 +80,28 @@ func validateNeutreeCoreVersionCompatibility(cliVersion, targetVersion string) e
 }
 
 func isDevelopmentCLIVersion(cliVersion string) bool {
-	return cliVersion == "" || cliVersion == "dev" || cliVersion == "unknown"
+	return !isReleaseCLIVersion(cliVersion)
+}
+
+func isReleaseCLIVersion(cliVersion string) bool {
+	if cliVersion == "" || cliVersion == "dev" || cliVersion == "unknown" {
+		return false
+	}
+
+	if hasLocalBuildSuffix(cliVersion) {
+		return false
+	}
+
+	_, err := semver.NewVersion(cliVersion)
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
+func hasLocalBuildSuffix(cliVersion string) bool {
+	return strings.HasSuffix(cliVersion, "-dirty") || gitDescribeLocalBuildPattern.MatchString(cliVersion)
 }
 
 func versionInRange(v *semver.Version, minVersion, maxVersion string) bool {
