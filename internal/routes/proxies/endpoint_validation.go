@@ -51,18 +51,15 @@ func validateEndpointAcceleratorVirtualization() gin.HandlerFunc {
 }
 
 func validateEndpointAcceleratorVirtualizationBody(body []byte) *validationError {
-	hasResources, err := endpointPayloadHasResources(body)
-	if err != nil {
-		return invalidEndpointPayloadError(err)
-	}
-
-	if !hasResources {
-		return nil
-	}
-
 	var endpoint v1.Endpoint
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&endpoint); err != nil {
 		return invalidEndpointPayloadError(err)
+	}
+
+	if endpoint.GetDeletionTimestamp() != "" {
+		// Soft delete PATCH reuses the same route but should not be blocked by
+		// endpoint resource validation.
+		return nil
 	}
 
 	if endpoint.Spec == nil || endpoint.Spec.Resources == nil {
@@ -75,29 +72,6 @@ func validateEndpointAcceleratorVirtualizationBody(body []byte) *validationError
 	}
 
 	return nil
-}
-
-func endpointPayloadHasResources(body []byte) (bool, error) {
-	// PATCH is partial. Only requests that explicitly touch spec.resources
-	// should trigger accelerator virtualization validation.
-	var payload map[string]interface{}
-	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&payload); err != nil {
-		return false, err
-	}
-
-	rawSpec, ok := payload["spec"]
-	if !ok || rawSpec == nil {
-		return false, nil
-	}
-
-	spec, ok := rawSpec.(map[string]interface{})
-	if !ok {
-		return false, fmt.Errorf("spec must be an object")
-	}
-
-	_, ok = spec["resources"]
-
-	return ok, nil
 }
 
 func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.ResourceSpec) *validationError {

@@ -11,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/cluster/component/hami"
 	"github.com/neutree-ai/neutree/internal/cluster/component/metrics"
@@ -277,7 +278,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *Reconc
 func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 	reconcileCtx *ReconcileContext,
 ) (*v1.ClusterResources, error) {
-	parsers := map[string]resourceview.ResourceParser{}
+	parsers := map[string]resourceparser.ResourceParser{}
 	if c.acceleratorMgr != nil {
 		parsers = c.acceleratorMgr.GetAllParsers()
 	}

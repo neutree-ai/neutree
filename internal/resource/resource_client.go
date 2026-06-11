@@ -23,8 +23,6 @@ type ResourceClient interface {
 	ListEndpointInstances(ctx context.Context, opts ListEndpointInstancesOptions) ([]EndpointInstanceResource, error)
 }
 
-type ResourceParser = resourceparser.ResourceParser
-
 const BytesPerGiB = 1024 * 1024 * 1024
 
 type ListNodesOptions struct {
@@ -48,10 +46,10 @@ type EndpointInstanceResource = resourceparser.EndpointInstanceResource
 
 type K8sResourceClient struct {
 	client  client.Client
-	parsers map[string]ResourceParser
+	parsers map[string]resourceparser.ResourceParser
 }
 
-func NewK8sResourceClient(ctrClient client.Client, parsers map[string]ResourceParser) *K8sResourceClient {
+func NewK8sResourceClient(ctrClient client.Client, parsers map[string]resourceparser.ResourceParser) *K8sResourceClient {
 	return &K8sResourceClient{
 		client:  ctrClient,
 		parsers: parsers,
@@ -278,7 +276,7 @@ func (c *K8sResourceClient) listEndpointNodes(
 	return nodes, nil
 }
 
-func sortedParserKeys(parsers map[string]ResourceParser) []string {
+func sortedParserKeys(parsers map[string]resourceparser.ResourceParser) []string {
 	keys := make([]string, 0, len(parsers))
 	for key := range parsers {
 		keys = append(keys, key)
@@ -291,10 +289,10 @@ func sortedParserKeys(parsers map[string]ResourceParser) []string {
 
 type RayResourceClient struct {
 	client  dashboard.DashboardService
-	parsers map[string]ResourceParser
+	parsers map[string]resourceparser.ResourceParser
 }
 
-func NewRayResourceClient(dashboardClient dashboard.DashboardService, parsers map[string]ResourceParser) *RayResourceClient {
+func NewRayResourceClient(dashboardClient dashboard.DashboardService, parsers map[string]resourceparser.ResourceParser) *RayResourceClient {
 	return &RayResourceClient{
 		client:  dashboardClient,
 		parsers: parsers,
@@ -367,7 +365,7 @@ func resourceNodeFromStatus(nodeID string, status *v1.ResourceStatus) ResourceNo
 
 func transformKubernetesNodeResources(
 	input resourceparser.KubernetesNodeResourceContext,
-	parsers map[string]ResourceParser,
+	parsers map[string]resourceparser.ResourceParser,
 	acceleratorVirtualizationEnabled bool,
 ) (*v1.ResourceStatus, []*v1.DeviceResource, map[v1.AcceleratorType]*v1.AcceleratorMetadata, error) {
 	status := newKubernetesResourceStatus(input.AvailableResources, input.AllocatableResources)
@@ -401,7 +399,7 @@ func transformKubernetesNodeResources(
 
 func transformKubernetesVirtualizationNodeResources(
 	input resourceparser.KubernetesNodeResourceContext,
-	parsers map[string]ResourceParser,
+	parsers map[string]resourceparser.ResourceParser,
 ) (*resourceparser.KubernetesResourceParseResult, bool, error) {
 	for _, key := range sortedParserKeys(parsers) {
 		parser, ok := parsers[key].(resourceparser.KubernetesVirtualizationResourceParser)
@@ -440,7 +438,7 @@ func mergeKubernetesStandardAccelerators(
 	result *v1.ResourceStatus,
 	availableResources, allocatableResources map[corev1.ResourceName]k8sresource.Quantity,
 	labels map[string]string,
-	parsers map[string]ResourceParser,
+	parsers map[string]resourceparser.ResourceParser,
 ) error {
 	for _, key := range sortedParserKeys(parsers) {
 		parser := parsers[key]
@@ -471,7 +469,7 @@ func mergeKubernetesStandardAccelerators(
 
 func transformKubernetesVirtualizationEndpointResources(
 	input resourceparser.KubernetesEndpointResourceContext,
-	parsers map[string]ResourceParser,
+	parsers map[string]resourceparser.ResourceParser,
 ) ([]EndpointInstanceResource, bool, error) {
 	for _, key := range sortedParserKeys(parsers) {
 		parser, ok := parsers[key].(resourceparser.KubernetesVirtualizationEndpointResourceParser)
@@ -515,7 +513,7 @@ func newKubernetesResourceStatus(
 
 func transformRayResources(
 	availableResources, allocatableResources map[string]float64,
-	parsers map[string]ResourceParser,
+	parsers map[string]resourceparser.ResourceParser,
 ) (*v1.ResourceStatus, error) {
 	result := &v1.ResourceStatus{
 		Allocatable: &v1.ResourceInfo{

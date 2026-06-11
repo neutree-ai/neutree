@@ -16,7 +16,7 @@ import (
 
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -493,7 +493,7 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cluster := &NativeKubernetesClusterReconciler{}
 			acceleratorMgr := acceleratormocks.NewMockManager(t)
-			acceleratorMgr.On("GetAllParsers").Return(map[string]resourceview.ResourceParser{
+			acceleratorMgr.On("GetAllParsers").Return(map[string]resourceparser.ResourceParser{
 				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 			}).Maybe()
 			cluster.acceleratorMgr = acceleratorMgr
