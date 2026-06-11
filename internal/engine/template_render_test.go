@@ -94,6 +94,7 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 			assert.Equal(t, "4096", deploy.GetName())
 			assertNestedString(t, deploy.Object, "4096", "spec", "selector", "matchLabels", "endpoint")
 			assertNestedString(t, deploy.Object, "4096", "spec", "template", "metadata", "labels", "endpoint")
+			assertAntiAffinityEndpointValue(t, deploy.Object, "4096")
 		})
 	}
 }
@@ -160,6 +161,38 @@ func assertNestedString(t *testing.T, obj map[string]any, want string, fields ..
 	require.NoError(t, err)
 	require.Truef(t, found, "%s not found", strings.Join(fields, "."))
 	assert.Equal(t, want, got)
+}
+
+func assertAntiAffinityEndpointValue(t *testing.T, obj map[string]any, want string) {
+	t.Helper()
+	spec := requireMap(t, obj["spec"], "spec")
+	tmpl := requireMap(t, spec["template"], "spec.template")
+	pod := requireMap(t, tmpl["spec"], "spec.template.spec")
+	affinity := requireMap(t, pod["affinity"], "spec.template.spec.affinity")
+	podAntiAffinity := requireMap(t, affinity["podAntiAffinity"], "spec.template.spec.affinity.podAntiAffinity")
+	preferred := requireSlice(
+		t,
+		podAntiAffinity["preferredDuringSchedulingIgnoredDuringExecution"],
+		"spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution",
+	)
+	require.NotEmpty(t, preferred)
+	term := requireMap(t, preferred[0], "preferredDuringSchedulingIgnoredDuringExecution[0]")
+	podAffinityTerm := requireMap(t, term["podAffinityTerm"], "preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm")
+	labelSelector := requireMap(t, podAffinityTerm["labelSelector"], "podAffinityTerm.labelSelector")
+	expressions := requireSlice(t, labelSelector["matchExpressions"], "labelSelector.matchExpressions")
+
+	for _, expression := range expressions {
+		expressionMap := requireMap(t, expression, "matchExpression")
+		if key, ok := expressionMap["key"].(string); ok && key == "endpoint" {
+			values := requireSlice(t, expressionMap["values"], "matchExpression.values")
+			require.Len(t, values, 1)
+			assert.Equal(t, want, mustString(t, values[0], "matchExpression.values", 0))
+
+			return
+		}
+	}
+
+	require.Fail(t, "endpoint anti-affinity match expression not found")
 }
 
 // mustExtractContainerCommand pulls the named container's command list out of
