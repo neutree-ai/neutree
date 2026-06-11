@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
+	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 )
 
 func (h *HAMiComponent) Preflight(ctx context.Context) error {
@@ -44,14 +44,14 @@ func (h *HAMiComponent) Preflight(ctx context.Context) error {
 func (h *HAMiComponent) validateClusterVersion() error {
 	version := h.cluster.GetVersion()
 
-	supported, err := accelerator.SupportsVirtualizationClusterVersion(version)
+	supported, err := clustervalidation.SupportsVirtualizationClusterVersion(version)
 	if err != nil {
 		return fmt.Errorf("failed to parse cluster version %q: %w", version, err)
 	}
 
 	if !supported {
 		return fmt.Errorf("accelerator virtualization component requires cluster version >= %s",
-			accelerator.MinVirtualizationClusterVersion)
+			clustervalidation.MinVirtualizationClusterVersion)
 	}
 
 	return nil

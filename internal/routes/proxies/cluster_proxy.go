@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
+	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -193,7 +193,7 @@ func invalidClusterPayloadError(err error) *validationError {
 }
 
 func validateAcceleratorVirtualizationClusterVersion(version string) *validationError {
-	supported, err := accelerator.SupportsVirtualizationClusterVersion(version)
+	supported, err := clustervalidation.SupportsVirtualizationClusterVersion(version)
 	if err != nil {
 		return &validationError{
 			Code:    "10209",
@@ -206,9 +206,9 @@ func validateAcceleratorVirtualizationClusterVersion(version string) *validation
 		return &validationError{
 			Code: "10208",
 			Message: fmt.Sprintf("spec.accelerator_virtualization requires cluster version >= %s",
-				accelerator.MinVirtualizationClusterVersion),
+				clustervalidation.MinVirtualizationClusterVersion),
 			Hint: fmt.Sprintf("Upgrade cluster version to %s or later before enabling accelerator virtualization",
-				accelerator.MinVirtualizationClusterVersion),
+				clustervalidation.MinVirtualizationClusterVersion),
 		}
 	}
 
