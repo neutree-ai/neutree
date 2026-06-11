@@ -6,6 +6,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -74,7 +75,7 @@ func TestK8sResourceClientListEndpointInstancesWithHAMiAllocation(t *testing.T) 
 		WithScheme(scheme).
 		WithObjects(node, pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceview.ResourceParser{
+	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
@@ -144,7 +145,7 @@ func TestK8sResourceClientListNodesFallsBackToStandardParserWhenVirtualizationEn
 		WithScheme(scheme).
 		WithObjects(node, pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceview.ResourceParser{
+	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
@@ -193,7 +194,7 @@ func TestK8sResourceClientListNodesDoesNotExposeHAMiSlotsWithoutRegisteredDevice
 		WithScheme(scheme).
 		WithObjects(node).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceview.ResourceParser{
+	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 

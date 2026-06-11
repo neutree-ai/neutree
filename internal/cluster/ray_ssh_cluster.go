@@ -17,6 +17,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
@@ -714,7 +715,7 @@ func setNodePrivisionStatus(reconcileCtx *ReconcileContext, nodeIP, status strin
 func (c *sshRayClusterReconciler) calculateClusterResources(
 	reconcileCtx *ReconcileContext,
 ) (*v1.ClusterResources, error) {
-	parsers := map[string]resourceview.ResourceParser{}
+	parsers := map[string]resourceparser.ResourceParser{}
 	if c.acceleratorManager != nil {
 		parsers = c.acceleratorManager.GetAllParsers()
 	}

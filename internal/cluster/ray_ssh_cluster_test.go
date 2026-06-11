@@ -11,9 +11,9 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
@@ -1239,7 +1239,7 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 			dashboardSvc := &dashboardmocks.MockDashboardService{}
 			tt.setMock(dashboardSvc)
 			acceleratorMgr := acceleratormocks.NewMockManager(t)
-			acceleratorMgr.On("GetAllParsers").Return(map[string]resourceview.ResourceParser{
+			acceleratorMgr.On("GetAllParsers").Return(map[string]resourceparser.ResourceParser{
 				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 			})
 
