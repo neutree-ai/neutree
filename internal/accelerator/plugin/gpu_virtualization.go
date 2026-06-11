@@ -47,13 +47,26 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	blockingReasons := make([]string, 0)
 
 	for _, policy := range input.GPUOperatorClusterPolicies {
-		if boolAtPathDefault(policy.Spec, true, "driver", "enabled") {
-			// GPU Operator managed drivers are usually mounted under this root.
-			// HAMi device-plugin needs the same path to discover host devices.
-			setNestedString(configPatch, NvidiaGPUOperatorDriverRoot, "devicePlugin", "nvidiaDriverRoot")
+		driverEnabled, found, err := unstructured.NestedBool(policy.Spec, "driver", "enabled")
+		if !found || err != nil {
+			driverEnabled = true
 		}
 
-		if boolAtPathDefault(policy.Spec, true, "devicePlugin", "enabled") {
+		if driverEnabled {
+			// GPU Operator managed drivers are usually mounted under this root.
+			// HAMi device-plugin needs the same path to discover host devices.
+			if err := unstructured.SetNestedField(configPatch, NvidiaGPUOperatorDriverRoot,
+				"devicePlugin", "nvidiaDriverRoot"); err != nil {
+				return nil, errors.Wrap(err, "failed to build NVIDIA GPU virtualization config patch")
+			}
+		}
+
+		devicePluginEnabled, found, err := unstructured.NestedBool(policy.Spec, "devicePlugin", "enabled")
+		if !found || err != nil {
+			devicePluginEnabled = true
+		}
+
+		if devicePluginEnabled {
 			blockingReasons = append(blockingReasons,
 				"NVIDIA GPU Operator devicePlugin is enabled; disable it before enabling HAMi NVIDIA vGPU")
 		}
@@ -84,52 +97,6 @@ func NvidiaVirtualizationCandidateNodes(nodes []corev1.Node) []string {
 	}
 
 	return candidates
-}
-
-func boolAtPathDefault(values map[string]interface{}, defaultValue bool, path ...string) bool {
-	value, ok := valueAtPath(values, path...)
-	if !ok {
-		return defaultValue
-	}
-
-	boolValue, ok := value.(bool)
-	if !ok {
-		return defaultValue
-	}
-
-	return boolValue
-}
-
-func setNestedString(values map[string]interface{}, value string, path ...string) {
-	current := values
-	for _, key := range path[:len(path)-1] {
-		next, ok := current[key].(map[string]interface{})
-		if !ok {
-			next = map[string]interface{}{}
-			current[key] = next
-		}
-
-		current = next
-	}
-
-	current[path[len(path)-1]] = value
-}
-
-func valueAtPath(values map[string]interface{}, path ...string) (interface{}, bool) {
-	var current interface{} = values
-	for _, key := range path {
-		currentMap, ok := current.(map[string]interface{})
-		if !ok {
-			return nil, false
-		}
-
-		current, ok = currentMap[key]
-		if !ok {
-			return nil, false
-		}
-	}
-
-	return current, true
 }
 
 func kubernetesClientForVirtualizationConfig(cluster *v1.Cluster) (client.Reader, error) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
@@ -155,7 +156,7 @@ func validateClusterAcceleratorVirtualizationConfigPatch(configPatch map[string]
 		}
 	}
 
-	if schedulerPatch, ok := nestedBoolFromMap(configPatch, "scheduler", "patch", "enabled"); ok && schedulerPatch {
+	if schedulerPatch, ok, err := unstructured.NestedBool(configPatch, "scheduler", "patch", "enabled"); err == nil && ok && schedulerPatch {
 		return &validationError{
 			Code:    "10210",
 			Message: "HAMi scheduler patch hook is managed by Neutree and cannot be enabled",
@@ -163,7 +164,7 @@ func validateClusterAcceleratorVirtualizationConfigPatch(configPatch map[string]
 		}
 	}
 
-	if certManager, ok := nestedBoolFromMap(configPatch, "scheduler", "certManager", "enabled"); ok && certManager {
+	if certManager, ok, err := unstructured.NestedBool(configPatch, "scheduler", "certManager", "enabled"); err == nil && ok && certManager {
 		return &validationError{
 			Code:    "10210",
 			Message: "HAMi cert-manager integration is managed by Neutree and cannot be enabled",
@@ -171,7 +172,7 @@ func validateClusterAcceleratorVirtualizationConfigPatch(configPatch map[string]
 		}
 	}
 
-	if migStrategy, ok := nestedStringFromMap(configPatch, "devicePlugin", "migStrategy"); ok &&
+	if migStrategy, ok, err := unstructured.NestedString(configPatch, "devicePlugin", "migStrategy"); err == nil && ok &&
 		strings.ToLower(strings.TrimSpace(migStrategy)) != "none" {
 		return &validationError{
 			Code:    "10210",
@@ -181,45 +182,6 @@ func validateClusterAcceleratorVirtualizationConfigPatch(configPatch map[string]
 	}
 
 	return nil
-}
-
-func nestedBoolFromMap(values map[string]interface{}, path ...string) (bool, bool) {
-	value, ok := nestedValueFromMap(values, path...)
-	if !ok {
-		return false, false
-	}
-
-	boolValue, ok := value.(bool)
-
-	return boolValue, ok
-}
-
-func nestedStringFromMap(values map[string]interface{}, path ...string) (string, bool) {
-	value, ok := nestedValueFromMap(values, path...)
-	if !ok {
-		return "", false
-	}
-
-	stringValue, ok := value.(string)
-
-	return stringValue, ok
-}
-
-func nestedValueFromMap(values map[string]interface{}, path ...string) (interface{}, bool) {
-	var current interface{} = values
-	for _, key := range path {
-		asMap, ok := current.(map[string]interface{})
-		if !ok {
-			return nil, false
-		}
-
-		current, ok = asMap[key]
-		if !ok {
-			return nil, false
-		}
-	}
-
-	return current, true
 }
 
 func invalidClusterPayloadError(err error) *validationError {
