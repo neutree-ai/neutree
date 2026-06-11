@@ -18,7 +18,7 @@ func TestSyncApiKeyUsage(t *testing.T) {
 
 		// Create an API key for the user
 		var apiKeyID string
-		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext("test")}, func(tx *sql.Tx) error {
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
 			return tx.QueryRowContext(ctx, `
 			SELECT id FROM api.create_api_key(
 				p_workspace := 'test-workspace',
@@ -106,7 +106,7 @@ func TestSyncApiKeyUsage(t *testing.T) {
 
 		// Create an API key
 		var apiKeyID string
-		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext("test")}, func(tx *sql.Tx) error {
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
 			return tx.QueryRowContext(ctx, `
 			SELECT id FROM api.create_api_key(
 				p_workspace := 'test-workspace-2',
@@ -174,7 +174,7 @@ func TestSyncApiKeyUsage(t *testing.T) {
 
 		// Create an API key
 		var apiKeyID string
-		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext("test")}, func(tx *sql.Tx) error {
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
 			return tx.QueryRowContext(ctx, `
 			SELECT id FROM api.create_api_key(
 				p_workspace := 'test-workspace-3',
