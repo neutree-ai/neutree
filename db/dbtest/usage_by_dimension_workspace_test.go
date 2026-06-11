@@ -67,8 +67,8 @@ func TestGetUsageByDimensionWorkspaceFilter(t *testing.T) {
 			VALUES (
 				'v1',
 				'ApiDailyUsage',
-				ROW('neu-463-du-' || $2, NULL, $2, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
-				ROW($1::uuid, CURRENT_DATE, $3, jsonb_build_object($4::text, $3), NULL::jsonb)::api.api_daily_usage_spec,
+				ROW('neu-463-du-' || $2::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
+				ROW($1::uuid, CURRENT_DATE, $3::bigint, jsonb_build_object($4::text, $3::bigint), NULL::jsonb)::api.api_daily_usage_spec,
 				ROW(now())::api.api_daily_usage_status
 			)`, keyID, workspace, amount, dimension)
 		if err != nil {
@@ -97,7 +97,7 @@ func TestGetUsageByDimensionWorkspaceFilter(t *testing.T) {
 					NULL,
 					NULL
 				)::api.endpoint_spec,
-				ROW($1, NULL, $2, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata
+				ROW($1::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata
 			)`, dimension, workspace)
 		if err != nil {
 			t.Fatalf("failed to insert endpoint in %s: %v", workspace, err)
