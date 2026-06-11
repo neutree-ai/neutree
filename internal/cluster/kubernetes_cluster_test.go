@@ -2,11 +2,13 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -17,6 +19,7 @@ import (
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -609,4 +612,112 @@ func TestComputeAdditionalComponents_HAMi(t *testing.T) {
 	if len(deleteComps) != 1 {
 		t.Fatalf("expected metrics component to be deleted when metrics URL is empty, got %d components", len(deleteComps))
 	}
+}
+
+func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *testing.T) {
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+		Spec: &v1.ClusterSpec{
+			Type: v1.KubernetesClusterType,
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+			},
+		},
+	}
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: util.ClusterNamespace(cluster),
+		},
+	}
+	gpuNode := newNode("gpu-node", true, nil, map[string]string{
+		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	})
+	metricsClusterRole := newUnstructuredObject("rbac.authorization.k8s.io/v1", "ClusterRole",
+		"", "vmagent-node-reader-test")
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(namespace, gpuNode, metricsClusterRole).
+		Build()
+	setLastAppliedConfig(t, fakeClient, namespace.Name, cluster.Metadata.Name, "metrics",
+		[]unstructured.Unstructured{*metricsClusterRole})
+	acceleratorMgr := acceleratormocks.NewMockManager(t)
+	acceleratorMgr.On("SupportPlugins").Return([]string{string(v1.AcceleratorTypeNVIDIAGPU)})
+	acceleratorMgr.On("GetPlugin", string(v1.AcceleratorTypeNVIDIAGPU)).
+		Return(testVirtualizationPlugin{}, true)
+	reconciler := &NativeKubernetesClusterReconciler{
+		acceleratorMgr: acceleratorMgr,
+	}
+	reconcileCtx := &ReconcileContext{
+		Ctx:                     context.TODO(),
+		Cluster:                 cluster,
+		clusterNamespace:        util.ClusterNamespace(cluster),
+		kubernetesClusterConfig: &v1.KubernetesClusterConfig{},
+		ctrClient:               fakeClient,
+	}
+
+	err := reconciler.reconcileDelete(reconcileCtx)
+
+	require.ErrorContains(t, err, "waiting for namespace deletion")
+
+	gotNode := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: "gpu-node"}, gotNode))
+	require.NotContains(t, gotNode.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
+
+	gotClusterRole := newUnstructuredObject("rbac.authorization.k8s.io/v1", "ClusterRole",
+		"", "vmagent-node-reader-test")
+	require.Error(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: "vmagent-node-reader-test"}, gotClusterRole))
+}
+
+func newUnstructuredObject(apiVersion, kind, namespace, name string) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetAPIVersion(apiVersion)
+	obj.SetKind(kind)
+	obj.SetNamespace(namespace)
+	obj.SetName(name)
+
+	return obj
+}
+
+func setLastAppliedConfig(
+	t *testing.T,
+	ctrlClient client.Client,
+	namespace,
+	resourceName,
+	componentName string,
+	objs []unstructured.Unstructured,
+) {
+	t.Helper()
+
+	config, err := json.Marshal(objs)
+	require.NoError(t, err)
+	require.NoError(t, deploy.NewConfigStore(ctrlClient).Set(context.TODO(),
+		namespace, resourceName, componentName, string(config), nil))
+}
+
+type testVirtualizationPlugin struct{}
+
+func (testVirtualizationPlugin) Handle() plugin.AcceleratorPluginHandle {
+	return nil
+}
+
+func (testVirtualizationPlugin) Resource() string {
+	return string(v1.AcceleratorTypeNVIDIAGPU)
+}
+
+func (testVirtualizationPlugin) Type() string {
+	return plugin.InternalPluginType
+}
+
+func (testVirtualizationPlugin) ResolveClusterVirtualizationConfig(
+	context.Context,
+	*v1.Cluster,
+) (*plugin.VirtualizationConfig, error) {
+	return &plugin.VirtualizationConfig{
+		Supported: true,
+		NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
+			Key:           plugin.NvidiaGPUVirtualizationLabelKey,
+			EnabledValue:  "true",
+			DisabledValue: "false",
+		},
+	}, nil
 }

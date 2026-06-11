@@ -8,7 +8,7 @@ import (
 	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	mock "github.com/stretchr/testify/mock"
 
-	resource "github.com/neutree-ai/neutree/internal/resource"
+	resourceparser "github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -74,19 +74,19 @@ func (_c *MockManager_GetAllConverters_Call) RunAndReturn(run func() map[string]
 }
 
 // GetAllParsers provides a mock function with no fields
-func (_m *MockManager) GetAllParsers() map[string]resource.ResourceParser {
+func (_m *MockManager) GetAllParsers() map[string]resourceparser.ResourceParser {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllParsers")
 	}
 
-	var r0 map[string]resource.ResourceParser
-	if rf, ok := ret.Get(0).(func() map[string]resource.ResourceParser); ok {
+	var r0 map[string]resourceparser.ResourceParser
+	if rf, ok := ret.Get(0).(func() map[string]resourceparser.ResourceParser); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]resource.ResourceParser)
+			r0 = ret.Get(0).(map[string]resourceparser.ResourceParser)
 		}
 	}
 
@@ -110,12 +110,12 @@ func (_c *MockManager_GetAllParsers_Call) Run(run func()) *MockManager_GetAllPar
 	return _c
 }
 
-func (_c *MockManager_GetAllParsers_Call) Return(_a0 map[string]resource.ResourceParser) *MockManager_GetAllParsers_Call {
+func (_c *MockManager_GetAllParsers_Call) Return(_a0 map[string]resourceparser.ResourceParser) *MockManager_GetAllParsers_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockManager_GetAllParsers_Call) RunAndReturn(run func() map[string]resource.ResourceParser) *MockManager_GetAllParsers_Call {
+func (_c *MockManager_GetAllParsers_Call) RunAndReturn(run func() map[string]resourceparser.ResourceParser) *MockManager_GetAllParsers_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -400,23 +400,23 @@ func (_c *MockManager_GetNodeRuntimeConfig_Call) RunAndReturn(run func(context.C
 }
 
 // GetParser provides a mock function with given fields: acceleratorType
-func (_m *MockManager) GetParser(acceleratorType string) (resource.ResourceParser, bool) {
+func (_m *MockManager) GetParser(acceleratorType string) (resourceparser.ResourceParser, bool) {
 	ret := _m.Called(acceleratorType)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetParser")
 	}
 
-	var r0 resource.ResourceParser
+	var r0 resourceparser.ResourceParser
 	var r1 bool
-	if rf, ok := ret.Get(0).(func(string) (resource.ResourceParser, bool)); ok {
+	if rf, ok := ret.Get(0).(func(string) (resourceparser.ResourceParser, bool)); ok {
 		return rf(acceleratorType)
 	}
-	if rf, ok := ret.Get(0).(func(string) resource.ResourceParser); ok {
+	if rf, ok := ret.Get(0).(func(string) resourceparser.ResourceParser); ok {
 		r0 = rf(acceleratorType)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(resource.ResourceParser)
+			r0 = ret.Get(0).(resourceparser.ResourceParser)
 		}
 	}
 
@@ -447,12 +447,12 @@ func (_c *MockManager_GetParser_Call) Run(run func(acceleratorType string)) *Moc
 	return _c
 }
 
-func (_c *MockManager_GetParser_Call) Return(_a0 resource.ResourceParser, _a1 bool) *MockManager_GetParser_Call {
+func (_c *MockManager_GetParser_Call) Return(_a0 resourceparser.ResourceParser, _a1 bool) *MockManager_GetParser_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManager_GetParser_Call) RunAndReturn(run func(string) (resource.ResourceParser, bool)) *MockManager_GetParser_Call {
+func (_c *MockManager_GetParser_Call) RunAndReturn(run func(string) (resourceparser.ResourceParser, bool)) *MockManager_GetParser_Call {
 	_c.Call.Return(run)
 	return _c
 }

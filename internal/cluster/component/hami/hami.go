@@ -104,27 +104,32 @@ func (h *HAMiComponent) Reconcile() error {
 }
 
 func (h *HAMiComponent) Delete() error {
+	ownsNodeScope := h.ownsNodeScope()
+
+	// Remove the cluster-wide scheduling scope before deleting HAMi Pods. A
+	// force delete can remove the Neutree cluster record while Kubernetes
+	// resources are still terminating, so delaying scope cleanup until every
+	// manifest is gone can leave stale vGPU labels behind.
+	if ownsNodeScope {
+		if err := h.DisableNodeScope(context.Background()); err != nil {
+			return errors.Wrap(err, "failed to disable HAMi node scope")
+		}
+	}
+
 	deleted, err := h.DeleteResources(context.Background())
 	if err != nil {
 		return errors.Wrap(err, "failed to delete HAMi resources")
 	}
 
 	if !deleted {
-		h.setNotReadyStatus("Deleting", "HAMi resources are still deleting")
 		return errors.New("HAMi resources are not fully deleted, please wait")
 	}
 
-	if err := h.DisableNodeScope(context.Background()); err != nil {
-		h.setNotReadyStatus("NodeScopeCleanupFailed", err.Error())
-		return errors.Wrap(err, "failed to disable HAMi node scope")
-	}
-
 	if err := h.CleanupTLS(context.Background()); err != nil {
-		h.setNotReadyStatus("TLSCleanupFailed", err.Error())
 		return errors.Wrap(err, "failed to clean up HAMi TLS secret")
 	}
 
-	h.setNotReadyStatus("Disabled", "accelerator virtualization is disabled")
+	h.clearStatus()
 
 	return nil
 }
@@ -161,4 +166,26 @@ func (h *HAMiComponent) writeStatus(status *v1.ComponentStatus) {
 	}
 
 	h.cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey] = status
+}
+
+func (h *HAMiComponent) hasStatus() bool {
+	if h.cluster.Status == nil || h.cluster.Status.ComponentStatus == nil {
+		return false
+	}
+
+	_, ok := h.cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
+
+	return ok
+}
+
+func (h *HAMiComponent) ownsNodeScope() bool {
+	return h.hasStatus() || h.cluster.Spec.AcceleratorVirtualizationEnabled()
+}
+
+func (h *HAMiComponent) clearStatus() {
+	if h.cluster.Status == nil || h.cluster.Status.ComponentStatus == nil {
+		return
+	}
+
+	delete(h.cluster.Status.ComponentStatus, v1.ComponentStatusAcceleratorVirtualizationKey)
 }

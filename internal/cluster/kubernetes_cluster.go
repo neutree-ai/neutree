@@ -261,17 +261,59 @@ func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *Reconc
 		return errors.Wrap(err, "failed to get namespace")
 	}
 
-	if ns.DeletionTimestamp != nil {
-		// Namespace is already being deleted
-		return errors.New("waiting for namespace deletion")
+	componentDeleteErr := c.deleteClusterComponents(reconcileCtx)
+
+	if ns.DeletionTimestamp == nil {
+		err = reconcileCtx.ctrClient.Delete(reconcileCtx.Ctx, ns)
+		if err != nil {
+			return utilerrors.NewAggregate([]error{
+				componentDeleteErr,
+				errors.Wrap(err, "failed to delete namespace"),
+			})
+		}
 	}
 
-	err = reconcileCtx.ctrClient.Delete(reconcileCtx.Ctx, ns)
-	if err != nil {
-		return errors.Wrap(err, "failed to delete namespace")
+	if componentDeleteErr != nil {
+		return componentDeleteErr
 	}
 
 	return errors.New("waiting for namespace deletion")
+}
+
+func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
+	reconcileCtx *ReconcileContext,
+) error {
+	var errs []error
+
+	if reconcileCtx.Cluster.Spec.AcceleratorVirtualizationEnabled() {
+		hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
+			reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+			*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
+
+		if err := hamiComp.DisableNodeScope(reconcileCtx.Ctx); err != nil {
+			errs = append(errs, errors.Wrap(err, "failed to disable accelerator virtualization node scope"))
+		}
+
+		if _, err := hamiComp.DeleteResources(reconcileCtx.Ctx); err != nil {
+			errs = append(errs, errors.Wrap(err, "failed to delete accelerator virtualization resources"))
+		}
+	}
+
+	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	if _, err := metricsComp.DeleteResources(reconcileCtx.Ctx); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to delete metrics resources"))
+	}
+
+	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+		*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	if _, err := routerComp.DeleteResources(reconcileCtx.Ctx); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to delete router resources"))
+	}
+
+	return utilerrors.NewAggregate(errs)
 }
 
 // calculateResources calculates the allocatable and available resources of the cluster.
