@@ -70,60 +70,22 @@ func validateConfigPatch(configPatch map[string]interface{}) error {
 		}
 	}
 
-	if schedulerPatch, ok := nestedBool(configPatch, "scheduler", "patch", "enabled"); ok && schedulerPatch {
+	if schedulerPatch, ok, err := unstructured.NestedBool(configPatch, "scheduler", "patch", "enabled"); err == nil && ok && schedulerPatch {
 		return errors.New("HAMi scheduler patch hook is managed by Neutree and cannot be enabled")
 	}
 
-	if certManager, ok := nestedBool(configPatch, "scheduler", "certManager", "enabled"); ok && certManager {
+	if certManager, ok, err := unstructured.NestedBool(configPatch, "scheduler", "certManager", "enabled"); err == nil && ok && certManager {
 		return errors.New("HAMi cert-manager integration is managed by Neutree and cannot be enabled")
 	}
 
 	// Neutree vGPU support is based on HAMi core mode. MIG mode requires
 	// different node/device semantics and is intentionally rejected here.
-	if migStrategy, ok := nestedString(configPatch, "devicePlugin", "migStrategy"); ok &&
+	if migStrategy, ok, err := unstructured.NestedString(configPatch, "devicePlugin", "migStrategy"); err == nil && ok &&
 		strings.ToLower(strings.TrimSpace(migStrategy)) != "none" {
 		return errors.New("HAMi MIG virtualization mode is not supported")
 	}
 
 	return nil
-}
-
-func nestedBool(values map[string]interface{}, path ...string) (bool, bool) {
-	var current interface{} = values
-	for _, key := range path {
-		asMap, ok := current.(map[string]interface{})
-		if !ok {
-			return false, false
-		}
-
-		current, ok = asMap[key]
-		if !ok {
-			return false, false
-		}
-	}
-
-	value, ok := current.(bool)
-
-	return value, ok
-}
-
-func nestedString(values map[string]interface{}, path ...string) (string, bool) {
-	var current interface{} = values
-	for _, key := range path {
-		asMap, ok := current.(map[string]interface{})
-		if !ok {
-			return "", false
-		}
-
-		current, ok = asMap[key]
-		if !ok {
-			return "", false
-		}
-	}
-
-	value, ok := current.(string)
-
-	return value, ok
 }
 
 func (h *HAMiComponent) validateUnmanagedHAMi(ctx context.Context) error {
