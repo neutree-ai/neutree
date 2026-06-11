@@ -14,7 +14,7 @@ This enables the pre-commit gate (`gofmt` / `go vet` / architecture boundaries /
 
 ## Playbooks
 
-Step-by-step checklists for the two highest-cost additions:
+Step-by-step checklists for common high-impact additions:
 
 | Goal | Entry point | Checklist |
 |------|-------------|-----------|
@@ -33,7 +33,7 @@ Required checklist:
 1. Add the component to the relevant Compose stack under `deploy/docker/` (`neutree-core` or `obs-stack`), including image, environment, volumes, ports, dependencies, and config files.
 2. Add the same component to `deploy/chart/neutree/`, including default values, templates, config, volumes, ports, and service account/RBAC resources if needed.
 3. Add every new runtime image to `scripts/builder/image-lists/controlplane/images.txt` so offline control-plane packages include it.
-4. Render the Helm chart and review the Compose template before committing.
+4. Render the Helm chart and review the Compose files before committing.
 
 If the component differs between Compose and Helm, document the reason in the PR description and make sure the offline image list still covers the images required by the Helm chart.
 
