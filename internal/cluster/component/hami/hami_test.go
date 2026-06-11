@@ -66,6 +66,23 @@ func TestHAMiComponentResourcesUseHAMiEntrypoints(t *testing.T) {
 	assert.Contains(t, stringSlice(monitor["command"]), "vGPUmonitor")
 }
 
+func TestHAMiComponentDevicePluginNodeSelectorUsesVirtualizationLabelOnly(t *testing.T) {
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	objs, err := component.renderResources(NodeScopePlan{})
+	require.NoError(t, err)
+
+	devicePlugin := findObject(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName)
+	nodeSelector, found, err := unstructured.NestedStringMap(devicePlugin.Object,
+		"spec", "template", "spec", "nodeSelector")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, map[string]string{
+		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	}, nodeSelector)
+}
+
 func TestHAMiComponentKubeSchedulerVersionUsesDetectedClusterMinor(t *testing.T) {
 	originalGetKubernetesServerVersion := getKubernetesServerVersion
 	getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
@@ -457,7 +474,7 @@ func TestHAMiDeleteRemovesTLSSecret(t *testing.T) {
 	tlsSecret := newHAMiTLSSecret(t, "neutree-system")
 	fakeClient := newHAMiFakeClient(t, tlsSecret)
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient, newTestPluginProvider())
 
 	err := component.Delete()
 
@@ -467,7 +484,25 @@ func TestHAMiDeleteRemovesTLSSecret(t *testing.T) {
 	assert.True(t, apierrors.IsNotFound(err))
 }
 
-func TestHAMiDeleteDisablesNodeScopeLabels(t *testing.T) {
+func TestHAMiDeleteRemovesComponentStatus(t *testing.T) {
+	cluster := newTestCluster()
+	cluster.Status = &v1.ClusterStatus{
+		ComponentStatus: map[string]*v1.ComponentStatus{
+			v1.ComponentStatusAcceleratorVirtualizationKey: {
+				Phase: v1.ComponentPhaseReady,
+			},
+		},
+	}
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t), newTestPluginProvider())
+
+	err := component.Delete()
+
+	require.NoError(t, err)
+	assert.NotContains(t, cluster.Status.ComponentStatus, v1.ComponentStatusAcceleratorVirtualizationKey)
+}
+
+func TestHAMiDeleteRemovesEnabledNodeScopeLabels(t *testing.T) {
 	enabledNode := newHAMiNode("gpu-enabled", map[string]string{
 		plugin.NvidiaGPUVirtualizationLabelKey: "true",
 	})
@@ -476,8 +511,10 @@ func TestHAMiDeleteDisablesNodeScopeLabels(t *testing.T) {
 	})
 	unlabeledNode := newHAMiNode("gpu-unlabeled", map[string]string{})
 	fakeClient := newHAMiFakeClient(t, enabledNode, disabledNode, unlabeledNode)
-	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
+	cluster := newTestCluster()
+	markHAMiOwned(cluster)
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient, newTestPluginProvider())
 
 	err := component.Delete()
 
@@ -485,7 +522,7 @@ func TestHAMiDeleteDisablesNodeScopeLabels(t *testing.T) {
 
 	gotEnabled := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-enabled"}, gotEnabled))
-	assert.Equal(t, "false", gotEnabled.Labels[plugin.NvidiaGPUVirtualizationLabelKey])
+	assert.NotContains(t, gotEnabled.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
 
 	gotDisabled := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-disabled"}, gotDisabled))
@@ -494,6 +531,82 @@ func TestHAMiDeleteDisablesNodeScopeLabels(t *testing.T) {
 	gotUnlabeled := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-unlabeled"}, gotUnlabeled))
 	assert.NotContains(t, gotUnlabeled.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
+}
+
+func TestHAMiDeleteSkipsNodeScopeCleanupWhenClusterDoesNotOwnVirtualization(t *testing.T) {
+	enabledNode := newHAMiNode("gpu-enabled", map[string]string{
+		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	})
+	fakeClient := newHAMiFakeClient(t, enabledNode)
+	cluster := newTestCluster()
+	cluster.Spec.AcceleratorVirtualization = nil
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient, newTestPluginProvider())
+
+	err := component.Delete()
+
+	require.NoError(t, err)
+
+	gotEnabled := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-enabled"}, gotEnabled))
+	assert.Equal(t, "true", gotEnabled.Labels[plugin.NvidiaGPUVirtualizationLabelKey])
+}
+
+func TestHAMiDeleteRemovesNodeScopeWhenSpecStillEnablesVirtualization(t *testing.T) {
+	enabledNode := newHAMiNode("gpu-enabled", map[string]string{
+		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	})
+	fakeClient := newHAMiFakeClient(t, enabledNode)
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient, newTestPluginProvider())
+
+	err := component.Delete()
+
+	require.NoError(t, err)
+
+	gotEnabled := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-enabled"}, gotEnabled))
+	assert.NotContains(t, gotEnabled.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
+}
+
+func TestHAMiDeleteUsesPluginNodeScopeLabel(t *testing.T) {
+	const customLabelKey = "example.com/custom-vgpu-enabled"
+	customLabel := plugin.VirtualizationNodeScopeLabel{
+		Key:           customLabelKey,
+		EnabledValue:  "enabled",
+		DisabledValue: "disabled",
+	}
+	customEnabledNode := newHAMiNode("custom-enabled", map[string]string{
+		customLabelKey: "enabled",
+	})
+	customDisabledNode := newHAMiNode("custom-disabled", map[string]string{
+		customLabelKey: "disabled",
+	})
+	defaultEnabledNode := newHAMiNode("default-enabled", map[string]string{
+		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	})
+	fakeClient := newHAMiFakeClient(t, customEnabledNode, customDisabledNode, defaultEnabledNode)
+	cluster := newTestCluster()
+	markHAMiOwned(cluster)
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient,
+		newTestPluginProviderWithNodeScopeLabel(customLabel))
+
+	err := component.Delete()
+
+	require.NoError(t, err)
+
+	gotCustomEnabled := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "custom-enabled"}, gotCustomEnabled))
+	assert.NotContains(t, gotCustomEnabled.Labels, customLabelKey)
+
+	gotCustomDisabled := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "custom-disabled"}, gotCustomDisabled))
+	assert.Equal(t, "disabled", gotCustomDisabled.Labels[customLabelKey])
+
+	gotDefaultEnabled := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "default-enabled"}, gotDefaultEnabled))
+	assert.Equal(t, "true", gotDefaultEnabled.Labels[plugin.NvidiaGPUVirtualizationLabelKey])
 }
 
 func assertHasObject(t *testing.T, items []unstructured.Unstructured, kind, name string) {
@@ -506,6 +619,19 @@ func assertHasObject(t *testing.T, items []unstructured.Unstructured, kind, name
 	}
 
 	t.Fatalf("expected rendered %s/%s", kind, name)
+}
+
+func findObject(t *testing.T, items []unstructured.Unstructured, kind, name string) *unstructured.Unstructured {
+	t.Helper()
+
+	for i := range items {
+		if items[i].GetKind() == kind && items[i].GetName() == name {
+			return &items[i]
+		}
+	}
+
+	t.Fatalf("expected rendered %s/%s", kind, name)
+	return nil
 }
 
 func findContainer(t *testing.T, items []unstructured.Unstructured, kind, name, containerName string) map[string]interface{} {
@@ -573,16 +699,23 @@ type fakePluginProvider struct {
 }
 
 func newTestPluginProvider(candidateNodes ...string) fakePluginProvider {
+	return newTestPluginProviderWithNodeScopeLabel(plugin.VirtualizationNodeScopeLabel{
+		Key:           plugin.NvidiaGPUVirtualizationLabelKey,
+		EnabledValue:  "true",
+		DisabledValue: "false",
+	}, candidateNodes...)
+}
+
+func newTestPluginProviderWithNodeScopeLabel(
+	label plugin.VirtualizationNodeScopeLabel,
+	candidateNodes ...string,
+) fakePluginProvider {
 	nvidiaPlugin := fakeAcceleratorPlugin{
 		acceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
 		config: &plugin.VirtualizationConfig{
 			Supported:      true,
 			CandidateNodes: candidateNodes,
-			NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
-				Key:           plugin.NvidiaGPUVirtualizationLabelKey,
-				EnabledValue:  "true",
-				DisabledValue: "false",
-			},
+			NodeScopeLabel: label,
 		},
 	}
 
@@ -639,6 +772,18 @@ func newTestCluster() *v1.Cluster {
 			},
 		},
 		Status: &v1.ClusterStatus{},
+	}
+}
+
+func markHAMiOwned(cluster *v1.Cluster) {
+	if cluster.Status == nil {
+		cluster.Status = &v1.ClusterStatus{}
+	}
+
+	cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{
+		v1.ComponentStatusAcceleratorVirtualizationKey: {
+			Phase: v1.ComponentPhaseReady,
+		},
 	}
 }
 

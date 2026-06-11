@@ -45,15 +45,20 @@ func (h *HAMiComponent) ReconcileNodeScope(ctx context.Context) (NodeScopePlan, 
 }
 
 func (h *HAMiComponent) DisableNodeScope(ctx context.Context) error {
+	config, err := h.resolveVirtualizationConfig(ctx)
+	if err != nil {
+		return err
+	}
+
 	nodeList := &corev1.NodeList{}
 	if err := h.ctrlClient.List(ctx, nodeList); err != nil {
 		return errors.Wrap(err, "failed to list nodes")
 	}
 
-	// Disabling HAMi should also opt nodes out of the HAMi device plugin.
-	// This keeps subsequent non-vGPU clusters on the same Kubernetes cluster
-	// from inheriting stale Neutree-managed vGPU node scope labels.
-	label := defaultNodeScopeLabel()
+	// Remove only the enabled scope label written while HAMi is active.
+	// Existing disabled labels are preserved because users can set them
+	// explicitly to keep a node out of virtualization.
+	label := nodeScopeLabelFromPlugin(config.NodeScopeLabel)
 	for _, item := range nodeList.Items {
 		if item.Labels[label.Key] != label.EnabledValue {
 			continue
@@ -68,7 +73,8 @@ func (h *HAMiComponent) DisableNodeScope(ctx context.Context) error {
 			continue
 		}
 
-		node.Labels[label.Key] = label.DisabledValue
+		delete(node.Labels, label.Key)
+
 		if err := h.ctrlClient.Update(ctx, node); err != nil {
 			return errors.Wrapf(err, "failed to patch node %s", item.Name)
 		}

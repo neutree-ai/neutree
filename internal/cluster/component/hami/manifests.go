@@ -175,14 +175,16 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 		})
 	}
 
-	nodeScopeLabel := scopePlan.NodeScopeLabel
-	if nodeScopeLabel.Key == "" {
-		nodeScopeLabel = defaultNodeScopeLabel()
-	}
+	nodeScopeLabel := nodeScopeLabelFromPlan(scopePlan)
 
 	values = mergeChartValues(values, map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
 			"nvidiaNodeSelector": map[string]interface{}{
+				// The upstream HAMi chart defaults this selector to gpu=on.
+				// Neutree uses the accelerator plugin scope label as the only
+				// virtualization node selector, so clear the chart default
+				// during Helm value coalescing.
+				"gpu":              nil,
 				nodeScopeLabel.Key: nodeScopeLabel.EnabledValue,
 			},
 		},
@@ -350,4 +352,23 @@ func shouldDeployDevicePlugin(plan NodeScopePlan) bool {
 
 func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {
 	return renderEmbeddedHAMiChart(h.buildChartValues(scopePlan), h.namespace, h.resolveChartKubeVersion())
+}
+
+func nodeScopeLabelFromPlan(scopePlan NodeScopePlan) NodeScopeLabel {
+	defaultLabel := defaultNodeScopeLabel()
+	nodeScopeLabel := scopePlan.NodeScopeLabel
+
+	if nodeScopeLabel.Key == "" {
+		return defaultLabel
+	}
+
+	if nodeScopeLabel.EnabledValue == "" {
+		nodeScopeLabel.EnabledValue = defaultLabel.EnabledValue
+	}
+
+	if nodeScopeLabel.DisabledValue == "" {
+		nodeScopeLabel.DisabledValue = defaultLabel.DisabledValue
+	}
+
+	return nodeScopeLabel
 }

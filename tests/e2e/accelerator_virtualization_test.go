@@ -17,14 +17,16 @@ const (
 	vgpuEndpointCorePercent      = "50"
 	vgpuEndpointMemoryMiBValue   = int64(8192)
 	vgpuEndpointCorePercentValue = int64(50)
+	vgpuFullCardCoreUnits        = int64(100)
 )
 
 var _ = Describe("K8s Accelerator Virtualization", Ordered,
 	Label("cluster", "endpoint", "k8s", "accelerator-virtualization", "hami", "happy-path"), func() {
 		var (
-			clusterName  string
-			endpointName string
-			productName  string
+			clusterName          string
+			endpointName         string
+			fullCardEndpointName string
+			productName          string
 		)
 
 		BeforeAll(func() {
@@ -55,6 +57,10 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 		AfterAll(func() {
 			if endpointName != "" {
 				deleteEndpoint(endpointName)
+			}
+
+			if fullCardEndpointName != "" {
+				deleteEndpoint(fullCardEndpointName)
 			}
 
 			if clusterName != "" {
@@ -115,6 +121,47 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 				v1.AcceleratorVirtualizationCorePercentKey, vgpuEndpointCorePercent))
 
 			expectEndpointVGPUResources(endpoint, productName)
+		})
+
+		It("should deploy a full-card endpoint without virtualization resource keys", func() {
+			if profileModelName() == "" {
+				Skip("Model name not configured in profile, skipping full-card endpoint happy path")
+			}
+
+			cluster := eventuallyVirtualizedClusterResourceInfo(clusterName)
+			if productName == "" {
+				productName = expectNVIDIAVirtualizedClusterResources(cluster)
+			}
+
+			memoryMiB := expectNVIDIAProductMemoryMiB(cluster, productName)
+
+			By("Setting up model registry")
+			SetupModelRegistry()
+			DeferCleanup(TeardownModelRegistry)
+
+			fullCardEndpointName = "e2e-full-gpu-ep-" + Cfg.RunID
+
+			yamlPath := applyEndpoint(fullCardEndpointName, clusterName,
+				withAccelerator(string(v1.AcceleratorTypeNVIDIAGPU), productName))
+			DeferCleanup(func() {
+				if fullCardEndpointName != "" {
+					deleteEndpoint(fullCardEndpointName)
+					fullCardEndpointName = ""
+				}
+			})
+			DeferCleanup(removeFileIfExists, yamlPath)
+
+			By("Waiting for full-card endpoint Running")
+			waitEndpointRunning(fullCardEndpointName)
+
+			endpoint := eventuallyEndpointResourceInfo(fullCardEndpointName)
+			Expect(endpoint.Spec).NotTo(BeNil())
+			Expect(endpoint.Spec.Resources).NotTo(BeNil())
+			Expect(endpoint.Spec.Resources.Accelerator).NotTo(HaveKey(v1.AcceleratorVirtualizationMemoryMiBKey))
+			Expect(endpoint.Spec.Resources.Accelerator).NotTo(HaveKey(v1.AcceleratorVirtualizationMemoryPercentKey))
+			Expect(endpoint.Spec.Resources.Accelerator).NotTo(HaveKey(v1.AcceleratorVirtualizationCorePercentKey))
+
+			expectEndpointNVIDIAGPUResourcesWithExpected(endpoint, productName, memoryMiB, vgpuFullCardCoreUnits)
 		})
 	})
 
@@ -232,6 +279,20 @@ func expectClusterProductDevices(nodes map[string]*v1.NodeResourceStatus, produc
 	return count
 }
 
+func expectNVIDIAProductMemoryMiB(cluster v1.Cluster, productName string) int64 {
+	ExpectWithOffset(1, cluster.Status).NotTo(BeNil())
+	ExpectWithOffset(1, cluster.Status.ResourceInfo).NotTo(BeNil())
+
+	metadata := cluster.Status.ResourceInfo.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU]
+	ExpectWithOffset(1, metadata).NotTo(BeNil())
+
+	productMetadata := metadata.Products[v1.AcceleratorProduct(productName)]
+	ExpectWithOffset(1, productMetadata).NotTo(BeNil())
+	ExpectWithOffset(1, productMetadata.MemoryTotalMiB).To(BeNumerically(">", 0))
+
+	return int64(productMetadata.MemoryTotalMiB)
+}
+
 func eventuallyEndpointResourceInfo(endpointName string) v1.Endpoint {
 	var endpoint v1.Endpoint
 
@@ -250,14 +311,24 @@ func eventuallyEndpointResourceInfo(endpointName string) v1.Endpoint {
 }
 
 func expectEndpointVGPUResources(endpoint v1.Endpoint, productName string) {
+	expectEndpointNVIDIAGPUResourcesWithExpected(endpoint, productName,
+		vgpuEndpointMemoryMiBValue, vgpuEndpointCorePercentValue)
+}
+
+func expectEndpointNVIDIAGPUResourcesWithExpected(
+	endpoint v1.Endpoint,
+	productName string,
+	expectedMemoryMiB int64,
+	expectedCoreUnits int64,
+) {
 	resources := endpoint.Status.Resources
 	ExpectWithOffset(1, resources).NotTo(BeNil())
 	ExpectWithOffset(1, resources.Summary).NotTo(BeNil())
 
 	usage := resources.Summary.Products[v1.AcceleratorProduct(productName)]
 	ExpectWithOffset(1, usage).NotTo(BeNil())
-	ExpectWithOffset(1, usage.MemoryMiB).To(Equal(vgpuEndpointMemoryMiBValue))
-	ExpectWithOffset(1, usage.CoreUnits).To(Equal(vgpuEndpointCorePercentValue))
+	ExpectWithOffset(1, usage.MemoryMiB).To(Equal(expectedMemoryMiB))
+	ExpectWithOffset(1, usage.CoreUnits).To(Equal(expectedCoreUnits))
 
 	var memoryMiB, coreUnits int64
 	for _, replica := range resources.Replicas {
