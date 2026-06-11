@@ -243,6 +243,12 @@ func (k *Kong) generateAIGatewayPlugin(ep *v1.Endpoint, curRoute *kong.Route) *k
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
 		Config: map[string]interface{}{
 			"route_type": getEndpointRouteType(ep),
+			// route_prefix lets the plugin strip the endpoint route path from the
+			// request URI so it can detect the Anthropic-compatible suffix
+			// (/anthropic/v1/messages) on internal endpoints, matching the external
+			// endpoint behavior. Without it the suffix never matches and the raw
+			// Anthropic request is forwarded to the engine, which 404s.
+			"route_prefix": getEndpointRoutePath(ep),
 		},
 	}
 }
