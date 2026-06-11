@@ -68,11 +68,12 @@ help: ## Display this help.
 all: build
 
 .PHONY: install-hooks
-install-hooks: ## Enable .githooks as local git hooks (run once per clone)
-	git config core.hooksPath .githooks
+install-hooks: ## Enable .githooks as local git hooks (run once per worktree)
+	git config extensions.worktreeConfig true
+	git config --worktree core.hooksPath "$(PROJECT_DIR)/.githooks"
 	chmod +x .githooks/pre-commit
 	chmod +x scripts/check-boundaries.sh scripts/check-migration-pairs.sh scripts/builder/sync-controlplane-images.sh
-	@echo "Git hooks installed. Pre-commit will run on every 'git commit'."
+	@echo "Git hooks installed for this worktree. Pre-commit will run on every 'git commit'."
 
 build: test build-neutree-core build-neutree-cli build-neutree-api
 

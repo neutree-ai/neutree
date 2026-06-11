@@ -128,11 +128,11 @@ func TestStatsWindow_MalformedEndRejected(t *testing.T) {
 
 func TestLogsQLQuoteValue(t *testing.T) {
 	cases := map[string]string{
-		"":                 `""`,
-		"plain":            `"plain"`,
-		`with"quote`:       `"with\"quote"`,
-		`back\slash`:       `"back\\slash"`,
-		"line\nbreak":      `"line\nbreak"`,
+		"":                   `""`,
+		"plain":              `"plain"`,
+		`with"quote`:         `"with\"quote"`,
+		`back\slash`:         `"back\\slash"`,
+		"line\nbreak":        `"line\nbreak"`,
 		`a"b\c` + "\n" + "d": `"a\"b\\c\nd"`,
 	}
 	for in, want := range cases {

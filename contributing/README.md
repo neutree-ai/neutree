@@ -10,7 +10,7 @@ After cloning the repo, install the local git hooks:
 make install-hooks
 ```
 
-This enables the pre-commit gate (`gofmt` / `go vet` / architecture boundaries / migration-pair check / incremental lint / short tests on affected packages).
+This enables the pre-commit gate (`gofmt` / `go vet` / architecture boundaries / migration-pair check / full lint / short tests on affected packages).
 
 ## Playbooks
 
