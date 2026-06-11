@@ -34,7 +34,9 @@ system:
 
 metrics:
   # Specify the URL for remote write if using an external metrics storage system.
-  # Leave this empty to use the embedded Victoria Metrics cluster.
+  # This explicit value takes precedence over the embedded VictoriaMetrics
+  # Service and over the vminsert Ingress-derived URL. When this points at a
+  # TLS-enabled VMInsert Ingress, use an https:// URL.
   remoteWriteUrl: ""
 
 k8sWaitFor:
@@ -227,9 +229,11 @@ kong:
   proxyService:
     type: LoadBalancer
   # Optional Ingress for the inference gateway (Kong proxy at
-  # `<fullname>-kong-proxy:80`). Use a higher `proxy-body-size` here if your
-  # users upload large payloads. Kong admin/manager Services stay internal
-  # regardless of this setting.
+  # `<fullname>-kong-proxy:80`). When enabled, neutree-core uses this public
+  # URL as --gateway-proxy-url; tls: [] -> http://host, tls configured ->
+  # https://host. Use a higher `proxy-body-size` here if your users upload
+  # large payloads. Kong admin/manager Services stay internal regardless of
+  # this setting.
   ingress:
     enabled: false
     className: ""
@@ -308,8 +312,9 @@ victoria-metrics-cluster:
       type: LoadBalancer
     # Native VictoriaMetrics subchart Ingress for VMInsert.
     # Backend service defaults to `<release>-victoria-metrics-cluster-vminsert`
-    # port `http` (8480). Internal Neutree metrics writes still use the
-    # in-cluster Service, not the external Ingress URL.
+    # port `http` (8480). When metrics.remoteWriteUrl is empty and this Ingress
+    # is enabled, neutree-core and vmagent derive their remote-write URL from
+    # this public host; tls: [] -> http://host, tls configured -> https://host.
     ingress:
       enabled: false
       ingressClassName: ""  # e.g. "contour", "nginx"; empty -> cluster default IngressClass

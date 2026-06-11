@@ -31,15 +31,14 @@ spec:
             - --storage-jwt-secret={{ include "neutree.jwtSecret" . }}
             - --controller-workers=5
             - --default-cluster-version=v1.0.0
-            {{- if  index .Values "victoria-metrics-cluster" "enabled" }}
-            - --metrics-remote-write-url=http://{{ include "neutree.vminsert.serviceName" . }}:8480/insert/0/prometheus/
-            {{- else if .Values.metrics.remoteWriteUrl }}
-            - --metrics-remote-write-url={{ .Values.metrics.remoteWriteUrl }}
+            {{- $metricsRemoteWriteUrl := include "neutree.metricsRemoteWriteUrl" . }}
+            {{- if $metricsRemoteWriteUrl }}
+            - --metrics-remote-write-url={{ $metricsRemoteWriteUrl }}
             {{- end }}
             - --kubernetes-metrics-collect-configmap=vmagent-scrape-config
             - --kubernetes-collect-config-namespace={{ .Release.Namespace}}
             - --gateway-type=kong
-            - --gateway-proxy-url=http://{{ include "neutree.fullname" . }}-kong-proxy:80
+            - --gateway-proxy-url={{ include "neutree.kong.proxyUrl" . }}
             - --gateway-admin-url=http://{{ include "neutree.fullname" . }}-kong-admin:8001
             - --gateway-log-remote-write-url=http://{{ include "neutree.fullname" . }}-vector:30122
             - --auth-endpoint=http://{{ include "neutree.fullname" . }}-auth-service:9999

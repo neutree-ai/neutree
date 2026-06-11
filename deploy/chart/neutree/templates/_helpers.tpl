@@ -112,6 +112,32 @@ is set — callers treat the empty result as "AI inference trace disabled".
 {{- end -}}
 
 {{/*
+Choose the Kong proxy URL used as the user-facing inference endpoint base URL.
+When Kong Ingress is enabled this must be the external Ingress URL. Otherwise
+the value remains the in-cluster Service URL, which neutree-core may transform
+through Kubernetes Service discovery for LoadBalancer installs.
+*/}}
+{{- define "neutree.kong.proxyUrl" -}}
+{{- $url := printf "http://%s-kong-proxy:80" (include "neutree.fullname" .) -}}
+{{- if and .Values.kong.ingress.enabled .Values.kong.ingress.host -}}
+{{- $scheme := "http" -}}
+{{- if gt (len .Values.kong.ingress.tls) 0 -}}
+{{- $scheme = "https" -}}
+{{- end -}}
+{{- $host := tpl (toString .Values.kong.ingress.host) . -}}
+{{- $path := .Values.kong.ingress.path | default "/" -}}
+{{- if eq $path "/" -}}
+{{- $url = printf "%s://%s" $scheme $host -}}
+{{- else if hasPrefix "/" $path -}}
+{{- $url = printf "%s://%s%s" $scheme $host $path | trimSuffix "/" -}}
+{{- else -}}
+{{- $url = printf "%s://%s/%s" $scheme $host $path | trimSuffix "/" -}}
+{{- end -}}
+{{- end -}}
+{{- $url -}}
+{{- end -}}
+
+{{/*
 VictoriaMetrics is provided by a dependency chart. Its vminsert Service name is
 derived from the subchart's release context, not this parent chart's fullname.
 */}}
@@ -142,6 +168,43 @@ derived from the subchart's release context, not this parent chart's fullname.
 {{- else -}}
 {{- $name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Choose the metrics remote-write URL for neutree-core and vmagent.
+Priority:
+1. metrics.remoteWriteUrl explicit override
+2. VMInsert Ingress external URL when enabled
+3. in-cluster VMInsert Service URL when the dependency is enabled
+*/}}
+{{- define "neutree.metricsRemoteWriteUrl" -}}
+{{- $vmEnabled := index .Values "victoria-metrics-cluster" "enabled" -}}
+{{- $vminsert := index .Values "victoria-metrics-cluster" "vminsert" -}}
+{{- $url := .Values.metrics.remoteWriteUrl -}}
+{{- if not $url -}}
+{{- if and $vmEnabled $vminsert.ingress.enabled (gt (len $vminsert.ingress.hosts) 0) -}}
+{{- $scheme := "http" -}}
+{{- if gt (len $vminsert.ingress.tls) 0 -}}
+{{- $scheme = "https" -}}
+{{- end -}}
+{{- $hostConfig := first $vminsert.ingress.hosts -}}
+{{- $host := tpl (toString (get $hostConfig "name")) . -}}
+{{- $path := "/insert" -}}
+{{- if gt (len (get $hostConfig "path")) 0 -}}
+{{- $path = toString (first (get $hostConfig "path")) -}}
+{{- end -}}
+{{- if eq $path "/" -}}
+{{- $url = printf "%s://%s/insert/0/prometheus/" $scheme $host -}}
+{{- else if hasPrefix "/" $path -}}
+{{- $url = printf "%s://%s%s/0/prometheus/" $scheme $host ($path | trimSuffix "/") -}}
+{{- else -}}
+{{- $url = printf "%s://%s/%s/0/prometheus/" $scheme $host ($path | trimSuffix "/") -}}
+{{- end -}}
+{{- else if $vmEnabled -}}
+{{- $url = printf "http://%s:8480/insert/0/prometheus/" (include "neutree.vminsert.serviceName" .) -}}
+{{- end -}}
+{{- end -}}
+{{- $url -}}
 {{- end -}}
 
 {{/*
