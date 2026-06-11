@@ -75,17 +75,6 @@ func validateEndpointAcceleratorVirtualizationBody(body []byte) *validationError
 }
 
 func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.ResourceSpec) *validationError {
-	for key := range resources.Accelerator {
-		switch key {
-		case "nvidia.com/gpumem", "nvidia.com/gpumem-percentage", "nvidia.com/gpucores":
-			return &validationError{
-				Code:    "10216",
-				Message: "raw HAMi resource keys are not supported in endpoint accelerator resources",
-				Hint:    "Use accelerator virtualization fields instead of nvidia.com/gpumem, nvidia.com/gpumem-percentage, or nvidia.com/gpucores",
-			}
-		}
-	}
-
 	if !resources.HasAcceleratorVirtualization() {
 		return nil
 	}

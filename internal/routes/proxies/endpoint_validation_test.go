@@ -25,7 +25,7 @@ func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("rejects raw HAMi resource keys", func(t *testing.T) {
+	t.Run("allows raw accelerator keys without virtualization fields", func(t *testing.T) {
 		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
 			"metadata": {"name": "endpoint", "workspace": "default"},
 			"spec": {
@@ -41,8 +41,7 @@ func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
 			}
 		}`))
 
-		assert.NotNil(t, err)
-		assert.Equal(t, "10216", err.Code)
+		assert.Nil(t, err)
 	})
 
 	t.Run("rejects vGPU endpoint without product", func(t *testing.T) {
