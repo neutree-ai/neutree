@@ -190,8 +190,15 @@ Priority:
 {{- $hostConfig := first $vminsert.ingress.hosts -}}
 {{- $host := tpl (toString (get $hostConfig "name")) . -}}
 {{- $path := "/insert" -}}
-{{- if gt (len (get $hostConfig "path")) 0 -}}
-{{- $path = toString (first (get $hostConfig "path")) -}}
+{{- $pathValue := get $hostConfig "path" -}}
+{{- if kindIs "slice" $pathValue -}}
+{{- if gt (len $pathValue) 0 -}}
+{{- $path = toString (first $pathValue) -}}
+{{- end -}}
+{{- else if kindIs "string" $pathValue -}}
+{{- if $pathValue -}}
+{{- $path = $pathValue -}}
+{{- end -}}
 {{- end -}}
 {{- if eq $path "/" -}}
 {{- $url = printf "%s://%s/insert/0/prometheus/" $scheme $host -}}
