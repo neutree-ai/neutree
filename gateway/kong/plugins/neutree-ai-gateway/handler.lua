@@ -1146,7 +1146,18 @@ function AIGatewayHandler:access(conf)
             end
             openai_req.model = matched_entry.model_mapping[openai_req.model]
         else
-            kong.service.request.set_path(string.gsub(request_path, "/anthropic/v1/messages/?$", "/v1/chat/completions"))
+            -- IE (internal endpoint) routes carry no `upstreams` config and rely on
+            -- Kong's own service/route path translation. By this point the router has
+            -- already populated ngx.var.upstream_uri with the service-aware upstream
+            -- path (e.g. /<workspace>/<endpoint>/anthropic/v1/messages); rewrite only
+            -- the anthropic suffix to the OpenAI chat-completions path the inference
+            -- engine actually serves. Rewriting request_path instead would drop the
+            -- Kong service path and hit the engine with the gateway-facing prefix.
+            local upstream_uri = ngx.var.upstream_uri
+            if upstream_uri == nil or upstream_uri == "" then
+                upstream_uri = request_path
+            end
+            kong.service.request.set_path((upstream_uri:gsub("/anthropic/v1/messages/?$", "/v1/chat/completions")))
         end
 
         local openai_json = cjson.encode(openai_req)
