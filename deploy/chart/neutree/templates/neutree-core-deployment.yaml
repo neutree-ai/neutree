@@ -32,7 +32,7 @@ spec:
             - --controller-workers=5
             - --default-cluster-version=v1.0.0
             {{- if  index .Values "victoria-metrics-cluster" "enabled" }}
-            - --metrics-remote-write-url=http://{{ include "neutree.fullname" . }}-victoria-metrics-cluster-vminsert:8480/insert/0/prometheus/
+            - --metrics-remote-write-url=http://{{ include "neutree.vminsert.serviceName" . }}:8480/insert/0/prometheus/
             {{- else if .Values.metrics.remoteWriteUrl }}
             - --metrics-remote-write-url={{ .Values.metrics.remoteWriteUrl }}
             {{- end }}

@@ -94,3 +94,59 @@ Get the JWT secret with validation.
 {{- define "neutree.jwtSecret" -}}
 {{- required "jwtSecret is required. Please set it in values.yaml or via --set jwtSecret=<your-secret>" .Values.jwtSecret -}}
 {{- end -}}
+
+{{/*
+Grafana is provided by a dependency chart. Its Service name is derived from
+the subchart's release context, not this parent chart's fullname.
+*/}}
+{{- define "neutree.grafana.serviceName" -}}
+{{- $name := printf "%s-grafana" .Release.Name -}}
+{{- if .Values.grafana.fullnameOverride -}}
+{{- $name = (.Values.grafana.fullnameOverride | trunc 63 | trimSuffix "-") -}}
+{{- end -}}
+{{- default $name .Values.grafana.service.name -}}
+{{- end -}}
+
+{{/*
+VictoriaMetrics is provided by a dependency chart. Its vminsert Service name is
+derived from the subchart's release context, not this parent chart's fullname.
+*/}}
+{{- define "neutree.vminsert.serviceName" -}}
+{{- $vminsert := index .Values "victoria-metrics-cluster" "vminsert" -}}
+{{- $name := printf "%s-victoria-metrics-cluster-vminsert" .Release.Name -}}
+{{- if $vminsert.fullnameOverride -}}
+{{- $name = ($vminsert.fullnameOverride | trunc 63 | trimSuffix "-") -}}
+{{- end -}}
+{{- default $name $vminsert.service.name -}}
+{{- end -}}
+
+{{/*
+Choose the Grafana URL exposed by the API system-info endpoint.
+Priority:
+1. system.grafana.url explicit override
+2. grafana.ingress host when Grafana ingress is enabled
+3. in-cluster Grafana Service URL
+*/}}
+{{- define "neutree.grafana.url" -}}
+{{- $url := .Values.system.grafana.url -}}
+{{- if and (not $url) .Values.grafana.enabled -}}
+{{- if and .Values.grafana.ingress.enabled (gt (len .Values.grafana.ingress.hosts) 0) -}}
+{{- $scheme := "http" -}}
+{{- if gt (len .Values.grafana.ingress.tls) 0 -}}
+{{- $scheme = "https" -}}
+{{- end -}}
+{{- $host := first .Values.grafana.ingress.hosts -}}
+{{- $path := .Values.grafana.ingress.path | default "/" -}}
+{{- if eq $path "/" -}}
+{{- $url = printf "%s://%s" $scheme $host -}}
+{{- else if hasPrefix "/" $path -}}
+{{- $url = printf "%s://%s%s" $scheme $host $path -}}
+{{- else -}}
+{{- $url = printf "%s://%s/%s" $scheme $host $path -}}
+{{- end -}}
+{{- else -}}
+{{- $url = printf "http://%s:80" (include "neutree.grafana.serviceName" .) -}}
+{{- end -}}
+{{- end -}}
+{{- $url -}}
+{{- end -}}

@@ -1,0 +1,14 @@
+{{- if and .Values.grafana.ingress.enabled (not .Values.grafana.enabled) -}}
+{{- fail "grafana.ingress.enabled is true but grafana.enabled is false" -}}
+{{- end -}}
+{{- if and .Values.grafana.ingress.enabled (eq (len .Values.grafana.ingress.hosts) 0) -}}
+{{- fail "grafana.ingress.enabled is true but grafana.ingress.hosts is empty" -}}
+{{- end -}}
+{{- $vmEnabled := index .Values "victoria-metrics-cluster" "enabled" -}}
+{{- $vminsert := index .Values "victoria-metrics-cluster" "vminsert" -}}
+{{- if and $vminsert.ingress.enabled (not $vmEnabled) -}}
+{{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.enabled is false" -}}
+{{- end -}}
+{{- if and $vminsert.ingress.enabled (eq (len $vminsert.ingress.hosts) 0) -}}
+{{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.vminsert.ingress.hosts is empty" -}}
+{{- end -}}

@@ -27,7 +27,7 @@ spec:
             - "--promscrape.config=/etc/prometheus/prometheus.yml"
             - "--promscrape.configCheckInterval=10s"
             {{- if index .Values "victoria-metrics-cluster" "enabled"  }}
-            - "--remoteWrite.url=http://{{ include "neutree.fullname" . }}-victoria-metrics-cluster-vminsert:8480/insert/0/prometheus/"
+            - "--remoteWrite.url=http://{{ include "neutree.vminsert.serviceName" . }}:8480/insert/0/prometheus/"
             {{- else if .Values.metrics.remoteWriteUrl }}
             - "--remoteWrite.url={{ .Values.metrics.remoteWriteUrl }}"
             {{- end }}
