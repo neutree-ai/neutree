@@ -59,6 +59,45 @@ func TestVLLMV0_17_1TemplateTaskTranslation(t *testing.T) {
 	}
 }
 
+func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+	}{
+		{
+			name:     "vllm v0.11.2",
+			template: vllmV0_11_2DeployTemplate,
+		},
+		{
+			name:     "vllm v0.17.1",
+			template: vllmV0_17_1DeployTemplate,
+		},
+		{
+			name:     "sglang v0.5.10",
+			template: sglangV0_5_10DeployTemplate,
+		},
+		{
+			name:     "llama.cpp v0.3.7",
+			template: llamaCppDefaultDeployTemplate,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := newTestVLLMV0_17_1Vars("text-generation")
+			vars["EndpointName"] = "4096"
+
+			objs, err := util.RenderKubernetesManifest(tc.template, vars)
+			require.NoError(t, err)
+
+			deploy := mustFindRenderedObjectByKind(t, objs.Items, "Deployment")
+			assert.Equal(t, "4096", deploy.GetName())
+			assertNestedString(t, deploy.Object, "4096", "spec", "selector", "matchLabels", "endpoint")
+			assertNestedString(t, deploy.Object, "4096", "spec", "template", "metadata", "labels", "endpoint")
+		})
+	}
+}
+
 // newTestVLLMV0_17_1Vars returns the minimum render variables the v0.17.1
 // template requires. We mirror the shape produced by setModelArgs in the
 // kubernetes orchestrator without taking a dependency on that package.
@@ -101,6 +140,26 @@ func mustFindRenderedObject(t *testing.T, objs []unstructured.Unstructured, kind
 	require.Failf(t, "rendered object not found", "%s/%s", kind, name)
 
 	return unstructured.Unstructured{}
+}
+
+func mustFindRenderedObjectByKind(t *testing.T, objs []unstructured.Unstructured, kind string) unstructured.Unstructured {
+	t.Helper()
+	for _, obj := range objs {
+		if obj.GetKind() == kind {
+			return obj
+		}
+	}
+	require.Failf(t, "rendered object kind not found", "%s", kind)
+
+	return unstructured.Unstructured{}
+}
+
+func assertNestedString(t *testing.T, obj map[string]any, want string, fields ...string) {
+	t.Helper()
+	got, found, err := unstructured.NestedString(obj, fields...)
+	require.NoError(t, err)
+	require.Truef(t, found, "%s not found", strings.Join(fields, "."))
+	assert.Equal(t, want, got)
 }
 
 // mustExtractContainerCommand pulls the named container's command list out of
