@@ -112,22 +112,6 @@ is set — callers treat the empty result as "AI inference trace disabled".
 {{- end -}}
 
 {{/*
-Grafana is provided by a dependency chart. Its Service name is derived from
-the subchart's release context, not this parent chart's fullname.
-*/}}
-{{- define "neutree.grafana.serviceName" -}}
-{{- $name := default "grafana" .Values.grafana.nameOverride -}}
-{{- if .Values.grafana.fullnameOverride -}}
-{{- $name = (.Values.grafana.fullnameOverride | trunc 63 | trimSuffix "-") -}}
-{{- else if contains $name .Release.Name -}}
-{{- $name = (.Release.Name | trunc 63 | trimSuffix "-") -}}
-{{- else -}}
-{{- $name = (printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-") -}}
-{{- end -}}
-{{- $name -}}
-{{- end -}}
-
-{{/*
 VictoriaMetrics is provided by a dependency chart. Its vminsert Service name is
 derived from the subchart's release context, not this parent chart's fullname.
 */}}
@@ -164,12 +148,18 @@ derived from the subchart's release context, not this parent chart's fullname.
 Choose the Grafana URL exposed by the API system-info endpoint.
 Priority:
 1. system.grafana.url explicit override
-2. grafana.ingress host when Grafana ingress is enabled
-3. in-cluster Grafana Service URL
+2. grafana.grafana.ini.server.root_url
+3. grafana.ingress host when Grafana ingress is enabled
+No in-cluster fallback is used because this URL is consumed as a user-facing
+external address.
 */}}
 {{- define "neutree.grafana.url" -}}
 {{- $url := .Values.system.grafana.url -}}
 {{- if and (not $url) .Values.grafana.enabled -}}
+{{- $grafanaRootURL := dig "grafana.ini" "server" "root_url" "" .Values.grafana -}}
+{{- if $grafanaRootURL -}}
+{{- $url = tpl (toString $grafanaRootURL) . -}}
+{{- else -}}
 {{- if and .Values.grafana.ingress.enabled (gt (len .Values.grafana.ingress.hosts) 0) -}}
 {{- $scheme := "http" -}}
 {{- if gt (len .Values.grafana.ingress.tls) 0 -}}
@@ -184,8 +174,7 @@ Priority:
 {{- else -}}
 {{- $url = printf "%s://%s/%s" $scheme $host $path -}}
 {{- end -}}
-{{- else -}}
-{{- $url = printf "http://%s:80" (include "neutree.grafana.serviceName" .) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $url -}}

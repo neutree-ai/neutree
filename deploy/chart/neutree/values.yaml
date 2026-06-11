@@ -23,6 +23,9 @@ adminPassword: ""
 
 system:
   grafana:
+    # User-facing Grafana URL returned by the Neutree API. When Grafana is
+    # exposed outside this chart, keep this aligned with
+    # grafana.grafana.ini.server.root_url.
     url: ""
   # External AI inference trace store (VictoriaLogs) base URL.
   # Only used when victorialogs.enabled is false. Leave empty to disable the
@@ -369,6 +372,13 @@ grafana:
       disable_sanitize_html: true
     grafana_net:
       url: ""
+    # server:
+    #   # Grafana uses root_url for redirects and absolute links. Set this when
+    #   # Grafana is exposed externally, including through Contour HTTPProxy or
+    #   # grafana.ingress. Use the same public URL as system.grafana.url.
+    #   root_url: https://grafana.neutree.example.com
+    #   # Required by Grafana when serving from a non-root path.
+    #   serve_from_sub_path: true
   dashboardProviders:
     dashboardproviders.yaml:
       - name: neutree
@@ -396,11 +406,12 @@ grafana:
     enabled: true
     type: LoadBalancer
 
-  # Native Grafana subchart Ingress for the Grafana UI. When enabled with at
-  # least one host and system.grafana.url is empty, neutree-api automatically
-  # exposes this external URL through the system-info API. For a non-root path,
-  # also set grafana.ini.server.root_url / serve_from_sub_path as required by
-  # Grafana.
+  # Native Grafana subchart Ingress for the Grafana UI. When enabled,
+  # grafana.grafana.ini.server.root_url must be set to the same public URL so
+  # Grafana redirects and absolute links use the external address. When
+  # system.grafana.url is empty, neutree-api uses that root_url for the
+  # system-info API. For a non-root path, also set
+  # grafana.grafana.ini.server.serve_from_sub_path=true.
   ingress:
     enabled: false
     ingressClassName: ""    # e.g. "contour", "nginx"; empty -> cluster default IngressClass
@@ -412,5 +423,3 @@ grafana:
     tls: []                 # e.g.
                             #   - hosts: ["grafana.neutree.example.com"]
                             #     secretName: neutree-grafana-tls
-
-
