@@ -3,13 +3,12 @@ package proxies
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
@@ -39,7 +38,7 @@ func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc
 	}
 }
 
-func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc {
+func validateClusterAcceleratorVirtualization() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -65,7 +64,7 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 			return
 		}
 
-		if validationErr := validateClusterAcceleratorVirtualizationBody(c.Request.Method, body, s); validationErr != nil {
+		if validationErr := validateClusterAcceleratorVirtualizationBody(body); validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
 
@@ -76,11 +75,7 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 	}
 }
 
-func validateClusterAcceleratorVirtualizationBody(
-	method string,
-	body []byte,
-	s storage.Storage,
-) *validationError {
+func validateClusterAcceleratorVirtualizationBody(body []byte) *validationError {
 	var cluster v1.Cluster
 	decoder := json.NewDecoder(bytes.NewReader(body))
 
@@ -102,83 +97,14 @@ func validateClusterAcceleratorVirtualizationBody(
 		return nil
 	}
 
-	if err := validateClusterAcceleratorVirtualizationConfigPatch(cluster.Spec.AcceleratorVirtualization.ConfigPatch); err != nil {
-		return err
+	if err := clustervalidation.ValidateAcceleratorVirtualizationConfigPatch(
+		cluster.Spec.AcceleratorVirtualization.ConfigPatch); err != nil {
+		return acceleratorVirtualizationValidationError(err)
 	}
 
-	if method == http.MethodPatch && (cluster.Spec.Type == "" || cluster.Spec.Version == "") {
-		// Enabling virtualization through PATCH may only send the changed
-		// accelerator_virtualization object. Load immutable cluster attributes
-		// from the existing row before validating support.
-		existingSpec, err := existingClusterSpec(cluster, s)
-		if err != nil {
-			return &validationError{
-				Code:    "10208",
-				Message: "spec.accelerator_virtualization is only supported for Kubernetes clusters",
-				Hint:    err.Error(),
-			}
-		}
-
-		if cluster.Spec.Type == "" {
-			cluster.Spec.Type = existingSpec.Type
-		}
-
-		if cluster.Spec.Version == "" {
-			cluster.Spec.Version = existingSpec.Version
-		}
-	}
-
-	if cluster.Spec.Type != v1.KubernetesClusterType {
-		return &validationError{
-			Code:    "10208",
-			Message: "spec.accelerator_virtualization is only supported for Kubernetes clusters",
-			Hint:    "Use a Kubernetes cluster when enabling accelerator virtualization",
-		}
-	}
-
-	if err := validateAcceleratorVirtualizationClusterVersion(cluster.Spec.Version); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func validateClusterAcceleratorVirtualizationConfigPatch(configPatch map[string]interface{}) *validationError {
-	for key := range configPatch {
-		switch key {
-		case "devicePlugin", "scheduler", "global":
-		default:
-			return &validationError{
-				Code:    "10210",
-				Message: fmt.Sprintf("unsupported accelerator_virtualization.config_patch key %q", key),
-				Hint:    "Only devicePlugin, scheduler, and global config_patch keys are supported",
-			}
-		}
-	}
-
-	if schedulerPatch, ok, err := unstructured.NestedBool(configPatch, "scheduler", "patch", "enabled"); err == nil && ok && schedulerPatch {
-		return &validationError{
-			Code:    "10210",
-			Message: "HAMi scheduler patch hook is managed by Neutree and cannot be enabled",
-			Hint:    "Remove scheduler.patch.enabled from accelerator_virtualization.config_patch",
-		}
-	}
-
-	if certManager, ok, err := unstructured.NestedBool(configPatch, "scheduler", "certManager", "enabled"); err == nil && ok && certManager {
-		return &validationError{
-			Code:    "10210",
-			Message: "HAMi cert-manager integration is managed by Neutree and cannot be enabled",
-			Hint:    "Remove scheduler.certManager.enabled from accelerator_virtualization.config_patch",
-		}
-	}
-
-	if migStrategy, ok, err := unstructured.NestedString(configPatch, "devicePlugin", "migStrategy"); err == nil && ok &&
-		strings.ToLower(strings.TrimSpace(migStrategy)) != "none" {
-		return &validationError{
-			Code:    "10210",
-			Message: "HAMi MIG virtualization mode is not supported",
-			Hint:    "Set devicePlugin.migStrategy to none or remove it from accelerator_virtualization.config_patch",
-		}
+	if err := clustervalidation.ValidateAcceleratorVirtualizationClusterSupport(
+		cluster.Spec.Type, cluster.Spec.Version); err != nil {
+		return acceleratorVirtualizationValidationError(err)
 	}
 
 	return nil
@@ -192,60 +118,37 @@ func invalidClusterPayloadError(err error) *validationError {
 	}
 }
 
-func validateAcceleratorVirtualizationClusterVersion(version string) *validationError {
-	supported, err := clustervalidation.SupportsVirtualizationClusterVersion(version)
-	if err != nil {
+func acceleratorVirtualizationValidationError(err error) *validationError {
+	var virtualizationErr *clustervalidation.AcceleratorVirtualizationError
+	if !errors.As(err, &virtualizationErr) {
 		return &validationError{
 			Code:    "10209",
-			Message: "invalid cluster version",
-			Hint:    fmt.Sprintf("failed to parse spec.version %q: %v", version, err),
+			Message: "invalid accelerator virtualization config",
+			Hint:    err.Error(),
 		}
 	}
 
-	if !supported {
+	switch virtualizationErr.Reason {
+	case clustervalidation.AcceleratorVirtualizationInvalidVersionReason:
 		return &validationError{
-			Code: "10208",
-			Message: fmt.Sprintf("spec.accelerator_virtualization requires cluster version >= %s",
-				clustervalidation.MinVirtualizationClusterVersion),
-			Hint: fmt.Sprintf("Upgrade cluster version to %s or later before enabling accelerator virtualization",
-				clustervalidation.MinVirtualizationClusterVersion),
+			Code:    "10209",
+			Message: virtualizationErr.Message,
+			Hint:    virtualizationErr.Hint,
+		}
+	case clustervalidation.AcceleratorVirtualizationUnsupportedClusterReason,
+		clustervalidation.AcceleratorVirtualizationUnsupportedVersionReason:
+		return &validationError{
+			Code:    "10208",
+			Message: virtualizationErr.Message,
+			Hint:    virtualizationErr.Hint,
+		}
+	default:
+		return &validationError{
+			Code:    "10210",
+			Message: virtualizationErr.Message,
+			Hint:    virtualizationErr.Hint,
 		}
 	}
-
-	return nil
-}
-
-func existingClusterSpec(cluster v1.Cluster, s storage.Storage) (*v1.ClusterSpec, error) {
-	if s == nil {
-		return nil, fmt.Errorf("include metadata.name, metadata.workspace, spec.type, and spec.version when enabling accelerator virtualization")
-	}
-
-	name := cluster.GetName()
-	workspace := cluster.GetWorkspace()
-
-	if name == "" || workspace == "" {
-		return nil, fmt.Errorf("include metadata.name and metadata.workspace when enabling accelerator virtualization")
-	}
-
-	filters := []storage.Filter{
-		{Column: "metadata->>name", Operator: "eq", Value: name},
-		{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
-	}
-
-	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
-	if err != nil {
-		return nil, fmt.Errorf("failed to load existing cluster: %w", err)
-	}
-
-	if len(clusters) != 1 {
-		return nil, fmt.Errorf("cluster patch must match exactly one existing cluster")
-	}
-
-	if clusters[0].Spec == nil {
-		return nil, fmt.Errorf("existing cluster has no spec")
-	}
-
-	return clusters[0].Spec, nil
 }
 
 func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
@@ -257,7 +160,7 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 		validateClusterDeletion(deps.Storage),
 	)
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
-	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
+	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization()
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)

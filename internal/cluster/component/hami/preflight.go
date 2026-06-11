@@ -2,8 +2,6 @@ package hami
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
@@ -13,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 )
 
@@ -22,67 +19,18 @@ func (h *HAMiComponent) Preflight(ctx context.Context) error {
 		return errors.New("accelerator virtualization is not enabled")
 	}
 
-	if h.cluster.Spec.Type != v1.KubernetesClusterType {
-		return errors.New("accelerator virtualization component is only supported for Kubernetes clusters")
-	}
-
-	if err := h.validateClusterVersion(); err != nil {
+	if err := clustervalidation.ValidateAcceleratorVirtualizationClusterSupport(
+		h.cluster.Spec.Type, h.cluster.GetVersion()); err != nil {
 		return err
 	}
 
-	if err := validateConfigPatch(h.cluster.Spec.AcceleratorVirtualization.ConfigPatch); err != nil {
+	if err := clustervalidation.ValidateAcceleratorVirtualizationConfigPatch(
+		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch); err != nil {
 		return err
 	}
 
 	if err := h.validateUnmanagedHAMi(ctx); err != nil {
 		return err
-	}
-
-	return nil
-}
-
-func (h *HAMiComponent) validateClusterVersion() error {
-	version := h.cluster.GetVersion()
-
-	supported, err := clustervalidation.SupportsVirtualizationClusterVersion(version)
-	if err != nil {
-		return fmt.Errorf("failed to parse cluster version %q: %w", version, err)
-	}
-
-	if !supported {
-		return fmt.Errorf("accelerator virtualization component requires cluster version >= %s",
-			clustervalidation.MinVirtualizationClusterVersion)
-	}
-
-	return nil
-}
-
-func validateConfigPatch(configPatch map[string]interface{}) error {
-	if configPatch == nil {
-		return nil
-	}
-
-	for key := range configPatch {
-		switch key {
-		case "devicePlugin", "scheduler", "global":
-		default:
-			return fmt.Errorf("unsupported accelerator_virtualization.config_patch key %q", key)
-		}
-	}
-
-	if schedulerPatch, ok, err := unstructured.NestedBool(configPatch, "scheduler", "patch", "enabled"); err == nil && ok && schedulerPatch {
-		return errors.New("HAMi scheduler patch hook is managed by Neutree and cannot be enabled")
-	}
-
-	if certManager, ok, err := unstructured.NestedBool(configPatch, "scheduler", "certManager", "enabled"); err == nil && ok && certManager {
-		return errors.New("HAMi cert-manager integration is managed by Neutree and cannot be enabled")
-	}
-
-	// Neutree vGPU support is based on HAMi core mode. MIG mode requires
-	// different node/device semantics and is intentionally rejected here.
-	if migStrategy, ok, err := unstructured.NestedString(configPatch, "devicePlugin", "migStrategy"); err == nil && ok &&
-		strings.ToLower(strings.TrimSpace(migStrategy)) != "none" {
-		return errors.New("HAMi MIG virtualization mode is not supported")
 	}
 
 	return nil
