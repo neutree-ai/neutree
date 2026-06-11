@@ -47,14 +47,14 @@ Configuration Options:
   --jwt-secret             JWT secret for authentication
   --metrics-remote-write-url Remote metrics storage URL
   --grafana-url            Grafana dashboard URL for system info API
-  --version                Component version (default: v0.0.1)
+  --version                Component version (default: CLI release version, or v0.0.1 for non-release/local builds)
 
 Examples:
   # Basic installation
   neutree-cli launch neutree-core
 
-  # Custom version installation
-  neutree-cli launch neutree-core --version v1.2.0
+  # Compatible version installation
+  neutree-cli launch neutree-core --version <compatible-version-for-your-cli-release-line>
 
   # With remote metrics storage and Grafana
   neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com --grafana-url http://grafana.example.com:3030`,
@@ -63,14 +63,11 @@ Examples:
 				return fmt.Errorf("--jwt-secret is required")
 			}
 
-			// set default node ip
-			if options.nodeIP == "" {
-				ip, err := util.GetHostIP()
-				if err != nil {
-					return err
-				}
-				options.nodeIP = ip
+			err := resolveNodeIP(cmd.OutOrStdout(), options.commonOptions, util.GetHostIP)
+			if err != nil {
+				return err
 			}
+
 			return installNeutreeCore(exector, options)
 		},
 	}
@@ -79,7 +76,7 @@ Examples:
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", "v0.0.1", "neutree core version")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
 		"it is valid when starting neutree core for the first time. "+
 		"It is recommended to change it quickly after installation.")
@@ -106,15 +103,25 @@ func installNeutreeCoreByDocker(exector command.Executor, options neutreeCoreIns
 }
 
 func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neutreeCoreInstallOptions) error {
-	err := prepareNeutreeCoreDeployConfig(options)
-	if err != nil {
-		return errors.Wrap(err, "prepare neutree core launch config failed")
+	if err := validateNeutreeCoreVersionCompatibility(getCLIAppVersion(), options.version); err != nil {
+		return err
 	}
 
 	if options.dryRun {
+		tempWorkDir, err := os.MkdirTemp("", "neutree-core-dry-run-")
+		if err != nil {
+			return errors.Wrap(err, "create dry-run work dir failed")
+		}
+		defer os.RemoveAll(tempWorkDir)
+
+		err = prepareNeutreeCoreDeployConfigInWorkDir(options, tempWorkDir)
+		if err != nil {
+			return errors.Wrap(err, "prepare neutree core launch config failed")
+		}
+
 		fmt.Println("dry run, skip install neutree core")
 
-		composeContent, err := os.ReadFile(filepath.Join(options.workDir, "neutree-core", "docker-compose.yml"))
+		composeContent, err := os.ReadFile(filepath.Join(tempWorkDir, "neutree-core", "docker-compose.yml"))
 		if err != nil {
 			return errors.Wrap(err, "read docker compose file failed")
 		}
@@ -122,6 +129,11 @@ func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neut
 		fmt.Println(string(composeContent))
 
 		return nil
+	}
+
+	err := prepareNeutreeCoreDeployConfig(options)
+	if err != nil {
+		return errors.Wrap(err, "prepare neutree core launch config failed")
 	}
 
 	output, err := exector.Execute(context.Background(), "docker",
@@ -134,6 +146,10 @@ func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neut
 }
 
 func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
+	return prepareNeutreeCoreDeployConfigInWorkDir(options, options.workDir)
+}
+
+func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, outputWorkDir string) error {
 	// extract neutree core deploy manifests
 	neutreeCoreDeployManifestsTarFile, err := manifests.NeutreeDeployManifestsTar.Open("neutree-core.tar")
 	if err != nil {
@@ -141,17 +157,18 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 	}
 	defer neutreeCoreDeployManifestsTarFile.Close()
 
-	err = util.ExtractTar(neutreeCoreDeployManifestsTarFile, options.workDir)
+	err = util.ExtractTar(neutreeCoreDeployManifestsTarFile, outputWorkDir)
 	if err != nil {
 		return errors.Wrap(err, "extract neutree core db init scripts failed")
 	}
 
+	renderedCoreWorkDir := filepath.Join(outputWorkDir, "neutree-core")
 	coreWorkDir := filepath.Join(options.workDir, "neutree-core")
 
 	// parseTemplate
 	tempplateFiles := []string{
-		filepath.Join(coreWorkDir, "docker-compose.yml"),
-		filepath.Join(coreWorkDir, "vector", "vector.yml"),
+		filepath.Join(renderedCoreWorkDir, "docker-compose.yml"),
+		filepath.Join(renderedCoreWorkDir, "vector", "vector.yml"),
 	}
 
 	jwtToken, err := storage.CreateServiceToken(options.jwtSecret)
@@ -179,7 +196,7 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 		return errors.Wrap(err, "parse template files failed")
 	}
 
-	composeFilePath := filepath.Join(coreWorkDir, "docker-compose.yml")
+	composeFilePath := filepath.Join(renderedCoreWorkDir, "docker-compose.yml")
 	err = replaceComposeImageRegistry(composeFilePath, options.mirrorRegistry, options.registryProject)
 
 	if err != nil {

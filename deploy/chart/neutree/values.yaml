@@ -24,6 +24,10 @@ adminPassword: ""
 system:
   grafana:
     url: ""
+  # External AI inference trace store (VictoriaLogs) base URL.
+  # Only used when victorialogs.enabled is false. Leave empty to disable the
+  # AI inference trace APIs and the Vector trace pipeline altogether.
+  aiTraceStoreUrl: ""
 
 metrics:
   # Specify the URL for remote write if using an external metrics storage system.
@@ -244,6 +248,35 @@ vector:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+# VictoriaLogs — the AI inference trace store. Vector ships full
+# request/response trace records here, and neutree-api queries it via
+# --ai-trace-store-url. Disable (enabled: false) to use an external store
+# configured through system.aiTraceStoreUrl, or to turn the feature off.
+victorialogs:
+  enabled: true
+  image:
+    registry: ""
+    repository: victoriametrics/victoria-logs
+    tag: "v1.50.0"
+    pullPolicy: IfNotPresent
+  # AI-trace request/response bodies can be large; raise the per-line ingest
+  # limit (bytes) so VictoriaLogs does not drop them. Matches docker-compose.
+  maxLineSizeBytes: 16777216
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  persistence:
+    enabled: true
+    size: 40Gi
+    accessModes:
+      - ReadWriteOnce
+  service:
+    type: ClusterIP
 
 jwtCli:
   image:

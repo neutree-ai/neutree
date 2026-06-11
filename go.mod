@@ -30,7 +30,7 @@ require (
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0
 	github.com/supabase-community/gotrue-go v1.2.1
-	github.com/supabase-community/postgrest-go v0.0.11
+	github.com/supabase-community/postgrest-go v0.0.12
 	github.com/tidwall/gjson v1.18.0
 	go.openly.dev/pointy v1.3.0
 	golang.org/x/crypto v0.40.0

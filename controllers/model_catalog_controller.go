@@ -82,6 +82,11 @@ func (c *ModelCatalogController) sync(modelCatalog *v1.ModelCatalog) error {
 		modelCatalog.Kind = "ModelCatalog"
 	}
 
+	// Initialize spec if nil; process* helpers dereference Spec fields without nil-guards
+	if modelCatalog.Spec == nil {
+		modelCatalog.Spec = &v1.ModelCatalogSpec{}
+	}
+
 	// Initialize status if nil
 	if modelCatalog.Status == nil {
 		modelCatalog.Status = &v1.ModelCatalogStatus{

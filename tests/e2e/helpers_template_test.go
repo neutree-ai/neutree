@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func writeTempTemplate(t *testing.T, content string) string {
@@ -270,6 +272,32 @@ func TestRenderTemplate_EngineArgsRange(t *testing.T) {
 	if got != want {
 		t.Fatalf("got=%q want=%q", got, want)
 	}
+}
+
+func TestDefaultEndpointEngineArgsMergesModelOverrides(t *testing.T) {
+	originalProfile := profile
+	t.Cleanup(func() { profile = originalProfile })
+
+	hfOverrides := `{"architectures": ["Qwen3VLForSequenceClassification"],"classifier_from_token": ["no", "yes"],"is_original_qwen3_reranker": true}`
+	profile = Profile{
+		Engines: map[string]EngineProfile{
+			defaultEngineName: {
+				EngineArgs: "dtype=half,max-model-len=4096,enforce_eager=true",
+			},
+		},
+	}
+	profile.RerankModel.EngineArgs = "max-model-len=8192,language_model_only=true,hf_overrides=" + hfOverrides
+
+	got := defaultEndpointEngineArgs(defaultEngineName, "text-rerank")
+	want := []EngineArg{
+		{Key: "dtype", Value: "half"},
+		{Key: "max-model-len", Value: "8192"},
+		{Key: "enforce_eager", Value: "true"},
+		{Key: "language_model_only", Value: "true"},
+		{Key: "hf_overrides", Value: hfOverrides},
+	}
+
+	require.Equal(t, want, got)
 }
 
 func TestRenderTemplate_RolePermissionsRange(t *testing.T) {

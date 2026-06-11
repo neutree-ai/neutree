@@ -1,0 +1,343 @@
+package logs
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
+	"github.com/neutree-ai/neutree/pkg/storage/mocks"
+)
+
+// statsCtx builds a gin.Context whose request carries the given query string.
+func statsCtx(rawQuery string) *gin.Context {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/?"+rawQuery, nil)
+
+	return c
+}
+
+func TestStatsWindow_ExplicitStartEnd(t *testing.T) {
+	q := url.Values{}
+	q.Set("start", "2026-03-01T08:30:00Z")
+	q.Set("end", "2026-03-05T23:00:00Z")
+
+	startDay, endDay, ok := statsWindow(statsCtx(q.Encode()))
+
+	assert.True(t, ok)
+	// Both bounds truncate to their UTC day.
+	assert.Equal(t, "2026-03-01", startDay.Format("2006-01-02"))
+	assert.Equal(t, "2026-03-05", endDay.Format("2006-01-02"))
+	assert.Equal(t, time.UTC, startDay.Location())
+}
+
+func TestStatsWindow_EndBeforeStartRejected(t *testing.T) {
+	q := url.Values{}
+	q.Set("start", "2026-03-10T00:00:00Z")
+	q.Set("end", "2026-03-01T00:00:00Z")
+
+	_, _, ok := statsWindow(statsCtx(q.Encode()))
+	assert.False(t, ok)
+}
+
+func TestStatsWindow_MalformedRejected(t *testing.T) {
+	_, _, ok := statsWindow(statsCtx("start=not-a-time"))
+	assert.False(t, ok)
+}
+
+func TestStatsWindow_ClampedToMaxDays(t *testing.T) {
+	q := url.Values{}
+	q.Set("start", "2026-01-01T00:00:00Z")
+	q.Set("end", "2026-06-01T00:00:00Z") // far more than maxStatsDays apart
+
+	startDay, endDay, ok := statsWindow(statsCtx(q.Encode()))
+
+	assert.True(t, ok)
+	// Span clamped to maxStatsDays buckets, anchored at the most recent end.
+	bucketCount := int(endDay.Sub(startDay).Hours()/24) + 1
+	assert.Equal(t, maxStatsDays, bucketCount)
+	assert.Equal(t, "2026-06-01", endDay.Format("2006-01-02"))
+}
+
+func TestStatsWindow_DaysFallback(t *testing.T) {
+	startDay, endDay, ok := statsWindow(statsCtx("days=30"))
+
+	assert.True(t, ok)
+	bucketCount := int(endDay.Sub(startDay).Hours()/24) + 1
+	assert.Equal(t, 30, bucketCount)
+	// endDay is today's UTC bucket.
+	assert.Equal(t, time.Now().UTC().Truncate(24*time.Hour).Format("2006-01-02"), endDay.Format("2006-01-02"))
+}
+
+func TestStatsWindow_DefaultSevenDays(t *testing.T) {
+	startDay, endDay, ok := statsWindow(statsCtx(""))
+
+	assert.True(t, ok)
+	bucketCount := int(endDay.Sub(startDay).Hours()/24) + 1
+	assert.Equal(t, 7, bucketCount)
+}
+
+func TestStatsWindow_DaysOutOfRangeFallsBackToDefault(t *testing.T) {
+	// >maxStatsDays is ignored, falling back to the 7-day default.
+	startDay, endDay, ok := statsWindow(statsCtx("days=999"))
+
+	assert.True(t, ok)
+	bucketCount := int(endDay.Sub(startDay).Hours()/24) + 1
+	assert.Equal(t, 7, bucketCount)
+}
+
+func TestStatsWindow_EndOnlyTrailingWindow(t *testing.T) {
+	// `end` without `start` is a valid trailing window (default 7 days ending at
+	// `end`), not a 400. Regression guard for the end-only handling.
+	q := url.Values{}
+	q.Set("end", "2026-03-10T12:00:00Z")
+
+	startDay, endDay, ok := statsWindow(statsCtx(q.Encode()))
+
+	assert.True(t, ok)
+	assert.Equal(t, "2026-03-10", endDay.Format("2006-01-02"))
+	assert.Equal(t, "2026-03-04", startDay.Format("2006-01-02")) // 7 buckets inclusive
+}
+
+func TestStatsWindow_EndOnlyWithDays(t *testing.T) {
+	q := url.Values{}
+	q.Set("end", "2026-03-10T00:00:00Z")
+	q.Set("days", "3")
+
+	startDay, endDay, ok := statsWindow(statsCtx(q.Encode()))
+
+	assert.True(t, ok)
+	bucketCount := int(endDay.Sub(startDay).Hours()/24) + 1
+	assert.Equal(t, 3, bucketCount)
+	assert.Equal(t, "2026-03-10", endDay.Format("2006-01-02"))
+}
+
+func TestStatsWindow_MalformedEndRejected(t *testing.T) {
+	q := url.Values{}
+	q.Set("end", "not-a-time")
+
+	_, _, ok := statsWindow(statsCtx(q.Encode()))
+	assert.False(t, ok)
+}
+
+func TestLogsQLQuoteValue(t *testing.T) {
+	cases := map[string]string{
+		"":                   `""`,
+		"plain":              `"plain"`,
+		`with"quote`:         `"with\"quote"`,
+		`back\slash`:         `"back\\slash"`,
+		"line\nbreak":        `"line\nbreak"`,
+		`a"b\c` + "\n" + "d": `"a\"b\\c\nd"`,
+	}
+	for in, want := range cases {
+		assert.Equalf(t, want, logsQLQuoteValue(in), "input %q", in)
+	}
+}
+
+func TestTraceEndpointTypeFilter(t *testing.T) {
+	// Unrestricted: no endpoint-type key set => no clause.
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	assert.Equal(t, "", traceEndpointTypeFilter(c))
+
+	// Restricted to a single endpoint type => exact-match LogsQL clause.
+	c.Set(traceEndpointTypeKey, "external-endpoint")
+	assert.Equal(t, `endpoint_type:="external-endpoint"`, traceEndpointTypeFilter(c))
+}
+
+func TestDecodeVLRecord_FullRecord(t *testing.T) {
+	line := []byte(`{
+		"_time":"2026-03-01T10:00:00Z",
+		"request_id":"req-1",
+		"workspace":"ws1",
+		"endpoint_type":"endpoint",
+		"endpoint_name":"gpt",
+		"api_key_id":"key-1",
+		"request_uri":"/v1/chat",
+		"request_model":"gpt-4",
+		"response_model":"gpt-4-0613",
+		"response_status":"200",
+		"prompt_tokens":"10",
+		"completion_tokens":"20",
+		"total_tokens":"30",
+		"finish_reason":"stop",
+		"stream":"true",
+		"user_agent":"openai-python",
+		"duration_ms":"1234.5",
+		"request_body":"req",
+		"response_body":"resp"
+	}`)
+
+	tr, ok := decodeVLRecord(line)
+
+	assert.True(t, ok)
+	assert.Equal(t, "req-1", tr.RequestID)
+	assert.Equal(t, "ws1", tr.Workspace)
+	assert.Equal(t, 200, tr.ResponseStatus)
+	assert.Equal(t, "stop", tr.FinishReason)
+	assert.True(t, tr.Stream)
+	if assert.NotNil(t, tr.PromptTokens) {
+		assert.Equal(t, 10, *tr.PromptTokens)
+	}
+	if assert.NotNil(t, tr.TotalTokens) {
+		assert.Equal(t, 30, *tr.TotalTokens)
+	}
+	if assert.NotNil(t, tr.DurationMs) {
+		assert.Equal(t, 1234, *tr.DurationMs) // float string truncated to int ms
+	}
+	assert.Equal(t, "req", tr.RequestBody)
+	assert.Equal(t, "resp", tr.ResponseBody)
+}
+
+func TestDecodeVLRecord_OptionalFieldsAbsent(t *testing.T) {
+	// A minimal record (e.g. an early-returning error response): optional numeric
+	// columns must stay nil rather than coerce to a misleading 0.
+	line := []byte(`{"_time":"2026-03-01T10:00:00Z","request_id":"req-2","workspace":"ws1"}`)
+
+	tr, ok := decodeVLRecord(line)
+
+	assert.True(t, ok)
+	assert.Equal(t, "req-2", tr.RequestID)
+	assert.Equal(t, 0, tr.ResponseStatus)
+	assert.False(t, tr.Stream)
+	assert.Nil(t, tr.PromptTokens)
+	assert.Nil(t, tr.CompletionTokens)
+	assert.Nil(t, tr.TotalTokens)
+	assert.Nil(t, tr.DurationMs)
+}
+
+func TestDecodeVLRecord_MissingTimeFallsBack(t *testing.T) {
+	line := []byte(`{"request_id":"req-3","workspace":"ws1"}`)
+
+	tr, ok := decodeVLRecord(line)
+
+	assert.True(t, ok)
+	assert.NotEmpty(t, tr.Time) // synthesised so the UI always has a timestamp
+}
+
+func TestDecodeVLRecord_InvalidJSON(t *testing.T) {
+	_, ok := decodeVLRecord([]byte(`{not json`))
+	assert.False(t, ok)
+}
+
+// traceCtx builds a gin context + recorder carrying the given user id and
+// workspace param, as the route middleware would have populated them.
+func traceCtx(userID, workspace string) (*gin.Context, *httptest.ResponseRecorder) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/", nil)
+
+	if userID != "" {
+		c.Set("user_id", userID)
+	}
+
+	if workspace != "" {
+		c.Params = gin.Params{{Key: "workspace", Value: workspace}}
+	}
+
+	return c, w
+}
+
+// permMock returns a MockStorage whose has_permission call resolves to the
+// allow value matching the required_permission argument.
+func permMock(allow map[string]bool) *mocks.MockStorage {
+	m := new(mocks.MockStorage)
+	m.On("CallDatabaseFunction", "has_permission", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			params := args.Get(1).(map[string]interface{})
+			perm, _ := params["required_permission"].(string)
+			out := args.Get(2).(*bool)
+			*out = allow[perm]
+		}).Return(nil)
+
+	return m
+}
+
+func TestRequireTracePermission_Unauthenticated(t *testing.T) {
+	deps := &Dependencies{Storage: new(mocks.MockStorage)}
+	c, w := traceCtx("", "ws1")
+
+	requireTracePermission(deps)(c)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.True(t, c.IsAborted())
+}
+
+func TestRequireTracePermission_MissingWorkspace(t *testing.T) {
+	deps := &Dependencies{Storage: new(mocks.MockStorage)}
+	c, w := traceCtx("user-1", "")
+
+	requireTracePermission(deps)(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.True(t, c.IsAborted())
+}
+
+func TestRequireTracePermission_BothDeniedForbidden(t *testing.T) {
+	deps := &Dependencies{Storage: permMock(map[string]bool{})}
+	c, w := traceCtx("user-1", "ws1")
+
+	requireTracePermission(deps)(c)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.True(t, c.IsAborted())
+}
+
+func TestRequireTracePermission_EndpointOnlyScopes(t *testing.T) {
+	deps := &Dependencies{Storage: permMock(map[string]bool{permEndpointTraceRead: true})}
+	c, _ := traceCtx("user-1", "ws1")
+
+	requireTracePermission(deps)(c)
+
+	assert.False(t, c.IsAborted())
+	assert.Equal(t, "endpoint", c.GetString(traceEndpointTypeKey))
+}
+
+func TestRequireTracePermission_ExternalOnlyScopes(t *testing.T) {
+	deps := &Dependencies{Storage: permMock(map[string]bool{permExternalEndpointTraceRead: true})}
+	c, _ := traceCtx("user-1", "ws1")
+
+	requireTracePermission(deps)(c)
+
+	assert.False(t, c.IsAborted())
+	assert.Equal(t, "external-endpoint", c.GetString(traceEndpointTypeKey))
+}
+
+func TestRequireTracePermission_BothGrantedUnrestricted(t *testing.T) {
+	deps := &Dependencies{Storage: permMock(map[string]bool{
+		permEndpointTraceRead:         true,
+		permExternalEndpointTraceRead: true,
+	})}
+	c, _ := traceCtx("user-1", "ws1")
+
+	requireTracePermission(deps)(c)
+
+	assert.False(t, c.IsAborted())
+	// No single-type restriction recorded => handlers see both endpoint types.
+	assert.Equal(t, "", c.GetString(traceEndpointTypeKey))
+}
+
+func TestAITraceHandlers_StoreNotConfigured(t *testing.T) {
+	// With no --ai-trace-store-url, every trace route returns 503 before any
+	// storage/VictoriaLogs interaction.
+	deps := &Dependencies{}
+
+	handlers := map[string]gin.HandlerFunc{
+		"list":  handleListAITraces(deps),
+		"stats": handleAITraceStats(deps),
+		"get":   handleGetAITrace(deps),
+	}
+
+	for name, h := range handlers {
+		c, w := traceCtx("user-1", "ws1")
+		h(c)
+		assert.Equalf(t, http.StatusServiceUnavailable, w.Code, "handler %s", name)
+		assert.Containsf(t, w.Body.String(), "not configured", "handler %s", name)
+	}
+}

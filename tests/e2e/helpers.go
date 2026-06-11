@@ -452,7 +452,8 @@ func SetupImageRegistry() {
 // TeardownImageRegistry deletes the image registry and cleans up the temp YAML.
 func TeardownImageRegistry() {
 	if imageRegistryYAML != "" {
-		RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
+		r := RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
+		ExpectSuccess(r)
 		os.Remove(imageRegistryYAML)
 		imageRegistryYAML = ""
 	}
@@ -699,8 +700,11 @@ func (c *ClusterHelper) EventuallyObservedSpecHashAdvanced(name, oldHash string,
 
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
 func (c *ClusterHelper) EnsureDeleted(name string) {
-	c.Delete(name)
-	c.WaitForDelete(name, TerminalPhaseTimeout)
+	r := c.Delete(name)
+	ExpectSuccess(r)
+
+	r = c.WaitForDelete(name, TerminalPhaseTimeout)
+	ExpectSuccess(r)
 }
 
 // --- Cluster JSON parsing ---
@@ -1075,13 +1079,30 @@ func createAPIKey(serverURL, jwt, workspace, name string) string {
 // boilerplate without merging the auth conventions, and would give
 // future tests one obvious place to look for "how do I call the API".
 func callNeutreeAPI(method, path string) ([]byte, int) {
+	return callNeutreeAPIWithBody(method, path, nil)
+}
+
+func callNeutreeAPIWithJSON(method, path string, payload any) ([]byte, int) {
+	GinkgoHelper()
+
+	body, err := json.Marshal(payload)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	return callNeutreeAPIWithBody(method, path, bytes.NewReader(body))
+}
+
+func callNeutreeAPIWithBody(method, path string, requestBody io.Reader) ([]byte, int) {
 	GinkgoHelper()
 
 	url := strings.TrimRight(Cfg.ServerURL, "/") + path
-	req, err := http.NewRequest(method, url, nil)
+	req, err := http.NewRequest(method, url, requestBody)
 	Expect(err).NotTo(HaveOccurred())
 
 	req.Header.Set("Authorization", Cfg.APIKey)
+
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
@@ -1222,18 +1243,16 @@ func teardownCluster(clusterName string) {
 
 // --- Endpoint helpers ---
 
-// engineArgs parses the named engine's profile engine_args
-// ("k=v,k2=v2,...") into a structured slice for direct injection into the
-// endpoint template via {{range}}.
-func engineArgs(engineName string) []EngineArg {
-	raw := profileEngineArgsFor(engineName)
+// parseEngineArgs parses a comma-separated "k=v,k2=v2" string into a structured
+// slice for direct injection into the endpoint template via {{range}}.
+func parseEngineArgs(raw string) []EngineArg {
 	if raw == "" {
 		return nil
 	}
 
 	var args []EngineArg
 
-	for _, pair := range strings.Split(raw, ",") {
+	for _, pair := range splitEngineArgPairs(raw) {
 		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
 		if !ok || k == "" {
 			continue
@@ -1243,6 +1262,97 @@ func engineArgs(engineName string) []EngineArg {
 	}
 
 	return args
+}
+
+func splitEngineArgPairs(raw string) []string {
+	var pairs []string
+	start := 0
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i, r := range raw {
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if inString {
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+
+			if r == '"' {
+				inString = false
+			}
+
+			continue
+		}
+
+		switch r {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				pairs = append(pairs, raw[start:i])
+				start = i + 1
+			}
+		}
+	}
+
+	pairs = append(pairs, raw[start:])
+
+	return pairs
+}
+
+// engineArgs parses the named engine's profile engine_args.
+func engineArgs(engineName string) []EngineArg {
+	return parseEngineArgs(profileEngineArgsFor(engineName))
+}
+
+// mergeEngineArgs overlays model-level engine args onto engine-level defaults.
+// Existing keys keep their position; model-level values win on duplicate keys.
+func mergeEngineArgs(base, overlay []EngineArg) []EngineArg {
+	if len(base) == 0 {
+		return append([]EngineArg(nil), overlay...)
+	}
+
+	merged := append([]EngineArg(nil), base...)
+
+	indexByKey := make(map[string]int, len(merged))
+	for i, arg := range merged {
+		indexByKey[arg.Key] = i
+	}
+
+	for _, arg := range overlay {
+		if arg.Key == "" {
+			continue
+		}
+
+		if i, ok := indexByKey[arg.Key]; ok {
+			merged[i] = arg
+			continue
+		}
+
+		indexByKey[arg.Key] = len(merged)
+		merged = append(merged, arg)
+	}
+
+	return merged
+}
+
+func defaultEndpointEngineArgs(engineName, task string) []EngineArg {
+	return mergeEngineArgs(
+		engineArgs(engineName),
+		parseEngineArgs(profileModelEngineArgsFor(task)),
+	)
 }
 
 // endpointOpts holds configurable fields for applyEndpoint.
@@ -1345,7 +1455,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 	}
 
 	if len(o.engineArgs) == 0 {
-		o.engineArgs = engineArgs(o.engineName)
+		o.engineArgs = defaultEndpointEngineArgs(o.engineName, o.task)
 	}
 
 	if o.accType == "" || o.accProduct == "" {
@@ -1393,13 +1503,17 @@ func applyEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath strin
 	return yamlPath
 }
 
-// allSchemaTypesEngineArgs returns an engine_args slice covering multiple JSON Schema data types.
+// allSchemaTypesEngineArgs returns an engine_args slice covering multiple JSON
+// Schema data types. enforce_eager covers the true-bool path (flag emitted with
+// no value); enable_prefix_caching covers the false-bool path (flag dropped
+// entirely, since vLLM argparse rejects `--flag false` for store_true flags).
 func allSchemaTypesEngineArgs() []EngineArg {
 	return []EngineArg{
 		{Key: "dtype", Value: "half"},
 		{Key: "max_model_len", Value: "4096"},
 		{Key: "gpu_memory_utilization", Value: "0.85"},
 		{Key: "enforce_eager", Value: "true"},
+		{Key: "enable_prefix_caching", Value: "false"},
 		{Key: "seed", Value: "42"},
 		{Key: "override_generation_config", Value: `'{"temperature": 0.8}'`},
 	}
@@ -1412,11 +1526,16 @@ func allSchemaTypesEngineArgs() []EngineArg {
 // Array types are intentionally absent — SGLang's only array-shaped CLI flag
 // is `--cuda-graph-bs` (nargs="+"), which the single-token K8s template can't
 // render.
+//
+// disable_cuda_graph covers the true-bool path (flag emitted with no value);
+// skip_tokenizer_init covers the false-bool path (flag dropped entirely,
+// since SGLang argparse rejects `--flag false` for store_true flags).
 func allSchemaTypesEngineArgsSGLang() []EngineArg {
 	return []EngineArg{
 		{Key: "tp_size", Value: "1"},
 		{Key: "mem_fraction_static", Value: "0.85"},
 		{Key: "disable_cuda_graph", Value: "true"},
+		{Key: "skip_tokenizer_init", Value: "false"},
 		{Key: "dtype", Value: "auto"},
 		{Key: "chunked_prefill_size", Value: "8192"},
 		{Key: "served_model_name", Value: "neu-sglang-test"},
@@ -1467,12 +1586,15 @@ func getEndpoint(name string) v1.Endpoint {
 
 // deleteEndpoint deletes an endpoint and waits for it to be removed.
 func deleteEndpoint(name string) {
-	RunCLI("delete", "endpoint", name, "-w", profileWorkspace(), "--force", "--ignore-not-found")
-	RunCLI("wait", "endpoint", name,
+	r := RunCLI("delete", "endpoint", name, "-w", profileWorkspace(), "--force", "--ignore-not-found")
+	ExpectSuccess(r)
+
+	r = RunCLI("wait", "endpoint", name,
 		"-w", profileWorkspace(),
 		"--for", "delete",
 		"--timeout", "5m",
 	)
+	ExpectSuccess(r)
 }
 
 func parseEndpointJSON(stdout string) v1.Endpoint {

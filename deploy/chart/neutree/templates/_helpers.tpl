@@ -96,6 +96,22 @@ Get the JWT secret with validation.
 {{- end -}}
 
 {{/*
+Resolve the AI inference trace store (VictoriaLogs) base URL.
+Returns the in-cluster VictoriaLogs service when victorialogs.enabled is true,
+otherwise the externally configured system.aiTraceStoreUrl. Empty when neither
+is set — callers treat the empty result as "AI inference trace disabled".
+*/}}
+{{- define "neutree.aiTraceStoreUrl" -}}
+{{- if .Values.victorialogs.enabled -}}
+{{- printf "http://%s-victorialogs-service:9428" (include "neutree.fullname" .) -}}
+{{- else if .Values.system.aiTraceStoreUrl -}}
+{{- /* Trim a trailing slash so callers (e.g. the Vector sink) never render a
+       double-slash path like https://host//insert/... */ -}}
+{{- .Values.system.aiTraceStoreUrl | trimSuffix "/" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Grafana is provided by a dependency chart. Its Service name is derived from
 the subchart's release context, not this parent chart's fullname.
 */}}

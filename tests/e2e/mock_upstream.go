@@ -10,6 +10,14 @@ import (
 	"sync/atomic"
 )
 
+type mockToolCallMode int32
+
+const (
+	mockToolCallModeDefault mockToolCallMode = iota
+	mockToolCallModeNullToolCalls
+	mockToolCallModeMalformedFunction
+)
+
 // RecordedRequest stores key parts of an HTTP request received by MockUpstream.
 type RecordedRequest struct {
 	Method  string
@@ -27,17 +35,34 @@ type MockUpstream struct {
 	mu       sync.Mutex
 	requests []RecordedRequest
 
-	// emitNullToolCalls makes the mock include "tool_calls": null in chat
-	// completion responses (both non-stream message and stream deltas) to
-	// reproduce the cjson.null userdata bug in the Anthropic conversion path.
-	emitNullToolCalls atomic.Bool
+	// toolCallMode controls malformed tool-call responses used by Anthropic
+	// compatibility tests.
+	toolCallMode atomic.Int32
 }
 
 // SetEmitNullToolCalls toggles whether chat completion responses explicitly
 // include "tool_calls": null. Tests that need the original happy-path payload
 // must reset this back to false (e.g. in AfterEach).
 func (m *MockUpstream) SetEmitNullToolCalls(v bool) {
-	m.emitNullToolCalls.Store(v)
+	if v {
+		m.toolCallMode.Store(int32(mockToolCallModeNullToolCalls))
+		return
+	}
+	m.toolCallMode.Store(int32(mockToolCallModeDefault))
+}
+
+// SetEmitMalformedToolCallFunction toggles responses where tool_calls is a real
+// array, but nested function fields contain JSON null sentinels.
+func (m *MockUpstream) SetEmitMalformedToolCallFunction(v bool) {
+	if v {
+		m.toolCallMode.Store(int32(mockToolCallModeMalformedFunction))
+		return
+	}
+	m.toolCallMode.Store(int32(mockToolCallModeDefault))
+}
+
+func (m *MockUpstream) currentToolCallMode() mockToolCallMode {
+	return mockToolCallMode(m.toolCallMode.Load())
 }
 
 // StartMockUpstream creates and starts a MockUpstream on a random port.
@@ -165,8 +190,11 @@ func (m *MockUpstream) writeChatJSON(w http.ResponseWriter, model string) {
 		"role":    "assistant",
 		"content": "Hello from mock upstream!",
 	}
-	if m.emitNullToolCalls.Load() {
+	switch m.currentToolCallMode() {
+	case mockToolCallModeNullToolCalls:
 		message["tool_calls"] = json.RawMessage("null")
+	case mockToolCallModeMalformedFunction:
+		message["tool_calls"] = malformedToolCalls()
 	}
 
 	resp := map[string]any{
@@ -206,10 +234,15 @@ func (m *MockUpstream) writeChatStream(w http.ResponseWriter, model string) {
 	delta1 := map[string]any{"role": "assistant"}
 	delta2 := map[string]any{"content": "Hello from mock!"}
 	delta3 := map[string]any{}
-	if m.emitNullToolCalls.Load() {
+	switch m.currentToolCallMode() {
+	case mockToolCallModeNullToolCalls:
 		delta1["tool_calls"] = json.RawMessage("null")
 		delta2["tool_calls"] = json.RawMessage("null")
 		delta3["tool_calls"] = json.RawMessage("null")
+	case mockToolCallModeMalformedFunction:
+		delta1["tool_calls"] = []map[string]any{malformedToolCallFunctionNull(0)}
+		delta2["tool_calls"] = []map[string]any{malformedToolCallNameNull(1)}
+		delta3["tool_calls"] = []map[string]any{malformedToolCallArgumentsNull(2)}
 	}
 
 	chunks := []map[string]any{
@@ -250,6 +283,47 @@ func (m *MockUpstream) writeChatStream(w http.ResponseWriter, model string) {
 
 	fmt.Fprint(w, "data: [DONE]\n\n")
 	flusher.Flush()
+}
+
+func malformedToolCalls() []map[string]any {
+	return []map[string]any{
+		malformedToolCallFunctionNull(0),
+		malformedToolCallNameNull(1),
+		malformedToolCallArgumentsNull(2),
+	}
+}
+
+func malformedToolCallFunctionNull(index int) map[string]any {
+	return map[string]any{
+		"index":    index,
+		"id":       "call-function-null",
+		"type":     "function",
+		"function": json.RawMessage("null"),
+	}
+}
+
+func malformedToolCallNameNull(index int) map[string]any {
+	return map[string]any{
+		"index": index,
+		"id":    "call-name-null",
+		"type":  "function",
+		"function": map[string]any{
+			"name":      json.RawMessage("null"),
+			"arguments": `{"city":"shanghai"}`,
+		},
+	}
+}
+
+func malformedToolCallArgumentsNull(index int) map[string]any {
+	return map[string]any{
+		"index": index,
+		"id":    "call-arguments-null",
+		"type":  "function",
+		"function": map[string]any{
+			"name":      "lookup_weather",
+			"arguments": json.RawMessage("null"),
+		},
+	}
 }
 
 func (m *MockUpstream) handleEmbeddings(w http.ResponseWriter, r *http.Request) {

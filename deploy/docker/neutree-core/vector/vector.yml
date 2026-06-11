@@ -13,22 +13,33 @@ transforms:
 
       # Access fields with hyphens using proper VRL syntax
 
+      .extracted_data.request_id = .request.id
+      .extracted_data.timestamp = .started_at
+      .extracted_data.status = .response.status
+      .extracted_data.api_version = .request.api_version
+      .extracted_data.api_key_id = .consumer.custom_id
+      if exists(.request.uri) {
+          .extracted_data.url_split = split!(.request.uri, "/")
+          .extracted_data.workspace = .extracted_data.url_split[2]      # workspace name from /workspace/{workspace}/...
+          .extracted_data.endpoint_type = .extracted_data.url_split[3]  # "endpoint" or "external-endpoint"
+          .extracted_data.endpoint_name = .extracted_data.url_split[4]  # endpoint name from /workspace/{workspace}/{type}/{endpoint_name}
+      }
+
       if exists(.ai) && exists(.ai."statistics") && exists(.ai."statistics".usage) {
-          # Extract fields one by one
-          .extracted_data.request_id = .request.id
           .extracted_data.total_tokens = .ai."statistics".usage.total_tokens
           .extracted_data.prompt_tokens = .ai."statistics".usage.prompt_tokens
           .extracted_data.completion_tokens = .ai."statistics".usage.completion_tokens
-          .extracted_data.timestamp = .started_at
-          .extracted_data.status = .response.status
-          .extracted_data.api_version =.request.api_version
-          .extracted_data.url_spilt = split!(.request.uri, "/")
-          .extracted_data.endpoint_type = .extracted_data.url_spilt[3]  # "endpoint" or "external-endpoint"
-          .extracted_data.endpoint_name = .extracted_data.url_spilt[4]  # endpoint name from /workspace/{workspace}/{type}/{endpoint_name}
-          .extracted_data.api_key_id = .consumer.custom_id
+          .extracted_data.cache_read_tokens = .ai."statistics".usage.cache_read_tokens
+          .extracted_data.cache_creation_tokens = .ai."statistics".usage.cache_creation_tokens
+          .extracted_data.reasoning_tokens = .ai."statistics".usage.reasoning_tokens
+          .extracted_data.cost_usd = .ai."statistics".usage.cost
 
           if exists(.ai."statistics".meta) && exists(.ai."statistics".meta.request_model) {
               .extracted_data.model_name = .ai."statistics".meta.request_model
+          }
+
+          if exists(.ai."statistics".meta) && exists(.ai."statistics".meta.message_id) {
+              .extracted_data.message_id = .ai."statistics".meta.message_id
           }
 
           if to_int!(.extracted_data.total_tokens) > 0 {
@@ -57,7 +68,53 @@ transforms:
           "p_endpoint_type": .extracted_data.endpoint_type,
           "p_model_name": .extracted_data.model_name,
           "p_prompt_tokens": .extracted_data.prompt_tokens,
-          "p_completion_tokens": .extracted_data.completion_tokens
+          "p_completion_tokens": .extracted_data.completion_tokens,
+          "p_cache_read_tokens": .extracted_data.cache_read_tokens,
+          "p_cache_creation_tokens": .extracted_data.cache_creation_tokens,
+          "p_reasoning_tokens": .extracted_data.reasoning_tokens,
+          "p_cost_usd": .extracted_data.cost_usd,
+          "p_message_id": .extracted_data.message_id
+      }
+  filter_trace_logs:
+    type: filter
+    inputs:
+      - parse_kong_logs
+    condition: exists(.ai."trace".request_body) || exists(.ai."trace".response_body)
+  prepare_trace_payload:
+    type: remap
+    inputs:
+      - filter_trace_logs
+    source: |
+      . = {
+          # VictoriaLogs rejects records without a non-empty `_msg`. Failed
+          # requests often carry no response body, so `_msg` must be a field
+          # that is always populated — never the (optional) response body.
+          "_msg":           .request.id || "ai-trace",
+          "request_id":     .request.id,
+          "timestamp":      .started_at,
+          "workspace":      .extracted_data.workspace || "",
+          "endpoint_type":  .extracted_data.endpoint_type || "",
+          "endpoint_name":  .extracted_data.endpoint_name || "",
+          # Optional string columns are coalesced to "" so every record carries
+          # the same string type even when the source field is absent (e.g. an
+          # error response that returned early before `ai.statistics`, or a
+          # success with no `finish_reason`). The numeric columns below are left
+          # nullable on purpose: the query API decodes them into pointer/optional
+          # fields and must distinguish "no token/latency data" from a real 0.
+          "api_key_id":     .consumer.custom_id || "",
+          "request_uri":    .request.uri || "",
+          "request_model":  .ai."statistics".meta.request_model || "",
+          "response_model": .ai."statistics".meta.response_model || "",
+          "response_status": .response.status,
+          "prompt_tokens":     .ai."statistics".usage.prompt_tokens,
+          "completion_tokens": .ai."statistics".usage.completion_tokens,
+          "total_tokens":      .ai."statistics".usage.total_tokens,
+          "finish_reason":  .ai."trace".finish_reason || "",
+          "stream":         .ai."trace".stream || false,
+          "user_agent":     .request.headers."user-agent" || "",
+          "duration_ms":    .latencies.request,
+          "request_body":   .ai."trace".request_body || "",
+          "response_body":  .ai."trace".response_body || "",
       }
 sinks:
   postgrest_rpc:
@@ -78,4 +135,30 @@ sinks:
       Content-Type: application/json
     batch:
       max_events: 1
+      timeout_secs: 1
+  ai_trace_file:
+    type: file
+    inputs:
+      - prepare_trace_payload
+    path: /var/log/vector/ai-trace-%Y-%m-%d.log
+    encoding:
+      codec: json
+    framing:
+      method: newline_delimited
+  ai_trace_victorialogs:
+    type: http
+    inputs:
+      - prepare_trace_payload
+    uri: http://victorialogs:9428/insert/jsonline?_stream_fields=workspace,endpoint_type,endpoint_name&_time_field=timestamp
+    method: post
+    encoding:
+      codec: json
+    framing:
+      method: newline_delimited
+    compression: none
+    request:
+      headers:
+        Content-Type: application/stream+json
+    batch:
+      max_events: 100
       timeout_secs: 1

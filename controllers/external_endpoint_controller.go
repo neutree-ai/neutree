@@ -96,18 +96,15 @@ func (c *ExternalEndpointController) sync(obj *v1.ExternalEndpoint) error {
 			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
-	// Update status to RUNNING after successful sync
-	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.ExternalEndpointPhasePENDING ||
-		obj.Status.Phase == v1.ExternalEndpointPhaseFAILED {
-		klog.Infof("ExternalEndpoint %s is PENDING/FAILED or has no status, updating to RUNNING", obj.Metadata.Name)
-		err = c.updateStatus(obj, v1.ExternalEndpointPhaseRUNNING, nil)
-
-		if err != nil {
-			return errors.Wrapf(err, "failed to update external_endpoint %s/%s status to RUNNING",
-				obj.Metadata.Workspace, obj.Metadata.Name)
-		}
-
-		return nil
+	// Recompute Running status on every successful reconcile so that the
+	// service URL stays in sync with the current gateway proxy address
+	// (e.g. after neutree-core restarts with a different --gateway-proxy-url).
+	// updateStatus drift-detects and only writes when phase, service URL,
+	// or error message has changed.
+	err = c.updateStatus(obj, v1.ExternalEndpointPhaseRUNNING, nil)
+	if err != nil {
+		return errors.Wrapf(err, "failed to update external_endpoint %s/%s status to RUNNING",
+			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
 	return nil
@@ -121,7 +118,10 @@ func (c *ExternalEndpointController) updateStatus(obj *v1.ExternalEndpoint, phas
 
 	if phase == v1.ExternalEndpointPhaseRUNNING {
 		url, urlErr := c.gw.GetExternalEndpointServeUrl(obj)
-		if urlErr == nil && url != "" {
+		if urlErr != nil {
+			klog.Warningf("failed to get external_endpoint %s/%s service url: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, urlErr)
+		} else if url != "" {
 			serviceURL = url
 		}
 	}
@@ -133,5 +133,26 @@ func (c *ExternalEndpointController) updateStatus(obj *v1.ExternalEndpoint, phas
 		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
+	if !externalEndpointStatusChanged(obj.Status, newStatus) {
+		return nil
+	}
+
 	return c.storage.UpdateExternalEndpoint(obj.GetID(), &v1.ExternalEndpoint{Status: newStatus})
+}
+
+// externalEndpointStatusChanged reports whether the user-visible fields of the
+// status changed between old and new. LastTransitionTime is intentionally
+// excluded so the status row is only persisted when something meaningful moved.
+func externalEndpointStatusChanged(old, newSt *v1.ExternalEndpointStatus) bool {
+	if old == nil {
+		return newSt != nil
+	}
+
+	if newSt == nil {
+		return true
+	}
+
+	return old.Phase != newSt.Phase ||
+		old.ServiceURL != newSt.ServiceURL ||
+		old.ErrorMessage != newSt.ErrorMessage
 }

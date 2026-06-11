@@ -9,6 +9,36 @@ local AIStatisticsPluginHandler = {
     VERSION = "0.0.1",
 }
 
+local EMPTY = {}
+
+local function is_table(v)
+    return type(v) == "table"
+end
+
+-- Capture usage breakdown fields (cache / reasoning / cost) from an
+-- OpenAI-compatible `usage` object into kong.ctx.plugin.
+local function record_extended_usage(ctx, usage)
+    if not is_table(usage) then
+        return
+    end
+    if is_table(usage.prompt_tokens_details) then
+        local ptd = usage.prompt_tokens_details
+        if ptd.cached_tokens ~= nil then
+            ctx.cache_read_tokens = ptd.cached_tokens
+        end
+        local cache_creation = ptd.cache_write_tokens or ptd.cache_creation_tokens
+        if cache_creation ~= nil then
+            ctx.cache_creation_tokens = cache_creation
+        end
+    end
+    if is_table(usage.completion_tokens_details) and usage.completion_tokens_details.reasoning_tokens ~= nil then
+        ctx.reasoning_tokens = usage.completion_tokens_details.reasoning_tokens
+    end
+    if usage.cost ~= nil then
+        ctx.cost_usd = usage.cost
+    end
+end
+
 local SUPPORTED_ROUTE_TYPES = {
     "/v1/chat/completions",
     "/v1/embeddings",
@@ -53,7 +83,10 @@ local function handle_json_response()
     local route_type = kong.ctx.plugin.route_type
 
     kong.ctx.plugin.response_model = ai_response.model
-    if ai_response.usage then
+    if ai_response.id ~= nil then
+        kong.ctx.plugin.message_id = ai_response.id
+    end
+    if is_table(ai_response.usage) then
         if route_type == "/v1/chat/completions" then
             kong.ctx.plugin.completions_tokens = ai_response.usage.completion_tokens
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
@@ -65,6 +98,7 @@ local function handle_json_response()
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
             kong.ctx.plugin.total_tokens = ai_response.usage.total_tokens
         end
+        record_extended_usage(kong.ctx.plugin, ai_response.usage)
     end
 end
 
@@ -96,11 +130,15 @@ local function handle_stream_response(conf, chunk, finished)
                     if kong.ctx.plugin.response_model == nil and event_t.model then
                         kong.ctx.plugin.response_model = event_t.model
                     end
+                    if event_t.id ~= nil then
+                        kong.ctx.plugin.message_id = event_t.id
+                    end
                     -- some upstream stream api return token usage in the last event, if exist, record it.
-                    if event_t.usage then
+                    if is_table(event_t.usage) then
                         kong.ctx.plugin.prompt_tokens = event_t.usage.prompt_tokens
                         kong.ctx.plugin.completions_tokens = event_t.usage.completion_tokens
                         kong.ctx.plugin.total_tokens = event_t.usage.total_tokens
+                        record_extended_usage(kong.ctx.plugin, event_t.usage)
                     end
                 end
             end
@@ -215,6 +253,7 @@ function AIStatisticsPluginHandler:log(conf)
         plugin_id = conf.__plugin_id,
         request_model = kong.ctx.plugin.request_model,
         response_model = kong.ctx.plugin.response_model,
+        message_id = kong.ctx.plugin.message_id,
     }
 
     kong.log.set_serialize_value("ai.statistics.meta", meta)
@@ -223,6 +262,11 @@ function AIStatisticsPluginHandler:log(conf)
         completion_tokens = kong.ctx.plugin.completions_tokens,
         prompt_tokens = kong.ctx.plugin.prompt_tokens,
         total_tokens = kong.ctx.plugin.total_tokens,
+        -- Usage breakdown fields (nil when upstream did not provide them).
+        cache_read_tokens = kong.ctx.plugin.cache_read_tokens,
+        cache_creation_tokens = kong.ctx.plugin.cache_creation_tokens,
+        reasoning_tokens = kong.ctx.plugin.reasoning_tokens,
+        cost = kong.ctx.plugin.cost_usd,
     }
 
     kong.log.set_serialize_value("ai.statistics.usage",usage)

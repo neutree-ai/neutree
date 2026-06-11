@@ -18,6 +18,56 @@ local function is_table(v)
     return type(v) == "table"
 end
 
+local function string_or_empty(v)
+    return type(v) == "string" and v or ""
+end
+
+-- Capture usage breakdown fields (cache / reasoning / cost) from an
+-- OpenAI-compatible `usage` object into kong.ctx.plugin so the log phase can
+-- forward them to the usage ledger. Only sets values that are actually present.
+local function record_extended_usage(ctx, usage)
+    if not is_table(usage) then
+        return
+    end
+    local ptd = is_table(usage.prompt_tokens_details) and usage.prompt_tokens_details or EMPTY
+    local ctd = is_table(usage.completion_tokens_details) and usage.completion_tokens_details or EMPTY
+    if ptd.cached_tokens ~= nil then
+        ctx.cache_read_tokens = ptd.cached_tokens
+    end
+    local cache_creation = ptd.cache_write_tokens or ptd.cache_creation_tokens
+    if cache_creation ~= nil then
+        ctx.cache_creation_tokens = cache_creation
+    end
+    if ctd.reasoning_tokens ~= nil then
+        ctx.reasoning_tokens = ctd.reasoning_tokens
+    end
+    if usage.cost ~= nil then
+        ctx.cost_usd = usage.cost
+    end
+end
+
+-- Anthropic reports cache tokens separately from input_tokens, while OpenAI
+-- `prompt_tokens` already includes cached tokens. So the Anthropic input_tokens
+-- is prompt_tokens minus the cache read/creation portions.
+local function anthropic_usage_from_openai(usage)
+    usage = is_table(usage) and usage or EMPTY
+    local ptd = is_table(usage.prompt_tokens_details) and usage.prompt_tokens_details or EMPTY
+    local prompt = usage.prompt_tokens or 0
+    local cache_read = ptd.cached_tokens or 0
+    local cache_creation = ptd.cache_write_tokens or ptd.cache_creation_tokens or 0
+    local input = prompt - cache_read - cache_creation
+    if input < 0 then
+        -- provider did not include cache tokens inside prompt_tokens; keep raw
+        input = prompt
+    end
+    return {
+        input_tokens = input,
+        output_tokens = usage.completion_tokens or 0,
+        cache_read_input_tokens = cache_read,
+        cache_creation_input_tokens = cache_creation,
+    }
+end
+
 local SUPPORTED_ROUTE_TYPES = {
     "/v1/chat/completions",
     "/v1/embeddings",
@@ -253,14 +303,40 @@ local function convert_tools(tools)
             },
         }
     end
+    -- An empty Lua table serialises to a JSON object `{}`, which upstreams
+    -- (e.g. vLLM) reject for the array-typed `tools` field. Omit `tools`
+    -- entirely when the client sent an empty list.
+    if #result == 0 then return nil end
     return result
+end
+
+local function append_system_content(parts, content)
+    if type(content) == "string" then
+        if content ~= "" then
+            parts[#parts + 1] = content
+        end
+    elseif type(content) == "table" then
+        for _, block in ipairs(content) do
+            if type(block) == "table" and type(block.text) == "string" and block.text ~= "" then
+                parts[#parts + 1] = block.text
+            elseif type(block) == "string" and block ~= "" then
+                parts[#parts + 1] = block
+            end
+        end
+    end
 end
 
 local function convert_messages(anthropic_messages)
     local openai_messages = {}
+    local system_parts = {}
 
     for _, msg in ipairs(anthropic_messages) do
-        if msg.role == "user" then
+        local role = msg.role
+        if role == "ctx" or role == "msg" then
+            role = "user"
+        end
+
+        if role == "user" then
             if type(msg.content) == "string" then
                 openai_messages[#openai_messages + 1] = {
                     role = "user",
@@ -358,7 +434,7 @@ local function convert_messages(anthropic_messages)
                     }
                 end
             end
-        elseif msg.role == "assistant" then
+        elseif role == "assistant" then
             if type(msg.content) == "string" then
                 openai_messages[#openai_messages + 1] = {
                     role = "assistant",
@@ -397,12 +473,14 @@ local function convert_messages(anthropic_messages)
                 end
                 openai_messages[#openai_messages + 1] = assistant_msg
             end
+        elseif role == "system" then
+            append_system_content(system_parts, msg.content)
         else
             openai_messages[#openai_messages + 1] = msg
         end
     end
 
-    return openai_messages
+    return openai_messages, system_parts
 end
 
 local function convert_request(anthropic_req)
@@ -415,23 +493,18 @@ local function convert_request(anthropic_req)
     }
 
     local messages = {}
+    local system_parts = {}
     if anthropic_req.system then
-        if type(anthropic_req.system) == "string" then
-            messages[#messages + 1] = { role = "system", content = anthropic_req.system }
-        elseif type(anthropic_req.system) == "table" then
-            local parts = {}
-            for _, block in ipairs(anthropic_req.system) do
-                if type(block) == "table" and block.text then
-                    parts[#parts + 1] = block.text
-                elseif type(block) == "string" then
-                    parts[#parts + 1] = block
-                end
-            end
-            messages[#messages + 1] = { role = "system", content = table.concat(parts, "\n\n") }
-        end
+        append_system_content(system_parts, anthropic_req.system)
     end
 
-    local converted = convert_messages(anthropic_req.messages or {})
+    local converted, inline_system_parts = convert_messages(anthropic_req.messages or {})
+    for _, part in ipairs(inline_system_parts) do
+        system_parts[#system_parts + 1] = part
+    end
+    if #system_parts > 0 then
+        messages[#messages + 1] = { role = "system", content = table.concat(system_parts, "\n\n") }
+    end
     for _, m in ipairs(converted) do
         messages[#messages + 1] = m
     end
@@ -458,6 +531,21 @@ local function convert_response(openai_resp, request_model)
     local message = choice.message or EMPTY
     local content = {}
 
+    -- Surface the model's reasoning as an Anthropic thinking block (OpenRouter
+    -- uses message.reasoning, vLLM/DeepSeek use message.reasoning_content)
+    -- instead of dropping it. Thinking blocks precede the text block.
+    local reasoning = message.reasoning_content
+    if reasoning == nil or reasoning == cjson.null then
+        reasoning = message.reasoning
+    end
+    if type(reasoning) == "string" and reasoning ~= "" then
+        content[#content + 1] = {
+            type = "thinking",
+            thinking = reasoning,
+            signature = "",
+        }
+    end
+
     if message.content and message.content ~= "" and message.content ~= cjson.null then
         content[#content + 1] = {
             type = "text",
@@ -468,10 +556,14 @@ local function convert_response(openai_resp, request_model)
     if is_table(message.tool_calls) then
         for _, tc in ipairs(message.tool_calls) do
             local input = {}
-            if tc["function"] and tc["function"].arguments then
-                local parsed, err = cjson.decode(tc["function"].arguments)
+            -- `tc["function"]` may be cjson.null (a truthy userdata), so guard
+            -- with is_table before indexing it (NEU-404).
+            local fn = is_table(tc["function"]) and tc["function"] or EMPTY
+            local args = fn.arguments
+            if type(args) == "string" then
+                local parsed, err = cjson.decode(args)
                 if err or parsed == nil then
-                    input = { raw = tc["function"].arguments }
+                    input = { raw = args }
                 else
                     input = parsed
                 end
@@ -479,7 +571,7 @@ local function convert_response(openai_resp, request_model)
             content[#content + 1] = {
                 type = "tool_use",
                 id = tc.id,
-                name = tc["function"] and tc["function"].name or "",
+                name = string_or_empty(fn.name),
                 input = input,
             }
         end
@@ -492,7 +584,6 @@ local function convert_response(openai_resp, request_model)
         }
     end
 
-    local usage = is_table(openai_resp.usage) and openai_resp.usage or EMPTY
     return {
         id = openai_resp.id or ("msg_" .. ngx.now()),
         type = "message",
@@ -501,12 +592,7 @@ local function convert_response(openai_resp, request_model)
         content = content,
         stop_reason = map_finish_reason(choice.finish_reason),
         stop_sequence = cjson.null,
-        usage = {
-            input_tokens = usage.prompt_tokens or 0,
-            output_tokens = usage.completion_tokens or 0,
-            cache_creation_input_tokens = 0,
-            cache_read_input_tokens = 0,
-        },
+        usage = anthropic_usage_from_openai(openai_resp.usage),
     }
 end
 
@@ -555,6 +641,18 @@ local function make_content_block_start_tool_use(index, id, name)
     }
 end
 
+local function make_content_block_start_thinking(index)
+    return {
+        type = "content_block_start",
+        index = index,
+        content_block = {
+            type = "thinking",
+            thinking = "",
+            signature = "",
+        },
+    }
+end
+
 local function make_content_block_delta_text(index, text)
     return {
         type = "content_block_delta",
@@ -562,6 +660,28 @@ local function make_content_block_delta_text(index, text)
         delta = {
             type = "text_delta",
             text = text,
+        },
+    }
+end
+
+local function make_content_block_delta_thinking(index, thinking)
+    return {
+        type = "content_block_delta",
+        index = index,
+        delta = {
+            type = "thinking_delta",
+            thinking = thinking,
+        },
+    }
+end
+
+local function make_content_block_delta_signature(index, signature)
+    return {
+        type = "content_block_delta",
+        index = index,
+        delta = {
+            type = "signature_delta",
+            signature = signature,
         },
     }
 end
@@ -588,16 +708,17 @@ local function make_ping()
     return { type = "ping" }
 end
 
-local function make_message_delta(stop_reason, output_tokens)
+-- usage is the full Anthropic usage table (input/output/cache). Anthropic
+-- repeats the cumulative usage on the terminal message_delta, so we forward the
+-- whole object rather than output_tokens alone.
+local function make_message_delta(stop_reason, usage)
     return {
         type = "message_delta",
         delta = {
             stop_reason = stop_reason or "end_turn",
             stop_sequence = cjson.null,
         },
-        usage = {
-            output_tokens = output_tokens or 0,
-        },
+        usage = usage or { output_tokens = 0 },
     }
 end
 
@@ -611,6 +732,8 @@ local function handle_openai_json_response()
         return
     end
 
+    kong.ctx.plugin.response_body_raw = response_body
+
     local ai_response, err = cjson.decode(response_body)
     if err then
         return
@@ -618,6 +741,13 @@ local function handle_openai_json_response()
 
     local route_type = kong.ctx.plugin.route_type
     kong.ctx.plugin.response_model = ai_response.model
+    local first_choice = ((ai_response.choices or EMPTY)[1]) or EMPTY
+    if first_choice.finish_reason and first_choice.finish_reason ~= cjson.null then
+        kong.ctx.plugin.finish_reason = first_choice.finish_reason
+    end
+    if ai_response.id ~= nil then
+        kong.ctx.plugin.message_id = ai_response.id
+    end
     if is_table(ai_response.usage) then
         if route_type == "/v1/chat/completions" then
             kong.ctx.plugin.completions_tokens = ai_response.usage.completion_tokens
@@ -627,6 +757,7 @@ local function handle_openai_json_response()
             kong.ctx.plugin.prompt_tokens = ai_response.usage.prompt_tokens
             kong.ctx.plugin.total_tokens = ai_response.usage.total_tokens
         end
+        record_extended_usage(kong.ctx.plugin, ai_response.usage)
     end
 end
 
@@ -638,6 +769,10 @@ local function handle_openai_stream_response(chunk, finished)
     end
 
     local body_buffer = kong.ctx.plugin.sse_body_buffer
+    local raw_buffer = kong.ctx.plugin.sse_raw_buffer
+    if raw_buffer and type(chunk) == "string" and chunk ~= "" then
+        raw_buffer:put(chunk)
+    end
     if type(chunk) == "string" and chunk ~= "" then
         local events = ai_shared.frame_to_events(chunk, normalized_content_type)
         if not events then
@@ -652,13 +787,21 @@ local function handle_openai_stream_response(chunk, finished)
                     if event_t.choices and #event_t.choices > 0 and body_buffer ~= nil then
                         body_buffer:put(get_token_text(event_t))
                     end
+                    if event_t.choices and event_t.choices[1] and event_t.choices[1].finish_reason
+                        and event_t.choices[1].finish_reason ~= cjson.null then
+                        kong.ctx.plugin.finish_reason = event_t.choices[1].finish_reason
+                    end
                     if kong.ctx.plugin.response_model == nil and event_t.model then
                         kong.ctx.plugin.response_model = event_t.model
+                    end
+                    if event_t.id ~= nil then
+                        kong.ctx.plugin.message_id = event_t.id
                     end
                     if is_table(event_t.usage) then
                         kong.ctx.plugin.prompt_tokens = event_t.usage.prompt_tokens
                         kong.ctx.plugin.completions_tokens = event_t.usage.completion_tokens
                         kong.ctx.plugin.total_tokens = event_t.usage.total_tokens
+                        record_extended_usage(kong.ctx.plugin, event_t.usage)
                     end
                 end
             end
@@ -681,6 +824,8 @@ local function handle_anthropic_non_stream_body()
     ctx.body_buffer = ctx.body_buffer .. (ngx.arg[1] or "")
 
     if ngx.arg[2] then
+        ctx.response_body_raw = ctx.body_buffer
+
         local openai_resp, err = cjson.decode(ctx.body_buffer)
         if err or openai_resp == nil then
             ngx.arg[1] = ctx.body_buffer
@@ -688,9 +833,17 @@ local function handle_anthropic_non_stream_body()
         end
 
         ctx.response_model = openai_resp.model
+        local first_choice = ((openai_resp.choices or EMPTY)[1]) or EMPTY
+        if first_choice.finish_reason and first_choice.finish_reason ~= cjson.null then
+            ctx.finish_reason = first_choice.finish_reason
+        end
+        if openai_resp.id ~= nil then
+            ctx.message_id = openai_resp.id
+        end
         if is_table(openai_resp.usage) then
             ctx.input_tokens = openai_resp.usage.prompt_tokens or 0
             ctx.output_tokens = openai_resp.usage.completion_tokens or 0
+            record_extended_usage(ctx, openai_resp.usage)
         end
 
         local anthropic_resp = convert_response(openai_resp, ctx.request_model)
@@ -700,13 +853,109 @@ local function handle_anthropic_non_stream_body()
     end
 end
 
+-- Build the Anthropic usage table for the terminal message_delta from whatever
+-- upstream usage we captured. Anthropic input_tokens excludes the cache tokens
+-- (OpenAI folds them into prompt_tokens), matching anthropic_usage_from_openai
+-- on the non-streaming path. When the upstream never sent a usage block, fall
+-- back to the access-phase prompt estimate and a char-based completion estimate
+-- so the client still sees non-zero, plausible numbers.
+local function anthropic_stream_final_usage(ctx)
+    local cache_read = ctx.cache_read_tokens or 0
+    local cache_creation = ctx.cache_creation_tokens or 0
+    local input, output
+    if ctx.usage_seen then
+        input = (ctx.input_tokens or 0) - cache_read - cache_creation
+        if input < 0 then
+            input = ctx.input_tokens or 0
+        end
+        output = ctx.output_tokens or 0
+        if output == 0 and (ctx.output_chars or 0) > 0 then
+            output = math.ceil(ctx.output_chars / 4)
+        end
+    else
+        input = ctx.input_tokens_estimate or 0
+        output = math.ceil((ctx.output_chars or 0) / 4)
+    end
+    return {
+        input_tokens = input,
+        output_tokens = output,
+        cache_read_input_tokens = cache_read,
+        cache_creation_input_tokens = cache_creation,
+    }
+end
+
 local function handle_anthropic_stream_body()
     local ctx = kong.ctx.plugin
     local chunk = ngx.arg[1] or ""
     local is_last = ngx.arg[2]
     ctx.sse_buffer = (ctx.sse_buffer or "") .. chunk
+    -- The anthropic streaming path never reaches the SSE buffer set up in
+    -- header_filter, so accumulate the raw upstream response here for tracing.
+    ctx.response_body_raw = (ctx.response_body_raw or "") .. chunk
 
     local output_parts = {}
+
+    -- message_start + ping are emitted lazily on the first content delta so the
+    -- per-block structure can adapt to thinking / text / tool_use ordering.
+    local function ensure_started()
+        if ctx.message_started then
+            return
+        end
+        output_parts[#output_parts + 1] = sse_frame("message_start", make_message_start(ctx.request_model, ctx.input_tokens_estimate))
+        output_parts[#output_parts + 1] = sse_frame("ping", make_ping())
+        ctx.message_started = true
+    end
+
+    -- Close the currently open content block (if any). Thinking blocks flush a
+    -- trailing signature_delta first when the upstream provided a signature.
+    local function close_block()
+        if ctx.open_block_type == nil then
+            return
+        end
+        if ctx.open_block_type == "thinking" and type(ctx.pending_signature) == "string"
+            and ctx.pending_signature ~= "" then
+            output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_signature(ctx.anthropic_block_index, ctx.pending_signature))
+        end
+        ctx.pending_signature = nil
+        output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(ctx.anthropic_block_index))
+        ctx.open_block_type = nil
+    end
+
+    -- Close any open block and allocate the next block index for block_type.
+    local function open_block(block_type)
+        close_block()
+        local idx = ctx.next_block_index or 0
+        ctx.next_block_index = idx + 1
+        ctx.anthropic_block_index = idx
+        ctx.open_block_type = block_type
+        return idx
+    end
+
+    local function finish_stream(stop_reason)
+        if ctx.finish_events_sent then
+            return
+        end
+        -- Only synthesise terminal events for a genuine SSE stream. ctx.saw_event
+        -- is set once we have decoded an upstream SSE event (or seen [DONE]); a
+        -- non-SSE 200 body (e.g. an error JSON) leaves it false, so we don't
+        -- fabricate a fake successful message for it.
+        if not ctx.message_started and not ctx.saw_event then
+            return
+        end
+        ensure_started()
+        -- An upstream stream with no content/tool deltas (only a usage chunk or
+        -- a role-only delta) still needs a content block to be a valid Anthropic
+        -- sequence; emit an empty text block when nothing was opened.
+        if (ctx.next_block_index or 0) == 0 then
+            local idx = open_block("text")
+            output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_text(idx))
+        end
+        close_block()
+        output_parts[#output_parts + 1] = sse_frame("message_delta", make_message_delta(stop_reason or map_finish_reason(ctx.finish_reason), anthropic_stream_final_usage(ctx)))
+        output_parts[#output_parts + 1] = sse_frame("message_stop", make_message_stop())
+        ctx.finish_events_sent = true
+    end
+
     while true do
         local event_end = string.find(ctx.sse_buffer, "\n\n", 1, true)
         if not event_end then
@@ -729,20 +978,12 @@ local function handle_anthropic_stream_body()
         end
 
         if data_line == "[DONE]" then
-            if not ctx.finish_events_sent then
-                if ctx.current_tool_index ~= nil then
-                    output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(ctx.anthropic_block_index))
-                    ctx.current_tool_index = nil
-                end
-                if ctx.text_block_open then
-                    output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(0))
-                    ctx.text_block_open = false
-                end
-                output_parts[#output_parts + 1] = sse_frame("message_delta", make_message_delta("end_turn", ctx.output_tokens))
-                output_parts[#output_parts + 1] = sse_frame("message_stop", make_message_stop())
-                ctx.finish_events_sent = true
-            end
+            -- By the time [DONE] arrives the trailing usage-only chunk has
+            -- already been processed, so finish_stream sees the final usage.
+            ctx.saw_event = true
+            finish_stream(map_finish_reason(ctx.finish_reason))
             output_parts[#output_parts + 1] = "data: [DONE]\n\n"
+            ctx.done_emitted = true
             goto continue
         end
 
@@ -750,13 +991,19 @@ local function handle_anthropic_stream_body()
         if parse_err or event_t == nil then
             goto continue
         end
+        ctx.saw_event = true
 
         if event_t.model and ctx.response_model == nil then
             ctx.response_model = event_t.model
         end
+        if event_t.id ~= nil then
+            ctx.message_id = event_t.id
+        end
         if is_table(event_t.usage) then
             ctx.input_tokens = event_t.usage.prompt_tokens or ctx.input_tokens
             ctx.output_tokens = event_t.usage.completion_tokens or ctx.output_tokens
+            ctx.usage_seen = true
+            record_extended_usage(ctx, event_t.usage)
         end
 
         local choice = ((event_t.choices or EMPTY)[1]) or nil
@@ -766,75 +1013,84 @@ local function handle_anthropic_stream_body()
 
         local delta = choice.delta or EMPTY
         local finish_reason = choice.finish_reason
-
-        if not ctx.message_started then
-            output_parts[#output_parts + 1] = sse_frame("message_start", make_message_start(ctx.request_model, ctx.input_tokens))
-            output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_text(0))
-            output_parts[#output_parts + 1] = sse_frame("ping", make_ping())
-            ctx.message_started = true
-            ctx.text_block_open = true
-            ctx.anthropic_block_index = 0
+        if finish_reason and finish_reason ~= cjson.null then
+            ctx.finish_reason = finish_reason
         end
 
-        if delta.content and delta.content ~= "" and delta.content ~= cjson.null then
-            output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_text(0, delta.content))
+        -- Reasoning / thinking: OpenRouter uses delta.reasoning, vLLM/DeepSeek
+        -- use delta.reasoning_content. Emit an Anthropic thinking block so the
+        -- model's chain-of-thought is not silently dropped.
+        local reasoning = delta.reasoning_content
+        if reasoning == nil or reasoning == cjson.null then
+            reasoning = delta.reasoning
+        end
+        if type(reasoning) == "string" and reasoning ~= "" then
+            ensure_started()
+            if ctx.open_block_type ~= "thinking" then
+                local idx = open_block("thinking")
+                output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_thinking(idx))
+            end
+            output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_thinking(ctx.anthropic_block_index, reasoning))
+            ctx.output_chars = (ctx.output_chars or 0) + #reasoning
+        end
+        -- Capture a reasoning signature if the upstream supplies one; it is
+        -- flushed as a signature_delta when the thinking block closes.
+        if is_table(delta.reasoning_details) then
+            for _, rd in ipairs(delta.reasoning_details) do
+                if is_table(rd) and type(rd.signature) == "string" and rd.signature ~= "" then
+                    ctx.pending_signature = rd.signature
+                end
+            end
+        end
+
+        if type(delta.content) == "string" and delta.content ~= "" then
+            ensure_started()
+            if ctx.open_block_type ~= "text" then
+                local idx = open_block("text")
+                output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_text(idx))
+            end
+            output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_text(ctx.anthropic_block_index, delta.content))
+            ctx.output_chars = (ctx.output_chars or 0) + #delta.content
         end
 
         if is_table(delta.tool_calls) then
+            ensure_started()
             for _, tc in ipairs(delta.tool_calls) do
+                -- `tc["function"]` may be cjson.null (a truthy userdata), so
+                -- guard with is_table before indexing it (NEU-404).
+                local fn = is_table(tc["function"]) and tc["function"] or EMPTY
                 local tc_index = tc.index or 0
-                if tc_index ~= ctx.current_tool_index then
-                    if ctx.current_tool_index ~= nil then
-                        output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(ctx.anthropic_block_index))
-                    elseif ctx.text_block_open then
-                        output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(0))
-                        ctx.text_block_open = false
-                    end
-
+                if ctx.open_block_type ~= "tool_use" or tc_index ~= ctx.current_tool_index then
+                    local idx = open_block("tool_use")
                     ctx.current_tool_index = tc_index
-                    ctx.anthropic_block_index = ctx.anthropic_block_index + 1
                     local tc_id = tc.id or ""
-                    local tc_name = (tc["function"] or EMPTY).name or ""
-                    output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_tool_use(ctx.anthropic_block_index, tc_id, tc_name))
+                    -- Coerce the name through string_or_empty so nil/cjson.null
+                    -- collapse to "" and never leak a non-string into the SSE
+                    -- frame (which would break JSON clients).
+                    local tc_name = string_or_empty(fn.name)
+                    output_parts[#output_parts + 1] = sse_frame("content_block_start", make_content_block_start_tool_use(idx, tc_id, tc_name))
                 end
 
-                local args = (tc["function"] or EMPTY).arguments
-                if args and args ~= "" then
+                local args = fn.arguments
+                if type(args) == "string" and args ~= "" then
                     output_parts[#output_parts + 1] = sse_frame("content_block_delta", make_content_block_delta_json(ctx.anthropic_block_index, args))
                 end
             end
         end
 
-        if finish_reason and finish_reason ~= cjson.null and not ctx.finish_events_sent then
-            if ctx.current_tool_index ~= nil then
-                output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(ctx.anthropic_block_index))
-                ctx.current_tool_index = nil
-            end
-            if ctx.text_block_open then
-                output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(0))
-                ctx.text_block_open = false
-            end
-            output_parts[#output_parts + 1] = sse_frame("message_delta", make_message_delta(map_finish_reason(finish_reason), ctx.output_tokens))
-            output_parts[#output_parts + 1] = sse_frame("message_stop", make_message_stop())
-            ctx.finish_events_sent = true
-        end
+        -- Do NOT emit the terminal events on finish_reason: the upstream sends
+        -- its usage in a separate trailing chunk after the finish_reason chunk,
+        -- so deferring to [DONE] / is_last lets message_delta carry real tokens.
 
         ::continue::
     end
 
-    if is_last and not ctx.finish_events_sent then
-        if ctx.message_started then
-            if ctx.current_tool_index ~= nil then
-                output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(ctx.anthropic_block_index))
-            end
-            if ctx.text_block_open then
-                output_parts[#output_parts + 1] = sse_frame("content_block_stop", make_content_block_stop(0))
-            end
-            output_parts[#output_parts + 1] = sse_frame("message_delta", make_message_delta("end_turn", ctx.output_tokens))
-            output_parts[#output_parts + 1] = sse_frame("message_stop", make_message_stop())
+    if is_last then
+        finish_stream(map_finish_reason(ctx.finish_reason))
+        if not ctx.done_emitted then
+            output_parts[#output_parts + 1] = "data: [DONE]\n\n"
+            ctx.done_emitted = true
         end
-        output_parts[#output_parts + 1] = "data: [DONE]\n\n"
-        ctx.finish_events_sent = true
     end
 
     ngx.arg[1] = table.concat(output_parts)
@@ -858,6 +1114,8 @@ function AIGatewayHandler:access(conf)
         if request_body == nil or request_body == "" then
             return anthropic_error(400, "invalid_request_error", "Request body is required")
         end
+
+        kong.ctx.plugin.request_body_raw = request_body
 
         local anthropic_req, err = cjson.decode(request_body)
         if err or anthropic_req == nil then
@@ -901,13 +1159,29 @@ function AIGatewayHandler:access(conf)
             kong.service.request.enable_buffering()
         else
             kong.ctx.plugin.message_started = false
-            kong.ctx.plugin.text_block_open = false
+            kong.ctx.plugin.open_block_type = nil
             kong.ctx.plugin.current_tool_index = nil
+            kong.ctx.plugin.next_block_index = 0
             kong.ctx.plugin.anthropic_block_index = 0
+            kong.ctx.plugin.pending_signature = nil
             kong.ctx.plugin.sse_buffer = ""
             kong.ctx.plugin.input_tokens = 0
             kong.ctx.plugin.output_tokens = 0
+            kong.ctx.plugin.output_chars = 0
+            kong.ctx.plugin.usage_seen = false
+            kong.ctx.plugin.saw_event = false
             kong.ctx.plugin.finish_events_sent = false
+            kong.ctx.plugin.done_emitted = false
+            -- Streaming never returns usage until the trailing chunk, so the
+            -- message_start input_tokens can only be a best-effort estimate
+            -- (Anthropic emits input_tokens up front; we approximate it here).
+            -- Unlike the OpenAI path we do not fail the request on an estimation
+            -- error, but we log it so an unexpected 0 input_tokens is traceable.
+            local est, est_err = ai_shared.calculate_cost(openai_req or {}, {}, 1.0)
+            if est_err then
+                kong.log.warn("unable to estimate anthropic stream input tokens: ", est_err)
+            end
+            kong.ctx.plugin.input_tokens_estimate = (not est_err and est) or 0
         end
 
         return
@@ -940,12 +1214,15 @@ function AIGatewayHandler:access(conf)
         return fail(400, "request body can not be null")
     end
 
+    kong.ctx.plugin.request_body_raw = request_body
+
     local ai_request, err = cjson.decode(request_body)
     if err then
         return fail(400, "request body is not json format")
     end
 
     kong.ctx.plugin.request_model = ai_request.model
+    kong.ctx.plugin.is_stream = ai_request.stream == true
 
     if conf.upstreams then
         if not ai_request.model or ai_request.model == "" then
@@ -1011,6 +1288,7 @@ function AIGatewayHandler:header_filter(conf)
     local normalized_content_type = content_type and content_type:sub(1, (content_type:find(";") or 0) - 1)
     if normalized_content_type and normalized_content_type == "text/event-stream" then
         kong.ctx.plugin.sse_body_buffer = buffer.new()
+        kong.ctx.plugin.sse_raw_buffer = buffer.new()
         return true
     end
 
@@ -1024,6 +1302,11 @@ function AIGatewayHandler:body_filter(conf)
 
     local response_status = kong.service.response.get_status()
     if response_status ~= 200 then
+        -- Error responses bypass the transform paths below, and streaming
+        -- requests have no response buffering — so capture the raw error body
+        -- here for the log phase to surface.
+        local ctx = kong.ctx.plugin
+        ctx.response_body_raw = (ctx.response_body_raw or "") .. (ngx.arg[1] or "")
         return
     end
 
@@ -1045,6 +1328,30 @@ function AIGatewayHandler:log(conf)
     end
 
     local response_status = kong.service.response.get_status()
+
+    -- Emit raw req/res trace for every request (incl. failures).
+    local response_body = kong.ctx.plugin.response_body_raw
+    if response_body == nil and kong.ctx.plugin.sse_raw_buffer ~= nil then
+        response_body = kong.ctx.plugin.sse_raw_buffer:get()
+    end
+    if response_body == nil then
+        local ok, body = pcall(kong.service.response.get_raw_body)
+        if ok and body ~= nil then
+            response_body = body
+        end
+    end
+    if kong.ctx.plugin.request_body_raw ~= nil then
+        kong.log.set_serialize_value("ai.trace.request_body", kong.ctx.plugin.request_body_raw)
+    end
+    if response_body ~= nil then
+        kong.log.set_serialize_value("ai.trace.response_body", response_body)
+    end
+    if kong.ctx.plugin.finish_reason ~= nil then
+        kong.log.set_serialize_value("ai.trace.finish_reason", kong.ctx.plugin.finish_reason)
+    end
+    -- Whether the client requested a streaming response.
+    kong.log.set_serialize_value("ai.trace.stream", kong.ctx.plugin.is_stream == true)
+
     if response_status ~= 200 then
         return
     end
@@ -1053,6 +1360,7 @@ function AIGatewayHandler:log(conf)
         plugin_id = conf.__plugin_id,
         request_model = kong.ctx.plugin.request_model,
         response_model = kong.ctx.plugin.response_model,
+        message_id = kong.ctx.plugin.message_id,
     }
     kong.log.set_serialize_value("ai.statistics.meta", meta)
 
@@ -1070,6 +1378,11 @@ function AIGatewayHandler:log(conf)
             total_tokens = kong.ctx.plugin.total_tokens,
         }
     end
+    -- Usage breakdown fields (nil when upstream did not provide them).
+    usage.cache_read_tokens = kong.ctx.plugin.cache_read_tokens
+    usage.cache_creation_tokens = kong.ctx.plugin.cache_creation_tokens
+    usage.reasoning_tokens = kong.ctx.plugin.reasoning_tokens
+    usage.cost = kong.ctx.plugin.cost_usd
     kong.log.set_serialize_value("ai.statistics.usage", usage)
 end
 

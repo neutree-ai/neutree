@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -439,6 +440,54 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 	})
 
+	Describe("vLLM Task Translation", Ordered, Label("config", "task-translation", "vllm"), func() {
+		type taskCase struct {
+			suffix      string
+			task        string
+			wantRunner  string
+			wantConvert string
+		}
+
+		DescribeTable("should translate model task into runner and convert flags",
+			func(tc taskCase) {
+				if profileEngineName() != v1.EngineNameVLLM {
+					Skip("vLLM task translation is only applicable to the vLLM engine")
+				}
+
+				epName := "e2e-ep-k8s-task-" + tc.suffix + "-" + Cfg.RunID
+				yamlPath := applyEndpoint(epName, clusterName,
+					withTask(tc.task),
+					withEngineArgs([]EngineArg{{Key: "dtype", Value: "half"}}))
+				DeferCleanup(func() { deleteEndpoint(epName) })
+				DeferCleanup(os.Remove, yamlPath)
+
+				cmd := eventuallyEndpointContainerCommand(k8sH, namespace, epName, profileEngineName())
+				Expect(commandFlagValue(cmd, "--runner")).To(Equal(tc.wantRunner),
+					"--runner mismatch for task %s (command=%v)", tc.task, cmd)
+				Expect(commandFlagValue(cmd, "--convert")).To(Equal(tc.wantConvert),
+					"--convert mismatch for task %s (command=%v)", tc.task, cmd)
+			},
+			Entry("text-embedding uses pooling/embed", taskCase{
+				suffix:      "embed",
+				task:        "text-embedding",
+				wantRunner:  "pooling",
+				wantConvert: "embed",
+			}),
+			Entry("text-rerank uses pooling/classify", taskCase{
+				suffix:      "rerank",
+				task:        "text-rerank",
+				wantRunner:  "pooling",
+				wantConvert: "classify",
+			}),
+			Entry("text-generation keeps vLLM auto defaults", taskCase{
+				suffix:      "gen",
+				task:        "text-generation",
+				wantRunner:  "",
+				wantConvert: "",
+			}),
+		)
+	})
+
 	// --- All Schema Types ---
 
 	Describe("All Schema Types Engine Args", Ordered, Label("config", "schema"), func() {
@@ -482,9 +531,21 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--max_model_len"), "integer")
 				Expect(argsStr).To(ContainSubstring("--gpu_memory_utilization"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean")
+				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean true (flag-only)")
 				Expect(argsStr).To(ContainSubstring("--seed"), "integer")
 				Expect(argsStr).To(ContainSubstring("--override_generation_config"), "object/JSON")
+
+				// Boolean false engine_args must drop the flag entirely. vLLM
+				// argparse rejects `--flag false` (store_true is nargs=0), so
+				// the template skips both `--<flag>` and `"false"` when the
+				// value is the literal string "false".
+				Expect(argsStr).NotTo(ContainSubstring("--enable_prefix_caching"),
+					"boolean false engine_arg must not emit its flag")
+				for _, tok := range allArgs {
+					Expect(tok).NotTo(Equal("false"),
+						"no CLI token should be the literal string \"false\"")
+				}
+
 				found = true
 
 				break
@@ -552,7 +613,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				// kebab-case CLI flags (sprig replace "_" "-"); assert kebab.
 				Expect(argsStr).To(ContainSubstring("--tp-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--mem-fraction-static"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean")
+				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean true (flag-only)")
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--chunked-prefill-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--served-model-name"), "string")
@@ -560,6 +621,22 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--cuda-graph-max-bs"), "integer")
 				Expect(argsStr).To(ContainSubstring("--preferred-sampling-params"), "object/JSON")
 				Expect(argsStr).To(ContainSubstring("--json-model-override-args"), "object/JSON")
+
+				// Boolean false engine_args must drop the flag entirely. SGLang
+				// argparse rejects `--flag false` (store_true is nargs=0), so
+				// the template skips both `--<flag>` and `"false"` when the
+				// value is the literal string "false". Check both kebab and
+				// underscore forms because the SGLang template applies sprig
+				// `replace "_" "-"` only on the emit branches.
+				Expect(argsStr).NotTo(ContainSubstring("--skip-tokenizer-init"),
+					"boolean false engine_arg must not emit its flag (kebab form)")
+				Expect(argsStr).NotTo(ContainSubstring("--skip_tokenizer_init"),
+					"boolean false engine_arg must not emit its flag (underscore form)")
+				for _, tok := range allArgs {
+					Expect(tok).NotTo(Equal("false"),
+						"no CLI token should be the literal string \"false\"")
+				}
+
 				found = true
 
 				break
@@ -576,3 +653,41 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 	})
 })
+
+func eventuallyEndpointContainerCommand(k8sH *K8sHelper, namespace, epName, containerName string) []string {
+	var cmd []string
+	Eventually(func() error {
+		var err error
+		cmd, err = endpointContainerCommand(context.Background(), k8sH, namespace, epName, containerName)
+		return err
+	}, TerminalPhaseTimeout).Should(Succeed(), "should find container %s in endpoint deployment %s", containerName, epName)
+
+	return cmd
+}
+
+func endpointContainerCommand(ctx context.Context, k8sH *K8sHelper, namespace, epName, containerName string) ([]string, error) {
+	d, err := k8sH.GetDeployment(ctx, namespace, epName)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, c := range d.Spec.Template.Spec.Containers {
+		if c.Name == containerName {
+			cmd := append([]string{}, c.Command...)
+			cmd = append(cmd, c.Args...)
+			return cmd, nil
+		}
+	}
+
+	return nil, fmt.Errorf("container %q not found in deployment %s/%s", containerName, namespace, epName)
+}
+
+func commandFlagValue(cmd []string, flag string) string {
+	for i, tok := range cmd {
+		if tok == flag && i+1 < len(cmd) {
+			return strings.Trim(cmd[i+1], `"`)
+		}
+	}
+
+	return ""
+}
