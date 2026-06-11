@@ -302,11 +302,6 @@ victoria-metrics-cluster:
   vminsert:
     replicaCount: 1
     service:
-      # Optional parent-chart override used by neutree-core / vmagent for
-      # nonstandard vminsert Service names. Empty follows
-      # victoria-metrics-cluster.vminsert.fullnameOverride when set, otherwise
-      # the dependency chart default: `<release>-victoria-metrics-cluster-vminsert`.
-      name: ""
       type: LoadBalancer
     # Native VictoriaMetrics subchart Ingress for VMInsert.
     # Backend service defaults to `<release>-victoria-metrics-cluster-vminsert`
@@ -399,10 +394,6 @@ grafana:
     readOnly: true
   service:
     enabled: true
-    # Optional parent-chart override used by neutree-api for nonstandard
-    # Grafana Service names. Empty follows grafana.fullnameOverride when set,
-    # otherwise the dependency chart default: `<release>-grafana`.
-    name: ""
     type: LoadBalancer
 
   # Native Grafana subchart Ingress for the Grafana UI. When enabled with at
@@ -421,6 +412,5 @@ grafana:
     tls: []                 # e.g.
                             #   - hosts: ["grafana.neutree.example.com"]
                             #     secretName: neutree-grafana-tls
-
 
 

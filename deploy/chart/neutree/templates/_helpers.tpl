@@ -116,11 +116,15 @@ Grafana is provided by a dependency chart. Its Service name is derived from
 the subchart's release context, not this parent chart's fullname.
 */}}
 {{- define "neutree.grafana.serviceName" -}}
-{{- $name := printf "%s-grafana" .Release.Name -}}
+{{- $name := default "grafana" .Values.grafana.nameOverride -}}
 {{- if .Values.grafana.fullnameOverride -}}
 {{- $name = (.Values.grafana.fullnameOverride | trunc 63 | trimSuffix "-") -}}
+{{- else if contains $name .Release.Name -}}
+{{- $name = (.Release.Name | trunc 63 | trimSuffix "-") -}}
+{{- else -}}
+{{- $name = (printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-") -}}
 {{- end -}}
-{{- default $name .Values.grafana.service.name -}}
+{{- $name -}}
 {{- end -}}
 
 {{/*
@@ -128,12 +132,32 @@ VictoriaMetrics is provided by a dependency chart. Its vminsert Service name is
 derived from the subchart's release context, not this parent chart's fullname.
 */}}
 {{- define "neutree.vminsert.serviceName" -}}
+{{- $vm := index .Values "victoria-metrics-cluster" -}}
 {{- $vminsert := index .Values "victoria-metrics-cluster" "vminsert" -}}
-{{- $name := printf "%s-victoria-metrics-cluster-vminsert" .Release.Name -}}
+{{- $name := "" -}}
 {{- if $vminsert.fullnameOverride -}}
-{{- $name = ($vminsert.fullnameOverride | trunc 63 | trimSuffix "-") -}}
+{{- $name = tpl $vminsert.fullnameOverride . -}}
+{{- else -}}
+{{- $base := "" -}}
+{{- if $vm.fullnameOverride -}}
+{{- $base = tpl $vm.fullnameOverride . -}}
+{{- else if .Values.global.fullnameOverride -}}
+{{- $base = tpl .Values.global.fullnameOverride . -}}
+{{- else -}}
+{{- $chartName := default "victoria-metrics-cluster" $vm.nameOverride -}}
+{{- if contains $chartName .Release.Name -}}
+{{- $base = .Release.Name -}}
+{{- else -}}
+{{- $base = printf "%s-%s" .Release.Name $chartName -}}
 {{- end -}}
-{{- default $name $vminsert.service.name -}}
+{{- end -}}
+{{- $name = printf "%s-vminsert" $base -}}
+{{- end -}}
+{{- if or .Values.global.disableNameTruncation $vm.disableNameTruncation -}}
+{{- $name -}}
+{{- else -}}
+{{- $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -151,7 +175,7 @@ Priority:
 {{- if gt (len .Values.grafana.ingress.tls) 0 -}}
 {{- $scheme = "https" -}}
 {{- end -}}
-{{- $host := first .Values.grafana.ingress.hosts -}}
+{{- $host := tpl (toString (first .Values.grafana.ingress.hosts)) . -}}
 {{- $path := .Values.grafana.ingress.path | default "/" -}}
 {{- if eq $path "/" -}}
 {{- $url = printf "%s://%s" $scheme $host -}}
