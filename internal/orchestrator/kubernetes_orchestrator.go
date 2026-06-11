@@ -569,7 +569,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 
 	resources, err := k.buildEndpointResourceStatus(ctrlClient, namespace, cluster, endpoint, dep.Spec.Selector.MatchLabels)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to build resource status for endpoint %s", endpoint.Metadata.WorkspaceName())
+		klog.Warningf("failed to build resource status for endpoint %s: %v", endpoint.Metadata.WorkspaceName(), err)
 	}
 
 	// Check if all pods are ready and updated

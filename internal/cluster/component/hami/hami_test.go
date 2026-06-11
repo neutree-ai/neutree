@@ -327,6 +327,35 @@ func TestHAMiPreflightRejectsUnmanagedDaemonSet(t *testing.T) {
 	assert.Contains(t, err.Error(), "unmanaged HAMi resource DaemonSet/hami-device-plugin")
 }
 
+func TestHAMiPreflightRejectsUnmanagedConfigMap(t *testing.T) {
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      SchedulerName + "-device",
+				Namespace: "neutree-system",
+			},
+		}))
+
+	err := component.Preflight(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmanaged HAMi resource ConfigMap/hami-scheduler-device")
+}
+
+func TestHAMiPreflightRejectsUnmanagedClusterRoleBinding(t *testing.T) {
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t, &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: SchedulerName + "-kube",
+			},
+		}))
+
+	err := component.Preflight(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmanaged HAMi resource ClusterRoleBinding/hami-scheduler-kube")
+}
+
 func TestHAMiServingCertificateRenewalWindow(t *testing.T) {
 	now := time.Now()
 	fresh := newHAMiTLSSecret(t, "neutree-system")
@@ -436,6 +465,35 @@ func TestHAMiDeleteRemovesTLSSecret(t *testing.T) {
 	got := &corev1.Secret{}
 	err = fakeClient.Get(context.Background(), client.ObjectKey{Name: TLSSecretName, Namespace: "neutree-system"}, got)
 	assert.True(t, apierrors.IsNotFound(err))
+}
+
+func TestHAMiDeleteDisablesNodeScopeLabels(t *testing.T) {
+	enabledNode := newHAMiNode("gpu-enabled", map[string]string{
+		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	})
+	disabledNode := newHAMiNode("gpu-disabled", map[string]string{
+		plugin.NvidiaGPUVirtualizationLabelKey: "false",
+	})
+	unlabeledNode := newHAMiNode("gpu-unlabeled", map[string]string{})
+	fakeClient := newHAMiFakeClient(t, enabledNode, disabledNode, unlabeledNode)
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, fakeClient)
+
+	err := component.Delete()
+
+	require.NoError(t, err)
+
+	gotEnabled := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-enabled"}, gotEnabled))
+	assert.Equal(t, "false", gotEnabled.Labels[plugin.NvidiaGPUVirtualizationLabelKey])
+
+	gotDisabled := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-disabled"}, gotDisabled))
+	assert.Equal(t, "false", gotDisabled.Labels[plugin.NvidiaGPUVirtualizationLabelKey])
+
+	gotUnlabeled := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-unlabeled"}, gotUnlabeled))
+	assert.NotContains(t, gotUnlabeled.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
 }
 
 func assertHasObject(t *testing.T, items []unstructured.Unstructured, kind, name string) {

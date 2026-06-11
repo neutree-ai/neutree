@@ -114,6 +114,11 @@ func (h *HAMiComponent) Delete() error {
 		return errors.New("HAMi resources are not fully deleted, please wait")
 	}
 
+	if err := h.DisableNodeScope(context.Background()); err != nil {
+		h.setNotReadyStatus("NodeScopeCleanupFailed", err.Error())
+		return errors.Wrap(err, "failed to disable HAMi node scope")
+	}
+
 	if err := h.CleanupTLS(context.Background()); err != nil {
 		h.setNotReadyStatus("TLSCleanupFailed", err.Error())
 		return errors.Wrap(err, "failed to clean up HAMi TLS secret")
