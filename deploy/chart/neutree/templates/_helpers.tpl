@@ -188,7 +188,17 @@ Priority:
 {{- $scheme = "https" -}}
 {{- end -}}
 {{- $hostConfig := first $vminsert.ingress.hosts -}}
-{{- $host := tpl (toString (get $hostConfig "name")) . -}}
+{{- if not (hasKey $hostConfig "name") -}}
+{{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.vminsert.ingress.hosts[0].name is empty" -}}
+{{- end -}}
+{{- $rawHost := get $hostConfig "name" -}}
+{{- if not $rawHost -}}
+{{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.vminsert.ingress.hosts[0].name is empty" -}}
+{{- end -}}
+{{- $host := tpl (toString $rawHost) . -}}
+{{- if not $host -}}
+{{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.vminsert.ingress.hosts[0].name renders empty" -}}
+{{- end -}}
 {{- $path := "/insert" -}}
 {{- $pathValue := get $hostConfig "path" -}}
 {{- if kindIs "slice" $pathValue -}}
