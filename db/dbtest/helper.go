@@ -125,9 +125,14 @@ func setUserContext(userID string) SetContextFunc {
 	}
 }
 
-func setJwtSecretContext(jwtSecret string) SetContextFunc {
+// testJwtSecret is the JWT secret used by the database test context. It is the
+// only value ever needed, so setJwtSecretContext takes no parameter (avoids the
+// unparam lint about an always-constant argument).
+const testJwtSecret = "test"
+
+func setJwtSecretContext() SetContextFunc {
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec(fmt.Sprintf("SET LOCAL app.settings.jwt_secret = '%s'", jwtSecret))
+		_, err := tx.Exec(fmt.Sprintf("SET LOCAL app.settings.jwt_secret = '%s'", testJwtSecret))
 		return errors.Wrap(err, "failed to set jwt secret context")
 	}
 }

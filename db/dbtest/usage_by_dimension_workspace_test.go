@@ -36,7 +36,7 @@ func TestGetUsageByDimensionWorkspaceFilter(t *testing.T) {
 
 	createKey := func(workspace, name string) string {
 		var id string
-		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext("test")}, func(tx *sql.Tx) error {
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
 			return tx.QueryRowContext(ctx, `
 				SELECT id FROM api.create_api_key(
 					p_workspace := $1,
