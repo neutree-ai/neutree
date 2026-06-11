@@ -657,7 +657,7 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *te
 
 	err := reconciler.reconcileDelete(reconcileCtx)
 
-	require.ErrorContains(t, err, "waiting for namespace deletion")
+	require.ErrorContains(t, err, "metrics resources are not fully deleted")
 
 	gotNode := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: "gpu-node"}, gotNode))
@@ -666,6 +666,14 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *te
 	gotClusterRole := newUnstructuredObject("rbac.authorization.k8s.io/v1", "ClusterRole",
 		"", "vmagent-node-reader-test")
 	require.Error(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: "vmagent-node-reader-test"}, gotClusterRole))
+
+	gotNamespace := &corev1.Namespace{}
+	require.NoError(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: namespace.Name}, gotNamespace))
+
+	err = reconciler.reconcileDelete(reconcileCtx)
+
+	require.ErrorContains(t, err, "waiting for namespace deletion")
+	require.Error(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: namespace.Name}, gotNamespace))
 }
 
 func newUnstructuredObject(apiVersion, kind, namespace, name string) *unstructured.Unstructured {

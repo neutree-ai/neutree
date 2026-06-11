@@ -261,20 +261,17 @@ func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *Reconc
 		return errors.Wrap(err, "failed to get namespace")
 	}
 
-	componentDeleteErr := c.deleteClusterComponents(reconcileCtx)
-
-	if ns.DeletionTimestamp == nil {
-		err = reconcileCtx.ctrClient.Delete(reconcileCtx.Ctx, ns)
-		if err != nil {
-			return utilerrors.NewAggregate([]error{
-				componentDeleteErr,
-				errors.Wrap(err, "failed to delete namespace"),
-			})
-		}
+	if ns.DeletionTimestamp != nil {
+		return errors.New("waiting for namespace deletion")
 	}
 
-	if componentDeleteErr != nil {
-		return componentDeleteErr
+	if err := c.deleteClusterComponents(reconcileCtx); err != nil {
+		return err
+	}
+
+	err = reconcileCtx.ctrClient.Delete(reconcileCtx.Ctx, ns)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete namespace")
 	}
 
 	return errors.New("waiting for namespace deletion")
@@ -290,27 +287,23 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 			reconcileCtx.clusterNamespace, "", ImagePullSecretName,
 			*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
 
-		if err := hamiComp.DisableNodeScope(reconcileCtx.Ctx); err != nil {
-			errs = append(errs, errors.Wrap(err, "failed to disable accelerator virtualization node scope"))
-		}
-
-		if _, err := hamiComp.DeleteResources(reconcileCtx.Ctx); err != nil {
-			errs = append(errs, errors.Wrap(err, "failed to delete accelerator virtualization resources"))
+		if err := hamiComp.Delete(); err != nil {
+			errs = append(errs, errors.Wrap(err, "failed to delete accelerator virtualization component"))
 		}
 	}
 
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
 		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
-	if _, err := metricsComp.DeleteResources(reconcileCtx.Ctx); err != nil {
-		errs = append(errs, errors.Wrap(err, "failed to delete metrics resources"))
+	if err := metricsComp.Delete(); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to delete metrics component"))
 	}
 
 	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
 		*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
-	if _, err := routerComp.DeleteResources(reconcileCtx.Ctx); err != nil {
-		errs = append(errs, errors.Wrap(err, "failed to delete router resources"))
+	if err := routerComp.Delete(); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to delete router component"))
 	}
 
 	return utilerrors.NewAggregate(errs)

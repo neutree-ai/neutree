@@ -28,7 +28,7 @@ func TestHAMiComponentResources(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	objs, err := component.renderResources(NodeScopePlan{})
+	objs, err := component.renderResources(defaultNodeScopePlan())
 
 	require.NoError(t, err)
 	assertHasObject(t, objs.Items, "ServiceAccount", "hami-scheduler")
@@ -46,7 +46,7 @@ func TestHAMiComponentResourcesUseHAMiEntrypoints(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	objs, err := component.renderResources(NodeScopePlan{})
+	objs, err := component.renderResources(defaultNodeScopePlan())
 	require.NoError(t, err)
 
 	scheduler := findContainer(t, objs.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")
@@ -70,7 +70,7 @@ func TestHAMiComponentDevicePluginNodeSelectorUsesVirtualizationLabelOnly(t *tes
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	objs, err := component.renderResources(NodeScopePlan{})
+	objs, err := component.renderResources(defaultNodeScopePlan())
 	require.NoError(t, err)
 
 	devicePlugin := findObject(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName)
@@ -797,6 +797,12 @@ func newHAMiFakeClient(t *testing.T, objs ...client.Object) client.Client {
 	require.NoError(t, rbacv1.AddToScheme(scheme))
 
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+}
+
+func defaultNodeScopePlan() NodeScopePlan {
+	return NodeScopePlan{
+		NodeScopeLabel: defaultNodeScopeLabel(),
+	}
 }
 
 func newHAMiReadyDeployment(namespace string) *appsv1.Deployment {
