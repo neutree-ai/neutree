@@ -106,6 +106,52 @@ func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
 		assert.Contains(t, err.Hint, "virtualization.core_percent")
 	})
 
+	t.Run("rejects fractional vGPU memory resource", func(t *testing.T) {
+		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
+			"metadata": {"name": "endpoint", "workspace": "default"},
+			"spec": {
+				"cluster": "cluster",
+				"resources": {
+					"gpu": "1",
+					"accelerator": {
+						"type": "nvidia_gpu",
+						"product": "Tesla-T4",
+						"virtualization.memory_mib": "8192.5",
+						"virtualization.core_percent": "50"
+					}
+				}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10216", err.Code)
+		assert.Contains(t, err.Hint, "virtualization.memory_mib")
+		assert.Contains(t, err.Hint, "positive integer")
+	})
+
+	t.Run("rejects fractional vGPU core resource", func(t *testing.T) {
+		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
+			"metadata": {"name": "endpoint", "workspace": "default"},
+			"spec": {
+				"cluster": "cluster",
+				"resources": {
+					"gpu": "1",
+					"accelerator": {
+						"type": "nvidia_gpu",
+						"product": "Tesla-T4",
+						"virtualization.memory_mib": "8192",
+						"virtualization.core_percent": "50.5"
+					}
+				}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10216", err.Code)
+		assert.Contains(t, err.Hint, "virtualization.core_percent")
+		assert.Contains(t, err.Hint, "positive integer")
+	})
+
 	t.Run("allows vGPU endpoint resource shape without cluster availability lookup", func(t *testing.T) {
 		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
 			"metadata": {"name": "endpoint", "workspace": "default"},

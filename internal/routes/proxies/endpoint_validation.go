@@ -107,7 +107,7 @@ func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.Resour
 		return endpointResourceValueError(err)
 	}
 
-	if _, err := parsePositiveFloat(resources.GetAcceleratorVirtualizationMemoryMiB(), "virtualization.memory_mib"); err != nil {
+	if _, err := parseOptionalPositiveInteger(resources.GetAcceleratorVirtualizationMemoryMiB(), "virtualization.memory_mib"); err != nil {
 		return endpointResourceValueError(err)
 	}
 
@@ -127,22 +127,21 @@ func parsePositiveIntegerResource(value *string, field string) (int64, error) {
 		return 0, fmt.Errorf("%s must be a positive integer", field)
 	}
 
-	parsed, err := strconv.ParseInt(*value, 10, 64)
-	if err != nil || parsed <= 0 {
-		return 0, fmt.Errorf("%s must be a positive integer", field)
-	}
-
-	return parsed, nil
+	return parseRequiredPositiveInteger(*value, field)
 }
 
-func parsePositiveFloat(value string, field string) (float64, error) {
+func parseOptionalPositiveInteger(value string, field string) (int64, error) {
 	if value == "" {
 		return 0, nil
 	}
 
-	parsed, err := strconv.ParseFloat(value, 64)
+	return parseRequiredPositiveInteger(value, field)
+}
+
+func parseRequiredPositiveInteger(value string, field string) (int64, error) {
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || parsed <= 0 {
-		return 0, fmt.Errorf("%s must be a positive number", field)
+		return 0, fmt.Errorf("%s must be a positive integer", field)
 	}
 
 	return parsed, nil
@@ -153,7 +152,7 @@ func validatePercentResource(value string, field string) error {
 		return nil
 	}
 
-	parsed, err := parsePositiveFloat(value, field)
+	parsed, err := parseOptionalPositiveInteger(value, field)
 	if err != nil {
 		return err
 	}

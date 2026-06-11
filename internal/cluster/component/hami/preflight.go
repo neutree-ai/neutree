@@ -6,6 +6,7 @@ import (
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -52,30 +53,40 @@ func (h *HAMiComponent) validateUnmanagedHAMi(ctx context.Context) error {
 		return errors.New("found existing unmanaged HAMi webhook hami-webhook")
 	}
 
-	objects := []client.Object{
-		&appsv1.Deployment{},
-		&appsv1.DaemonSet{},
-		&appsv1.DaemonSet{},
-		&corev1.Service{},
-		&corev1.Service{},
-		&corev1.Service{},
-	}
-	keys := []types.NamespacedName{
-		{Name: SchedulerName, Namespace: h.namespace},
-		{Name: DevicePluginDaemonSetName, Namespace: h.namespace},
-		{Name: MonitorDaemonSetName, Namespace: h.namespace},
-		{Name: SchedulerName, Namespace: h.namespace},
-		{Name: MonitorServiceName, Namespace: h.namespace},
-		{Name: MonitorDaemonSetName, Namespace: h.namespace},
-	}
-
-	for i, obj := range objects {
-		if err := h.validateManagedObject(ctx, obj, keys[i]); err != nil {
+	for _, check := range h.unmanagedHAMiResourceChecks() {
+		if err := h.validateManagedObject(ctx, check.object, check.key); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+type managedObjectCheck struct {
+	object client.Object
+	key    types.NamespacedName
+}
+
+func (h *HAMiComponent) unmanagedHAMiResourceChecks() []managedObjectCheck {
+	return []managedObjectCheck{
+		{object: &corev1.ServiceAccount{}, key: types.NamespacedName{Name: SchedulerName, Namespace: h.namespace}},
+		{object: &rbacv1.Role{}, key: types.NamespacedName{Name: SchedulerName, Namespace: h.namespace}},
+		{object: &rbacv1.RoleBinding{}, key: types.NamespacedName{Name: SchedulerName, Namespace: h.namespace}},
+		{object: &rbacv1.ClusterRole{}, key: types.NamespacedName{Name: SchedulerName}},
+		{object: &rbacv1.ClusterRoleBinding{}, key: types.NamespacedName{Name: SchedulerName}},
+		{object: &rbacv1.ClusterRoleBinding{}, key: types.NamespacedName{Name: SchedulerName + "-kube"}},
+		{object: &rbacv1.ClusterRoleBinding{}, key: types.NamespacedName{Name: SchedulerName + "-volume"}},
+		{object: &corev1.ConfigMap{}, key: types.NamespacedName{Name: SchedulerName, Namespace: h.namespace}},
+		{object: &corev1.ConfigMap{}, key: types.NamespacedName{Name: SchedulerName + "-device", Namespace: h.namespace}},
+		{object: &corev1.Service{}, key: types.NamespacedName{Name: SchedulerName, Namespace: h.namespace}},
+		{object: &appsv1.Deployment{}, key: types.NamespacedName{Name: SchedulerName, Namespace: h.namespace}},
+		{object: &corev1.ServiceAccount{}, key: types.NamespacedName{Name: DevicePluginDaemonSetName, Namespace: h.namespace}},
+		{object: &rbacv1.ClusterRole{}, key: types.NamespacedName{Name: DevicePluginDaemonSetName + "-monitor"}},
+		{object: &rbacv1.ClusterRoleBinding{}, key: types.NamespacedName{Name: DevicePluginDaemonSetName}},
+		{object: &corev1.ConfigMap{}, key: types.NamespacedName{Name: DevicePluginDaemonSetName, Namespace: h.namespace}},
+		{object: &corev1.Service{}, key: types.NamespacedName{Name: MonitorServiceName, Namespace: h.namespace}},
+		{object: &appsv1.DaemonSet{}, key: types.NamespacedName{Name: DevicePluginDaemonSetName, Namespace: h.namespace}},
+	}
 }
 
 func (h *HAMiComponent) validateManagedObject(ctx context.Context, obj client.Object, key types.NamespacedName) error {
@@ -99,6 +110,18 @@ func objectKind(obj client.Object) string {
 		return "DaemonSet"
 	case *corev1.Service:
 		return "Service"
+	case *corev1.ServiceAccount:
+		return "ServiceAccount"
+	case *corev1.ConfigMap:
+		return "ConfigMap"
+	case *rbacv1.Role:
+		return "Role"
+	case *rbacv1.RoleBinding:
+		return "RoleBinding"
+	case *rbacv1.ClusterRole:
+		return "ClusterRole"
+	case *rbacv1.ClusterRoleBinding:
+		return "ClusterRoleBinding"
 	default:
 		if kind := obj.GetObjectKind().GroupVersionKind().Kind; kind != "" {
 			return kind

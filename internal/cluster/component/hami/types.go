@@ -12,7 +12,6 @@ const (
 	Version                   = "v2.9.0"
 	SchedulerName             = "hami-scheduler"
 	DevicePluginDaemonSetName = "hami-device-plugin"
-	MonitorDaemonSetName      = "hami-vgpu-monitor"
 	MonitorServiceName        = "hami-device-plugin-monitor"
 	WebhookName               = "hami-webhook"
 	TLSSecretName             = "hami-scheduler-tls" //nolint:gosec

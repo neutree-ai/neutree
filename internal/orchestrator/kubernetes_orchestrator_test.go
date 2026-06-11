@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
@@ -2854,6 +2857,75 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			fakeClient.AssertExpectations()
 		})
 	}
+}
+
+func TestKubernetesOrchestrator_getEndpointStatsIgnoresResourceStatusError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "production",
+			Name:      "chat-model",
+		},
+		Spec: &v1.EndpointSpec{
+			Replicas: v1.ReplicaSpec{
+				Num: pointer.Int(1),
+			},
+		},
+	}
+
+	fakeClient := NewFakeK8sClient(t).
+		WithDeployment(endpoint.Metadata.Name, 1, 1, 1)
+
+	require.NoError(t, fakeClient.Create(context.Background(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node",
+			Labels: map[string]string{
+				plugin.NvidiaGPUVirtualizationLabelKey:    "true",
+				plugin.NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+			},
+			Annotations: map[string]string{
+				plugin.HAMiNodeNvidiaRegisterAnnotation: `[{"id":"GPU-1","devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true}]`,
+			},
+		},
+	}))
+	require.NoError(t, fakeClient.Create(context.Background(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat-model-0",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": endpoint.Metadata.Name,
+			},
+			Annotations: map[string]string{
+				plugin.HAMiVGPUDevicesAllocatedAnnotation: ";GPU-1,NVIDIA,invalid-memory,100:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}))
+
+	o := &kubernetesOrchestrator{
+		acceleratorMgr: accelerator.NewManager(gin.New()),
+	}
+	cluster := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+			},
+		},
+	}
+
+	status, err := o.getEndpointStats(fakeClient, "test-namespace", cluster, endpoint)
+
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.Equal(t, v1.EndpointPhaseRUNNING, status.Phase)
+	assert.Nil(t, status.Resources)
 }
 
 // TestBuildDeployment_BooleanEngineArgs pins the boolean handling in the
