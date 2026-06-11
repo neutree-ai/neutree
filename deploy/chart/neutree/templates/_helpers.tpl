@@ -219,7 +219,6 @@ Choose the Grafana URL exposed by the API system-info endpoint.
 Priority:
 1. system.grafana.url explicit override
 2. grafana.grafana.ini.server.root_url
-3. grafana.ingress host when Grafana ingress is enabled
 No in-cluster fallback is used because this URL is consumed as a user-facing
 external address.
 */}}
@@ -229,22 +228,6 @@ external address.
 {{- $grafanaRootURL := dig "grafana.ini" "server" "root_url" "" .Values.grafana -}}
 {{- if $grafanaRootURL -}}
 {{- $url = tpl (toString $grafanaRootURL) . -}}
-{{- else -}}
-{{- if and .Values.grafana.ingress.enabled (gt (len .Values.grafana.ingress.hosts) 0) -}}
-{{- $scheme := "http" -}}
-{{- if gt (len .Values.grafana.ingress.tls) 0 -}}
-{{- $scheme = "https" -}}
-{{- end -}}
-{{- $host := tpl (toString (first .Values.grafana.ingress.hosts)) . -}}
-{{- $path := .Values.grafana.ingress.path | default "/" -}}
-{{- if eq $path "/" -}}
-{{- $url = printf "%s://%s" $scheme $host -}}
-{{- else if hasPrefix "/" $path -}}
-{{- $url = printf "%s://%s%s" $scheme $host $path -}}
-{{- else -}}
-{{- $url = printf "%s://%s/%s" $scheme $host $path -}}
-{{- end -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $url -}}

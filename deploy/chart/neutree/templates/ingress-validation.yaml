@@ -25,6 +25,12 @@
 {{- if and $vminsert.ingress.enabled (eq (len $vminsert.ingress.hosts) 0) -}}
 {{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.vminsert.ingress.hosts is empty" -}}
 {{- end -}}
+{{- if and $vminsert.ingress.enabled (gt (len $vminsert.ingress.hosts) 0) -}}
+{{- $vminsertHost := tpl (toString (get (first $vminsert.ingress.hosts) "name")) . -}}
+{{- if not $vminsertHost -}}
+{{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.vminsert.ingress.hosts[0].name is empty" -}}
+{{- end -}}
+{{- end -}}
 {{- if and $vminsert.ingress.enabled .Values.metrics.remoteWriteUrl (gt (len $vminsert.ingress.tls) 0) (gt (len $vminsert.ingress.hosts) 0) -}}
 {{- $vminsertHost := tpl (toString (get (first $vminsert.ingress.hosts) "name")) . -}}
 {{- if hasPrefix (printf "http://%s" $vminsertHost) .Values.metrics.remoteWriteUrl -}}
