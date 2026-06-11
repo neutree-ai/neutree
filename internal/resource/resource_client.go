@@ -44,6 +44,11 @@ type ResourceNode struct {
 
 type EndpointInstanceResource = resourceparser.EndpointInstanceResource
 
+// Deprecated: use resourceparser.ResourceParser. This alias keeps generated
+// accelerator mocks compatible while the canonical interface lives in the
+// accelerator resourceparser package.
+type ResourceParser = resourceparser.ResourceParser
+
 type K8sResourceClient struct {
 	client  client.Client
 	parsers map[string]resourceparser.ResourceParser
