@@ -1,0 +1,37 @@
+# Engine import manifest for the mock "myengine" v0.1.0.
+# Import (metadata-only, no images pushed) with:
+#   neutree-cli import engine \
+#     --package myengine-engine.yaml --skip-image-push \
+#     --server-url http://<api-host>:3000 --api-key <sk-...>
+#
+# Metadata-only mode is enough for a static-nodes (Ray SSH) cluster <= v1.0.0,
+# where the engine serve code lives inside the cluster serve image rather than a
+# per-endpoint engine container, so no image is pulled at deploy time.
+manifest_version: "1.0"
+metadata:
+  author: "NEUTREE-GENERAL-10"
+  version: "v1.1.0"          # neutree manifest-format/platform version
+  tags: ["mock", "demo", "cpu-only"]
+images: []                    # metadata-only import; no image archive
+engines:
+  - name: myengine
+    supported_tasks:
+      - text-generation
+    engine_versions:
+      - version: v0.1.0
+        supported_tasks:
+          - text-generation
+        # Placeholder image; NOT pulled for an old (<=v1.0.0) SSH cluster.
+        images:
+          cpu:
+            image_name: neutree/myengine-mock
+            tag: v0.1.0
+        # JSON-Schema for engine_args (mock has one harmless knob).
+        values_schema:
+          type: object
+          additionalProperties: false
+          properties:
+            mock_note:
+              type: string
+              default: ""
+              description: "Free-form note echoed in logs; has no effect on output."

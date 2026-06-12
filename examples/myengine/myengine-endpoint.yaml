@@ -1,0 +1,30 @@
+# Endpoint that deploys the mock "myengine" on a static-nodes (Ray SSH) cluster.
+# Apply with:
+#   neutree-cli apply -f myengine-endpoint.yaml \
+#     --server-url http://<api-host>:3000 --api-key <sk-...>
+#
+# The model spec points at a tiny, already-cached GGUF only to satisfy control-plane
+# validation/caching; the mock backend never loads it and uses no GPU.
+apiVersion: v1
+kind: Endpoint
+metadata:
+  name: myengine-smoke
+  workspace: default
+spec:
+  cluster: quick-start-cluster
+  engine:
+    engine: myengine
+    version: v0.1.0
+  model:
+    registry: public-hugging-face
+    name: afrideva/Tinystories-gpt-0.1-3m-GGUF
+    file: "*8_0.gguf"
+    version: main
+    task: text-generation
+  resources:
+    cpu: "1"
+    memory: "1"
+  replicas:
+    num: 1
+  variables:
+    engine_args: {}
