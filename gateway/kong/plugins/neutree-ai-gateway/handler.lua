@@ -3,6 +3,7 @@ local buffer = require("string.buffer")
 local ai_shared = require("kong.llm.drivers.shared")
 local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
+local quota = require("kong.plugins.neutree-ai-gateway.quota")
 
 local AIGatewayHandler = {
     PRIORITY = 1100,
@@ -1103,6 +1104,10 @@ function AIGatewayHandler:access(conf)
     if maybe_return_model_list(conf, suffix) then
         return
     end
+
+    -- Enforce per-API-key token quota (NEUTREE-GENERAL-9). Denies with 429 when
+    -- the key's minimum remaining tokens across all quota policies is exhausted.
+    quota.enforce()
 
     if is_anthropic_messages_path(suffix) then
         local content_type = kong.request.get_header("Content-Type") or "application/json"
