@@ -15,12 +15,13 @@ local schema = {
             },
           },
           -- service_role JWT used to authenticate the remaining-token lookup.
+          -- No default/referenceable: an empty-string default trips kong's
+          -- vault-reference validation ("length must be at least 1") and aborts
+          -- plugin-schema load. The handler no-ops when it is unset.
           {
             service_token = {
               type = "string",
               required = false,
-              default = "",
-              referenceable = true,
             },
           },
           -- Seconds to cache a key's remaining tokens. Bounds the sync window
