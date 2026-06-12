@@ -212,6 +212,8 @@ func resolveAllWorkspacesTraceScope(c *gin.Context, deps *Dependencies, userID s
 	// Otherwise scope to the per-workspace grants the caller actually holds. We
 	// enumerate workspaces and OR together a clause per workspace the caller can
 	// read, narrowing to a single endpoint_type where only one permission is held.
+	// A permission already granted globally holds in every workspace, so skip its
+	// per-workspace check and only query the DB for the permission(s) not global.
 	workspaces, err := deps.Storage.ListWorkspace(storage.ListOption{})
 	if err != nil {
 		tracePermError(c, userID, err)
@@ -227,18 +229,24 @@ func resolveAllWorkspacesTraceScope(c *gin.Context, deps *Dependencies, userID s
 			continue
 		}
 
-		canEndpoint, err := middleware.CheckWorkspacePermission(deps.Storage, userID, name, permEndpointTraceRead)
-		if err != nil {
-			tracePermError(c, userID, err)
+		canEndpoint := globalEndpoint
+		if !canEndpoint {
+			canEndpoint, err = middleware.CheckWorkspacePermission(deps.Storage, userID, name, permEndpointTraceRead)
+			if err != nil {
+				tracePermError(c, userID, err)
 
-			return
+				return
+			}
 		}
 
-		canExternal, err := middleware.CheckWorkspacePermission(deps.Storage, userID, name, permExternalEndpointTraceRead)
-		if err != nil {
-			tracePermError(c, userID, err)
+		canExternal := globalExternal
+		if !canExternal {
+			canExternal, err = middleware.CheckWorkspacePermission(deps.Storage, userID, name, permExternalEndpointTraceRead)
+			if err != nil {
+				tracePermError(c, userID, err)
 
-			return
+				return
+			}
 		}
 
 		if clause := workspaceScopeClause(name, canEndpoint, canExternal); clause != "" {
@@ -267,7 +275,7 @@ func resolveAllWorkspacesTraceScope(c *gin.Context, deps *Dependencies, userID s
 func workspaceScopeClause(workspace string, canEndpoint, canExternal bool) string {
 	switch {
 	case canEndpoint && canExternal:
-		return fmt.Sprintf("workspace:=%s", logsQLQuoteValue(workspace))
+		return fmt.Sprintf("(workspace:=%s)", logsQLQuoteValue(workspace))
 	case canEndpoint:
 		return fmt.Sprintf("(workspace:=%s endpoint_type:=%s)",
 			logsQLQuoteValue(workspace), logsQLQuoteValue("endpoint"))
