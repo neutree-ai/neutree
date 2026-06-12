@@ -123,11 +123,18 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	imageService := registry.NewImageService()
 	c.ImageService = imageService
 
+	gatewayServiceToken, err := storage.CreateServiceToken(o.Storage.JwtSecret)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create service token for gateway")
+	}
+
 	gw, err := gateway.GetGateway(o.Gateway.Type, gateway.GatewayOptions{
 		ProxyUrl:          o.Gateway.ProxyUrl,
 		AdminUrl:          o.Gateway.AdminUrl,
 		LogRemoteWriteUrl: o.Gateway.LogRemoteWriteUrl,
 		Storage:           s,
+		ApiUrl:            o.Gateway.NeutreeApiUrl,
+		ServiceToken:      *gatewayServiceToken,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init gateway")
