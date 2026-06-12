@@ -133,3 +133,92 @@ func TestQuotaHierarchyAndRemaining(t *testing.T) {
 		}
 	})
 }
+
+// TestQuotaDimensions covers per-dimension quota overlays (NEUTREE-GENERAL-9):
+// a dimension policy is an independent overlay (it does not trip the sum
+// hierarchy) and only constrains get_api_key_remaining when the request targets
+// that dimension; its usage is sourced from detailed_dimensional_usage.
+func TestQuotaDimensions(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	const ws = "quota-dim-ws"
+	const model = "quota-dim-model"
+	user := CreateTestUser(t, "quotadimuser", "quotadim@example.com", "testpassword")
+
+	var key string
+	err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `
+			SELECT id FROM api.create_api_key(p_workspace := $1, p_name := $2, p_quota := 1000)`,
+			ws, "quota-dim-k").Scan(&key)
+	})
+	if err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.quota_policies WHERE workspace = $1", ws)
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_daily_usage WHERE (spec).api_key_id = $1", key)
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", key)
+	})
+
+	remaining := func(model, endpoint, etype interface{}) sql.NullInt64 {
+		var r sql.NullInt64
+		if err := db.QueryRowContext(ctx,
+			`SELECT api.get_api_key_remaining($1, $2, $3, $4)`, key, model, endpoint, etype).Scan(&r); err != nil {
+			t.Fatalf("get_api_key_remaining: %v", err)
+		}
+		return r
+	}
+
+	// A model-dimension overlay on the api_key, limit 100. No agnostic policy.
+	if _, err := db.ExecContext(ctx,
+		`SELECT api.set_quota_policy('api_key','monthly',100,NULL,NULL,$1,'model',$2)`, key, model); err != nil {
+		t.Fatalf("set model-dimension policy: %v", err)
+	}
+
+	t.Run("dimension overlay only applies when request matches", func(t *testing.T) {
+		// No request dimension -> overlay ignored -> unconstrained (NULL).
+		if r := remaining(nil, nil, nil); r.Valid {
+			t.Fatalf("expected NULL (unconstrained) without request dimension, got %v", r.Int64)
+		}
+		// Matching model -> overlay applies, 100 - 0 usage = 100.
+		if r := remaining(model, nil, nil); !r.Valid || r.Int64 != 100 {
+			t.Fatalf("expected remaining 100 for matching model, got %v", r)
+		}
+		// Different model -> overlay does not apply.
+		if r := remaining("other-model", nil, nil); r.Valid {
+			t.Fatalf("expected NULL for non-matching model, got %v", r.Int64)
+		}
+	})
+
+	t.Run("dimension usage comes from detailed_dimensional_usage", func(t *testing.T) {
+		// 30 tokens on endpoint|ep1|model this period.
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO api.api_daily_usage (api_version, kind, metadata, spec, status)
+			VALUES ('v1','ApiDailyUsage',
+				ROW('quota-dim-du', NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
+				ROW($1::uuid, CURRENT_DATE, 30::bigint, '{}'::jsonb,
+					jsonb_build_object('endpoint|ep1|' || $3::text,
+						jsonb_build_object('total', 30, 'prompt', 20, 'completion', 10)))::api.api_daily_usage_spec,
+				ROW(now())::api.api_daily_usage_status)`, key, ws, model); err != nil {
+			t.Fatalf("insert daily usage: %v", err)
+		}
+		// 100 - 30 = 70 for the matching model.
+		if r := remaining(model, nil, nil); !r.Valid || r.Int64 != 70 {
+			t.Fatalf("expected remaining 70 after 30 used, got %v", r)
+		}
+	})
+
+	t.Run("dimension overlay skips the sum hierarchy", func(t *testing.T) {
+		// An agnostic api_key quota of 50 exists; a model overlay of 700 must NOT
+		// trip 10052 (overlays are independent), unlike an agnostic one would.
+		if _, err := db.ExecContext(ctx,
+			`SELECT api.set_quota_policy('user','monthly',50,$1,$2,NULL)`, ws, user.ID); err != nil {
+			t.Fatalf("set user policy: %v", err)
+		}
+		if _, err := db.ExecContext(ctx,
+			`SELECT api.set_quota_policy('api_key','monthly',700,NULL,NULL,$1,'model',$2)`, key, model); err != nil {
+			t.Fatalf("model overlay of 700 should be allowed regardless of user quota: %v", err)
+		}
+	})
+}
