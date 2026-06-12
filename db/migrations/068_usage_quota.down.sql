@@ -1,4 +1,4 @@
--- Revert the quota feature (NEUTREE-GENERAL-9). Enum values added in 066 remain
+-- Revert the quota feature (NEUTREE-GENERAL-9). Enum values added in 067 remain
 -- (PostgreSQL cannot drop enum values); workspace-user permissions are restored
 -- to the pre-quota set.
 DROP FUNCTION IF EXISTS api.get_all_api_keys_remaining();
