@@ -10,6 +10,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -371,6 +372,27 @@ func TestHAMiPreflightRejectsUnmanagedClusterRoleBinding(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unmanaged HAMi resource ClusterRoleBinding/hami-scheduler-kube")
+}
+
+func TestHAMiPreflightRejectsUnmanagedRenderedRuntimeClass(t *testing.T) {
+	cluster := newTestCluster()
+	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
+		"devicePlugin": map[string]interface{}{
+			"createRuntimeClass": true,
+			"runtimeClassName":   "nvidia",
+		},
+	}
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree/",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t, &nodev1.RuntimeClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "nvidia",
+			},
+		}))
+
+	err := component.Preflight(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmanaged HAMi resource RuntimeClass/nvidia")
 }
 
 func TestHAMiServingCertificateRenewalWindow(t *testing.T) {
@@ -795,6 +817,7 @@ func newHAMiFakeClient(t *testing.T, objs ...client.Object) client.Client {
 	require.NoError(t, corev1.AddToScheme(scheme))
 	require.NoError(t, appsv1.AddToScheme(scheme))
 	require.NoError(t, rbacv1.AddToScheme(scheme))
+	require.NoError(t, nodev1.AddToScheme(scheme))
 
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 }
