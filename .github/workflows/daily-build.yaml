@@ -2,7 +2,7 @@ name: Daily Build
 
 on:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 1 * * *"
   workflow_dispatch:
 
 jobs:
@@ -21,24 +21,25 @@ jobs:
         id: create_nightly_tag
         run: |
           DATE=$(date +'%Y%m%d')
-          git tag v1.1.0-nightly-$DATE -m v1.1.0-nightly-$DATE
-          git push origin v1.1.0-nightly-$DATE
-          echo "tag=v1.1.0-nightly-$DATE" >> $GITHUB_OUTPUT
+          NIGHTLY_TAG="v1.1.0-nightly-${DATE}"
+          git tag "${NIGHTLY_TAG}" -m "${NIGHTLY_TAG}"
+          git push origin "${NIGHTLY_TAG}"
+          echo "tag=${NIGHTLY_TAG}" >> "${GITHUB_OUTPUT}"
       - name: Trigger Workflow
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         env:
-          NIGHTLY_UI_VERSION: ${{ secrets.NIGHTLY_UI_VERSION }}
           NIGHTLY_CLUSTER_VERSION: ${{ secrets.NIGHTLY_CLUSTER_VERSION }}
         with:
           script: |
-            github.rest.actions.createWorkflowDispatch({
+            const nightlyTag = '${{ steps.create_nightly_tag.outputs.tag }}';
+            await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'release.yaml',
               ref: 'main',
               inputs: {
-                tag: '${{ steps.create_nightly_tag.outputs.tag }}',
-                ui_version: '${{ env.NIGHTLY_UI_VERSION }}',
-                cluster_version:'${{ env.NIGHTLY_CLUSTER_VERSION }}'
+                tag: nightlyTag,
+                ui_version: nightlyTag,
+                cluster_version: process.env.NIGHTLY_CLUSTER_VERSION
               },
             })
