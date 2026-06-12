@@ -27,7 +27,9 @@ type Kong struct {
 	storage           storage.Storage
 	logRemoteWriteUrl string
 
-	proxyUrl string
+	proxyUrl     string
+	apiUrl       string
+	serviceToken string
 }
 
 func newKong(opts GatewayOptions) (Gateway, error) {
@@ -41,6 +43,8 @@ func newKong(opts GatewayOptions) (Gateway, error) {
 		storage:           opts.Storage,
 		logRemoteWriteUrl: opts.LogRemoteWriteUrl,
 		proxyUrl:          opts.ProxyUrl,
+		apiUrl:            opts.ApiUrl,
+		serviceToken:      opts.ServiceToken,
 	}, nil
 }
 
@@ -49,6 +53,13 @@ func (k *Kong) Init() error {
 	plugins = append(plugins, k.generateKeyAuthenticationPlugin())
 	plugins = append(plugins, k.generateRewriteApiKeyHeaderPlugin())
 	plugins = append(plugins, k.generateHttpLogPlugin())
+
+	// Global quota enforcement runs after key-auth and rejects requests whose
+	// API key has exhausted its minimum remaining tokens. Only registered when
+	// a service token is configured so non-quota deployments are unaffected.
+	if quotaPlugin := k.generateQuotaPlugin(); quotaPlugin != nil {
+		plugins = append(plugins, quotaPlugin)
+	}
 
 	for _, plugin := range plugins {
 		err := k.syncPlugin(plugin)
@@ -243,6 +254,28 @@ func (k *Kong) generateAIGatewayPlugin(ep *v1.Endpoint, curRoute *kong.Route) *k
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
 		Config: map[string]interface{}{
 			"route_type": getEndpointRouteType(ep),
+		},
+	}
+}
+
+func (k *Kong) generateQuotaPlugin() *kong.Plugin {
+	if k.serviceToken == "" {
+		return nil
+	}
+
+	apiURL := k.apiUrl
+	if apiURL == "" {
+		apiURL = "http://neutree-api:3000"
+	}
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-quota"),
+		InstanceName: pointy.String("neutree-ai-quota"),
+		Config: map[string]interface{}{
+			"api_url":       apiURL,
+			"service_token": k.serviceToken,
+			"cache_ttl":     5,
+			"timeout":       2000,
 		},
 	}
 }

@@ -47,6 +47,11 @@ func TestWorkspaceUserPermissions_HasExpectedPermissions(t *testing.T) {
 		"external_endpoint:delete",
 		"endpoint:trace-read",
 		"external_endpoint:trace-read",
+		// Added by 067_usage_quota: API-key-level quota management reuses the
+		// "create/edit API key" permission (NEUTREE-GENERAL-9).
+		"api_key:create",
+		"api_key:update",
+		"api_key:delete",
 	}
 
 	var permissions []string

@@ -17,6 +17,12 @@ type GatewayOptions struct {
 	AdminUrl          string
 	LogRemoteWriteUrl string
 	Storage           storage.Storage
+	// ApiUrl is the base URL of neutree-api, used by the gateway quota plugin to
+	// look up each API key's minimum remaining tokens.
+	ApiUrl string
+	// ServiceToken is a service_role JWT the gateway quota plugin uses to
+	// authenticate its remaining-token lookups against neutree-api.
+	ServiceToken string
 }
 
 // Gateway defines the interface for API gateway operations
