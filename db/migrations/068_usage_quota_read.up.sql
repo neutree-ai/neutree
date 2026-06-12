@@ -9,7 +9,7 @@
 --    so the UI can render "used / limit / remaining" next to each policy.
 
 -- ----------------------
--- List policies. SECURITY INVOKER so the quota_policies RLS in 065 decides
+-- List policies. SECURITY INVOKER so the quota_policies RLS in 067 decides
 -- visibility (workspace members see workspace/user policies; key owners see
 -- their own api_key policies). Optional filters narrow the result.
 -- ----------------------

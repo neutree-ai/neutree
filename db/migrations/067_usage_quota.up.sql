@@ -47,7 +47,7 @@ CREATE INDEX quota_policies_api_key_idx   ON api.quota_policies (api_key_id);
 --     workspace (workspace quota = "create/edit workspace"; user quota =
 --     "edit workspace"). Readable by workspace members (workspace:read).
 --   api_key policies: managed and read by the owner of the API key (a user sets
---     quota for their own keys). api_key:* permissions are added in 064 for
+--     quota for their own keys). api_key:* permissions are added in 066 for
 --     explicit/forward-looking gating.
 -- ----------------------
 ALTER TABLE api.quota_policies ENABLE ROW LEVEL SECURITY;
