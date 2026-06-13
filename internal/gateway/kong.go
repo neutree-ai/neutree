@@ -61,6 +61,13 @@ func (k *Kong) Init() error {
 		plugins = append(plugins, quotaPlugin)
 	}
 
+	// Global access enforcement (short-window rate limit / concurrency) runs
+	// after key-auth and just above quota, so an access rejection precedes a
+	// quota rejection. Only registered when a service token is configured.
+	if accessPlugin := k.generateAccessPlugin(); accessPlugin != nil {
+		plugins = append(plugins, accessPlugin)
+	}
+
 	for _, plugin := range plugins {
 		err := k.syncPlugin(plugin)
 		if err != nil {
@@ -271,6 +278,28 @@ func (k *Kong) generateQuotaPlugin() *kong.Plugin {
 	return &kong.Plugin{
 		Name:         pointy.String("neutree-ai-quota"),
 		InstanceName: pointy.String("neutree-ai-quota"),
+		Config: map[string]interface{}{
+			"api_url":       apiURL,
+			"service_token": k.serviceToken,
+			"cache_ttl":     5,
+			"timeout":       2000,
+		},
+	}
+}
+
+func (k *Kong) generateAccessPlugin() *kong.Plugin {
+	if k.serviceToken == "" {
+		return nil
+	}
+
+	apiURL := k.apiUrl
+	if apiURL == "" {
+		apiURL = "http://neutree-api:3000"
+	}
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-access"),
+		InstanceName: pointy.String("neutree-ai-access"),
 		Config: map[string]interface{}{
 			"api_url":       apiURL,
 			"service_token": k.serviceToken,
