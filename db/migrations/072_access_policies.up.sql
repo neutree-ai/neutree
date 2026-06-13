@@ -251,7 +251,7 @@ BEGIN
            OR (level = 'workspace' AND workspace = v_ws)
     ),
     rl AS (
-        SELECT rule_spec->>'window' AS window,
+        SELECT rule_spec->>'window' AS win,
                MIN((rule_spec->>'limit')::BIGINT) AS lim
         FROM applicable
         WHERE rule_type = 'rate_limit'
@@ -264,8 +264,8 @@ BEGIN
     )
     SELECT jsonb_build_object(
         'rate_limits',
-            COALESCE((SELECT jsonb_agg(jsonb_build_object('limit', lim, 'window', window)
-                              ORDER BY window) FROM rl), '[]'::jsonb),
+            COALESCE((SELECT jsonb_agg(jsonb_build_object('limit', lim, 'window', win)
+                              ORDER BY win) FROM rl), '[]'::jsonb),
         'concurrency', (SELECT max_c FROM cc)
     ) INTO v_out;
 
