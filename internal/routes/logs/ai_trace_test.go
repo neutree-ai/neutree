@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -321,6 +322,167 @@ func TestRequireTracePermission_BothGrantedUnrestricted(t *testing.T) {
 	assert.False(t, c.IsAborted())
 	// No single-type restriction recorded => handlers see both endpoint types.
 	assert.Equal(t, "", c.GetString(traceEndpointTypeKey))
+}
+
+// scopedPermMock returns a MockStorage whose has_permission resolves via the
+// given decision function, keyed on (workspace, permission). A nil workspace
+// param (the global check) is passed through as "".
+func scopedPermMock(decide func(workspace, perm string) bool) *mocks.MockStorage {
+	m := new(mocks.MockStorage)
+	m.On("CallDatabaseFunction", "has_permission", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			params := args.Get(1).(map[string]interface{})
+			perm, _ := params["required_permission"].(string)
+			ws, _ := params["workspace"].(string) // nil (global) → ""
+			out := args.Get(2).(*bool)
+			*out = decide(ws, perm)
+		}).Return(nil)
+
+	return m
+}
+
+// mockWorkspaces wires ListWorkspace to return workspaces with the given names.
+func mockWorkspaces(m *mocks.MockStorage, names ...string) {
+	wss := make([]v1.Workspace, 0, len(names))
+	for _, n := range names {
+		wss = append(wss, v1.Workspace{Metadata: &v1.Metadata{Name: n}})
+	}
+
+	m.On("ListWorkspace", mock.Anything).Return(wss, nil)
+}
+
+func TestRequireTracePermission_AllWorkspaces_GlobalBothUnrestricted(t *testing.T) {
+	// A global grant on both permissions skips workspace enumeration and imposes
+	// no workspace constraint (scope "*").
+	store := scopedPermMock(func(ws, _ string) bool { return ws == "" })
+	deps := &Dependencies{Storage: store}
+	c, _ := traceCtx("user-1", "_all_")
+
+	requireTracePermission(deps)(c)
+
+	assert.False(t, c.IsAborted())
+	assert.Equal(t, "*", c.GetString(traceScopeFilterKey))
+	store.AssertNotCalled(t, "ListWorkspace", mock.Anything)
+}
+
+func TestRequireTracePermission_AllWorkspaces_NoGrantsForbidden(t *testing.T) {
+	// No global grant and no per-workspace grant => 403, not an empty result.
+	store := scopedPermMock(func(_, _ string) bool { return false })
+	mockWorkspaces(store, "ws1", "ws2")
+	deps := &Dependencies{Storage: store}
+	c, w := traceCtx("user-1", "_all_")
+
+	requireTracePermission(deps)(c)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.True(t, c.IsAborted())
+}
+
+func TestRequireTracePermission_AllWorkspaces_ScopedBuildsFilter(t *testing.T) {
+	// No global grant; the caller holds both permissions in ws1, endpoint-only in
+	// ws2, and nothing in ws3. The scope OR-expression must reflect exactly that.
+	store := scopedPermMock(func(ws, perm string) bool {
+		switch ws {
+		case "ws1":
+			return true
+		case "ws2":
+			return perm == permEndpointTraceRead
+		default: // "" (global) and ws3
+			return false
+		}
+	})
+	mockWorkspaces(store, "ws1", "ws2", "ws3")
+	deps := &Dependencies{Storage: store}
+	c, _ := traceCtx("user-1", "_all_")
+
+	requireTracePermission(deps)(c)
+
+	assert.False(t, c.IsAborted())
+	assert.Equal(t,
+		`((workspace:="ws1") OR (workspace:="ws2" endpoint_type:="endpoint"))`,
+		c.GetString(traceScopeFilterKey),
+	)
+}
+
+func TestRequireTracePermission_AllWorkspaces_GlobalEndpointOnly(t *testing.T) {
+	// A global grant on only the endpoint permission yields an unscoped
+	// endpoint_type clause (so retained traces of deleted workspaces stay
+	// visible), OR'd with any workspace-scoped external grant (here ws2). It must
+	// not narrow the global endpoint permission to current workspaces.
+	store := scopedPermMock(func(ws, perm string) bool {
+		if perm == permEndpointTraceRead {
+			return true // global endpoint grant
+		}
+
+		return ws == "ws2" // workspace-scoped external grant
+	})
+	mockWorkspaces(store, "ws1", "ws2")
+	deps := &Dependencies{Storage: store}
+	c, _ := traceCtx("user-1", "_all_")
+
+	requireTracePermission(deps)(c)
+
+	assert.False(t, c.IsAborted())
+	assert.Equal(t,
+		`(endpoint_type:="endpoint" OR (workspace:="ws2" endpoint_type:="external-endpoint"))`,
+		c.GetString(traceScopeFilterKey),
+	)
+}
+
+func TestRequireTracePermission_AllWorkspaces_GlobalExternalOnly(t *testing.T) {
+	// Symmetric to the endpoint-only case: a global external grant yields an
+	// unscoped external endpoint_type clause, OR'd with any workspace-scoped
+	// endpoint grant (here ws1).
+	store := scopedPermMock(func(ws, perm string) bool {
+		if perm == permExternalEndpointTraceRead {
+			return true // global external grant
+		}
+
+		return ws == "ws1" // workspace-scoped endpoint grant
+	})
+	mockWorkspaces(store, "ws1", "ws2")
+	deps := &Dependencies{Storage: store}
+	c, _ := traceCtx("user-1", "_all_")
+
+	requireTracePermission(deps)(c)
+
+	assert.False(t, c.IsAborted())
+	assert.Equal(t,
+		`(endpoint_type:="external-endpoint" OR (workspace:="ws1" endpoint_type:="endpoint"))`,
+		c.GetString(traceScopeFilterKey),
+	)
+}
+
+func TestRequireTracePermission_AllWorkspaces_GlobalEndpointOnlyNoWorkspaceGrants(t *testing.T) {
+	// Global endpoint permission with no extra external grants: a single unscoped
+	// endpoint_type clause, with no per-workspace clauses appended.
+	store := scopedPermMock(func(_, perm string) bool {
+		return perm == permEndpointTraceRead
+	})
+	mockWorkspaces(store, "ws1", "ws2")
+	deps := &Dependencies{Storage: store}
+	c, _ := traceCtx("user-1", "_all_")
+
+	requireTracePermission(deps)(c)
+
+	assert.False(t, c.IsAborted())
+	assert.Equal(t, `(endpoint_type:="endpoint")`, c.GetString(traceScopeFilterKey))
+}
+
+func TestTraceScopeClause_ConcreteWorkspace(t *testing.T) {
+	// Concrete workspace, both endpoint types: bare workspace clause.
+	c, _ := traceCtx("user-1", "ws1")
+	assert.Equal(t, `workspace:="ws1"`, traceScopeClause(c))
+
+	// Concrete workspace restricted to one endpoint type folds the type in.
+	c.Set(traceEndpointTypeKey, "endpoint")
+	assert.Equal(t, `workspace:="ws1" endpoint_type:="endpoint"`, traceScopeClause(c))
+}
+
+func TestTraceScopeClause_AllWorkspacesUsesPrecomputedFilter(t *testing.T) {
+	c, _ := traceCtx("user-1", "_all_")
+	c.Set(traceScopeFilterKey, `((workspace:="ws1"))`)
+	assert.Equal(t, `((workspace:="ws1"))`, traceScopeClause(c))
 }
 
 func TestAITraceHandlers_StoreNotConfigured(t *testing.T) {

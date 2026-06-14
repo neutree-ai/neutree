@@ -14,6 +14,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // AITrace is one inference trace record returned to the SPA.
@@ -91,6 +92,17 @@ const (
 	// traceEndpointTypeKey holds, in the gin context, the single endpoint_type a
 	// caller is restricted to ("endpoint" or "external-endpoint"); empty = both.
 	traceEndpointTypeKey = "trace_endpoint_type"
+	// traceScopeFilterKey holds, in the gin context, a ready-to-use LogsQL
+	// boolean expression constraining results to the workspaces (and per-workspace
+	// endpoint types) the caller may read. Set only on the "all workspaces" path;
+	// empty for a concrete workspace, where traceScopeClause builds the clause
+	// from the path param instead.
+	traceScopeFilterKey = "trace_scope_filter"
+	// allWorkspacesSentinel mirrors the SPA's ALL_WORKSPACES constant
+	// (foundation/hooks/use-workspace.ts). It is a UI-only value, never a real
+	// workspace name; selecting it asks for traces aggregated across every
+	// workspace the caller is permitted to read.
+	allWorkspacesSentinel = "_all_"
 )
 
 // requireTracePermission gates the ai-trace routes on endpoint:trace-read OR
@@ -112,6 +124,16 @@ func requireTracePermission(deps *Dependencies) gin.HandlerFunc {
 		if workspace == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace parameter is required"})
 			c.Abort()
+
+			return
+		}
+
+		// "All workspaces" is a cross-workspace aggregate, not a real workspace.
+		// It needs its own permission resolution: the caller may read traces in
+		// only a subset of workspaces, so we compute a scope filter rather than a
+		// single yes/no check against a (non-existent) workspace named "_all_".
+		if workspace == allWorkspacesSentinel {
+			resolveAllWorkspacesTraceScope(c, deps, userID)
 
 			return
 		}
@@ -157,6 +179,147 @@ func tracePermError(c *gin.Context, userID string, err error) {
 	c.Abort()
 }
 
+// resolveAllWorkspacesTraceScope handles the "_all_" aggregate: it computes the
+// LogsQL scope filter restricting results to the workspaces (and per-workspace
+// endpoint types) the caller is permitted to read, stores it under
+// traceScopeFilterKey, and continues — or aborts 403 when the caller may read
+// no workspace at all.
+func resolveAllWorkspacesTraceScope(c *gin.Context, deps *Dependencies, userID string) {
+	// Fast path: a global grant on both trace permissions lets the caller read
+	// every workspace's traces — including any belonging to since-deleted
+	// workspaces — so we impose no workspace constraint at all.
+	globalEndpoint, err := middleware.CheckWorkspacePermission(deps.Storage, userID, "", permEndpointTraceRead)
+	if err != nil {
+		tracePermError(c, userID, err)
+
+		return
+	}
+
+	globalExternal, err := middleware.CheckWorkspacePermission(deps.Storage, userID, "", permExternalEndpointTraceRead)
+	if err != nil {
+		tracePermError(c, userID, err)
+
+		return
+	}
+
+	if globalEndpoint && globalExternal {
+		c.Set(traceScopeFilterKey, "*")
+		c.Next()
+
+		return
+	}
+
+	clauses := make([]string, 0)
+
+	// A trace permission held globally grants that endpoint type across *every*
+	// workspace — including retained traces of since-deleted workspaces — so emit
+	// an unscoped endpoint_type clause instead of enumerating current workspaces.
+	// This keeps "_all_" consistent with the both-global "*" fast path above:
+	// whether a caller holds one or both permissions globally, deleted-workspace
+	// traces for the permitted endpoint type(s) stay visible.
+	if globalEndpoint {
+		clauses = append(clauses, fmt.Sprintf("endpoint_type:=%s", logsQLQuoteValue("endpoint")))
+	}
+
+	if globalExternal {
+		clauses = append(clauses, fmt.Sprintf("endpoint_type:=%s", logsQLQuoteValue("external-endpoint")))
+	}
+
+	// Enumerate per-workspace grants only for the permission(s) NOT held globally;
+	// the global ones are already covered by the unscoped clauses above. Each
+	// workspace the caller can read contributes an OR clause, narrowed to a single
+	// endpoint_type where only one permission is held there.
+	if !globalEndpoint || !globalExternal {
+		workspaces, err := deps.Storage.ListWorkspace(storage.ListOption{})
+		if err != nil {
+			tracePermError(c, userID, err)
+
+			return
+		}
+
+		for i := range workspaces {
+			name := workspaces[i].GetName()
+			if name == "" {
+				continue
+			}
+
+			canEndpoint := false
+			if !globalEndpoint {
+				canEndpoint, err = middleware.CheckWorkspacePermission(deps.Storage, userID, name, permEndpointTraceRead)
+				if err != nil {
+					tracePermError(c, userID, err)
+
+					return
+				}
+			}
+
+			canExternal := false
+			if !globalExternal {
+				canExternal, err = middleware.CheckWorkspacePermission(deps.Storage, userID, name, permExternalEndpointTraceRead)
+				if err != nil {
+					tracePermError(c, userID, err)
+
+					return
+				}
+			}
+
+			if clause := workspaceScopeClause(name, canEndpoint, canExternal); clause != "" {
+				clauses = append(clauses, clause)
+			}
+		}
+	}
+
+	if len(clauses) == 0 {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":    "insufficient permissions",
+			"required": permEndpointTraceRead + " or " + permExternalEndpointTraceRead,
+		})
+		c.Abort()
+
+		return
+	}
+
+	c.Set(traceScopeFilterKey, "("+strings.Join(clauses, " OR ")+")")
+	c.Next()
+}
+
+// workspaceScopeClause builds the LogsQL sub-clause for one workspace given which
+// trace permissions the caller holds there. A caller holding both permissions
+// sees the whole workspace; holding only one is narrowed to that endpoint type.
+// Returns "" when the caller may read neither endpoint type.
+func workspaceScopeClause(workspace string, canEndpoint, canExternal bool) string {
+	switch {
+	case canEndpoint && canExternal:
+		return fmt.Sprintf("(workspace:=%s)", logsQLQuoteValue(workspace))
+	case canEndpoint:
+		return fmt.Sprintf("(workspace:=%s endpoint_type:=%s)",
+			logsQLQuoteValue(workspace), logsQLQuoteValue("endpoint"))
+	case canExternal:
+		return fmt.Sprintf("(workspace:=%s endpoint_type:=%s)",
+			logsQLQuoteValue(workspace), logsQLQuoteValue("external-endpoint"))
+	default:
+		return ""
+	}
+}
+
+// traceScopeClause returns the LogsQL expression constraining a query to the
+// workspace(s) and endpoint type(s) the caller may read. For the "_all_"
+// aggregate it is the scope filter precomputed by the permission middleware; for
+// a concrete workspace it is `workspace:="<ws>"` plus any single-endpoint-type
+// restriction the caller is limited to.
+func traceScopeClause(c *gin.Context) string {
+	if scope := c.GetString(traceScopeFilterKey); scope != "" {
+		return scope
+	}
+
+	clause := fmt.Sprintf("workspace:=%s", logsQLQuoteValue(c.Param("workspace")))
+	if et := traceEndpointTypeFilter(c); et != "" {
+		clause += " " + et
+	}
+
+	return clause
+}
+
 // traceEndpointTypeFilter returns a LogsQL clause restricting results to the
 // endpoint_type the caller is permitted to see, or "" when unrestricted.
 func traceEndpointTypeFilter(c *gin.Context) string {
@@ -178,8 +341,6 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		workspace := c.Param("workspace")
-
 		limit := 50
 
 		if v := c.Query("limit"); v != "" {
@@ -188,7 +349,9 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			}
 		}
 
-		queryParts := []string{fmt.Sprintf("workspace:=%s", logsQLQuoteValue(workspace))}
+		// Leading clause scopes the query to the workspace(s) the caller may read
+		// (a concrete workspace, or the cross-workspace "_all_" aggregate).
+		queryParts := []string{traceScopeClause(c)}
 
 		if endpoint := strings.TrimSpace(c.Query("endpoint_name")); endpoint != "" {
 			queryParts = append(queryParts, fmt.Sprintf("endpoint_name:=%s", logsQLQuoteValue(endpoint)))
@@ -216,11 +379,6 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 				"(request_model:=%s OR response_model:=%s)",
 				logsQLQuoteValue(model), logsQLQuoteValue(model),
 			))
-		}
-
-		// Restrict to the endpoint_type the caller is permitted to see.
-		if f := traceEndpointTypeFilter(c); f != "" {
-			queryParts = append(queryParts, f)
 		}
 
 		// The list view never renders request/response bodies — project them
@@ -277,8 +435,6 @@ func handleGetAITrace(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		workspace := c.Param("workspace")
-
 		requestID := strings.TrimSpace(c.Param("request_id"))
 		if requestID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -288,14 +444,12 @@ func handleGetAITrace(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		etFilter := traceEndpointTypeFilter(c)
-		if etFilter != "" {
-			etFilter = " " + etFilter
-		}
-
+		// The scope clause confines the lookup to workspaces/endpoint types the
+		// caller may read, so an "_all_" detail fetch cannot read a trace the
+		// caller has no permission for.
 		query := fmt.Sprintf(
-			"workspace:=%s request_id:=%s%s | sort by (_time) desc | limit 1",
-			logsQLQuoteValue(workspace), logsQLQuoteValue(requestID), etFilter,
+			"%s request_id:=%s | sort by (_time) desc | limit 1",
+			traceScopeClause(c), logsQLQuoteValue(requestID),
 		)
 
 		items, err := queryAITraces(deps, query, url.Values{})
@@ -336,8 +490,6 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		workspace := c.Param("workspace")
-
 		startDay, endDay, ok := statsWindow(c)
 		if !ok {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -347,14 +499,9 @@ func handleAITraceStats(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		etFilter := traceEndpointTypeFilter(c)
-		if etFilter != "" {
-			etFilter = " " + etFilter
-		}
-
 		query := fmt.Sprintf(
-			"workspace:=%s%s | stats by (_time:1d) count() total",
-			logsQLQuoteValue(workspace), etFilter,
+			"%s | stats by (_time:1d) count() total",
+			traceScopeClause(c),
 		)
 
 		params := url.Values{}
