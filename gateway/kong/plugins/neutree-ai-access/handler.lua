@@ -6,12 +6,14 @@
 -- MOST RESTRICTIVE applicable rule into a single object the gateway consumes via
 -- api.get_api_key_access (exposed through neutree-api /rpc).
 --
--- This version enforces the SHORT-WINDOW rules:
+-- Enforced rules:
+--   * model_allowlist / endpoint_allowlist -> 403 not_permitted when the request
+--                    targets a model/endpoint outside the (intersected) allowlist.
 --   * rate_limit  -> fixed-window counter per (key, window) in a lua_shared_dict
---                    (per-node; "暂时 lua", no Redis), 429 rate_limited.
+--                    (per-node; "暂时 lua", no Redis), windows second/minute/hour/day,
+--                    429 rate_limited.
 --   * concurrency -> in-flight counter incremented here, decremented in log().
--- Allowlist rule types (model/endpoint/ip/header) are stored by the management
--- plane but not enforced here yet.
+-- (ip/header allowlist rule types are storable but not enforced yet.)
 --
 -- Runs after key-auth (1003) so the consumer (custom_id = api_key id) is known,
 -- and slightly ABOVE neutree-ai-quota (890) so a 403/429 access rejection
@@ -22,10 +24,56 @@ local cjson = require("cjson.safe")
 
 local AccessHandler = {
     PRIORITY = 895,
-    VERSION = "0.0.1",
+    VERSION = "0.0.2",
 }
 
-local WINDOW_SECONDS = { second = 1, minute = 60, hour = 3600 }
+local WINDOW_SECONDS = { second = 1, minute = 60, hour = 3600, day = 86400 }
+
+-- Derive the request's target: the model (OpenAI-style request body) and the
+-- endpoint (route path /workspace/<ws>/endpoint/<name> or .../external-endpoint/
+-- <name>). Best-effort; anything missing stays nil and simply does not trigger
+-- an allowlist rejection. Mirrors neutree-ai-quota's request_dimension().
+local function request_target()
+    local etype, ename
+    local path = kong.request.get_path() or ""
+    ename = path:match("/external%-endpoint/([^/]+)")
+    if ename then
+        etype = "external_endpoint"
+    else
+        ename = path:match("/endpoint/([^/]+)")
+        if ename then
+            etype = "endpoint"
+        end
+    end
+
+    local model
+    local raw = kong.request.get_raw_body()
+    if raw and raw ~= "" then
+        local decoded = cjson.decode(raw)
+        if type(decoded) == "table" and type(decoded.model) == "string" then
+            model = decoded.model
+        end
+    end
+    return model, ename, etype
+end
+
+local function list_has(list, value)
+    for _, v in ipairs(list) do
+        if v == value then
+            return true
+        end
+    end
+    return false
+end
+
+local function endpoint_allowed(list, etype, ename)
+    for _, e in ipairs(list) do
+        if type(e) == "table" and e.type == etype and e.name == ename then
+            return true
+        end
+    end
+    return false
+end
 
 -- Reuse Kong's built-in rate-limiting shared dict so no extra nginx config is
 -- required to deploy. Fall back to fail-open if it is unavailable.
@@ -69,9 +117,19 @@ local function fetch_access(conf, api_key_id)
         return { unlimited = true }
     end
 
+    -- allowed_models / allowed_endpoints are JSON arrays when an allowlist is in
+    -- effect, JSON null (cjson.null, not nil) when unrestricted. Keep only real
+    -- arrays (type "table") so the handler can treat null/absent as unrestricted.
+    local allowed_models = decoded.allowed_models
+    if type(allowed_models) ~= "table" then allowed_models = nil end
+    local allowed_endpoints = decoded.allowed_endpoints
+    if type(allowed_endpoints) ~= "table" then allowed_endpoints = nil end
+
     return {
         rate_limits = decoded.rate_limits or {},
         concurrency = decoded.concurrency,
+        allowed_models = allowed_models,
+        allowed_endpoints = allowed_endpoints,
     }
 end
 
@@ -132,6 +190,31 @@ function AccessHandler:access(conf)
     end
     if not gate or gate.unlimited then
         return
+    end
+
+    -- Allowlists (403 not_permitted) are checked before the 429 rate/concurrency
+    -- limits. A null/absent allowlist is unrestricted; an empty array denies all.
+    if gate.allowed_models or gate.allowed_endpoints then
+        local model, endpoint, endpoint_type = request_target()
+        if gate.allowed_models and model and not list_has(gate.allowed_models, model) then
+            return kong.response.exit(403, {
+                error = {
+                    message = "Model not permitted for this API key",
+                    type = "not_permitted",
+                    code = "model_not_permitted",
+                },
+            })
+        end
+        if gate.allowed_endpoints and endpoint
+            and not endpoint_allowed(gate.allowed_endpoints, endpoint_type, endpoint) then
+            return kong.response.exit(403, {
+                error = {
+                    message = "Endpoint not permitted for this API key",
+                    type = "not_permitted",
+                    code = "endpoint_not_permitted",
+                },
+            })
+        end
     end
 
     -- Concurrency: increment in-flight, remember it for log() to decrement.
