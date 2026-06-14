@@ -209,48 +209,63 @@ func resolveAllWorkspacesTraceScope(c *gin.Context, deps *Dependencies, userID s
 		return
 	}
 
-	// Otherwise scope to the per-workspace grants the caller actually holds. We
-	// enumerate workspaces and OR together a clause per workspace the caller can
-	// read, narrowing to a single endpoint_type where only one permission is held.
-	// A permission already granted globally holds in every workspace, so skip its
-	// per-workspace check and only query the DB for the permission(s) not global.
-	workspaces, err := deps.Storage.ListWorkspace(storage.ListOption{})
-	if err != nil {
-		tracePermError(c, userID, err)
+	clauses := make([]string, 0)
 
-		return
+	// A trace permission held globally grants that endpoint type across *every*
+	// workspace — including retained traces of since-deleted workspaces — so emit
+	// an unscoped endpoint_type clause instead of enumerating current workspaces.
+	// This keeps "_all_" consistent with the both-global "*" fast path above:
+	// whether a caller holds one or both permissions globally, deleted-workspace
+	// traces for the permitted endpoint type(s) stay visible.
+	if globalEndpoint {
+		clauses = append(clauses, fmt.Sprintf("endpoint_type:=%s", logsQLQuoteValue("endpoint")))
 	}
 
-	clauses := make([]string, 0, len(workspaces))
+	if globalExternal {
+		clauses = append(clauses, fmt.Sprintf("endpoint_type:=%s", logsQLQuoteValue("external-endpoint")))
+	}
 
-	for i := range workspaces {
-		name := workspaces[i].GetName()
-		if name == "" {
-			continue
+	// Enumerate per-workspace grants only for the permission(s) NOT held globally;
+	// the global ones are already covered by the unscoped clauses above. Each
+	// workspace the caller can read contributes an OR clause, narrowed to a single
+	// endpoint_type where only one permission is held there.
+	if !globalEndpoint || !globalExternal {
+		workspaces, err := deps.Storage.ListWorkspace(storage.ListOption{})
+		if err != nil {
+			tracePermError(c, userID, err)
+
+			return
 		}
 
-		canEndpoint := globalEndpoint
-		if !canEndpoint {
-			canEndpoint, err = middleware.CheckWorkspacePermission(deps.Storage, userID, name, permEndpointTraceRead)
-			if err != nil {
-				tracePermError(c, userID, err)
-
-				return
+		for i := range workspaces {
+			name := workspaces[i].GetName()
+			if name == "" {
+				continue
 			}
-		}
 
-		canExternal := globalExternal
-		if !canExternal {
-			canExternal, err = middleware.CheckWorkspacePermission(deps.Storage, userID, name, permExternalEndpointTraceRead)
-			if err != nil {
-				tracePermError(c, userID, err)
+			canEndpoint := false
+			if !globalEndpoint {
+				canEndpoint, err = middleware.CheckWorkspacePermission(deps.Storage, userID, name, permEndpointTraceRead)
+				if err != nil {
+					tracePermError(c, userID, err)
 
-				return
+					return
+				}
 			}
-		}
 
-		if clause := workspaceScopeClause(name, canEndpoint, canExternal); clause != "" {
-			clauses = append(clauses, clause)
+			canExternal := false
+			if !globalExternal {
+				canExternal, err = middleware.CheckWorkspacePermission(deps.Storage, userID, name, permExternalEndpointTraceRead)
+				if err != nil {
+					tracePermError(c, userID, err)
+
+					return
+				}
+			}
+
+			if clause := workspaceScopeClause(name, canEndpoint, canExternal); clause != "" {
+				clauses = append(clauses, clause)
+			}
 		}
 	}
 
