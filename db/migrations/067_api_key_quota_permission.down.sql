@@ -1,0 +1,2 @@
+-- PostgreSQL does not support removing enum values.
+-- The api_key:create / api_key:update / api_key:delete values will remain.
