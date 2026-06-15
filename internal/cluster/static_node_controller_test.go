@@ -65,6 +65,37 @@ func TestStaticNodeControllerReconcileRunsDiscoveryForEmptyDesiredState(t *testi
 	assert.Empty(t, store.status.ErrorMessage)
 }
 
+func TestStaticNodeControllerReconcileCreatesRunnerWhenAcceleratorManagerIsConfigured(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.10",
+			Role:    v1.StaticNodeRoleHead,
+		},
+		Status: &v1.StaticNodeStatus{
+			Accelerator: &v1.StaticNodeAcceleratorStatus{
+				Type: v1.StaticNodeAcceleratorTypeCPU,
+			},
+		},
+	}
+	store := &fakeStaticNodeStore{}
+	runnerFactory := &fakeStaticNodeRunnerFactory{runner: &fakeStaticNodeRunner{}}
+	detector := &fakeStaticNodeAcceleratorManager{
+		accelerator: v1.CPUStaticNodeAcceleratorStatus(),
+	}
+
+	err := (&StaticNodeController{
+		Store:         store,
+		RunnerFactory: runnerFactory,
+		Reconciler:    &StaticNodeReconciler{AcceleratorManager: detector},
+	}).Reconcile(context.Background(), node)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, runnerFactory.calls)
+	assert.Equal(t, v1.StaticNodePhaseReady, store.status.Phase)
+	assert.Empty(t, store.status.ErrorMessage)
+}
+
 func TestStaticNodeControllerReconcileRequiredWarmFailure(t *testing.T) {
 	node := staticNodeWithWarmImages([]v1.WarmImageSpec{
 		{Name: "ray-runtime", Ref: "registry.example.com/neutree/neutree-serve:v1.2.0", Required: true},

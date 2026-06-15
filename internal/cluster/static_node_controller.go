@@ -40,7 +40,7 @@ func (c *StaticNodeController) Reconcile(ctx context.Context, node *v1.StaticNod
 
 	var runner StaticNodeCommandRunner
 
-	if needsStaticNodeRunner(node) {
+	if needsStaticNodeRunner(node, reconciler) {
 		if c.RunnerFactory == nil {
 			return errors.New("static node runner factory is required")
 		}
@@ -76,12 +76,16 @@ func (c *StaticNodeController) Reconcile(ctx context.Context, node *v1.StaticNod
 	return err
 }
 
-func needsStaticNodeRunner(node *v1.StaticNode) bool {
+func needsStaticNodeRunner(node *v1.StaticNode, reconciler *StaticNodeReconciler) bool {
 	if node == nil || node.Spec == nil {
 		return false
 	}
 
 	if node.Metadata != nil && node.Metadata.DeletionTimestamp != "" {
+		return true
+	}
+
+	if reconciler != nil && reconciler.AcceleratorManager != nil {
 		return true
 	}
 
