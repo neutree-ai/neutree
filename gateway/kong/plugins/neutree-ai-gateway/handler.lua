@@ -326,6 +326,67 @@ local function append_system_content(parts, content)
     end
 end
 
+-- Build an OpenAI `image_url` content part from a message content block.
+-- Handles Anthropic image blocks ({type="image", source=...}) with either a
+-- base64 source ({type="base64", media_type, data}) or a URL source
+-- ({type="url", url}), and OpenAI-style blocks ({type="image_url",
+-- image_url={url}}) that some clients send directly. Returns nil when the block
+-- carries no usable image, so callers can skip it instead of forwarding a
+-- malformed part the upstream rejects. Every field is type-checked before use:
+-- cjson decodes JSON null as a userdata sentinel, so a truthiness check would
+-- pass it through (forwarding `null` upstream) or crash on string concat.
+local function nonempty_string(v)
+    return type(v) == "string" and v ~= "" and v or nil
+end
+
+-- Only forward client-supplied image URLs the upstream can safely fetch.
+-- Rejecting other schemes (file://, gopher://, ...) avoids SSRF-style access
+-- when an upstream fetches the URL server-side, which matters most for
+-- `internal` upstreams reachable on the cluster network.
+local function safe_image_url(v)
+    v = nonempty_string(v)
+    if not v then
+        return nil
+    end
+    local scheme = v:match("^(%a[%w+.-]*):")
+    scheme = scheme and scheme:lower()
+    if scheme == "http" or scheme == "https" or scheme == "data" then
+        return v
+    end
+    return nil
+end
+
+local function image_part_from_block(block)
+    if block.type == "image_url" then
+        local image_url = block.image_url
+        local url = type(image_url) == "table" and safe_image_url(image_url.url)
+        if url then
+            return { type = "image_url", image_url = { url = url } }
+        end
+        return nil
+    end
+
+    local source = block.source
+    if type(source) ~= "table" then
+        return nil
+    end
+
+    local url
+    if source.type == "url" then
+        url = safe_image_url(source.url)
+    else
+        local data = nonempty_string(source.data)
+        if data then
+            url = "data:" .. (nonempty_string(source.media_type) or "image/png") .. ";base64," .. data
+        end
+    end
+
+    if not url then
+        return nil
+    end
+    return { type = "image_url", image_url = { url = url } }
+end
+
 local function convert_messages(anthropic_messages)
     local openai_messages = {}
     local system_parts = {}
@@ -347,8 +408,13 @@ local function convert_messages(anthropic_messages)
                 local tool_results = {}
                 local trailing_user_parts = {}
                 local found_tool_result = false
+                local handled_any = false
 
                 for _, block in ipairs(msg.content) do
+                    if block.type == "text" or block.type == "image"
+                        or block.type == "image_url" or block.type == "tool_result" then
+                        handled_any = true
+                    end
                     if block.type == "tool_result" then
                         found_tool_result = true
                         local tool_content = ""
@@ -379,12 +445,11 @@ local function convert_messages(anthropic_messages)
                                 type = "text",
                                 text = block.text,
                             }
-                        elseif block.type == "image" then
-                            local url = "data:" .. (block.source.media_type or "image/png") .. ";base64," .. block.source.data
-                            trailing_user_parts[#trailing_user_parts + 1] = {
-                                type = "image_url",
-                                image_url = { url = url },
-                            }
+                        elseif block.type == "image" or block.type == "image_url" then
+                            local part = image_part_from_block(block)
+                            if part then
+                                trailing_user_parts[#trailing_user_parts + 1] = part
+                            end
                         end
                     else
                         if block.type == "text" then
@@ -392,12 +457,11 @@ local function convert_messages(anthropic_messages)
                                 type = "text",
                                 text = block.text,
                             }
-                        elseif block.type == "image" then
-                            local url = "data:" .. (block.source.media_type or "image/png") .. ";base64," .. block.source.data
-                            user_parts[#user_parts + 1] = {
-                                type = "image_url",
-                                image_url = { url = url },
-                            }
+                        elseif block.type == "image" or block.type == "image_url" then
+                            local part = image_part_from_block(block)
+                            if part then
+                                user_parts[#user_parts + 1] = part
+                            end
                         end
                     end
                 end
@@ -427,7 +491,14 @@ local function convert_messages(anthropic_messages)
                     end
                 end
 
-                if #user_parts == 0 and #tool_results == 0 and #trailing_user_parts == 0 then
+                -- Only fall back to the raw content when no block was a type we
+                -- understand (e.g. an unknown future block) — preserving such a
+                -- message instead of dropping it. When we did recognise blocks
+                -- but they all produced nothing (e.g. images skipped as invalid),
+                -- forwarding the raw content would reintroduce the very blocks the
+                -- upstream rejects, so emit nothing instead.
+                if #user_parts == 0 and #tool_results == 0 and #trailing_user_parts == 0
+                    and not handled_any then
                     openai_messages[#openai_messages + 1] = {
                         role = "user",
                         content = msg.content,
