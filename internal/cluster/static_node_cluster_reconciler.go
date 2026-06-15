@@ -25,7 +25,7 @@ const (
 	vmagentComponentName             = "vmagent"
 	acceleratorExporterComponentName = "accelerator-exporter"
 	defaultVMAgentPort               = 8429
-	defaultNodeExporterPort          = 9100
+	defaultNodeExporterPort          = 19100
 	defaultRayDashboardPort          = 8265
 	defaultPrometheusHTTPPath        = "/metrics"
 	defaultHealthHTTPPath            = "/health"
@@ -369,7 +369,10 @@ func buildNodeComponents(
 			Name:  nodeExporterComponentName,
 			Type:  v1.NodeComponentTypeNodeExporter,
 			Image: staticComponentImage(cluster, defaultNodeExporterImage),
-			Args:  []string{"--path.rootfs=/host"},
+			Args: []string{
+				"--path.rootfs=/host",
+				fmt.Sprintf("--web.listen-address=:%d", defaultNodeExporterPort),
+			},
 			DockerRunOptions: []string{
 				"--net=host",
 				"--pid=host",
@@ -402,7 +405,10 @@ func buildNodeComponents(
 			Name:             acceleratorExporterComponentName,
 			Type:             exporter.ComponentType,
 			Image:            staticComponentImage(cluster, exporter.Image),
+			Args:             append([]string{}, exporter.Args...),
 			Env:              copyStringMap(exporter.Env),
+			Volumes:          append([]v1.NodeComponentVolume{}, exporter.Volumes...),
+			ConfigFiles:      append([]v1.NodeComponentConfigFile{}, exporter.ConfigFiles...),
 			DockerRunOptions: append([]string{}, exporter.DockerRunOptions...),
 			RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 			Ports: []v1.NodeComponentPort{

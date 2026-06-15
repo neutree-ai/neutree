@@ -26,8 +26,23 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 				Kind:          "dcgm-exporter",
 				ComponentType: NodeComponentTypeAcceleratorExporter,
 				Image:         "nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04",
+				Args:          []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
 				Port:          9400,
 				MetricsPath:   "/metrics",
+				ConfigFiles: []NodeComponentConfigFile{
+					{
+						Path:    "/etc/neutree/dcgm-exporter/default-counters.csv",
+						Content: "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.",
+					},
+				},
+				Volumes: []NodeComponentVolume{
+					{
+						Name:      "dcgm-counters",
+						HostPath:  "/etc/neutree/dcgm-exporter/default-counters.csv",
+						MountPath: "/etc/neutree/dcgm-exporter/default-counters.csv",
+						ReadOnly:  true,
+					},
+				},
 				DockerRunOptions: []string{
 					"--net=host",
 					"--gpus all",
@@ -56,7 +71,12 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.Metrics)
 	require.NotNil(t, decoded.Metrics.Exporter)
 	assert.Equal(t, NodeComponentTypeAcceleratorExporter, decoded.Metrics.Exporter.ComponentType)
+	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, decoded.Metrics.Exporter.Args)
 	assert.Equal(t, 9400, decoded.Metrics.Exporter.Port)
+	require.Len(t, decoded.Metrics.Exporter.ConfigFiles, 1)
+	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", decoded.Metrics.Exporter.ConfigFiles[0].Path)
+	require.Len(t, decoded.Metrics.Exporter.Volumes, 1)
+	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", decoded.Metrics.Exporter.Volumes[0].MountPath)
 	require.NotNil(t, decoded.ResourceDefaults)
 	assert.Equal(t, "nvidia.com/gpu", decoded.ResourceDefaults.KubernetesResourceName)
 }

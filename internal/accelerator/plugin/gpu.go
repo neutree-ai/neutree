@@ -21,6 +21,20 @@ const (
 	NvidiaGPUKubernetesNodeSelectorKey string              = "nvidia.com/gpu.product"
 	nvidiaDCGMExporterImage            string              = "nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04"
 	nvidiaDCGMExporterPort             int                 = 9400
+	nvidiaDCGMExporterCollectorsPath   string              = "/etc/neutree/dcgm-exporter/default-counters.csv"
+	nvidiaDCGMExporterCollectors       string              = `# Format
+# DCGM FIELD, Prometheus metric type, help message
+DCGM_FI_DEV_SM_CLOCK, gauge, SM clock frequency (in MHz).
+DCGM_FI_DEV_MEM_CLOCK, gauge, Memory clock frequency (in MHz).
+DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature (in C).
+DCGM_FI_DEV_POWER_USAGE, gauge, Power draw (in W).
+DCGM_FI_DEV_GPU_UTIL, gauge, GPU utilization (in %).
+DCGM_FI_DEV_MEM_COPY_UTIL, gauge, Memory utilization (in %).
+DCGM_FI_DEV_FB_FREE, gauge, Frame buffer memory free (in MB).
+DCGM_FI_DEV_FB_USED, gauge, Frame buffer memory used (in MB).
+DCGM_FI_DEV_XID_ERRORS, gauge, Value of the last XID error encountered.
+DCGM_FI_DRIVER_VERSION, label, Driver Version.
+`
 )
 
 func init() { //nolint:gochecknoinits
@@ -160,7 +174,28 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				Kind:          "dcgm-exporter",
 				ComponentType: v1.NodeComponentTypeAcceleratorExporter,
 				Image:         nvidiaDCGMExporterImage,
+				Args:          []string{"--collectors", nvidiaDCGMExporterCollectorsPath},
 				Port:          nvidiaDCGMExporterPort,
+				ConfigFiles: []v1.NodeComponentConfigFile{
+					{
+						Path:         nvidiaDCGMExporterCollectorsPath,
+						Content:      nvidiaDCGMExporterCollectors,
+						Mode:         "0644",
+						Owner:        "root",
+						Group:        "root",
+						Sudo:         true,
+						Atomic:       true,
+						CreateParent: true,
+					},
+				},
+				Volumes: []v1.NodeComponentVolume{
+					{
+						Name:      "dcgm-counters",
+						HostPath:  nvidiaDCGMExporterCollectorsPath,
+						MountPath: nvidiaDCGMExporterCollectorsPath,
+						ReadOnly:  true,
+					},
+				},
 				DockerRunOptions: []string{
 					"--net=host",
 					"--gpus all",

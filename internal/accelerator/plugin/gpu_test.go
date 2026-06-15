@@ -190,4 +190,10 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, v1.NodeComponentTypeAcceleratorExporter, profile.Metrics.Exporter.ComponentType)
 	assert.Equal(t, nvidiaDCGMExporterImage, profile.Metrics.Exporter.Image)
 	assert.Equal(t, nvidiaDCGMExporterPort, profile.Metrics.Exporter.Port)
+	assert.Equal(t, []string{"--collectors", nvidiaDCGMExporterCollectorsPath}, profile.Metrics.Exporter.Args)
+	require.Len(t, profile.Metrics.Exporter.ConfigFiles, 1)
+	assert.Equal(t, nvidiaDCGMExporterCollectorsPath, profile.Metrics.Exporter.ConfigFiles[0].Path)
+	assert.NotContains(t, profile.Metrics.Exporter.ConfigFiles[0].Content, "PROF")
+	require.Len(t, profile.Metrics.Exporter.Volumes, 1)
+	assert.Equal(t, nvidiaDCGMExporterCollectorsPath, profile.Metrics.Exporter.Volumes[0].MountPath)
 }

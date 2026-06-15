@@ -23,11 +23,26 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 			},
 			Metrics: &v1.AcceleratorMetricsProfile{
 				Exporter: &v1.AcceleratorExporterProfile{
-					Kind:             "dcgm-exporter",
-					ComponentType:    v1.NodeComponentTypeAcceleratorExporter,
-					Image:            "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-					Port:             9400,
-					MetricsPath:      "/dcgm/metrics",
+					Kind:          "dcgm-exporter",
+					ComponentType: v1.NodeComponentTypeAcceleratorExporter,
+					Image:         "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+					Args:          []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
+					Port:          9400,
+					MetricsPath:   "/dcgm/metrics",
+					ConfigFiles: []v1.NodeComponentConfigFile{
+						{
+							Path:    "/etc/neutree/dcgm-exporter/default-counters.csv",
+							Content: "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.",
+						},
+					},
+					Volumes: []v1.NodeComponentVolume{
+						{
+							Name:      "dcgm-counters",
+							HostPath:  "/etc/neutree/dcgm-exporter/default-counters.csv",
+							MountPath: "/etc/neutree/dcgm-exporter/default-counters.csv",
+							ReadOnly:  true,
+						},
+					},
 					DockerRunOptions: []string{"--gpus all", "--cap-add=SYS_ADMIN"},
 				},
 			},
@@ -104,10 +119,17 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	nodeExporter := findComponent(head.Spec.Components, nodeExporterComponentName)
 	require.NotNil(t, nodeExporter)
 	assert.Equal(t, "registry.example.com/neutree/prometheus/node-exporter:v1.8.2", nodeExporter.Image)
+	assert.Contains(t, nodeExporter.Args, "--web.listen-address=:19100")
+	assert.Equal(t, 19100, nodeExporter.Ports[0].Port)
+	require.NotNil(t, nodeExporter.HealthCheck)
+	assert.Equal(t, 19100, nodeExporter.HealthCheck.Port)
 	exporter := findComponent(head.Spec.Components, acceleratorExporterComponentName)
 	require.NotNil(t, exporter)
 	assert.Equal(t, "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test", exporter.Image)
+	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, exporter.Args)
 	assert.Equal(t, []string{"--gpus all", "--cap-add=SYS_ADMIN"}, exporter.DockerRunOptions)
+	assert.Equal(t, "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.", exporter.ConfigFiles[0].Content)
+	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", exporter.Volumes[0].MountPath)
 	assert.Equal(t, 9400, exporter.Ports[0].Port)
 	require.NotNil(t, exporter.HealthCheck)
 	assert.Equal(t, "/dcgm/metrics", exporter.HealthCheck.HTTPPath)
@@ -122,8 +144,8 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
 	assert.Contains(t, vmagentConfig.Content, `neutree_cluster: "static-a"`)
 	assert.Contains(t, vmagentConfig.Content, `static_node_cluster: "static-a"`)
-	assert.Contains(t, vmagentConfig.Content, `"10.0.0.10:9100"`)
-	assert.Contains(t, vmagentConfig.Content, `"10.0.0.11:9100"`)
+	assert.Contains(t, vmagentConfig.Content, `"10.0.0.10:19100"`)
+	assert.Contains(t, vmagentConfig.Content, `"10.0.0.11:19100"`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
 	assert.Contains(t, vmagentConfig.Content, `metrics_path: "/dcgm/metrics"`)
 	assert.Contains(t, vmagentConfig.Content, `accelerator_type: "nvidia_gpu"`)

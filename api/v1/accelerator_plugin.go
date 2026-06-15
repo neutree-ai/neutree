@@ -109,14 +109,17 @@ type AcceleratorMetricsProfile struct {
 }
 
 type AcceleratorExporterProfile struct {
-	Kind             string            `json:"kind,omitempty"`
-	ComponentType    NodeComponentType `json:"component_type,omitempty"`
-	Image            string            `json:"image,omitempty"`
-	Port             int               `json:"port,omitempty"`
-	MetricsPath      string            `json:"metrics_path,omitempty"`
-	Env              map[string]string `json:"env,omitempty"`
-	DockerRunOptions []string          `json:"docker_run_options,omitempty"`
-	RawMetrics       bool              `json:"raw_metrics,omitempty"`
+	Kind             string                    `json:"kind,omitempty"`
+	ComponentType    NodeComponentType         `json:"component_type,omitempty"`
+	Image            string                    `json:"image,omitempty"`
+	Args             []string                  `json:"args,omitempty"`
+	Port             int                       `json:"port,omitempty"`
+	MetricsPath      string                    `json:"metrics_path,omitempty"`
+	Env              map[string]string         `json:"env,omitempty"`
+	Volumes          []NodeComponentVolume     `json:"volumes,omitempty"`
+	ConfigFiles      []NodeComponentConfigFile `json:"config_files,omitempty"`
+	DockerRunOptions []string                  `json:"docker_run_options,omitempty"`
+	RawMetrics       bool                      `json:"raw_metrics,omitempty"`
 }
 
 type AcceleratorResourceDefaults struct {
