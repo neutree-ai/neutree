@@ -34,10 +34,9 @@ spec:
             - --static-dir=./public
             - --gin-mode=release
             - --auth-endpoint=http://{{ include "neutree.fullname" . }}-auth-service:9999
-            {{- if .Values.grafana.enabled }}
-            - --grafana-url=http://{{ include "neutree.fullname" . }}-grafana:80
-            {{- else if .Values.system.grafana.url }}
-            - --grafana-url={{ .Values.system.grafana.url }}
+            {{- $grafanaURL := include "neutree.grafana.url" . }}
+            {{- if $grafanaURL }}
+            - --grafana-url={{ $grafanaURL }}
             {{- end }}
             {{- $aiTraceStoreUrl := include "neutree.aiTraceStoreUrl" . }}
             {{- if $aiTraceStoreUrl }}

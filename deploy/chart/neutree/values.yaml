@@ -23,6 +23,9 @@ adminPassword: ""
 
 system:
   grafana:
+    # User-facing Grafana URL returned by the Neutree API. When Grafana is
+    # exposed outside this chart, keep this aligned with
+    # grafana.grafana.ini.server.root_url.
     url: ""
   # External AI inference trace store (VictoriaLogs) base URL.
   # Only used when victorialogs.enabled is false. Leave empty to disable the
@@ -31,7 +34,9 @@ system:
 
 metrics:
   # Specify the URL for remote write if using an external metrics storage system.
-  # Leave this empty to use the embedded Victoria Metrics cluster.
+  # This explicit value takes precedence over the embedded VictoriaMetrics
+  # Service and over the vminsert Ingress-derived URL. When this points at a
+  # TLS-enabled VMInsert Ingress, use an https:// URL.
   remoteWriteUrl: ""
 
 k8sWaitFor:
@@ -170,6 +175,21 @@ api:
   affinity: {}
   service:
     type: ClusterIP
+  # Optional Ingress for the control-plane API (`<fullname>-api-service:3000`).
+  # Requires an ingress controller in the cluster. TLS Secret and controller
+  # installation are the operator's responsibility.
+  ingress:
+    enabled: false
+    className: ""        # e.g. "nginx", "traefik"; empty -> cluster default IngressClass
+    annotations: {}      # controller-specific options, e.g.
+                         #   nginx.ingress.kubernetes.io/proxy-body-size: 10m
+                         #   cert-manager.io/cluster-issuer: letsencrypt-prod
+    host: ""
+    path: /
+    pathType: Prefix
+    tls: []              # k8s-native, e.g.
+                         #   - hosts: ["api.neutree.example.com"]
+                         #     secretName: neutree-api-tls
 
 vmagent:
   image:
@@ -208,6 +228,20 @@ kong:
   affinity: {}
   proxyService:
     type: LoadBalancer
+  # Optional Ingress for the inference gateway (Kong proxy at
+  # `<fullname>-kong-proxy:80`). When enabled, neutree-core uses this public
+  # URL as --gateway-proxy-url; tls: [] -> http://host, tls configured ->
+  # https://host. Use a higher `proxy-body-size` here if your users upload
+  # large payloads. Kong admin/manager Services stay internal regardless of
+  # this setting.
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}      # e.g. nginx.ingress.kubernetes.io/proxy-body-size: 100m
+    host: ""
+    path: /
+    pathType: Prefix
+    tls: []
 
 vector:
   image:
@@ -258,6 +292,15 @@ jwtCli:
     tag: 6.2.0
     pullPolicy: IfNotPresent
 
+# Ingress is configured per component:
+#   - control-plane API:  api.ingress.*  (parent chart template)
+#   - inference gateway:  kong.ingress.* (parent chart template)
+#   - Grafana UI:         grafana.ingress.* (Grafana subchart template)
+#   - VMInsert metrics:   victoria-metrics-cluster.vminsert.ingress.* (VictoriaMetrics subchart template)
+# Each can be enabled and configured independently with its own ingress class,
+# annotations, and TLS spec. An ingress controller must be installed in the
+# cluster; TLS Secret / cert provisioning is the operator's responsibility.
+
 victoria-metrics-cluster:
   enabled: true
   # global.image.registry is inherited from parent chart's global.image.registry
@@ -267,6 +310,25 @@ victoria-metrics-cluster:
     replicaCount: 1
     service:
       type: LoadBalancer
+    # Native VictoriaMetrics subchart Ingress for VMInsert.
+    # Backend service defaults to `<release>-victoria-metrics-cluster-vminsert`
+    # port `http` (8480). When metrics.remoteWriteUrl is empty and this Ingress
+    # is enabled, neutree-core and vmagent derive their remote-write URL from
+    # this public host; tls: [] -> http://host, tls configured -> https://host.
+    ingress:
+      enabled: false
+      ingressClassName: ""  # e.g. "contour", "nginx"; empty -> cluster default IngressClass
+      annotations: {}
+      extraLabels: {}
+      hosts: []             # e.g.
+                            #   - name: vminsert.neutree.example.com
+                            #     path:
+                            #       - /insert
+                            #     port: http
+      pathType: Prefix
+      tls: []               # e.g.
+                            #   - hosts: ["vminsert.neutree.example.com"]
+                            #     secretName: neutree-vminsert-tls
   vmstorage:
     replicaCount: 1
     persistentVolume:
@@ -315,6 +377,13 @@ grafana:
       disable_sanitize_html: true
     grafana_net:
       url: ""
+    # server:
+    #   # Grafana uses root_url for redirects and absolute links. Set this when
+    #   # Grafana is exposed externally, including through Contour HTTPProxy or
+    #   # grafana.ingress. Use the same public URL as system.grafana.url.
+    #   root_url: https://grafana.neutree.example.com
+    #   # Required by Grafana when serving from a non-root path.
+    #   serve_from_sub_path: true
   dashboardProviders:
     dashboardproviders.yaml:
       - name: neutree
@@ -342,7 +411,20 @@ grafana:
     enabled: true
     type: LoadBalancer
 
-
-
-
-
+  # Native Grafana subchart Ingress for the Grafana UI. When enabled,
+  # grafana.grafana.ini.server.root_url must be set to the same public URL so
+  # Grafana redirects and absolute links use the external address. When
+  # system.grafana.url is empty, neutree-api uses that root_url for the
+  # system-info API. For a non-root path, also set
+  # grafana.grafana.ini.server.serve_from_sub_path=true.
+  ingress:
+    enabled: false
+    ingressClassName: ""    # e.g. "contour", "nginx"; empty -> cluster default IngressClass
+    annotations: {}
+    labels: {}
+    path: /
+    pathType: Prefix
+    hosts: []               # e.g. ["grafana.neutree.example.com"]
+    tls: []                 # e.g.
+                            #   - hosts: ["grafana.neutree.example.com"]
+                            #     secretName: neutree-grafana-tls
