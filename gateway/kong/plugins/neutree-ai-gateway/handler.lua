@@ -332,11 +332,19 @@ end
 -- ({type="url", url}), and OpenAI-style blocks ({type="image_url",
 -- image_url={url}}) that some clients send directly. Returns nil when the block
 -- carries no usable image, so callers can skip it instead of forwarding a
--- malformed part the upstream rejects.
+-- malformed part the upstream rejects. Every field is type-checked before use:
+-- cjson decodes JSON null as a userdata sentinel, so a truthiness check would
+-- pass it through (forwarding `null` upstream) or crash on string concat.
+local function nonempty_string(v)
+    return type(v) == "string" and v ~= "" and v or nil
+end
+
 local function image_part_from_block(block)
     if block.type == "image_url" then
-        if type(block.image_url) == "table" and block.image_url.url then
-            return { type = "image_url", image_url = { url = block.image_url.url } }
+        local image_url = block.image_url
+        local url = type(image_url) == "table" and nonempty_string(image_url.url)
+        if url then
+            return { type = "image_url", image_url = { url = url } }
         end
         return nil
     end
@@ -347,10 +355,13 @@ local function image_part_from_block(block)
     end
 
     local url
-    if source.type == "url" and source.url then
-        url = source.url
-    elseif source.data then
-        url = "data:" .. (source.media_type or "image/png") .. ";base64," .. source.data
+    if source.type == "url" then
+        url = nonempty_string(source.url)
+    else
+        local data = nonempty_string(source.data)
+        if data then
+            url = "data:" .. (nonempty_string(source.media_type) or "image/png") .. ";base64," .. data
+        end
     end
 
     if not url then
