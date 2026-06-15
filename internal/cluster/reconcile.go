@@ -61,7 +61,7 @@ func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
 	switch cluster.Spec.Type {
 	case v1.SSHClusterType:
-		return newStaticRayClusterReconcile(s, metricsRemoteWriteURL)
+		return newStaticRayClusterReconcile(s, acceleratorManager, metricsRemoteWriteURL)
 	case v1.KubernetesClusterType:
 		return NewNativeKubernetesClusterReconciler(s, acceleratorManager, metricsRemoteWriteURL), nil
 	default:

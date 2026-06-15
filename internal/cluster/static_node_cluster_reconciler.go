@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -32,19 +33,31 @@ const (
 	defaultVMAgentImage              = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
 )
 
-type StaticNodeClusterReconciler struct{}
+type StaticNodeClusterReconciler struct {
+	RuntimeProfileProvider RuntimeProfileProvider
+}
+
+type RuntimeProfileProvider interface {
+	RuntimeProfile(ctx context.Context, accelerator v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)
+}
 
 type StaticNodeClusterReconcilePlan struct {
 	DesiredNodes []*v1.StaticNode
 	Status       v1.StaticNodeClusterStatus
 }
 
+type staticNodeDesiredPlan struct {
+	Node        *v1.StaticNode
+	Accelerator *v1.StaticNodeAcceleratorStatus
+	Profile     *v1.AcceleratorProfile
+}
+
 func (r *StaticNodeClusterReconciler) Plan(
+	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
-	acceleratorProfiles map[string]*v1.AcceleratorProfile,
 ) (*StaticNodeClusterReconcilePlan, error) {
-	desiredNodes, err := r.BuildDesiredNodes(cluster, acceleratorProfiles)
+	desiredNodes, err := r.BuildDesiredNodes(ctx, cluster, currentNodes)
 	if err != nil {
 		return nil, err
 	}
@@ -56,9 +69,28 @@ func (r *StaticNodeClusterReconciler) Plan(
 }
 
 func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
+	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
-	acceleratorProfiles map[string]*v1.AcceleratorProfile,
+	currentNodes []*v1.StaticNode,
 ) ([]*v1.StaticNode, error) {
+	plans, err := r.buildDesiredNodePlans(ctx, cluster, currentNodes)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := make([]*v1.StaticNode, 0, len(plans))
+	for _, plan := range plans {
+		nodes = append(nodes, plan.Node)
+	}
+
+	return nodes, nil
+}
+
+func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
+	ctx context.Context,
+	cluster *v1.StaticNodeCluster,
+	currentNodes []*v1.StaticNode,
+) ([]staticNodeDesiredPlan, error) {
 	if cluster == nil {
 		return nil, errors.New("static node cluster is nil")
 	}
@@ -89,7 +121,8 @@ func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
 
 	nodeNames := make(map[string]struct{}, len(cluster.Spec.Nodes))
 	headSeen := false
-	desiredNodes := make([]*v1.StaticNode, 0, len(cluster.Spec.Nodes))
+	currentByName := staticNodeByName(currentNodes)
+	plans := make([]staticNodeDesiredPlan, 0, len(cluster.Spec.Nodes))
 
 	for _, nodeSpec := range cluster.Spec.Nodes {
 		if nodeSpec.Name == "" {
@@ -112,8 +145,7 @@ func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
 			headSeen = true
 		}
 
-		profile := acceleratorProfiles[nodeSpec.AcceleratorType]
-		desiredNodes = append(desiredNodes, &v1.StaticNode{
+		desiredNode := &v1.StaticNode{
 			APIVersion: "v1",
 			Kind:       "StaticNode",
 			Metadata: &v1.Metadata{
@@ -123,15 +155,34 @@ func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
 				Annotations: copyStringMap(cluster.Metadata.Annotations),
 			},
 			Spec: &v1.StaticNodeSpec{
-				Cluster:         cluster.Metadata.Name,
-				IP:              nodeSpec.IP,
-				Role:            role,
-				AcceleratorType: nodeSpec.AcceleratorType,
-				SSHAuthRef:      nodeSpec.SSHAuthRef,
-				SSHAuth:         copyAuth(nodeSpec.SSHAuth),
-				Warm:            buildNodeWarmSpec(cluster),
-				Components:      buildNodeComponents(cluster, role, profile),
+				Cluster:    cluster.Metadata.Name,
+				IP:         nodeSpec.IP,
+				Role:       role,
+				SSHAuthRef: nodeSpec.SSHAuthRef,
+				SSHAuth:    copyAuth(nodeSpec.SSHAuth),
+				Warm:       &v1.WarmSpec{},
 			},
+		}
+
+		acceleratorStatus := currentStaticNodeAcceleratorStatus(currentByName[nodeSpec.Name])
+		if acceleratorStatus == nil {
+			plans = append(plans, staticNodeDesiredPlan{Node: desiredNode})
+
+			continue
+		}
+
+		profile, err := r.runtimeProfile(ctx, *acceleratorStatus)
+		if err != nil {
+			return nil, err
+		}
+
+		components := buildNodeComponents(cluster, role, profile)
+		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
+		desiredNode.Spec.Components = components
+		plans = append(plans, staticNodeDesiredPlan{
+			Node:        desiredNode,
+			Accelerator: acceleratorStatus,
+			Profile:     profile,
 		})
 	}
 
@@ -139,19 +190,19 @@ func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
 		return nil, fmt.Errorf("head node %s not found in static node cluster nodes", cluster.Spec.Head.NodeName)
 	}
 
-	sort.SliceStable(desiredNodes, func(i, j int) bool {
-		return desiredNodes[i].Metadata.Name < desiredNodes[j].Metadata.Name
+	sort.SliceStable(plans, func(i, j int) bool {
+		return plans[i].Node.Metadata.Name < plans[j].Node.Metadata.Name
 	})
 
-	if err := attachMetricsConfigFiles(cluster, desiredNodes, acceleratorProfiles); err != nil {
+	if err := attachMetricsConfigFiles(cluster, plans); err != nil {
 		return nil, err
 	}
 
-	for _, node := range desiredNodes {
-		node.Spec.Components = withComponentConfigHashes(node.Spec.Components)
+	for _, plan := range plans {
+		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
 	}
 
-	return desiredNodes, nil
+	return plans, nil
 }
 
 func (r *StaticNodeClusterReconciler) AggregateStatus(
@@ -259,6 +310,53 @@ func staticNodeLabels(clusterName string, role v1.StaticNodeRole) map[string]str
 	}
 }
 
+func staticNodeByName(nodes []*v1.StaticNode) map[string]*v1.StaticNode {
+	result := make(map[string]*v1.StaticNode, len(nodes))
+	for _, node := range nodes {
+		if node == nil || node.Metadata == nil || node.Metadata.Name == "" {
+			continue
+		}
+
+		result[node.Metadata.Name] = node
+	}
+
+	return result
+}
+
+func currentStaticNodeAcceleratorStatus(node *v1.StaticNode) *v1.StaticNodeAcceleratorStatus {
+	if node == nil || node.Status == nil || node.Status.Accelerator == nil {
+		return nil
+	}
+
+	accelerator := *node.Status.Accelerator
+
+	return &accelerator
+}
+
+func (r *StaticNodeClusterReconciler) runtimeProfile(
+	ctx context.Context,
+	accelerator v1.StaticNodeAcceleratorStatus,
+) (*v1.AcceleratorProfile, error) {
+	if accelerator.Type == "" || accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
+		return nil, nil
+	}
+
+	if r == nil || r.RuntimeProfileProvider == nil {
+		return nil, nil
+	}
+
+	profile, supported, err := r.RuntimeProfileProvider.RuntimeProfile(ctx, accelerator)
+	if err != nil {
+		return nil, err
+	}
+
+	if !supported {
+		return nil, nil
+	}
+
+	return profile, nil
+}
+
 func buildNodeComponents(
 	cluster *v1.StaticNodeCluster,
 	role v1.StaticNodeRole,
@@ -269,7 +367,7 @@ func buildNodeComponents(
 		{
 			Name:  nodeExporterComponentName,
 			Type:  v1.NodeComponentTypeNodeExporter,
-			Image: defaultNodeExporterImage,
+			Image: staticComponentImage(cluster, defaultNodeExporterImage),
 			Args:  []string{"--path.rootfs=/host"},
 			DockerRunOptions: []string{
 				"--net=host",
@@ -302,14 +400,15 @@ func buildNodeComponents(
 		components = append(components, v1.NodeComponentSpec{
 			Name:             acceleratorExporterComponentName,
 			Type:             exporter.ComponentType,
-			Image:            exporter.Image,
+			Image:            staticComponentImage(cluster, exporter.Image),
+			Env:              copyStringMap(exporter.Env),
 			DockerRunOptions: append([]string{}, exporter.DockerRunOptions...),
 			RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 			Ports: []v1.NodeComponentPort{
 				{Name: "metrics", Port: exporter.Port, Protocol: "TCP"},
 			},
 			HealthCheck: &v1.NodeComponentHealthCheck{
-				HTTPPath: defaultPrometheusHTTPPath,
+				HTTPPath: exporterMetricsPath(exporter),
 				Port:     exporter.Port,
 			},
 		})
@@ -329,7 +428,7 @@ func buildNodeComponents(
 		components = append(components, v1.NodeComponentSpec{
 			Name:             vmagentComponentName,
 			Type:             v1.NodeComponentTypeMetricsAgent,
-			Image:            defaultVMAgentImage,
+			Image:            staticComponentImage(cluster, defaultVMAgentImage),
 			Args:             vmagentArgs,
 			DockerRunOptions: []string{"--net=host"},
 			Volumes: []v1.NodeComponentVolume{
@@ -357,10 +456,10 @@ func buildNodeComponents(
 
 func attachMetricsConfigFiles(
 	cluster *v1.StaticNodeCluster,
-	nodes []*v1.StaticNode,
-	acceleratorProfiles map[string]*v1.AcceleratorProfile,
+	plans []staticNodeDesiredPlan,
 ) error {
-	for _, node := range nodes {
+	for _, plan := range plans {
+		node := plan.Node
 		if node == nil || node.Metadata == nil || node.Spec == nil {
 			continue
 		}
@@ -371,7 +470,7 @@ func attachMetricsConfigFiles(
 
 		appendComponentConfigFile(node, vmagentComponentName, v1.NodeComponentConfigFile{
 			Path:         vmagentConfigPath,
-			Content:      renderVMAgentConfig(cluster, acceleratorProfiles),
+			Content:      renderVMAgentConfig(cluster, plans),
 			Mode:         "0644",
 			Owner:        "root",
 			Group:        "root",
@@ -386,70 +485,125 @@ func attachMetricsConfigFiles(
 
 func renderVMAgentConfig(
 	cluster *v1.StaticNodeCluster,
-	acceleratorProfiles map[string]*v1.AcceleratorProfile,
+	plans []staticNodeDesiredPlan,
 ) string {
 	var builder strings.Builder
 	builder.WriteString("global:\n")
 	builder.WriteString("  scrape_interval: 15s\n")
 	builder.WriteString("scrape_configs:\n")
 
-	nodes := append([]v1.StaticNodeClusterNodeSpec{}, cluster.Spec.Nodes...)
-	sort.SliceStable(nodes, func(i, j int) bool {
-		return nodes[i].Name < nodes[j].Name
+	plans = append([]staticNodeDesiredPlan{}, plans...)
+	sort.SliceStable(plans, func(i, j int) bool {
+		return plans[i].Node.Metadata.Name < plans[j].Node.Metadata.Name
 	})
 
 	builder.WriteString("- job_name: static-node-node-exporter\n")
 	builder.WriteString("  static_configs:\n")
-	for _, node := range nodes {
+	for _, plan := range plans {
+		node := plan.Node
+		if node == nil || node.Spec == nil {
+			continue
+		}
+
 		writeVMAgentStaticConfig(&builder, cluster, node, nodeExporterComponentName, defaultNodeExporterPort, nil)
 	}
 
-	if hasAcceleratorExporterTarget(nodes, acceleratorProfiles) {
-		builder.WriteString("- job_name: static-node-accelerator-exporter\n")
+	groups := acceleratorExporterTargetGroups(plans)
+	for i, group := range groups {
+		builder.WriteString("- job_name: ")
+		builder.WriteString(acceleratorExporterJobName(group.MetricsPath, len(groups), i))
+		builder.WriteString("\n")
+		if group.MetricsPath != defaultPrometheusHTTPPath {
+			builder.WriteString("  metrics_path: ")
+			builder.WriteString(strconv.Quote(group.MetricsPath))
+			builder.WriteString("\n")
+		}
 		builder.WriteString("  static_configs:\n")
 
-		for _, node := range nodes {
-			profile := acceleratorProfiles[node.AcceleratorType]
-			if profile == nil || profile.Metrics == nil || profile.Metrics.Exporter == nil {
-				continue
-			}
-
+		for _, target := range group.Targets {
 			extraLabels := map[string]string{
-				"accelerator_type": node.AcceleratorType,
-				"exporter_kind":    profile.Metrics.Exporter.Kind,
+				"accelerator_exporter":      target.Exporter.Kind,
+				"accelerator_product_model": target.Accelerator.ProductModel,
+				"accelerator_type":          target.Accelerator.Type,
+				"accelerator_vendor":        target.Accelerator.Vendor,
 			}
-			writeVMAgentStaticConfig(&builder, cluster, node, acceleratorExporterComponentName, profile.Metrics.Exporter.Port, extraLabels)
+			writeVMAgentStaticConfig(&builder, cluster, target.Node, acceleratorExporterComponentName, target.Exporter.Port, nonEmptyLabels(extraLabels))
 		}
 	}
 
 	return builder.String()
 }
 
-func hasAcceleratorExporterTarget(
-	nodes []v1.StaticNodeClusterNodeSpec,
-	acceleratorProfiles map[string]*v1.AcceleratorProfile,
-) bool {
-	for _, node := range nodes {
-		profile := acceleratorProfiles[node.AcceleratorType]
-		if profile != nil && profile.Metrics != nil && profile.Metrics.Exporter != nil {
-			return true
+type acceleratorExporterTargetGroup struct {
+	MetricsPath string
+	Targets     []acceleratorExporterTarget
+}
+
+type acceleratorExporterTarget struct {
+	Node        *v1.StaticNode
+	Accelerator v1.StaticNodeAcceleratorStatus
+	Exporter    *v1.AcceleratorExporterProfile
+}
+
+func acceleratorExporterTargetGroups(plans []staticNodeDesiredPlan) []acceleratorExporterTargetGroup {
+	groupsByPath := map[string][]acceleratorExporterTarget{}
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Accelerator == nil || plan.Profile == nil ||
+			plan.Profile.Metrics == nil || plan.Profile.Metrics.Exporter == nil {
+			continue
 		}
+
+		exporter := plan.Profile.Metrics.Exporter
+		metricsPath := exporterMetricsPath(exporter)
+		groupsByPath[metricsPath] = append(groupsByPath[metricsPath], acceleratorExporterTarget{
+			Node:        plan.Node,
+			Accelerator: *plan.Accelerator,
+			Exporter:    exporter,
+		})
 	}
 
-	return false
+	paths := make([]string, 0, len(groupsByPath))
+	for path := range groupsByPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	groups := make([]acceleratorExporterTargetGroup, 0, len(paths))
+	for _, path := range paths {
+		groups = append(groups, acceleratorExporterTargetGroup{
+			MetricsPath: path,
+			Targets:     groupsByPath[path],
+		})
+	}
+
+	return groups
+}
+
+func acceleratorExporterJobName(metricsPath string, groupCount int, index int) string {
+	if groupCount <= 1 {
+		return "static-node-accelerator-exporter"
+	}
+
+	name := strings.Trim(metricsPath, "/")
+	name = strings.ReplaceAll(name, "/", "-")
+	if name == "" {
+		name = strconv.Itoa(index)
+	}
+
+	return "static-node-accelerator-exporter-" + name
 }
 
 func writeVMAgentStaticConfig(
 	builder *strings.Builder,
 	cluster *v1.StaticNodeCluster,
-	node v1.StaticNodeClusterNodeSpec,
+	node *v1.StaticNode,
 	source string,
 	port int,
 	extraLabels map[string]string,
 ) {
 	builder.WriteString("  - targets:\n")
 	builder.WriteString("    - ")
-	builder.WriteString(strconv.Quote(fmt.Sprintf("%s:%d", node.IP, port)))
+	builder.WriteString(strconv.Quote(fmt.Sprintf("%s:%d", node.Spec.IP, port)))
 	builder.WriteString("\n")
 	builder.WriteString("    labels:\n")
 	builder.WriteString("      source: ")
@@ -468,13 +622,13 @@ func writeVMAgentStaticConfig(
 	builder.WriteString(strconv.Quote("ray"))
 	builder.WriteString("\n")
 	builder.WriteString("      node: ")
-	builder.WriteString(strconv.Quote(node.Name))
+	builder.WriteString(strconv.Quote(node.Metadata.Name))
 	builder.WriteString("\n")
 	builder.WriteString("      node_ip: ")
-	builder.WriteString(strconv.Quote(node.IP))
+	builder.WriteString(strconv.Quote(node.Spec.IP))
 	builder.WriteString("\n")
 	builder.WriteString("      node_role: ")
-	builder.WriteString(strconv.Quote(string(staticNodeClusterNodeRole(cluster, node))))
+	builder.WriteString(strconv.Quote(string(node.Spec.Role)))
 	builder.WriteString("\n")
 
 	keys := make([]string, 0, len(extraLabels))
@@ -501,6 +655,30 @@ func staticNodeClusterNodeRole(
 	}
 
 	return normalizeStaticNodeRole(node.Role)
+}
+
+func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
+	if exporter == nil || exporter.MetricsPath == "" {
+		return defaultPrometheusHTTPPath
+	}
+
+	path := exporter.MetricsPath
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	return path
+}
+
+func nonEmptyLabels(labels map[string]string) map[string]string {
+	result := make(map[string]string, len(labels))
+	for key, value := range labels {
+		if value != "" {
+			result[key] = value
+		}
+	}
+
+	return result
 }
 
 func appendComponentConfigFile(node *v1.StaticNode, componentName string, configFile v1.NodeComponentConfigFile) {
@@ -561,19 +739,9 @@ func buildRayComponent(
 			DockerRunOptions: dockerRunOptions,
 			RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 			HealthCheck: &v1.NodeComponentHealthCheck{
-				HTTPPath: "/api/v0/cluster_metadata",
-				Port:     defaultRayDashboardPort,
+				Port: defaultRayDashboardPort,
 			},
 		}
-	}
-
-	healthCommand := []string{
-		"docker",
-		"exec",
-		sanitizeContainerName(componentContainerPrefix(cluster) + "-ray-worker"),
-		"ray",
-		"status",
-		"--address=" + staticNodeClusterHeadIP(cluster) + ":6379",
 	}
 
 	return v1.NodeComponentSpec{
@@ -586,7 +754,8 @@ func buildRayComponent(
 		DockerRunOptions: dockerRunOptions,
 		RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 		HealthCheck: &v1.NodeComponentHealthCheck{
-			Command: healthCommand,
+			HTTPHost: staticNodeClusterHeadIP(cluster),
+			Port:     defaultRayDashboardPort,
 		},
 	}
 }
@@ -746,20 +915,37 @@ func nodeMetricsReady(node *v1.StaticNode) bool {
 	return true
 }
 
-func buildNodeWarmSpec(cluster *v1.StaticNodeCluster) *v1.WarmSpec {
-	image := buildRayRuntimeImage(cluster)
-	if image == "" {
+func buildNodeWarmSpec(components []v1.NodeComponentSpec) *v1.WarmSpec {
+	if len(components) == 0 {
+		return nil
+	}
+
+	images := make([]v1.WarmImageSpec, 0, len(components))
+	seen := map[string]struct{}{}
+
+	for _, component := range components {
+		if component.Image == "" {
+			continue
+		}
+
+		if _, exists := seen[component.Image]; exists {
+			continue
+		}
+		seen[component.Image] = struct{}{}
+
+		images = append(images, v1.WarmImageSpec{
+			Name:     warmImageName(component),
+			Ref:      component.Image,
+			Required: true,
+		})
+	}
+
+	if len(images) == 0 {
 		return nil
 	}
 
 	return &v1.WarmSpec{
-		Images: []v1.WarmImageSpec{
-			{
-				Name:     "ray-runtime",
-				Ref:      image,
-				Required: true,
-			},
-		},
+		Images: images,
 	}
 }
 
@@ -769,6 +955,53 @@ func buildRayRuntimeImage(cluster *v1.StaticNodeCluster) string {
 	}
 
 	return strings.TrimRight(cluster.Spec.ImageRegistry, "/") + "/neutree-serve:" + cluster.Spec.Version
+}
+
+func warmImageName(component v1.NodeComponentSpec) string {
+	switch component.Type {
+	case v1.NodeComponentTypeRayHead, v1.NodeComponentTypeRayWorker:
+		return "ray-runtime"
+	default:
+		if component.Name != "" {
+			return component.Name
+		}
+
+		return string(component.Type)
+	}
+}
+
+func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
+	if image == "" {
+		return ""
+	}
+
+	if cluster == nil || cluster.Spec == nil || cluster.Spec.ImageRegistry == "" {
+		return image
+	}
+
+	imageRegistry := strings.TrimRight(cluster.Spec.ImageRegistry, "/")
+	if strings.HasPrefix(image, imageRegistry+"/") {
+		return image
+	}
+
+	return imageRegistry + "/" + stripSourceImageRegistry(image)
+}
+
+func stripSourceImageRegistry(image string) string {
+	parts := strings.SplitN(image, "/", 2)
+	if len(parts) < 2 {
+		return image
+	}
+
+	if isSourceImageRegistry(parts[0]) {
+		return parts[1]
+	}
+
+	return image
+}
+
+func isSourceImageRegistry(segment string) bool {
+	return segment == "localhost" || strings.Contains(segment, ".") || strings.Contains(segment, ":")
 }
 
 func copyStringMap(values map[string]string) map[string]string {

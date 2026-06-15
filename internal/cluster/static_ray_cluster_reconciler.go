@@ -4,10 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -17,18 +22,20 @@ type staticRayClusterStore interface {
 	ListStaticNodeCluster(option storage.ListOption) ([]v1.StaticNodeCluster, error)
 	CreateStaticNodeCluster(data *v1.StaticNodeCluster) error
 	UpdateStaticNodeCluster(id string, data *v1.StaticNodeCluster) error
-	DeleteStaticNodeCluster(id string) error
 }
 
 type staticRayClusterReconciler struct {
 	store                 staticRayClusterStore
+	acceleratorManager    accelerator.Manager
 	metricsRemoteWriteURL string
+	newDashboardService   dashboard.NewDashboardServiceFunc
 }
 
 var _ ClusterReconcile = (*staticRayClusterReconciler)(nil)
 
 func newStaticRayClusterReconcile(
 	store interface{},
+	acceleratorManager accelerator.Manager,
 	metricsRemoteWriteURL string,
 ) (*staticRayClusterReconciler, error) {
 	staticStore, ok := store.(staticRayClusterStore)
@@ -38,7 +45,9 @@ func newStaticRayClusterReconcile(
 
 	return &staticRayClusterReconciler{
 		store:                 staticStore,
+		acceleratorManager:    acceleratorManager,
 		metricsRemoteWriteURL: metricsRemoteWriteURL,
+		newDashboardService:   dashboard.NewDashboardService,
 	}, nil
 }
 
@@ -93,7 +102,14 @@ func (r *staticRayClusterReconciler) ReconcileDelete(_ context.Context, cluster 
 		return nil
 	}
 
-	return r.store.DeleteStaticNodeCluster(strconv.Itoa(current.ID))
+	if current.Metadata == nil {
+		current.Metadata = &v1.Metadata{}
+	}
+	if current.Metadata.DeletionTimestamp == "" {
+		current.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	return r.store.UpdateStaticNodeCluster(strconv.Itoa(current.ID), current)
 }
 
 func (r *staticRayClusterReconciler) buildStaticNodeCluster(cluster *v1.Cluster) (*v1.StaticNodeCluster, error) {
@@ -196,7 +212,7 @@ func (r *staticRayClusterReconciler) copyStaticStatusToCluster(
 		cluster.Status = &v1.ClusterStatus{}
 	}
 
-	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:%d", staticNodeClusterHeadIP(desired), defaultRayDashboardPort)
+	cluster.Status.DashboardURL = staticNodeClusterDashboardURL(desired)
 	cluster.Status.DesiredNodes = len(desired.Spec.Nodes)
 
 	if status != nil {
@@ -209,7 +225,41 @@ func (r *staticRayClusterReconciler) copyStaticStatusToCluster(
 	if status != nil && status.Phase == v1.StaticNodeClusterPhaseReady {
 		cluster.Status.Initialized = true
 		cluster.Status.Version = cluster.GetVersion()
+		if resources, err := r.calculateStaticClusterResources(desired); err != nil {
+			klog.Warningf("failed to calculate static cluster resources for %s: %v", cluster.Metadata.WorkspaceName(), err)
+		} else {
+			cluster.Status.ResourceInfo = resources
+		}
 	}
+}
+
+func (r *staticRayClusterReconciler) calculateStaticClusterResources(
+	cluster *v1.StaticNodeCluster,
+) (*v1.ClusterResources, error) {
+	return calculateRayDashboardClusterResources(
+		r.dashboardService(staticNodeClusterDashboardURL(cluster)),
+		r.resourceParsers(),
+	)
+}
+
+func (r *staticRayClusterReconciler) dashboardService(dashboardURL string) dashboard.DashboardService {
+	if r != nil && r.newDashboardService != nil {
+		return r.newDashboardService(dashboardURL)
+	}
+
+	return dashboard.NewDashboardService(dashboardURL)
+}
+
+func (r *staticRayClusterReconciler) resourceParsers() map[string]plugin.ResourceParser {
+	if r == nil || r.acceleratorManager == nil {
+		return nil
+	}
+
+	return r.acceleratorManager.GetAllParsers()
+}
+
+func staticNodeClusterDashboardURL(cluster *v1.StaticNodeCluster) string {
+	return fmt.Sprintf("http://%s:%d", staticNodeClusterHeadIP(cluster), defaultRayDashboardPort)
 }
 
 func staticNodeClusterNotReadyError(cluster *v1.StaticNodeCluster) error {

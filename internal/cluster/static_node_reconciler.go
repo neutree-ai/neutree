@@ -3,13 +3,19 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
@@ -22,6 +28,7 @@ const (
 	componentReasonConfigWriteFailed = "ConfigWriteFailed"
 	componentReasonDependencyPending = "DependencyPending"
 	componentReasonExternallyManaged = "ExternallyManaged"
+	componentReasonHeadPending       = "HeadNodePending"
 	componentReasonHealthCheckFailed = "HealthCheckFailed"
 	componentReasonInspectFailed     = "ContainerInspectFailed"
 	componentReasonRunFailed         = "ContainerRunFailed"
@@ -40,11 +47,64 @@ type staticNodeFileRunner interface {
 	Files() commandrunner.FileClient
 }
 
-type StaticNodeReconciler struct{}
+type StaticNodeReconciler struct {
+	AcceleratorManager  StaticNodeAcceleratorManager
+	HeadReadyChecker    StaticNodeHeadReadyChecker
+	NewDashboardService dashboard.NewDashboardServiceFunc
+}
 
 type StaticNodeReconcileResult struct {
-	Warm       *v1.WarmStatus
-	Components []v1.NodeComponentStatus
+	Accelerator *v1.StaticNodeAcceleratorStatus
+	Warm        *v1.WarmStatus
+	Components  []v1.NodeComponentStatus
+}
+
+type StaticNodeAcceleratorManager interface {
+	DetectAccelerator(ctx context.Context, runner accelerator.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)
+}
+
+type StaticNodeHeadReadyChecker interface {
+	HeadReady(ctx context.Context, node *v1.StaticNode) (bool, error)
+}
+
+type StaticNodeHeadReadyReader interface {
+	ListStaticNodes(ctx context.Context, workspace, clusterName string) ([]*v1.StaticNode, error)
+}
+
+type StaticNodeStoreHeadReadyChecker struct {
+	Reader StaticNodeHeadReadyReader
+}
+
+func (c *StaticNodeStoreHeadReadyChecker) HeadReady(ctx context.Context, node *v1.StaticNode) (bool, error) {
+	if node == nil || node.Spec == nil || node.Spec.Role != v1.StaticNodeRoleWorker {
+		return true, nil
+	}
+
+	if c == nil || c.Reader == nil {
+		return false, nil
+	}
+
+	workspace := ""
+	if node.Metadata != nil {
+		workspace = node.Metadata.Workspace
+	}
+
+	nodes, err := c.Reader.ListStaticNodes(ctx, workspace, node.Spec.Cluster)
+	if err != nil {
+		return false, err
+	}
+
+	for _, candidate := range nodes {
+		if candidate == nil || candidate.Spec == nil || candidate.Status == nil {
+			continue
+		}
+
+		if candidate.Spec.Role == v1.StaticNodeRoleHead {
+			return candidate.Status.Phase == v1.StaticNodePhaseReady, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (r *StaticNodeReconciler) Reconcile(
@@ -52,17 +112,45 @@ func (r *StaticNodeReconciler) Reconcile(
 	node *v1.StaticNode,
 	runner StaticNodeCommandRunner,
 ) (*StaticNodeReconcileResult, error) {
+	acceleratorStatus, err := r.ReconcileAccelerator(ctx, node, runner)
+	if err != nil {
+		return &StaticNodeReconcileResult{Accelerator: acceleratorStatus}, err
+	}
+
 	warmStatus, err := r.ReconcileWarmImages(ctx, node, runner)
 	if err != nil {
-		return &StaticNodeReconcileResult{Warm: warmStatus}, err
+		return &StaticNodeReconcileResult{Accelerator: acceleratorStatus, Warm: warmStatus}, err
 	}
 
 	componentStatuses, err := r.ReconcileComponents(ctx, node, runner)
 
 	return &StaticNodeReconcileResult{
-		Warm:       warmStatus,
-		Components: componentStatuses,
+		Accelerator: acceleratorStatus,
+		Warm:        warmStatus,
+		Components:  componentStatuses,
 	}, err
+}
+
+func (r *StaticNodeReconciler) ReconcileAccelerator(
+	ctx context.Context,
+	node *v1.StaticNode,
+	runner StaticNodeCommandRunner,
+) (*v1.StaticNodeAcceleratorStatus, error) {
+	if r == nil || r.AcceleratorManager == nil {
+		if node != nil && node.Status != nil && node.Status.Accelerator != nil {
+			return node.Status.Accelerator, nil
+		}
+
+		cpu := v1.CPUStaticNodeAcceleratorStatus()
+
+		return &cpu, nil
+	}
+
+	if runner == nil {
+		return nil, errors.New("static node command runner is required for accelerator discovery")
+	}
+
+	return r.AcceleratorManager.DetectAccelerator(ctx, runner)
 }
 
 func (r *StaticNodeReconciler) ReconcileWarmImages(
@@ -101,6 +189,63 @@ func (r *StaticNodeReconciler) ReconcileWarmImages(
 	}
 
 	return status, nil
+}
+
+func (r *StaticNodeReconciler) Delete(
+	ctx context.Context,
+	node *v1.StaticNode,
+	runner StaticNodeCommandRunner,
+) error {
+	if node == nil || node.Spec == nil {
+		return nil
+	}
+
+	if runner == nil {
+		return errors.New("static node command runner is required")
+	}
+
+	errs := []error{}
+	for _, component := range node.Spec.Components {
+		containerName := componentContainerName(node, component)
+		if _, err := runner.Run(ctx, "docker rm -f "+shellArg(containerName)+" >/dev/null 2>&1 || true"); err != nil {
+			errs = append(errs, errors.Wrapf(err, "failed to remove component container %s", containerName))
+		}
+
+		if err := removeComponentConfigFiles(ctx, runner, component); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return apierrors.NewAggregate(errs)
+}
+
+func removeComponentConfigFiles(
+	ctx context.Context,
+	runner StaticNodeCommandRunner,
+	component v1.NodeComponentSpec,
+) error {
+	if len(component.ConfigFiles) == 0 {
+		return nil
+	}
+
+	fileRunner, ok := runner.(staticNodeFileRunner)
+	if !ok {
+		return errors.New("static node command runner does not support file operations")
+	}
+
+	files := fileRunner.Files()
+	if files == nil {
+		return errors.New("static node command runner file client is nil")
+	}
+
+	errs := []error{}
+	for _, configFile := range component.ConfigFiles {
+		if err := files.Remove(ctx, configFile.Path, commandrunner.RemoveFileOptions{Sudo: configFile.Sudo}); err != nil {
+			errs = append(errs, errors.Wrapf(err, "failed to remove config file %s", configFile.Path))
+		}
+	}
+
+	return apierrors.NewAggregate(errs)
 }
 
 func (r *StaticNodeReconciler) ReconcileComponents(
@@ -147,6 +292,18 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		ObservedImage: component.Image,
 	}
 
+	waitForHead, err := r.shouldWaitForHead(ctx, node, component)
+	if err != nil || waitForHead {
+		status.Phase = v1.NodeComponentPhasePending
+		status.Reason = componentReasonHeadPending
+		status.Message = "head static node is not ready"
+		if err != nil {
+			status.Message = err.Error()
+		}
+
+		return status, nil
+	}
+
 	for _, dependency := range component.Dependencies {
 		if !readyByName[dependency] {
 			status.Phase = v1.NodeComponentPhasePending
@@ -190,7 +347,7 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		}
 	}
 
-	if err := checkComponentHealth(ctx, runner, component); err != nil {
+	if err := r.checkComponentHealth(ctx, node, runner, component); err != nil {
 		status.Phase = v1.NodeComponentPhaseDegraded
 		status.Reason = componentReasonHealthCheckFailed
 		status.Message = err.Error()
@@ -203,6 +360,31 @@ func (r *StaticNodeReconciler) reconcileComponent(
 	status.Reason = componentReasonRunning
 
 	return status, nil
+}
+
+func (r *StaticNodeReconciler) shouldWaitForHead(
+	ctx context.Context,
+	node *v1.StaticNode,
+	component v1.NodeComponentSpec,
+) (bool, error) {
+	if node == nil || node.Spec == nil || node.Spec.Role != v1.StaticNodeRoleWorker {
+		return false, nil
+	}
+
+	if component.Type != v1.NodeComponentTypeRayWorker {
+		return false, nil
+	}
+
+	if r == nil || r.HeadReadyChecker == nil {
+		return false, nil
+	}
+
+	headReady, err := r.HeadReadyChecker.HeadReady(ctx, node)
+	if err != nil {
+		return true, err
+	}
+
+	return !headReady, nil
 }
 
 func writeComponentConfigFiles(
@@ -301,8 +483,9 @@ func ensureComponentImage(ctx context.Context, runner StaticNodeCommandRunner, i
 	return nil
 }
 
-func checkComponentHealth(
+func (r *StaticNodeReconciler) checkComponentHealth(
 	ctx context.Context,
+	node *v1.StaticNode,
 	runner StaticNodeCommandRunner,
 	component v1.NodeComponentSpec,
 ) error {
@@ -316,7 +499,7 @@ func checkComponentHealth(
 		return err
 	}
 
-	if component.HealthCheck.HTTPPath == "" || component.HealthCheck.Port == 0 {
+	if component.HealthCheck.Port == 0 {
 		return nil
 	}
 
@@ -325,16 +508,102 @@ func checkComponentHealth(
 		timeout = 5
 	}
 
-	_, err := runner.Run(
-		ctx,
-		fmt.Sprintf(
-			"curl -fsS --max-time %d %s",
-			timeout,
-			shellArg(fmt.Sprintf("http://127.0.0.1:%d%s", component.HealthCheck.Port, component.HealthCheck.HTTPPath)),
-		),
-	)
+	dashboardURL := componentHealthBaseURL(node, component.HealthCheck)
+	switch component.Type {
+	case v1.NodeComponentTypeRayHead:
+		return r.checkRayHeadDashboardHealth(dashboardURL)
+	case v1.NodeComponentTypeRayWorker:
+		return r.checkRayWorkerDashboardHealth(dashboardURL, staticNodeHealthHost(node))
+	}
+
+	if component.HealthCheck.HTTPPath == "" {
+		return nil
+	}
+
+	return checkHTTPHealth(ctx, componentHealthURL(node, component.HealthCheck), timeout)
+}
+
+func componentHealthBaseURL(node *v1.StaticNode, healthCheck *v1.NodeComponentHealthCheck) string {
+	host := strings.TrimSpace(healthCheck.HTTPHost)
+	if host == "" {
+		host = staticNodeHealthHost(node)
+	}
+
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(healthCheck.Port))
+}
+
+func componentHealthURL(node *v1.StaticNode, healthCheck *v1.NodeComponentHealthCheck) string {
+	path := healthCheck.HTTPPath
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	return componentHealthBaseURL(node, healthCheck) + path
+}
+
+func staticNodeHealthHost(node *v1.StaticNode) string {
+	if node != nil && node.Spec != nil && node.Spec.IP != "" {
+		return node.Spec.IP
+	}
+
+	return "127.0.0.1"
+}
+
+func checkHTTPHealth(ctx context.Context, url string, timeoutSec int) error {
+	response, err := doHealthHTTPGet(ctx, url, timeoutSec)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("http health check %s returned %s", url, response.Status)
+	}
+
+	return nil
+}
+
+func doHealthHTTPGet(ctx context.Context, url string, timeoutSec int) (*http.Response, error) {
+	if timeoutSec <= 0 {
+		timeoutSec = 5
+	}
+
+	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return client.Do(request)
+}
+
+func (r *StaticNodeReconciler) checkRayHeadDashboardHealth(dashboardURL string) error {
+	_, err := r.dashboardService(dashboardURL).GetClusterMetadata()
 
 	return err
+}
+
+func (r *StaticNodeReconciler) checkRayWorkerDashboardHealth(dashboardURL string, nodeIP string) error {
+	nodes, err := r.dashboardService(dashboardURL).ListNodes()
+	if err != nil {
+		return errors.Wrap(err, "failed to list ray dashboard nodes")
+	}
+
+	for _, node := range nodes {
+		if node.IP == nodeIP && node.Raylet.State == v1.AliveNodeState {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("ray node %s is not alive in dashboard", nodeIP)
+}
+
+func (r *StaticNodeReconciler) dashboardService(dashboardURL string) dashboard.DashboardService {
+	if r != nil && r.NewDashboardService != nil {
+		return r.NewDashboardService(dashboardURL)
+	}
+
+	return dashboard.NewDashboardService(dashboardURL)
 }
 
 func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, componentHash string) string {

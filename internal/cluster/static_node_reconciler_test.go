@@ -3,10 +3,16 @@ package cluster
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -223,9 +229,11 @@ func TestComponentContainerMatchesIgnoresSSHWarning(t *testing.T) {
 }
 
 func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
+			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:          nodeExporterComponentName,
@@ -239,7 +247,7 @@ func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 					},
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: defaultPrometheusHTTPPath,
-						Port:     defaultNodeExporterPort,
+						Port:     healthPort,
 					},
 				},
 			},
@@ -268,9 +276,6 @@ func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 					"'--path.rootfs=/host'",
 				},
 			},
-			{
-				command: "curl -fsS --max-time 5 'http://127.0.0.1:9100/metrics'",
-			},
 		},
 	}
 
@@ -285,9 +290,11 @@ func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 }
 
 func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure(t *testing.T) {
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
+			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       "ray-head",
@@ -305,7 +312,7 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 					},
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: defaultPrometheusHTTPPath,
-						Port:     defaultNodeExporterPort,
+						Port:     healthPort,
 					},
 				},
 			},
@@ -342,9 +349,6 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 					"'quay.io/prometheus/node-exporter:v1.8.2'",
 				},
 			},
-			{
-				command: "curl -fsS --max-time 5 'http://127.0.0.1:9100/metrics'",
-			},
 		},
 	}
 
@@ -360,9 +364,11 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 }
 
 func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *testing.T) {
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
+			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       nodeExporterComponentName,
@@ -371,7 +377,7 @@ func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *t
 					ConfigHash: "hash-node-exporter",
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: defaultPrometheusHTTPPath,
-						Port:     defaultNodeExporterPort,
+						Port:     healthPort,
 					},
 				},
 			},
@@ -400,9 +406,6 @@ func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *t
 					"'quay.io/prometheus/node-exporter:v1.8.2'",
 				},
 			},
-			{
-				command: "curl -fsS --max-time 5 'http://127.0.0.1:9100/metrics'",
-			},
 		},
 	}
 
@@ -416,9 +419,11 @@ func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *t
 }
 
 func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultHealthHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
+			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:          vmagentComponentName,
@@ -448,7 +453,7 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 					},
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: defaultHealthHTTPPath,
-						Port:     defaultVMAgentPort,
+						Port:     healthPort,
 					},
 				},
 			},
@@ -476,9 +481,6 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 					"'victoriametrics/vmagent:v1.115.0'",
 				},
 			},
-			{
-				command: "curl -fsS --max-time 5 'http://127.0.0.1:8429/health'",
-			},
 		},
 	}
 
@@ -493,6 +495,158 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
+func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerWithDashboardAPI(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.11",
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:       "ray-worker",
+					Type:       v1.NodeComponentTypeRayWorker,
+					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
+					ConfigHash: "hash-ray-worker",
+					HealthCheck: &v1.NodeComponentHealthCheck{
+						HTTPHost: "10.0.0.10",
+						Port:     defaultRayDashboardPort,
+					},
+				},
+			},
+		},
+	}
+	runner := &fakeStaticNodeRunner{
+		responses: []fakeStaticNodeResponse{
+			{
+				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-ray-worker'",
+				output:  "hash-ray-worker true\n",
+			},
+		},
+	}
+	reconciler := &StaticNodeReconciler{
+		NewDashboardService: func(dashboardURL string) dashboard.DashboardService {
+			assert.Equal(t, "http://10.0.0.10:8265", dashboardURL)
+
+			return &fakeStaticNodeDashboardService{
+				nodes: []v1.NodeSummary{
+					{
+						IP: "10.0.0.11",
+						Raylet: v1.Raylet{
+							State: v1.AliveNodeState,
+						},
+					},
+				},
+			}
+		},
+	}
+
+	statuses, err := reconciler.ReconcileComponents(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].Ready)
+	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
+	assert.Equal(t, len(runner.responses), runner.calls)
+}
+
+func TestStaticNodeReconcilerReconcileComponentsWaitsForHeadBeforeRayWorker(t *testing.T) {
+	node := &v1.StaticNode{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "worker-0"},
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.11",
+			Role:    v1.StaticNodeRoleWorker,
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:       "ray-worker",
+					Type:       v1.NodeComponentTypeRayWorker,
+					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
+					ConfigHash: "hash-ray-worker",
+				},
+			},
+		},
+	}
+	runner := &fakeStaticNodeRunner{}
+	reconciler := &StaticNodeReconciler{
+		HeadReadyChecker: fakeStaticNodeHeadReadyChecker{ready: false},
+	}
+
+	statuses, err := reconciler.ReconcileComponents(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.False(t, statuses[0].Ready)
+	assert.Equal(t, v1.NodeComponentPhasePending, statuses[0].Phase)
+	assert.Equal(t, componentReasonHeadPending, statuses[0].Reason)
+	assert.Equal(t, "head static node is not ready", statuses[0].Message)
+	assert.Equal(t, 0, runner.calls)
+}
+
+func TestStaticNodeStoreHeadReadyCheckerReadsHeadStatusFromClusterNodes(t *testing.T) {
+	reader := &fakeStaticNodeHeadReadyReader{
+		nodes: []*v1.StaticNode{
+			{
+				Spec:   &v1.StaticNodeSpec{Cluster: "static-a", Role: v1.StaticNodeRoleHead},
+				Status: &v1.StaticNodeStatus{Phase: v1.StaticNodePhaseReady},
+			},
+		},
+	}
+	checker := &StaticNodeStoreHeadReadyChecker{Reader: reader}
+	node := &v1.StaticNode{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "worker-0"},
+		Spec:     &v1.StaticNodeSpec{Cluster: "static-a", Role: v1.StaticNodeRoleWorker},
+	}
+
+	ready, err := checker.HeadReady(context.Background(), node)
+
+	require.NoError(t, err)
+	assert.True(t, ready)
+	assert.Equal(t, "default", reader.workspace)
+	assert.Equal(t, "static-a", reader.clusterName)
+}
+
+func TestStaticNodeReconcilerReconcileComponentsChecksRayHeadWithDashboardAPI(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.10",
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:       "ray-head",
+					Type:       v1.NodeComponentTypeRayHead,
+					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
+					ConfigHash: "hash-ray-head",
+					HealthCheck: &v1.NodeComponentHealthCheck{
+						Port: defaultRayDashboardPort,
+					},
+				},
+			},
+		},
+	}
+	runner := &fakeStaticNodeRunner{
+		responses: []fakeStaticNodeResponse{
+			{
+				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-ray-head'",
+				output:  "hash-ray-head true\n",
+			},
+		},
+	}
+	reconciler := &StaticNodeReconciler{
+		NewDashboardService: func(dashboardURL string) dashboard.DashboardService {
+			assert.Equal(t, "http://10.0.0.10:8265", dashboardURL)
+
+			return &fakeStaticNodeDashboardService{}
+		},
+	}
+
+	statuses, err := reconciler.ReconcileComponents(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].Ready)
+	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
+	assert.Equal(t, len(runner.responses), runner.calls)
+}
+
 func staticNodeWithWarmImages(images []v1.WarmImageSpec) *v1.StaticNode {
 	return &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
@@ -501,6 +655,91 @@ func staticNodeWithWarmImages(images []v1.WarmImageSpec) *v1.StaticNode {
 			},
 		},
 	}
+}
+
+func newStaticNodeHealthServer(t *testing.T, path string, body string) (string, int) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+
+			return
+		}
+
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+
+	parsedURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	host, portString, err := net.SplitHostPort(parsedURL.Host)
+	require.NoError(t, err)
+
+	port, err := strconv.Atoi(portString)
+	require.NoError(t, err)
+
+	return host, port
+}
+
+type fakeStaticNodeDashboardService struct {
+	nodes []v1.NodeSummary
+}
+
+func (f *fakeStaticNodeDashboardService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {
+	return &dashboard.ClusterMetadataResponse{}, nil
+}
+
+func (f *fakeStaticNodeDashboardService) ListNodes() ([]v1.NodeSummary, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeStaticNodeDashboardService) GetClusterStatus() (v1.RayAPIClusterStatus, error) {
+	return v1.RayAPIClusterStatus{}, nil
+}
+
+func (f *fakeStaticNodeDashboardService) GetServeApplications() (*dashboard.RayServeApplicationsResponse, error) {
+	return nil, nil
+}
+
+func (f *fakeStaticNodeDashboardService) UpdateServeApplications(_ dashboard.RayServeApplicationsRequest) error {
+	return nil
+}
+
+type fakeStaticNodeHeadReadyChecker struct {
+	ready bool
+	err   error
+}
+
+func (f fakeStaticNodeHeadReadyChecker) HeadReady(_ context.Context, _ *v1.StaticNode) (bool, error) {
+	return f.ready, f.err
+}
+
+type fakeStaticNodeHeadReadyReader struct {
+	nodes       []*v1.StaticNode
+	workspace   string
+	clusterName string
+	err         error
+}
+
+func (f *fakeStaticNodeHeadReadyReader) ListStaticNodes(
+	_ context.Context,
+	workspace string,
+	clusterName string,
+) ([]*v1.StaticNode, error) {
+	f.workspace = workspace
+	f.clusterName = clusterName
+
+	return f.nodes, f.err
+}
+
+func (f *fakeStaticNodeDashboardService) ListActors(
+	_ []dashboard.ActorFilter,
+	_ bool,
+	_ int,
+) (*dashboard.ActorsResponse, error) {
+	return nil, nil
 }
 
 type fakeStaticNodeRunner struct {

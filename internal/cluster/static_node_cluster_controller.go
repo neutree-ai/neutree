@@ -12,6 +12,7 @@ type StaticNodeClusterStore interface {
 	ListStaticNodes(ctx context.Context, workspace, clusterName string) ([]*v1.StaticNode, error)
 	UpsertStaticNode(ctx context.Context, node *v1.StaticNode) error
 	DeleteStaticNode(ctx context.Context, node *v1.StaticNode) error
+	HardDeleteStaticNodeCluster(ctx context.Context, cluster *v1.StaticNodeCluster) error
 	UpdateStaticNodeClusterStatus(ctx context.Context, cluster *v1.StaticNodeCluster, status v1.StaticNodeClusterStatus) error
 }
 
@@ -23,7 +24,6 @@ type StaticNodeClusterController struct {
 func (c *StaticNodeClusterController) Reconcile(
 	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
-	acceleratorProfiles map[string]*v1.AcceleratorProfile,
 ) error {
 	if cluster == nil || cluster.Metadata == nil {
 		return errors.New("static node cluster metadata is required")
@@ -43,20 +43,19 @@ func (c *StaticNodeClusterController) Reconcile(
 		return errors.Wrap(err, "failed to list static nodes")
 	}
 
-	plan, err := reconciler.Plan(cluster, currentNodes, acceleratorProfiles)
+	if cluster.Metadata.DeletionTimestamp != "" {
+		return c.reconcileDelete(ctx, cluster, currentNodes)
+	}
+
+	plan, err := reconciler.Plan(ctx, cluster, currentNodes)
 	if err != nil {
 		return err
 	}
 
-	headReady := staticNodeClusterHeadReady(cluster, currentNodes)
 	desiredByName := make(map[string]*v1.StaticNode, len(plan.DesiredNodes))
 
 	for _, node := range plan.DesiredNodes {
 		if node == nil || node.Metadata == nil {
-			continue
-		}
-
-		if deferStaticWorkerNode(cluster, node, headReady) {
 			continue
 		}
 
@@ -88,32 +87,44 @@ func (c *StaticNodeClusterController) Reconcile(
 	return nil
 }
 
-func staticNodeClusterHeadReady(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
-	if cluster == nil || cluster.Spec == nil || cluster.Spec.Head.NodeName == "" {
-		return false
+func (c *StaticNodeClusterController) reconcileDelete(
+	ctx context.Context,
+	cluster *v1.StaticNodeCluster,
+	currentNodes []*v1.StaticNode,
+) error {
+	if len(currentNodes) == 0 {
+		return c.Store.HardDeleteStaticNodeCluster(ctx, cluster)
 	}
 
-	for _, node := range nodes {
-		if node == nil || node.Metadata == nil || node.Status == nil {
+	for _, node := range currentNodes {
+		if node == nil {
 			continue
 		}
 
-		if node.Metadata.Name == cluster.Spec.Head.NodeName {
-			return node.Status.Phase == v1.StaticNodePhaseReady
+		if node.Metadata != nil && node.Metadata.DeletionTimestamp != "" {
+			continue
+		}
+
+		if err := c.Store.DeleteStaticNode(ctx, node); err != nil {
+			return errors.Wrapf(err, "failed to delete static node %s", staticNodeName(node))
 		}
 	}
 
-	return false
+	status := v1.StaticNodeClusterStatus{
+		Phase:        v1.StaticNodeClusterPhaseStopping,
+		DesiredNodes: len(currentNodes),
+	}
+	if err := c.Store.UpdateStaticNodeClusterStatus(ctx, cluster, status); err != nil {
+		return errors.Wrap(err, "failed to update static node cluster deletion status")
+	}
+
+	return nil
 }
 
-func deferStaticWorkerNode(cluster *v1.StaticNodeCluster, node *v1.StaticNode, headReady bool) bool {
-	if headReady || cluster == nil || cluster.Spec == nil || node == nil || node.Metadata == nil || node.Spec == nil {
-		return false
+func staticNodeName(node *v1.StaticNode) string {
+	if node == nil || node.Metadata == nil {
+		return ""
 	}
 
-	if node.Metadata.Name == cluster.Spec.Head.NodeName {
-		return false
-	}
-
-	return node.Spec.Role == v1.StaticNodeRoleWorker
+	return node.Metadata.Name
 }

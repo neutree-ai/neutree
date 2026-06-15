@@ -74,14 +74,39 @@ func TestStaticNodeObjectStoreUpsertStaticNode(t *testing.T) {
 	assert.Equal(t, "worker-0", created.Metadata.Name)
 }
 
-func TestStaticNodeObjectStoreDeleteStaticNode(t *testing.T) {
+func TestStaticNodeObjectStoreDeleteStaticNodeSoftDeletes(t *testing.T) {
 	objectStorage := &fakeObjectStorage{}
 	store := NewStaticNodeObjectStore(objectStorage)
 
 	err := store.DeleteStaticNode(context.Background(), &v1.StaticNode{ID: 12})
 
 	require.NoError(t, err)
+	assert.Empty(t, objectStorage.deletedIDs)
+	require.Len(t, objectStorage.updatedMetadata, 1)
+	updated, ok := objectStorage.updatedMetadata["12"].(*v1.StaticNode)
+	require.True(t, ok)
+	require.NotNil(t, updated.Metadata)
+	assert.NotEmpty(t, updated.Metadata.DeletionTimestamp)
+}
+
+func TestStaticNodeObjectStoreHardDeleteStaticNode(t *testing.T) {
+	objectStorage := &fakeObjectStorage{}
+	store := NewStaticNodeObjectStore(objectStorage)
+
+	err := store.HardDeleteStaticNode(context.Background(), &v1.StaticNode{ID: 12})
+
+	require.NoError(t, err)
 	assert.Equal(t, []string{"12"}, objectStorage.deletedIDs)
+}
+
+func TestStaticNodeObjectStoreHardDeleteStaticNodeCluster(t *testing.T) {
+	objectStorage := &fakeObjectStorage{}
+	store := NewStaticNodeObjectStore(objectStorage)
+
+	err := store.HardDeleteStaticNodeCluster(context.Background(), &v1.StaticNodeCluster{ID: 13})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"13"}, objectStorage.deletedIDs)
 }
 
 func TestStaticNodeObjectStoreUpdateStatus(t *testing.T) {
@@ -111,6 +136,7 @@ type fakeObjectStorage struct {
 	nodes              []v1.StaticNode
 	created            []scheme.Object
 	updatedMetadataIDs []string
+	updatedMetadata    map[string]scheme.Object
 	updatedSpecIDs     []string
 	updatedStatus      map[string]scheme.Object
 	deletedIDs         []string
@@ -148,8 +174,13 @@ func (f *fakeObjectStorage) List(obj scheme.ObjectList, _ storage.ListOption) er
 	return nil
 }
 
-func (f *fakeObjectStorage) UpdateMetadata(id string, _ scheme.Object) error {
+func (f *fakeObjectStorage) UpdateMetadata(id string, data scheme.Object) error {
 	f.updatedMetadataIDs = append(f.updatedMetadataIDs, id)
+	if f.updatedMetadata == nil {
+		f.updatedMetadata = map[string]scheme.Object{}
+	}
+
+	f.updatedMetadata[id] = data
 
 	return nil
 }

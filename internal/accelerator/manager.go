@@ -3,6 +3,8 @@ package accelerator
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,8 @@ import (
 
 type Manager interface {
 	Start(ctx context.Context)
+	DetectAccelerator(ctx context.Context, runner NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)
+	RuntimeProfile(ctx context.Context, accelerator v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
 
@@ -41,6 +45,10 @@ type Manager interface {
 	// (e.g. "rocm" for amd_gpu). Returns empty string for default variant or if
 	// the accelerator type is not registered.
 	GetImageSuffix(acceleratorType string) string
+}
+
+type NodeCommandRunner interface {
+	Run(ctx context.Context, command string) (string, error)
 }
 
 type registerPlugin struct {
@@ -174,6 +182,117 @@ func (a *manager) Start(ctx context.Context) {
 	}, time.Minute)
 }
 
+func (a *manager) DetectAccelerator(
+	ctx context.Context,
+	runner NodeCommandRunner,
+) (*v1.StaticNodeAcceleratorStatus, error) {
+	if runner == nil {
+		return nil, errors.New("node command runner is required")
+	}
+
+	output, err := runner.Run(ctx, "lspci -nn")
+	if err != nil {
+		cpu := v1.CPUStaticNodeAcceleratorStatus()
+
+		return &cpu, nil
+	}
+
+	if status, ok := detectNVIDIAAccelerator(output); ok {
+		return status, nil
+	}
+
+	if status, ok := detectAMDAccelerator(output); ok {
+		return status, nil
+	}
+
+	cpu := v1.CPUStaticNodeAcceleratorStatus()
+
+	return &cpu, nil
+}
+
+func detectNVIDIAAccelerator(output string) (*v1.StaticNodeAcceleratorStatus, bool) {
+	return detectPCIAccelerator(
+		output,
+		v1.AcceleratorTypeNVIDIAGPU.String(),
+		"nvidia",
+		"NVIDIA GPU",
+		"nvidia_gpu",
+		"GPU",
+		func(line string) bool {
+			return strings.Contains(line, "10de:") &&
+				(strings.Contains(line, "3d controller") || strings.Contains(line, "vga compatible controller"))
+		},
+	)
+}
+
+func detectAMDAccelerator(output string) (*v1.StaticNodeAcceleratorStatus, bool) {
+	return detectPCIAccelerator(
+		output,
+		v1.AcceleratorTypeAMDGPU.String(),
+		"amd",
+		"AMD GPU",
+		"amd_gpu",
+		"GPU",
+		func(line string) bool {
+			return (strings.Contains(line, "1002:") || strings.Contains(line, "advanced micro devices")) &&
+				(strings.Contains(line, "processing accelerators") || strings.Contains(line, "vga compatible controller"))
+		},
+	)
+}
+
+func detectPCIAccelerator(
+	output string,
+	acceleratorType string,
+	vendor string,
+	productName string,
+	productModel string,
+	resourceName string,
+	match func(string) bool,
+) (*v1.StaticNodeAcceleratorStatus, bool) {
+	devices := []v1.StaticNodeAcceleratorDeviceStatus{}
+	for _, rawLine := range strings.Split(output, "\n") {
+		line := strings.ToLower(rawLine)
+		if !match(line) {
+			continue
+		}
+
+		devices = append(devices, v1.StaticNodeAcceleratorDeviceStatus{
+			ID:          strconv.Itoa(len(devices)),
+			ProductName: productName,
+			Healthy:     true,
+		})
+	}
+
+	if len(devices) == 0 {
+		return nil, false
+	}
+
+	return &v1.StaticNodeAcceleratorStatus{
+		Type:           acceleratorType,
+		Vendor:         vendor,
+		ProductName:    productName,
+		ProductModel:   productModel,
+		RuntimeProfile: acceleratorType,
+		ResourceName:   resourceName,
+		Devices:        devices,
+	}, true
+}
+
+func (a *manager) RuntimeProfile(
+	ctx context.Context,
+	accelerator v1.StaticNodeAcceleratorStatus,
+) (*v1.AcceleratorProfile, bool, error) {
+	profileKey := accelerator.RuntimeProfile
+	if profileKey == "" {
+		profileKey = accelerator.Type
+	}
+	if profileKey == "" || profileKey == v1.StaticNodeAcceleratorTypeCPU {
+		return nil, false, nil
+	}
+
+	return a.getAcceleratorProfile(ctx, profileKey, false)
+}
+
 func (a *manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {
 	var (
 		err                  error
@@ -248,12 +367,24 @@ func (a *manager) GetAcceleratorProfile(
 	ctx context.Context,
 	acceleratorType string,
 ) (*v1.AcceleratorProfile, bool, error) {
+	return a.getAcceleratorProfile(ctx, acceleratorType, true)
+}
+
+func (a *manager) getAcceleratorProfile(
+	ctx context.Context,
+	acceleratorType string,
+	errorOnMissingPlugin bool,
+) (*v1.AcceleratorProfile, bool, error) {
 	if acceleratorType == "" {
 		return nil, false, nil
 	}
 
 	p, ok := a.GetPlugin(acceleratorType)
 	if !ok {
+		if !errorOnMissingPlugin {
+			return nil, false, nil
+		}
+
 		return nil, false, errors.Errorf("accelerator plugin %s not found", acceleratorType)
 	}
 

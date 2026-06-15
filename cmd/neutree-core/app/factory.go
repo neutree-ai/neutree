@@ -6,6 +6,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -269,15 +270,10 @@ func NewModelRegistryControllerFactory() ControllerFactory {
 
 func NewStaticNodeClusterControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
-		var acceleratorProfileProvider controllers.AcceleratorProfileProvider
-		if getter, ok := opts.config.AcceleratorManager.(controllers.AcceleratorProfileGetter); ok {
-			acceleratorProfileProvider = controllers.NewAcceleratorManagerProfileProvider(getter)
-		}
-
 		staticNodeClusterController, err := controllers.NewStaticNodeClusterController(
 			&controllers.StaticNodeClusterControllerOption{
-				Store:                      controllers.NewStaticNodeObjectStore(opts.storage),
-				AcceleratorProfileProvider: acceleratorProfileProvider,
+				Store:                  controllers.NewStaticNodeObjectStore(opts.storage),
+				RuntimeProfileProvider: opts.config.AcceleratorManager,
 			},
 		)
 		if err != nil {
@@ -300,9 +296,16 @@ func NewStaticNodeClusterControllerFactory() ControllerFactory {
 
 func NewStaticNodeControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		store := controllers.NewStaticNodeObjectStore(opts.storage)
 		staticNodeController, err := controllers.NewStaticNodeController(&controllers.StaticNodeControllerOption{
-			Store:         controllers.NewStaticNodeObjectStore(opts.storage),
+			Store:         store,
 			RunnerFactory: controllers.NewStaticNodeSSHRunnerFactory(),
+			Reconciler: &clusterreconcile.StaticNodeReconciler{
+				AcceleratorManager: opts.config.AcceleratorManager,
+				HeadReadyChecker: &clusterreconcile.StaticNodeStoreHeadReadyChecker{
+					Reader: store,
+				},
+			},
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create static node controller")

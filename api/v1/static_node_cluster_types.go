@@ -29,12 +29,11 @@ type StaticNodeClusterHeadSpec struct {
 }
 
 type StaticNodeClusterNodeSpec struct {
-	Name            string         `json:"name,omitempty"`
-	IP              string         `json:"ip,omitempty"`
-	Role            StaticNodeRole `json:"role,omitempty"`
-	AcceleratorType string         `json:"accelerator_type,omitempty"`
-	SSHAuthRef      string         `json:"ssh_auth_ref,omitempty"`
-	SSHAuth         *Auth          `json:"ssh_auth,omitempty" api:"-"`
+	Name       string         `json:"name,omitempty"`
+	IP         string         `json:"ip,omitempty"`
+	Role       StaticNodeRole `json:"role,omitempty"`
+	SSHAuthRef string         `json:"ssh_auth_ref,omitempty"`
+	SSHAuth    *Auth          `json:"ssh_auth,omitempty" api:"-"`
 }
 
 type StaticNodeClusterUpgradeStrategy struct {
@@ -50,7 +49,6 @@ type StaticNodeClusterStatus struct {
 	WarmReady          bool                   `json:"warm_ready,omitempty"`
 	LastTransitionTime string                 `json:"last_transition_time,omitempty"`
 	ErrorMessage       string                 `json:"error_message,omitempty"`
-	Conditions         []StaticCondition      `json:"conditions,omitempty"`
 }
 
 type StaticNodeClusterPhase string
@@ -76,14 +74,13 @@ type StaticNode struct {
 }
 
 type StaticNodeSpec struct {
-	Cluster         string              `json:"cluster,omitempty"`
-	IP              string              `json:"ip,omitempty"`
-	Role            StaticNodeRole      `json:"role,omitempty"`
-	AcceleratorType string              `json:"accelerator_type,omitempty"`
-	SSHAuthRef      string              `json:"ssh_auth_ref,omitempty"`
-	SSHAuth         *Auth               `json:"ssh_auth,omitempty" api:"-"`
-	Warm            *WarmSpec           `json:"warm,omitempty"`
-	Components      []NodeComponentSpec `json:"components,omitempty"`
+	Cluster    string              `json:"cluster,omitempty"`
+	IP         string              `json:"ip,omitempty"`
+	Role       StaticNodeRole      `json:"role,omitempty"`
+	SSHAuthRef string              `json:"ssh_auth_ref,omitempty"`
+	SSHAuth    *Auth               `json:"ssh_auth,omitempty" api:"-"`
+	Warm       *WarmSpec           `json:"warm,omitempty"`
+	Components []NodeComponentSpec `json:"components,omitempty"`
 }
 
 type StaticNodeRole string
@@ -94,12 +91,43 @@ const (
 )
 
 type StaticNodeStatus struct {
-	Phase              StaticNodePhase       `json:"phase,omitempty"`
-	Warm               *WarmStatus           `json:"warm,omitempty"`
-	Components         []NodeComponentStatus `json:"components,omitempty"`
-	LastTransitionTime string                `json:"last_transition_time,omitempty"`
-	ErrorMessage       string                `json:"error_message,omitempty"`
-	Conditions         []StaticCondition     `json:"conditions,omitempty"`
+	Phase              StaticNodePhase              `json:"phase,omitempty"`
+	Accelerator        *StaticNodeAcceleratorStatus `json:"accelerator,omitempty"`
+	Warm               *WarmStatus                  `json:"warm,omitempty"`
+	Components         []NodeComponentStatus        `json:"components,omitempty"`
+	LastTransitionTime string                       `json:"last_transition_time,omitempty"`
+	ErrorMessage       string                       `json:"error_message,omitempty"`
+}
+
+const StaticNodeAcceleratorTypeCPU = "cpu"
+
+type StaticNodeAcceleratorStatus struct {
+	Type           string                              `json:"type,omitempty"`
+	Vendor         string                              `json:"vendor,omitempty"`
+	ProductName    string                              `json:"product_name,omitempty"`
+	ProductModel   string                              `json:"product_model,omitempty"`
+	RuntimeProfile string                              `json:"runtime_profile,omitempty"`
+	ResourceName   string                              `json:"resource_name,omitempty"`
+	Devices        []StaticNodeAcceleratorDeviceStatus `json:"devices,omitempty"`
+}
+
+type StaticNodeAcceleratorDeviceStatus struct {
+	ID          string `json:"id,omitempty"`
+	UUID        string `json:"uuid,omitempty"`
+	ProductName string `json:"product_name,omitempty"`
+	Healthy     bool   `json:"healthy,omitempty"`
+}
+
+func CPUStaticNodeAcceleratorStatus() StaticNodeAcceleratorStatus {
+	return StaticNodeAcceleratorStatus{
+		Type:           StaticNodeAcceleratorTypeCPU,
+		Vendor:         "generic",
+		ProductName:    "CPU",
+		ProductModel:   StaticNodeAcceleratorTypeCPU,
+		RuntimeProfile: StaticNodeAcceleratorTypeCPU,
+		ResourceName:   "CPU",
+		Devices:        []StaticNodeAcceleratorDeviceStatus{},
+	}
 }
 
 type StaticNodePhase string
@@ -167,6 +195,7 @@ type NodeComponentConfigFile struct {
 
 type NodeComponentHealthCheck struct {
 	Command         []string `json:"command,omitempty"`
+	HTTPHost        string   `json:"http_host,omitempty"`
 	HTTPPath        string   `json:"http_path,omitempty"`
 	Port            int      `json:"port,omitempty"`
 	InitialDelaySec int      `json:"initial_delay_sec,omitempty"`

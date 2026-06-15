@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -10,6 +11,7 @@ import (
 
 type StaticNodeStore interface {
 	UpdateStaticNodeStatus(ctx context.Context, node *v1.StaticNode, status v1.StaticNodeStatus) error
+	HardDeleteStaticNode(ctx context.Context, node *v1.StaticNode) error
 }
 
 type StaticNodeRunnerFactory interface {
@@ -51,6 +53,19 @@ func (c *StaticNodeController) Reconcile(ctx context.Context, node *v1.StaticNod
 		runner = nodeRunner
 	}
 
+	if node.Metadata != nil && node.Metadata.DeletionTimestamp != "" {
+		if err := reconciler.Delete(ctx, node, runner); err != nil {
+			status := buildStaticNodeStatus(node, nil, err)
+			if updateErr := c.Store.UpdateStaticNodeStatus(ctx, node, status); updateErr != nil {
+				return errors.Wrap(updateErr, "failed to update static node status")
+			}
+
+			return err
+		}
+
+		return c.Store.HardDeleteStaticNode(ctx, node)
+	}
+
 	result, err := reconciler.Reconcile(ctx, node, runner)
 	status := buildStaticNodeStatus(node, result, err)
 
@@ -64,6 +79,14 @@ func (c *StaticNodeController) Reconcile(ctx context.Context, node *v1.StaticNod
 func needsStaticNodeRunner(node *v1.StaticNode) bool {
 	if node == nil || node.Spec == nil {
 		return false
+	}
+
+	if node.Metadata != nil && node.Metadata.DeletionTimestamp != "" {
+		return true
+	}
+
+	if node.Status == nil || node.Status.Accelerator == nil {
+		return true
 	}
 
 	if node.Spec.Warm != nil && len(node.Spec.Warm.Images) > 0 {
@@ -80,6 +103,7 @@ func buildStaticNodeStatus(node *v1.StaticNode, result *StaticNodeReconcileResul
 	}
 
 	if result != nil {
+		status.Accelerator = result.Accelerator
 		status.Warm = result.Warm
 		status.Components = result.Components
 	}
@@ -106,6 +130,7 @@ func buildStaticNodeStatus(node *v1.StaticNode, result *StaticNodeReconcileResul
 	}
 
 	status.Phase = v1.StaticNodePhaseReady
+	status.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
 
 	return status
 }

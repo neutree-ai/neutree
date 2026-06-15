@@ -62,10 +62,9 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 			Workspace: "default",
 		},
 		Spec: &StaticNodeSpec{
-			Cluster:         "cluster-a",
-			IP:              "10.0.0.10",
-			Role:            StaticNodeRoleHead,
-			AcceleratorType: AcceleratorTypeNVIDIAGPU.String(),
+			Cluster: "cluster-a",
+			IP:      "10.0.0.10",
+			Role:    StaticNodeRoleHead,
 			Warm: &WarmSpec{
 				Images: []WarmImageSpec{
 					{Name: "ray-runtime", Ref: "registry.example.com/neutree/serve:v1.2.0", Required: true},
@@ -91,6 +90,17 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 		},
 		Status: &StaticNodeStatus{
 			Phase: StaticNodePhaseReady,
+			Accelerator: &StaticNodeAcceleratorStatus{
+				Type:           AcceleratorTypeNVIDIAGPU.String(),
+				Vendor:         "nvidia",
+				ProductName:    "NVIDIA GPU",
+				ProductModel:   "nvidia_gpu",
+				RuntimeProfile: AcceleratorTypeNVIDIAGPU.String(),
+				ResourceName:   "GPU",
+				Devices: []StaticNodeAcceleratorDeviceStatus{
+					{ID: "0", ProductName: "NVIDIA GPU", Healthy: true},
+				},
+			},
 			Warm: &WarmStatus{
 				Ready: true,
 				Images: []WarmImageStatus{
@@ -122,6 +132,8 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, NodeComponentTypeRayHead, decoded.Spec.Components[0].Type)
 	assert.Equal(t, NodeComponentRestartPolicyAlways, decoded.Spec.Components[0].RestartPolicy)
 	require.NotNil(t, decoded.Status)
+	require.NotNil(t, decoded.Status.Accelerator)
+	assert.Equal(t, AcceleratorTypeNVIDIAGPU.String(), decoded.Status.Accelerator.Type)
 	require.Len(t, decoded.Status.Components, 1)
 	assert.Equal(t, NodeComponentPhaseRunning, decoded.Status.Components[0].Phase)
 }

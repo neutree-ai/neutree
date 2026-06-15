@@ -10,19 +10,15 @@ import (
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 )
 
-type AcceleratorProfileProvider interface {
-	GetAcceleratorProfiles(ctx context.Context, acceleratorTypes []string) (map[string]*v1.AcceleratorProfile, error)
-}
-
 type StaticNodeClusterController struct {
 	syncHandler func(cluster *v1.StaticNodeCluster) error
 }
 
 type StaticNodeClusterControllerOption struct {
-	Store                      clusterreconcile.StaticNodeClusterStore
-	Reconciler                 *clusterreconcile.StaticNodeClusterReconciler
-	AcceleratorProfileProvider AcceleratorProfileProvider
-	ReconcileController        *clusterreconcile.StaticNodeClusterController
+	Store                  clusterreconcile.StaticNodeClusterStore
+	Reconciler             *clusterreconcile.StaticNodeClusterReconciler
+	RuntimeProfileProvider clusterreconcile.RuntimeProfileProvider
+	ReconcileController    *clusterreconcile.StaticNodeClusterController
 }
 
 func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (*StaticNodeClusterController, error) {
@@ -32,29 +28,22 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 
 	reconcileController := option.ReconcileController
 	if reconcileController == nil {
+		reconciler := option.Reconciler
+		if reconciler == nil {
+			reconciler = &clusterreconcile.StaticNodeClusterReconciler{
+				RuntimeProfileProvider: option.RuntimeProfileProvider,
+			}
+		}
+
 		reconcileController = &clusterreconcile.StaticNodeClusterController{
 			Store:      option.Store,
-			Reconciler: option.Reconciler,
+			Reconciler: reconciler,
 		}
 	}
 
 	c := &StaticNodeClusterController{}
 	c.syncHandler = func(cluster *v1.StaticNodeCluster) error {
-		profiles := map[string]*v1.AcceleratorProfile{}
-
-		if option.AcceleratorProfileProvider != nil {
-			providerProfiles, err := option.AcceleratorProfileProvider.GetAcceleratorProfiles(
-				context.Background(),
-				staticNodeClusterAcceleratorTypes(cluster),
-			)
-			if err != nil {
-				return errors.Wrap(err, "failed to get accelerator profiles")
-			}
-
-			profiles = providerProfiles
-		}
-
-		return reconcileController.Reconcile(context.Background(), cluster, profiles)
+		return reconcileController.Reconcile(context.Background(), cluster)
 	}
 
 	return c, nil
@@ -71,28 +60,4 @@ func (c *StaticNodeClusterController) Reconcile(obj interface{}) error {
 	}
 
 	return c.syncHandler(cluster)
-}
-
-func staticNodeClusterAcceleratorTypes(cluster *v1.StaticNodeCluster) []string {
-	if cluster == nil || cluster.Spec == nil {
-		return nil
-	}
-
-	seen := map[string]struct{}{}
-	acceleratorTypes := make([]string, 0, len(cluster.Spec.Nodes))
-
-	for _, node := range cluster.Spec.Nodes {
-		if node.AcceleratorType == "" {
-			continue
-		}
-
-		if _, ok := seen[node.AcceleratorType]; ok {
-			continue
-		}
-
-		seen[node.AcceleratorType] = struct{}{}
-		acceleratorTypes = append(acceleratorTypes, node.AcceleratorType)
-	}
-
-	return acceleratorTypes
 }

@@ -48,7 +48,8 @@ func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
 }
 
 type fakeControllerStaticNodeStore struct {
-	status v1.StaticNodeStatus
+	status       v1.StaticNodeStatus
+	deletedNodes []*v1.StaticNode
 }
 
 var _ clusterreconcile.StaticNodeStore = (*fakeControllerStaticNodeStore)(nil)
@@ -59,6 +60,12 @@ func (f *fakeControllerStaticNodeStore) UpdateStaticNodeStatus(
 	status v1.StaticNodeStatus,
 ) error {
 	f.status = status
+
+	return nil
+}
+
+func (f *fakeControllerStaticNodeStore) HardDeleteStaticNode(_ context.Context, node *v1.StaticNode) error {
+	f.deletedNodes = append(f.deletedNodes, node)
 
 	return nil
 }

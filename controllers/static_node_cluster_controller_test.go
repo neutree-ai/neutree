@@ -12,26 +12,17 @@ import (
 
 func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 	store := &fakeControllerStaticNodeClusterStore{}
-	profileProvider := &fakeAcceleratorProfileProvider{
-		profiles: map[string]*v1.AcceleratorProfile{
-			v1.AcceleratorTypeNVIDIAGPU.String(): {
-				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-			},
-		},
-	}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Store:                      store,
-		AcceleratorProfileProvider: profileProvider,
+		Store: store,
 	})
 	require.NoError(t, err)
 
 	err = controller.Reconcile(controllerStaticNodeCluster())
 
 	require.NoError(t, err)
-	assert.True(t, profileProvider.called)
-	assert.Equal(t, []string{v1.AcceleratorTypeNVIDIAGPU.String()}, profileProvider.acceleratorTypes)
-	require.Len(t, store.upsertedNodes, 1)
+	require.Len(t, store.upsertedNodes, 2)
 	assert.Equal(t, "head-0", store.upsertedNodes[0].Metadata.Name)
+	assert.Equal(t, "worker-0", store.upsertedNodes[1].Metadata.Name)
 	assert.Equal(t, "default", store.listWorkspace)
 	assert.Equal(t, "static-a", store.listClusterName)
 	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, store.updatedStatus.Phase)
@@ -49,29 +40,14 @@ func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to assert obj to *v1.StaticNodeCluster")
 }
 
-type fakeAcceleratorProfileProvider struct {
-	profiles         map[string]*v1.AcceleratorProfile
-	called           bool
-	acceleratorTypes []string
-}
-
-func (f *fakeAcceleratorProfileProvider) GetAcceleratorProfiles(
-	_ context.Context,
-	acceleratorTypes []string,
-) (map[string]*v1.AcceleratorProfile, error) {
-	f.called = true
-	f.acceleratorTypes = acceleratorTypes
-
-	return f.profiles, nil
-}
-
 type fakeControllerStaticNodeClusterStore struct {
-	currentNodes    []*v1.StaticNode
-	upsertedNodes   []*v1.StaticNode
-	deletedNodes    []*v1.StaticNode
-	updatedStatus   v1.StaticNodeClusterStatus
-	listWorkspace   string
-	listClusterName string
+	currentNodes        []*v1.StaticNode
+	upsertedNodes       []*v1.StaticNode
+	deletedNodes        []*v1.StaticNode
+	hardDeletedClusters []*v1.StaticNodeCluster
+	updatedStatus       v1.StaticNodeClusterStatus
+	listWorkspace       string
+	listClusterName     string
 }
 
 var _ clusterreconcile.StaticNodeClusterStore = (*fakeControllerStaticNodeClusterStore)(nil)
@@ -95,6 +71,12 @@ func (f *fakeControllerStaticNodeClusterStore) UpsertStaticNode(_ context.Contex
 
 func (f *fakeControllerStaticNodeClusterStore) DeleteStaticNode(_ context.Context, node *v1.StaticNode) error {
 	f.deletedNodes = append(f.deletedNodes, node)
+
+	return nil
+}
+
+func (f *fakeControllerStaticNodeClusterStore) HardDeleteStaticNodeCluster(_ context.Context, cluster *v1.StaticNodeCluster) error {
+	f.hardDeletedClusters = append(f.hardDeletedClusters, cluster)
 
 	return nil
 }
@@ -123,9 +105,8 @@ func controllerStaticNodeCluster() *v1.StaticNodeCluster {
 			},
 			Nodes: []v1.StaticNodeClusterNodeSpec{
 				{
-					Name:            "head-0",
-					IP:              "10.0.0.10",
-					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					Name: "head-0",
+					IP:   "10.0.0.10",
 				},
 				{
 					Name: "worker-0",

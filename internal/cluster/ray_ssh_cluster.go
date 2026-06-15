@@ -17,7 +17,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
@@ -712,171 +711,11 @@ func setNodePrivisionStatus(reconcileCtx *ReconcileContext, nodeIP, status strin
 func (c *sshRayClusterReconciler) calculateClusterResources(
 	reconcileCtx *ReconcileContext,
 ) (*v1.ClusterResources, error) {
-	// Create dashboard service client
-	dashboardSvc := reconcileCtx.rayService
-	// Fetch node list from Dashboard
-	nodeList, err := dashboardSvc.ListNodes()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get node list from Ray Dashboard: %w", err)
-	}
-
-	availableResource := map[string]float64{}
-	allocatableResource := map[string]float64{}
-	nodeResources := map[string]*v1.ResourceStatus{}
-
-	for _, node := range nodeList {
-		if node.Raylet.State != v1.AliveNodeState {
-			continue
-		}
-
-		nodeAvailableResource := map[string]float64{}
-		nodeAllocatableResource := map[string]float64{}
-
-		for resourceKey, quantity := range node.Raylet.Resources {
-			nodeAllocatableResource[resourceKey] = quantity
-			nodeAvailableResource[resourceKey] = quantity
-		}
-
-		for _, workers := range node.Raylet.CoreWorkersStats {
-			for resourceKey, allocations := range workers.UsedResources {
-				nodeAvailableResource[resourceKey] -= float64(allocations.TotalAllocation())
-			}
-		}
-
-		klog.V(4).Infof("Node %s allocatable resources: %+v", node.IP, nodeAllocatableResource)
-		klog.V(4).Infof("Node %s available resources: %+v", node.IP, nodeAvailableResource)
-
-		nodeResourceStatus, err := c.transformResources(nodeAvailableResource, nodeAllocatableResource)
-		if err != nil {
-			return nil, fmt.Errorf("failed to transform resources for node %s: %w", node.IP, err)
-		}
-
-		nodeResources[node.IP] = nodeResourceStatus
-
-		for resourceKey, quantity := range nodeAvailableResource {
-			availableResource[resourceKey] += quantity
-		}
-
-		for resourceKey, quantity := range nodeAllocatableResource {
-			allocatableResource[resourceKey] += quantity
-		}
-	}
-
-	clusterResourceStatus, err := c.transformResources(availableResource, allocatableResource)
-	if err != nil {
-		return nil, fmt.Errorf("failed to transform cluster resources: %w", err)
-	}
-
-	result := &v1.ClusterResources{
-		ResourceStatus: *clusterResourceStatus,
-		NodeResources:  nodeResources,
-	}
-
-	return result, nil
+	return calculateRayDashboardClusterResources(reconcileCtx.rayService, c.acceleratorManager.GetAllParsers())
 }
 
 func (c *sshRayClusterReconciler) transformResources(availableResource, allocatableResource map[string]float64) (*v1.ResourceStatus, error) {
-	availableResourceCPU, ok := availableResource["CPU"]
-	if ok {
-		if availableResourceCPU < 0 {
-			availableResourceCPU = 0
-		} else {
-			availableResourceCPU = roundFloat64ToTwoDecimals(availableResourceCPU)
-		}
-	}
-
-	availableResourceMemory, ok := availableResource["memory"]
-	if ok {
-		if availableResourceMemory < 0 {
-			availableResourceMemory = 0
-		} else {
-			availableResourceMemory = roundFloat64ToTwoDecimals(availableResourceMemory / plugin.BytesPerGiB)
-		}
-	}
-
-	allocatableResourceCPU, ok := allocatableResource["CPU"]
-	if ok {
-		if allocatableResourceCPU < 0 {
-			allocatableResourceCPU = 0
-		} else {
-			allocatableResourceCPU = roundFloat64ToTwoDecimals(allocatableResourceCPU)
-		}
-	}
-
-	allocatableResourceMemory, ok := allocatableResource["memory"]
-	if ok {
-		if allocatableResourceMemory < 0 {
-			allocatableResourceMemory = 0
-		} else {
-			allocatableResourceMemory = roundFloat64ToTwoDecimals(allocatableResourceMemory / plugin.BytesPerGiB)
-		}
-	}
-
-	result := &v1.ResourceStatus{
-		Allocatable: &v1.ResourceInfo{
-			CPU:               allocatableResourceCPU,
-			Memory:            allocatableResourceMemory,
-			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
-		},
-		Available: &v1.ResourceInfo{
-			CPU:               availableResourceCPU,
-			Memory:            availableResourceMemory,
-			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
-		},
-	}
-
-	resourceParserMap := c.acceleratorManager.GetAllParsers()
-	for resourceKey, parser := range resourceParserMap {
-		allocatableInfo, err := parser.ParseFromRay(allocatableResource)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse allocatable resources from Ray for resource %s: %w", resourceKey, err)
-		}
-
-		if allocatableInfo != nil && len(allocatableInfo.AcceleratorGroups) > 0 {
-			for key, group := range allocatableInfo.AcceleratorGroups {
-				if existingGroup, exists := result.Allocatable.AcceleratorGroups[key]; exists {
-					existingGroup.Quantity += group.Quantity
-					for productKey, quantity := range group.ProductGroups {
-						if existingQuantity, exists := existingGroup.ProductGroups[productKey]; exists {
-							existingGroup.ProductGroups[productKey] = existingQuantity + quantity
-						} else {
-							existingGroup.ProductGroups[productKey] = quantity
-						}
-					}
-
-					result.Allocatable.AcceleratorGroups[key] = existingGroup
-				} else {
-					result.Allocatable.AcceleratorGroups[key] = allocatableInfo.AcceleratorGroups[key]
-				}
-			}
-		}
-
-		availableInfo, err := parser.ParseFromRay(availableResource)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse available resources from Ray for resource %s: %w", resourceKey, err)
-		}
-
-		if availableInfo != nil && len(availableInfo.AcceleratorGroups) > 0 {
-			for key, group := range availableInfo.AcceleratorGroups {
-				if existingGroup, exists := result.Available.AcceleratorGroups[key]; exists {
-					existingGroup.Quantity += group.Quantity
-					for productKey, quantity := range group.ProductGroups {
-						if existingQuantity, exists := existingGroup.ProductGroups[productKey]; exists {
-							existingGroup.ProductGroups[productKey] = existingQuantity + quantity
-						} else {
-							existingGroup.ProductGroups[productKey] = quantity
-						}
-					}
-
-					result.Available.AcceleratorGroups[key] = existingGroup
-				} else {
-					result.Available.AcceleratorGroups[key] = availableInfo.AcceleratorGroups[key]
-				}
-			}
-		}
-	}
-
-	return result, nil
+	return transformRayResources(availableResource, allocatableResource, c.acceleratorManager.GetAllParsers())
 }
 
 func formatMessageWithTimestamp(message string) string {

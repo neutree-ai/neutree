@@ -5,6 +5,7 @@ package mocks
 import (
 	context "context"
 
+	accelerator "github.com/neutree-ai/neutree/internal/accelerator"
 	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	mock "github.com/stretchr/testify/mock"
 
@@ -22,6 +23,34 @@ type MockManager_Expecter struct {
 
 func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
+}
+
+// DetectAccelerator provides a mock function with given fields: ctx, runner
+func (_m *MockManager) DetectAccelerator(ctx context.Context, runner accelerator.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error) {
+	ret := _m.Called(ctx, runner)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DetectAccelerator")
+	}
+
+	var r0 *v1.StaticNodeAcceleratorStatus
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, accelerator.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)); ok {
+		return rf(ctx, runner)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, accelerator.NodeCommandRunner) *v1.StaticNodeAcceleratorStatus); ok {
+		r0 = rf(ctx, runner)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).(*v1.StaticNodeAcceleratorStatus)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, accelerator.NodeCommandRunner) error); ok {
+		r1 = rf(ctx, runner)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // GetAllConverters provides a mock function with no fields
@@ -453,6 +482,41 @@ func (_c *MockManager_GetParser_Call) Return(_a0 plugin.ResourceParser, _a1 bool
 func (_c *MockManager_GetParser_Call) RunAndReturn(run func(string) (plugin.ResourceParser, bool)) *MockManager_GetParser_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+// RuntimeProfile provides a mock function with given fields: ctx, accelerator
+func (_m *MockManager) RuntimeProfile(ctx context.Context, acceleratorStatus v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error) {
+	ret := _m.Called(ctx, acceleratorStatus)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RuntimeProfile")
+	}
+
+	var r0 *v1.AcceleratorProfile
+	var r1 bool
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)); ok {
+		return rf(ctx, acceleratorStatus)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, v1.StaticNodeAcceleratorStatus) *v1.AcceleratorProfile); ok {
+		r0 = rf(ctx, acceleratorStatus)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).(*v1.AcceleratorProfile)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, v1.StaticNodeAcceleratorStatus) bool); ok {
+		r1 = rf(ctx, acceleratorStatus)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, v1.StaticNodeAcceleratorStatus) error); ok {
+		r2 = rf(ctx, acceleratorStatus)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // Start provides a mock function with given fields: ctx
