@@ -9,6 +9,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -43,6 +44,14 @@ func (f *StaticNodeSSHRunnerFactory) NewStaticNodeRunner(
 	auth, err := staticNodeSSHAuth(node)
 	if err != nil {
 		return nil, err
+	}
+	if auth.SSHPrivateKey != "" {
+		sshKeyPath, err := util.GenerateTmpSSHKeyFile(auth.SSHPrivateKey)
+		if err != nil {
+			return nil, err
+		}
+
+		auth.SSHPrivateKey = sshKeyPath
 	}
 
 	var processExecute commandrunner.ProcessExecute

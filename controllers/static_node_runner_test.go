@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -48,7 +49,7 @@ func TestStaticNodeSSHRunnerFactoryWrapsSSHRunner(t *testing.T) {
 			IP: "10.0.0.10",
 			SSHAuth: &v1.Auth{
 				SSHUser:       "ray",
-				SSHPrivateKey: "/tmp/ray.pem",
+				SSHPrivateKey: "cmF5LXBlbQo=",
 			},
 		},
 	})
@@ -64,6 +65,11 @@ func TestStaticNodeSSHRunnerFactoryWrapsSSHRunner(t *testing.T) {
 	assert.Equal(t, "ok\n", output)
 	require.Len(t, calls, 2)
 	assert.Equal(t, "ssh", calls[0].name)
+	keyPath := sshArgValue(calls[0].args, "-i")
+	require.NotEmpty(t, keyPath)
+	keyData, err := os.ReadFile(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, "ray-pem\n", string(keyData))
 	assert.Equal(t, "uptime", calls[0].args[len(calls[0].args)-1])
 	assert.Equal(t, "ray@10.0.0.10", calls[0].args[len(calls[0].args)-2])
 	assert.Equal(t, "docker ps", calls[1].args[len(calls[1].args)-1])
@@ -72,4 +78,14 @@ func TestStaticNodeSSHRunnerFactoryWrapsSSHRunner(t *testing.T) {
 type processCall struct {
 	name string
 	args []string
+}
+
+func sshArgValue(args []string, flag string) string {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+
+	return ""
 }
