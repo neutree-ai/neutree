@@ -1049,26 +1049,132 @@ Warm -> StopCluster -> StartCluster -> Verify
 
 ### 14.3 E2E test
 
-E2E 需要真实 SSH Ray 静态集群环境，开发完成后在 e2e gate 阻塞执行。
+E2E 需要真实 SSH Ray 静态集群环境。当前第一轮验证先覆盖最小单节点静态集群，使用一个 SSH 节点同时作为 Ray head 和静态节点。多 worker、Ray-only upgrade 和 accelerator exporter 的完整自动化可以在第二轮按同一套 case 扩展。
 
-场景：
+#### E2E-SRC-001: minimum static SSH Ray cluster creates derived resources
 
-1. 创建静态 SSH Ray 集群后，`ClusterController` 创建 `StaticNodeCluster`。
-2. `StaticNodeClusterController` 创建 head / worker `StaticNode`，worker 不因 head 未 ready 延迟创建。
-3. 每个 `StaticNode.status.accelerator` 来自节点探测结果，而不是 spec 配置。
-4. CPU 节点写入 CPU fallback，仍能启动 Ray 和 node-exporter。
-5. 探测结果为 NVIDIA 的节点生成并启动 `dcgm-exporter`。
-6. 所有节点的 `ray-head` / `ray-worker` ready。
-7. 每个节点 `node-exporter` ready。
-8. head `vmagent` ready。
-9. vmagent scrape config 带 `neutree_cluster`、`static_node_cluster`、`workspace`、`node`、`node_ip`、`node_role`、`source` 等 labels。
-10. accelerator exporter target 只在 profile 声明 exporter 时出现。
-11. `Cluster.status.resource_info` 包含 CPU、memory 和 accelerator resource。
-12. `StaticNode.spec.warm.images` 包含 ray runtime、node-exporter、vmagent 和存在的 accelerator exporter，并由 `StaticNodeReconciler` 拉取。
-13. head start command 不依赖 Ray autoscaler config。
-14. Ray runtime image 更新触发 `ray-head` / `ray-worker` 组件级滚动重建，不重启 exporter 和 vmagent。
-15. 删除 worker 时，先清理远端 Ray worker、exporter 容器和配置，再删除 `StaticNode` 对象，head vmagent target 同步移除。
-16. dashboard 不可达时，cluster status error message 包含 head IP 和 port 8265。
+| Field | Value |
+| --- | --- |
+| Title | Create a minimum static SSH Ray cluster and derive static node resources |
+| Type | Happy Path |
+| Priority | P0 |
+| Label / Tag | `static-cluster`, `ssh`, `ray` |
+| Preconditions | Control plane is running; SSH auth can access the static node; image registry is configured; the static node has Docker and can pull offline images. |
+| Test Data | `Cluster` with `spec.type=ssh`, one `provider.head_ip`, empty worker list, and no `accelerator_type` in `StaticNodeCluster.spec.nodes` or `StaticNode.spec`. |
+| Test Steps | 1. Create a static SSH `Cluster` whose head IP is the test node IP.<br>2. Wait until the `ClusterController` creates a `StaticNodeCluster` with the same name.<br>3. Read the derived `StaticNodeCluster.spec.nodes`.<br>4. Read derived `StaticNode` objects. |
+| Expected Result | 1. `StaticNodeCluster.spec.head.node_name` equals the node IP.<br>2. `StaticNodeCluster.spec.nodes[0].name` and `ip` both equal the node IP.<br>3. The derived `StaticNode` has `spec.cluster=<cluster-name>`, `spec.role=head`, `spec.ip=<node-ip>`.<br>4. Neither `StaticNodeCluster.spec.nodes[]` nor `StaticNode.spec` contains `accelerator_type`. |
+| Cleanup | Delete the `Cluster`; verify cleanup with E2E-SRC-006. |
+
+#### E2E-SRC-002: static node discovery writes accelerator status before components
+
+| Field | Value |
+| --- | --- |
+| Title | Detect accelerator facts on a static node and write StaticNode status |
+| Type | Happy Path / Edge Case |
+| Priority | P0 |
+| Label / Tag | `static-cluster`, `discovery` |
+| Preconditions | E2E-SRC-001 cluster exists; `StaticNodeReconciler` can SSH to the node. |
+| Test Data | Same `Cluster` as E2E-SRC-001. The node may be CPU-only or have a supported accelerator. |
+| Test Steps | 1. Observe the first derived `StaticNode` before accelerator status is ready.<br>2. Wait for `StaticNode.status.accelerator` to become non-empty.<br>3. Read `StaticNode.spec.components` after `StaticNodeClusterReconciler` observes the accelerator status. |
+| Expected Result | 1. Before discovery, the derived `StaticNode` is discovery-safe: connection fields exist, `spec.components` is empty, and `spec.warm.images` is empty or absent.<br>2. Discovery writes deterministic `status.accelerator`.<br>3. CPU-only or unknown nodes use `type=cpu`, `runtime_profile=cpu`, `resource_name=CPU` and still proceed.<br>4. After discovery, `spec.components` contains `ray-head`, `node-exporter`, and head-local `vmagent`.<br>5. Accelerator-dependent runtime options or exporters are generated only when `RuntimeProfile` returns a supported profile. |
+| Cleanup | Covered by E2E-SRC-006. |
+
+#### E2E-SRC-003: warm images and node components become ready
+
+| Field | Value |
+| --- | --- |
+| Title | Warm static node images and start Ray, node-exporter, and vmagent components |
+| Type | Happy Path |
+| Priority | P0 |
+| Label / Tag | `static-cluster`, `component` |
+| Preconditions | E2E-SRC-002 has completed; offline images exist in the configured registry. |
+| Test Data | Same `Cluster` as E2E-SRC-001. |
+| Test Steps | 1. Wait for `StaticNode.status.warm.ready=true`.<br>2. Inspect `StaticNode.status.warm.images`.<br>3. Wait for component statuses.<br>4. Query Ray dashboard health through the control plane or direct node IP.<br>5. Inspect containers on the static node. |
+| Expected Result | 1. `StaticNode.spec.warm.images` includes ray runtime, node-exporter, vmagent, and accelerator exporter when applicable.<br>2. Required warm images become ready.<br>3. `ray-head`, `node-exporter`, and `vmagent` component statuses become `Running` and `ready=true`.<br>4. Ray head dashboard is reachable on port 8265.<br>5. The Ray start command does not depend on Ray autoscaler bootstrap config files. |
+| Cleanup | Covered by E2E-SRC-006. |
+
+#### E2E-SRC-004: vmagent scrape config contains Neutree labels and targets
+
+| Field | Value |
+| --- | --- |
+| Title | Generate static cluster vmagent scrape config with Neutree labels |
+| Type | Regression |
+| Priority | P0 |
+| Label / Tag | `static-cluster`, `metrics` |
+| Preconditions | E2E-SRC-003 has completed and vmagent is running on the head node. |
+| Test Data | Same `Cluster` as E2E-SRC-001. |
+| Test Steps | 1. Read `/etc/neutree/vmagent/config.yaml` on the head node.<br>2. Inspect scrape jobs and static targets.<br>3. Query vmagent `/metrics` or scrape status if available.<br>4. For a node with accelerator profile exporter, verify the accelerator exporter target. |
+| Expected Result | 1. node-exporter target exists for every static node.<br>2. The target labels include `workspace`, `neutree_cluster`, `static_node_cluster`, `cluster_type`, `node`, `node_ip`, `node_role`, and `source`.<br>3. `neutree_cluster` equals the static cluster name.<br>4. Accelerator exporter target appears only when the runtime profile declares an exporter.<br>5. Accelerator exporter labels include `accelerator_type`, `accelerator_vendor`, `accelerator_product_model`, and `accelerator_exporter`.<br>6. Exporter `metrics_path` from profile is preserved in the vmagent scrape job. |
+| Cleanup | Covered by E2E-SRC-006. |
+
+#### E2E-SRC-005: Cluster status aggregates Ray resources
+
+| Field | Value |
+| --- | --- |
+| Title | Aggregate static Ray cluster resource information from Ray dashboard |
+| Type | Happy Path |
+| Priority | P0 |
+| Label / Tag | `static-cluster`, `resource` |
+| Preconditions | E2E-SRC-003 has completed and Ray dashboard is reachable. |
+| Test Data | Same `Cluster` as E2E-SRC-001. |
+| Test Steps | 1. Wait for `StaticNodeCluster.status.phase=Ready`.<br>2. Wait for parent `Cluster.status.initialized=true`.<br>3. Read `Cluster.status.resource_info`.<br>4. If accelerator resources exist in Ray dashboard, verify parsed accelerator groups. |
+| Expected Result | 1. `StaticNodeCluster.status.desired_nodes=1`, `ready_nodes=1`, `head_ready=true`, `warm_ready=true`, and `metrics_ready=true`.<br>2. Parent `Cluster.status.dashboard_url` points at `<head-ip>:8265`.<br>3. `Cluster.status.resource_info.allocatable` and `available` include CPU and memory.<br>4. Accelerator resource groups are included when Ray reports accelerator resources and a parser exists. |
+| Cleanup | Covered by E2E-SRC-006. |
+
+#### E2E-SRC-006: deleting a static cluster cleans remote node components first
+
+| Field | Value |
+| --- | --- |
+| Title | Delete a static SSH Ray cluster through soft-delete cascading cleanup |
+| Type | Regression |
+| Priority | P0 |
+| Label / Tag | `static-cluster`, `delete` |
+| Preconditions | E2E-SRC-001 through E2E-SRC-005 have completed. |
+| Test Data | Same `Cluster` as E2E-SRC-001. |
+| Test Steps | 1. Delete the parent `Cluster`.<br>2. Observe `StaticNodeCluster.metadata.deletion_timestamp`.<br>3. Observe child `StaticNode.metadata.deletion_timestamp`.<br>4. Wait for `StaticNodeReconciler` cleanup.<br>5. Inspect the static node for Neutree-managed containers and vmagent config files.<br>6. Verify `StaticNode` and then `StaticNodeCluster` objects are removed. |
+| Expected Result | 1. Parent deletion does not hard-delete children immediately.<br>2. `StaticNodeClusterController` soft-deletes child `StaticNode` objects.<br>3. `StaticNodeReconciler` removes Neutree-managed Ray, node-exporter, vmagent, and accelerator-exporter containers if present.<br>4. Component config files such as `/etc/neutree/vmagent/config.yaml` are removed.<br>5. After remote cleanup, `StaticNode` is hard-deleted, then `StaticNodeCluster` is hard-deleted. |
+| Cleanup | If cleanup fails, manually remove containers whose names start with `neutree-<cluster-name>-` and remove `/etc/neutree/vmagent/config.yaml`. |
+
+#### E2E-SRC-007: worker gate for multi-node static clusters
+
+| Field | Value |
+| --- | --- |
+| Title | Create workers before head is ready but gate ray-worker startup on head readiness |
+| Type | Edge Case |
+| Priority | P1 |
+| Label / Tag | `static-cluster`, `worker-gate` |
+| Preconditions | Two SSH static nodes are available. |
+| Test Data | `Cluster` with one head IP and at least one worker IP. |
+| Test Steps | 1. Create a multi-node static SSH `Cluster`.<br>2. Observe that head and worker `StaticNode` objects are created before head ready.<br>3. Before head ready, read worker `StaticNode.status.accelerator` and component status.<br>4. Wait for head ready, then observe worker component status and Ray dashboard node list. |
+| Expected Result | 1. Worker `StaticNode` is created immediately and can complete accelerator discovery.<br>2. Before head ready, `ray-worker` remains pending and does not start the worker container.<br>3. After head ready, `ray-worker` starts and Ray dashboard reports the worker node as `ALIVE`.<br>4. A failed worker does not block other nodes from reconciling. |
+| Cleanup | Delete the parent `Cluster`; verify all head and worker resources are cleaned. |
+
+#### E2E-SRC-008: Ray runtime update is component-scoped
+
+| Field | Value |
+| --- | --- |
+| Title | Update Ray runtime image without restarting observability components |
+| Type | Regression |
+| Priority | P1 |
+| Label / Tag | `static-cluster`, `upgrade` |
+| Preconditions | E2E-SRC-003 has completed; a second valid static Ray runtime image tag exists. |
+| Test Data | Existing `Cluster` plus updated `spec.version`. |
+| Test Steps | 1. Record current component hashes and container IDs for ray-head, node-exporter, vmagent, and accelerator exporter if present.<br>2. Update `Cluster.spec.version` to a new runtime version.<br>3. Wait for warm and component reconcile.<br>4. Compare component hashes and container IDs. |
+| Expected Result | 1. Ray runtime image warm is performed for the new version.<br>2. `ray-head` and `ray-worker` components are rebuilt when their hashes change.<br>3. node-exporter, accelerator-exporter, and vmagent are not restarted when their hashes do not change.<br>4. Cluster returns to ready and resource info is still available. |
+| Cleanup | Restore or delete the test cluster. |
+
+#### Manual validation profile for the first development pass
+
+The first manual pass can execute E2E-SRC-001 through E2E-SRC-006 with a single static node:
+
+```yaml
+control_plane: 10.255.1.54
+static_cluster:
+  head_ip: 192.168.19.218
+  worker_ips: []
+```
+
+E2E-SRC-007 and E2E-SRC-008 require additional worker nodes or a second runtime image and can remain pending until those inputs are available.
 
 ## 15. 回滚与兼容性
 
