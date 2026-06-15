@@ -326,6 +326,39 @@ local function append_system_content(parts, content)
     end
 end
 
+-- Build an OpenAI `image_url` content part from a message content block.
+-- Handles Anthropic image blocks ({type="image", source=...}) with either a
+-- base64 source ({type="base64", media_type, data}) or a URL source
+-- ({type="url", url}), and OpenAI-style blocks ({type="image_url",
+-- image_url={url}}) that some clients send directly. Returns nil when the block
+-- carries no usable image, so callers can skip it instead of forwarding a
+-- malformed part the upstream rejects.
+local function image_part_from_block(block)
+    if block.type == "image_url" then
+        if type(block.image_url) == "table" and block.image_url.url then
+            return { type = "image_url", image_url = { url = block.image_url.url } }
+        end
+        return nil
+    end
+
+    local source = block.source
+    if type(source) ~= "table" then
+        return nil
+    end
+
+    local url
+    if source.type == "url" and source.url then
+        url = source.url
+    elseif source.data then
+        url = "data:" .. (source.media_type or "image/png") .. ";base64," .. source.data
+    end
+
+    if not url then
+        return nil
+    end
+    return { type = "image_url", image_url = { url = url } }
+end
+
 local function convert_messages(anthropic_messages)
     local openai_messages = {}
     local system_parts = {}
@@ -379,12 +412,11 @@ local function convert_messages(anthropic_messages)
                                 type = "text",
                                 text = block.text,
                             }
-                        elseif block.type == "image" then
-                            local url = "data:" .. (block.source.media_type or "image/png") .. ";base64," .. block.source.data
-                            trailing_user_parts[#trailing_user_parts + 1] = {
-                                type = "image_url",
-                                image_url = { url = url },
-                            }
+                        elseif block.type == "image" or block.type == "image_url" then
+                            local part = image_part_from_block(block)
+                            if part then
+                                trailing_user_parts[#trailing_user_parts + 1] = part
+                            end
                         end
                     else
                         if block.type == "text" then
@@ -392,12 +424,11 @@ local function convert_messages(anthropic_messages)
                                 type = "text",
                                 text = block.text,
                             }
-                        elseif block.type == "image" then
-                            local url = "data:" .. (block.source.media_type or "image/png") .. ";base64," .. block.source.data
-                            user_parts[#user_parts + 1] = {
-                                type = "image_url",
-                                image_url = { url = url },
-                            }
+                        elseif block.type == "image" or block.type == "image_url" then
+                            local part = image_part_from_block(block)
+                            if part then
+                                user_parts[#user_parts + 1] = part
+                            end
                         end
                     end
                 end
