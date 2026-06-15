@@ -122,6 +122,152 @@ func TestNVIDIAGPU_ParseFromKubernetes(t *testing.T) {
 	}
 }
 
+func TestNVIDIAGPU_ParseFromKubernetesVirtualizationLabelUsesStandardSemantics(t *testing.T) {
+	parser := &GPUResourceParser{}
+	result, err := parser.ParseFromKubernetes(map[corev1.ResourceName]resource.Quantity{
+		NvidiaGPUKubernetesResource: resource.MustParse("20"),
+		NvidiaGPUMemoryResource:     resource.MustParse("40960"),
+		NvidiaGPUCoreResource:       resource.MustParse("200"),
+	}, map[string]string{
+		NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		NvidiaGPUMemoryNodeLabelKey:        "15360",
+		NvidiaGPUVirtualizationLabelKey:    "true",
+		NvidiaGPUCountResource:             "2",
+	})
+	if err != nil {
+		t.Fatalf("ParseFromKubernetes() error = %v", err)
+	}
+
+	expected := &v1.ResourceInfo{
+		AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+			v1.AcceleratorTypeNVIDIAGPU: {
+				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
+					"Tesla-T4": {
+						MemoryTotalMiB: 15360,
+					},
+				},
+			},
+		},
+		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+			v1.AcceleratorTypeNVIDIAGPU: {
+				Quantity: 20,
+				ProductGroups: map[v1.AcceleratorProduct]float64{
+					"Tesla-T4": 20,
+				},
+				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
+					"Tesla-T4": {
+						Quantity: 20,
+					},
+				},
+			},
+		},
+	}
+
+	equal, diff, err := util.JsonEqual(result, expected)
+	if err != nil {
+		t.Fatalf("JsonEqual() error = %v", err)
+	}
+	if !equal {
+		t.Fatalf("ParseFromKubernetes() differs from expected:\n%s", diff)
+	}
+}
+
+func TestNVIDIAGPU_ParseFromKubernetesDoesNotInferVirtualizationFromHAMiResources(t *testing.T) {
+	parser := &GPUResourceParser{}
+	result, err := parser.ParseFromKubernetes(map[corev1.ResourceName]resource.Quantity{
+		NvidiaGPUKubernetesResource: resource.MustParse("20"),
+		NvidiaGPUMemoryResource:     resource.MustParse("40960"),
+		NvidiaGPUCoreResource:       resource.MustParse("200"),
+	}, map[string]string{
+		NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		NvidiaGPUMemoryNodeLabelKey:        "15360",
+		NvidiaGPUCountResource:             "2",
+	})
+	if err != nil {
+		t.Fatalf("ParseFromKubernetes() error = %v", err)
+	}
+
+	expected := &v1.ResourceInfo{
+		AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+			v1.AcceleratorTypeNVIDIAGPU: {
+				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
+					"Tesla-T4": {
+						MemoryTotalMiB: 15360,
+					},
+				},
+			},
+		},
+		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+			v1.AcceleratorTypeNVIDIAGPU: {
+				Quantity: 20,
+				ProductGroups: map[v1.AcceleratorProduct]float64{
+					"Tesla-T4": 20,
+				},
+				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
+					"Tesla-T4": {
+						Quantity: 20,
+					},
+				},
+			},
+		},
+	}
+
+	equal, diff, err := util.JsonEqual(result, expected)
+	if err != nil {
+		t.Fatalf("JsonEqual() error = %v", err)
+	}
+	if !equal {
+		t.Fatalf("ParseFromKubernetes() differs from expected:\n%s", diff)
+	}
+}
+
+func TestNVIDIAGPU_ParseFromKubernetesDoesNotAddVirtualizationDetailsWithoutMemoryLabel(t *testing.T) {
+	parser := &GPUResourceParser{}
+	result, err := parser.ParseFromKubernetes(map[corev1.ResourceName]resource.Quantity{
+		NvidiaGPUKubernetesResource: resource.MustParse("20"),
+		NvidiaGPUMemoryResource:     resource.MustParse("30720"),
+		NvidiaGPUCoreResource:       resource.MustParse("200"),
+	}, map[string]string{
+		NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		NvidiaGPUVirtualizationLabelKey:    "true",
+		NvidiaGPUCountResource:             "2",
+	})
+	if err != nil {
+		t.Fatalf("ParseFromKubernetes() error = %v", err)
+	}
+
+	group := result.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	if group.Quantity != 20 {
+		t.Fatalf("expected base parser to keep Kubernetes GPU quantity, got %v", group.Quantity)
+	}
+	if group.ProductGroups["Tesla-T4"] != 20 {
+		t.Fatalf("expected product group quantity to keep Kubernetes GPU quantity, got %v", group.ProductGroups["Tesla-T4"])
+	}
+	if group.Products != nil {
+		t.Fatalf("expected no product detail without memory label, got %v", group.Products)
+	}
+}
+
+func TestNVIDIAGPU_ParseFromKubernetesVirtualizationLabelDoesNotRequireGPUCountLabel(t *testing.T) {
+	parser := &GPUResourceParser{}
+	result, err := parser.ParseFromKubernetes(map[corev1.ResourceName]resource.Quantity{
+		NvidiaGPUKubernetesResource: resource.MustParse("20"),
+		NvidiaGPUMemoryResource:     resource.MustParse("40960"),
+		NvidiaGPUCoreResource:       resource.MustParse("200"),
+	}, map[string]string{
+		NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		NvidiaGPUVirtualizationLabelKey:    "true",
+	})
+	if err != nil {
+		t.Fatalf("ParseFromKubernetes() error = %v", err)
+	}
+
+	group := result.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	if group.Quantity != 20 {
+		t.Fatalf("expected base parser to keep Kubernetes GPU quantity, got %v", group.Quantity)
+	}
+}
+
 func TestGPUParser_ParserFromRay(t *testing.T) {
 	parser := &GPUResourceParser{}
 

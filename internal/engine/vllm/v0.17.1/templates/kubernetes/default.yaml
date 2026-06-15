@@ -24,6 +24,12 @@ spec:
       app: inference
   template:
     metadata:
+      {{- if .Annotations }}
+      annotations:
+        {{- range $key, $value := .Annotations }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
       labels:
         engine: {{ .EngineName }}
         engine_version: {{ .EngineVersion }}

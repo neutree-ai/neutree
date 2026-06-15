@@ -15,6 +15,7 @@ type KubernetesResourceSpec struct {
 	Requests     map[string]string `json:"requests,omitempty" yaml:"requests,omitempty"`
 	Limits       map[string]string `json:"limits,omitempty" yaml:"limits,omitempty"`
 	NodeSelector map[string]string `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty"`
+	Annotations  map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 	Env          map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 }
 
@@ -22,6 +23,10 @@ type KubernetesResourceSpec struct {
 const (
 	AcceleratorTypeKey    = "type"    // Accelerator type
 	AcceleratorProductKey = "product" // Accelerator product model
+
+	AcceleratorVirtualizationMemoryMiBKey     = "virtualization.memory_mib"
+	AcceleratorVirtualizationMemoryPercentKey = "virtualization.memory_percent"
+	AcceleratorVirtualizationCorePercentKey   = "virtualization.core_percent"
 )
 
 // GetAcceleratorType returns the accelerator type
@@ -42,6 +47,36 @@ func (r *ResourceSpec) GetAcceleratorProduct() string {
 	return r.Accelerator[AcceleratorProductKey]
 }
 
+func (r *ResourceSpec) GetAcceleratorVirtualizationMemoryMiB() string {
+	if r.Accelerator == nil {
+		return ""
+	}
+
+	return r.Accelerator[AcceleratorVirtualizationMemoryMiBKey]
+}
+
+func (r *ResourceSpec) GetAcceleratorVirtualizationMemoryPercent() string {
+	if r.Accelerator == nil {
+		return ""
+	}
+
+	return r.Accelerator[AcceleratorVirtualizationMemoryPercentKey]
+}
+
+func (r *ResourceSpec) GetAcceleratorVirtualizationCorePercent() string {
+	if r.Accelerator == nil {
+		return ""
+	}
+
+	return r.Accelerator[AcceleratorVirtualizationCorePercentKey]
+}
+
+func (r *ResourceSpec) HasAcceleratorVirtualization() bool {
+	return r.GetAcceleratorVirtualizationMemoryMiB() != "" ||
+		r.GetAcceleratorVirtualizationMemoryPercent() != "" ||
+		r.GetAcceleratorVirtualizationCorePercent() != ""
+}
+
 // GetCustomResources returns custom resources (excluding type and product)
 func (r *ResourceSpec) GetCustomResources() map[string]string {
 	if r.Accelerator == nil {
@@ -51,9 +86,11 @@ func (r *ResourceSpec) GetCustomResources() map[string]string {
 	customResources := make(map[string]string)
 
 	for k, v := range r.Accelerator {
-		if k != AcceleratorTypeKey && k != AcceleratorProductKey {
-			customResources[k] = v
+		if IsReservedKey(k) || IsAcceleratorVirtualizationKey(k) {
+			continue
 		}
+
+		customResources[k] = v
 	}
 
 	return customResources
@@ -99,6 +136,12 @@ func (r *ResourceSpec) AddCustomResource(key, value string) {
 // IsReservedKey checks whether the key is reserved
 func IsReservedKey(key string) bool {
 	return key == AcceleratorTypeKey || key == AcceleratorProductKey
+}
+
+func IsAcceleratorVirtualizationKey(key string) bool {
+	return key == AcceleratorVirtualizationMemoryMiBKey ||
+		key == AcceleratorVirtualizationMemoryPercentKey ||
+		key == AcceleratorVirtualizationCorePercentKey
 }
 
 // GetGPUCount returns the GPU count

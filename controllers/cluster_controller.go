@@ -223,6 +223,7 @@ func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.Clus
 		newStatus.ResourceInfo = obj.Status.ResourceInfo
 		newStatus.AcceleratorType = obj.Status.AcceleratorType
 		newStatus.ObservedSpecHash = obj.Status.ObservedSpecHash
+		newStatus.ComponentStatus = obj.Status.ComponentStatus
 	}
 
 	if err != nil {

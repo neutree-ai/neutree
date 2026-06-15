@@ -12,6 +12,9 @@ const (
 	VictoriaMetricsCluster = VictoriaMetrics + "-cluster"
 )
 
+// KubeStateMetrics image version.
+const KubeStateMetrics = "v2.15.0"
+
 // Grafana image version.
 const Grafana = "11.5.3"
 

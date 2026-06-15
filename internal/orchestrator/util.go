@@ -255,6 +255,7 @@ func convertToKubernetes(acceleratorMgr accelerator.Manager, spec *v1.ResourceSp
 		Requests:     make(map[string]string),
 		Limits:       make(map[string]string),
 		NodeSelector: make(map[string]string),
+		Annotations:  make(map[string]string),
 		Env:          make(map[string]string),
 	}
 
@@ -320,6 +321,10 @@ func convertToKubernetes(acceleratorMgr accelerator.Manager, spec *v1.ResourceSp
 			maps.Copy(result.NodeSelector, res.NodeSelector)
 		}
 
+		if res.Annotations != nil {
+			maps.Copy(result.Annotations, res.Annotations)
+		}
+
 		if res.Env != nil {
 			maps.Copy(result.Env, res.Env)
 		}
@@ -355,6 +360,7 @@ func convertCPUToKubernetes(spec *v1.ResourceSpec) *v1.KubernetesResourceSpec {
 		Requests:     make(map[string]string),
 		Limits:       make(map[string]string),
 		NodeSelector: make(map[string]string),
+		Annotations:  make(map[string]string),
 	}
 
 	if spec.GetCPUCount() > 0 {
