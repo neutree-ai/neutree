@@ -250,6 +250,7 @@ func detectPCIAccelerator(
 	match func(string) bool,
 ) (*v1.StaticNodeAcceleratorStatus, bool) {
 	devices := []v1.StaticNodeAcceleratorDeviceStatus{}
+
 	for _, rawLine := range strings.Split(output, "\n") {
 		line := strings.ToLower(rawLine)
 		if !match(line) {
@@ -286,6 +287,7 @@ func (a *manager) RuntimeProfile(
 	if profileKey == "" {
 		profileKey = accelerator.Type
 	}
+
 	if profileKey == "" || profileKey == v1.StaticNodeAcceleratorTypeCPU {
 		return nil, false, nil
 	}

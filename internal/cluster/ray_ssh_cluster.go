@@ -43,19 +43,6 @@ type sshRayClusterReconciler struct {
 	storage            storage.Storage
 }
 
-func newRaySSHClusterReconcile(storage storage.Storage, acceleratorManager accelerator.Manager) *sshRayClusterReconciler {
-	r := &sshRayClusterReconciler{
-		acceleratorManager: acceleratorManager,
-		storage:            storage,
-	}
-
-	if r.executor == nil {
-		r.executor = &command.OSExecutor{}
-	}
-
-	return r
-}
-
 // logWithProcessMessage logs the process messages and updates the cluster status error message.
 // Progress messages are written during initialization and upgrade to provide user-visible feedback.
 func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileContext, messages ...string) {
@@ -712,10 +699,6 @@ func (c *sshRayClusterReconciler) calculateClusterResources(
 	reconcileCtx *ReconcileContext,
 ) (*v1.ClusterResources, error) {
 	return calculateRayDashboardClusterResources(reconcileCtx.rayService, c.acceleratorManager.GetAllParsers())
-}
-
-func (c *sshRayClusterReconciler) transformResources(availableResource, allocatableResource map[string]float64) (*v1.ResourceStatus, error) {
-	return transformRayResources(availableResource, allocatableResource, c.acceleratorManager.GetAllParsers())
 }
 
 func formatMessageWithTimestamp(message string) string {

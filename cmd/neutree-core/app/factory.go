@@ -297,6 +297,7 @@ func NewStaticNodeClusterControllerFactory() ControllerFactory {
 func NewStaticNodeControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		store := controllers.NewStaticNodeObjectStore(opts.storage)
+
 		staticNodeController, err := controllers.NewStaticNodeController(&controllers.StaticNodeControllerOption{
 			Store:         store,
 			RunnerFactory: controllers.NewStaticNodeSSHRunnerFactory(),

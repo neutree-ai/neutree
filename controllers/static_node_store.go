@@ -46,6 +46,7 @@ func (s *StaticNodeObjectStore) ListStaticNodes(
 	}
 
 	nodes := make([]*v1.StaticNode, 0, len(list.Items))
+
 	for i := range list.Items {
 		node := list.Items[i]
 		if node.Metadata == nil || node.Spec == nil {
@@ -84,6 +85,7 @@ func (s *StaticNodeObjectStore) UpsertStaticNode(_ context.Context, node *v1.Sta
 
 	node.ID = existing.ID
 	id := existing.GetID()
+
 	if emptyObjectID(id) {
 		return errors.New("existing static node id is required")
 	}
@@ -105,10 +107,12 @@ func (s *StaticNodeObjectStore) DeleteStaticNode(_ context.Context, node *v1.Sta
 	}
 
 	prepareStaticNode(node)
+
 	node, found, err := s.staticNodeForDelete(node)
 	if err != nil {
 		return err
 	}
+
 	if !found {
 		return nil
 	}
@@ -139,10 +143,12 @@ func (s *StaticNodeObjectStore) HardDeleteStaticNode(_ context.Context, node *v1
 	}
 
 	prepareStaticNode(node)
+
 	node, found, err := s.staticNodeForDelete(node)
 	if err != nil {
 		return err
 	}
+
 	if !found {
 		return nil
 	}
@@ -166,6 +172,7 @@ func (s *StaticNodeObjectStore) HardDeleteStaticNodeCluster(_ context.Context, c
 
 	prepareStaticNodeCluster(cluster)
 	id := cluster.GetID()
+
 	if emptyObjectID(id) {
 		return errors.New("static node cluster id is required")
 	}
@@ -188,6 +195,7 @@ func (s *StaticNodeObjectStore) UpdateStaticNodeClusterStatus(
 
 	prepareStaticNodeCluster(cluster)
 	id := cluster.GetID()
+
 	if emptyObjectID(id) {
 		return errors.New("static node cluster id is required")
 	}
@@ -213,6 +221,7 @@ func (s *StaticNodeObjectStore) UpdateStaticNodeStatus(
 
 	prepareStaticNode(node)
 	id := node.GetID()
+
 	if emptyObjectID(id) {
 		return errors.New("static node id is required")
 	}

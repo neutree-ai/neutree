@@ -82,6 +82,7 @@ func (r *staticRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.
 	}
 
 	r.copyStaticStatusToCluster(cluster, desired, current.Status)
+
 	if current.Status == nil || current.Status.Phase != v1.StaticNodeClusterPhaseReady {
 		return staticNodeClusterNotReadyError(current)
 	}
@@ -98,6 +99,7 @@ func (r *staticRayClusterReconciler) ReconcileDelete(_ context.Context, cluster 
 	if err != nil {
 		return errors.Wrap(err, "failed to find static node cluster")
 	}
+
 	if !found {
 		return nil
 	}
@@ -105,6 +107,7 @@ func (r *staticRayClusterReconciler) ReconcileDelete(_ context.Context, cluster 
 	if current.Metadata == nil {
 		current.Metadata = &v1.Metadata{}
 	}
+
 	if current.Metadata.DeletionTimestamp == "" {
 		current.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
 	}
@@ -121,6 +124,7 @@ func (r *staticRayClusterReconciler) buildStaticNodeCluster(cluster *v1.Cluster)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse ssh cluster config")
 	}
+
 	if sshConfig.Provider.HeadIP == "" {
 		return nil, errors.New("head IP can not be empty")
 	}
@@ -196,6 +200,7 @@ func (r *staticRayClusterReconciler) findStaticNodeCluster(
 	if err != nil {
 		return nil, false, err
 	}
+
 	if len(clusters) == 0 {
 		return nil, false, nil
 	}
@@ -225,6 +230,7 @@ func (r *staticRayClusterReconciler) copyStaticStatusToCluster(
 	if status != nil && status.Phase == v1.StaticNodeClusterPhaseReady {
 		cluster.Status.Initialized = true
 		cluster.Status.Version = cluster.GetVersion()
+
 		if resources, err := r.calculateStaticClusterResources(desired); err != nil {
 			klog.Warningf("failed to calculate static cluster resources for %s: %v", cluster.Metadata.WorkspaceName(), err)
 		} else {
@@ -295,6 +301,7 @@ func getUsedImageRegistryFromStore(cluster *v1.Cluster, store staticRayClusterSt
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list image registry")
 	}
+
 	if len(imageRegistries) == 0 {
 		return nil, storage.ErrResourceNotFound
 	}

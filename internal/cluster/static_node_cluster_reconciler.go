@@ -195,9 +195,7 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 		return plans[i].Node.Metadata.Name < plans[j].Node.Metadata.Name
 	})
 
-	if err := attachMetricsConfigFiles(cluster, plans); err != nil {
-		return nil, err
-	}
+	attachMetricsConfigFiles(cluster, plans)
 
 	for _, plan := range plans {
 		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
@@ -219,6 +217,7 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 				desiredNodeNames[node.Name] = struct{}{}
 			}
 		}
+
 		headName = cluster.Spec.Head.NodeName
 	}
 
@@ -313,6 +312,7 @@ func staticNodeLabels(clusterName string, role v1.StaticNodeRole) map[string]str
 
 func staticNodeByName(nodes []*v1.StaticNode) map[string]*v1.StaticNode {
 	result := make(map[string]*v1.StaticNode, len(nodes))
+
 	for _, node := range nodes {
 		if node == nil || node.Metadata == nil || node.Metadata.Name == "" {
 			continue
@@ -458,7 +458,7 @@ func buildNodeComponents(
 func attachMetricsConfigFiles(
 	cluster *v1.StaticNodeCluster,
 	plans []staticNodeDesiredPlan,
-) error {
+) {
 	for _, plan := range plans {
 		node := plan.Node
 		if node == nil || node.Metadata == nil || node.Spec == nil {
@@ -480,8 +480,6 @@ func attachMetricsConfigFiles(
 			CreateParent: true,
 		})
 	}
-
-	return nil
 }
 
 func renderVMAgentConfig(
@@ -500,6 +498,7 @@ func renderVMAgentConfig(
 
 	builder.WriteString("- job_name: static-node-node-exporter\n")
 	builder.WriteString("  static_configs:\n")
+
 	for _, plan := range plans {
 		node := plan.Node
 		if node == nil || node.Spec == nil {
@@ -514,11 +513,13 @@ func renderVMAgentConfig(
 		builder.WriteString("- job_name: ")
 		builder.WriteString(acceleratorExporterJobName(group.MetricsPath, len(groups), i))
 		builder.WriteString("\n")
+
 		if group.MetricsPath != defaultPrometheusHTTPPath {
 			builder.WriteString("  metrics_path: ")
 			builder.WriteString(strconv.Quote(group.MetricsPath))
 			builder.WriteString("\n")
 		}
+
 		builder.WriteString("  static_configs:\n")
 
 		for _, target := range group.Targets {
@@ -548,6 +549,7 @@ type acceleratorExporterTarget struct {
 
 func acceleratorExporterTargetGroups(plans []staticNodeDesiredPlan) []acceleratorExporterTargetGroup {
 	groupsByPath := map[string][]acceleratorExporterTarget{}
+
 	for _, plan := range plans {
 		if plan.Node == nil || plan.Accelerator == nil || plan.Profile == nil ||
 			plan.Profile.Metrics == nil || plan.Profile.Metrics.Exporter == nil {
@@ -567,6 +569,7 @@ func acceleratorExporterTargetGroups(plans []staticNodeDesiredPlan) []accelerato
 	for path := range groupsByPath {
 		paths = append(paths, path)
 	}
+
 	sort.Strings(paths)
 
 	groups := make([]acceleratorExporterTargetGroup, 0, len(paths))
@@ -587,6 +590,7 @@ func acceleratorExporterJobName(metricsPath string, groupCount int, index int) s
 
 	name := strings.Trim(metricsPath, "/")
 	name = strings.ReplaceAll(name, "/", "-")
+
 	if name == "" {
 		name = strconv.Itoa(index)
 	}
@@ -636,6 +640,7 @@ func writeVMAgentStaticConfig(
 	for key := range extraLabels {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
 
 	for _, key := range keys {
@@ -645,17 +650,6 @@ func writeVMAgentStaticConfig(
 		builder.WriteString(strconv.Quote(extraLabels[key]))
 		builder.WriteString("\n")
 	}
-}
-
-func staticNodeClusterNodeRole(
-	cluster *v1.StaticNodeCluster,
-	node v1.StaticNodeClusterNodeSpec,
-) v1.StaticNodeRole {
-	if cluster != nil && cluster.Spec != nil && node.Name == cluster.Spec.Head.NodeName {
-		return v1.StaticNodeRoleHead
-	}
-
-	return normalizeStaticNodeRole(node.Role)
 }
 
 func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
@@ -673,6 +667,7 @@ func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
 
 func nonEmptyLabels(labels map[string]string) map[string]string {
 	result := make(map[string]string, len(labels))
+
 	for key, value := range labels {
 		if value != "" {
 			result[key] = value
@@ -875,15 +870,6 @@ func staticNodeClusterHeadIP(cluster *v1.StaticNodeCluster) string {
 	return ""
 }
 
-func componentContainerPrefix(cluster *v1.StaticNodeCluster) string {
-	prefix := "neutree"
-	if cluster != nil && cluster.Metadata != nil && cluster.Metadata.Name != "" {
-		prefix += "-" + cluster.Metadata.Name
-	}
-
-	return prefix
-}
-
 func nodeMetricsReady(node *v1.StaticNode) bool {
 	required := map[string]bool{
 		nodeExporterComponentName: false,
@@ -932,6 +918,7 @@ func buildNodeWarmSpec(components []v1.NodeComponentSpec) *v1.WarmSpec {
 		if _, exists := seen[component.Image]; exists {
 			continue
 		}
+
 		seen[component.Image] = struct{}{}
 
 		images = append(images, v1.WarmImageSpec{

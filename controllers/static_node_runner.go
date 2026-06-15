@@ -45,6 +45,7 @@ func (f *StaticNodeSSHRunnerFactory) NewStaticNodeRunner(
 	if err != nil {
 		return nil, err
 	}
+
 	if auth.SSHPrivateKey != "" {
 		sshKeyPath, err := util.GenerateTmpSSHKeyFile(auth.SSHPrivateKey)
 		if err != nil {
@@ -56,6 +57,7 @@ func (f *StaticNodeSSHRunnerFactory) NewStaticNodeRunner(
 
 	var processExecute commandrunner.ProcessExecute
 	sshControlPath := ""
+
 	if f != nil {
 		processExecute = f.ProcessExecute
 		sshControlPath = f.SSHControlPath

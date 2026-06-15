@@ -205,6 +205,7 @@ func (r *StaticNodeReconciler) Delete(
 	}
 
 	errs := []error{}
+
 	for _, component := range node.Spec.Components {
 		containerName := componentContainerName(node, component)
 		if _, err := runner.Run(ctx, "docker rm -f "+shellArg(containerName)+" >/dev/null 2>&1 || true"); err != nil {
@@ -239,6 +240,7 @@ func removeComponentConfigFiles(
 	}
 
 	errs := []error{}
+
 	for _, configFile := range component.ConfigFiles {
 		if err := files.Remove(ctx, configFile.Path, commandrunner.RemoveFileOptions{Sudo: configFile.Sudo}); err != nil {
 			errs = append(errs, errors.Wrapf(err, "failed to remove config file %s", configFile.Path))
@@ -297,6 +299,7 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		status.Phase = v1.NodeComponentPhasePending
 		status.Reason = componentReasonHeadPending
 		status.Message = "head static node is not ready"
+
 		if err != nil {
 			status.Message = err.Error()
 		}
@@ -402,6 +405,7 @@ func writeComponentConfigFiles(
 	}
 
 	changed := false
+
 	files := fileRunner.Files()
 	if files == nil {
 		return false, errors.New("static node command runner file client is nil")
@@ -509,6 +513,7 @@ func (r *StaticNodeReconciler) checkComponentHealth(
 	}
 
 	dashboardURL := componentHealthBaseURL(node, component.HealthCheck)
+
 	switch component.Type {
 	case v1.NodeComponentTypeRayHead:
 		return r.checkRayHeadDashboardHealth(dashboardURL)
@@ -569,6 +574,7 @@ func doHealthHTTPGet(ctx context.Context, url string, timeoutSec int) (*http.Res
 	}
 
 	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -638,6 +644,7 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 	for key := range component.Env {
 		envKeys = append(envKeys, key)
 	}
+
 	sort.Strings(envKeys)
 
 	for _, key := range envKeys {
@@ -653,6 +660,7 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 		if volume.ReadOnly {
 			value += ":ro"
 		}
+
 		parts = append(parts, "-v", shellArg(value))
 	}
 
@@ -700,6 +708,7 @@ func sanitizeContainerName(value string) string {
 	for _, r := range strings.ToLower(value) {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			builder.WriteRune(r)
+
 			lastDash = false
 
 			continue
@@ -707,6 +716,7 @@ func sanitizeContainerName(value string) string {
 
 		if !lastDash {
 			builder.WriteByte('-')
+
 			lastDash = true
 		}
 	}
