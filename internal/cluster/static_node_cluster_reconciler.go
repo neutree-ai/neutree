@@ -14,6 +14,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 const (
@@ -954,7 +955,7 @@ func buildRayRuntimeImage(cluster *v1.StaticNodeCluster) string {
 		return ""
 	}
 
-	return strings.TrimRight(cluster.Spec.ImageRegistry, "/") + "/neutree-serve:" + cluster.Spec.Version
+	return util.BuildClusterImageRef(strings.TrimRight(cluster.Spec.ImageRegistry, "/"), cluster.Spec.Version, "")
 }
 
 func warmImageName(component v1.NodeComponentSpec) string {

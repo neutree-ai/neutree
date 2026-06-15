@@ -78,7 +78,7 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	}, head.Metadata.Labels)
 	rayHead := findComponent(head.Spec.Components, "ray-head")
 	require.NotNil(t, rayHead)
-	assert.Equal(t, "registry.example.com/neutree/neutree-serve:v1.2.0", rayHead.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", rayHead.Image)
 	assert.Equal(t, []string{"/bin/bash", "-lc"}, rayHead.Command)
 	require.Len(t, rayHead.Args, 1)
 	assert.Contains(t, rayHead.Args[0], "python /home/ray/start.py --head")
@@ -90,7 +90,7 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, rayHead.DockerRunOptions, "--gpus all")
 	require.NotNil(t, head.Spec.Warm)
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
-		"ray-runtime":                    "registry.example.com/neutree/neutree-serve:v1.2.0",
+		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
@@ -141,7 +141,7 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Equal(t, v1.StaticNodeRoleWorker, worker.Spec.Role)
 	rayWorker := findComponent(worker.Spec.Components, "ray-worker")
 	require.NotNil(t, rayWorker)
-	assert.Equal(t, "registry.example.com/neutree/neutree-serve:v1.2.0", rayWorker.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", rayWorker.Image)
 	require.Len(t, rayWorker.Args, 1)
 	assert.Contains(t, rayWorker.Args[0], "python /home/ray/start.py --address=10.0.0.10:6379")
 	assert.Contains(t, rayWorker.Args[0], v1.StaticNodeProvisionType)
@@ -153,12 +153,12 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 		v1.NodeComponentTypeNodeExporter,
 	})
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
-		"ray-runtime":             "registry.example.com/neutree/neutree-serve:v1.2.0",
+		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
 	})
 
 	cluster.Spec.Version = "mutated"
-	assert.Equal(t, "registry.example.com/neutree/neutree-serve:v1.2.0", warmImageRef(head.Spec.Warm.Images, "ray-runtime"))
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", warmImageRef(head.Spec.Warm.Images, "ray-runtime"))
 }
 
 func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
