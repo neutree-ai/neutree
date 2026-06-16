@@ -5,7 +5,7 @@ local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
 
 local AIGatewayHandler = {
-    PRIORITY = 1100,
+    PRIORITY = 900,
     VERSION = "0.0.1",
 }
 
