@@ -100,6 +100,7 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, rayHead.Args[0], "python /home/ray/start.py --head")
 	assert.Contains(t, rayHead.Args[0], "docker rm -f ray_container")
 	assert.Contains(t, rayHead.Args[0], "(while true; do docker rm -f ray_container")
+	assert.NotContains(t, rayHead.Args[0], "& &&")
 	assert.Less(t,
 		strings.Index(rayHead.Args[0], "(while true; do docker rm -f ray_container"),
 		strings.Index(rayHead.Args[0], "python /home/ray/start.py --head"),
@@ -191,6 +192,7 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, rayWorker.Args[0], "python /home/ray/start.py --address=10.0.0.10:6379")
 	assert.Contains(t, rayWorker.Args[0], "docker rm -f ray_container")
 	assert.Contains(t, rayWorker.Args[0], "(while true; do docker rm -f ray_container")
+	assert.NotContains(t, rayWorker.Args[0], "& &&")
 	assert.Less(t,
 		strings.Index(rayWorker.Args[0], "(while true; do docker rm -f ray_container"),
 		strings.Index(rayWorker.Args[0], "python /home/ray/start.py --address=10.0.0.10:6379"),

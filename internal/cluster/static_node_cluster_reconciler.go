@@ -1267,7 +1267,7 @@ func legacyRayContainerCleanupCommand() string {
 }
 
 func legacyRayContainerCleanupWatcherCommand() string {
-	return "(while true; do " + legacyRayContainerCleanupCommand() + "; sleep 1; done) &"
+	return "(while true; do " + legacyRayContainerCleanupCommand() + "; sleep 1; done) & true"
 }
 
 func rayNodeLabelArg(cluster *v1.StaticNodeCluster, role v1.StaticNodeRole) string {
