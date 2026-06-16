@@ -14,8 +14,6 @@ import (
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
-var _ clusterreconcile.StaticNodeRunnerFactory = (*StaticNodeSSHRunnerFactory)(nil)
-
 type StaticNodeSSHRunnerFactory struct {
 	ProcessExecute commandrunner.ProcessExecute
 	SSHControlPath string

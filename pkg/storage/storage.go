@@ -187,6 +187,13 @@ type ExternalEndpointStorage interface {
 	ListExternalEndpoint(option ListOption) ([]v1.ExternalEndpoint, error)
 }
 
+type StaticNodeClusterStorage interface {
+	CreateStaticNodeCluster(data *v1.StaticNodeCluster) error
+	DeleteStaticNodeCluster(id string) error
+	UpdateStaticNodeCluster(id string, data *v1.StaticNodeCluster) error
+	ListStaticNodeCluster(option ListOption) ([]v1.StaticNodeCluster, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -200,6 +207,7 @@ type Storage interface {
 	ModelCatalogStorage
 	UserProfileStorage
 	ExternalEndpointStorage
+	StaticNodeClusterStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error

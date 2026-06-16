@@ -6,8 +6,10 @@ import (
 	context "context"
 
 	accelerator "github.com/neutree-ai/neutree/internal/accelerator"
-	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
+
 	mock "github.com/stretchr/testify/mock"
+
+	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -40,8 +42,10 @@ func (_m *MockManager) DetectAccelerator(ctx context.Context, runner accelerator
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, accelerator.NodeCommandRunner) *v1.StaticNodeAcceleratorStatus); ok {
 		r0 = rf(ctx, runner)
-	} else if ret.Get(0) != nil {
-		r0 = ret.Get(0).(*v1.StaticNodeAcceleratorStatus)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.StaticNodeAcceleratorStatus)
+		}
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, accelerator.NodeCommandRunner) error); ok {
@@ -51,6 +55,35 @@ func (_m *MockManager) DetectAccelerator(ctx context.Context, runner accelerator
 	}
 
 	return r0, r1
+}
+
+// MockManager_DetectAccelerator_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DetectAccelerator'
+type MockManager_DetectAccelerator_Call struct {
+	*mock.Call
+}
+
+// DetectAccelerator is a helper method to define mock.On call
+//   - ctx context.Context
+//   - runner accelerator.NodeCommandRunner
+func (_e *MockManager_Expecter) DetectAccelerator(ctx interface{}, runner interface{}) *MockManager_DetectAccelerator_Call {
+	return &MockManager_DetectAccelerator_Call{Call: _e.mock.On("DetectAccelerator", ctx, runner)}
+}
+
+func (_c *MockManager_DetectAccelerator_Call) Run(run func(ctx context.Context, runner accelerator.NodeCommandRunner)) *MockManager_DetectAccelerator_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(accelerator.NodeCommandRunner))
+	})
+	return _c
+}
+
+func (_c *MockManager_DetectAccelerator_Call) Return(_a0 *v1.StaticNodeAcceleratorStatus, _a1 error) *MockManager_DetectAccelerator_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManager_DetectAccelerator_Call) RunAndReturn(run func(context.Context, accelerator.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)) *MockManager_DetectAccelerator_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // GetAllConverters provides a mock function with no fields
@@ -484,9 +517,9 @@ func (_c *MockManager_GetParser_Call) RunAndReturn(run func(string) (plugin.Reso
 	return _c
 }
 
-// RuntimeProfile provides a mock function with given fields: ctx, accelerator
-func (_m *MockManager) RuntimeProfile(ctx context.Context, acceleratorStatus v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error) {
-	ret := _m.Called(ctx, acceleratorStatus)
+// RuntimeProfile provides a mock function with given fields: ctx, _a1
+func (_m *MockManager) RuntimeProfile(ctx context.Context, _a1 v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error) {
+	ret := _m.Called(ctx, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RuntimeProfile")
@@ -496,27 +529,58 @@ func (_m *MockManager) RuntimeProfile(ctx context.Context, acceleratorStatus v1.
 	var r1 bool
 	var r2 error
 	if rf, ok := ret.Get(0).(func(context.Context, v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)); ok {
-		return rf(ctx, acceleratorStatus)
+		return rf(ctx, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, v1.StaticNodeAcceleratorStatus) *v1.AcceleratorProfile); ok {
-		r0 = rf(ctx, acceleratorStatus)
-	} else if ret.Get(0) != nil {
-		r0 = ret.Get(0).(*v1.AcceleratorProfile)
+		r0 = rf(ctx, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.AcceleratorProfile)
+		}
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, v1.StaticNodeAcceleratorStatus) bool); ok {
-		r1 = rf(ctx, acceleratorStatus)
+		r1 = rf(ctx, _a1)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
 
 	if rf, ok := ret.Get(2).(func(context.Context, v1.StaticNodeAcceleratorStatus) error); ok {
-		r2 = rf(ctx, acceleratorStatus)
+		r2 = rf(ctx, _a1)
 	} else {
 		r2 = ret.Error(2)
 	}
 
 	return r0, r1, r2
+}
+
+// MockManager_RuntimeProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RuntimeProfile'
+type MockManager_RuntimeProfile_Call struct {
+	*mock.Call
+}
+
+// RuntimeProfile is a helper method to define mock.On call
+//   - ctx context.Context
+//   - _a1 v1.StaticNodeAcceleratorStatus
+func (_e *MockManager_Expecter) RuntimeProfile(ctx interface{}, _a1 interface{}) *MockManager_RuntimeProfile_Call {
+	return &MockManager_RuntimeProfile_Call{Call: _e.mock.On("RuntimeProfile", ctx, _a1)}
+}
+
+func (_c *MockManager_RuntimeProfile_Call) Run(run func(ctx context.Context, _a1 v1.StaticNodeAcceleratorStatus)) *MockManager_RuntimeProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(v1.StaticNodeAcceleratorStatus))
+	})
+	return _c
+}
+
+func (_c *MockManager_RuntimeProfile_Call) Return(_a0 *v1.AcceleratorProfile, _a1 bool, _a2 error) *MockManager_RuntimeProfile_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockManager_RuntimeProfile_Call) RunAndReturn(run func(context.Context, v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)) *MockManager_RuntimeProfile_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // Start provides a mock function with given fields: ctx

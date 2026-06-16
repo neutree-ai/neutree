@@ -272,7 +272,7 @@ func NewStaticNodeClusterControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		staticNodeClusterController, err := controllers.NewStaticNodeClusterController(
 			&controllers.StaticNodeClusterControllerOption{
-				Store:                  controllers.NewStaticNodeObjectStore(opts.storage),
+				Store:                  storage.NewStaticNodeObjectStore(opts.storage),
 				RuntimeProfileProvider: opts.config.AcceleratorManager,
 			},
 		)
@@ -296,7 +296,7 @@ func NewStaticNodeClusterControllerFactory() ControllerFactory {
 
 func NewStaticNodeControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
-		store := controllers.NewStaticNodeObjectStore(opts.storage)
+		store := storage.NewStaticNodeObjectStore(opts.storage)
 
 		staticNodeController, err := controllers.NewStaticNodeController(&controllers.StaticNodeControllerOption{
 			Store:         store,

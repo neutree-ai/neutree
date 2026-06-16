@@ -3,8 +3,6 @@ package accelerator
 import (
 	"context"
 	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -47,9 +45,7 @@ type Manager interface {
 	GetImageSuffix(acceleratorType string) string
 }
 
-type NodeCommandRunner interface {
-	Run(ctx context.Context, command string) (string, error)
-}
+type NodeCommandRunner = plugin.NodeCommandRunner
 
 type registerPlugin struct {
 	resource         string
@@ -190,19 +186,36 @@ func (a *manager) DetectAccelerator(
 		return nil, errors.New("node command runner is required")
 	}
 
-	output, err := runner.Run(ctx, "lspci -nn")
-	if err != nil {
-		cpu := v1.CPUStaticNodeAcceleratorStatus()
+	var detected *v1.StaticNodeAcceleratorStatus
 
-		return &cpu, nil
-	}
+	a.acceleratorsMap.Range(func(key, value any) bool {
+		p, ok := value.(registerPlugin)
+		if !ok {
+			klog.Warning("assert register plugin type failed")
+			return true
+		}
 
-	if status, ok := detectNVIDIAAccelerator(output); ok {
-		return status, nil
-	}
+		detector, ok := staticNodeAcceleratorDetector(p.plugin)
+		if !ok {
+			return true
+		}
 
-	if status, ok := detectAMDAccelerator(output); ok {
-		return status, nil
+		status, matched, err := detector.DetectStaticNodeAccelerator(ctx, runner)
+		if err != nil {
+			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, err.Error())
+			return true
+		}
+
+		if matched && status != nil {
+			detected = status
+			return false
+		}
+
+		return true
+	})
+
+	if detected != nil {
+		return detected, nil
 	}
 
 	cpu := v1.CPUStaticNodeAcceleratorStatus()
@@ -210,89 +223,55 @@ func (a *manager) DetectAccelerator(
 	return &cpu, nil
 }
 
-func detectNVIDIAAccelerator(output string) (*v1.StaticNodeAcceleratorStatus, bool) {
-	return detectPCIAccelerator(
-		output,
-		v1.AcceleratorTypeNVIDIAGPU.String(),
-		"nvidia",
-		"NVIDIA GPU",
-		"nvidia_gpu",
-		"GPU",
-		func(line string) bool {
-			return strings.Contains(line, "10de:") &&
-				(strings.Contains(line, "3d controller") || strings.Contains(line, "vga compatible controller"))
-		},
-	)
-}
-
-func detectAMDAccelerator(output string) (*v1.StaticNodeAcceleratorStatus, bool) {
-	return detectPCIAccelerator(
-		output,
-		v1.AcceleratorTypeAMDGPU.String(),
-		"amd",
-		"AMD GPU",
-		"amd_gpu",
-		"GPU",
-		func(line string) bool {
-			return (strings.Contains(line, "1002:") || strings.Contains(line, "advanced micro devices")) &&
-				(strings.Contains(line, "processing accelerators") || strings.Contains(line, "vga compatible controller"))
-		},
-	)
-}
-
-func detectPCIAccelerator(
-	output string,
-	acceleratorType string,
-	vendor string,
-	productName string,
-	productModel string,
-	resourceName string,
-	match func(string) bool,
-) (*v1.StaticNodeAcceleratorStatus, bool) {
-	devices := []v1.StaticNodeAcceleratorDeviceStatus{}
-
-	for _, rawLine := range strings.Split(output, "\n") {
-		line := strings.ToLower(rawLine)
-		if !match(line) {
-			continue
-		}
-
-		devices = append(devices, v1.StaticNodeAcceleratorDeviceStatus{
-			ID:          strconv.Itoa(len(devices)),
-			ProductName: productName,
-			Healthy:     true,
-		})
-	}
-
-	if len(devices) == 0 {
-		return nil, false
-	}
-
-	return &v1.StaticNodeAcceleratorStatus{
-		Type:           acceleratorType,
-		Vendor:         vendor,
-		ProductName:    productName,
-		ProductModel:   productModel,
-		RuntimeProfile: acceleratorType,
-		ResourceName:   resourceName,
-		Devices:        devices,
-	}, true
-}
-
 func (a *manager) RuntimeProfile(
 	ctx context.Context,
 	accelerator v1.StaticNodeAcceleratorStatus,
 ) (*v1.AcceleratorProfile, bool, error) {
-	profileKey := accelerator.RuntimeProfile
-	if profileKey == "" {
-		profileKey = accelerator.Type
-	}
-
-	if profileKey == "" || profileKey == v1.StaticNodeAcceleratorTypeCPU {
+	if accelerator.Type == "" || accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
 		return nil, false, nil
 	}
 
-	return a.getAcceleratorProfile(ctx, profileKey, false)
+	p, ok := a.GetPlugin(accelerator.Type)
+	if !ok {
+		return nil, false, nil
+	}
+
+	provider, ok := staticNodeRuntimeProfileProvider(p)
+	if ok {
+		profile, supported, err := provider.RuntimeProfile(ctx, accelerator)
+		if err != nil {
+			return nil, false, errors.Wrapf(err, "get runtime profile from plugin %s failed", p.Resource())
+		}
+
+		return profile, supported, nil
+	}
+
+	profile, supported, err := a.getAcceleratorProfile(ctx, accelerator.Type, false)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return profile, supported, nil
+}
+
+func staticNodeAcceleratorDetector(p plugin.AcceleratorPlugin) (plugin.StaticNodeAcceleratorDetector, bool) {
+	if detector, ok := p.(plugin.StaticNodeAcceleratorDetector); ok {
+		return detector, true
+	}
+
+	detector, ok := p.Handle().(plugin.StaticNodeAcceleratorDetector)
+
+	return detector, ok
+}
+
+func staticNodeRuntimeProfileProvider(p plugin.AcceleratorPlugin) (plugin.StaticNodeRuntimeProfileProvider, bool) {
+	if provider, ok := p.(plugin.StaticNodeRuntimeProfileProvider); ok {
+		return provider, true
+	}
+
+	provider, ok := p.Handle().(plugin.StaticNodeRuntimeProfileProvider)
+
+	return provider, ok
 }
 
 func (a *manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {

@@ -84,6 +84,39 @@ func (p *AMDGPUAcceleratorPlugin) GetNodeRuntimeConfig(ctx context.Context,
 	}, nil
 }
 
+func (p *AMDGPUAcceleratorPlugin) DetectStaticNodeAccelerator(
+	ctx context.Context,
+	runner NodeCommandRunner,
+) (*v1.StaticNodeAcceleratorStatus, bool, error) {
+	return detectPCIStaticNodeAccelerator(ctx, runner, pciStaticNodeAcceleratorDetector{
+		acceleratorType: v1.AcceleratorTypeAMDGPU.String(),
+		vendor:          "amd",
+		productName:     "AMD GPU",
+		productModel:    "amd_gpu",
+		resourceName:    "GPU",
+		match: func(line string) bool {
+			return (strings.Contains(line, "1002:") || strings.Contains(line, "advanced micro devices")) &&
+				(strings.Contains(line, "processing accelerators") || strings.Contains(line, "vga compatible controller"))
+		},
+	})
+}
+
+func (p *AMDGPUAcceleratorPlugin) RuntimeProfile(
+	ctx context.Context,
+	accelerator v1.StaticNodeAcceleratorStatus,
+) (*v1.AcceleratorProfile, bool, error) {
+	if accelerator.Type != p.Resource() {
+		return nil, false, nil
+	}
+
+	profile, err := p.GetAcceleratorProfile(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return profile, profile != nil, nil
+}
+
 func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {
 	decodedKey, err := base64.StdEncoding.DecodeString(auth.SSHPrivateKey)
 	if err != nil {

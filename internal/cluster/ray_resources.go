@@ -77,6 +77,13 @@ func calculateRayDashboardClusterResources(
 	}, nil
 }
 
+func CalculateRayDashboardClusterResources(
+	dashboardSvc dashboard.DashboardService,
+	resourceParserMap map[string]plugin.ResourceParser,
+) (*v1.ClusterResources, error) {
+	return calculateRayDashboardClusterResources(dashboardSvc, resourceParserMap)
+}
+
 func transformRayResources(
 	availableResource map[string]float64,
 	allocatableResource map[string]float64,

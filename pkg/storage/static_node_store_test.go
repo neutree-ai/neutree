@@ -1,4 +1,4 @@
-package controllers
+package storage
 
 import (
 	"context"
@@ -10,15 +10,14 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/scheme"
-	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 func TestStaticNodeObjectStoreListStaticNodesFiltersByWorkspaceAndCluster(t *testing.T) {
-	objectStorage := &fakeObjectStorage{
+	objectStorage := &fakeStaticNodeObjectStorage{
 		nodes: []v1.StaticNode{
-			testObjectStoreStaticNode(1, "default", "head-0", "static-a"),
-			testObjectStoreStaticNode(2, "default", "head-1", "static-b"),
-			testObjectStoreStaticNode(3, "other", "head-2", "static-a"),
+			testStorageStaticNode(1, "default", "head-0", "static-a"),
+			testStorageStaticNode(2, "default", "head-1", "static-b"),
+			testStorageStaticNode(3, "other", "head-2", "static-a"),
 		},
 	}
 	store := NewStaticNodeObjectStore(objectStorage)
@@ -30,10 +29,20 @@ func TestStaticNodeObjectStoreListStaticNodesFiltersByWorkspaceAndCluster(t *tes
 	assert.Equal(t, "head-0", nodes[0].Metadata.Name)
 }
 
+type fakeStaticNodeObjectStorage struct {
+	nodes              []v1.StaticNode
+	created            []scheme.Object
+	updatedMetadataIDs []string
+	updatedMetadata    map[string]scheme.Object
+	updatedSpecIDs     []string
+	updatedStatus      map[string]scheme.Object
+	deletedIDs         []string
+}
+
 func TestStaticNodeObjectStoreUpsertStaticNode(t *testing.T) {
-	objectStorage := &fakeObjectStorage{
+	objectStorage := &fakeStaticNodeObjectStorage{
 		nodes: []v1.StaticNode{
-			testObjectStoreStaticNode(11, "default", "head-0", "static-a"),
+			testStorageStaticNode(11, "default", "head-0", "static-a"),
 		},
 	}
 	store := NewStaticNodeObjectStore(objectStorage)
@@ -75,7 +84,7 @@ func TestStaticNodeObjectStoreUpsertStaticNode(t *testing.T) {
 }
 
 func TestStaticNodeObjectStoreDeleteStaticNodeSoftDeletes(t *testing.T) {
-	objectStorage := &fakeObjectStorage{}
+	objectStorage := &fakeStaticNodeObjectStorage{}
 	store := NewStaticNodeObjectStore(objectStorage)
 
 	err := store.DeleteStaticNode(context.Background(), &v1.StaticNode{ID: 12})
@@ -90,7 +99,7 @@ func TestStaticNodeObjectStoreDeleteStaticNodeSoftDeletes(t *testing.T) {
 }
 
 func TestStaticNodeObjectStoreHardDeleteStaticNode(t *testing.T) {
-	objectStorage := &fakeObjectStorage{}
+	objectStorage := &fakeStaticNodeObjectStorage{}
 	store := NewStaticNodeObjectStore(objectStorage)
 
 	err := store.HardDeleteStaticNode(context.Background(), &v1.StaticNode{ID: 12})
@@ -100,7 +109,7 @@ func TestStaticNodeObjectStoreHardDeleteStaticNode(t *testing.T) {
 }
 
 func TestStaticNodeObjectStoreHardDeleteStaticNodeCluster(t *testing.T) {
-	objectStorage := &fakeObjectStorage{}
+	objectStorage := &fakeStaticNodeObjectStorage{}
 	store := NewStaticNodeObjectStore(objectStorage)
 
 	err := store.HardDeleteStaticNodeCluster(context.Background(), &v1.StaticNodeCluster{ID: 13})
@@ -110,7 +119,7 @@ func TestStaticNodeObjectStoreHardDeleteStaticNodeCluster(t *testing.T) {
 }
 
 func TestStaticNodeObjectStoreUpdateStatus(t *testing.T) {
-	objectStorage := &fakeObjectStorage{}
+	objectStorage := &fakeStaticNodeObjectStorage{}
 	store := NewStaticNodeObjectStore(objectStorage)
 
 	err := store.UpdateStaticNodeClusterStatus(
@@ -132,37 +141,27 @@ func TestStaticNodeObjectStoreUpdateStatus(t *testing.T) {
 	assert.IsType(t, &v1.StaticNode{}, objectStorage.updatedStatus["8"])
 }
 
-type fakeObjectStorage struct {
-	nodes              []v1.StaticNode
-	created            []scheme.Object
-	updatedMetadataIDs []string
-	updatedMetadata    map[string]scheme.Object
-	updatedSpecIDs     []string
-	updatedStatus      map[string]scheme.Object
-	deletedIDs         []string
-}
-
-func (f *fakeObjectStorage) Create(data scheme.Object) error {
+func (f *fakeStaticNodeObjectStorage) Create(data scheme.Object) error {
 	f.created = append(f.created, data)
 
 	return nil
 }
 
-func (f *fakeObjectStorage) Update(id string, data scheme.Object) error {
+func (f *fakeStaticNodeObjectStorage) Update(id string, data scheme.Object) error {
 	return errors.New("unexpected update " + id + " for " + data.GetKind())
 }
 
-func (f *fakeObjectStorage) Delete(id string, _ scheme.Object) error {
+func (f *fakeStaticNodeObjectStorage) Delete(id string, _ scheme.Object) error {
 	f.deletedIDs = append(f.deletedIDs, id)
 
 	return nil
 }
 
-func (f *fakeObjectStorage) Get(_ string, _ scheme.Object) error {
+func (f *fakeStaticNodeObjectStorage) Get(_ string, _ scheme.Object) error {
 	return errors.New("unexpected get")
 }
 
-func (f *fakeObjectStorage) List(obj scheme.ObjectList, _ storage.ListOption) error {
+func (f *fakeStaticNodeObjectStorage) List(obj scheme.ObjectList, _ ListOption) error {
 	items := make([]scheme.Object, 0, len(f.nodes))
 	for i := range f.nodes {
 		node := f.nodes[i]
@@ -174,7 +173,7 @@ func (f *fakeObjectStorage) List(obj scheme.ObjectList, _ storage.ListOption) er
 	return nil
 }
 
-func (f *fakeObjectStorage) UpdateMetadata(id string, data scheme.Object) error {
+func (f *fakeStaticNodeObjectStorage) UpdateMetadata(id string, data scheme.Object) error {
 	f.updatedMetadataIDs = append(f.updatedMetadataIDs, id)
 	if f.updatedMetadata == nil {
 		f.updatedMetadata = map[string]scheme.Object{}
@@ -185,13 +184,13 @@ func (f *fakeObjectStorage) UpdateMetadata(id string, data scheme.Object) error 
 	return nil
 }
 
-func (f *fakeObjectStorage) UpdateSpec(id string, _ scheme.Object) error {
+func (f *fakeStaticNodeObjectStorage) UpdateSpec(id string, _ scheme.Object) error {
 	f.updatedSpecIDs = append(f.updatedSpecIDs, id)
 
 	return nil
 }
 
-func (f *fakeObjectStorage) UpdateStatus(id string, data scheme.Object) error {
+func (f *fakeStaticNodeObjectStorage) UpdateStatus(id string, data scheme.Object) error {
 	if f.updatedStatus == nil {
 		f.updatedStatus = map[string]scheme.Object{}
 	}
@@ -201,7 +200,7 @@ func (f *fakeObjectStorage) UpdateStatus(id string, data scheme.Object) error {
 	return nil
 }
 
-func testObjectStoreStaticNode(id int, workspace, name, clusterName string) v1.StaticNode {
+func testStorageStaticNode(id int, workspace, name, clusterName string) v1.StaticNode {
 	return v1.StaticNode{
 		ID:         id,
 		APIVersion: "v1",

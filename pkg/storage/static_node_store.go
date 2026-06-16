@@ -1,4 +1,4 @@
-package controllers
+package storage
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
-	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 const (
@@ -18,17 +16,12 @@ const (
 	staticNodeListKind    = "StaticNodeList"
 )
 
-var (
-	_ clusterreconcile.StaticNodeClusterStore = (*StaticNodeObjectStore)(nil)
-	_ clusterreconcile.StaticNodeStore        = (*StaticNodeObjectStore)(nil)
-)
-
 type StaticNodeObjectStore struct {
-	Storage storage.ObjectStorage
+	objectStorage ObjectStorage
 }
 
-func NewStaticNodeObjectStore(objectStorage storage.ObjectStorage) *StaticNodeObjectStore {
-	return &StaticNodeObjectStore{Storage: objectStorage}
+func NewStaticNodeObjectStore(objectStorage ObjectStorage) *StaticNodeObjectStore {
+	return &StaticNodeObjectStore{objectStorage: objectStorage}
 }
 
 func (s *StaticNodeObjectStore) ListStaticNodes(
@@ -36,12 +29,12 @@ func (s *StaticNodeObjectStore) ListStaticNodes(
 	workspace string,
 	clusterName string,
 ) ([]*v1.StaticNode, error) {
-	if s == nil || s.Storage == nil {
+	if s == nil || s.objectStorage == nil {
 		return nil, errors.New("object storage is required")
 	}
 
 	list := &v1.StaticNodeList{Kind: staticNodeListKind}
-	if err := s.Storage.List(list, storage.ListOption{}); err != nil {
+	if err := s.objectStorage.List(list, ListOption{}); err != nil {
 		return nil, err
 	}
 
@@ -64,7 +57,7 @@ func (s *StaticNodeObjectStore) ListStaticNodes(
 }
 
 func (s *StaticNodeObjectStore) UpsertStaticNode(_ context.Context, node *v1.StaticNode) error {
-	if s == nil || s.Storage == nil {
+	if s == nil || s.objectStorage == nil {
 		return errors.New("object storage is required")
 	}
 
@@ -80,7 +73,7 @@ func (s *StaticNodeObjectStore) UpsertStaticNode(_ context.Context, node *v1.Sta
 	}
 
 	if !found {
-		return s.Storage.Create(node)
+		return s.objectStorage.Create(node)
 	}
 
 	node.ID = existing.ID
@@ -90,15 +83,15 @@ func (s *StaticNodeObjectStore) UpsertStaticNode(_ context.Context, node *v1.Sta
 		return errors.New("existing static node id is required")
 	}
 
-	if err := s.Storage.UpdateMetadata(id, node); err != nil {
+	if err := s.objectStorage.UpdateMetadata(id, node); err != nil {
 		return err
 	}
 
-	return s.Storage.UpdateSpec(id, node)
+	return s.objectStorage.UpdateSpec(id, node)
 }
 
 func (s *StaticNodeObjectStore) DeleteStaticNode(_ context.Context, node *v1.StaticNode) error {
-	if s == nil || s.Storage == nil {
+	if s == nil || s.objectStorage == nil {
 		return errors.New("object storage is required")
 	}
 
@@ -130,11 +123,11 @@ func (s *StaticNodeObjectStore) DeleteStaticNode(_ context.Context, node *v1.Sta
 		node.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
 	}
 
-	return s.Storage.UpdateMetadata(id, node)
+	return s.objectStorage.UpdateMetadata(id, node)
 }
 
 func (s *StaticNodeObjectStore) HardDeleteStaticNode(_ context.Context, node *v1.StaticNode) error {
-	if s == nil || s.Storage == nil {
+	if s == nil || s.objectStorage == nil {
 		return errors.New("object storage is required")
 	}
 
@@ -158,11 +151,11 @@ func (s *StaticNodeObjectStore) HardDeleteStaticNode(_ context.Context, node *v1
 		return errors.New("static node id is required")
 	}
 
-	return s.Storage.Delete(id, &v1.StaticNode{Kind: staticNodeKind})
+	return s.objectStorage.Delete(id, &v1.StaticNode{Kind: staticNodeKind})
 }
 
 func (s *StaticNodeObjectStore) HardDeleteStaticNodeCluster(_ context.Context, cluster *v1.StaticNodeCluster) error {
-	if s == nil || s.Storage == nil {
+	if s == nil || s.objectStorage == nil {
 		return errors.New("object storage is required")
 	}
 
@@ -177,7 +170,7 @@ func (s *StaticNodeObjectStore) HardDeleteStaticNodeCluster(_ context.Context, c
 		return errors.New("static node cluster id is required")
 	}
 
-	return s.Storage.Delete(id, &v1.StaticNodeCluster{Kind: staticNodeClusterKind})
+	return s.objectStorage.Delete(id, &v1.StaticNodeCluster{Kind: staticNodeClusterKind})
 }
 
 func (s *StaticNodeObjectStore) UpdateStaticNodeClusterStatus(
@@ -185,7 +178,7 @@ func (s *StaticNodeObjectStore) UpdateStaticNodeClusterStatus(
 	cluster *v1.StaticNodeCluster,
 	status v1.StaticNodeClusterStatus,
 ) error {
-	if s == nil || s.Storage == nil {
+	if s == nil || s.objectStorage == nil {
 		return errors.New("object storage is required")
 	}
 
@@ -200,7 +193,7 @@ func (s *StaticNodeObjectStore) UpdateStaticNodeClusterStatus(
 		return errors.New("static node cluster id is required")
 	}
 
-	return s.Storage.UpdateStatus(id, &v1.StaticNodeCluster{
+	return s.objectStorage.UpdateStatus(id, &v1.StaticNodeCluster{
 		Kind:   staticNodeClusterKind,
 		Status: &status,
 	})
@@ -211,7 +204,7 @@ func (s *StaticNodeObjectStore) UpdateStaticNodeStatus(
 	node *v1.StaticNode,
 	status v1.StaticNodeStatus,
 ) error {
-	if s == nil || s.Storage == nil {
+	if s == nil || s.objectStorage == nil {
 		return errors.New("object storage is required")
 	}
 
@@ -226,7 +219,7 @@ func (s *StaticNodeObjectStore) UpdateStaticNodeStatus(
 		return errors.New("static node id is required")
 	}
 
-	return s.Storage.UpdateStatus(id, &v1.StaticNode{
+	return s.objectStorage.UpdateStatus(id, &v1.StaticNode{
 		Kind:   staticNodeKind,
 		Status: &status,
 	})
@@ -234,7 +227,7 @@ func (s *StaticNodeObjectStore) UpdateStaticNodeStatus(
 
 func (s *StaticNodeObjectStore) findStaticNode(workspace, name string) (*v1.StaticNode, bool, error) {
 	list := &v1.StaticNodeList{Kind: staticNodeListKind}
-	if err := s.Storage.List(list, storage.ListOption{}); err != nil {
+	if err := s.objectStorage.List(list, ListOption{}); err != nil {
 		return nil, false, err
 	}
 

@@ -1,36 +1,37 @@
 package controllers
 
 import (
-	"context"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/pkg/scheme"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestStaticNodeClusterControllerReconcile(t *testing.T) {
-	store := &fakeControllerStaticNodeClusterStore{}
+	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Store: store,
+		Store: storage.NewStaticNodeObjectStore(objectStorage),
 	})
 	require.NoError(t, err)
 
 	err = controller.Reconcile(controllerStaticNodeCluster())
 
 	require.NoError(t, err)
-	require.Len(t, store.upsertedNodes, 2)
-	assert.Equal(t, "head-0", store.upsertedNodes[0].Metadata.Name)
-	assert.Equal(t, "worker-0", store.upsertedNodes[1].Metadata.Name)
-	assert.Equal(t, "default", store.listWorkspace)
-	assert.Equal(t, "static-a", store.listClusterName)
-	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, store.updatedStatus.Phase)
+	require.Len(t, objectStorage.created, 2)
+	assert.Equal(t, "head-0", objectStorage.created[0].(*v1.StaticNode).Metadata.Name)
+	assert.Equal(t, "worker-0", objectStorage.created[1].(*v1.StaticNode).Metadata.Name)
+	status, ok := objectStorage.updatedStatus["7"].(*v1.StaticNodeCluster)
+	require.True(t, ok)
+	require.NotNil(t, status.Status)
+	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
 }
 
 func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Store: &fakeControllerStaticNodeClusterStore{},
+		Store: storage.NewStaticNodeObjectStore(&fakeControllerStaticNodeClusterObjectStorage{}),
 	})
 	require.NoError(t, err)
 
@@ -40,59 +41,63 @@ func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to assert obj to *v1.StaticNodeCluster")
 }
 
-type fakeControllerStaticNodeClusterStore struct {
-	currentNodes        []*v1.StaticNode
-	upsertedNodes       []*v1.StaticNode
-	deletedNodes        []*v1.StaticNode
-	hardDeletedClusters []*v1.StaticNodeCluster
-	updatedStatus       v1.StaticNodeClusterStatus
-	listWorkspace       string
-	listClusterName     string
+type fakeControllerStaticNodeClusterObjectStorage struct {
+	nodes         []v1.StaticNode
+	created       []scheme.Object
+	updatedStatus map[string]scheme.Object
 }
 
-var _ clusterreconcile.StaticNodeClusterStore = (*fakeControllerStaticNodeClusterStore)(nil)
-
-func (f *fakeControllerStaticNodeClusterStore) ListStaticNodes(
-	_ context.Context,
-	workspace string,
-	clusterName string,
-) ([]*v1.StaticNode, error) {
-	f.listWorkspace = workspace
-	f.listClusterName = clusterName
-
-	return f.currentNodes, nil
-}
-
-func (f *fakeControllerStaticNodeClusterStore) UpsertStaticNode(_ context.Context, node *v1.StaticNode) error {
-	f.upsertedNodes = append(f.upsertedNodes, node)
+func (f *fakeControllerStaticNodeClusterObjectStorage) Create(data scheme.Object) error {
+	f.created = append(f.created, data)
 
 	return nil
 }
 
-func (f *fakeControllerStaticNodeClusterStore) DeleteStaticNode(_ context.Context, node *v1.StaticNode) error {
-	f.deletedNodes = append(f.deletedNodes, node)
+func (f *fakeControllerStaticNodeClusterObjectStorage) Update(_ string, _ scheme.Object) error {
+	return nil
+}
+
+func (f *fakeControllerStaticNodeClusterObjectStorage) Delete(_ string, _ scheme.Object) error {
+	return nil
+}
+
+func (f *fakeControllerStaticNodeClusterObjectStorage) Get(_ string, _ scheme.Object) error {
+	return nil
+}
+
+func (f *fakeControllerStaticNodeClusterObjectStorage) List(obj scheme.ObjectList, _ storage.ListOption) error {
+	items := make([]scheme.Object, 0, len(f.nodes))
+	for i := range f.nodes {
+		node := f.nodes[i]
+		items = append(items, &node)
+	}
+
+	obj.SetItems(items)
 
 	return nil
 }
 
-func (f *fakeControllerStaticNodeClusterStore) HardDeleteStaticNodeCluster(_ context.Context, cluster *v1.StaticNodeCluster) error {
-	f.hardDeletedClusters = append(f.hardDeletedClusters, cluster)
-
+func (f *fakeControllerStaticNodeClusterObjectStorage) UpdateMetadata(_ string, _ scheme.Object) error {
 	return nil
 }
 
-func (f *fakeControllerStaticNodeClusterStore) UpdateStaticNodeClusterStatus(
-	_ context.Context,
-	_ *v1.StaticNodeCluster,
-	status v1.StaticNodeClusterStatus,
-) error {
-	f.updatedStatus = status
+func (f *fakeControllerStaticNodeClusterObjectStorage) UpdateSpec(_ string, _ scheme.Object) error {
+	return nil
+}
+
+func (f *fakeControllerStaticNodeClusterObjectStorage) UpdateStatus(id string, data scheme.Object) error {
+	if f.updatedStatus == nil {
+		f.updatedStatus = map[string]scheme.Object{}
+	}
+
+	f.updatedStatus[id] = data
 
 	return nil
 }
 
 func controllerStaticNodeCluster() *v1.StaticNodeCluster {
 	return &v1.StaticNodeCluster{
+		ID: 7,
 		Metadata: &v1.Metadata{
 			Workspace: "default",
 			Name:      "static-a",

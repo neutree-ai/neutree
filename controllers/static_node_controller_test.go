@@ -2,16 +2,19 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/pkg/scheme"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestStaticNodeControllerReconcile(t *testing.T) {
-	store := &fakeControllerStaticNodeStore{}
+	objectStorage := &fakeControllerStaticNodeObjectStorage{}
 	runner := &fakeControllerStaticNodeRunner{
 		responses: []fakeControllerStaticNodeRunnerResponse{
 			{
@@ -21,23 +24,28 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 		},
 	}
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Store:         store,
-		RunnerFactory: &fakeControllerStaticNodeRunnerFactory{runner: runner},
+		Store: storage.NewStaticNodeObjectStore(objectStorage),
 	})
 	require.NoError(t, err)
+	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
+		return runner, nil
+	}
 
 	err = controller.Reconcile(controllerStaticNode())
 
 	require.NoError(t, err)
-	assert.Equal(t, v1.StaticNodePhaseReady, store.status.Phase)
-	require.NotNil(t, store.status.Warm)
-	assert.True(t, store.status.Warm.Ready)
+	statusObj, ok := objectStorage.updatedStatus["8"].(*v1.StaticNode)
+	require.True(t, ok)
+	require.NotNil(t, statusObj.Status)
+	assert.Equal(t, v1.StaticNodePhaseReady, statusObj.Status.Phase)
+	require.NotNil(t, statusObj.Status.Warm)
+	assert.True(t, statusObj.Status.Warm.Ready)
 	assert.Equal(t, 1, runner.calls)
 }
 
 func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Store: &fakeControllerStaticNodeStore{},
+		Store: storage.NewStaticNodeObjectStore(&fakeControllerStaticNodeObjectStorage{}),
 	})
 	require.NoError(t, err)
 
@@ -47,40 +55,73 @@ func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to assert obj to *v1.StaticNode")
 }
 
-type fakeControllerStaticNodeStore struct {
-	status       v1.StaticNodeStatus
-	deletedNodes []*v1.StaticNode
+func TestStaticNodeControllerForceDeleteHardDeletesWithoutRunner(t *testing.T) {
+	objectStorage := &fakeControllerStaticNodeObjectStorage{}
+	node := controllerStaticNode()
+	node.Metadata.DeletionTimestamp = "2026-06-15T16:47:17Z"
+	node.Metadata.Annotations = map[string]string{
+		"neutree.ai/force-delete": "true",
+	}
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
+		Store: storage.NewStaticNodeObjectStore(objectStorage),
+	})
+	require.NoError(t, err)
+	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
+		return nil, errors.New("runner should not be created for force delete")
+	}
+
+	err = controller.Reconcile(node)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"8"}, objectStorage.deletedIDs)
+	assert.Empty(t, objectStorage.updatedStatus)
 }
 
-var _ clusterreconcile.StaticNodeStore = (*fakeControllerStaticNodeStore)(nil)
+type fakeControllerStaticNodeObjectStorage struct {
+	updatedStatus map[string]scheme.Object
+	deletedIDs    []string
+}
 
-func (f *fakeControllerStaticNodeStore) UpdateStaticNodeStatus(
-	_ context.Context,
-	_ *v1.StaticNode,
-	status v1.StaticNodeStatus,
-) error {
-	f.status = status
+func (f *fakeControllerStaticNodeObjectStorage) Create(_ scheme.Object) error {
+	return nil
+}
+
+func (f *fakeControllerStaticNodeObjectStorage) Update(_ string, _ scheme.Object) error {
+	return nil
+}
+
+func (f *fakeControllerStaticNodeObjectStorage) Delete(id string, _ scheme.Object) error {
+	f.deletedIDs = append(f.deletedIDs, id)
 
 	return nil
 }
 
-func (f *fakeControllerStaticNodeStore) HardDeleteStaticNode(_ context.Context, node *v1.StaticNode) error {
-	f.deletedNodes = append(f.deletedNodes, node)
+func (f *fakeControllerStaticNodeObjectStorage) Get(_ string, _ scheme.Object) error {
+	return nil
+}
+
+func (f *fakeControllerStaticNodeObjectStorage) List(obj scheme.ObjectList, _ storage.ListOption) error {
+	obj.SetItems(nil)
 
 	return nil
 }
 
-type fakeControllerStaticNodeRunnerFactory struct {
-	runner clusterreconcile.StaticNodeCommandRunner
+func (f *fakeControllerStaticNodeObjectStorage) UpdateMetadata(_ string, _ scheme.Object) error {
+	return nil
 }
 
-var _ clusterreconcile.StaticNodeRunnerFactory = (*fakeControllerStaticNodeRunnerFactory)(nil)
+func (f *fakeControllerStaticNodeObjectStorage) UpdateSpec(_ string, _ scheme.Object) error {
+	return nil
+}
 
-func (f *fakeControllerStaticNodeRunnerFactory) NewStaticNodeRunner(
-	_ context.Context,
-	_ *v1.StaticNode,
-) (clusterreconcile.StaticNodeCommandRunner, error) {
-	return f.runner, nil
+func (f *fakeControllerStaticNodeObjectStorage) UpdateStatus(id string, data scheme.Object) error {
+	if f.updatedStatus == nil {
+		f.updatedStatus = map[string]scheme.Object{}
+	}
+
+	f.updatedStatus[id] = data
+
+	return nil
 }
 
 type fakeControllerStaticNodeRunner struct {
@@ -112,6 +153,7 @@ func (f *fakeControllerStaticNodeRunner) Run(_ context.Context, command string) 
 
 func controllerStaticNode() *v1.StaticNode {
 	return &v1.StaticNode{
+		ID: 8,
 		Metadata: &v1.Metadata{
 			Workspace: "default",
 			Name:      "head-0",

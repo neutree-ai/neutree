@@ -28,7 +28,8 @@ type ClusterController struct {
 
 	gw gateway.Gateway
 
-	acceleratorManager accelerator.Manager
+	acceleratorManager  accelerator.Manager
+	newClusterReconcile func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
 }
 
 type ClusterControllerOption struct {
@@ -49,8 +50,9 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
 		metricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
 
-		gw:                 opt.Gw,
-		acceleratorManager: opt.AcceleratorManager,
+		gw:                  opt.Gw,
+		acceleratorManager:  opt.AcceleratorManager,
+		newClusterReconcile: cluster.NewReconcile,
 	}
 
 	c.syncHandler = c.sync
@@ -98,16 +100,24 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 		controller.updateClusterStatus(c, reconcileErr)
 	}()
 
-	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
-	if err != nil {
-		reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
-		return reconcileErr
-	}
+	if shouldUseStaticNodeClusterFlow(c) {
+		reconcileErr = controller.reconcileStaticNodeCluster(c)
+		if reconcileErr != nil {
+			reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile static node cluster %s", c.Metadata.WorkspaceName())
+			return reconcileErr
+		}
+	} else {
+		r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+		if err != nil {
+			reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
+			return reconcileErr
+		}
 
-	reconcileErr = r.Reconcile(context.Background(), c)
-	if reconcileErr != nil {
-		reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile cluster %s", c.Metadata.WorkspaceName())
-		return reconcileErr
+		reconcileErr = r.Reconcile(context.Background(), c)
+		if reconcileErr != nil {
+			reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile cluster %s", c.Metadata.WorkspaceName())
+			return reconcileErr
+		}
 	}
 
 	klog.V(4).Info("Cluster " + c.Metadata.WorkspaceName() + " reconcile succeeded, syncing to gateway")
@@ -156,13 +166,24 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 			controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
 		}
 
-		r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+		useStaticNodeDeleteFlow, err := controller.shouldUseStaticNodeClusterDeleteFlow(c)
 		if err != nil {
-			return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
+			return errors.Wrapf(err, "failed to check static node cluster delete flow for cluster %s", c.Metadata.WorkspaceName())
 		}
 
-		if err = r.ReconcileDelete(context.Background(), c); err != nil {
-			return errors.Wrapf(err, "failed to reconcile delete cluster %s", c.Metadata.WorkspaceName())
+		if useStaticNodeDeleteFlow {
+			if err := controller.reconcileStaticNodeClusterDelete(c); err != nil {
+				return errors.Wrapf(err, "failed to reconcile delete static node cluster %s", c.Metadata.WorkspaceName())
+			}
+		} else {
+			r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+			if err != nil {
+				return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
+			}
+
+			if err = r.ReconcileDelete(context.Background(), c); err != nil {
+				return errors.Wrapf(err, "failed to reconcile delete cluster %s", c.Metadata.WorkspaceName())
+			}
 		}
 
 		return nil
