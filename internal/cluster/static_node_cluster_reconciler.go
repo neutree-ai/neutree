@@ -1226,7 +1226,7 @@ func rayStartCommand(
 	role v1.StaticNodeRole,
 ) string {
 	parts := []string{
-		legacyRayContainerCleanupCommand(),
+		legacyRayContainerCleanupWatcherCommand(),
 		"ray stop",
 		"ulimit -n 65536",
 	}
@@ -1257,7 +1257,6 @@ func rayStartCommand(
 		}, " "))
 	}
 
-	parts = append(parts, legacyRayContainerCleanupLoopCommand())
 	parts = append(parts, "tail -f /dev/null")
 
 	return strings.Join(parts, " && ")
@@ -1267,8 +1266,8 @@ func legacyRayContainerCleanupCommand() string {
 	return "docker rm -f ray_container >/dev/null 2>&1 || true"
 }
 
-func legacyRayContainerCleanupLoopCommand() string {
-	return "for i in $(seq 1 30); do " + legacyRayContainerCleanupCommand() + "; sleep 1; done"
+func legacyRayContainerCleanupWatcherCommand() string {
+	return "(while true; do " + legacyRayContainerCleanupCommand() + "; sleep 1; done) &"
 }
 
 func rayNodeLabelArg(cluster *v1.StaticNodeCluster, role v1.StaticNodeRole) string {
