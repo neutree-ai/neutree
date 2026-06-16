@@ -546,9 +546,9 @@ func (r *StaticNodeReconciler) checkComponentHealth(
 
 	switch component.Type {
 	case v1.NodeComponentTypeRayHead:
-		return r.checkRayHeadDashboardHealth(dashboardURL)
+		return r.checkRayHeadDashboardHealth(dashboardURL, staticNodeHealthHost(node), component.HealthCheck.RayNodeLabels)
 	case v1.NodeComponentTypeRayWorker:
-		return r.checkRayWorkerDashboardHealth(dashboardURL, staticNodeHealthHost(node))
+		return r.checkRayWorkerDashboardHealth(dashboardURL, staticNodeHealthHost(node), component.HealthCheck.RayNodeLabels)
 	}
 
 	if component.HealthCheck.HTTPPath == "" {
@@ -613,25 +613,68 @@ func doHealthHTTPGet(ctx context.Context, url string, timeoutSec int) (*http.Res
 	return client.Do(request)
 }
 
-func (r *StaticNodeReconciler) checkRayHeadDashboardHealth(dashboardURL string) error {
-	_, err := r.dashboardService(dashboardURL).GetClusterMetadata()
+func (r *StaticNodeReconciler) checkRayHeadDashboardHealth(
+	dashboardURL string,
+	nodeIP string,
+	expectedLabels map[string]string,
+) error {
+	if len(expectedLabels) == 0 {
+		_, err := r.dashboardService(dashboardURL).GetClusterMetadata()
 
-	return err
+		return err
+	}
+
+	return r.checkRayDashboardNodeHealth(dashboardURL, nodeIP, expectedLabels)
 }
 
-func (r *StaticNodeReconciler) checkRayWorkerDashboardHealth(dashboardURL string, nodeIP string) error {
+func (r *StaticNodeReconciler) checkRayWorkerDashboardHealth(
+	dashboardURL string,
+	nodeIP string,
+	expectedLabels map[string]string,
+) error {
+	return r.checkRayDashboardNodeHealth(dashboardURL, nodeIP, expectedLabels)
+}
+
+func (r *StaticNodeReconciler) checkRayDashboardNodeHealth(
+	dashboardURL string,
+	nodeIP string,
+	expectedLabels map[string]string,
+) error {
 	nodes, err := r.dashboardService(dashboardURL).ListNodes()
 	if err != nil {
 		return errors.Wrap(err, "failed to list ray dashboard nodes")
 	}
 
 	for _, node := range nodes {
-		if node.IP == nodeIP && node.Raylet.State == v1.AliveNodeState {
-			return nil
+		if node.IP != nodeIP || node.Raylet.State != v1.AliveNodeState {
+			continue
 		}
+
+		if err := validateRayNodeLabels(node.Raylet.Labels, expectedLabels); err != nil {
+			return fmt.Errorf("ray node %s %w", nodeIP, err)
+		}
+
+		return nil
 	}
 
 	return fmt.Errorf("ray node %s is not alive in dashboard", nodeIP)
+}
+
+func validateRayNodeLabels(actual map[string]string, expected map[string]string) error {
+	keys := make([]string, 0, len(expected))
+	for key := range expected {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		if actual[key] != expected[key] {
+			return fmt.Errorf("label %s mismatch: expected %q, got %q", key, expected[key], actual[key])
+		}
+	}
+
+	return nil
 }
 
 func (r *StaticNodeReconciler) dashboardService(dashboardURL string) dashboard.DashboardService {

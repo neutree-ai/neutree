@@ -1156,7 +1156,8 @@ func buildRayComponent(
 			DockerRunOptions: dockerRunOptions,
 			RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 			HealthCheck: &v1.NodeComponentHealthCheck{
-				Port: defaultRayDashboardPort,
+				Port:          defaultRayDashboardPort,
+				RayNodeLabels: rayNodeLabels(cluster, role),
 			},
 		}
 	}
@@ -1171,8 +1172,9 @@ func buildRayComponent(
 		DockerRunOptions: dockerRunOptions,
 		RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 		HealthCheck: &v1.NodeComponentHealthCheck{
-			HTTPHost: staticNodeClusterHeadIP(cluster),
-			Port:     defaultRayDashboardPort,
+			HTTPHost:      staticNodeClusterHeadIP(cluster),
+			Port:          defaultRayDashboardPort,
+			RayNodeLabels: rayNodeLabels(cluster, role),
 		},
 	}
 }
@@ -1224,6 +1226,7 @@ func rayStartCommand(
 	role v1.StaticNodeRole,
 ) string {
 	parts := []string{
+		"docker rm -f ray_container >/dev/null 2>&1 || true",
 		"ray stop",
 		"ulimit -n 65536",
 	}
@@ -1260,6 +1263,17 @@ func rayStartCommand(
 }
 
 func rayNodeLabelArg(cluster *v1.StaticNodeCluster, role v1.StaticNodeRole) string {
+	labels := rayNodeLabels(cluster, role)
+
+	content, err := json.Marshal(labels)
+	if err != nil || len(labels) == 0 {
+		return ""
+	}
+
+	return "--labels='" + string(content) + "'"
+}
+
+func rayNodeLabels(cluster *v1.StaticNodeCluster, role v1.StaticNodeRole) map[string]string {
 	labels := map[string]string{}
 	if cluster != nil && cluster.Spec != nil && cluster.Spec.Version != "" {
 		labels[v1.NeutreeServingVersionLabel] = cluster.Spec.Version
@@ -1269,12 +1283,7 @@ func rayNodeLabelArg(cluster *v1.StaticNodeCluster, role v1.StaticNodeRole) stri
 		labels[v1.NeutreeNodeProvisionTypeLabel] = v1.StaticNodeProvisionType
 	}
 
-	content, err := json.Marshal(labels)
-	if err != nil || len(labels) == 0 {
-		return ""
-	}
-
-	return "--labels='" + string(content) + "'"
+	return labels
 }
 
 func staticNodeClusterHeadIP(cluster *v1.StaticNodeCluster) string {
