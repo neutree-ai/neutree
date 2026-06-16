@@ -78,6 +78,7 @@ func (c *StaticNodeController) sync(ctx context.Context, node *v1.StaticNode) er
 	}
 
 	var runner clusterreconcile.StaticNodeCommandRunner
+
 	if clusterreconcile.NeedsStaticNodeRunner(node, reconciler) {
 		if c.newRunner == nil {
 			return errors.New("static node runner factory is required")

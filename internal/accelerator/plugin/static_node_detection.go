@@ -28,6 +28,7 @@ func detectPCIStaticNodeAccelerator(
 	}
 
 	devices := []v1.StaticNodeAcceleratorDeviceStatus{}
+
 	for _, rawLine := range strings.Split(output, "\n") {
 		line := strings.ToLower(rawLine)
 		if !detector.match(line) {
