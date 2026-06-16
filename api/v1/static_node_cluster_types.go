@@ -16,12 +16,12 @@ type StaticNodeCluster struct {
 }
 
 type StaticNodeClusterSpec struct {
-	Version               string                            `json:"version,omitempty"`
-	ImageRegistry         string                            `json:"image_registry,omitempty"`
-	MetricsRemoteWriteURL string                            `json:"metrics_remote_write_url,omitempty"`
-	Head                  StaticNodeClusterHeadSpec         `json:"head,omitempty"`
-	Nodes                 []StaticNodeClusterNodeSpec       `json:"nodes,omitempty"`
-	UpgradeStrategy       *StaticNodeClusterUpgradeStrategy `json:"upgrade_strategy,omitempty"`
+	Version               string                      `json:"version,omitempty"`
+	ImageRegistry         string                      `json:"image_registry,omitempty"`
+	MetricsRemoteWriteURL string                      `json:"metrics_remote_write_url,omitempty"`
+	Head                  StaticNodeClusterHeadSpec   `json:"head,omitempty"`
+	Nodes                 []StaticNodeClusterNodeSpec `json:"nodes,omitempty"`
+	UpgradeStrategy       *ClusterUpgradeStrategy     `json:"upgrade_strategy,omitempty"`
 }
 
 type StaticNodeClusterHeadSpec struct {
@@ -34,10 +34,6 @@ type StaticNodeClusterNodeSpec struct {
 	Role       StaticNodeRole `json:"role,omitempty"`
 	SSHAuthRef string         `json:"ssh_auth_ref,omitempty"`
 	SSHAuth    *Auth          `json:"ssh_auth,omitempty" api:"-"`
-}
-
-type StaticNodeClusterUpgradeStrategy struct {
-	StopStart bool `json:"stop_start,omitempty"`
 }
 
 type StaticNodeClusterStatus struct {

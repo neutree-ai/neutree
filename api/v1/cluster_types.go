@@ -31,12 +31,23 @@ type Cluster struct {
 
 type ClusterSpec struct {
 	// currently supports "ssh" and "kubernetes" cluster types
-	Type          string         `json:"type"`
-	Config        *ClusterConfig `json:"config"`
-	ImageRegistry string         `json:"image_registry"`
+	Type            string                  `json:"type"`
+	Config          *ClusterConfig          `json:"config"`
+	ImageRegistry   string                  `json:"image_registry"`
+	UpgradeStrategy *ClusterUpgradeStrategy `json:"upgrade_strategy,omitempty" yaml:"upgrade_strategy,omitempty"`
 	// the neutree serving version, if not specified, the default version will be used
 	Version string `json:"version"`
 }
+
+type ClusterUpgradeStrategy struct {
+	Type ClusterUpgradeStrategyType `json:"type,omitempty" yaml:"type,omitempty"`
+}
+
+type ClusterUpgradeStrategyType string
+
+const (
+	ClusterUpgradeStrategyTypeRecreate ClusterUpgradeStrategyType = "Recreate"
+)
 
 type ClusterConfig struct {
 	SSHConfig        *RaySSHProvisionClusterConfig `json:"ssh_config,omitempty" yaml:"ssh_config,omitempty"`
@@ -206,6 +217,22 @@ func (obj *Cluster) GetVersion() string {
 	}
 
 	return obj.Spec.Version
+}
+
+func (obj *Cluster) GetUpgradeStrategy() *ClusterUpgradeStrategy {
+	if obj == nil || obj.Spec == nil || obj.Spec.UpgradeStrategy == nil || obj.Spec.UpgradeStrategy.Type == "" {
+		return DefaultClusterUpgradeStrategy()
+	}
+
+	return &ClusterUpgradeStrategy{Type: obj.Spec.UpgradeStrategy.Type}
+}
+
+func DefaultClusterUpgradeStrategy() *ClusterUpgradeStrategy {
+	return &ClusterUpgradeStrategy{Type: ClusterUpgradeStrategyTypeRecreate}
+}
+
+func IsSupportedClusterUpgradeStrategyType(strategyType ClusterUpgradeStrategyType) bool {
+	return strategyType == ClusterUpgradeStrategyTypeRecreate
 }
 
 func (obj *Cluster) GetName() string {

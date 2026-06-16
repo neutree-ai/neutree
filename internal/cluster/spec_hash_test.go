@@ -132,6 +132,14 @@ func TestComputeClusterSpecHash_SpecChangeProducesDifferentHash(t *testing.T) {
 				s.Config.SSHConfig.Auth.SSHUser = "ubuntu"
 			},
 		},
+		{
+			name: "upgrade strategy change",
+			mutate: func(s *v1.ClusterSpec) {
+				s.UpgradeStrategy = &v1.ClusterUpgradeStrategy{
+					Type: v1.ClusterUpgradeStrategyTypeRecreate,
+				}
+			},
+		},
 	}
 
 	baseHash := ComputeClusterSpecHash(base)

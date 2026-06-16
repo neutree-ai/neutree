@@ -384,6 +384,8 @@ func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testin
 		assert.Equal(t, "v1.0.2", created.Spec.Version)
 		assert.Equal(t, "registry.example.com/neutree", created.Spec.ImageRegistry)
 		assert.Equal(t, "http://vmagent:8428/api/v1/write", created.Spec.MetricsRemoteWriteURL)
+		require.NotNil(t, created.Spec.UpgradeStrategy)
+		assert.Equal(t, v1.ClusterUpgradeStrategyTypeRecreate, created.Spec.UpgradeStrategy.Type)
 		assert.Equal(t, "10.0.0.10", created.Spec.Head.NodeName)
 		require.Len(t, created.Spec.Nodes, 2)
 		assert.Equal(t, "10.0.0.10", created.Spec.Nodes[0].Name)
@@ -406,6 +408,103 @@ func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testin
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "static node cluster static-a is provisioning")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerCreateStaticNodeClusterPropagatesUpgradeStrategy(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{
+		storage:               mockStorage,
+		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+	}
+
+	input := &v1.Cluster{
+		ID: 4,
+		Metadata: &v1.Metadata{
+			Name:      "static-recreate",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.2",
+			ImageRegistry: "registry-a",
+			UpgradeStrategy: &v1.ClusterUpgradeStrategy{
+				Type: v1.ClusterUpgradeStrategyTypeRecreate,
+			},
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+	}
+
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
+		{
+			Metadata: &v1.Metadata{Name: "registry-a", Workspace: "default"},
+			Spec: &v1.ImageRegistrySpec{
+				URL:        "registry.example.com",
+				Repository: "neutree",
+			},
+			Status: &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
+		},
+	}, nil)
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil)
+	mockStorage.On("CreateStaticNodeCluster", mock.MatchedBy(func(created *v1.StaticNodeCluster) bool {
+		require.NotNil(t, created.Spec)
+		require.NotNil(t, created.Spec.UpgradeStrategy)
+		assert.Equal(t, v1.ClusterUpgradeStrategyTypeRecreate, created.Spec.UpgradeStrategy.Type)
+
+		return true
+	})).Return(nil)
+	mockStorage.On("UpdateCluster", "4", mock.Anything).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-recreate is provisioning")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerCreateStaticNodeClusterRejectsUnsupportedUpgradeStrategy(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{storage: mockStorage}
+
+	input := &v1.Cluster{
+		ID: 5,
+		Metadata: &v1.Metadata{
+			Name:      "static-rolling",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.2",
+			ImageRegistry: "registry-a",
+			UpgradeStrategy: &v1.ClusterUpgradeStrategy{
+				Type: v1.ClusterUpgradeStrategyType("RollingUpdate"),
+			},
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+	}
+
+	mockStorage.On("UpdateCluster", "5", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseInitializing, updated.Status.Phase)
+		assert.Contains(t, updated.Status.ErrorMessage, "unsupported cluster upgrade strategy")
+
+		return true
+	})).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported cluster upgrade strategy")
 	mockStorage.AssertExpectations(t)
 }
 

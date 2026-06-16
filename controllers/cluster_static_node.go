@@ -126,6 +126,11 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 		return nil, errors.New("cluster spec is required")
 	}
 
+	upgradeStrategy := c.GetUpgradeStrategy()
+	if !v1.IsSupportedClusterUpgradeStrategyType(upgradeStrategy.Type) {
+		return nil, fmt.Errorf("unsupported cluster upgrade strategy %q", upgradeStrategy.Type)
+	}
+
 	sshConfig, err := util.ParseSSHClusterConfig(c)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse ssh cluster config")
@@ -183,6 +188,7 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 			MetricsRemoteWriteURL: controller.metricsRemoteWriteURL,
 			Head:                  v1.StaticNodeClusterHeadSpec{NodeName: headName},
 			Nodes:                 nodes,
+			UpgradeStrategy:       upgradeStrategy,
 		},
 	}, nil
 }
