@@ -30,6 +30,8 @@ const (
 	defaultPrometheusHTTPPath        = "/metrics"
 	defaultHealthHTTPPath            = "/health"
 	vmagentConfigPath                = "/etc/neutree/vmagent/config.yaml"
+	vmagentFileSDDir                 = "/etc/neutree/vmagent/file_sd"
+	vmagentNodeExporterFileSDPath    = vmagentFileSDDir + "/node-exporter.json"
 	defaultNodeExporterImage         = "quay.io/prometheus/node-exporter:v1.8.2"
 	defaultVMAgentImage              = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
 )
@@ -48,9 +50,10 @@ type StaticNodeClusterReconcilePlan struct {
 }
 
 type staticNodeDesiredPlan struct {
-	Node        *v1.StaticNode
-	Accelerator *v1.StaticNodeAcceleratorStatus
-	Profile     *v1.AcceleratorProfile
+	Node                          *v1.StaticNode
+	Accelerator                   *v1.StaticNodeAcceleratorStatus
+	Profile                       *v1.AcceleratorProfile
+	RuntimeProfileFallbackMessage string
 }
 
 func (r *StaticNodeClusterReconciler) Plan(
@@ -58,14 +61,17 @@ func (r *StaticNodeClusterReconciler) Plan(
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
 ) (*StaticNodeClusterReconcilePlan, error) {
-	desiredNodes, err := r.BuildDesiredNodes(ctx, cluster, currentNodes)
+	plans, err := r.buildDesiredNodePlans(ctx, cluster, currentNodes)
 	if err != nil {
 		return nil, err
 	}
 
+	status := advanceStaticNodeClusterUpgradeStatus(cluster, currentNodes, r.AggregateStatus(cluster, currentNodes))
+	status = withRuntimeProfileFallbackStatus(status, plans)
+
 	return &StaticNodeClusterReconcilePlan{
-		DesiredNodes: desiredNodes,
-		Status:       r.AggregateStatus(cluster, currentNodes),
+		DesiredNodes: desiredNodesFromPlans(plans),
+		Status:       status,
 	}, nil
 }
 
@@ -85,6 +91,15 @@ func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
 	}
 
 	return nodes, nil
+}
+
+func desiredNodesFromPlans(plans []staticNodeDesiredPlan) []*v1.StaticNode {
+	nodes := make([]*v1.StaticNode, 0, len(plans))
+	for _, plan := range plans {
+		nodes = append(nodes, plan.Node)
+	}
+
+	return nodes
 }
 
 func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
@@ -172,7 +187,7 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 			continue
 		}
 
-		profile, err := r.runtimeProfile(ctx, *acceleratorStatus)
+		profile, fallbackMessage, err := r.runtimeProfile(ctx, *acceleratorStatus)
 		if err != nil {
 			return nil, err
 		}
@@ -181,9 +196,10 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, staticNodeDesiredPlan{
-			Node:        desiredNode,
-			Accelerator: acceleratorStatus,
-			Profile:     profile,
+			Node:                          desiredNode,
+			Accelerator:                   acceleratorStatus,
+			Profile:                       profile,
+			RuntimeProfileFallbackMessage: fallbackMessage,
 		})
 	}
 
@@ -196,6 +212,7 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 	})
 
 	attachMetricsConfigFiles(cluster, plans)
+	applyRayRecreateUpgradePlan(cluster, currentByName, plans)
 
 	for _, plan := range plans {
 		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
@@ -204,26 +221,147 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 	return plans, nil
 }
 
+func withRuntimeProfileFallbackStatus(
+	status v1.StaticNodeClusterStatus,
+	plans []staticNodeDesiredPlan,
+) v1.StaticNodeClusterStatus {
+	messages := make([]string, 0, len(plans))
+
+	for _, plan := range plans {
+		if plan.RuntimeProfileFallbackMessage == "" {
+			continue
+		}
+
+		nodeName := ""
+		if plan.Node != nil && plan.Node.Metadata != nil {
+			nodeName = plan.Node.Metadata.Name
+		}
+
+		if nodeName == "" {
+			messages = append(messages, plan.RuntimeProfileFallbackMessage)
+			continue
+		}
+
+		messages = append(messages, "static node "+nodeName+" "+plan.RuntimeProfileFallbackMessage)
+	}
+
+	if len(messages) == 0 {
+		return status
+	}
+
+	status.ErrorMessage = joinStatusMessages(status.ErrorMessage, messages...)
+
+	return status
+}
+
+func joinStatusMessages(current string, messages ...string) string {
+	result := make([]string, 0, len(messages)+1)
+	if current != "" {
+		result = append(result, current)
+	}
+
+	result = append(result, messages...)
+
+	return strings.Join(result, "; ")
+}
+
+func applyRayRecreateUpgradePlan(
+	cluster *v1.StaticNodeCluster,
+	currentByName map[string]*v1.StaticNode,
+	plans []staticNodeDesiredPlan,
+) {
+	upgrade := staticNodeClusterUpgrade(cluster)
+	if upgrade == nil {
+		return
+	}
+
+	for i := range plans {
+		plan := &plans[i]
+		if plan.Node == nil || plan.Node.Metadata == nil || plan.Node.Spec == nil {
+			continue
+		}
+
+		current := currentByName[plan.Node.Metadata.Name]
+
+		switch upgrade.Step {
+		case v1.StaticNodeClusterUpgradeStepWarming:
+			useCurrentComponentsIfPresent(plan.Node, current)
+		case v1.StaticNodeClusterUpgradeStepStoppingWorkers:
+			useCurrentComponentsIfPresent(plan.Node, current)
+
+			if plan.Node.Spec.Role == v1.StaticNodeRoleWorker {
+				markRayWorkerStopped(plan.Node)
+			}
+		case v1.StaticNodeClusterUpgradeStepStartingHead:
+			if plan.Node.Spec.Role == v1.StaticNodeRoleWorker {
+				useCurrentComponentsIfPresent(plan.Node, current)
+				markRayWorkerStopped(plan.Node)
+			}
+		}
+	}
+}
+
+func staticNodeClusterUpgrade(cluster *v1.StaticNodeCluster) *v1.StaticNodeClusterUpgradeStatus {
+	if cluster == nil || cluster.Spec == nil || cluster.Status == nil || cluster.Status.Upgrade == nil {
+		return nil
+	}
+
+	upgrade := *cluster.Status.Upgrade
+	if upgrade.ObservedVersion == "" || upgrade.ObservedVersion == cluster.Spec.Version {
+		return nil
+	}
+
+	if upgrade.TargetVersion == "" {
+		upgrade.TargetVersion = cluster.Spec.Version
+	}
+
+	if upgrade.Step == "" {
+		upgrade.Step = v1.StaticNodeClusterUpgradeStepWarming
+	}
+
+	return &upgrade
+}
+
+func useCurrentComponentsIfPresent(node *v1.StaticNode, current *v1.StaticNode) {
+	if node == nil || node.Spec == nil || current == nil || current.Spec == nil || len(current.Spec.Components) == 0 {
+		return
+	}
+
+	node.Spec.Components = copyNodeComponents(current.Spec.Components)
+}
+
+func markRayWorkerStopped(node *v1.StaticNode) {
+	if node == nil || node.Spec == nil {
+		return
+	}
+
+	for i := range node.Spec.Components {
+		if node.Spec.Components[i].Type == v1.NodeComponentTypeRayWorker {
+			node.Spec.Components[i].DesiredPhase = v1.NodeComponentPhaseStopped
+		}
+	}
+}
+
+func copyNodeComponents(components []v1.NodeComponentSpec) []v1.NodeComponentSpec {
+	result := make([]v1.NodeComponentSpec, len(components))
+	copy(result, components)
+
+	return result
+}
+
 func (r *StaticNodeClusterReconciler) AggregateStatus(
 	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
 ) v1.StaticNodeClusterStatus {
-	desiredNodeNames := map[string]struct{}{}
-	headName := ""
-
-	if cluster != nil && cluster.Spec != nil {
-		for _, node := range cluster.Spec.Nodes {
-			if node.Name != "" {
-				desiredNodeNames[node.Name] = struct{}{}
-			}
-		}
-
-		headName = cluster.Spec.Head.NodeName
-	}
+	desiredNodeNames, headName := staticNodeClusterDesiredNodeNames(cluster)
 
 	status := v1.StaticNodeClusterStatus{
 		Phase:        v1.StaticNodeClusterPhaseProvisioning,
 		DesiredNodes: len(desiredNodeNames),
+	}
+	if upgrade := staticNodeClusterUpgrade(cluster); upgrade != nil {
+		status.Upgrade = upgrade
+		status.Phase = staticNodeClusterUpgradePhase(upgrade.Step)
 	}
 
 	if status.DesiredNodes == 0 {
@@ -282,6 +420,8 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 	status.MetricsReady = metricsReady
 
 	switch {
+	case status.Upgrade != nil:
+		status.Phase = staticNodeClusterUpgradePhase(status.Upgrade.Step)
 	case anyNodeFailed:
 		status.Phase = v1.StaticNodeClusterPhaseFailed
 	case status.ReadyNodes == status.DesiredNodes && status.HeadReady && status.WarmReady && status.MetricsReady:
@@ -292,7 +432,209 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 		status.Phase = v1.StaticNodeClusterPhaseProvisioning
 	}
 
+	if status.Phase == v1.StaticNodeClusterPhaseReady && status.Upgrade == nil && cluster != nil && cluster.Spec != nil {
+		status.Upgrade = &v1.StaticNodeClusterUpgradeStatus{ObservedVersion: cluster.Spec.Version}
+	}
+
 	return status
+}
+
+func staticNodeClusterDesiredNodeNames(cluster *v1.StaticNodeCluster) (map[string]struct{}, string) {
+	desiredNodeNames := map[string]struct{}{}
+	if cluster == nil || cluster.Spec == nil {
+		return desiredNodeNames, ""
+	}
+
+	for _, node := range cluster.Spec.Nodes {
+		if node.Name != "" {
+			desiredNodeNames[node.Name] = struct{}{}
+		}
+	}
+
+	return desiredNodeNames, cluster.Spec.Head.NodeName
+}
+
+func staticNodeClusterUpgradePhase(step v1.StaticNodeClusterUpgradeStep) v1.StaticNodeClusterPhase {
+	switch step {
+	case v1.StaticNodeClusterUpgradeStepWarming:
+		return v1.StaticNodeClusterPhaseWarming
+	case v1.StaticNodeClusterUpgradeStepStoppingWorkers:
+		return v1.StaticNodeClusterPhaseStopping
+	case v1.StaticNodeClusterUpgradeStepStartingHead, v1.StaticNodeClusterUpgradeStepStartingWorkers:
+		return v1.StaticNodeClusterPhaseStarting
+	case v1.StaticNodeClusterUpgradeStepVerifying:
+		return v1.StaticNodeClusterPhaseVerifying
+	default:
+		return v1.StaticNodeClusterPhaseWarming
+	}
+}
+
+func advanceStaticNodeClusterUpgradeStatus(
+	cluster *v1.StaticNodeCluster,
+	currentNodes []*v1.StaticNode,
+	status v1.StaticNodeClusterStatus,
+) v1.StaticNodeClusterStatus {
+	if status.Upgrade == nil {
+		return status
+	}
+
+	switch status.Upgrade.Step {
+	case v1.StaticNodeClusterUpgradeStepWarming:
+		if status.WarmReady {
+			status.Upgrade.Step = v1.StaticNodeClusterUpgradeStepStoppingWorkers
+		}
+	case v1.StaticNodeClusterUpgradeStepStoppingWorkers:
+		if staticNodeClusterWorkersStopped(cluster, currentNodes) {
+			status.Upgrade.Step = v1.StaticNodeClusterUpgradeStepStartingHead
+		}
+	case v1.StaticNodeClusterUpgradeStepStartingHead:
+		if staticNodeClusterHeadRayRunningTarget(cluster, currentNodes) {
+			status.Upgrade.Step = v1.StaticNodeClusterUpgradeStepStartingWorkers
+		}
+	case v1.StaticNodeClusterUpgradeStepStartingWorkers:
+		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes) {
+			status.Upgrade.Step = v1.StaticNodeClusterUpgradeStepVerifying
+		}
+	case v1.StaticNodeClusterUpgradeStepVerifying:
+		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes) &&
+			status.ReadyNodes == status.DesiredNodes &&
+			status.HeadReady &&
+			status.WarmReady &&
+			status.MetricsReady {
+			status.Upgrade = &v1.StaticNodeClusterUpgradeStatus{ObservedVersion: cluster.Spec.Version}
+			status.Phase = v1.StaticNodeClusterPhaseReady
+
+			return status
+		}
+	}
+
+	status.Phase = staticNodeClusterUpgradePhase(status.Upgrade.Step)
+
+	return status
+}
+
+func staticNodeClusterWorkersStopped(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
+	workerNames := staticNodeClusterWorkerNames(cluster)
+	if len(workerNames) == 0 {
+		return true
+	}
+
+	stopped := map[string]bool{}
+
+	for _, node := range nodes {
+		if node == nil || node.Metadata == nil || node.Status == nil {
+			continue
+		}
+
+		if _, ok := workerNames[node.Metadata.Name]; !ok {
+			continue
+		}
+
+		stopped[node.Metadata.Name] = rayComponentStopped(node.Status.Components)
+	}
+
+	for name := range workerNames {
+		if !stopped[name] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func staticNodeClusterRayRuntimeRunningTarget(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
+	return staticNodeClusterHeadRayRunningTarget(cluster, nodes) && staticNodeClusterWorkersRayRunningTarget(cluster, nodes)
+}
+
+func staticNodeClusterHeadRayRunningTarget(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
+	if cluster == nil || cluster.Spec == nil || cluster.Spec.Head.NodeName == "" {
+		return false
+	}
+
+	node := staticNodeByName(nodes)[cluster.Spec.Head.NodeName]
+	if node == nil || node.Status == nil {
+		return false
+	}
+
+	return rayComponentRunningTarget(node.Status.Components, v1.NodeComponentTypeRayHead, buildRayRuntimeImage(cluster))
+}
+
+func staticNodeClusterWorkersRayRunningTarget(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
+	workerNames := staticNodeClusterWorkerNames(cluster)
+	if len(workerNames) == 0 {
+		return true
+	}
+
+	nodesByName := staticNodeByName(nodes)
+	for name := range workerNames {
+		node := nodesByName[name]
+		if node == nil || node.Status == nil {
+			return false
+		}
+
+		if !rayComponentRunningTarget(node.Status.Components, v1.NodeComponentTypeRayWorker, buildRayRuntimeImage(cluster)) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func staticNodeClusterWorkerNames(cluster *v1.StaticNodeCluster) map[string]struct{} {
+	workerNames := map[string]struct{}{}
+	if cluster == nil || cluster.Spec == nil {
+		return workerNames
+	}
+
+	for _, nodeSpec := range cluster.Spec.Nodes {
+		role := normalizeStaticNodeRole(nodeSpec.Role)
+		if nodeSpec.Name == cluster.Spec.Head.NodeName {
+			role = v1.StaticNodeRoleHead
+		}
+
+		if role == v1.StaticNodeRoleWorker && nodeSpec.Name != "" {
+			workerNames[nodeSpec.Name] = struct{}{}
+		}
+	}
+
+	return workerNames
+}
+
+func rayComponentStopped(components []v1.NodeComponentStatus) bool {
+	for _, component := range components {
+		if component.Type == v1.NodeComponentTypeRayWorker || component.Name == "ray-worker" {
+			return component.Phase == v1.NodeComponentPhaseStopped
+		}
+	}
+
+	return false
+}
+
+func rayComponentRunningTarget(components []v1.NodeComponentStatus, componentType v1.NodeComponentType, targetImage string) bool {
+	for _, component := range components {
+		if component.Type != componentType && !rayComponentNameMatchesType(component.Name, componentType) {
+			continue
+		}
+
+		if !component.Ready || component.Phase != v1.NodeComponentPhaseRunning {
+			return false
+		}
+
+		return targetImage == "" || component.ObservedImage == targetImage
+	}
+
+	return false
+}
+
+func rayComponentNameMatchesType(name string, componentType v1.NodeComponentType) bool {
+	switch componentType {
+	case v1.NodeComponentTypeRayHead:
+		return name == "ray-head"
+	case v1.NodeComponentTypeRayWorker:
+		return name == "ray-worker"
+	default:
+		return false
+	}
 }
 
 func normalizeStaticNodeRole(role v1.StaticNodeRole) v1.StaticNodeRole {
@@ -337,25 +679,34 @@ func currentStaticNodeAcceleratorStatus(node *v1.StaticNode) *v1.StaticNodeAccel
 func (r *StaticNodeClusterReconciler) runtimeProfile(
 	ctx context.Context,
 	accelerator v1.StaticNodeAcceleratorStatus,
-) (*v1.AcceleratorProfile, error) {
+) (*v1.AcceleratorProfile, string, error) {
 	if accelerator.Type == "" || accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	if r == nil || r.RuntimeProfileProvider == nil {
-		return nil, nil
+		return nil, runtimeProfileFallbackMessage(accelerator), nil
 	}
 
 	profile, supported, err := r.RuntimeProfileProvider.RuntimeProfile(ctx, accelerator)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if !supported {
-		return nil, nil
+		return nil, runtimeProfileFallbackMessage(accelerator), nil
 	}
 
-	return profile, nil
+	return profile, "", nil
+}
+
+func runtimeProfileFallbackMessage(accelerator v1.StaticNodeAcceleratorStatus) string {
+	profile := accelerator.RuntimeProfile
+	if profile == "" {
+		profile = accelerator.Type
+	}
+
+	return "accelerator runtime profile " + strconv.Quote(profile) + " is not supported; fallback to CPU runtime"
 }
 
 func buildNodeComponents(
@@ -440,9 +791,9 @@ func buildNodeComponents(
 			DockerRunOptions: []string{"--net=host"},
 			Volumes: []v1.NodeComponentVolume{
 				{
-					Name:      "vmagent-config",
-					HostPath:  vmagentConfigPath,
-					MountPath: vmagentConfigPath,
+					Name:      "vmagent-config-dir",
+					HostPath:  "/etc/neutree/vmagent",
+					MountPath: "/etc/neutree/vmagent",
 					ReadOnly:  true,
 				},
 			},
@@ -477,7 +828,7 @@ func attachMetricsConfigFiles(
 
 		appendComponentConfigFile(node, vmagentComponentName, v1.NodeComponentConfigFile{
 			Path:         vmagentConfigPath,
-			Content:      renderVMAgentConfig(cluster, plans),
+			Content:      renderVMAgentConfig(plans),
 			Mode:         "0644",
 			Owner:        "root",
 			Group:        "root",
@@ -485,13 +836,14 @@ func attachMetricsConfigFiles(
 			Atomic:       true,
 			CreateParent: true,
 		})
+
+		for _, configFile := range renderVMAgentFileSDConfigFiles(cluster, plans) {
+			appendComponentConfigFile(node, vmagentComponentName, configFile)
+		}
 	}
 }
 
-func renderVMAgentConfig(
-	cluster *v1.StaticNodeCluster,
-	plans []staticNodeDesiredPlan,
-) string {
+func renderVMAgentConfig(plans []staticNodeDesiredPlan) string {
 	var builder strings.Builder
 	builder.WriteString("global:\n")
 	builder.WriteString("  scrape_interval: 15s\n")
@@ -503,16 +855,7 @@ func renderVMAgentConfig(
 	})
 
 	builder.WriteString("- job_name: static-node-node-exporter\n")
-	builder.WriteString("  static_configs:\n")
-
-	for _, plan := range plans {
-		node := plan.Node
-		if node == nil || node.Spec == nil {
-			continue
-		}
-
-		writeVMAgentStaticConfig(&builder, cluster, node, nodeExporterComponentName, defaultNodeExporterPort, nil)
-	}
+	writeVMAgentFileSDConfig(&builder, vmagentNodeExporterFileSDPath)
 
 	groups := acceleratorExporterTargetGroups(plans)
 	for i, group := range groups {
@@ -526,20 +869,109 @@ func renderVMAgentConfig(
 			builder.WriteString("\n")
 		}
 
-		builder.WriteString("  static_configs:\n")
-
-		for _, target := range group.Targets {
-			extraLabels := map[string]string{
-				"accelerator_exporter":      target.Exporter.Kind,
-				"accelerator_product_model": target.Accelerator.ProductModel,
-				"accelerator_type":          target.Accelerator.Type,
-				"accelerator_vendor":        target.Accelerator.Vendor,
-			}
-			writeVMAgentStaticConfig(&builder, cluster, target.Node, acceleratorExporterComponentName, target.Exporter.Port, nonEmptyLabels(extraLabels))
-		}
+		writeVMAgentFileSDConfig(&builder, acceleratorExporterFileSDPath(group.MetricsPath))
 	}
 
 	return builder.String()
+}
+
+func writeVMAgentFileSDConfig(builder *strings.Builder, path string) {
+	builder.WriteString("  file_sd_configs:\n")
+	builder.WriteString("  - files:\n")
+	builder.WriteString("    - ")
+	builder.WriteString(strconv.Quote(path))
+	builder.WriteString("\n")
+}
+
+func renderVMAgentFileSDConfigFiles(
+	cluster *v1.StaticNodeCluster,
+	plans []staticNodeDesiredPlan,
+) []v1.NodeComponentConfigFile {
+	configFiles := []v1.NodeComponentConfigFile{
+		vmagentFileSDConfigFile(
+			vmagentNodeExporterFileSDPath,
+			renderVMAgentNodeExporterFileSDTargets(cluster, plans),
+		),
+	}
+
+	for _, group := range acceleratorExporterTargetGroups(plans) {
+		configFiles = append(configFiles, vmagentFileSDConfigFile(
+			acceleratorExporterFileSDPath(group.MetricsPath),
+			renderVMAgentAcceleratorExporterFileSDTargets(cluster, group.Targets),
+		))
+	}
+
+	return configFiles
+}
+
+func vmagentFileSDConfigFile(path string, content string) v1.NodeComponentConfigFile {
+	return v1.NodeComponentConfigFile{
+		Path:                path,
+		Content:             content,
+		Mode:                "0644",
+		Owner:               "root",
+		Group:               "root",
+		Sudo:                true,
+		Atomic:              true,
+		CreateParent:        true,
+		SkipRestartOnChange: true,
+	}
+}
+
+type vmagentFileSDTarget struct {
+	Targets []string          `json:"targets"`
+	Labels  map[string]string `json:"labels,omitempty"`
+}
+
+func renderVMAgentNodeExporterFileSDTargets(
+	cluster *v1.StaticNodeCluster,
+	plans []staticNodeDesiredPlan,
+) string {
+	targets := make([]vmagentFileSDTarget, 0, len(plans))
+
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Spec == nil {
+			continue
+		}
+
+		targets = append(targets, vmagentFileSDTarget{
+			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, defaultNodeExporterPort)},
+			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeExporterComponentName, nil),
+		})
+	}
+
+	return mustMarshalVMAgentFileSDTargets(targets)
+}
+
+func renderVMAgentAcceleratorExporterFileSDTargets(
+	cluster *v1.StaticNodeCluster,
+	targets []acceleratorExporterTarget,
+) string {
+	result := make([]vmagentFileSDTarget, 0, len(targets))
+
+	for _, target := range targets {
+		extraLabels := map[string]string{
+			"accelerator_exporter":      target.Exporter.Kind,
+			"accelerator_product_model": target.Accelerator.ProductModel,
+			"accelerator_type":          target.Accelerator.Type,
+			"accelerator_vendor":        target.Accelerator.Vendor,
+		}
+		result = append(result, vmagentFileSDTarget{
+			Targets: []string{fmt.Sprintf("%s:%d", target.Node.Spec.IP, target.Exporter.Port)},
+			Labels:  vmagentTargetLabels(cluster, target.Node, acceleratorExporterComponentName, nonEmptyLabels(extraLabels)),
+		})
+	}
+
+	return mustMarshalVMAgentFileSDTargets(result)
+}
+
+func mustMarshalVMAgentFileSDTargets(targets []vmagentFileSDTarget) string {
+	content, err := json.MarshalIndent(targets, "", "  ")
+	if err != nil {
+		return "[]\n"
+	}
+
+	return string(content) + "\n"
 }
 
 type acceleratorExporterTargetGroup struct {
@@ -590,7 +1022,9 @@ func acceleratorExporterTargetGroups(plans []staticNodeDesiredPlan) []accelerato
 }
 
 func acceleratorExporterJobName(metricsPath string, groupCount int, index int) string {
-	if groupCount <= 1 {
+	_ = groupCount
+
+	if metricsPath == defaultPrometheusHTTPPath {
 		return "static-node-accelerator-exporter"
 	}
 
@@ -604,58 +1038,32 @@ func acceleratorExporterJobName(metricsPath string, groupCount int, index int) s
 	return "static-node-accelerator-exporter-" + name
 }
 
-func writeVMAgentStaticConfig(
-	builder *strings.Builder,
+func acceleratorExporterFileSDPath(metricsPath string) string {
+	return vmagentFileSDDir + "/" + strings.TrimPrefix(acceleratorExporterJobName(metricsPath, 2, 0), "static-node-") + ".json"
+}
+
+func vmagentTargetLabels(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
 	source string,
-	port int,
 	extraLabels map[string]string,
-) {
-	builder.WriteString("  - targets:\n")
-	builder.WriteString("    - ")
-	builder.WriteString(strconv.Quote(fmt.Sprintf("%s:%d", node.Spec.IP, port)))
-	builder.WriteString("\n")
-	builder.WriteString("    labels:\n")
-	builder.WriteString("      source: ")
-	builder.WriteString(strconv.Quote(source))
-	builder.WriteString("\n")
-	builder.WriteString("      workspace: ")
-	builder.WriteString(strconv.Quote(cluster.Metadata.Workspace))
-	builder.WriteString("\n")
-	builder.WriteString("      neutree_cluster: ")
-	builder.WriteString(strconv.Quote(cluster.Metadata.Name))
-	builder.WriteString("\n")
-	builder.WriteString("      static_node_cluster: ")
-	builder.WriteString(strconv.Quote(cluster.Metadata.Name))
-	builder.WriteString("\n")
-	builder.WriteString("      cluster_type: ")
-	builder.WriteString(strconv.Quote("ray"))
-	builder.WriteString("\n")
-	builder.WriteString("      node: ")
-	builder.WriteString(strconv.Quote(node.Metadata.Name))
-	builder.WriteString("\n")
-	builder.WriteString("      node_ip: ")
-	builder.WriteString(strconv.Quote(node.Spec.IP))
-	builder.WriteString("\n")
-	builder.WriteString("      node_role: ")
-	builder.WriteString(strconv.Quote(string(node.Spec.Role)))
-	builder.WriteString("\n")
-
-	keys := make([]string, 0, len(extraLabels))
-	for key := range extraLabels {
-		keys = append(keys, key)
+) map[string]string {
+	labels := map[string]string{
+		"source":              source,
+		"workspace":           cluster.Metadata.Workspace,
+		"neutree_cluster":     cluster.Metadata.Name,
+		"static_node_cluster": cluster.Metadata.Name,
+		"cluster_type":        "ray",
+		"node":                node.Metadata.Name,
+		"node_ip":             node.Spec.IP,
+		"node_role":           string(node.Spec.Role),
 	}
 
-	sort.Strings(keys)
-
-	for _, key := range keys {
-		builder.WriteString("      ")
-		builder.WriteString(key)
-		builder.WriteString(": ")
-		builder.WriteString(strconv.Quote(extraLabels[key]))
-		builder.WriteString("\n")
+	for key, value := range extraLabels {
+		labels[key] = value
 	}
+
+	return labels
 }
 
 func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
@@ -709,6 +1117,13 @@ func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeCompo
 
 func nodeComponentConfigHash(component v1.NodeComponentSpec) string {
 	component.ConfigHash = ""
+	component.ConfigFiles = append([]v1.NodeComponentConfigFile{}, component.ConfigFiles...)
+
+	for i := range component.ConfigFiles {
+		if component.ConfigFiles[i].SkipRestartOnChange {
+			component.ConfigFiles[i].Content = ""
+		}
+	}
 
 	content, err := json.Marshal(component)
 	if err != nil {

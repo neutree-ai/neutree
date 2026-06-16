@@ -181,6 +181,10 @@ func (c *sshRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster *
 	// Early write: set Deleting phase for user feedback
 	WriteEarlyDeleting(cluster, c.storage)
 
+	return c.CleanupLegacyRuntime(ctx, cluster)
+}
+
+func (c *sshRayClusterReconciler) CleanupLegacyRuntime(ctx context.Context, cluster *v1.Cluster) error {
 	imageRegistry, err := getUsedImageRegistries(cluster, c.storage)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get used image registry")

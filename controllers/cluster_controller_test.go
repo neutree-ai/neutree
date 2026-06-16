@@ -271,6 +271,7 @@ func TestShouldUseStaticNodeClusterFlow(t *testing.T) {
 		name    string
 		cluster *v1.Cluster
 		want    bool
+		wantErr string
 	}{
 		{
 			name: "ssh v1.0.1 stays on legacy ray ssh reconcile",
@@ -308,19 +309,210 @@ func TestShouldUseStaticNodeClusterFlow(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "invalid version falls back to legacy flow",
+			name: "invalid version fails",
 			cluster: &v1.Cluster{
 				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "custom"},
 			},
-			want: false,
+			wantErr: "invalid cluster version",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, shouldUseStaticNodeClusterFlow(tt.cluster))
+			got, err := shouldUseStaticNodeClusterFlow(tt.cluster)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestClusterControllerSyncRejectsInvalidStaticClusterVersion(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{storage: mockStorage}
+	input := &v1.Cluster{
+		ID: 6,
+		Metadata: &v1.Metadata{
+			Name:      "static-invalid",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			Type:    v1.SSHClusterType,
+			Version: "custom",
+		},
+	}
+
+	mockStorage.On("UpdateCluster", "6", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseInitializing, updated.Status.Phase)
+		assert.Contains(t, updated.Status.ErrorMessage, "invalid cluster version")
+
+		return true
+	})).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cluster version")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerLegacyToStaticNodeFlowCleansLegacyRuntimeBeforeCreate(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	cleanupCalled := false
+	controller := &ClusterController{
+		storage:               mockStorage,
+		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+		cleanupLegacyStaticRuntime: func(_ *v1.Cluster) error {
+			cleanupCalled = true
+
+			return nil
+		},
+	}
+	input := &v1.Cluster{
+		ID: 7,
+		Metadata: &v1.Metadata{
+			Name:      "static-upgrade",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.2",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{
+			Initialized: true,
+			Version:     "v1.0.1",
+		},
+	}
+
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
+		{
+			Metadata: &v1.Metadata{Name: "registry-a", Workspace: "default"},
+			Spec: &v1.ImageRegistrySpec{
+				URL:        "registry.example.com",
+				Repository: "neutree",
+			},
+			Status: &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
+		},
+	}, nil).Once()
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil).Once()
+	mockStorage.On("CreateStaticNodeCluster", mock.MatchedBy(func(_ *v1.StaticNodeCluster) bool {
+		assert.True(t, cleanupCalled, "legacy cleanup must finish before creating StaticNodeCluster")
+
+		return true
+	})).Return(nil).Once()
+	mockStorage.On("UpdateCluster", "7", mock.Anything).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-upgrade is provisioning")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerStaticNodeToLegacyFlowDeletesStaticNodeClusterBeforeLegacyReconcile(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{
+		storage: mockStorage,
+		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
+			require.Fail(t, "legacy cluster reconcile must wait until StaticNodeCluster cleanup finishes")
+
+			return nil, nil
+		},
+	}
+	input := &v1.Cluster{
+		ID: 9,
+		Metadata: &v1.Metadata{
+			Name:      "static-rollback",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			Type:    v1.SSHClusterType,
+			Version: "v1.0.1",
+		},
+		Status: &v1.ClusterStatus{
+			Initialized: true,
+			Version:     "v1.0.2",
+		},
+	}
+
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
+		{
+			ID: 44,
+			Metadata: &v1.Metadata{
+				Name:      "static-rollback",
+				Workspace: "default",
+			},
+		},
+	}, nil).Once()
+	mockStorage.On("UpdateStaticNodeCluster", "44", mock.MatchedBy(func(updated *v1.StaticNodeCluster) bool {
+		return updated.Metadata != nil && updated.Metadata.DeletionTimestamp != ""
+	})).Return(nil).Once()
+	mockStorage.On("UpdateCluster", "9", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Contains(t, updated.Status.ErrorMessage, "static node cluster static-rollback is deleting")
+
+		return true
+	})).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-rollback is deleting")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerRejectsInitializedStaticNodeHeadChange(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{storage: mockStorage}
+	input := &v1.Cluster{
+		ID: 8,
+		Metadata: &v1.Metadata{
+			Name:      "static-head-change",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			Type:    v1.SSHClusterType,
+			Version: "v1.0.2",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.20"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{
+			Initialized:         true,
+			Version:             "v1.0.2",
+			NodeProvisionStatus: `{"10.0.0.10":{"status":"provisioned","is_head":true}}`,
+		},
+	}
+
+	mockStorage.On("UpdateCluster", "8", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Contains(t, updated.Status.ErrorMessage, "initialized static cluster head ip can not be changed")
+
+		return true
+	})).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "initialized static cluster head ip can not be changed")
+	mockStorage.AssertExpectations(t)
 }
 
 func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testing.T) {

@@ -1,7 +1,10 @@
 package controllers
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -22,30 +25,33 @@ const (
 	staticNodeClusterDashboardPort   = 8265
 )
 
-func shouldUseStaticNodeClusterFlow(c *v1.Cluster) bool {
+func shouldUseStaticNodeClusterFlow(c *v1.Cluster) (bool, error) {
 	if c == nil || c.Spec == nil || c.Spec.Type != v1.SSHClusterType {
-		return false
+		return false, nil
 	}
 
-	useStaticNodeFlow, err := semver.LessThan(staticNodeClusterFlowVersionGate, c.GetVersion())
-	if err != nil {
-		klog.Warningf("invalid cluster version %q, fallback to legacy static cluster reconcile: %v", c.GetVersion(), err)
-
-		return false
-	}
-
-	return useStaticNodeFlow
+	return isStaticNodeClusterFlowVersion(c.GetVersion())
 }
 
 func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) error {
-	desired, err := controller.buildStaticNodeCluster(c)
-	if err != nil {
+	if err := validateStaticNodeClusterSpec(c); err != nil {
 		return err
 	}
 
 	current, found, err := controller.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
 	if err != nil {
 		return errors.Wrap(err, "failed to find static node cluster")
+	}
+
+	if !found {
+		if err := controller.cleanupLegacyRuntimeBeforeStaticNodeFlow(c); err != nil {
+			return err
+		}
+	}
+
+	desired, err := controller.buildStaticNodeCluster(c)
+	if err != nil {
+		return err
 	}
 
 	if !found {
@@ -67,6 +73,15 @@ func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) e
 
 	if current.Status == nil || current.Status.Phase != v1.StaticNodeClusterPhaseReady {
 		return staticNodeClusterNotReadyError(current)
+	}
+
+	return nil
+}
+
+func validateStaticNodeClusterSpec(c *v1.Cluster) error {
+	upgradeStrategy := c.GetUpgradeStrategy()
+	if !v1.IsSupportedClusterUpgradeStrategyType(upgradeStrategy.Type) {
+		return fmt.Errorf("unsupported cluster upgrade strategy %q", upgradeStrategy.Type)
 	}
 
 	return nil
@@ -101,7 +116,12 @@ func (controller *ClusterController) shouldUseStaticNodeClusterDeleteFlow(c *v1.
 		return false, nil
 	}
 
-	if shouldUseStaticNodeClusterFlow(c) {
+	useStaticNodeFlow, err := shouldUseStaticNodeClusterFlow(c)
+	if err != nil {
+		return false, err
+	}
+
+	if useStaticNodeFlow {
 		return true, nil
 	}
 
@@ -117,6 +137,142 @@ func (controller *ClusterController) shouldUseStaticNodeClusterDeleteFlow(c *v1.
 	return found, nil
 }
 
+func (controller *ClusterController) validateStaticNodeClusterUpdate(c *v1.Cluster) error {
+	if c == nil || !c.IsInitialized() {
+		return nil
+	}
+
+	desiredHeadIP, err := staticClusterSpecHeadIP(c)
+	if err != nil {
+		return err
+	}
+
+	currentHeadIP := currentStaticClusterHeadIP(c)
+	if desiredHeadIP == "" || currentHeadIP == "" || desiredHeadIP == currentHeadIP {
+		return nil
+	}
+
+	return fmt.Errorf("initialized static cluster head ip can not be changed from %s to %s", currentHeadIP, desiredHeadIP)
+}
+
+func (controller *ClusterController) cleanupLegacyRuntimeBeforeStaticNodeFlow(c *v1.Cluster) error {
+	if !isLegacyToStaticNodeFlowUpgrade(c) {
+		return nil
+	}
+
+	if controller.cleanupLegacyStaticRuntime != nil {
+		return controller.cleanupLegacyStaticRuntime(c)
+	}
+
+	reconciler, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+	if err != nil {
+		return errors.Wrap(err, "failed to create legacy static runtime cleaner")
+	}
+
+	cleaner, ok := reconciler.(interface {
+		CleanupLegacyRuntime(ctx context.Context, cluster *v1.Cluster) error
+	})
+	if !ok {
+		return errors.New("legacy static runtime cleaner is not supported")
+	}
+
+	if err := cleaner.CleanupLegacyRuntime(context.Background(), c); err != nil {
+		return errors.Wrap(err, "failed to cleanup legacy static runtime")
+	}
+
+	return nil
+}
+
+func (controller *ClusterController) cleanupStaticNodeClusterBeforeLegacyFlow(c *v1.Cluster) error {
+	if !isStaticNodeToLegacyFlowRollback(c) {
+		return nil
+	}
+
+	return controller.reconcileStaticNodeClusterDelete(c)
+}
+
+func isLegacyToStaticNodeFlowUpgrade(c *v1.Cluster) bool {
+	if c == nil || c.Status == nil || !c.Status.Initialized || c.Status.Version == "" {
+		return false
+	}
+
+	wasStaticNodeFlow, err := isStaticNodeClusterFlowVersion(c.Status.Version)
+	if err != nil || wasStaticNodeFlow {
+		return false
+	}
+
+	useStaticNodeFlow, err := isStaticNodeClusterFlowVersion(c.GetVersion())
+	if err != nil {
+		return false
+	}
+
+	return useStaticNodeFlow
+}
+
+func isStaticNodeToLegacyFlowRollback(c *v1.Cluster) bool {
+	if c == nil || c.Status == nil || !c.Status.Initialized || c.Status.Version == "" {
+		return false
+	}
+
+	wasStaticNodeFlow, err := isStaticNodeClusterFlowVersion(c.Status.Version)
+	if err != nil || !wasStaticNodeFlow {
+		return false
+	}
+
+	useStaticNodeFlow, err := isStaticNodeClusterFlowVersion(c.GetVersion())
+	if err != nil {
+		return false
+	}
+
+	return !useStaticNodeFlow
+}
+
+func isStaticNodeClusterFlowVersion(version string) (bool, error) {
+	useStaticNodeFlow, err := semver.LessThan(staticNodeClusterFlowVersionGate, version)
+	if err != nil {
+		return false, fmt.Errorf("invalid cluster version %q: %w", version, err)
+	}
+
+	return useStaticNodeFlow, nil
+}
+
+func staticClusterSpecHeadIP(c *v1.Cluster) (string, error) {
+	sshConfig, err := util.ParseSSHClusterConfig(c)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to parse ssh cluster config")
+	}
+
+	return sshConfig.Provider.HeadIP, nil
+}
+
+func currentStaticClusterHeadIP(c *v1.Cluster) string {
+	if c == nil || c.Status == nil {
+		return ""
+	}
+
+	if c.Status.NodeProvisionStatus != "" {
+		nodeStatus := map[string]v1.NodeProvision{}
+		if err := json.Unmarshal([]byte(c.Status.NodeProvisionStatus), &nodeStatus); err == nil {
+			for nodeIP, provision := range nodeStatus {
+				if provision.IsHead {
+					return nodeIP
+				}
+			}
+		}
+	}
+
+	if c.Status.DashboardURL == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(c.Status.DashboardURL)
+	if err != nil {
+		return ""
+	}
+
+	return parsed.Hostname()
+}
+
 func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.StaticNodeCluster, error) {
 	if c == nil || c.Metadata == nil {
 		return nil, errors.New("cluster metadata is required")
@@ -127,9 +283,6 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 	}
 
 	upgradeStrategy := c.GetUpgradeStrategy()
-	if !v1.IsSupportedClusterUpgradeStrategyType(upgradeStrategy.Type) {
-		return nil, fmt.Errorf("unsupported cluster upgrade strategy %q", upgradeStrategy.Type)
-	}
 
 	sshConfig, err := util.ParseSSHClusterConfig(c)
 	if err != nil {

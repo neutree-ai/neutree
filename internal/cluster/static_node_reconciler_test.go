@@ -495,6 +495,94 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
+func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestartConfigChanged(t *testing.T) {
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultHealthHTTPPath, `ok`)
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      healthHost,
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:          vmagentComponentName,
+					Type:          v1.NodeComponentTypeMetricsAgent,
+					Image:         defaultVMAgentImage,
+					ConfigHash:    "hash-vmagent",
+					RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+					DockerRunOptions: []string{
+						"--net=host",
+					},
+					ConfigFiles: []v1.NodeComponentConfigFile{
+						{
+							Path:                vmagentNodeExporterFileSDPath,
+							Content:             `[{"targets":["10.0.0.10:19100"]}]`,
+							Mode:                "0644",
+							Sudo:                true,
+							Atomic:              true,
+							CreateParent:        true,
+							SkipRestartOnChange: true,
+						},
+					},
+					HealthCheck: &v1.NodeComponentHealthCheck{
+						HTTPPath: defaultHealthHTTPPath,
+						Port:     healthPort,
+					},
+				},
+			},
+		},
+	}
+	fileClient := &fakeStaticNodeFileClient{changed: true}
+	runner := &fakeStaticNodeRunner{
+		fileClient: fileClient,
+		responses: []fakeStaticNodeResponse{
+			{
+				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-vmagent'",
+				output:  "hash-vmagent true\n",
+			},
+		},
+	}
+
+	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].Ready)
+	assert.Equal(t, 1, fileClient.calls)
+	assert.Equal(t, vmagentNodeExporterFileSDPath, fileClient.path)
+	assert.Equal(t, len(runner.responses), runner.calls)
+}
+
+func TestStaticNodeReconcilerReconcileComponentsStopsDesiredStoppedComponent(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.11",
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:         "ray-worker",
+					Type:         v1.NodeComponentTypeRayWorker,
+					Image:        "registry.example.com/neutree/neutree-serve:v1.0.2",
+					DesiredPhase: v1.NodeComponentPhaseStopped,
+				},
+			},
+		},
+	}
+	runner := &fakeStaticNodeRunner{
+		responses: []fakeStaticNodeResponse{
+			{
+				command: "docker rm -f 'neutree-static-a-ray-worker' >/dev/null 2>&1 || true",
+			},
+		},
+	}
+
+	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.False(t, statuses[0].Ready)
+	assert.Equal(t, v1.NodeComponentPhaseStopped, statuses[0].Phase)
+	assert.Equal(t, len(runner.responses), runner.calls)
+}
+
 func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerWithDashboardAPI(t *testing.T) {
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{

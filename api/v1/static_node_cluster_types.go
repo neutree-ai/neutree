@@ -37,15 +37,32 @@ type StaticNodeClusterNodeSpec struct {
 }
 
 type StaticNodeClusterStatus struct {
-	Phase              StaticNodeClusterPhase `json:"phase,omitempty"`
-	DesiredNodes       int                    `json:"desired_nodes,omitempty"`
-	ReadyNodes         int                    `json:"ready_nodes,omitempty"`
-	HeadReady          bool                   `json:"head_ready,omitempty"`
-	MetricsReady       bool                   `json:"metrics_ready,omitempty"`
-	WarmReady          bool                   `json:"warm_ready,omitempty"`
-	LastTransitionTime string                 `json:"last_transition_time,omitempty"`
-	ErrorMessage       string                 `json:"error_message,omitempty"`
+	Phase              StaticNodeClusterPhase          `json:"phase,omitempty"`
+	DesiredNodes       int                             `json:"desired_nodes,omitempty"`
+	ReadyNodes         int                             `json:"ready_nodes,omitempty"`
+	HeadReady          bool                            `json:"head_ready,omitempty"`
+	MetricsReady       bool                            `json:"metrics_ready,omitempty"`
+	WarmReady          bool                            `json:"warm_ready,omitempty"`
+	Upgrade            *StaticNodeClusterUpgradeStatus `json:"upgrade,omitempty"`
+	LastTransitionTime string                          `json:"last_transition_time,omitempty"`
+	ErrorMessage       string                          `json:"error_message,omitempty"`
 }
+
+type StaticNodeClusterUpgradeStatus struct {
+	ObservedVersion string                       `json:"observed_version,omitempty"`
+	TargetVersion   string                       `json:"target_version,omitempty"`
+	Step            StaticNodeClusterUpgradeStep `json:"step,omitempty"`
+}
+
+type StaticNodeClusterUpgradeStep string
+
+const (
+	StaticNodeClusterUpgradeStepWarming         StaticNodeClusterUpgradeStep = "Warming"
+	StaticNodeClusterUpgradeStepStoppingWorkers StaticNodeClusterUpgradeStep = "StoppingWorkers"
+	StaticNodeClusterUpgradeStepStartingHead    StaticNodeClusterUpgradeStep = "StartingHead"
+	StaticNodeClusterUpgradeStepStartingWorkers StaticNodeClusterUpgradeStep = "StartingWorkers"
+	StaticNodeClusterUpgradeStepVerifying       StaticNodeClusterUpgradeStep = "Verifying"
+)
 
 type StaticNodeClusterPhase string
 
@@ -151,6 +168,7 @@ type NodeComponentSpec struct {
 	HealthCheck      *NodeComponentHealthCheck  `json:"health_check,omitempty"`
 	Dependencies     []string                   `json:"dependencies,omitempty"`
 	RestartPolicy    NodeComponentRestartPolicy `json:"restart_policy,omitempty"`
+	DesiredPhase     NodeComponentPhase         `json:"desired_phase,omitempty"`
 	ConfigHash       string                     `json:"config_hash,omitempty"`
 }
 
@@ -187,6 +205,8 @@ type NodeComponentConfigFile struct {
 	Sudo         bool   `json:"sudo,omitempty"`
 	Atomic       bool   `json:"atomic,omitempty"`
 	CreateParent bool   `json:"create_parent,omitempty"`
+	// SkipRestartOnChange excludes dynamic file contents from component hash.
+	SkipRestartOnChange bool `json:"skip_restart_on_change,omitempty"`
 }
 
 type NodeComponentHealthCheck struct {

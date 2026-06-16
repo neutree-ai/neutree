@@ -30,6 +30,8 @@ type ClusterController struct {
 
 	acceleratorManager  accelerator.Manager
 	newClusterReconcile func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
+
+	cleanupLegacyStaticRuntime func(*v1.Cluster) error
 }
 
 type ClusterControllerOption struct {
@@ -100,13 +102,31 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 		controller.updateClusterStatus(c, reconcileErr)
 	}()
 
-	if shouldUseStaticNodeClusterFlow(c) {
+	useStaticNodeFlow, err := shouldUseStaticNodeClusterFlow(c)
+	if err != nil {
+		reconcileErr = err
+		return reconcileErr
+	}
+
+	if useStaticNodeFlow {
+		if err := controller.validateStaticNodeClusterUpdate(c); err != nil {
+			reconcileErr = err
+			return reconcileErr
+		}
+	}
+
+	if useStaticNodeFlow {
 		reconcileErr = controller.reconcileStaticNodeCluster(c)
 		if reconcileErr != nil {
 			reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile static node cluster %s", c.Metadata.WorkspaceName())
 			return reconcileErr
 		}
 	} else {
+		if err := controller.cleanupStaticNodeClusterBeforeLegacyFlow(c); err != nil {
+			reconcileErr = errors.Wrapf(err, "failed to cleanup static node cluster before legacy reconcile %s", c.Metadata.WorkspaceName())
+			return reconcileErr
+		}
+
 		r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 		if err != nil {
 			reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())

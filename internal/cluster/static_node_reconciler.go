@@ -33,6 +33,7 @@ const (
 	componentReasonInspectFailed     = "ContainerInspectFailed"
 	componentReasonRunFailed         = "ContainerRunFailed"
 	componentReasonRunning           = "Running"
+	componentReasonStopped           = "Stopped"
 
 	componentHashLabel = "neutree.ai/component-hash"
 	componentNameLabel = "neutree.ai/component"
@@ -307,6 +308,21 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		return status, nil
 	}
 
+	if component.DesiredPhase == v1.NodeComponentPhaseStopped {
+		if err := stopComponentContainer(ctx, runner, componentContainerName(node, component)); err != nil {
+			status.Phase = v1.NodeComponentPhaseFailed
+			status.Reason = componentReasonRunFailed
+			status.Message = err.Error()
+
+			return status, err
+		}
+
+		status.Phase = v1.NodeComponentPhaseStopped
+		status.Reason = componentReasonStopped
+
+		return status, nil
+	}
+
 	for _, dependency := range component.Dependencies {
 		if !readyByName[dependency] {
 			status.Phase = v1.NodeComponentPhasePending
@@ -429,7 +445,9 @@ func writeComponentConfigFiles(
 			return changed, errors.Wrapf(err, "failed to write config file %s", configFile.Path)
 		}
 
-		changed = changed || fileChanged
+		if fileChanged && !configFile.SkipRestartOnChange {
+			changed = true
+		}
 	}
 
 	return changed, nil
@@ -472,6 +490,18 @@ func restartComponentContainer(
 
 	if _, err := runner.Run(ctx, buildDockerRunCommand(node, component, componentHash)); err != nil {
 		return errors.Wrapf(err, "failed to run component container %s", containerName)
+	}
+
+	return nil
+}
+
+func stopComponentContainer(
+	ctx context.Context,
+	runner StaticNodeCommandRunner,
+	containerName string,
+) error {
+	if _, err := runner.Run(ctx, "docker rm -f "+shellArg(containerName)+" >/dev/null 2>&1 || true"); err != nil {
+		return errors.Wrapf(err, "failed to remove component container %s", containerName)
 	}
 
 	return nil
