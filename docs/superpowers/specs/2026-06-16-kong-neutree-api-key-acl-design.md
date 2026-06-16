@@ -59,10 +59,13 @@ This order is a hard requirement. If Kong's default plugin priorities would run
 custom plugin priority or configure plugin ordering so ACL enforcement happens
 first.
 
-Each IE/EE route gets exactly one Neutree-managed ACL group:
+Each IE/EE route gets exactly one Neutree-managed ACL group. The logical
+identity is `workspace + endpoint_type + resource_name`, and the concrete Kong
+group uses a stable hash so workspace and resource names do not leak into Kong
+group names or violate Kong naming constraints:
 
-- IE: `nt:{workspace}:endpoint:{endpoint_name}`
-- EE: `nt:{workspace}:external-endpoint:{external_endpoint_name}`
+- IE: `nt:endpoint:{sha256(workspace, endpoint, endpoint_name)}`
+- EE: `nt:external-endpoint:{sha256(workspace, external-endpoint, external_endpoint_name)}`
 
 Neutree core periodically computes expected Consumer ACL membership. For each
 active API key, it reads the key owner, key workspace, and the owner's current
