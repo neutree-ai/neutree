@@ -173,15 +173,15 @@ RBAC permissions in those workspaces.
 
 ## Naming
 
-The logical group format is:
+Neutree ACL groups are logically keyed by `workspace + endpoint_type +
+resource_name`, but the concrete Kong group name is hashed:
 
 ```text
-nt:{workspace}:{endpoint_type}:{resource_name}
+nt:{endpoint_type}:{sha256(workspace, endpoint_type, resource_name)}
 ```
 
-Implementation should centralize group name generation. If workspace or
-resource names contain characters that are unsafe for Kong group names, the
-function must produce a stable escaped or hashed form. Tests must cover special
+Implementation centralizes group name generation so workspace or resource names
+with Kong-unsafe characters never appear in cleartext. Tests cover special
 characters and length boundaries.
 
 ## Rejected Alternatives

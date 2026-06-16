@@ -398,7 +398,7 @@ func isManagedAIRoutePlugin(plugin *kong.Plugin) bool {
 
 	switch *plugin.Name {
 	case "neutree-ai-gateway", "neutree-ai-statistics":
-		return true
+		return plugin.InstanceName != nil
 	case "acl":
 		return plugin.InstanceName != nil && strings.HasPrefix(*plugin.InstanceName, "neutree-acl-")
 	default:
