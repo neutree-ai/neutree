@@ -474,7 +474,7 @@ func advanceStaticNodeClusterUpgradeStatus(
 	currentNodes []*v1.StaticNode,
 	status v1.StaticNodeClusterStatus,
 ) v1.StaticNodeClusterStatus {
-	if status.Upgrade == nil {
+	if status.Upgrade == nil || status.Upgrade.Step == "" {
 		return status
 	}
 

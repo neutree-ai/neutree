@@ -512,6 +512,28 @@ func TestStaticNodeClusterReconcilerCompletesRayRecreateUpgradeWhenTargetReady(t
 	assert.Empty(t, plan.Status.Upgrade.Step)
 }
 
+func TestStaticNodeClusterReconcilerKeepsReadyWhenObservedVersionMatchesSpec(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.2.1"
+	cluster.Status = &v1.StaticNodeClusterStatus{
+		Phase: v1.StaticNodeClusterPhaseReady,
+		Upgrade: &v1.StaticNodeClusterUpgradeStatus{
+			ObservedVersion: "v1.2.1",
+		},
+	}
+	currentNodes := staticNodeUpgradeCurrentNodes()
+	markStaticNodeUpgradeReady(currentNodes, buildRayRuntimeImage(cluster))
+
+	plan, err := (&StaticNodeClusterReconciler{}).Plan(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+	assert.Equal(t, v1.StaticNodeClusterPhaseReady, plan.Status.Phase)
+	require.NotNil(t, plan.Status.Upgrade)
+	assert.Equal(t, "v1.2.1", plan.Status.Upgrade.ObservedVersion)
+	assert.Empty(t, plan.Status.Upgrade.TargetVersion)
+	assert.Empty(t, plan.Status.Upgrade.Step)
+}
+
 func TestStaticNodeClusterReconcilerFallsBackToCPURuntimeWhenRuntimeProfileUnsupported(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	currentNodes := []*v1.StaticNode{
