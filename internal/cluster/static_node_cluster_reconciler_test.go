@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -98,6 +99,11 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	require.Len(t, rayHead.Args, 1)
 	assert.Contains(t, rayHead.Args[0], "python /home/ray/start.py --head")
 	assert.Contains(t, rayHead.Args[0], "docker rm -f ray_container")
+	assert.Contains(t, rayHead.Args[0], "for i in $(seq 1 30); do docker rm -f ray_container")
+	assert.Less(t,
+		strings.Index(rayHead.Args[0], "python /home/ray/start.py --head"),
+		strings.LastIndex(rayHead.Args[0], "docker rm -f ray_container"),
+	)
 	assert.Contains(t, rayHead.Args[0], "--dashboard-port=8265")
 	assert.Contains(t, rayHead.Args[0], v1.NeutreeServingVersionLabel)
 	assert.NotContains(t, rayHead.Args[0], "--autoscaling-config")
@@ -184,6 +190,11 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	require.Len(t, rayWorker.Args, 1)
 	assert.Contains(t, rayWorker.Args[0], "python /home/ray/start.py --address=10.0.0.10:6379")
 	assert.Contains(t, rayWorker.Args[0], "docker rm -f ray_container")
+	assert.Contains(t, rayWorker.Args[0], "for i in $(seq 1 30); do docker rm -f ray_container")
+	assert.Less(t,
+		strings.Index(rayWorker.Args[0], "python /home/ray/start.py --address=10.0.0.10:6379"),
+		strings.LastIndex(rayWorker.Args[0], "docker rm -f ray_container"),
+	)
 	assert.Contains(t, rayWorker.Args[0], v1.StaticNodeProvisionType)
 	require.NotNil(t, rayWorker.HealthCheck)
 	assert.Equal(t, "10.0.0.10", rayWorker.HealthCheck.HTTPHost)
