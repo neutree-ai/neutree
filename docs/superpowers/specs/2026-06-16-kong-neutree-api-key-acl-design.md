@@ -76,7 +76,7 @@ surface needed to prove route-level API-key authorization:
 | `neutree-enterprise` | Affected. Enterprise consumes community gateway/core code, and this change touches workspace, role/permission, endpoint, and external-endpoint access control. | Run `COMMUNITY_VERSION=<PR branch or sha> make sync-community`, then enterprise compatibility/build checks for affected components. |
 | Enterprise UI/UX / Chinese localization / vendor branding | N/A. No enterprise UI, copy, or vendor asset changes. | No screenshot/browser verification required. |
 | API/UI contract | N/A. No API fields, statuses, or error codes are added. | No frontend contract update required. |
-| E2E / manual verification | Affected. The plan includes same-workspace allow, cross-workspace deny, permission revoke, and usage/trace checks. | Cross-workspace EE/IE deny must run on enterprise or another multi-workspace-capable runtime; single-workspace community runtime is insufficient for full acceptance. |
+| E2E / manual verification | Affected. The plan includes same-workspace allow, cross-workspace deny, permission revoke, and usage/trace checks. | Step 5 manual runtime E2E uses the enterprise version and enterprise runtime for all cases; single-workspace community runtime can only be additional smoke. |
 
 ## Decisions
 
@@ -312,9 +312,10 @@ does not replace automated E2E acceptance.
 - Successful usage and trace records still include `api_key_id`, target
   workspace, target endpoint type, and target endpoint name.
 - Rejected cross-workspace calls do not create successful usage records.
-- Same-workspace allow cases may run on community or enterprise if the build
-  contains PR #422. Cross-workspace denial cases must run on enterprise or
-  another multi-workspace-capable runtime.
+- Step 5 manual runtime E2E uses the enterprise version and enterprise runtime
+  for all cases. The enterprise runtime must contain PR #422 and provide
+  multi-workspace capability. A single-workspace community runtime can only be
+  additional smoke, not full acceptance.
 
 ### E2E Classification
 
@@ -327,8 +328,8 @@ verification.
 | Authorized same-workspace EE model list and OpenAI chat | Manual Step 5 + Code E2E | Reuse `external-endpoint && openai` |
 | Authorized same-workspace EE Anthropic messages | Manual Step 5 only | Existing suite covers protocol behavior; ACL proof is manual |
 | Authorized same-workspace IE chat on a Running endpoint | Manual Step 5 only | Depends on cluster/model capacity |
-| Cross-workspace EE denied with `403` | Manual Step 5 only | Requires enterprise or another multi-workspace-capable runtime |
-| Cross-workspace IE denied with `403` | Manual Step 5 only | Requires enterprise or another multi-workspace-capable runtime plus Running IE |
+| Cross-workspace EE denied with `403` | Manual Step 5 only | Requires enterprise runtime |
+| Cross-workspace IE denied with `403` | Manual Step 5 only | Requires enterprise runtime plus Running IE |
 | Permission removal followed by reconcile denies access | Manual Step 5 only | Requires non-admin role mutation and reconcile observation |
 | Direct Kong ACL membership removal denies access | Manual Step 5 only | Route default-deny proof |
 | Successful usage/trace records still include API-key and target metadata | Manual Step 5 only | Requires usage/trace query access |
@@ -340,17 +341,16 @@ verification.
 |---|---|---|---|
 | EE with mock upstream | EE allow/deny happy path | Created temporary EE and upstream mock | Available |
 | Running IE | IE allow/deny path | Environment listed zero clusters and endpoints | Missing |
-| Two workspaces | Cross-workspace denial | Current community shared environment is single-workspace; enterprise or another multi-workspace-capable runtime is required | Missing |
+| Two workspaces | Cross-workspace denial | Current community shared environment is single-workspace; enterprise runtime is required for Step 5 acceptance | Missing |
 | Non-admin role assignment and permission revoke | Permission-removal reconcile | Shared environment only validated admin/global path | Missing |
 | Kong Admin access | Route ACL and membership evidence | Kong Admin reachable through container network | Available |
 | Usage/trace query visibility | Usage/trace assertions | Existing scoped E2E does not assert these fields | Missing |
 
 Step 5 cannot be considered complete until the missing capabilities are supplied
 and the corresponding manual cases pass, or the remaining risk is explicitly
-accepted before Step 9. In particular, the cross-workspace denial cases require a
-build containing PR #422 on enterprise or another multi-workspace-capable
-runtime; the pre-PR base nightly and single-workspace community runtime are not
-sufficient for full acceptance.
+accepted before Step 9. Step 5 manual runtime E2E requires the enterprise version
+and enterprise runtime with a build containing PR #422; the pre-PR base nightly
+and single-workspace community runtime are not sufficient for full acceptance.
 
 ## Rollout Notes
 
