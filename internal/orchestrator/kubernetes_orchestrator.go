@@ -529,6 +529,13 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		}, nil
 	}
 
+	if hasRunningModelDownloaderInitContainer(pods) {
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseMODELDOWNLOADING,
+			ErrorMessage: "Endpoint model download in progress: model-downloader init container is running",
+		}, nil
+	}
+
 	// Otherwise, still deploying
 	errorMessage := k.buildDeploymentErrorMessage(dep)
 
@@ -551,6 +558,18 @@ func (k *kubernetesOrchestrator) listPods(ctrlClient client.Client, namespace st
 	}
 
 	return podList.Items, nil
+}
+
+func hasRunningModelDownloaderInitContainer(pods []corev1.Pod) bool {
+	for _, pod := range pods {
+		for _, initStatus := range pod.Status.InitContainerStatuses {
+			if initStatus.Name == "model-downloader" && initStatus.State.Running != nil {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // checkContainerStatuses checks a slice of container statuses for critical failures.

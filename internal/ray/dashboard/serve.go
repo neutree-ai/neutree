@@ -36,9 +36,17 @@ type RayServeApplicationStatus struct {
 }
 
 type Deployment struct {
-	Name    string `json:"name"`
-	Status  string `json:"status,omitempty"`
-	Message string `json:"message,omitempty"`
+	Name     string    `json:"name"`
+	Status   string    `json:"status,omitempty"`
+	Message  string    `json:"message,omitempty"`
+	Replicas []Replica `json:"replicas,omitempty"`
+}
+
+type Replica struct {
+	NodeID      string `json:"node_id"`
+	ActorID     string `json:"actor_id"`
+	LogFilePath string `json:"log_file_path"`
+	ReplicaID   string `json:"replica_id"`
 }
 
 type ProxyStatus struct {

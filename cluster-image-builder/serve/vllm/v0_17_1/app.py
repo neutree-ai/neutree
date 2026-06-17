@@ -86,9 +86,15 @@ class Backend:
 
         downloader = get_downloader(backend)
         print(f"[Backend] Downloading model using backend={backend} from source={dl_req.source} to dest={dl_req.dest}")
-        downloader.download(dl_req.source, dl_req.dest, credentials=dl_req.credentials,
-                            recursive=dl_req.recursive, overwrite=dl_req.overwrite,
-                            retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
+        print("NEUTREE_MODEL_DOWNLOAD_START", flush=True)
+        try:
+            downloader.download(dl_req.source, dl_req.dest, credentials=dl_req.credentials,
+                                recursive=dl_req.recursive, overwrite=dl_req.overwrite,
+                                retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
+        except Exception:
+            print("NEUTREE_MODEL_DOWNLOAD_FAILED", flush=True)
+            raise
+        print("NEUTREE_MODEL_DOWNLOAD_DONE", flush=True)
         print(f"[Backend] Model download completed.")
 
         self.model_id = model_serve_name

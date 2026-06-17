@@ -380,6 +380,38 @@ func (f *FakeK8sClient) WithInitContainerOOMKilled(containerName string) *FakeK8
 	return f
 }
 
+func (f *FakeK8sClient) WithRunningInitContainer(containerName string) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-init-running",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  containerName,
+					Ready: false,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{
+							StartedAt: metav1.Now(),
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
 func (f *FakeK8sClient) WithUnschedulablePod(message string) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2657,6 +2689,20 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "Init Container",
+			expectError:    false,
+		},
+		{
+			name: "return ModelDownloading while model-downloader init container is running",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithRunningInitContainer("model-downloader")
+			},
+			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
+			expectErrorMsg: "model-downloader init container is running",
 			expectError:    false,
 		},
 		{

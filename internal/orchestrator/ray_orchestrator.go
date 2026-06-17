@@ -42,6 +42,28 @@ func isNewClusterVersion(cluster *v1.Cluster) (bool, error) {
 // concurrent workers from overwriting each other's changes.
 var clusterLocks sync.Map
 
+const (
+	modelDownloadLogTailLines = 200
+
+	modelDownloadStartMarker  = "NEUTREE_MODEL_DOWNLOAD_START"
+	modelDownloadDoneMarker   = "NEUTREE_MODEL_DOWNLOAD_DONE"
+	modelDownloadFailedMarker = "NEUTREE_MODEL_DOWNLOAD_FAILED"
+
+	rayAppStatusDeploying    = "DEPLOYING"
+	rayAppStatusNotStarted   = "NOT_STARTED"
+	rayAppStatusDeployFailed = "DEPLOY_FAILED"
+	rayAppStatusUnhealthy    = "UNHEALTHY"
+	rayAppStatusRunning      = "RUNNING"
+)
+
+type modelDownloadMarkerState int
+
+const (
+	modelDownloadMarkerNone modelDownloadMarkerState = iota
+	modelDownloadMarkerInProgress
+	modelDownloadMarkerFailed
+)
+
 func getClusterLock(clusterKey string) *sync.Mutex {
 	actual, _ := clusterLocks.LoadOrStore(clusterKey, &sync.Mutex{})
 	return actual.(*sync.Mutex) //nolint:errcheck // type is guaranteed by LoadOrStore
@@ -380,6 +402,20 @@ func allDeploymentsHealthy(deployments map[string]dashboard.Deployment) bool {
 	return true
 }
 
+func allProxiesHealthy(proxies map[string]dashboard.ProxyStatus) bool {
+	if len(proxies) == 0 {
+		return false
+	}
+
+	for _, proxyStatus := range proxies {
+		if proxyStatus.Status != dashboard.ProxyStatusHealthy {
+			return false
+		}
+	}
+
+	return true
+}
+
 // mapDeployingPhase resolves the endpoint phase when Ray Serve reports the
 // application as DEPLOYING or NOT_STARTED. Returns Failed when any deployment
 // is UNHEALTHY; returns Running when the previous Neutree phase was Running,
@@ -404,7 +440,7 @@ func mapDeployingPhase(endpoint *v1.Endpoint, status dashboard.RayServeApplicati
 		}
 	}
 
-	if status.Status == "DEPLOYING" &&
+	if status.Status == rayAppStatusDeploying &&
 		proxyReady &&
 		endpoint.Status != nil &&
 		endpoint.Status.Phase == v1.EndpointPhaseRUNNING &&
@@ -414,6 +450,69 @@ func mapDeployingPhase(endpoint *v1.Endpoint, status dashboard.RayServeApplicati
 	}
 
 	return v1.EndpointPhaseDEPLOYING
+}
+
+func modelDownloadStateFromLog(logText string) modelDownloadMarkerState {
+	if strings.Contains(logText, modelDownloadFailedMarker) {
+		return modelDownloadMarkerFailed
+	}
+
+	if strings.Contains(logText, modelDownloadStartMarker) && !strings.Contains(logText, modelDownloadDoneMarker) {
+		return modelDownloadMarkerInProgress
+	}
+
+	return modelDownloadMarkerNone
+}
+
+func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashboard.RayServeApplicationStatus) (modelDownloadMarkerState, string, error) {
+	var (
+		firstErr         error
+		inProgressDetail string
+	)
+
+	for deploymentKey, deployment := range appStatus.Deployments {
+		deploymentName := deployment.Name
+		if deploymentName == "" {
+			deploymentName = deploymentKey
+		}
+
+		for _, replica := range deployment.Replicas {
+			if replica.ActorID == "" {
+				continue
+			}
+
+			replicaID := replica.ReplicaID
+			if replicaID == "" {
+				replicaID = replica.ActorID
+			}
+
+			for _, suffix := range []string{"out", "err"} {
+				logText, err := svc.GetActorLog(replica.ActorID, suffix, modelDownloadLogTailLines)
+				if err != nil {
+					if firstErr == nil {
+						firstErr = errors.Wrapf(err, "failed to get %s log for actor %s", suffix, replica.ActorID)
+					}
+
+					continue
+				}
+
+				switch modelDownloadStateFromLog(logText) {
+				case modelDownloadMarkerFailed:
+					return modelDownloadMarkerFailed,
+						fmt.Sprintf("Deployment %s replica %s model download failed", deploymentName, replicaID),
+						nil
+				case modelDownloadMarkerInProgress:
+					inProgressDetail = fmt.Sprintf("Deployment %s replica %s model download in progress", deploymentName, replicaID)
+				}
+			}
+		}
+	}
+
+	if inProgressDetail != "" {
+		return modelDownloadMarkerInProgress, inProgressDetail, nil
+	}
+
+	return modelDownloadMarkerNone, "", firstErr
 }
 
 // GetEndpointStatus retrieves the status of a specific endpoint from Ray Serve.
@@ -470,18 +569,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}, nil
 	}
 
-	proxyReady := true
-
-	if len(currentAppsResp.Proxies) == 0 {
-		proxyReady = false
-	}
-
-	for _, proxyStatus := range currentAppsResp.Proxies {
-		if proxyStatus.Status != dashboard.ProxyStatusHealthy {
-			proxyReady = false
-			break
-		}
-	}
+	proxyReady := allProxiesHealthy(currentAppsResp.Proxies)
 
 	// Basic status mapping
 	// https://docs.ray.io/en/latest/serve/api/doc/ray.serve.schema.ApplicationStatus.html#ray.serve.schema.ApplicationStatus
@@ -489,11 +577,11 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	var errorMessages []string
 
 	switch status.Status {
-	case "DEPLOYING", "NOT_STARTED":
+	case rayAppStatusDeploying, rayAppStatusNotStarted:
 		phase = mapDeployingPhase(endpoint, status, proxyReady)
-	case "DEPLOY_FAILED", "UNHEALTHY":
+	case rayAppStatusDeployFailed, rayAppStatusUnhealthy:
 		phase = v1.EndpointPhaseFAILED
-	case "RUNNING":
+	case rayAppStatusRunning:
 		if !proxyReady {
 			phase = v1.EndpointPhaseDEPLOYING
 
@@ -512,6 +600,24 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 			Phase:        phase,
 			ErrorMessage: "",
 		}, nil
+	}
+
+	if phase == v1.EndpointPhaseDEPLOYING && (status.Status == rayAppStatusDeploying || status.Status == rayAppStatusNotStarted) {
+		markerState, markerMsg, markerErr := inspectRayModelDownloadLogs(dashboardService, status)
+		if markerErr != nil {
+			klog.V(4).Info("failed to inspect Ray actor model download logs", "error", markerErr)
+		}
+
+		switch markerState {
+		case modelDownloadMarkerFailed:
+			phase = v1.EndpointPhaseFAILED
+
+			errorMessages = append(errorMessages, markerMsg)
+		case modelDownloadMarkerInProgress:
+			phase = v1.EndpointPhaseMODELDOWNLOADING
+
+			errorMessages = append(errorMessages, markerMsg)
+		}
 	}
 
 	// Merge Ray Serve error messages
@@ -537,6 +643,8 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		// no prefix
 		case v1.EndpointPhaseDEPLOYING:
 			errorMsg = "Endpoint deploying in progress: " + errorMsg
+		case v1.EndpointPhaseMODELDOWNLOADING:
+			errorMsg = "Endpoint model download in progress: " + errorMsg
 		case v1.EndpointPhaseFAILED:
 			errorMsg = "Endpoint failed: " + errorMsg
 		}
