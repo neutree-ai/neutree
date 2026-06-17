@@ -29,7 +29,7 @@ func DeploymentDiagnostics(ctx context.Context, ctrlClient client.Client, namesp
 
 	diagnostics = append(diagnostics, formatDeployment(deployment))
 	diagnostics = append(diagnostics, podDiagnostics(ctx, ctrlClient, namespace, podLabels)...)
-	diagnostics = append(diagnostics, eventDiagnostics(ctx, ctrlClient, namespace, "Deployment", name)...)
+	diagnostics = append(diagnostics, eventDiagnostics(ctx, ctrlClient, namespace, "Deployment", name, deployment.UID)...)
 
 	return diagnostics
 }
@@ -42,7 +42,7 @@ func ServiceDiagnostics(ctx context.Context, ctrlClient client.Client, namespace
 	}
 
 	diagnostics := []string{formatService(service)}
-	diagnostics = append(diagnostics, eventDiagnostics(ctx, ctrlClient, namespace, "Service", name)...)
+	diagnostics = append(diagnostics, eventDiagnostics(ctx, ctrlClient, namespace, "Service", name, service.UID)...)
 
 	return diagnostics
 }
@@ -110,7 +110,7 @@ func podDiagnostics(ctx context.Context, ctrlClient client.Client, namespace str
 		}
 
 		diagnostics = append(diagnostics, formatPod(pod))
-		diagnostics = append(diagnostics, eventDiagnostics(ctx, ctrlClient, namespace, "Pod", pod.Name)...)
+		diagnostics = append(diagnostics, eventDiagnostics(ctx, ctrlClient, namespace, "Pod", pod.Name, pod.UID)...)
 		podCount++
 	}
 
@@ -210,7 +210,7 @@ func formatService(service *corev1.Service) string {
 	)
 }
 
-func eventDiagnostics(ctx context.Context, ctrlClient client.Client, namespace, kind, name string) []string {
+func eventDiagnostics(ctx context.Context, ctrlClient client.Client, namespace, kind, name string, uid types.UID) []string {
 	events := &corev1.EventList{}
 	if err := ctrlClient.List(ctx, events, client.InNamespace(namespace)); err != nil {
 		return []string{fmt.Sprintf("events/%s: list failed: %v", name, err)}
@@ -219,9 +219,15 @@ func eventDiagnostics(ctx context.Context, ctrlClient client.Client, namespace, 
 	matched := []corev1.Event{}
 
 	for _, event := range events.Items {
-		if event.InvolvedObject.Kind == kind && event.InvolvedObject.Name == name {
-			matched = append(matched, event)
+		if event.InvolvedObject.Kind != kind || event.InvolvedObject.Name != name {
+			continue
 		}
+
+		if uid != "" && event.InvolvedObject.UID != uid {
+			continue
+		}
+
+		matched = append(matched, event)
 	}
 
 	sort.Slice(matched, func(i, j int) bool {
@@ -254,10 +260,12 @@ func truncateDiagnosticMessage(message string) string {
 		return message
 	}
 
-	cut := maxDiagnosticBytes
+	const suffix = "\n... truncated"
+
+	cut := maxDiagnosticBytes - len(suffix)
 	for cut > 0 && !utf8.RuneStart(message[cut]) {
 		cut--
 	}
 
-	return message[:cut] + "\n... truncated"
+	return message[:cut] + suffix
 }

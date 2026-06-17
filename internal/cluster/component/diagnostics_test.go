@@ -30,6 +30,7 @@ func TestTruncateDiagnosticMessagePreservesUTF8(t *testing.T) {
 
 	assert.True(t, utf8.ValidString(output))
 	assert.True(t, strings.HasSuffix(output, "\n... truncated"))
+	assert.LessOrEqual(t, len(output), maxDiagnosticBytes)
 }
 
 func TestServiceDiagnosticsIncludesStatusAndEvents(t *testing.T) {
@@ -40,6 +41,7 @@ func TestServiceDiagnosticsIncludesStatusAndEvents(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "router-service",
 					Namespace: "default",
+					UID:       "current-service",
 				},
 				Spec: corev1.ServiceSpec{
 					Type:      corev1.ServiceTypeLoadBalancer,
@@ -69,6 +71,7 @@ func TestServiceDiagnosticsIncludesStatusAndEvents(t *testing.T) {
 					Kind:      "Service",
 					Namespace: "default",
 					Name:      "router-service",
+					UID:       "current-service",
 				},
 				Type:          corev1.EventTypeWarning,
 				Reason:        "SyncLoadBalancerFailed",
@@ -87,6 +90,64 @@ func TestServiceDiagnosticsIncludesStatusAndEvents(t *testing.T) {
 	assert.Contains(t, message, "http:8000/TCP->8000,nodePort=30080")
 	assert.Contains(t, message, "ingress=192.0.2.10")
 	assert.Contains(t, message, "event/router-service: Warning SyncLoadBalancerFailed")
+}
+
+func TestServiceDiagnosticsIgnoresEventsForRecreatedService(t *testing.T) {
+	now := metav1.NewTime(time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+	fakeClient := fake.NewClientBuilder().
+		WithObjects(
+			&corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "router-service",
+					Namespace: "default",
+					UID:       "current-service",
+				},
+				Spec: corev1.ServiceSpec{
+					Type:      corev1.ServiceTypeLoadBalancer,
+					ClusterIP: "10.96.0.10",
+				},
+			},
+			&corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "old-router-service-event",
+					Namespace: "default",
+				},
+				InvolvedObject: corev1.ObjectReference{
+					Kind:      "Service",
+					Namespace: "default",
+					Name:      "router-service",
+					UID:       "old-service",
+				},
+				Type:          corev1.EventTypeWarning,
+				Reason:        "OldFailure",
+				Message:       "stale event from deleted service",
+				LastTimestamp: now,
+			},
+			&corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "current-router-service-event",
+					Namespace: "default",
+				},
+				InvolvedObject: corev1.ObjectReference{
+					Kind:      "Service",
+					Namespace: "default",
+					Name:      "router-service",
+					UID:       "current-service",
+				},
+				Type:          corev1.EventTypeWarning,
+				Reason:        "CurrentFailure",
+				Message:       "current service event",
+				LastTimestamp: now,
+			},
+		).
+		Build()
+
+	diagnostics := ServiceDiagnostics(context.Background(), fakeClient, "default", "router-service")
+	message := strings.Join(diagnostics, "\n")
+
+	assert.Contains(t, message, "CurrentFailure")
+	assert.NotContains(t, message, "OldFailure")
+	assert.NotContains(t, message, "stale event from deleted service")
 }
 
 func TestServiceDiagnosticsHandlesMissingService(t *testing.T) {
@@ -138,6 +199,7 @@ func TestPodDiagnosticsIncludesTerminatedContainersAndSkipsReadyPods(t *testing.
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "router-terminated",
 					Namespace: "default",
+					UID:       "current-pod",
 					Labels: map[string]string{
 						"app": "router",
 					},
@@ -157,6 +219,38 @@ func TestPodDiagnosticsIncludesTerminatedContainersAndSkipsReadyPods(t *testing.
 						},
 					},
 				},
+			},
+			&corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "old-router-terminated-event",
+					Namespace: "default",
+				},
+				InvolvedObject: corev1.ObjectReference{
+					Kind:      "Pod",
+					Namespace: "default",
+					Name:      "router-terminated",
+					UID:       "old-pod",
+				},
+				Type:          corev1.EventTypeWarning,
+				Reason:        "OldPodFailure",
+				Message:       "stale pod event",
+				LastTimestamp: metav1.NewTime(time.Date(2026, 6, 17, 10, 1, 0, 0, time.UTC)),
+			},
+			&corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "current-router-terminated-event",
+					Namespace: "default",
+				},
+				InvolvedObject: corev1.ObjectReference{
+					Kind:      "Pod",
+					Namespace: "default",
+					Name:      "router-terminated",
+					UID:       "current-pod",
+				},
+				Type:          corev1.EventTypeWarning,
+				Reason:        "CurrentPodFailure",
+				Message:       "current pod event",
+				LastTimestamp: metav1.NewTime(time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC)),
 			},
 			&corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
@@ -185,5 +279,8 @@ func TestPodDiagnosticsIncludesTerminatedContainersAndSkipsReadyPods(t *testing.
 
 	assert.Contains(t, message, "pod/router-terminated")
 	assert.Contains(t, message, "terminated reason=Error exitCode=1")
+	assert.Contains(t, message, "CurrentPodFailure")
+	assert.NotContains(t, message, "OldPodFailure")
+	assert.NotContains(t, message, "stale pod event")
 	assert.NotContains(t, message, "pod/router-ready")
 }
