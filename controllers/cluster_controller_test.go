@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -278,6 +279,11 @@ func TestClusterController_UpdateClusterStatus(t *testing.T) {
 		Type:          "ssh",
 		Version:       "v3",
 	}
+	diagnosticErr := errors.New(`route component is not fully ready, please check the status: DeploymentReady: false
+Diagnostics:
+deployment/router: desired=1, updated=1, ready=0, available=0
+pod/router-abcde: phase=Pending, container/router waiting reason=ImagePullBackOff message="Back-off pulling image"
+event/router-abcde: Warning FailedPull - failed to pull image`)
 
 	tests := []struct {
 		name      string
@@ -368,6 +374,31 @@ func TestClusterController_UpdateClusterStatus(t *testing.T) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
 					assert.NotEmpty(t, obj.Status.ErrorMessage)
+				}).Return(nil)
+			},
+			wantErr: true,
+		},
+		{
+			name: "Failed: reconcile diagnostic error is persisted",
+			input: &v1.Cluster{
+				ID:       1,
+				Metadata: &v1.Metadata{Name: "test"},
+				Spec:     specV2,
+				Status: &v1.ClusterStatus{
+					Phase:            v1.ClusterPhaseRunning,
+					Initialized:      true,
+					ObservedSpecHash: specV2Hash,
+				},
+			},
+			mockSetup: func(s *storagemocks.MockStorage, o *clustermocks.MockClusterReconcile) {
+				o.On("Reconcile", mock.Anything, mock.Anything).Return(diagnosticErr)
+				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
+					obj := args.Get(1).(*v1.Cluster)
+					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
+					assert.Contains(t, obj.Status.ErrorMessage, "route component is not fully ready")
+					assert.Contains(t, obj.Status.ErrorMessage, "deployment/router")
+					assert.Contains(t, obj.Status.ErrorMessage, "pod/router-abcde")
+					assert.Contains(t, obj.Status.ErrorMessage, "event/router-abcde")
 				}).Return(nil)
 			},
 			wantErr: true,

@@ -18,11 +18,13 @@ type MetricsStatus struct {
 	PodsReady       int
 	TotalPods       int
 	Errors          []string
+	Diagnostics     []string
 }
 
 func (m MetricsStatus) String() string {
-	return fmt.Sprintf("DeploymentReady: %v, PodsReady: %d/%d, Errors: %v",
+	base := fmt.Sprintf("DeploymentReady: %v, PodsReady: %d/%d, Errors: %v",
 		m.DeploymentReady, m.PodsReady, m.TotalPods, m.Errors)
+	return component.FormatStatusWithDiagnostics(base, m.Diagnostics)
 }
 
 // CheckResourcesStatus checks the status of all metrics resources
@@ -35,13 +37,22 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 	deploymentReady, podsReady, totalPods, err := m.checkDeploymentStatus(ctx)
 	if err != nil {
 		status.Errors = append(status.Errors, fmt.Sprintf("deployment check failed: %v", err))
+		status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
 	} else {
 		status.DeploymentReady = deploymentReady
 		status.PodsReady = podsReady
 		status.TotalPods = totalPods
+
+		if !deploymentReady {
+			status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
+		}
 	}
 
 	return status, nil
+}
+
+func (m *MetricsComponent) metricsPodLabels() map[string]string {
+	return map[string]string{"app": "vmagent", "cluster": m.cluster.GetName(), "workspace": m.cluster.GetWorkspace()}
 }
 
 // checkDeploymentStatus checks if the deployment is ready and running the expected cluster version.
@@ -65,7 +76,7 @@ func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int
 
 	// Check that all running Pods have the expected cluster version label
 	match, err := component.AllPodsMatchVersion(ctx, m.ctrlClient, m.namespace,
-		map[string]string{"app": "vmagent", "cluster": m.cluster.GetName(), "workspace": m.cluster.GetWorkspace()},
+		m.metricsPodLabels(),
 		m.cluster.GetVersion())
 	if err != nil {
 		return false, podsReady, totalPods, err

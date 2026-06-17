@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"testing"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -270,6 +272,145 @@ func Test_checkServiceStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckResourcesStatusIncludesRouterDiagnostics(t *testing.T) {
+	now := metav1.NewTime(time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+	r := &RouterComponent{
+		ctrlClient: fakeClient.NewFakeClient(
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "router",
+					Namespace:  "default",
+					Generation: 2,
+				},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: pointy.Int32(1),
+				},
+				Status: appsv1.DeploymentStatus{
+					ObservedGeneration: 2,
+					Replicas:           1,
+					UpdatedReplicas:    1,
+					ReadyReplicas:      0,
+					AvailableReplicas:  0,
+					Conditions: []appsv1.DeploymentCondition{
+						{
+							Type:    appsv1.DeploymentAvailable,
+							Status:  corev1.ConditionFalse,
+							Reason:  "MinimumReplicasUnavailable",
+							Message: "Deployment does not have minimum availability",
+						},
+					},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "router-6f8d9c7b8c-abcde",
+					Namespace: "default",
+					Labels: map[string]string{
+						"app":       "router",
+						"cluster":   "test",
+						"workspace": "default",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "router",
+							Env: []corev1.EnvVar{
+								{Name: "SHOULD_NOT_LEAK", Value: "TOP_SECRET_VALUE"},
+							},
+						},
+					},
+				},
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "router",
+							State: corev1.ContainerState{
+								Waiting: &corev1.ContainerStateWaiting{
+									Reason:  "ImagePullBackOff",
+									Message: "Back-off pulling image",
+								},
+							},
+						},
+					},
+				},
+			},
+			&corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "router-service",
+					Namespace: "default",
+				},
+				Spec: corev1.ServiceSpec{
+					Type: corev1.ServiceTypeLoadBalancer,
+					Ports: []corev1.ServicePort{
+						{
+							Name:       "http",
+							Port:       8000,
+							TargetPort: intstr.FromInt(8000),
+							Protocol:   corev1.ProtocolTCP,
+						},
+					},
+				},
+			},
+			&corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "router-pull-failed",
+					Namespace: "default",
+				},
+				InvolvedObject: corev1.ObjectReference{
+					Kind:      "Pod",
+					Namespace: "default",
+					Name:      "router-6f8d9c7b8c-abcde",
+				},
+				Type:          corev1.EventTypeWarning,
+				Reason:        "FailedPull",
+				Message:       `failed to pull image "example/router:dev"`,
+				LastTimestamp: now,
+			},
+			&corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "router-service-sync-failed",
+					Namespace: "default",
+				},
+				InvolvedObject: corev1.ObjectReference{
+					Kind:      "Service",
+					Namespace: "default",
+					Name:      "router-service",
+				},
+				Type:          corev1.EventTypeWarning,
+				Reason:        "SyncLoadBalancerFailed",
+				Message:       "failed to ensure load balancer",
+				LastTimestamp: now,
+			},
+		),
+		namespace: "default",
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.0.0"},
+		},
+	}
+
+	status, err := r.CheckResourcesStatus(context.Background())
+
+	assert.NoError(t, err)
+	assert.False(t, status.DeploymentReady)
+	assert.False(t, status.ServiceReady)
+	message := status.String()
+	assert.Contains(t, message, "deployment/router")
+	assert.Contains(t, message, "available=0")
+	assert.Contains(t, message, "pod/router-6f8d9c7b8c-abcde")
+	assert.Contains(t, message, "ImagePullBackOff")
+	assert.Contains(t, message, "event/router-6f8d9c7b8c-abcde")
+	assert.Contains(t, message, "FailedPull")
+	assert.Contains(t, message, "service/router-service")
+	assert.Contains(t, message, "LoadBalancer")
+	assert.Contains(t, message, "ingress=<empty>")
+	assert.Contains(t, message, "event/router-service")
+	assert.Contains(t, message, "SyncLoadBalancerFailed")
+	assert.NotContains(t, message, "TOP_SECRET_VALUE")
 }
 
 func Test_checkDeploymentStatus(t *testing.T) {
