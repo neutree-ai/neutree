@@ -13,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -150,6 +151,23 @@ func TestServiceDiagnosticsIgnoresEventsForRecreatedService(t *testing.T) {
 	assert.NotContains(t, message, "stale event from deleted service")
 }
 
+func TestEventDiagnosticsUsesFieldSelector(t *testing.T) {
+	recorder := &eventListSelectorRecorder{
+		Client: fake.NewClientBuilder().Build(),
+	}
+
+	diagnostics := eventDiagnostics(context.Background(), recorder, "default", "Pod", "router-abc", "pod-uid")
+
+	assert.Empty(t, diagnostics)
+	if assert.NotEmpty(t, recorder.eventListCalls) {
+		firstCall := recorder.eventListCalls[0]
+		assert.Equal(t, "default", firstCall.namespace)
+		assert.Equal(t, "Pod", firstCall.fields["involvedObject.kind"])
+		assert.Equal(t, "router-abc", firstCall.fields["involvedObject.name"])
+		assert.Equal(t, "pod-uid", firstCall.fields["involvedObject.uid"])
+	}
+}
+
 func TestServiceDiagnosticsHandlesMissingService(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().Build()
 
@@ -283,4 +301,47 @@ func TestPodDiagnosticsIncludesTerminatedContainersAndSkipsReadyPods(t *testing.
 	assert.NotContains(t, message, "OldPodFailure")
 	assert.NotContains(t, message, "stale pod event")
 	assert.NotContains(t, message, "pod/router-ready")
+}
+
+type eventListSelectorRecorder struct {
+	client.Client
+
+	eventListCalls []eventListCall
+}
+
+type eventListCall struct {
+	namespace string
+	fields    map[string]string
+}
+
+func (r *eventListSelectorRecorder) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	listOptions := &client.ListOptions{}
+	for _, opt := range opts {
+		opt.ApplyToList(listOptions)
+	}
+
+	if _, ok := list.(*corev1.EventList); ok {
+		r.eventListCalls = append(r.eventListCalls, eventListCall{
+			namespace: listOptions.Namespace,
+			fields:    exactFieldMatches(listOptions.FieldSelector),
+		})
+	}
+
+	return r.Client.List(ctx, list, opts...)
+}
+
+func exactFieldMatches(selector fields.Selector) map[string]string {
+	matches := map[string]string{}
+	if selector == nil {
+		return matches
+	}
+
+	for _, field := range []string{"involvedObject.kind", "involvedObject.name", "involvedObject.uid"} {
+		value, ok := selector.RequiresExactMatch(field)
+		if ok {
+			matches[field] = value
+		}
+	}
+
+	return matches
 }

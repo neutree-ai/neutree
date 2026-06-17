@@ -211,8 +211,8 @@ func formatService(service *corev1.Service) string {
 }
 
 func eventDiagnostics(ctx context.Context, ctrlClient client.Client, namespace, kind, name string, uid types.UID) []string {
-	events := &corev1.EventList{}
-	if err := ctrlClient.List(ctx, events, client.InNamespace(namespace)); err != nil {
+	events, err := listObjectEvents(ctx, ctrlClient, namespace, kind, name, uid)
+	if err != nil {
 		return []string{fmt.Sprintf("events/%s: list failed: %v", name, err)}
 	}
 
@@ -253,6 +253,37 @@ func eventDiagnostics(ctx context.Context, ctrlClient client.Client, namespace, 
 	}
 
 	return diagnostics
+}
+
+func listObjectEvents(ctx context.Context, ctrlClient client.Client, namespace, kind, name string, uid types.UID) (*corev1.EventList, error) {
+	events := &corev1.EventList{}
+	if err := ctrlClient.List(ctx, events, eventListOptions(namespace, kind, name, uid)...); err == nil {
+		return events, nil
+	}
+
+	// Some client implementations require pre-registered indexes for arbitrary
+	// field selectors. Keep diagnostics available if selector evaluation fails.
+	events = &corev1.EventList{}
+	if err := ctrlClient.List(ctx, events, client.InNamespace(namespace)); err != nil {
+		return nil, err
+	}
+
+	return events, nil
+}
+
+func eventListOptions(namespace, kind, name string, uid types.UID) []client.ListOption {
+	matchFields := client.MatchingFields{
+		"involvedObject.kind": kind,
+		"involvedObject.name": name,
+	}
+	if uid != "" {
+		matchFields["involvedObject.uid"] = string(uid)
+	}
+
+	return []client.ListOption{
+		client.InNamespace(namespace),
+		matchFields,
+	}
 }
 
 func truncateDiagnosticMessage(message string) string {
