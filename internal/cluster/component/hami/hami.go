@@ -179,7 +179,7 @@ func (h *HAMiComponent) hasStatus() bool {
 }
 
 func (h *HAMiComponent) ownsNodeScope() bool {
-	return h.hasStatus() || h.cluster.Spec.AcceleratorVirtualizationEnabled()
+	return h.hasStatus() || (h.cluster.Spec != nil && h.cluster.Spec.AcceleratorVirtualizationEnabled())
 }
 
 func (h *HAMiComponent) clearStatus() {

@@ -282,7 +282,7 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 ) error {
 	var errs []error
 
-	if reconcileCtx.Cluster.Spec.AcceleratorVirtualizationEnabled() {
+	if shouldDeleteAcceleratorVirtualizationComponent(reconcileCtx.Cluster) {
 		hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
 			reconcileCtx.clusterNamespace, "", ImagePullSecretName,
 			*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
@@ -307,6 +307,24 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 	}
 
 	return utilerrors.NewAggregate(errs)
+}
+
+func shouldDeleteAcceleratorVirtualizationComponent(cluster *v1.Cluster) bool {
+	if cluster == nil {
+		return false
+	}
+
+	if cluster.Spec != nil && cluster.Spec.AcceleratorVirtualizationEnabled() {
+		return true
+	}
+
+	if cluster.Status == nil || cluster.Status.ComponentStatus == nil {
+		return false
+	}
+
+	_, ok := cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
+
+	return ok
 }
 
 // calculateResources calculates the allocatable and available resources of the cluster.

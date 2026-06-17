@@ -676,6 +676,64 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *te
 	require.Error(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: namespace.Name}, gotNamespace))
 }
 
+func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScopeFromStatus(t *testing.T) {
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+		Spec: &v1.ClusterSpec{
+			Type: v1.KubernetesClusterType,
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: false,
+			},
+		},
+		Status: &v1.ClusterStatus{
+			ComponentStatus: map[string]*v1.ComponentStatus{
+				v1.ComponentStatusAcceleratorVirtualizationKey: {
+					Phase:   v1.ComponentPhaseReady,
+					Managed: true,
+				},
+			},
+		},
+	}
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: util.ClusterNamespace(cluster),
+		},
+	}
+	gpuNode := newNode("gpu-node", true, nil, map[string]string{
+		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	})
+	metricsClusterRole := newUnstructuredObject("rbac.authorization.k8s.io/v1", "ClusterRole",
+		"", "vmagent-node-reader-test")
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(namespace, gpuNode, metricsClusterRole).
+		Build()
+	setLastAppliedConfig(t, fakeClient, namespace.Name, cluster.Metadata.Name, "metrics",
+		[]unstructured.Unstructured{*metricsClusterRole})
+	acceleratorMgr := acceleratormocks.NewMockManager(t)
+	acceleratorMgr.On("SupportPlugins").Return([]string{string(v1.AcceleratorTypeNVIDIAGPU)})
+	acceleratorMgr.On("GetPlugin", string(v1.AcceleratorTypeNVIDIAGPU)).
+		Return(testVirtualizationPlugin{}, true)
+	reconciler := &NativeKubernetesClusterReconciler{
+		acceleratorMgr: acceleratorMgr,
+	}
+	reconcileCtx := &ReconcileContext{
+		Ctx:                     context.TODO(),
+		Cluster:                 cluster,
+		clusterNamespace:        util.ClusterNamespace(cluster),
+		kubernetesClusterConfig: &v1.KubernetesClusterConfig{},
+		ctrClient:               fakeClient,
+	}
+
+	err := reconciler.reconcileDelete(reconcileCtx)
+
+	require.ErrorContains(t, err, "metrics resources are not fully deleted")
+
+	gotNode := &corev1.Node{}
+	require.NoError(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: "gpu-node"}, gotNode))
+	require.NotContains(t, gotNode.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
+}
+
 func newUnstructuredObject(apiVersion, kind, namespace, name string) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{}
 	obj.SetAPIVersion(apiVersion)
