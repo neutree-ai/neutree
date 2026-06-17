@@ -48,12 +48,6 @@ const (
 	modelDownloadStartMarker  = "NEUTREE_MODEL_DOWNLOAD_START"
 	modelDownloadDoneMarker   = "NEUTREE_MODEL_DOWNLOAD_DONE"
 	modelDownloadFailedMarker = "NEUTREE_MODEL_DOWNLOAD_FAILED"
-
-	rayAppStatusDeploying    = "DEPLOYING"
-	rayAppStatusNotStarted   = "NOT_STARTED"
-	rayAppStatusDeployFailed = "DEPLOY_FAILED"
-	rayAppStatusUnhealthy    = "UNHEALTHY"
-	rayAppStatusRunning      = "RUNNING"
 )
 
 type modelDownloadMarkerState int
@@ -441,7 +435,7 @@ func mapDeployingPhase(endpoint *v1.Endpoint, status dashboard.RayServeApplicati
 		}
 	}
 
-	if status.Status == rayAppStatusDeploying &&
+	if status.Status == dashboard.ApplicationStatusDeploying &&
 		proxyReady &&
 		endpoint.Status != nil &&
 		endpoint.Status.Phase == v1.EndpointPhaseRUNNING &&
@@ -579,7 +573,7 @@ func resolveRayStartupModelDownloadStatus(
 	modelDownloadCompleted bool,
 ) (v1.EndpointPhase, bool, bool, []string) {
 	if phase != v1.EndpointPhaseDEPLOYING ||
-		(appStatus.Status != rayAppStatusDeploying && appStatus.Status != rayAppStatusNotStarted) {
+		(appStatus.Status != dashboard.ApplicationStatusDeploying && appStatus.Status != dashboard.ApplicationStatusNotStarted) {
 		return phase, modelDownloadCompleted, false, nil
 	}
 
@@ -686,11 +680,11 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	var errorMessages []string
 
 	switch status.Status {
-	case rayAppStatusDeploying, rayAppStatusNotStarted:
+	case dashboard.ApplicationStatusDeploying, dashboard.ApplicationStatusNotStarted:
 		phase = mapDeployingPhase(endpoint, status, proxyReady)
-	case rayAppStatusDeployFailed, rayAppStatusUnhealthy:
+	case dashboard.ApplicationStatusDeployFailed, dashboard.ApplicationStatusUnhealthy:
 		phase = v1.EndpointPhaseFAILED
-	case rayAppStatusRunning:
+	case dashboard.ApplicationStatusRunning:
 		if !proxyReady {
 			phase = v1.EndpointPhaseDEPLOYING
 

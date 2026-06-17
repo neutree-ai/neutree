@@ -7,6 +7,12 @@ import (
 )
 
 const (
+	ApplicationStatusDeploying    = "DEPLOYING"
+	ApplicationStatusNotStarted   = "NOT_STARTED"
+	ApplicationStatusDeployFailed = "DEPLOY_FAILED"
+	ApplicationStatusUnhealthy    = "UNHEALTHY"
+	ApplicationStatusRunning      = "RUNNING"
+
 	DeploymentStatusHealthy   = "HEALTHY"
 	DeploymentStatusUnhealthy = "UNHEALTHY"
 	ProxyStatusHealthy        = "HEALTHY"
