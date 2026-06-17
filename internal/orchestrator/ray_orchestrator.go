@@ -474,6 +474,7 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 		firstErr         error
 		doneDetail       string
 		inProgressDetail string
+		unknownActorSeen bool
 	)
 
 	for deploymentKey, deployment := range appStatus.Deployments {
@@ -492,6 +493,8 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 				replicaID = replica.ActorID
 			}
 
+			replicaState := modelDownloadMarkerNone
+
 			for _, suffix := range []string{"out", "err"} {
 				logText, err := svc.GetActorLog(replica.ActorID, suffix, modelDownloadLogTailLines)
 				if err != nil {
@@ -508,20 +511,35 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 						fmt.Sprintf("Deployment %s replica %s model download failed", deploymentName, replicaID),
 						nil
 				case modelDownloadMarkerDone:
-					doneDetail = fmt.Sprintf("Deployment %s replica %s model download completed", deploymentName, replicaID)
+					replicaState = modelDownloadMarkerDone
 				case modelDownloadMarkerInProgress:
-					inProgressDetail = fmt.Sprintf("Deployment %s replica %s model download in progress", deploymentName, replicaID)
+					if replicaState != modelDownloadMarkerDone {
+						replicaState = modelDownloadMarkerInProgress
+					}
 				}
+			}
+
+			switch replicaState {
+			case modelDownloadMarkerDone:
+				doneDetail = fmt.Sprintf("Deployment %s replica %s model download completed", deploymentName, replicaID)
+			case modelDownloadMarkerInProgress:
+				inProgressDetail = fmt.Sprintf("Deployment %s replica %s model download in progress", deploymentName, replicaID)
+			case modelDownloadMarkerNone:
+				unknownActorSeen = true
 			}
 		}
 	}
 
-	if doneDetail != "" {
-		return modelDownloadMarkerDone, doneDetail, nil
-	}
-
 	if inProgressDetail != "" {
 		return modelDownloadMarkerInProgress, inProgressDetail, nil
+	}
+
+	if unknownActorSeen {
+		return modelDownloadMarkerNone, "", firstErr
+	}
+
+	if doneDetail != "" {
+		return modelDownloadMarkerDone, doneDetail, nil
 	}
 
 	return modelDownloadMarkerNone, "", firstErr

@@ -2721,6 +2721,55 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:               false,
 		},
 		{
+			name: "return ModelDownloading when one backend replica is still downloading even if another replica is done",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {
+									Name:   "BACKEND",
+									Status: "UPDATING",
+									Replicas: []dashboard.Replica{
+										{
+											ActorID:   "actor-1",
+											ReplicaID: "backend-replica-1",
+										},
+										{
+											ActorID:   "actor-2",
+											ReplicaID: "backend-replica-2",
+										},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+				mockDashboard.On("GetActorLog", "actor-1", "out", 200).
+					Return("NEUTREE_MODEL_DOWNLOAD_START\nNEUTREE_MODEL_DOWNLOAD_DONE\n", nil)
+				mockDashboard.On("GetActorLog", "actor-1", "err", 200).Return("", nil)
+				mockDashboard.On("GetActorLog", "actor-2", "out", 200).Return("NEUTREE_MODEL_DOWNLOAD_START\n", nil)
+				mockDashboard.On("GetActorLog", "actor-2", "err", 200).Return("", nil)
+			},
+			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
+			expectedModelDownloadDone:    boolPtr(false),
+			expectModelDownloadHashEmpty: true,
+			expectErrorMsg:               "model download in progress",
+			expectError:                  false,
+		},
+		{
 			name: "return Deploying when current model download is already completed and actor has no done marker",
 			inputEndpoint: func() *v1.Endpoint {
 				ep := newEndpoint()
