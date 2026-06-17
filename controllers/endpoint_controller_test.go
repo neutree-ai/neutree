@@ -460,6 +460,18 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "same phase and omitted model download metadata that will be preserved",
+			oldStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompleted:     boolPtr(true),
+				ModelDownloadCompletedHash: stringPtr("same-hash"),
+			},
+			newStatus: &v1.EndpointStatus{
+				Phase: v1.EndpointPhaseDEPLOYING,
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
