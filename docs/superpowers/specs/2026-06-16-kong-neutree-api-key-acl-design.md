@@ -316,6 +316,10 @@ does not replace automated E2E acceptance.
   for all cases. The enterprise runtime must contain PR #422 and provide
   multi-workspace capability. A single-workspace community runtime can only be
   additional smoke, not full acceptance.
+- The current `neutree` main repo is the community version, so this PR does not
+  add cross-workspace code-backed E2E that depends on enterprise multi-workspace
+  capability. Code-backed E2E remains scoped to Case 1, the same-workspace EE
+  OpenAI happy path.
 
 ### E2E Classification
 
@@ -328,8 +332,8 @@ verification.
 | Authorized same-workspace EE model list and OpenAI chat | Manual Step 5 + Code E2E | Reuse `external-endpoint && openai` |
 | Authorized same-workspace EE Anthropic messages | Manual Step 5 only | Existing suite covers protocol behavior; ACL proof is manual |
 | Authorized same-workspace IE chat on a Running endpoint | Manual Step 5 only | Depends on cluster/model capacity |
-| Cross-workspace EE denied with `403` | Manual Step 5 only | Requires enterprise runtime |
-| Cross-workspace IE denied with `403` | Manual Step 5 only | Requires enterprise runtime plus Running IE |
+| Cross-workspace EE denied with `403` | Manual Step 5 only | Enterprise runtime manual acceptance; not automated in the community main repo |
+| Cross-workspace IE denied with `403` | Manual Step 5 only | Enterprise runtime manual acceptance with Running IE; not automated in the community main repo |
 | Permission removal followed by reconcile denies access | Manual Step 5 only | Requires non-admin role mutation and reconcile observation |
 | Direct Kong ACL membership removal denies access | Manual Step 5 only | Route default-deny proof |
 | Successful usage/trace records still include API-key and target metadata | Manual Step 5 only | Requires usage/trace query access |
