@@ -2722,6 +2722,60 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectError:               false,
 		},
 		{
+			name: "return Deploying when backend actor is done even if controller actor has no download markers",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {
+									Name:   "BACKEND",
+									Status: "UPDATING",
+									Replicas: []dashboard.Replica{
+										{
+											ActorID:   "actor-backend",
+											ReplicaID: "backend-replica-1",
+										},
+									},
+								},
+								"Controller": {
+									Name:   "Controller",
+									Status: "HEALTHY",
+									Replicas: []dashboard.Replica{
+										{
+											ActorID:   "actor-controller",
+											ReplicaID: "controller-replica-1",
+										},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+				mockDashboard.On("GetActorLog", "actor-backend", "out", 200).
+					Return("NEUTREE_MODEL_DOWNLOAD_START\nNEUTREE_MODEL_DOWNLOAD_DONE\n", nil)
+				mockDashboard.On("GetActorLog", "actor-backend", "err", 200).Return("", nil)
+				mockDashboard.On("GetActorLog", "actor-controller", "out", 200).Maybe().Return("", nil)
+				mockDashboard.On("GetActorLog", "actor-controller", "err", 200).Maybe().Return("", nil)
+			},
+			expectedPhase:             v1.EndpointPhaseDEPLOYING,
+			expectedModelDownloadDone: boolPtr(true),
+			expectCurrentModelHash:    true,
+			expectError:               false,
+		},
+		{
 			name: "return ModelDownloading when one backend replica is still downloading even if another replica is done",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()

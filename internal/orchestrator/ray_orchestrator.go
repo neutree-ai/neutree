@@ -469,6 +469,10 @@ func modelDownloadStateFromLog(logText string) modelDownloadMarkerState {
 	return modelDownloadMarkerNone
 }
 
+func isBackendDeployment(deploymentName string) bool {
+	return strings.EqualFold(deploymentName, "backend")
+}
+
 func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashboard.RayServeApplicationStatus) (modelDownloadMarkerState, string, error) {
 	var (
 		firstErr         error
@@ -481,6 +485,10 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 		deploymentName := deployment.Name
 		if deploymentName == "" {
 			deploymentName = deploymentKey
+		}
+
+		if !isBackendDeployment(deploymentName) {
+			continue
 		}
 
 		for _, replica := range deployment.Replicas {

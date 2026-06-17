@@ -27,8 +27,9 @@ import (
 )
 
 const (
-	annEndpointSpecHash = "neutree.ai/endpoint-spec-hash"
-	annNeutreeVersion   = "neutree.ai/neutree-version"
+	annEndpointSpecHash              = "neutree.ai/endpoint-spec-hash"
+	annNeutreeVersion                = "neutree.ai/neutree-version"
+	containerFailureRestartThreshold = 5
 )
 
 var _ Orchestrator = &kubernetesOrchestrator{}
@@ -687,11 +688,23 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 			continue
 		}
 
+		if containerType == "Init Container" &&
+			cs.State.Terminated != nil &&
+			cs.State.Terminated.ExitCode != 0 &&
+			cs.RestartCount >= containerFailureRestartThreshold {
+			failed = true
+
+			errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' terminated with exit code %d after %d restarts: %s",
+				podName, containerType, cs.Name, cs.State.Terminated.ExitCode, cs.RestartCount, cs.State.Terminated.Message))
+
+			continue
+		}
+
 		// Check for CrashLoopBackOff with restart count >= 5
 		if cs.State.Waiting != nil {
 			reason := cs.State.Waiting.Reason
 
-			if reason == "CrashLoopBackOff" && cs.RestartCount >= 5 {
+			if reason == "CrashLoopBackOff" && cs.RestartCount >= containerFailureRestartThreshold {
 				failed = true
 
 				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' in CrashLoopBackOff (restarted %d times): %s",
