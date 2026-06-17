@@ -65,6 +65,7 @@ func (h *HAMiComponent) unmanagedHAMiResourceChecks() ([]managedObjectCheck, err
 	}
 
 	checks := make([]managedObjectCheck, 0, len(rendered.Items))
+
 	for i := range rendered.Items {
 		item := &rendered.Items[i]
 		if item.GetAPIVersion() == "" || item.GetKind() == "" || item.GetName() == "" {
@@ -89,6 +90,7 @@ func (h *HAMiComponent) unmanagedHAMiResourceChecks() ([]managedObjectCheck, err
 
 func (h *HAMiComponent) validateManagedObject(ctx context.Context, obj client.Object, key types.NamespacedName) error {
 	kind := objectKind(obj)
+
 	if err := h.ctrlClient.Get(ctx, key, obj); err != nil {
 		return clientIgnoreNotFound(err)
 	}
