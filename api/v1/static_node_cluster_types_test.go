@@ -2,6 +2,7 @@ package v1
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -82,21 +83,18 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 					ConfigFiles: []NodeComponentConfigFile{
 						{Path: "/etc/neutree/vmagent.yaml", Content: "scrape_configs: []", Mode: "0644", Atomic: true},
 					},
-					HealthCheck:   &NodeComponentHealthCheck{HTTPPath: "/api/version", Port: 8265},
-					RestartPolicy: NodeComponentRestartPolicyAlways,
-					ConfigHash:    "hash-a",
+					HealthCheck: &NodeComponentHealthCheck{HTTPPath: "/api/version", Port: 8265},
+					ConfigHash:  "hash-a",
 				},
 			},
 		},
 		Status: &StaticNodeStatus{
 			Phase: StaticNodePhaseReady,
 			Accelerator: &StaticNodeAcceleratorStatus{
-				Type:           AcceleratorTypeNVIDIAGPU.String(),
-				Vendor:         "nvidia",
-				ProductName:    "NVIDIA GPU",
-				ProductModel:   "nvidia_gpu",
-				RuntimeProfile: AcceleratorTypeNVIDIAGPU.String(),
-				ResourceName:   "GPU",
+				Type:         AcceleratorTypeNVIDIAGPU.String(),
+				Vendor:       "nvidia",
+				ProductName:  "NVIDIA GPU",
+				ProductModel: "nvidia_gpu",
 				Devices: []StaticNodeAcceleratorDeviceStatus{
 					{ID: "0", ProductName: "NVIDIA GPU", Healthy: true},
 				},
@@ -130,12 +128,41 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.Spec)
 	require.Len(t, decoded.Spec.Components, 1)
 	assert.Equal(t, NodeComponentTypeRayHead, decoded.Spec.Components[0].Type)
-	assert.Equal(t, NodeComponentRestartPolicyAlways, decoded.Spec.Components[0].RestartPolicy)
 	require.NotNil(t, decoded.Status)
 	require.NotNil(t, decoded.Status.Accelerator)
 	assert.Equal(t, AcceleratorTypeNVIDIAGPU.String(), decoded.Status.Accelerator.Type)
 	require.Len(t, decoded.Status.Components, 1)
 	assert.Equal(t, NodeComponentPhaseRunning, decoded.Status.Components[0].Phase)
+}
+
+func TestStaticNodeAPIShapeOmitsInternalOrDerivedFields(t *testing.T) {
+	clusterSpecType := reflect.TypeOf(ClusterSpec{})
+	_, hasParentUpgradeStrategy := clusterSpecType.FieldByName("UpgradeStrategy")
+	assert.False(t, hasParentUpgradeStrategy, "Cluster.spec must not expose upgrade_strategy; static flow owns Recreate internally")
+
+	staticNodeClusterSpecType := reflect.TypeOf(StaticNodeClusterSpec{})
+	_, hasHead := staticNodeClusterSpecType.FieldByName("Head")
+	assert.False(t, hasHead, "StaticNodeCluster head must be derived from spec.nodes[].role=head")
+
+	staticNodeClusterStatusType := reflect.TypeOf(StaticNodeClusterStatus{})
+	_, hasNestedUpgrade := staticNodeClusterStatusType.FieldByName("Upgrade")
+	assert.False(t, hasNestedUpgrade, "StaticNodeCluster.status must use version + upgrade_step instead of nested upgrade status")
+	_, hasVersion := staticNodeClusterStatusType.FieldByName("Version")
+	assert.True(t, hasVersion, "StaticNodeCluster.status.version is required")
+	_, hasUpgradeStep := staticNodeClusterStatusType.FieldByName("UpgradeStep")
+	assert.True(t, hasUpgradeStep, "StaticNodeCluster.status.upgrade_step is required")
+
+	acceleratorStatusType := reflect.TypeOf(StaticNodeAcceleratorStatus{})
+	_, hasRuntimeProfile := acceleratorStatusType.FieldByName("RuntimeProfile")
+	assert.False(t, hasRuntimeProfile, "StaticNode.status.accelerator must not expose runtime_profile")
+	_, hasResourceName := acceleratorStatusType.FieldByName("ResourceName")
+	assert.False(t, hasResourceName, "StaticNode.status.accelerator must not expose resource_name")
+
+	componentSpecType := reflect.TypeOf(NodeComponentSpec{})
+	for _, field := range []string{"Dependencies", "RestartPolicy", "DesiredPhase"} {
+		_, ok := componentSpecType.FieldByName(field)
+		assert.False(t, ok, "NodeComponentSpec must not expose %s", field)
+	}
 }
 
 func TestStaticResourcesSchemeRegistration(t *testing.T) {

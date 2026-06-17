@@ -570,11 +570,10 @@ type ApiEngineStatus struct {
 }
 
 type ApiClusterSpec struct {
-	Type            string      `json:"type"`
-	Config          interface{} `json:"config"`
-	ImageRegistry   string      `json:"image_registry"`
-	UpgradeStrategy interface{} `json:"upgrade_strategy"`
-	Version         string      `json:"version"`
+	Type          string      `json:"type"`
+	Config        interface{} `json:"config"`
+	ImageRegistry string      `json:"image_registry"`
+	Version       string      `json:"version"`
 }
 
 type ApiClusterStatus struct {

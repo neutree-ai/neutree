@@ -32,6 +32,7 @@ const (
 	vmagentConfigPath                = "/etc/neutree/vmagent/config.yaml"
 	vmagentFileSDDir                 = "/etc/neutree/vmagent/file_sd"
 	vmagentNodeExporterFileSDPath    = vmagentFileSDDir + "/node-exporter.json"
+	vmagentRayFileSDPath             = vmagentFileSDDir + "/ray.json"
 	defaultNodeExporterImage         = "quay.io/prometheus/node-exporter:v1.8.2"
 	defaultVMAgentImage              = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
 )
@@ -127,16 +128,12 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 		return nil, errors.New("static node cluster spec.image_registry is required")
 	}
 
-	if cluster.Spec.Head.NodeName == "" {
-		return nil, errors.New("static node cluster spec.head.node_name is required")
-	}
-
 	if len(cluster.Spec.Nodes) == 0 {
 		return nil, errors.New("static node cluster spec.nodes is required")
 	}
 
 	nodeNames := make(map[string]struct{}, len(cluster.Spec.Nodes))
-	headSeen := false
+	headCount := 0
 	currentByName := staticNodeByName(currentNodes)
 	plans := make([]staticNodeDesiredPlan, 0, len(cluster.Spec.Nodes))
 
@@ -156,9 +153,8 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 		nodeNames[nodeSpec.Name] = struct{}{}
 
 		role := normalizeStaticNodeRole(nodeSpec.Role)
-		if nodeSpec.Name == cluster.Spec.Head.NodeName {
-			role = v1.StaticNodeRoleHead
-			headSeen = true
+		if role == v1.StaticNodeRoleHead {
+			headCount++
 		}
 
 		desiredNode := &v1.StaticNode{
@@ -203,8 +199,8 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 		})
 	}
 
-	if !headSeen {
-		return nil, fmt.Errorf("head node %s not found in static node cluster nodes", cluster.Spec.Head.NodeName)
+	if headCount != 1 {
+		return nil, fmt.Errorf("static node cluster requires exactly one head node, got %d", headCount)
 	}
 
 	sort.SliceStable(plans, func(i, j int) bool {
@@ -290,36 +286,41 @@ func applyRayRecreateUpgradePlan(
 			useCurrentComponentsIfPresent(plan.Node, current)
 
 			if plan.Node.Spec.Role == v1.StaticNodeRoleWorker {
-				markRayWorkerStopped(plan.Node)
+				removeRayWorkerComponent(plan.Node)
 			}
 		case v1.StaticNodeClusterUpgradeStepStartingHead:
 			if plan.Node.Spec.Role == v1.StaticNodeRoleWorker {
 				useCurrentComponentsIfPresent(plan.Node, current)
-				markRayWorkerStopped(plan.Node)
+				removeRayWorkerComponent(plan.Node)
 			}
 		}
 	}
 }
 
-func staticNodeClusterUpgrade(cluster *v1.StaticNodeCluster) *v1.StaticNodeClusterUpgradeStatus {
-	if cluster == nil || cluster.Spec == nil || cluster.Status == nil || cluster.Status.Upgrade == nil {
+type staticNodeClusterUpgradeState struct {
+	ObservedVersion string
+	Step            v1.StaticNodeClusterUpgradeStep
+}
+
+func staticNodeClusterUpgrade(cluster *v1.StaticNodeCluster) *staticNodeClusterUpgradeState {
+	if cluster == nil || cluster.Spec == nil || cluster.Status == nil {
 		return nil
 	}
 
-	upgrade := *cluster.Status.Upgrade
-	if upgrade.ObservedVersion == "" || upgrade.ObservedVersion == cluster.Spec.Version {
+	observedVersion := cluster.Status.Version
+	if observedVersion == "" || observedVersion == cluster.Spec.Version {
 		return nil
 	}
 
-	if upgrade.TargetVersion == "" {
-		upgrade.TargetVersion = cluster.Spec.Version
+	step := cluster.Status.UpgradeStep
+	if step == "" {
+		step = v1.StaticNodeClusterUpgradeStepWarming
 	}
 
-	if upgrade.Step == "" {
-		upgrade.Step = v1.StaticNodeClusterUpgradeStepWarming
+	return &staticNodeClusterUpgradeState{
+		ObservedVersion: observedVersion,
+		Step:            step,
 	}
-
-	return &upgrade
 }
 
 func useCurrentComponentsIfPresent(node *v1.StaticNode, current *v1.StaticNode) {
@@ -330,16 +331,20 @@ func useCurrentComponentsIfPresent(node *v1.StaticNode, current *v1.StaticNode) 
 	node.Spec.Components = copyNodeComponents(current.Spec.Components)
 }
 
-func markRayWorkerStopped(node *v1.StaticNode) {
+func removeRayWorkerComponent(node *v1.StaticNode) {
 	if node == nil || node.Spec == nil {
 		return
 	}
 
+	components := make([]v1.NodeComponentSpec, 0, len(node.Spec.Components))
+
 	for i := range node.Spec.Components {
-		if node.Spec.Components[i].Type == v1.NodeComponentTypeRayWorker {
-			node.Spec.Components[i].DesiredPhase = v1.NodeComponentPhaseStopped
+		if node.Spec.Components[i].Type != v1.NodeComponentTypeRayWorker {
+			components = append(components, node.Spec.Components[i])
 		}
 	}
+
+	node.Spec.Components = components
 }
 
 func copyNodeComponents(components []v1.NodeComponentSpec) []v1.NodeComponentSpec {
@@ -360,7 +365,8 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 		DesiredNodes: len(desiredNodeNames),
 	}
 	if upgrade := staticNodeClusterUpgrade(cluster); upgrade != nil {
-		status.Upgrade = upgrade
+		status.Version = upgrade.ObservedVersion
+		status.UpgradeStep = upgrade.Step
 		status.Phase = staticNodeClusterUpgradePhase(upgrade.Step)
 	}
 
@@ -420,8 +426,8 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 	status.MetricsReady = metricsReady
 
 	switch {
-	case status.Upgrade != nil:
-		status.Phase = staticNodeClusterUpgradePhase(status.Upgrade.Step)
+	case status.UpgradeStep != "":
+		status.Phase = staticNodeClusterUpgradePhase(status.UpgradeStep)
 	case anyNodeFailed:
 		status.Phase = v1.StaticNodeClusterPhaseFailed
 	case status.ReadyNodes == status.DesiredNodes && status.HeadReady && status.WarmReady && status.MetricsReady:
@@ -432,8 +438,8 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 		status.Phase = v1.StaticNodeClusterPhaseProvisioning
 	}
 
-	if status.Phase == v1.StaticNodeClusterPhaseReady && status.Upgrade == nil && cluster != nil && cluster.Spec != nil {
-		status.Upgrade = &v1.StaticNodeClusterUpgradeStatus{ObservedVersion: cluster.Spec.Version}
+	if status.Phase == v1.StaticNodeClusterPhaseReady && status.UpgradeStep == "" && cluster != nil && cluster.Spec != nil {
+		status.Version = cluster.Spec.Version
 	}
 
 	return status
@@ -451,7 +457,21 @@ func staticNodeClusterDesiredNodeNames(cluster *v1.StaticNodeCluster) (map[strin
 		}
 	}
 
-	return desiredNodeNames, cluster.Spec.Head.NodeName
+	return desiredNodeNames, staticNodeClusterHeadName(cluster)
+}
+
+func staticNodeClusterHeadName(cluster *v1.StaticNodeCluster) string {
+	if cluster == nil || cluster.Spec == nil {
+		return ""
+	}
+
+	for _, node := range cluster.Spec.Nodes {
+		if normalizeStaticNodeRole(node.Role) == v1.StaticNodeRoleHead {
+			return node.Name
+		}
+	}
+
+	return ""
 }
 
 func staticNodeClusterUpgradePhase(step v1.StaticNodeClusterUpgradeStep) v1.StaticNodeClusterPhase {
@@ -474,26 +494,26 @@ func advanceStaticNodeClusterUpgradeStatus(
 	currentNodes []*v1.StaticNode,
 	status v1.StaticNodeClusterStatus,
 ) v1.StaticNodeClusterStatus {
-	if status.Upgrade == nil || status.Upgrade.Step == "" {
+	if status.UpgradeStep == "" {
 		return status
 	}
 
-	switch status.Upgrade.Step {
+	switch status.UpgradeStep {
 	case v1.StaticNodeClusterUpgradeStepWarming:
 		if status.WarmReady {
-			status.Upgrade.Step = v1.StaticNodeClusterUpgradeStepStoppingWorkers
+			status.UpgradeStep = v1.StaticNodeClusterUpgradeStepStoppingWorkers
 		}
 	case v1.StaticNodeClusterUpgradeStepStoppingWorkers:
 		if staticNodeClusterWorkersStopped(cluster, currentNodes) {
-			status.Upgrade.Step = v1.StaticNodeClusterUpgradeStepStartingHead
+			status.UpgradeStep = v1.StaticNodeClusterUpgradeStepStartingHead
 		}
 	case v1.StaticNodeClusterUpgradeStepStartingHead:
 		if staticNodeClusterHeadRayRunningTarget(cluster, currentNodes) {
-			status.Upgrade.Step = v1.StaticNodeClusterUpgradeStepStartingWorkers
+			status.UpgradeStep = v1.StaticNodeClusterUpgradeStepStartingWorkers
 		}
 	case v1.StaticNodeClusterUpgradeStepStartingWorkers:
 		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes) {
-			status.Upgrade.Step = v1.StaticNodeClusterUpgradeStepVerifying
+			status.UpgradeStep = v1.StaticNodeClusterUpgradeStepVerifying
 		}
 	case v1.StaticNodeClusterUpgradeStepVerifying:
 		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes) &&
@@ -501,14 +521,15 @@ func advanceStaticNodeClusterUpgradeStatus(
 			status.HeadReady &&
 			status.WarmReady &&
 			status.MetricsReady {
-			status.Upgrade = &v1.StaticNodeClusterUpgradeStatus{ObservedVersion: cluster.Spec.Version}
+			status.Version = cluster.Spec.Version
+			status.UpgradeStep = ""
 			status.Phase = v1.StaticNodeClusterPhaseReady
 
 			return status
 		}
 	}
 
-	status.Phase = staticNodeClusterUpgradePhase(status.Upgrade.Step)
+	status.Phase = staticNodeClusterUpgradePhase(status.UpgradeStep)
 
 	return status
 }
@@ -547,11 +568,12 @@ func staticNodeClusterRayRuntimeRunningTarget(cluster *v1.StaticNodeCluster, nod
 }
 
 func staticNodeClusterHeadRayRunningTarget(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
-	if cluster == nil || cluster.Spec == nil || cluster.Spec.Head.NodeName == "" {
+	headName := staticNodeClusterHeadName(cluster)
+	if headName == "" {
 		return false
 	}
 
-	node := staticNodeByName(nodes)[cluster.Spec.Head.NodeName]
+	node := staticNodeByName(nodes)[headName]
 	if node == nil || node.Status == nil {
 		return false
 	}
@@ -587,12 +609,7 @@ func staticNodeClusterWorkerNames(cluster *v1.StaticNodeCluster) map[string]stru
 	}
 
 	for _, nodeSpec := range cluster.Spec.Nodes {
-		role := normalizeStaticNodeRole(nodeSpec.Role)
-		if nodeSpec.Name == cluster.Spec.Head.NodeName {
-			role = v1.StaticNodeRoleHead
-		}
-
-		if role == v1.StaticNodeRoleWorker && nodeSpec.Name != "" {
+		if normalizeStaticNodeRole(nodeSpec.Role) == v1.StaticNodeRoleWorker && nodeSpec.Name != "" {
 			workerNames[nodeSpec.Name] = struct{}{}
 		}
 	}
@@ -701,7 +718,7 @@ func (r *StaticNodeClusterReconciler) runtimeProfile(
 }
 
 func runtimeProfileFallbackMessage(accelerator v1.StaticNodeAcceleratorStatus) string {
-	profile := accelerator.RuntimeProfile
+	profile := accelerator.ProductModel
 	if profile == "" {
 		profile = accelerator.Type
 	}
@@ -736,7 +753,6 @@ func buildNodeComponents(
 					ReadOnly:  true,
 				},
 			},
-			RestartPolicy: v1.NodeComponentRestartPolicyAlways,
 			Ports: []v1.NodeComponentPort{
 				{Name: "metrics", Port: defaultNodeExporterPort, Protocol: "TCP"},
 			},
@@ -746,8 +762,6 @@ func buildNodeComponents(
 			},
 		},
 	}
-
-	vmagentDependencies := []string{nodeExporterComponentName}
 
 	if profile != nil && profile.Metrics != nil && profile.Metrics.Exporter != nil {
 		exporter := profile.Metrics.Exporter
@@ -761,7 +775,6 @@ func buildNodeComponents(
 			Volumes:          append([]v1.NodeComponentVolume{}, exporter.Volumes...),
 			ConfigFiles:      append([]v1.NodeComponentConfigFile{}, exporter.ConfigFiles...),
 			DockerRunOptions: append([]string{}, exporter.DockerRunOptions...),
-			RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 			Ports: []v1.NodeComponentPort{
 				{Name: "metrics", Port: exporter.Port, Protocol: "TCP"},
 			},
@@ -770,8 +783,6 @@ func buildNodeComponents(
 				Port:     exporter.Port,
 			},
 		})
-
-		vmagentDependencies = append(vmagentDependencies, acceleratorExporterComponentName)
 	}
 
 	if role == v1.StaticNodeRoleHead {
@@ -797,8 +808,6 @@ func buildNodeComponents(
 					ReadOnly:  true,
 				},
 			},
-			Dependencies:  vmagentDependencies,
-			RestartPolicy: v1.NodeComponentRestartPolicyAlways,
 			Ports: []v1.NodeComponentPort{
 				{Name: "http", Port: defaultVMAgentPort, Protocol: "TCP"},
 			},
@@ -857,6 +866,9 @@ func renderVMAgentConfig(plans []staticNodeDesiredPlan) string {
 	builder.WriteString("- job_name: static-node-node-exporter\n")
 	writeVMAgentFileSDConfig(&builder, vmagentNodeExporterFileSDPath)
 
+	builder.WriteString("- job_name: static-node-ray\n")
+	writeVMAgentFileSDConfig(&builder, vmagentRayFileSDPath)
+
 	groups := acceleratorExporterTargetGroups(plans)
 	for i, group := range groups {
 		builder.WriteString("- job_name: ")
@@ -891,6 +903,10 @@ func renderVMAgentFileSDConfigFiles(
 		vmagentFileSDConfigFile(
 			vmagentNodeExporterFileSDPath,
 			renderVMAgentNodeExporterFileSDTargets(cluster, plans),
+		),
+		vmagentFileSDConfigFile(
+			vmagentRayFileSDPath,
+			renderVMAgentRayFileSDTargets(cluster, plans),
 		),
 	}
 
@@ -943,6 +959,41 @@ func renderVMAgentNodeExporterFileSDTargets(
 	return mustMarshalVMAgentFileSDTargets(targets)
 }
 
+func renderVMAgentRayFileSDTargets(
+	cluster *v1.StaticNodeCluster,
+	plans []staticNodeDesiredPlan,
+) string {
+	targets := make([]vmagentFileSDTarget, 0, len(plans))
+
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Spec == nil || !staticNodeHasRayComponent(plan.Node) {
+			continue
+		}
+
+		targets = append(targets, vmagentFileSDTarget{
+			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, v1.RayletMetricsPort)},
+			Labels:  vmagentTargetLabels(cluster, plan.Node, "ray", nil),
+		})
+	}
+
+	return mustMarshalVMAgentFileSDTargets(targets)
+}
+
+func staticNodeHasRayComponent(node *v1.StaticNode) bool {
+	if node == nil || node.Spec == nil {
+		return false
+	}
+
+	for _, component := range node.Spec.Components {
+		switch component.Type {
+		case v1.NodeComponentTypeRayHead, v1.NodeComponentTypeRayWorker:
+			return true
+		}
+	}
+
+	return false
+}
+
 func renderVMAgentAcceleratorExporterFileSDTargets(
 	cluster *v1.StaticNodeCluster,
 	targets []acceleratorExporterTarget,
@@ -950,15 +1001,9 @@ func renderVMAgentAcceleratorExporterFileSDTargets(
 	result := make([]vmagentFileSDTarget, 0, len(targets))
 
 	for _, target := range targets {
-		extraLabels := map[string]string{
-			"accelerator_exporter":      target.Exporter.Kind,
-			"accelerator_product_model": target.Accelerator.ProductModel,
-			"accelerator_type":          target.Accelerator.Type,
-			"accelerator_vendor":        target.Accelerator.Vendor,
-		}
 		result = append(result, vmagentFileSDTarget{
 			Targets: []string{fmt.Sprintf("%s:%d", target.Node.Spec.IP, target.Exporter.Port)},
-			Labels:  vmagentTargetLabels(cluster, target.Node, acceleratorExporterComponentName, nonEmptyLabels(extraLabels)),
+			Labels:  vmagentTargetLabels(cluster, target.Node, acceleratorExporterComponentName, nil),
 		})
 	}
 
@@ -1079,18 +1124,6 @@ func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
 	return path
 }
 
-func nonEmptyLabels(labels map[string]string) map[string]string {
-	result := make(map[string]string, len(labels))
-
-	for key, value := range labels {
-		if value != "" {
-			result[key] = value
-		}
-	}
-
-	return result
-}
-
 func appendComponentConfigFile(node *v1.StaticNode, componentName string, configFile v1.NodeComponentConfigFile) {
 	for i := range node.Spec.Components {
 		if node.Spec.Components[i].Name != componentName {
@@ -1154,7 +1187,6 @@ func buildRayComponent(
 			Args:             []string{rayStartCommand(cluster, role)},
 			Env:              env,
 			DockerRunOptions: dockerRunOptions,
-			RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 			HealthCheck: &v1.NodeComponentHealthCheck{
 				Port:          defaultRayDashboardPort,
 				RayNodeLabels: rayNodeLabels(cluster, role),
@@ -1170,7 +1202,6 @@ func buildRayComponent(
 		Args:             []string{rayStartCommand(cluster, role)},
 		Env:              env,
 		DockerRunOptions: dockerRunOptions,
-		RestartPolicy:    v1.NodeComponentRestartPolicyAlways,
 		HealthCheck: &v1.NodeComponentHealthCheck{
 			HTTPHost:      staticNodeClusterHeadIP(cluster),
 			Port:          defaultRayDashboardPort,
@@ -1300,7 +1331,7 @@ func staticNodeClusterHeadIP(cluster *v1.StaticNodeCluster) string {
 	}
 
 	for _, node := range cluster.Spec.Nodes {
-		if node.Name == cluster.Spec.Head.NodeName {
+		if normalizeStaticNodeRole(node.Role) == v1.StaticNodeRoleHead {
 			return node.IP
 		}
 	}

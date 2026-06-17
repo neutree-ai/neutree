@@ -31,10 +31,9 @@ type Cluster struct {
 
 type ClusterSpec struct {
 	// currently supports "ssh" and "kubernetes" cluster types
-	Type            string                  `json:"type"`
-	Config          *ClusterConfig          `json:"config"`
-	ImageRegistry   string                  `json:"image_registry"`
-	UpgradeStrategy *ClusterUpgradeStrategy `json:"upgrade_strategy,omitempty" yaml:"upgrade_strategy,omitempty"`
+	Type          string         `json:"type"`
+	Config        *ClusterConfig `json:"config"`
+	ImageRegistry string         `json:"image_registry"`
 	// the neutree serving version, if not specified, the default version will be used
 	Version string `json:"version"`
 }
@@ -217,14 +216,6 @@ func (obj *Cluster) GetVersion() string {
 	}
 
 	return obj.Spec.Version
-}
-
-func (obj *Cluster) GetUpgradeStrategy() *ClusterUpgradeStrategy {
-	if obj == nil || obj.Spec == nil || obj.Spec.UpgradeStrategy == nil || obj.Spec.UpgradeStrategy.Type == "" {
-		return DefaultClusterUpgradeStrategy()
-	}
-
-	return &ClusterUpgradeStrategy{Type: obj.Spec.UpgradeStrategy.Type}
 }
 
 func DefaultClusterUpgradeStrategy() *ClusterUpgradeStrategy {

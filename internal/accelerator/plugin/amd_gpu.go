@@ -93,7 +93,6 @@ func (p *AMDGPUAcceleratorPlugin) DetectStaticNodeAccelerator(
 		vendor:          "amd",
 		productName:     "AMD GPU",
 		productModel:    "amd_gpu",
-		resourceName:    "GPU",
 		match: func(line string) bool {
 			return (strings.Contains(line, "1002:") || strings.Contains(line, "advanced micro devices")) &&
 				(strings.Contains(line, "processing accelerators") || strings.Contains(line, "vga compatible controller"))

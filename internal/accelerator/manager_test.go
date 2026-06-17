@@ -64,12 +64,10 @@ func TestManagerGetAcceleratorProfileMissingPlugin(t *testing.T) {
 
 func TestManagerDetectAcceleratorDelegatesToPluginDetector(t *testing.T) {
 	expected := &v1.StaticNodeAcceleratorStatus{
-		Type:           "custom_gpu",
-		Vendor:         "custom",
-		ProductName:    "Custom GPU",
-		ProductModel:   "custom-gpu",
-		RuntimeProfile: "custom-gpu",
-		ResourceName:   "GPU",
+		Type:         "custom_gpu",
+		Vendor:       "custom",
+		ProductName:  "Custom GPU",
+		ProductModel: "custom-gpu",
 		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 			{ID: "0", ProductName: "Custom GPU", Healthy: true},
 		},
@@ -136,9 +134,8 @@ func TestManagerRuntimeProfileDelegatesToPluginProvider(t *testing.T) {
 		lastRegisterTime: time.Now(),
 	})
 	accelerator := v1.StaticNodeAcceleratorStatus{
-		Type:           "custom_gpu",
-		RuntimeProfile: "custom-gpu-special",
-		ProductModel:   "custom-gpu-special",
+		Type:         "custom_gpu",
+		ProductModel: "custom-gpu-special",
 	}
 
 	profile, supported, err := m.RuntimeProfile(context.Background(), accelerator)

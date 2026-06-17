@@ -35,7 +35,7 @@ func (p *acceleratorRestPlugin) RuntimeProfile(
 	ctx context.Context,
 	accelerator v1.StaticNodeAcceleratorStatus,
 ) (*v1.AcceleratorProfile, bool, error) {
-	if accelerator.Type != "" && accelerator.Type != p.resource && accelerator.RuntimeProfile != p.resource {
+	if accelerator.Type != "" && accelerator.Type != p.resource {
 		return nil, false, nil
 	}
 

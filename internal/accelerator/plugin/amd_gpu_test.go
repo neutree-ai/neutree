@@ -63,8 +63,6 @@ func TestAMDGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 	assert.Equal(t, "amd", status.Vendor)
 	assert.Equal(t, "AMD GPU", status.ProductName)
 	assert.Equal(t, "amd_gpu", status.ProductModel)
-	assert.Equal(t, v1.AcceleratorTypeAMDGPU.String(), status.RuntimeProfile)
-	assert.Equal(t, "GPU", status.ResourceName)
 	require.Len(t, status.Devices, 1)
 	assert.Equal(t, "0", status.Devices[0].ID)
 	assert.True(t, status.Devices[0].Healthy)
@@ -97,8 +95,8 @@ func TestAMDGPUAcceleratorPluginRuntimeProfile(t *testing.T) {
 	p := &AMDGPUAcceleratorPlugin{}
 
 	profile, supported, err := p.RuntimeProfile(context.Background(), v1.StaticNodeAcceleratorStatus{
-		Type:           v1.AcceleratorTypeAMDGPU.String(),
-		RuntimeProfile: "amd-mi300x",
+		Type:         v1.AcceleratorTypeAMDGPU.String(),
+		ProductModel: "amd-mi300x",
 	})
 
 	require.NoError(t, err)

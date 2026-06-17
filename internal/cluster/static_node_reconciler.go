@@ -256,7 +256,11 @@ func (r *StaticNodeReconciler) ReconcileComponents(
 	node *v1.StaticNode,
 	runner StaticNodeCommandRunner,
 ) ([]v1.NodeComponentStatus, error) {
-	if node == nil || node.Spec == nil || len(node.Spec.Components) == 0 {
+	if node == nil || node.Spec == nil {
+		return nil, nil
+	}
+
+	if len(node.Spec.Components) == 0 && existingComponentStatusCount(node) == 0 {
 		return nil, nil
 	}
 
@@ -264,12 +268,16 @@ func (r *StaticNodeReconciler) ReconcileComponents(
 		return nil, errors.New("static node command runner is required")
 	}
 
-	statuses := make([]v1.NodeComponentStatus, 0, len(node.Spec.Components))
+	statuses := make([]v1.NodeComponentStatus, 0, len(node.Spec.Components)+existingComponentStatusCount(node))
 	readyByName := map[string]bool{}
 	errs := []error{}
 
+	staleStatuses, staleErrs := stopStaleComponents(ctx, node, runner)
+	statuses = append(statuses, staleStatuses...)
+	errs = append(errs, staleErrs...)
+
 	for _, component := range node.Spec.Components {
-		status, err := r.reconcileComponent(ctx, node, component, readyByName, runner)
+		status, err := r.reconcileComponent(ctx, node, component, node.Spec.Components, readyByName, runner)
 		statuses = append(statuses, status)
 		readyByName[component.Name] = status.Ready
 
@@ -281,10 +289,19 @@ func (r *StaticNodeReconciler) ReconcileComponents(
 	return statuses, apierrors.NewAggregate(errs)
 }
 
+func existingComponentStatusCount(node *v1.StaticNode) int {
+	if node == nil || node.Status == nil {
+		return 0
+	}
+
+	return len(node.Status.Components)
+}
+
 func (r *StaticNodeReconciler) reconcileComponent(
 	ctx context.Context,
 	node *v1.StaticNode,
 	component v1.NodeComponentSpec,
+	desiredComponents []v1.NodeComponentSpec,
 	readyByName map[string]bool,
 	runner StaticNodeCommandRunner,
 ) (v1.NodeComponentStatus, error) {
@@ -308,22 +325,7 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		return status, nil
 	}
 
-	if component.DesiredPhase == v1.NodeComponentPhaseStopped {
-		if err := stopComponentContainer(ctx, runner, componentContainerName(node, component)); err != nil {
-			status.Phase = v1.NodeComponentPhaseFailed
-			status.Reason = componentReasonRunFailed
-			status.Message = err.Error()
-
-			return status, err
-		}
-
-		status.Phase = v1.NodeComponentPhaseStopped
-		status.Reason = componentReasonStopped
-
-		return status, nil
-	}
-
-	for _, dependency := range component.Dependencies {
+	for _, dependency := range implicitComponentDependencies(component, desiredComponents) {
 		if !readyByName[dependency] {
 			status.Phase = v1.NodeComponentPhasePending
 			status.Reason = componentReasonDependencyPending
@@ -379,6 +381,72 @@ func (r *StaticNodeReconciler) reconcileComponent(
 	status.Reason = componentReasonRunning
 
 	return status, nil
+}
+
+func stopStaleComponents(
+	ctx context.Context,
+	node *v1.StaticNode,
+	runner StaticNodeCommandRunner,
+) ([]v1.NodeComponentStatus, []error) {
+	if node == nil || node.Spec == nil || node.Status == nil || len(node.Status.Components) == 0 {
+		return nil, nil
+	}
+
+	desired := map[string]struct{}{}
+	for _, component := range node.Spec.Components {
+		desired[component.Name] = struct{}{}
+	}
+
+	statuses := []v1.NodeComponentStatus{}
+	errs := []error{}
+
+	for _, current := range node.Status.Components {
+		if current.Name == "" {
+			continue
+		}
+
+		if _, ok := desired[current.Name]; ok {
+			continue
+		}
+
+		status := v1.NodeComponentStatus{
+			Name:   current.Name,
+			Type:   current.Type,
+			Phase:  v1.NodeComponentPhaseStopped,
+			Reason: componentReasonStopped,
+		}
+		component := v1.NodeComponentSpec{Name: current.Name, Type: current.Type}
+
+		if err := stopComponentContainer(ctx, runner, componentContainerName(node, component)); err != nil {
+			status.Phase = v1.NodeComponentPhaseFailed
+			status.Reason = componentReasonRunFailed
+			status.Message = err.Error()
+			errs = append(errs, err)
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	return statuses, errs
+}
+
+func implicitComponentDependencies(component v1.NodeComponentSpec, desiredComponents []v1.NodeComponentSpec) []string {
+	if component.Type != v1.NodeComponentTypeMetricsAgent && component.Name != vmagentComponentName {
+		return nil
+	}
+
+	dependencies := []string{}
+
+	for _, desired := range desiredComponents {
+		switch desired.Type {
+		case v1.NodeComponentTypeNodeExporter, v1.NodeComponentTypeAcceleratorExporter:
+			if desired.Name != "" && desired.Name != component.Name {
+				dependencies = append(dependencies, desired.Name)
+			}
+		}
+	}
+
+	return dependencies
 }
 
 func (r *StaticNodeReconciler) shouldWaitForHead(
@@ -697,9 +765,7 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 		parts = append(parts, "--label", shellArg(clusterNameLabel+"="+node.Spec.Cluster))
 	}
 
-	if restart := dockerRestartPolicy(component.RestartPolicy); restart != "" {
-		parts = append(parts, "--restart", restart)
-	}
+	parts = append(parts, "--restart", "unless-stopped")
 
 	parts = append(parts, component.DockerRunOptions...)
 
@@ -742,17 +808,6 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 	parts = append(parts, shellArgs(component.Args)...)
 
 	return strings.Join(parts, " ")
-}
-
-func dockerRestartPolicy(policy v1.NodeComponentRestartPolicy) string {
-	switch policy {
-	case v1.NodeComponentRestartPolicyAlways:
-		return "unless-stopped"
-	case v1.NodeComponentRestartPolicyOnFailure:
-		return "on-failure"
-	default:
-		return ""
-	}
 }
 
 func usesHostNetwork(options []string) bool {

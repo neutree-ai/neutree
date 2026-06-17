@@ -63,8 +63,6 @@ func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 	assert.Equal(t, "nvidia", status.Vendor)
 	assert.Equal(t, "NVIDIA GPU", status.ProductName)
 	assert.Equal(t, "nvidia_gpu", status.ProductModel)
-	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), status.RuntimeProfile)
-	assert.Equal(t, "GPU", status.ResourceName)
 	require.Len(t, status.Devices, 2)
 	assert.Equal(t, "0", status.Devices[0].ID)
 	assert.True(t, status.Devices[0].Healthy)
@@ -97,8 +95,8 @@ func TestGPUAcceleratorPluginRuntimeProfile(t *testing.T) {
 	p := &GPUAcceleratorPlugin{}
 
 	profile, supported, err := p.RuntimeProfile(context.Background(), v1.StaticNodeAcceleratorStatus{
-		Type:           v1.AcceleratorTypeNVIDIAGPU.String(),
-		RuntimeProfile: "nvidia-a100",
+		Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+		ProductModel: "nvidia-a100",
 	})
 
 	require.NoError(t, err)

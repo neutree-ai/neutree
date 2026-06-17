@@ -236,12 +236,11 @@ func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:          nodeExporterComponentName,
-					Type:          v1.NodeComponentTypeNodeExporter,
-					Image:         defaultNodeExporterImage,
-					Args:          []string{"--path.rootfs=/host"},
-					ConfigHash:    "hash-node-exporter",
-					RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+					Name:       nodeExporterComponentName,
+					Type:       v1.NodeComponentTypeNodeExporter,
+					Image:      defaultNodeExporterImage,
+					Args:       []string{"--path.rootfs=/host"},
+					ConfigHash: "hash-node-exporter",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
@@ -426,11 +425,10 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:          vmagentComponentName,
-					Type:          v1.NodeComponentTypeMetricsAgent,
-					Image:         defaultVMAgentImage,
-					ConfigHash:    "hash-vmagent",
-					RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+					Name:       vmagentComponentName,
+					Type:       v1.NodeComponentTypeMetricsAgent,
+					Image:      defaultVMAgentImage,
+					ConfigHash: "hash-vmagent",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
@@ -503,11 +501,10 @@ func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestar
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:          vmagentComponentName,
-					Type:          v1.NodeComponentTypeMetricsAgent,
-					Image:         defaultVMAgentImage,
-					ConfigHash:    "hash-vmagent",
-					RestartPolicy: v1.NodeComponentRestartPolicyAlways,
+					Name:       vmagentComponentName,
+					Type:       v1.NodeComponentTypeMetricsAgent,
+					Image:      defaultVMAgentImage,
+					ConfigHash: "hash-vmagent",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
@@ -551,17 +548,20 @@ func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestar
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
-func TestStaticNodeReconcilerReconcileComponentsStopsDesiredStoppedComponent(t *testing.T) {
+func TestStaticNodeReconcilerReconcileComponentsStopsRemovedComponent(t *testing.T) {
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
-			Cluster: "static-a",
-			IP:      "10.0.0.11",
-			Components: []v1.NodeComponentSpec{
+			Cluster:    "static-a",
+			IP:         "10.0.0.11",
+			Components: nil,
+		},
+		Status: &v1.StaticNodeStatus{
+			Components: []v1.NodeComponentStatus{
 				{
-					Name:         "ray-worker",
-					Type:         v1.NodeComponentTypeRayWorker,
-					Image:        "registry.example.com/neutree/neutree-serve:v1.0.2",
-					DesiredPhase: v1.NodeComponentPhaseStopped,
+					Name:  "ray-worker",
+					Type:  v1.NodeComponentTypeRayWorker,
+					Phase: v1.NodeComponentPhaseRunning,
+					Ready: true,
 				},
 			},
 		},

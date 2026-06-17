@@ -5,11 +5,8 @@ package mocks
 import (
 	context "context"
 
-	accelerator "github.com/neutree-ai/neutree/internal/accelerator"
-
-	mock "github.com/stretchr/testify/mock"
-
 	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	mock "github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -28,7 +25,7 @@ func (_m *MockManager) EXPECT() *MockManager_Expecter {
 }
 
 // DetectAccelerator provides a mock function with given fields: ctx, runner
-func (_m *MockManager) DetectAccelerator(ctx context.Context, runner accelerator.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error) {
+func (_m *MockManager) DetectAccelerator(ctx context.Context, runner plugin.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error) {
 	ret := _m.Called(ctx, runner)
 
 	if len(ret) == 0 {
@@ -37,10 +34,10 @@ func (_m *MockManager) DetectAccelerator(ctx context.Context, runner accelerator
 
 	var r0 *v1.StaticNodeAcceleratorStatus
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, accelerator.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, plugin.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)); ok {
 		return rf(ctx, runner)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, accelerator.NodeCommandRunner) *v1.StaticNodeAcceleratorStatus); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, plugin.NodeCommandRunner) *v1.StaticNodeAcceleratorStatus); ok {
 		r0 = rf(ctx, runner)
 	} else {
 		if ret.Get(0) != nil {
@@ -48,7 +45,7 @@ func (_m *MockManager) DetectAccelerator(ctx context.Context, runner accelerator
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, accelerator.NodeCommandRunner) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, plugin.NodeCommandRunner) error); ok {
 		r1 = rf(ctx, runner)
 	} else {
 		r1 = ret.Error(1)
@@ -64,14 +61,14 @@ type MockManager_DetectAccelerator_Call struct {
 
 // DetectAccelerator is a helper method to define mock.On call
 //   - ctx context.Context
-//   - runner accelerator.NodeCommandRunner
+//   - runner plugin.NodeCommandRunner
 func (_e *MockManager_Expecter) DetectAccelerator(ctx interface{}, runner interface{}) *MockManager_DetectAccelerator_Call {
 	return &MockManager_DetectAccelerator_Call{Call: _e.mock.On("DetectAccelerator", ctx, runner)}
 }
 
-func (_c *MockManager_DetectAccelerator_Call) Run(run func(ctx context.Context, runner accelerator.NodeCommandRunner)) *MockManager_DetectAccelerator_Call {
+func (_c *MockManager_DetectAccelerator_Call) Run(run func(ctx context.Context, runner plugin.NodeCommandRunner)) *MockManager_DetectAccelerator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(accelerator.NodeCommandRunner))
+		run(args[0].(context.Context), args[1].(plugin.NodeCommandRunner))
 	})
 	return _c
 }
@@ -81,7 +78,7 @@ func (_c *MockManager_DetectAccelerator_Call) Return(_a0 *v1.StaticNodeAccelerat
 	return _c
 }
 
-func (_c *MockManager_DetectAccelerator_Call) RunAndReturn(run func(context.Context, accelerator.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)) *MockManager_DetectAccelerator_Call {
+func (_c *MockManager_DetectAccelerator_Call) RunAndReturn(run func(context.Context, plugin.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)) *MockManager_DetectAccelerator_Call {
 	_c.Call.Return(run)
 	return _c
 }

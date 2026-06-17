@@ -100,7 +100,6 @@ func (p *GPUAcceleratorPlugin) DetectStaticNodeAccelerator(
 		vendor:          "nvidia",
 		productName:     "NVIDIA GPU",
 		productModel:    "nvidia_gpu",
-		resourceName:    "GPU",
 		match: func(line string) bool {
 			return strings.Contains(line, "10de:") &&
 				(strings.Contains(line, "3d controller") || strings.Contains(line, "vga compatible controller"))

@@ -19,13 +19,8 @@ type StaticNodeClusterSpec struct {
 	Version               string                      `json:"version,omitempty"`
 	ImageRegistry         string                      `json:"image_registry,omitempty"`
 	MetricsRemoteWriteURL string                      `json:"metrics_remote_write_url,omitempty"`
-	Head                  StaticNodeClusterHeadSpec   `json:"head,omitempty"`
 	Nodes                 []StaticNodeClusterNodeSpec `json:"nodes,omitempty"`
 	UpgradeStrategy       *ClusterUpgradeStrategy     `json:"upgrade_strategy,omitempty"`
-}
-
-type StaticNodeClusterHeadSpec struct {
-	NodeName string `json:"node_name,omitempty"`
 }
 
 type StaticNodeClusterNodeSpec struct {
@@ -37,21 +32,16 @@ type StaticNodeClusterNodeSpec struct {
 }
 
 type StaticNodeClusterStatus struct {
-	Phase              StaticNodeClusterPhase          `json:"phase,omitempty"`
-	DesiredNodes       int                             `json:"desired_nodes,omitempty"`
-	ReadyNodes         int                             `json:"ready_nodes,omitempty"`
-	HeadReady          bool                            `json:"head_ready,omitempty"`
-	MetricsReady       bool                            `json:"metrics_ready,omitempty"`
-	WarmReady          bool                            `json:"warm_ready,omitempty"`
-	Upgrade            *StaticNodeClusterUpgradeStatus `json:"upgrade,omitempty"`
-	LastTransitionTime string                          `json:"last_transition_time,omitempty"`
-	ErrorMessage       string                          `json:"error_message,omitempty"`
-}
-
-type StaticNodeClusterUpgradeStatus struct {
-	ObservedVersion string                       `json:"observed_version,omitempty"`
-	TargetVersion   string                       `json:"target_version,omitempty"`
-	Step            StaticNodeClusterUpgradeStep `json:"step,omitempty"`
+	Phase              StaticNodeClusterPhase       `json:"phase,omitempty"`
+	DesiredNodes       int                          `json:"desired_nodes,omitempty"`
+	ReadyNodes         int                          `json:"ready_nodes,omitempty"`
+	HeadReady          bool                         `json:"head_ready,omitempty"`
+	MetricsReady       bool                         `json:"metrics_ready,omitempty"`
+	WarmReady          bool                         `json:"warm_ready,omitempty"`
+	Version            string                       `json:"version,omitempty"`
+	UpgradeStep        StaticNodeClusterUpgradeStep `json:"upgrade_step,omitempty"`
+	LastTransitionTime string                       `json:"last_transition_time,omitempty"`
+	ErrorMessage       string                       `json:"error_message,omitempty"`
 }
 
 type StaticNodeClusterUpgradeStep string
@@ -115,13 +105,11 @@ type StaticNodeStatus struct {
 const StaticNodeAcceleratorTypeCPU = "cpu"
 
 type StaticNodeAcceleratorStatus struct {
-	Type           string                              `json:"type,omitempty"`
-	Vendor         string                              `json:"vendor,omitempty"`
-	ProductName    string                              `json:"product_name,omitempty"`
-	ProductModel   string                              `json:"product_model,omitempty"`
-	RuntimeProfile string                              `json:"runtime_profile,omitempty"`
-	ResourceName   string                              `json:"resource_name,omitempty"`
-	Devices        []StaticNodeAcceleratorDeviceStatus `json:"devices,omitempty"`
+	Type         string                              `json:"type,omitempty"`
+	Vendor       string                              `json:"vendor,omitempty"`
+	ProductName  string                              `json:"product_name,omitempty"`
+	ProductModel string                              `json:"product_model,omitempty"`
+	Devices      []StaticNodeAcceleratorDeviceStatus `json:"devices,omitempty"`
 }
 
 type StaticNodeAcceleratorDeviceStatus struct {
@@ -133,13 +121,11 @@ type StaticNodeAcceleratorDeviceStatus struct {
 
 func CPUStaticNodeAcceleratorStatus() StaticNodeAcceleratorStatus {
 	return StaticNodeAcceleratorStatus{
-		Type:           StaticNodeAcceleratorTypeCPU,
-		Vendor:         "generic",
-		ProductName:    "CPU",
-		ProductModel:   StaticNodeAcceleratorTypeCPU,
-		RuntimeProfile: StaticNodeAcceleratorTypeCPU,
-		ResourceName:   "CPU",
-		Devices:        []StaticNodeAcceleratorDeviceStatus{},
+		Type:         StaticNodeAcceleratorTypeCPU,
+		Vendor:       "generic",
+		ProductName:  "CPU",
+		ProductModel: StaticNodeAcceleratorTypeCPU,
+		Devices:      []StaticNodeAcceleratorDeviceStatus{},
 	}
 }
 
@@ -155,21 +141,18 @@ const (
 )
 
 type NodeComponentSpec struct {
-	Name             string                     `json:"name,omitempty"`
-	Type             NodeComponentType          `json:"type,omitempty"`
-	Image            string                     `json:"image,omitempty"`
-	Command          []string                   `json:"command,omitempty"`
-	Args             []string                   `json:"args,omitempty"`
-	Env              map[string]string          `json:"env,omitempty"`
-	Ports            []NodeComponentPort        `json:"ports,omitempty"`
-	Volumes          []NodeComponentVolume      `json:"volumes,omitempty"`
-	DockerRunOptions []string                   `json:"docker_run_options,omitempty"`
-	ConfigFiles      []NodeComponentConfigFile  `json:"config_files,omitempty"`
-	HealthCheck      *NodeComponentHealthCheck  `json:"health_check,omitempty"`
-	Dependencies     []string                   `json:"dependencies,omitempty"`
-	RestartPolicy    NodeComponentRestartPolicy `json:"restart_policy,omitempty"`
-	DesiredPhase     NodeComponentPhase         `json:"desired_phase,omitempty"`
-	ConfigHash       string                     `json:"config_hash,omitempty"`
+	Name             string                    `json:"name,omitempty"`
+	Type             NodeComponentType         `json:"type,omitempty"`
+	Image            string                    `json:"image,omitempty"`
+	Command          []string                  `json:"command,omitempty"`
+	Args             []string                  `json:"args,omitempty"`
+	Env              map[string]string         `json:"env,omitempty"`
+	Ports            []NodeComponentPort       `json:"ports,omitempty"`
+	Volumes          []NodeComponentVolume     `json:"volumes,omitempty"`
+	DockerRunOptions []string                  `json:"docker_run_options,omitempty"`
+	ConfigFiles      []NodeComponentConfigFile `json:"config_files,omitempty"`
+	HealthCheck      *NodeComponentHealthCheck `json:"health_check,omitempty"`
+	ConfigHash       string                    `json:"config_hash,omitempty"`
 }
 
 type NodeComponentType string
@@ -180,7 +163,6 @@ const (
 	NodeComponentTypeNodeExporter        NodeComponentType = "node-exporter"
 	NodeComponentTypeAcceleratorExporter NodeComponentType = "accelerator-exporter"
 	NodeComponentTypeMetricsAgent        NodeComponentType = "metrics-agent"
-	NodeComponentTypeMetricsNormalizer   NodeComponentType = "metrics-normalizer"
 )
 
 type NodeComponentPort struct {
@@ -219,14 +201,6 @@ type NodeComponentHealthCheck struct {
 	TimeoutSec      int               `json:"timeout_sec,omitempty"`
 	RayNodeLabels   map[string]string `json:"ray_node_labels,omitempty"`
 }
-
-type NodeComponentRestartPolicy string
-
-const (
-	NodeComponentRestartPolicyAlways    NodeComponentRestartPolicy = "Always"
-	NodeComponentRestartPolicyOnFailure NodeComponentRestartPolicy = "OnFailure"
-	NodeComponentRestartPolicyNever     NodeComponentRestartPolicy = "Never"
-)
 
 type NodeComponentStatus struct {
 	Name               string             `json:"name,omitempty"`

@@ -105,17 +105,16 @@ func controllerStaticNodeCluster() *v1.StaticNodeCluster {
 		Spec: &v1.StaticNodeClusterSpec{
 			Version:       "v1.2.0",
 			ImageRegistry: "registry.example.com/neutree",
-			Head: v1.StaticNodeClusterHeadSpec{
-				NodeName: "head-0",
-			},
 			Nodes: []v1.StaticNodeClusterNodeSpec{
 				{
 					Name: "head-0",
 					IP:   "10.0.0.10",
+					Role: v1.StaticNodeRoleHead,
 				},
 				{
 					Name: "worker-0",
 					IP:   "10.0.0.11",
+					Role: v1.StaticNodeRoleWorker,
 				},
 			},
 		},

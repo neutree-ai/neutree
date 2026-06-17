@@ -13,7 +13,6 @@ type pciStaticNodeAcceleratorDetector struct {
 	vendor          string
 	productName     string
 	productModel    string
-	resourceName    string
 	match           func(string) bool
 }
 
@@ -47,12 +46,10 @@ func detectPCIStaticNodeAccelerator(
 	}
 
 	return &v1.StaticNodeAcceleratorStatus{
-		Type:           detector.acceleratorType,
-		Vendor:         detector.vendor,
-		ProductName:    detector.productName,
-		ProductModel:   detector.productModel,
-		RuntimeProfile: detector.acceleratorType,
-		ResourceName:   detector.resourceName,
-		Devices:        devices,
+		Type:         detector.acceleratorType,
+		Vendor:       detector.vendor,
+		ProductName:  detector.productName,
+		ProductModel: detector.productModel,
+		Devices:      devices,
 	}, true, nil
 }

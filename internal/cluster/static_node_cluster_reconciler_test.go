@@ -158,6 +158,8 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-exporter.json`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.10:19100"`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:19100"`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-ray`)
+	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/ray.json`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter-dcgm-metrics`)
 	assert.Contains(t, vmagentConfig.Content, `metrics_path: "/dcgm/metrics"`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/accelerator-exporter-dcgm-metrics.json`)
@@ -172,13 +174,21 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeTargets.Content, `"10.0.0.11:19100"`)
 	assert.Contains(t, nodeTargets.Content, `"neutree_cluster": "static-a"`)
 	assert.Contains(t, nodeTargets.Content, `"static_node_cluster": "static-a"`)
+	rayTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/ray.json")
+	require.NotNil(t, rayTargets)
+	assert.True(t, rayTargets.SkipRestartOnChange)
+	assert.Contains(t, rayTargets.Content, `"10.0.0.10:54311"`)
+	assert.Contains(t, rayTargets.Content, `"10.0.0.11:54311"`)
+	assert.Contains(t, rayTargets.Content, `"source": "ray"`)
 	acceleratorTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/accelerator-exporter-dcgm-metrics.json")
 	require.NotNil(t, acceleratorTargets)
 	assert.True(t, acceleratorTargets.SkipRestartOnChange)
 	assert.Contains(t, acceleratorTargets.Content, `"10.0.0.10:9400"`)
 	assert.NotContains(t, acceleratorTargets.Content, `"10.0.0.11:9400"`)
-	assert.Contains(t, acceleratorTargets.Content, `"accelerator_type": "nvidia_gpu"`)
-	assert.Contains(t, acceleratorTargets.Content, `"accelerator_exporter": "dcgm-exporter"`)
+	assert.NotContains(t, acceleratorTargets.Content, `"accelerator_type"`)
+	assert.NotContains(t, acceleratorTargets.Content, `"accelerator_exporter"`)
+	assert.NotContains(t, acceleratorTargets.Content, `"accelerator_product_model"`)
+	assert.NotContains(t, acceleratorTargets.Content, `"accelerator_vendor"`)
 
 	worker := nodes[1]
 	require.NotNil(t, worker.Metadata)
@@ -264,9 +274,20 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodesValidation(t *testing.T) {
 		{
 			name: "missing head node",
 			mutate: func(cluster *v1.StaticNodeCluster) {
-				cluster.Spec.Head.NodeName = "missing"
+				for i := range cluster.Spec.Nodes {
+					cluster.Spec.Nodes[i].Role = v1.StaticNodeRoleWorker
+				}
 			},
-			wantErr: "head node missing not found",
+			wantErr: "static node cluster requires exactly one head node, got 0",
+		},
+		{
+			name: "multiple head nodes",
+			mutate: func(cluster *v1.StaticNodeCluster) {
+				for i := range cluster.Spec.Nodes {
+					cluster.Spec.Nodes[i].Role = v1.StaticNodeRoleHead
+				}
+			},
+			wantErr: "static node cluster requires exactly one head node, got 2",
 		},
 		{
 			name: "missing version",
@@ -345,23 +366,21 @@ func TestStaticNodeClusterReconcilerPlansRayRecreateUpgradeOrder(t *testing.T) {
 		wantPhase       v1.StaticNodeClusterPhase
 		wantHeadImage   string
 		wantWorkerImage string
-		wantWorkerPhase v1.NodeComponentPhase
+		wantWorkerRay   bool
 	}{
 		{
-			name:            "stopping workers keeps head on observed version",
-			step:            v1.StaticNodeClusterUpgradeStepStoppingWorkers,
-			wantPhase:       v1.StaticNodeClusterPhaseStopping,
-			wantHeadImage:   "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
-			wantWorkerImage: "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
-			wantWorkerPhase: v1.NodeComponentPhaseStopped,
+			name:          "stopping workers keeps head on observed version",
+			step:          v1.StaticNodeClusterUpgradeStepStoppingWorkers,
+			wantPhase:     v1.StaticNodeClusterPhaseStopping,
+			wantHeadImage: "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+			wantWorkerRay: false,
 		},
 		{
-			name:            "starting head keeps workers stopped",
-			step:            v1.StaticNodeClusterUpgradeStepStartingHead,
-			wantPhase:       v1.StaticNodeClusterPhaseStarting,
-			wantHeadImage:   "registry.example.com/neutree/neutree/neutree-serve:v1.2.1",
-			wantWorkerImage: "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
-			wantWorkerPhase: v1.NodeComponentPhaseStopped,
+			name:          "starting head keeps workers stopped",
+			step:          v1.StaticNodeClusterUpgradeStepStartingHead,
+			wantPhase:     v1.StaticNodeClusterPhaseStarting,
+			wantHeadImage: "registry.example.com/neutree/neutree/neutree-serve:v1.2.1",
+			wantWorkerRay: false,
 		},
 		{
 			name:            "starting workers updates workers after head",
@@ -369,6 +388,7 @@ func TestStaticNodeClusterReconcilerPlansRayRecreateUpgradeOrder(t *testing.T) {
 			wantPhase:       v1.StaticNodeClusterPhaseStarting,
 			wantHeadImage:   "registry.example.com/neutree/neutree/neutree-serve:v1.2.1",
 			wantWorkerImage: "registry.example.com/neutree/neutree/neutree-serve:v1.2.1",
+			wantWorkerRay:   true,
 		},
 	}
 
@@ -377,12 +397,9 @@ func TestStaticNodeClusterReconcilerPlansRayRecreateUpgradeOrder(t *testing.T) {
 			cluster := testStaticNodeCluster()
 			cluster.Spec.Version = "v1.2.1"
 			cluster.Status = &v1.StaticNodeClusterStatus{
-				Phase: v1.StaticNodeClusterPhaseReady,
-				Upgrade: &v1.StaticNodeClusterUpgradeStatus{
-					ObservedVersion: "v1.2.0",
-					TargetVersion:   "v1.2.1",
-					Step:            tt.step,
-				},
+				Phase:       v1.StaticNodeClusterPhaseReady,
+				Version:     "v1.2.0",
+				UpgradeStep: tt.step,
 			}
 			currentNodes := staticNodeUpgradeCurrentNodes()
 
@@ -390,9 +407,8 @@ func TestStaticNodeClusterReconcilerPlansRayRecreateUpgradeOrder(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantPhase, plan.Status.Phase)
-			require.NotNil(t, plan.Status.Upgrade)
-			assert.Equal(t, "v1.2.1", plan.Status.Upgrade.TargetVersion)
-			assert.Equal(t, tt.step, plan.Status.Upgrade.Step)
+			assert.Equal(t, "v1.2.0", plan.Status.Version)
+			assert.Equal(t, tt.step, plan.Status.UpgradeStep)
 
 			head := findStaticNode(plan.DesiredNodes, "head-0")
 			require.NotNil(t, head)
@@ -403,9 +419,11 @@ func TestStaticNodeClusterReconcilerPlansRayRecreateUpgradeOrder(t *testing.T) {
 			worker := findStaticNode(plan.DesiredNodes, "worker-0")
 			require.NotNil(t, worker)
 			workerRay := findComponent(worker.Spec.Components, "ray-worker")
-			require.NotNil(t, workerRay)
-			assert.Equal(t, tt.wantWorkerImage, workerRay.Image)
-			assert.Equal(t, tt.wantWorkerPhase, workerRay.DesiredPhase)
+			if !tt.wantWorkerRay {
+				assert.Nil(t, workerRay)
+			} else if assert.NotNil(t, workerRay) {
+				assert.Equal(t, tt.wantWorkerImage, workerRay.Image)
+			}
 		})
 	}
 }
@@ -489,12 +507,9 @@ func TestStaticNodeClusterReconcilerAdvancesRayRecreateUpgradeStep(t *testing.T)
 			cluster := testStaticNodeCluster()
 			cluster.Spec.Version = "v1.2.1"
 			cluster.Status = &v1.StaticNodeClusterStatus{
-				Phase: v1.StaticNodeClusterPhaseReady,
-				Upgrade: &v1.StaticNodeClusterUpgradeStatus{
-					ObservedVersion: "v1.2.0",
-					TargetVersion:   "v1.2.1",
-					Step:            tt.step,
-				},
+				Phase:       v1.StaticNodeClusterPhaseReady,
+				Version:     "v1.2.0",
+				UpgradeStep: tt.step,
 			}
 			currentNodes := staticNodeUpgradeCurrentNodes()
 			if tt.mutate != nil {
@@ -504,8 +519,7 @@ func TestStaticNodeClusterReconcilerAdvancesRayRecreateUpgradeStep(t *testing.T)
 			plan, err := (&StaticNodeClusterReconciler{}).Plan(context.Background(), cluster, currentNodes)
 
 			require.NoError(t, err)
-			require.NotNil(t, plan.Status.Upgrade)
-			assert.Equal(t, tt.wantStep, plan.Status.Upgrade.Step)
+			assert.Equal(t, tt.wantStep, plan.Status.UpgradeStep)
 		})
 	}
 }
@@ -514,12 +528,9 @@ func TestStaticNodeClusterReconcilerCompletesRayRecreateUpgradeWhenTargetReady(t
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Version = "v1.2.1"
 	cluster.Status = &v1.StaticNodeClusterStatus{
-		Phase: v1.StaticNodeClusterPhaseVerifying,
-		Upgrade: &v1.StaticNodeClusterUpgradeStatus{
-			ObservedVersion: "v1.2.0",
-			TargetVersion:   "v1.2.1",
-			Step:            v1.StaticNodeClusterUpgradeStepVerifying,
-		},
+		Phase:       v1.StaticNodeClusterPhaseVerifying,
+		Version:     "v1.2.0",
+		UpgradeStep: v1.StaticNodeClusterUpgradeStepVerifying,
 	}
 	currentNodes := staticNodeUpgradeCurrentNodes()
 	targetImage := "registry.example.com/neutree/neutree/neutree-serve:v1.2.1"
@@ -529,20 +540,16 @@ func TestStaticNodeClusterReconcilerCompletesRayRecreateUpgradeWhenTargetReady(t
 
 	require.NoError(t, err)
 	assert.Equal(t, v1.StaticNodeClusterPhaseReady, plan.Status.Phase)
-	require.NotNil(t, plan.Status.Upgrade)
-	assert.Equal(t, "v1.2.1", plan.Status.Upgrade.ObservedVersion)
-	assert.Empty(t, plan.Status.Upgrade.TargetVersion)
-	assert.Empty(t, plan.Status.Upgrade.Step)
+	assert.Equal(t, "v1.2.1", plan.Status.Version)
+	assert.Empty(t, plan.Status.UpgradeStep)
 }
 
 func TestStaticNodeClusterReconcilerKeepsReadyWhenObservedVersionMatchesSpec(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Version = "v1.2.1"
 	cluster.Status = &v1.StaticNodeClusterStatus{
-		Phase: v1.StaticNodeClusterPhaseReady,
-		Upgrade: &v1.StaticNodeClusterUpgradeStatus{
-			ObservedVersion: "v1.2.1",
-		},
+		Phase:   v1.StaticNodeClusterPhaseReady,
+		Version: "v1.2.1",
 	}
 	currentNodes := staticNodeUpgradeCurrentNodes()
 	markStaticNodeUpgradeReady(currentNodes, buildRayRuntimeImage(cluster))
@@ -551,10 +558,8 @@ func TestStaticNodeClusterReconcilerKeepsReadyWhenObservedVersionMatchesSpec(t *
 
 	require.NoError(t, err)
 	assert.Equal(t, v1.StaticNodeClusterPhaseReady, plan.Status.Phase)
-	require.NotNil(t, plan.Status.Upgrade)
-	assert.Equal(t, "v1.2.1", plan.Status.Upgrade.ObservedVersion)
-	assert.Empty(t, plan.Status.Upgrade.TargetVersion)
-	assert.Empty(t, plan.Status.Upgrade.Step)
+	assert.Equal(t, "v1.2.1", plan.Status.Version)
+	assert.Empty(t, plan.Status.UpgradeStep)
 }
 
 func TestStaticNodeClusterReconcilerFallsBackToCPURuntimeWhenRuntimeProfileUnsupported(t *testing.T) {
@@ -572,7 +577,7 @@ func TestStaticNodeClusterReconcilerFallsBackToCPURuntimeWhenRuntimeProfileUnsup
 	assert.Contains(t, plan.Status.ErrorMessage, `static node head-0 accelerator runtime profile "nvidia-unknown" is not supported; fallback to CPU runtime`)
 	assert.Contains(t, plan.Status.ErrorMessage, `static node worker-0 accelerator runtime profile "nvidia-unknown" is not supported; fallback to CPU runtime`)
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), currentNodes[0].Status.Accelerator.Type)
-	assert.Equal(t, "nvidia-unknown", currentNodes[0].Status.Accelerator.RuntimeProfile)
+	assert.Equal(t, "nvidia-unknown", currentNodes[0].Status.Accelerator.ProductModel)
 
 	head := findStaticNode(plan.DesiredNodes, "head-0")
 	require.NotNil(t, head)
@@ -607,9 +612,7 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				HeadReady:    true,
 				MetricsReady: true,
 				WarmReady:    true,
-				Upgrade: &v1.StaticNodeClusterUpgradeStatus{
-					ObservedVersion: "v1.2.0",
-				},
+				Version:      "v1.2.0",
 			},
 		},
 		{
@@ -689,10 +692,8 @@ func TestStaticNodeClusterReconcilerAggregateStatusRecordsObservedVersionWhenRea
 	status := (&StaticNodeClusterReconciler{}).AggregateStatus(cluster, nodes)
 
 	assert.Equal(t, v1.StaticNodeClusterPhaseReady, status.Phase)
-	require.NotNil(t, status.Upgrade)
-	assert.Equal(t, "v1.2.0", status.Upgrade.ObservedVersion)
-	assert.Empty(t, status.Upgrade.TargetVersion)
-	assert.Empty(t, status.Upgrade.Step)
+	assert.Equal(t, "v1.2.0", status.Version)
+	assert.Empty(t, status.UpgradeStep)
 }
 
 func testStaticNodeCluster() *v1.StaticNodeCluster {
@@ -705,9 +706,6 @@ func testStaticNodeCluster() *v1.StaticNodeCluster {
 		Spec: &v1.StaticNodeClusterSpec{
 			Version:       "v1.2.0",
 			ImageRegistry: "registry.example.com/neutree",
-			Head: v1.StaticNodeClusterHeadSpec{
-				NodeName: "head-0",
-			},
 			Nodes: []v1.StaticNodeClusterNodeSpec{
 				{
 					Name:       "worker-0",
@@ -719,7 +717,7 @@ func testStaticNodeCluster() *v1.StaticNodeCluster {
 				{
 					Name:       "head-0",
 					IP:         "10.0.0.10",
-					Role:       v1.StaticNodeRoleWorker,
+					Role:       v1.StaticNodeRoleHead,
 					SSHAuthRef: "ssh-ref",
 					SSHAuth:    &v1.Auth{SSHUser: "ray", SSHPrivateKey: "/tmp/key"},
 				},
@@ -763,12 +761,10 @@ func staticNodeStatusWithAccelerator(
 
 func nvidiaAcceleratorStatus() v1.StaticNodeAcceleratorStatus {
 	return v1.StaticNodeAcceleratorStatus{
-		Type:           v1.AcceleratorTypeNVIDIAGPU.String(),
-		Vendor:         "nvidia",
-		ProductName:    "NVIDIA GPU",
-		ProductModel:   "nvidia_gpu",
-		RuntimeProfile: v1.AcceleratorTypeNVIDIAGPU.String(),
-		ResourceName:   "GPU",
+		Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+		Vendor:       "nvidia",
+		ProductName:  "NVIDIA GPU",
+		ProductModel: "nvidia_gpu",
 		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 			{ID: "0", ProductName: "NVIDIA GPU", Healthy: true},
 		},
@@ -781,7 +777,7 @@ func cpuAcceleratorStatus() v1.StaticNodeAcceleratorStatus {
 
 func unsupportedNvidiaAcceleratorStatus() v1.StaticNodeAcceleratorStatus {
 	status := nvidiaAcceleratorStatus()
-	status.RuntimeProfile = "nvidia-unknown"
+	status.ProductModel = "nvidia-unknown"
 
 	return status
 }
@@ -811,7 +807,7 @@ func (f fakeRuntimeProfileProvider) RuntimeProfile(
 	_ context.Context,
 	accelerator v1.StaticNodeAcceleratorStatus,
 ) (*v1.AcceleratorProfile, bool, error) {
-	key := accelerator.RuntimeProfile
+	key := accelerator.ProductModel
 	if key == "" {
 		key = accelerator.Type
 	}
@@ -909,7 +905,7 @@ func staticNodeUpgradeCurrentNodes() []*v1.StaticNode {
 			},
 			Status: &v1.StaticNodeStatus{
 				Phase:       v1.StaticNodePhaseReady,
-				Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU, RuntimeProfile: v1.StaticNodeAcceleratorTypeCPU},
+				Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU, ProductModel: v1.StaticNodeAcceleratorTypeCPU},
 				Warm:        &v1.WarmStatus{Ready: true},
 				Components: []v1.NodeComponentStatus{
 					{Name: "ray-head", Type: v1.NodeComponentTypeRayHead, Ready: true, Phase: v1.NodeComponentPhaseRunning},
@@ -924,7 +920,7 @@ func staticNodeUpgradeCurrentNodes() []*v1.StaticNode {
 			},
 			Status: &v1.StaticNodeStatus{
 				Phase:       v1.StaticNodePhaseReady,
-				Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU, RuntimeProfile: v1.StaticNodeAcceleratorTypeCPU},
+				Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU, ProductModel: v1.StaticNodeAcceleratorTypeCPU},
 				Warm:        &v1.WarmStatus{Ready: true},
 				Components: []v1.NodeComponentStatus{
 					{Name: "ray-worker", Type: v1.NodeComponentTypeRayWorker, Ready: true, Phase: v1.NodeComponentPhaseRunning},

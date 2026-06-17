@@ -79,11 +79,6 @@ func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) e
 }
 
 func validateStaticNodeClusterSpec(c *v1.Cluster) error {
-	upgradeStrategy := c.GetUpgradeStrategy()
-	if !v1.IsSupportedClusterUpgradeStrategyType(upgradeStrategy.Type) {
-		return fmt.Errorf("unsupported cluster upgrade strategy %q", upgradeStrategy.Type)
-	}
-
 	return nil
 }
 
@@ -282,8 +277,6 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 		return nil, errors.New("cluster spec is required")
 	}
 
-	upgradeStrategy := c.GetUpgradeStrategy()
-
 	sshConfig, err := util.ParseSSHClusterConfig(c)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse ssh cluster config")
@@ -339,9 +332,8 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 			Version:               c.Spec.Version,
 			ImageRegistry:         imagePrefix,
 			MetricsRemoteWriteURL: controller.metricsRemoteWriteURL,
-			Head:                  v1.StaticNodeClusterHeadSpec{NodeName: headName},
 			Nodes:                 nodes,
-			UpgradeStrategy:       upgradeStrategy,
+			UpgradeStrategy:       v1.DefaultClusterUpgradeStrategy(),
 		},
 	}, nil
 }
@@ -463,7 +455,7 @@ func staticNodeClusterHeadIP(staticCluster *v1.StaticNodeCluster) string {
 	}
 
 	for _, node := range staticCluster.Spec.Nodes {
-		if node.Name == staticCluster.Spec.Head.NodeName {
+		if node.Role == v1.StaticNodeRoleHead {
 			return node.IP
 		}
 	}
