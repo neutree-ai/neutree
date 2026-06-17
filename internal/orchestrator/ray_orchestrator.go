@@ -456,7 +456,7 @@ func modelDownloadStateFromLog(logText string) modelDownloadMarkerState {
 		return modelDownloadMarkerDone
 	}
 
-	if strings.Contains(logText, modelDownloadStartMarker) && !strings.Contains(logText, modelDownloadDoneMarker) {
+	if strings.Contains(logText, modelDownloadStartMarker) {
 		return modelDownloadMarkerInProgress
 	}
 

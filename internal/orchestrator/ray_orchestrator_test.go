@@ -1,9 +1,6 @@
 package orchestrator
 
 import (
-	"crypto/sha256"
-	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -34,11 +31,10 @@ func stringPtr(v string) *string { return &v }
 func endpointModelHashForTest(t *testing.T, endpoint *v1.Endpoint) string {
 	t.Helper()
 
-	modelJSON, err := json.Marshal(endpoint.Spec.Model)
+	hash, err := util.ComputeEndpointModelHash(endpoint)
 	require.NoError(t, err)
 
-	hash := sha256.Sum256(modelJSON)
-	return fmt.Sprintf("%x", hash)
+	return hash
 }
 
 func newTestRayOrchestratorCtx(s *storagemocks.MockStorage, dashboardService *dashboardmocks.MockDashboardService, endpoint *v1.Endpoint, acceleratorMgr *acceleratormocks.MockManager) (*RayOrchestrator, *OrchestratorContext) {
