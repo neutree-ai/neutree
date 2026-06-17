@@ -192,7 +192,7 @@ func (f *FakeK8sClient) WithPodInCrashLoopBackOff(containerName string, restartC
 					RestartCount: restartCount,
 					State: corev1.ContainerState{
 						Waiting: &corev1.ContainerStateWaiting{
-							Reason:  "CrashLoopBackOff",
+							Reason:  k8sContainerReasonCrashLoopBackOff,
 							Message: "Container is crashing",
 						},
 					},
@@ -225,7 +225,7 @@ func (f *FakeK8sClient) WithPodInImagePullBackOff(containerName string) *FakeK8s
 					Ready: false,
 					State: corev1.ContainerState{
 						Waiting: &corev1.ContainerStateWaiting{
-							Reason:  "ImagePullBackOff",
+							Reason:  k8sContainerReasonImagePullBackOff,
 							Message: "Failed to pull image",
 						},
 					},
@@ -258,13 +258,13 @@ func (f *FakeK8sClient) WithPodOOMKilled(containerName string) *FakeK8sClient {
 					Ready: false,
 					LastTerminationState: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{
-							Reason:  "OOMKilled",
+							Reason:  k8sContainerReasonOOMKilled,
 							Message: "Out of memory",
 						},
 					},
 					State: corev1.ContainerState{
 						Waiting: &corev1.ContainerStateWaiting{
-							Reason: "CrashLoopBackOff",
+							Reason: k8sContainerReasonCrashLoopBackOff,
 						},
 					},
 				},
@@ -297,7 +297,7 @@ func (f *FakeK8sClient) WithInitContainerInCrashLoopBackOff(containerName string
 					RestartCount: restartCount,
 					State: corev1.ContainerState{
 						Waiting: &corev1.ContainerStateWaiting{
-							Reason:  "CrashLoopBackOff",
+							Reason:  k8sContainerReasonCrashLoopBackOff,
 							Message: "Init container is crashing",
 						},
 					},
@@ -330,7 +330,7 @@ func (f *FakeK8sClient) WithInitContainerInImagePullBackOff(containerName string
 					Ready: false,
 					State: corev1.ContainerState{
 						Waiting: &corev1.ContainerStateWaiting{
-							Reason:  "ImagePullBackOff",
+							Reason:  k8sContainerReasonImagePullBackOff,
 							Message: "Failed to pull init container image",
 						},
 					},
@@ -363,13 +363,13 @@ func (f *FakeK8sClient) WithInitContainerOOMKilled(containerName string) *FakeK8
 					Ready: false,
 					LastTerminationState: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{
-							Reason:  "OOMKilled",
+							Reason:  k8sContainerReasonOOMKilled,
 							Message: "Out of memory",
 						},
 					},
 					State: corev1.ContainerState{
 						Waiting: &corev1.ContainerStateWaiting{
-							Reason: "CrashLoopBackOff",
+							Reason: k8sContainerReasonCrashLoopBackOff,
 						},
 					},
 				},
@@ -2833,7 +2833,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 					WithPodInCrashLoopBackOff("test-container", 5)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
-			expectErrorMsg: "CrashLoopBackOff",
+			expectErrorMsg: k8sContainerReasonCrashLoopBackOff,
 			expectError:    false,
 		},
 		{
@@ -2886,7 +2886,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithInitContainerInCrashLoopBackOff("model-downloader", 5)
+					WithInitContainerInCrashLoopBackOff(modelDownloaderInitContainerName, 5)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "Init Container",
@@ -2900,7 +2900,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithInitContainerInImagePullBackOff("model-downloader")
+					WithInitContainerInImagePullBackOff(modelDownloaderInitContainerName)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "Init Container",
@@ -2914,7 +2914,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithInitContainerOOMKilled("model-downloader")
+					WithInitContainerOOMKilled(modelDownloaderInitContainerName)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "Init Container",
@@ -2928,10 +2928,10 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithTerminatedInitContainer("model-downloader", 1, 1)
+					WithTerminatedInitContainer(modelDownloaderInitContainerName, 1, 1)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: "model-downloader init container has not completed",
+			expectErrorMsg: modelDownloaderInitContainerName + " init container has not completed",
 			expectError:    false,
 		},
 		{
@@ -2942,7 +2942,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithTerminatedInitContainer("model-downloader", 1, 5)
+					WithTerminatedInitContainer(modelDownloaderInitContainerName, 1, 5)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "exit code 1",
@@ -2956,10 +2956,10 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithRunningInitContainer("model-downloader")
+					WithRunningInitContainer(modelDownloaderInitContainerName)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: "model-downloader init container is running",
+			expectErrorMsg: modelDownloaderInitContainerName + " init container is running",
 			expectError:    false,
 		},
 		{
@@ -2970,10 +2970,10 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithWaitingInitContainer("model-downloader", "PodInitializing")
+					WithWaitingInitContainer(modelDownloaderInitContainerName, k8sContainerReasonPodInitializing)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: "model-downloader init container has not completed",
+			expectErrorMsg: modelDownloaderInitContainerName + " init container has not completed",
 			expectError:    false,
 		},
 		{

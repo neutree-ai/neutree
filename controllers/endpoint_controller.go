@@ -11,7 +11,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
-	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -307,35 +306,11 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 }
 
 func (c *EndpointController) preserveModelDownloadStatus(obj *v1.Endpoint, status *v1.EndpointStatus) {
-	if obj.Status == nil {
-		return
-	}
-
-	currentModelHash, err := util.ComputeEndpointModelHash(obj)
-	if err != nil {
-		klog.Warningf("failed to compute endpoint %s model hash: %v", obj.Metadata.WorkspaceName(), err)
+	if obj.Status == nil || obj.Status.ModelDownloadCompletedHash == nil {
 		return
 	}
 
 	if status.ModelDownloadCompletedHash != nil {
-		if currentModelHash != "" && *status.ModelDownloadCompletedHash != currentModelHash {
-			emptyHash := ""
-			status.ModelDownloadCompletedHash = &emptyHash
-		}
-
-		return
-	}
-
-	if obj.Status.ModelDownloadCompletedHash == nil {
-		return
-	}
-
-	if currentModelHash != "" &&
-		*obj.Status.ModelDownloadCompletedHash != "" &&
-		*obj.Status.ModelDownloadCompletedHash != currentModelHash {
-		emptyHash := ""
-		status.ModelDownloadCompletedHash = &emptyHash
-
 		return
 	}
 

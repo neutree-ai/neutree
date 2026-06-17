@@ -9,7 +9,6 @@ import (
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
-	"github.com/neutree-ai/neutree/internal/util"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -526,18 +525,55 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 	}
 }
 
-func Test_PrepareStatusForUpdate_ClearsStaleModelDownloadHash(t *testing.T) {
+func Test_PrepareStatusForUpdate_PreservesOmittedModelDownloadHash(t *testing.T) {
 	endpoint := ep(1, v1.EndpointPhaseDEPLOYING)
-	currentHash, err := util.ComputeEndpointModelHash(endpoint)
-	assert.NoError(t, err)
-	assert.NotEqual(t, "stale-hash", currentHash)
-	endpoint.Status.ModelDownloadCompletedHash = stringPtr("stale-hash")
+	endpoint.Status.ModelDownloadCompletedHash = stringPtr("completed-hash")
 
 	status := &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}
 	c := &EndpointController{}
 	c.prepareStatusForUpdate(endpoint, status)
 
 	assert.NotNil(t, status.ModelDownloadCompletedHash)
-	assert.Equal(t, "", *status.ModelDownloadCompletedHash)
-	assert.True(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}))
+	assert.Equal(t, "completed-hash", *status.ModelDownloadCompletedHash)
+	assert.False(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}))
+}
+
+func Test_PrepareStatusForUpdate_UsesExplicitModelDownloadHash(t *testing.T) {
+	tests := []struct {
+		name     string
+		newHash  *string
+		expected string
+	}{
+		{
+			name:     "empty hash clears stale completion",
+			newHash:  stringPtr(""),
+			expected: "",
+		},
+		{
+			name:     "new hash updates completion",
+			newHash:  stringPtr("new-hash"),
+			expected: "new-hash",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint := ep(1, v1.EndpointPhaseDEPLOYING)
+			endpoint.Status.ModelDownloadCompletedHash = stringPtr("old-hash")
+
+			status := &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: tt.newHash,
+			}
+			c := &EndpointController{}
+			c.prepareStatusForUpdate(endpoint, status)
+
+			assert.NotNil(t, status.ModelDownloadCompletedHash)
+			assert.Equal(t, tt.expected, *status.ModelDownloadCompletedHash)
+			assert.True(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: tt.newHash,
+			}))
+		})
+	}
 }
