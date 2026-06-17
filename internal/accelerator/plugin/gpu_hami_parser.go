@@ -1,0 +1,415 @@
+package plugin
+
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+)
+
+const (
+	// These annotation keys mirror HAMi v2.9.0 NVIDIA device-plugin output.
+	// Keep them local instead of importing HAMi implementation packages so
+	// Neutree depends only on the Kubernetes annotation contract it observes.
+	HAMiNodeNvidiaRegisterAnnotation     = "hami.io/node-nvidia-register"
+	HAMiVGPUDevicesAllocatedAnnotation   = "hami.io/vgpu-devices-allocated"
+	hamiDefaultNvidiaDeviceCoreUnits     = int64(100)
+	hamiNvidiaDeviceAllocationFieldCount = 4
+)
+
+// hamiNvidiaRegisteredDevice is the subset of HAMi node registration data that
+// Neutree needs for resource views. HAMi may add fields to the annotation; the
+// parser intentionally ignores everything outside this stable subset.
+type hamiNvidiaRegisteredDevice struct {
+	ID      string `json:"id"`
+	DevMem  int64  `json:"devmem"`
+	DevCore int64  `json:"devcore"`
+	Type    string `json:"type"`
+	Health  *bool  `json:"health"`
+}
+
+type hamiNvidiaDeviceAllocation struct {
+	DeviceID  string
+	Product   string
+	MemoryMiB int64
+	CoreUnits int64
+}
+
+type hamiNvidiaDeviceUsage struct {
+	memoryMiB int64
+	coreUnits int64
+}
+
+func (p *GPUResourceParser) ParseKubernetesVirtualizationNode(
+	input resourceparser.KubernetesNodeResourceContext,
+) (*resourceparser.KubernetesResourceParseResult, bool, error) {
+	// The node label is the virtualization switch. A virtualized cluster can
+	// still contain standard NVIDIA nodes, so non-matching nodes must fall back
+	// to the standard parser instead of returning an empty vGPU result.
+	if input.Labels[NvidiaGPUVirtualizationLabelKey] != "true" {
+		return nil, false, nil
+	}
+
+	devices, err := parseHAMiNvidiaRegisteredDevices(input.Annotations[HAMiNodeNvidiaRegisterAnnotation])
+	if err != nil {
+		return nil, true, err
+	}
+
+	if len(devices) == 0 {
+		return &resourceparser.KubernetesResourceParseResult{}, true, nil
+	}
+
+	usage, err := parseHAMiNvidiaPodUsage(input.Pods)
+	if err != nil {
+		return nil, true, err
+	}
+
+	return buildHAMiNvidiaResourceParseResult(input.Labels, devices, usage), true, nil
+}
+
+func (p *GPUResourceParser) ParseKubernetesVirtualizationEndpoint(
+	input resourceparser.KubernetesEndpointResourceContext,
+) ([]resourceparser.EndpointInstanceResource, bool, error) {
+	if !hasHAMiNvidiaEndpointAllocations(input) {
+		return nil, false, nil
+	}
+
+	instances, err := parseHAMiNvidiaEndpointResources(input)
+
+	return instances, true, err
+}
+
+func hasHAMiNvidiaEndpointAllocations(input resourceparser.KubernetesEndpointResourceContext) bool {
+	for _, pod := range input.Pods {
+		if strings.TrimSpace(pod.Annotations[HAMiVGPUDevicesAllocatedAnnotation]) == "" {
+			continue
+		}
+
+		node := input.Nodes[pod.NodeName]
+		if node.Labels[NvidiaGPUVirtualizationLabelKey] == "true" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func parseHAMiNvidiaEndpointResources(
+	input resourceparser.KubernetesEndpointResourceContext,
+) ([]resourceparser.EndpointInstanceResource, error) {
+	deviceProducts, err := hamiNvidiaDeviceProductsByNode(input.Nodes)
+	if err != nil {
+		return nil, err
+	}
+
+	instances := make([]resourceparser.EndpointInstanceResource, 0, len(input.Pods))
+
+	for _, pod := range input.Pods {
+		allocations, err := parseHAMiNvidiaDeviceAllocations(pod.Annotations[HAMiVGPUDevicesAllocatedAnnotation])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse HAMi NVIDIA allocation for endpoint pod %s/%s: %w",
+				pod.Namespace, pod.Name, err)
+		}
+
+		if len(allocations) == 0 {
+			continue
+		}
+
+		instance := resourceparser.EndpointInstanceResource{
+			InstanceID: pod.Name,
+			ReplicaID:  pod.Name,
+			NodeID:     pod.NodeName,
+			Devices:    make([]v1.DeviceAllocation, 0, len(allocations)),
+		}
+
+		for _, allocation := range allocations {
+			product := deviceProducts[pod.NodeName][allocation.DeviceID]
+			if product == "" {
+				product = allocation.Product
+			}
+
+			if product == "" {
+				product = "unknown"
+			}
+
+			instance.Devices = append(instance.Devices, v1.DeviceAllocation{
+				UUID:      allocation.DeviceID,
+				Product:   product,
+				MemoryMiB: allocation.MemoryMiB,
+				CoreUnits: allocation.CoreUnits,
+				NodeID:    pod.NodeName,
+			})
+		}
+
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
+}
+
+func hamiNvidiaDeviceProductsByNode(
+	nodes map[string]resourceparser.KubernetesEndpointNodeResourceContext,
+) (map[string]map[string]string, error) {
+	result := make(map[string]map[string]string)
+
+	for nodeName, node := range nodes {
+		devices, err := parseHAMiNvidiaRegisteredDevices(node.Annotations[HAMiNodeNvidiaRegisterAnnotation])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse HAMi NVIDIA registered devices for node %s: %w", nodeName, err)
+		}
+
+		if len(devices) == 0 {
+			continue
+		}
+
+		result[nodeName] = make(map[string]string, len(devices))
+		for _, device := range devices {
+			result[nodeName][device.ID] = hamiNvidiaDeviceProduct(node.Labels, device)
+		}
+	}
+
+	return result, nil
+}
+
+func parseHAMiNvidiaRegisteredDevices(value string) ([]hamiNvidiaRegisteredDevice, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+
+	var devices []hamiNvidiaRegisteredDevice
+	if err := json.Unmarshal([]byte(value), &devices); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", HAMiNodeNvidiaRegisterAnnotation, err)
+	}
+
+	return devices, nil
+}
+
+func parseHAMiNvidiaPodUsage(pods []resourceparser.KubernetesPodResourceContext) (map[string]hamiNvidiaDeviceUsage, error) {
+	result := make(map[string]hamiNvidiaDeviceUsage)
+
+	for _, pod := range pods {
+		allocations, err := parseHAMiNvidiaDeviceAllocations(pod.Annotations[HAMiVGPUDevicesAllocatedAnnotation])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse HAMi NVIDIA allocation for pod %s/%s: %w",
+				pod.Namespace, pod.Name, err)
+		}
+
+		for _, allocation := range allocations {
+			usage := result[allocation.DeviceID]
+			usage.memoryMiB += allocation.MemoryMiB
+			usage.coreUnits += allocation.CoreUnits
+			result[allocation.DeviceID] = usage
+		}
+	}
+
+	return result, nil
+}
+
+func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocation, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+
+	// HAMi v2.9.0 writes allocated devices as a semicolon-delimited string.
+	// Empty fields are common because the annotation keeps slots for each
+	// container/device position. Example:
+	//
+	//	;;GPU-5ad72eb2,NVIDIA,15360,100:;GPU-cd4432b1,NVIDIA,15360,100:;
+	//
+	// Each non-empty record is parsed as:
+	//
+	//	<device_uuid>,<vendor>,<memory_mib>,<core_units>[:optional_suffix]
+	//
+	// Neutree only needs the UUID plus the memory/core allocation. The vendor
+	// is kept as Product only as a fallback when node registration metadata is
+	// missing.
+	var allocations []hamiNvidiaDeviceAllocation
+
+	for _, entry := range strings.Split(value, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+
+		if colon := strings.Index(entry, ":"); colon >= 0 {
+			entry = entry[:colon]
+		}
+
+		fields := strings.Split(entry, ",")
+		if len(fields) < hamiNvidiaDeviceAllocationFieldCount {
+			continue
+		}
+
+		memoryMiB, err := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid memory value %q: %w", fields[2], err)
+		}
+
+		coreUnits, err := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid core value %q: %w", fields[3], err)
+		}
+
+		allocations = append(allocations, hamiNvidiaDeviceAllocation{
+			DeviceID:  strings.TrimSpace(fields[0]),
+			Product:   strings.TrimSpace(fields[1]),
+			MemoryMiB: memoryMiB,
+			CoreUnits: coreUnits,
+		})
+	}
+
+	return allocations, nil
+}
+
+func buildHAMiNvidiaResourceParseResult(
+	labels map[string]string,
+	devices []hamiNvidiaRegisteredDevice,
+	usage map[string]hamiNvidiaDeviceUsage,
+) *resourceparser.KubernetesResourceParseResult {
+	allocatableGroup := newNvidiaAcceleratorGroup()
+	availableGroup := newNvidiaAcceleratorGroup()
+	metadata := &v1.AcceleratorMetadata{
+		Products: make(map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata),
+	}
+	deviceResources := make([]*v1.DeviceResource, 0, len(devices))
+
+	for _, device := range devices {
+		product := hamiNvidiaDeviceProduct(labels, device)
+		allocatable := hamiNvidiaDeviceAllocatable(device)
+		used := usage[device.ID]
+		available := hamiNvidiaDeviceAvailable(allocatable, used)
+
+		deviceResources = append(deviceResources, &v1.DeviceResource{
+			UUID:        device.ID,
+			Product:     product,
+			Health:      device.healthy(),
+			Allocatable: allocatable,
+			Available:   available,
+		})
+
+		if !device.healthy() {
+			continue
+		}
+
+		productKey := v1.AcceleratorProduct(product)
+		addHAMiNvidiaProductResource(allocatableGroup, productKey, 1, allocatable)
+
+		if hamiNvidiaDeviceHasAvailableCapacity(available) {
+			// A device is counted as available only when one more vGPU slice can
+			// fit both memory and core requirements. Exposing only memory or only
+			// core capacity would let middleware accept an unschedulable endpoint.
+			addHAMiNvidiaProductResource(availableGroup, productKey, 1, available)
+		}
+
+		if _, exists := metadata.Products[productKey]; !exists && allocatable.MemoryMiB > 0 {
+			metadata.Products[productKey] = &v1.AcceleratorProductMetadata{
+				MemoryTotalMiB: float64(allocatable.MemoryMiB),
+			}
+		}
+	}
+
+	return &resourceparser.KubernetesResourceParseResult{
+		Allocatable: &v1.ResourceInfo{
+			AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+				v1.AcceleratorTypeNVIDIAGPU: allocatableGroup,
+			},
+		},
+		Available: &v1.ResourceInfo{
+			AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+				v1.AcceleratorTypeNVIDIAGPU: availableGroup,
+			},
+		},
+		Devices: deviceResources,
+		AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+			v1.AcceleratorTypeNVIDIAGPU: metadata,
+		},
+	}
+}
+
+func hamiNvidiaDeviceProduct(labels map[string]string, device hamiNvidiaRegisteredDevice) string {
+	if product := labels[NvidiaGPUKubernetesNodeSelectorKey]; product != "" {
+		return product
+	}
+
+	if device.Type != "" {
+		return device.Type
+	}
+
+	return "unknown"
+}
+
+func hamiNvidiaDeviceAllocatable(device hamiNvidiaRegisteredDevice) *v1.DeviceResourcePool {
+	return &v1.DeviceResourcePool{
+		MemoryMiB: nonZeroInt64(device.DevMem, 0),
+		CoreUnits: nonZeroInt64(device.DevCore, hamiDefaultNvidiaDeviceCoreUnits),
+	}
+}
+
+func hamiNvidiaDeviceAvailable(
+	allocatable *v1.DeviceResourcePool,
+	used hamiNvidiaDeviceUsage,
+) *v1.DeviceResourcePool {
+	return &v1.DeviceResourcePool{
+		MemoryMiB: nonNegativeInt64(allocatable.MemoryMiB - used.memoryMiB),
+		CoreUnits: nonNegativeInt64(allocatable.CoreUnits - used.coreUnits),
+	}
+}
+
+func hamiNvidiaDeviceHasAvailableCapacity(pool *v1.DeviceResourcePool) bool {
+	return pool != nil && pool.MemoryMiB > 0 && pool.CoreUnits > 0
+}
+
+func addHAMiNvidiaProductResource(
+	group *v1.AcceleratorGroup,
+	product v1.AcceleratorProduct,
+	quantity float64,
+	pool *v1.DeviceResourcePool,
+) {
+	group.Quantity += quantity
+	group.ProductGroups[product] += quantity
+
+	productResource := group.Products[product]
+	if productResource == nil {
+		productResource = &v1.AcceleratorProductResource{}
+		group.Products[product] = productResource
+	}
+
+	productResource.Quantity += quantity
+
+	if productResource.Virtualization == nil {
+		productResource.Virtualization = &v1.AcceleratorVirtualizationResource{}
+	}
+
+	productResource.Virtualization.MemoryMiB += float64(pool.MemoryMiB)
+	productResource.Virtualization.CoreUnits += float64(pool.CoreUnits)
+}
+
+func newNvidiaAcceleratorGroup() *v1.AcceleratorGroup {
+	return &v1.AcceleratorGroup{
+		ProductGroups: make(map[v1.AcceleratorProduct]float64),
+		Products:      make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource),
+	}
+}
+
+func (d hamiNvidiaRegisteredDevice) healthy() bool {
+	return d.Health == nil || *d.Health
+}
+
+func nonZeroInt64(value, fallback int64) int64 {
+	if value == 0 {
+		return fallback
+	}
+
+	return value
+}
+
+func nonNegativeInt64(value int64) int64 {
+	if value < 0 {
+		return 0
+	}
+
+	return value
+}

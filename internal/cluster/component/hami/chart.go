@@ -1,0 +1,117 @@
+package hami
+
+import (
+	"bytes"
+	"embed"
+	"path"
+	"sort"
+	"strings"
+
+	"github.com/pkg/errors"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/chartutil"
+	"helm.sh/helm/v3/pkg/engine"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/neutree-ai/neutree/internal/util"
+)
+
+const embeddedHAMiChartPackage = "chart/hami-2.9.0.tgz"
+
+//go:embed chart/hami-2.9.0.tgz
+var embeddedHAMiChartFS embed.FS
+
+func renderEmbeddedHAMiChart(
+	values map[string]interface{},
+	namespace string,
+	kubeVersion chartutil.KubeVersion,
+) (*unstructured.UnstructuredList, error) {
+	hamiChart, err := loadEmbeddedHAMiChart()
+	if err != nil {
+		return nil, err
+	}
+
+	capabilities := chartutil.DefaultCapabilities.Copy()
+	capabilities.KubeVersion = kubeVersion
+
+	renderValues, err := chartutil.ToRenderValuesWithSchemaValidation(
+		hamiChart,
+		values,
+		chartutil.ReleaseOptions{
+			Name:      ChartReleaseName,
+			Namespace: namespace,
+			Revision:  1,
+			IsInstall: true,
+		},
+		capabilities,
+		true,
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build HAMi chart render values")
+	}
+
+	renderedFiles, err := engine.Engine{}.Render(hamiChart, renderValues)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to render HAMi chart")
+	}
+
+	manifest := joinRenderedManifests(renderedFiles)
+
+	objList, err := util.DecodeKubernetesManifest(manifest)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to decode rendered HAMi manifest")
+	}
+
+	return objList, nil
+}
+
+func loadEmbeddedHAMiChart() (*chart.Chart, error) {
+	data, err := embeddedHAMiChartFS.ReadFile(embeddedHAMiChartPackage)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read embedded HAMi chart")
+	}
+
+	hamiChart, err := loader.LoadArchive(bytes.NewReader(data))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load embedded HAMi chart")
+	}
+
+	return hamiChart, nil
+}
+
+func joinRenderedManifests(renderedFiles map[string]string) string {
+	keys := make([]string, 0, len(renderedFiles))
+	for key := range renderedFiles {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	var buf bytes.Buffer
+
+	for _, key := range keys {
+		content := strings.TrimSpace(renderedFiles[key])
+		if content == "" || !isRenderedManifestFile(key) {
+			continue
+		}
+
+		buf.WriteString("---\n")
+		buf.WriteString("# Source: ")
+		buf.WriteString(key)
+		buf.WriteString("\n")
+		buf.WriteString(content)
+		buf.WriteString("\n")
+	}
+
+	return buf.String()
+}
+
+func isRenderedManifestFile(filePath string) bool {
+	switch path.Ext(filePath) {
+	case ".yaml", ".yml":
+		return true
+	default:
+		return false
+	}
+}

@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"text/template"
 
@@ -26,18 +27,19 @@ func RenderKubernetesManifest(templateStr string, variables any) (*unstructured.
 		return nil, errors.Wrap(err, "failed to execute template")
 	}
 
-	// Decode YAML to unstructured objects
-	// Note: yaml.NewYAMLOrJSONDecoder is a streaming decoder.
-	// Each call to Decode() reads ONE YAML document (separated by ---).
-	// We need to loop through all documents in the stream.
+	return DecodeKubernetesManifest(buf.String())
+}
+
+// DecodeKubernetesManifest decodes a multi-document Kubernetes YAML/JSON
+// manifest into unstructured objects.
+func DecodeKubernetesManifest(manifest string) (*unstructured.UnstructuredList, error) {
 	objList := &unstructured.UnstructuredList{}
-	decoder := yaml.NewYAMLOrJSONDecoder(&buf, 4096)
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewBufferString(manifest), 4096)
 
 	for {
 		obj := &unstructured.Unstructured{}
 		if err := decoder.Decode(obj); err != nil {
-			// io.EOF indicates end of stream
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 

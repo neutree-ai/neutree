@@ -144,6 +144,109 @@ func TestNVIDIAGPU_ConvertToKubernetes(t *testing.T) {
 	}
 }
 
+func TestNVIDIAGPU_ConvertToKubernetesWithHAMiMemoryMiB(t *testing.T) {
+	converter := NewGPUConverter()
+	resourceInfo := &v1.ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:                      string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey:                   "Tesla-T4",
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "10240",
+			v1.AcceleratorVirtualizationCorePercentKey: "30",
+		},
+	}
+
+	k8sResource, err := converter.ConvertToKubernetes(resourceInfo)
+	if err != nil {
+		t.Fatalf("ConvertToKubernetes() error = %v", err)
+	}
+
+	expectedResource := &v1.KubernetesResourceSpec{
+		Requests: map[string]string{
+			NvidiaGPUKubernetesResource.String(): "1",
+			NvidiaGPUMemoryResource.String():     "10240",
+			NvidiaGPUCoreResource.String():       "30",
+		},
+		Limits: map[string]string{
+			NvidiaGPUKubernetesResource.String(): "1",
+			NvidiaGPUMemoryResource.String():     "10240",
+			NvidiaGPUCoreResource.String():       "30",
+		},
+		NodeSelector: map[string]string{
+			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		},
+		Annotations: map[string]string{},
+	}
+
+	equal, diff, err := util.JsonEqual(k8sResource, expectedResource)
+	if err != nil {
+		t.Fatalf("JsonEqual() error = %v", err)
+	}
+	if !equal {
+		t.Fatalf("ConvertToKubernetes() differs from expected:\n%s", diff)
+	}
+}
+
+func TestNVIDIAGPU_ConvertToKubernetesWithHAMiMemoryPercent(t *testing.T) {
+	converter := NewGPUConverter()
+	resourceInfo := &v1.ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:                        string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey:                     "Tesla-T4",
+			v1.AcceleratorVirtualizationMemoryPercentKey: "50",
+			v1.AcceleratorVirtualizationCorePercentKey:   "30",
+		},
+	}
+
+	k8sResource, err := converter.ConvertToKubernetes(resourceInfo)
+	if err != nil {
+		t.Fatalf("ConvertToKubernetes() error = %v", err)
+	}
+
+	expectedResource := &v1.KubernetesResourceSpec{
+		Requests: map[string]string{
+			NvidiaGPUKubernetesResource.String():       "1",
+			NvidiaGPUMemoryPercentageResource.String(): "50",
+			NvidiaGPUCoreResource.String():             "30",
+		},
+		Limits: map[string]string{
+			NvidiaGPUKubernetesResource.String():       "1",
+			NvidiaGPUMemoryPercentageResource.String(): "50",
+			NvidiaGPUCoreResource.String():             "30",
+		},
+		NodeSelector: map[string]string{
+			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+		},
+		Annotations: map[string]string{},
+	}
+
+	equal, diff, err := util.JsonEqual(k8sResource, expectedResource)
+	if err != nil {
+		t.Fatalf("JsonEqual() error = %v", err)
+	}
+	if !equal {
+		t.Fatalf("ConvertToKubernetes() differs from expected:\n%s", diff)
+	}
+}
+
+func TestNVIDIAGPU_ConvertToKubernetesRejectsInvalidHAMiVirtualization(t *testing.T) {
+	converter := NewGPUConverter()
+	resourceInfo := &v1.ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:                        string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorVirtualizationMemoryMiBKey:     "10240",
+			v1.AcceleratorVirtualizationMemoryPercentKey: "50",
+		},
+	}
+
+	_, err := converter.ConvertToKubernetes(resourceInfo)
+	if err == nil {
+		t.Fatal("expected mutual-exclusive memory validation error")
+	}
+}
+
 func TestNVIDIAGPU_ConvertToRay(t *testing.T) {
 	tests := []struct {
 		name             string

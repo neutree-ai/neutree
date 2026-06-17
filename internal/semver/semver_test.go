@@ -137,3 +137,45 @@ func TestBaseVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestMajorMinor(t *testing.T) {
+	tests := []struct {
+		name     string
+		version  string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "plain version with v prefix",
+			version:  "v1.30.9",
+			expected: "1.30",
+		},
+		{
+			name:     "version with build metadata",
+			version:  "v1.30.9+k3s1",
+			expected: "1.30",
+		},
+		{
+			name:     "version with prerelease",
+			version:  "v1.30.9-gke.1",
+			expected: "1.30",
+		},
+		{
+			name:    "invalid version",
+			version: "invalid",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := MajorMinor(tt.version)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

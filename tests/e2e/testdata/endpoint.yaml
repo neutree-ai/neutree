@@ -24,6 +24,15 @@ spec:
     accelerator:
       type: {{ .E2E_ACCELERATOR_TYPE }}
       product: {{ .E2E_ACCELERATOR_PRODUCT }}
+{{- if .E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_MIB }}
+      virtualization.memory_mib: "{{ .E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_MIB }}"
+{{- end }}
+{{- if .E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_PERCENT }}
+      virtualization.memory_percent: "{{ .E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_PERCENT }}"
+{{- end }}
+{{- if .E2E_ACCELERATOR_VIRTUALIZATION_CORE_PERCENT }}
+      virtualization.core_percent: "{{ .E2E_ACCELERATOR_VIRTUALIZATION_CORE_PERCENT }}"
+{{- end }}
   variables:
     engine_args:
 {{- range .E2E_ENGINE_ARGS }}

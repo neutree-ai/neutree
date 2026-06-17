@@ -13,6 +13,36 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+func readyMetricsDeployment(name string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Namespace:  "default",
+			Generation: 2,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: pointy.Int32(1),
+		},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 2,
+			ReadyReplicas:      1,
+			AvailableReplicas:  1,
+			UpdatedReplicas:    1,
+			Replicas:           1,
+			Conditions: []appsv1.DeploymentCondition{
+				{
+					Type:   appsv1.DeploymentAvailable,
+					Status: corev1.ConditionTrue,
+				},
+				{
+					Type:   appsv1.DeploymentProgressing,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+}
+
 func Test_checkDeploymentStatus(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -123,6 +153,85 @@ func Test_checkDeploymentStatus(t *testing.T) {
 				assert.NoError(t, err, "Did not expect error but got one")
 				assert.Equal(t, tt.expectedReady, ready, "Deployment readiness mismatch")
 			}
+		})
+	}
+}
+
+func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().
+		WithObjects(
+			readyMetricsDeployment("vmagent"),
+			readyMetricsDeployment("neutree-kube-state-metrics"),
+		).
+		Build()
+
+	metricsCmpt := &MetricsComponent{
+		ctrlClient: fakeClient,
+		namespace:  "default",
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+	}
+
+	status, err := metricsCmpt.CheckResourcesStatus(context.Background())
+
+	assert.NoError(t, err)
+	assert.True(t, status.Ready())
+	assert.True(t, status.DeploymentReady)
+	assert.True(t, status.KubeStateMetricsRequired)
+	assert.True(t, status.KubeStateMetricsDeploymentReady)
+	assert.Equal(t, 1, status.PodsReady)
+	assert.Equal(t, 1, status.KubeStateMetricsPodsReady)
+}
+
+func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().
+		WithObjects(readyMetricsDeployment("vmagent")).
+		Build()
+
+	metricsCmpt := &MetricsComponent{
+		ctrlClient: fakeClient,
+		namespace:  "default",
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.0.0"},
+		},
+	}
+
+	status, err := metricsCmpt.CheckResourcesStatus(context.Background())
+
+	assert.NoError(t, err)
+	assert.True(t, status.Ready())
+	assert.True(t, status.DeploymentReady)
+	assert.False(t, status.KubeStateMetricsRequired)
+	assert.False(t, status.KubeStateMetricsDeploymentReady)
+}
+
+func TestSupportsKubeStateMetricsClusterVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+		wantErr bool
+	}{
+		{name: "empty", version: "", want: false},
+		{name: "before minimum", version: "v1.0.0", want: false},
+		{name: "minimum", version: "v1.1.0", want: true},
+		{name: "nightly minimum", version: "v1.1.0-nightly-20260603", want: true},
+		{name: "invalid", version: "invalid", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := supportsKubeStateMetricsClusterVersion(tt.version)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

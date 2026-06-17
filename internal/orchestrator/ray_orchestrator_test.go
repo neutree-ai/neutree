@@ -15,6 +15,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	modelregistrymocks "github.com/neutree-ai/neutree/internal/model_registry/mocks"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
@@ -224,7 +225,7 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 			mockAcceleratorMgr := acceleratormocks.NewMockManager(t)
 			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllConverters().Return(map[string]plugin.ResourceConverter{}).Maybe()
-			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]plugin.ResourceParser{}).Maybe()
+			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]resourceparser.ResourceParser{}).Maybe()
 
 			o, ctx := newTestRayOrchestratorCtx(mockStorage, mockDashboard, endpoint, mockAcceleratorMgr)
 
@@ -340,7 +341,7 @@ func TestRayOrchestrator_createOrUpdateEndpoint_ApplicationNameConsistency(t *te
 			mockAcceleratorMgr := acceleratormocks.NewMockManager(t)
 			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllConverters().Return(map[string]plugin.ResourceConverter{}).Maybe()
-			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]plugin.ResourceParser{}).Maybe()
+			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]resourceparser.ResourceParser{}).Maybe()
 
 			o, ctx := newTestRayOrchestratorCtx(mockStorage, mockDashboard, endpoint, mockAcceleratorMgr)
 
@@ -462,7 +463,7 @@ func TestRayOrchestrator_deleteEndpoint(t *testing.T) {
 			mockAcceleratorMgr := acceleratormocks.NewMockManager(t)
 			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllConverters().Return(map[string]plugin.ResourceConverter{}).Maybe()
-			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]plugin.ResourceParser{}).Maybe()
+			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]resourceparser.ResourceParser{}).Maybe()
 
 			o, ctx := newTestRayOrchestratorCtx(mockStorage, mockDashboard, endpoint, mockAcceleratorMgr)
 

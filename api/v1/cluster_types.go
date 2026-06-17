@@ -31,11 +31,21 @@ type Cluster struct {
 
 type ClusterSpec struct {
 	// currently supports "ssh" and "kubernetes" cluster types
-	Type          string         `json:"type"`
-	Config        *ClusterConfig `json:"config"`
-	ImageRegistry string         `json:"image_registry"`
+	Type                      string                         `json:"type"`
+	Config                    *ClusterConfig                 `json:"config"`
+	ImageRegistry             string                         `json:"image_registry"`
+	AcceleratorVirtualization *AcceleratorVirtualizationSpec `json:"accelerator_virtualization,omitempty" yaml:"accelerator_virtualization,omitempty"`
 	// the neutree serving version, if not specified, the default version will be used
 	Version string `json:"version"`
+}
+
+type AcceleratorVirtualizationSpec struct {
+	Enabled     bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	ConfigPatch map[string]interface{} `json:"config_patch,omitempty" yaml:"config_patch,omitempty"`
+}
+
+func (s *ClusterSpec) AcceleratorVirtualizationEnabled() bool {
+	return s != nil && s.AcceleratorVirtualization != nil && s.AcceleratorVirtualization.Enabled
 }
 
 type ClusterConfig struct {
@@ -132,6 +142,25 @@ type ClusterStatus struct {
 	// ObservedSpecHash is the SHA256 hash of the last successfully applied ClusterSpec.
 	// Used to detect spec changes and trigger the Updating phase.
 	ObservedSpecHash string `json:"observed_spec_hash,omitempty"`
+
+	ComponentStatus map[string]*ComponentStatus `json:"component_status,omitempty"`
+}
+
+const ComponentStatusAcceleratorVirtualizationKey = "accelerator_virtualization"
+
+type ComponentPhase string
+
+const (
+	ComponentPhaseReady    ComponentPhase = "Ready"
+	ComponentPhaseNotReady ComponentPhase = "NotReady"
+)
+
+type ComponentStatus struct {
+	Phase   ComponentPhase `json:"phase,omitempty"`
+	Managed bool           `json:"managed,omitempty"`
+	Version string         `json:"version,omitempty"`
+	Reason  string         `json:"reason,omitempty"`
+	Message string         `json:"message,omitempty"`
 }
 
 type NodeProvision struct {
