@@ -25,6 +25,39 @@ The fix must keep inference traffic independent from `neutree-api` request-time
 availability. Neutree should compute permissions and push them into Kong; Kong
 should enforce the decision locally.
 
+## Repo Standards Read
+
+- `CLAUDE.md`: source work stays in the task worktree and ignored generated
+  paths are not read or edited.
+- `contributing/architecture.md`: inference traffic flows through Kong and does
+  not call `neutree-api` or `neutree-core` on the request path.
+- `contributing/architecture-neutree-api.md`: API-key authentication for
+  control-plane REST requests is middleware/PostgREST oriented and should not be
+  mixed into inference-route authorization.
+- `contributing/architecture-neutree-core.md`: controller behavior must remain
+  idempotent and tolerate periodic reconcile retries.
+- `contributing/testing.md`: Go tests stay package-local, DB permission changes
+  need `db/dbtest` coverage, and E2E uses Ginkgo labels with profile-driven
+  environment data.
+- `contributing/coding-standards.md`: changes must keep imports organized,
+  avoid oversized helpers, and pass scoped lint/vet gates.
+- `contributing/database.md`: RBAC remains database-backed through
+  `has_permission`; this change does not add a migration.
+
+## Minimal Change Boundary
+
+This design changes only Kong gateway synchronization and the verification
+surface needed to prove route-level API-key authorization:
+
+- In scope: Neutree-managed ACL group naming, API-key Consumer ACL membership
+  sync, IE/EE route ACL plugins, Kong custom plugin priority, unit tests, DB
+  permission regression coverage, and Step 5 E2E acceptance design.
+- Out of scope: a request-time call from Kong to Neutree, a new custom Kong
+  authorization plugin, API-key fixed scopes, new database schema, new
+  permissions, CLI/API wire-shape changes, and UI changes.
+- Existing non-Neutree Kong ACL groups are preserved; only groups with the
+  `nt:` prefix are managed by this feature.
+
 ## Decisions
 
 - Use Kong's native `acl` plugin for gateway authorization.
@@ -260,9 +293,38 @@ does not replace automated E2E acceptance.
   workspace, target endpoint type, and target endpoint name.
 - Rejected cross-workspace calls do not create successful usage records.
 
-Manual testing is not required for final acceptance if automated E2E covers the
-cases above. The manual baseline remains a development input, not the release
-gate.
+### E2E Classification
+
+Every case keeps a manual Step 5 execution requirement. Code-backed E2E is an
+additional layer for the deterministic happy path, not a replacement for manual
+verification.
+
+| Case | Classification | Code E2E decision |
+|---|---|---|
+| Authorized same-workspace EE model list and OpenAI chat | Manual Step 5 + Code E2E | Reuse `external-endpoint && openai` |
+| Authorized same-workspace EE Anthropic messages | Manual Step 5 only | Existing suite covers protocol behavior; ACL proof is manual |
+| Authorized same-workspace IE chat on a Running endpoint | Manual Step 5 only | Depends on cluster/model capacity |
+| Cross-workspace EE denied with `403` | Manual Step 5 only | Requires multi-workspace environment |
+| Cross-workspace IE denied with `403` | Manual Step 5 only | Requires multi-workspace plus Running IE |
+| Permission removal followed by reconcile denies access | Manual Step 5 only | Requires non-admin role mutation and reconcile observation |
+| Direct Kong ACL membership removal denies access | Manual Step 5 only | Route default-deny proof |
+| Successful usage/trace records still include API-key and target metadata | Manual Step 5 only | Requires usage/trace query access |
+| Rejected calls do not create successful usage records | Manual Step 5 only | Requires usage query access |
+
+### E2E Environment Capability Matrix
+
+| Capability | Required by | Current `10.255.1.54` evidence | Status |
+|---|---|---|---|
+| EE with mock upstream | EE allow/deny happy path | Created temporary EE and upstream mock | Available |
+| Running IE | IE allow/deny path | Environment listed zero clusters and endpoints | Missing |
+| Two workspaces | Cross-workspace denial | Current DB migration allows one workspace | Missing |
+| Non-admin role assignment and permission revoke | Permission-removal reconcile | Shared environment only validated admin/global path | Missing |
+| Kong Admin access | Route ACL and membership evidence | Kong Admin reachable through container network | Available |
+| Usage/trace query visibility | Usage/trace assertions | Existing scoped E2E does not assert these fields | Missing |
+
+Step 5 cannot be considered complete until the missing capabilities are supplied
+and the corresponding manual cases pass, or the remaining risk is explicitly
+accepted before Step 9.
 
 ## Rollout Notes
 
