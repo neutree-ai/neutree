@@ -84,3 +84,190 @@ func TestValidateClusterDeletion(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
+	t.Run("allows Kubernetes cluster to enable accelerator virtualization", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {
+					"enabled": true,
+					"config_patch": {"devicePlugin": {"nvidiaDriverRoot": "/run/nvidia/driver"}}
+				}
+			}
+		}`))
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("allows Kubernetes nightly cluster with minimum base version to enable accelerator virtualization", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0-nightly-20260603",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("rejects Kubernetes cluster below minimum version enabling accelerator virtualization", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.0.9",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10208", err.Code)
+		assert.Contains(t, err.Message, "requires cluster version >= v1.1.0")
+	})
+
+	t.Run("rejects Kubernetes cluster missing version enabling accelerator virtualization", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10208", err.Code)
+		assert.Contains(t, err.Message, "requires cluster version >= v1.1.0")
+	})
+
+	t.Run("rejects invalid cluster version enabling accelerator virtualization", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "nightly",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10209", err.Code)
+		assert.Equal(t, "invalid cluster version", err.Message)
+	})
+
+	t.Run("rejects SSH cluster enabling accelerator virtualization", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "ssh",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10208", err.Code)
+	})
+
+	t.Run("rejects non-bool enabled", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {"enabled": "true"}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10209", err.Code)
+		assert.Equal(t, "invalid cluster payload", err.Message)
+	})
+
+	t.Run("rejects non-object config_patch", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {"enabled": true, "config_patch": ["invalid"]}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10209", err.Code)
+		assert.Equal(t, "invalid cluster payload", err.Message)
+	})
+
+	t.Run("skips accelerator virtualization validation for soft delete patch", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"metadata": {
+				"name": "cluster",
+				"workspace": "default",
+				"deletion_timestamp": "2026-06-10T00:00:00Z"
+			},
+			"spec": {
+				"type": "ssh",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("rejects unsupported config patch key", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {
+					"enabled": true,
+					"config_patch": {"dra": {"enabled": true}}
+				}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10210", err.Code)
+		assert.Contains(t, err.Message, "unsupported")
+	})
+
+	t.Run("rejects MIG virtualization config patch", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {
+					"enabled": true,
+					"config_patch": {"devicePlugin": {"migStrategy": "mixed"}}
+				}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10210", err.Code)
+		assert.Contains(t, err.Message, "MIG")
+	})
+
+	t.Run("rejects partial patch missing cluster type and version", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"metadata": {"name": "cluster", "workspace": "default"},
+			"spec": {
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10208", err.Code)
+		assert.Contains(t, err.Message, "only supported for Kubernetes")
+	})
+
+	t.Run("rejects partial patch missing cluster version", func(t *testing.T) {
+		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
+			"metadata": {"name": "cluster", "workspace": "default"},
+			"spec": {
+				"type": "kubernetes",
+				"accelerator_virtualization": {"enabled": true}
+			}
+		}`))
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10208", err.Code)
+		assert.Contains(t, err.Message, "requires cluster version >= v1.1.0")
+	})
+}

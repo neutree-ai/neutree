@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"reflect"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -243,6 +244,10 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 
 	// Update if error message changed
 	if obj.Status.ErrorMessage != newStatus.ErrorMessage {
+		return true
+	}
+
+	if !reflect.DeepEqual(obj.Status.Resources, newStatus.Resources) {
 		return true
 	}
 

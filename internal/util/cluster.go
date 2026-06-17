@@ -8,8 +8,10 @@ import (
 
 	"github.com/pkg/errors"
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -22,8 +24,10 @@ import (
 var (
 	scheme = runtime.NewScheme()
 	_      = rayv1.AddToScheme(scheme)
+	_      = admissionregistrationv1.AddToScheme(scheme)
 	_      = appsv1.AddToScheme(scheme)
 	_      = corev1.AddToScheme(scheme)
+	_      = rbacv1.AddToScheme(scheme)
 )
 
 func GetClusterModelCache(c v1.Cluster) ([]v1.ModelCache, error) {

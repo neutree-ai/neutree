@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -66,6 +67,7 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 		Requests:     make(map[string]string),
 		Limits:       make(map[string]string),
 		NodeSelector: make(map[string]string),
+		Annotations:  make(map[string]string),
 		Env:          make(map[string]string),
 	}
 
@@ -84,5 +86,77 @@ func (c *GPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.Kubernete
 		k8s.NodeSelector[c.nodeSelectorKey] = product
 	}
 
+	if spec.HasAcceleratorVirtualization() {
+		// Keep the public API in Neutree resource terms. The HAMi raw resource
+		// names are introduced only at the Kubernetes manifest boundary.
+		if err := c.setHAMiVirtualizationResources(k8s, spec); err != nil {
+			return nil, err
+		}
+
+		return k8s, nil
+	}
+
 	return k8s, nil
+}
+
+func (c *GPUConverter) setHAMiVirtualizationResources(k8s *v1.KubernetesResourceSpec, spec *v1.ResourceSpec) error {
+	memoryMiB := spec.GetAcceleratorVirtualizationMemoryMiB()
+	memoryPercent := spec.GetAcceleratorVirtualizationMemoryPercent()
+	corePercent := spec.GetAcceleratorVirtualizationCorePercent()
+
+	if memoryMiB != "" && memoryPercent != "" {
+		return fmt.Errorf("%s and %s are mutually exclusive",
+			v1.AcceleratorVirtualizationMemoryMiBKey,
+			v1.AcceleratorVirtualizationMemoryPercentKey)
+	}
+
+	if memoryMiB != "" {
+		if err := validatePositiveInteger(memoryMiB, v1.AcceleratorVirtualizationMemoryMiBKey); err != nil {
+			return err
+		}
+
+		setKubernetesResource(k8s, NvidiaGPUMemoryResource.String(), memoryMiB)
+	}
+
+	if memoryPercent != "" {
+		if err := validatePercent(memoryPercent, v1.AcceleratorVirtualizationMemoryPercentKey); err != nil {
+			return err
+		}
+		// HAMi accepts percentage memory as a Pod resource, while Neutree
+		// converts it back to MiB in resource views using product metadata.
+		setKubernetesResource(k8s, NvidiaGPUMemoryPercentageResource.String(), memoryPercent)
+	}
+
+	if corePercent != "" {
+		if err := validatePercent(corePercent, v1.AcceleratorVirtualizationCorePercentKey); err != nil {
+			return err
+		}
+
+		setKubernetesResource(k8s, NvidiaGPUCoreResource.String(), corePercent)
+	}
+
+	return nil
+}
+
+func setKubernetesResource(k8s *v1.KubernetesResourceSpec, key, value string) {
+	k8s.Requests[key] = value
+	k8s.Limits[key] = value
+}
+
+func validatePositiveInteger(value, field string) error {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fmt.Errorf("%s must be a positive integer", field)
+	}
+
+	return nil
+}
+
+func validatePercent(value, field string) error {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 || parsed > 100 {
+		return fmt.Errorf("%s must be an integer from 1 to 100", field)
+	}
+
+	return nil
 }

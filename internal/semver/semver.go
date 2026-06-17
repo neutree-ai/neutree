@@ -42,3 +42,16 @@ func BaseVersion(version string) (string, error) {
 
 	return fmt.Sprintf("%s%d.%d.%d", prefix, v.Major(), v.Minor(), v.Patch()), nil
 }
+
+func MajorMinor(version string) (string, error) {
+	if version == "" {
+		return "", nil
+	}
+
+	v, err := semver.NewVersion(version)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse version %q: %w", version, err)
+	}
+
+	return fmt.Sprintf("%d.%d", v.Major(), v.Minor()), nil
+}
