@@ -3,12 +3,15 @@ package util
 import (
 	"encoding/base64"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
+
+var invalidRegistryHostnameChar = regexp.MustCompile(`[^A-Za-z0-9.:-]`)
 
 // GetImageRegistryAuthInfo extracts the username and password from the given image registry auth config.
 // If both username and password are provided, they are returned directly.
@@ -67,7 +70,23 @@ func parseRegistryHost(rawURL string) (string, error) {
 		return "", errors.New("invalid registry url: " + rawURL)
 	}
 
+	if err := validateRegistryHostname(parsed.Hostname()); err != nil {
+		return "", err
+	}
+
 	return parsed.Host, nil
+}
+
+func validateRegistryHostname(hostname string) error {
+	if hostname == "" {
+		return errors.New("empty registry host")
+	}
+
+	if char := invalidRegistryHostnameChar.FindString(hostname); char != "" {
+		return errors.Errorf("invalid registry host %q: contains invalid character %q", hostname, char)
+	}
+
+	return nil
 }
 
 // StripRegistryScheme removes the http:// or https:// scheme prefix from a
