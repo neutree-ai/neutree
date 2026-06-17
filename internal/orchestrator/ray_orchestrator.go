@@ -61,6 +61,7 @@ type modelDownloadMarkerState int
 const (
 	modelDownloadMarkerNone modelDownloadMarkerState = iota
 	modelDownloadMarkerInProgress
+	modelDownloadMarkerDone
 	modelDownloadMarkerFailed
 )
 
@@ -457,6 +458,10 @@ func modelDownloadStateFromLog(logText string) modelDownloadMarkerState {
 		return modelDownloadMarkerFailed
 	}
 
+	if strings.Contains(logText, modelDownloadDoneMarker) {
+		return modelDownloadMarkerDone
+	}
+
 	if strings.Contains(logText, modelDownloadStartMarker) && !strings.Contains(logText, modelDownloadDoneMarker) {
 		return modelDownloadMarkerInProgress
 	}
@@ -467,6 +472,7 @@ func modelDownloadStateFromLog(logText string) modelDownloadMarkerState {
 func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashboard.RayServeApplicationStatus) (modelDownloadMarkerState, string, error) {
 	var (
 		firstErr         error
+		doneDetail       string
 		inProgressDetail string
 	)
 
@@ -501,6 +507,8 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 					return modelDownloadMarkerFailed,
 						fmt.Sprintf("Deployment %s replica %s model download failed", deploymentName, replicaID),
 						nil
+				case modelDownloadMarkerDone:
+					doneDetail = fmt.Sprintf("Deployment %s replica %s model download completed", deploymentName, replicaID)
 				case modelDownloadMarkerInProgress:
 					inProgressDetail = fmt.Sprintf("Deployment %s replica %s model download in progress", deploymentName, replicaID)
 				}
@@ -508,11 +516,82 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 		}
 	}
 
+	if doneDetail != "" {
+		return modelDownloadMarkerDone, doneDetail, nil
+	}
+
 	if inProgressDetail != "" {
 		return modelDownloadMarkerInProgress, inProgressDetail, nil
 	}
 
 	return modelDownloadMarkerNone, "", firstErr
+}
+
+func currentModelDownloadCompleted(endpoint *v1.Endpoint, currentModelHash string) bool {
+	if currentModelHash == "" || endpoint == nil || endpoint.Status == nil {
+		return false
+	}
+
+	return endpoint.Status.ModelDownloadCompleted != nil &&
+		*endpoint.Status.ModelDownloadCompleted &&
+		endpoint.Status.ModelDownloadCompletedHash != nil &&
+		*endpoint.Status.ModelDownloadCompletedHash == currentModelHash
+}
+
+func setModelDownloadStatus(status *v1.EndpointStatus, completed bool, currentModelHash string) {
+	status.ModelDownloadCompleted = &completed
+
+	if completed {
+		status.ModelDownloadCompletedHash = &currentModelHash
+		return
+	}
+
+	emptyHash := ""
+	status.ModelDownloadCompletedHash = &emptyHash
+}
+
+func resolveRayStartupModelDownloadStatus(
+	svc dashboard.DashboardService,
+	appStatus dashboard.RayServeApplicationStatus,
+	phase v1.EndpointPhase,
+	modelDownloadCompleted bool,
+) (v1.EndpointPhase, bool, bool, []string) {
+	if phase != v1.EndpointPhaseDEPLOYING ||
+		(appStatus.Status != rayAppStatusDeploying && appStatus.Status != rayAppStatusNotStarted) {
+		return phase, modelDownloadCompleted, false, nil
+	}
+
+	var errorMessages []string
+	modelDownloadIncomplete := false
+
+	markerState, markerMsg, markerErr := inspectRayModelDownloadLogs(svc, appStatus)
+	if markerErr != nil {
+		klog.V(4).Info("failed to inspect Ray actor model download logs", "error", markerErr)
+	}
+
+	switch markerState {
+	case modelDownloadMarkerFailed:
+		phase = v1.EndpointPhaseFAILED
+		modelDownloadIncomplete = true
+
+		errorMessages = append(errorMessages, markerMsg)
+	case modelDownloadMarkerDone:
+		modelDownloadCompleted = true
+	case modelDownloadMarkerInProgress:
+		phase = v1.EndpointPhaseMODELDOWNLOADING
+		modelDownloadIncomplete = true
+
+		errorMessages = append(errorMessages, markerMsg)
+	case modelDownloadMarkerNone:
+		if !modelDownloadCompleted {
+			phase = v1.EndpointPhaseMODELDOWNLOADING
+			modelDownloadIncomplete = true
+
+			errorMessages = append(errorMessages, "current model download is not completed")
+		}
+	}
+
+	return phase, modelDownloadCompleted, modelDownloadIncomplete, errorMessages
 }
 
 // GetEndpointStatus retrieves the status of a specific endpoint from Ray Serve.
@@ -571,6 +650,14 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	proxyReady := allProxiesHealthy(currentAppsResp.Proxies)
 
+	currentModelHash, hashErr := util.ComputeEndpointModelHash(endpoint)
+	if hashErr != nil {
+		klog.Warningf("failed to compute endpoint %s model hash: %v", endpoint.Metadata.WorkspaceName(), hashErr)
+	}
+
+	modelDownloadCompleted := currentModelDownloadCompleted(endpoint, currentModelHash)
+	modelDownloadIncomplete := false
+
 	// Basic status mapping
 	// https://docs.ray.io/en/latest/serve/api/doc/ray.serve.schema.ApplicationStatus.html#ray.serve.schema.ApplicationStatus
 	var phase v1.EndpointPhase
@@ -596,29 +683,21 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	}
 
 	if phase == v1.EndpointPhaseRUNNING {
-		return &v1.EndpointStatus{
+		endpointStatus := &v1.EndpointStatus{
 			Phase:        phase,
 			ErrorMessage: "",
-		}, nil
-	}
-
-	if phase == v1.EndpointPhaseDEPLOYING && (status.Status == rayAppStatusDeploying || status.Status == rayAppStatusNotStarted) {
-		markerState, markerMsg, markerErr := inspectRayModelDownloadLogs(dashboardService, status)
-		if markerErr != nil {
-			klog.V(4).Info("failed to inspect Ray actor model download logs", "error", markerErr)
+		}
+		if currentModelHash != "" {
+			setModelDownloadStatus(endpointStatus, true, currentModelHash)
 		}
 
-		switch markerState {
-		case modelDownloadMarkerFailed:
-			phase = v1.EndpointPhaseFAILED
-
-			errorMessages = append(errorMessages, markerMsg)
-		case modelDownloadMarkerInProgress:
-			phase = v1.EndpointPhaseMODELDOWNLOADING
-
-			errorMessages = append(errorMessages, markerMsg)
-		}
+		return endpointStatus, nil
 	}
+
+	var modelDownloadMessages []string
+	phase, modelDownloadCompleted, modelDownloadIncomplete, modelDownloadMessages =
+		resolveRayStartupModelDownloadStatus(dashboardService, status, phase, modelDownloadCompleted)
+	errorMessages = append(errorMessages, modelDownloadMessages...)
 
 	// Merge Ray Serve error messages
 	if status.Message != "" {
@@ -653,6 +732,14 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	endpointStatus := &v1.EndpointStatus{
 		Phase:        phase,
 		ErrorMessage: errorMsg, // Use merged error message
+	}
+
+	if currentModelHash != "" {
+		if modelDownloadCompleted {
+			setModelDownloadStatus(endpointStatus, true, currentModelHash)
+		} else if modelDownloadIncomplete {
+			setModelDownloadStatus(endpointStatus, false, currentModelHash)
+		}
 	}
 
 	return endpointStatus, nil

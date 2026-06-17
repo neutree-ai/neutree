@@ -13,3 +13,6 @@ ALTER TABLE api.endpoints ADD COLUMN status_sort_priority integer
       ELSE 9
     END
   ) STORED;
+
+ALTER TYPE api.endpoint_status DROP ATTRIBUTE model_download_completed_hash;
+ALTER TYPE api.endpoint_status DROP ATTRIBUTE model_download_completed;

@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -246,7 +247,32 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 		return true
 	}
 
+	// Update if Ray model download completion metadata changed.
+	if !sameOptionalBool(obj.Status.ModelDownloadCompleted, newStatus.ModelDownloadCompleted) {
+		return true
+	}
+
+	if !sameOptionalString(obj.Status.ModelDownloadCompletedHash, newStatus.ModelDownloadCompletedHash) {
+		return true
+	}
+
 	return false
+}
+
+func sameOptionalBool(left, right *bool) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+
+	return *left == *right
+}
+
+func sameOptionalString(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+
+	return *left == *right
 }
 
 func (c *EndpointController) cleanupEndpoint(obj *v1.Endpoint) error {
@@ -276,7 +302,45 @@ func (c *EndpointController) updateStatus(obj *v1.Endpoint, status *v1.EndpointS
 		status.ServiceURL = obj.Status.ServiceURL
 	}
 
+	c.preserveModelDownloadStatus(obj, status)
+
 	return c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Status: status})
+}
+
+func (c *EndpointController) preserveModelDownloadStatus(obj *v1.Endpoint, status *v1.EndpointStatus) {
+	if obj.Status == nil {
+		return
+	}
+
+	currentModelHash, err := util.ComputeEndpointModelHash(obj)
+	if err != nil {
+		klog.Warningf("failed to compute endpoint %s model hash: %v", obj.Metadata.WorkspaceName(), err)
+		return
+	}
+
+	if status.ModelDownloadCompleted != nil {
+		if *status.ModelDownloadCompleted {
+			if currentModelHash != "" {
+				status.ModelDownloadCompletedHash = &currentModelHash
+			}
+
+			return
+		}
+
+		if status.ModelDownloadCompletedHash == nil {
+			emptyHash := ""
+			status.ModelDownloadCompletedHash = &emptyHash
+		}
+
+		return
+	}
+
+	if status.ModelDownloadCompletedHash != nil {
+		return
+	}
+
+	status.ModelDownloadCompleted = obj.Status.ModelDownloadCompleted
+	status.ModelDownloadCompletedHash = obj.Status.ModelDownloadCompletedHash
 }
 
 func (c *EndpointController) formatStatus(phase v1.EndpointPhase, err error) *v1.EndpointStatus {

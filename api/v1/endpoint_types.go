@@ -55,10 +55,12 @@ const (
 )
 
 type EndpointStatus struct {
-	Phase              EndpointPhase `json:"phase,omitempty"`
-	ServiceURL         string        `json:"service_url,omitempty"`
-	LastTransitionTime string        `json:"last_transition_time,omitempty"`
-	ErrorMessage       string        `json:"error_message,omitempty"`
+	Phase                      EndpointPhase `json:"phase,omitempty"`
+	ServiceURL                 string        `json:"service_url,omitempty"`
+	LastTransitionTime         string        `json:"last_transition_time,omitempty"`
+	ErrorMessage               string        `json:"error_message,omitempty"`
+	ModelDownloadCompleted     *bool         `json:"model_download_completed,omitempty"`
+	ModelDownloadCompletedHash *string       `json:"model_download_completed_hash,omitempty"`
 }
 
 type Endpoint struct {

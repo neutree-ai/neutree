@@ -29,6 +29,10 @@ func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratorm
 	return c
 }
 
+func boolPtr(v bool) *bool { return &v }
+
+func stringPtr(v string) *string { return &v }
+
 func ep(id int, phase v1.EndpointPhase) *v1.Endpoint {
 	e := &v1.Endpoint{
 		ID: id,
@@ -415,6 +419,46 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServiceURL: "same-url"},
 			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServiceURL: "same-url"},
 			want:      false,
+		},
+		{
+			name: "same phase, different model download completion flag",
+			oldStatus: &v1.EndpointStatus{
+				Phase:                  v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompleted: boolPtr(false),
+			},
+			newStatus: &v1.EndpointStatus{
+				Phase:                  v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompleted: boolPtr(true),
+			},
+			want: true,
+		},
+		{
+			name: "same phase, different model download completion hash",
+			oldStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompleted:     boolPtr(true),
+				ModelDownloadCompletedHash: stringPtr("old-hash"),
+			},
+			newStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompleted:     boolPtr(true),
+				ModelDownloadCompletedHash: stringPtr("new-hash"),
+			},
+			want: true,
+		},
+		{
+			name: "same phase and same model download metadata",
+			oldStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompleted:     boolPtr(true),
+				ModelDownloadCompletedHash: stringPtr("same-hash"),
+			},
+			newStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompleted:     boolPtr(true),
+				ModelDownloadCompletedHash: stringPtr("same-hash"),
+			},
+			want: false,
 		},
 	}
 

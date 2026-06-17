@@ -529,10 +529,10 @@ func (k *kubernetesOrchestrator) getEndpointStats(ctrlClient client.Client, name
 		}, nil
 	}
 
-	if hasRunningModelDownloaderInitContainer(pods) {
+	if hasIncomplete, detail := hasIncompleteModelDownloaderInitContainer(pods); hasIncomplete {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseMODELDOWNLOADING,
-			ErrorMessage: "Endpoint model download in progress: model-downloader init container is running",
+			ErrorMessage: "Endpoint model download in progress: " + detail,
 		}, nil
 	}
 
@@ -560,16 +560,26 @@ func (k *kubernetesOrchestrator) listPods(ctrlClient client.Client, namespace st
 	return podList.Items, nil
 }
 
-func hasRunningModelDownloaderInitContainer(pods []corev1.Pod) bool {
+func hasIncompleteModelDownloaderInitContainer(pods []corev1.Pod) (bool, string) {
 	for _, pod := range pods {
 		for _, initStatus := range pod.Status.InitContainerStatuses {
-			if initStatus.Name == "model-downloader" && initStatus.State.Running != nil {
-				return true
+			if initStatus.Name != "model-downloader" {
+				continue
 			}
+
+			if initStatus.State.Terminated != nil && initStatus.State.Terminated.ExitCode == 0 {
+				continue
+			}
+
+			if initStatus.State.Running != nil {
+				return true, "model-downloader init container is running"
+			}
+
+			return true, "model-downloader init container has not completed"
 		}
 	}
 
-	return false
+	return false, ""
 }
 
 // checkContainerStatuses checks a slice of container statuses for critical failures.
