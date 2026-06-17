@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	rbacv1 "k8s.io/api/rbac/v1"
 )
 
 func makeKubeConfig(clusterConfig, userConfig string) string {
@@ -28,7 +29,6 @@ users:
 `, clusterConfig, userConfig)
 }
 
-// TestGetApiServerUrlFromDecodedKubeConfig tests extracting API server URL from kubeconfig
 func TestGetApiServerUrlFromDecodedKubeConfig(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -40,30 +40,25 @@ func TestGetApiServerUrlFromDecodedKubeConfig(t *testing.T) {
 			name:           "valid kubeconfig with https server",
 			kubeconfigYAML: makeKubeConfig("    server: https://kubernetes.example.com:6443\n    insecure-skip-tls-verify: true", "    token: test-token"),
 			expectedURL:    "https://kubernetes.example.com:6443",
-			expectError:    false,
 		},
 		{
 			name:           "valid kubeconfig with http server",
 			kubeconfigYAML: makeKubeConfig("    server: http://localhost:8080", "    token: local-token"),
 			expectedURL:    "http://localhost:8080",
-			expectError:    false,
 		},
 		{
 			name:           "invalid kubeconfig - empty string",
 			kubeconfigYAML: "",
-			expectedURL:    "",
 			expectError:    true,
 		},
 		{
 			name:           "invalid kubeconfig - malformed YAML",
 			kubeconfigYAML: "not: valid: yaml: content:",
-			expectedURL:    "",
 			expectError:    true,
 		},
 		{
 			name:           "invalid kubeconfig - missing server",
 			kubeconfigYAML: makeKubeConfig("    insecure-skip-tls-verify: true", "    token: test-token"),
-			expectedURL:    "",
 			expectError:    true,
 		},
 	}
@@ -73,16 +68,16 @@ func TestGetApiServerUrlFromDecodedKubeConfig(t *testing.T) {
 			url, err := GetApiServerUrlFromDecodedKubeConfig(tt.kubeconfigYAML)
 
 			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedURL, url)
+				require.Error(t, err)
+				return
 			}
+
+			require.NoError(t, err)
+			require.Equal(t, tt.expectedURL, url)
 		})
 	}
 }
 
-// TestGetTransportFromDecodedKubeConfig tests creating authenticated transport from kubeconfig
 func TestGetTransportFromDecodedKubeConfig(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -92,17 +87,14 @@ func TestGetTransportFromDecodedKubeConfig(t *testing.T) {
 		{
 			name:           "valid kubeconfig with token auth",
 			kubeconfigYAML: makeKubeConfig("    server: https://kubernetes.example.com:6443\n    insecure-skip-tls-verify: true", "    token: test-bearer-token-12345"),
-			expectError:    false,
 		},
 		{
 			name:           "valid kubeconfig with basic auth",
 			kubeconfigYAML: makeKubeConfig("    server: https://kubernetes.example.com:6443\n    insecure-skip-tls-verify: true", "    username: admin\n    password: secret"),
-			expectError:    false,
 		},
 		{
 			name:           "valid kubeconfig without explicit auth",
 			kubeconfigYAML: makeKubeConfig("    server: https://kubernetes.example.com:6443\n    insecure-skip-tls-verify: true", "    {}"),
-			expectError:    false,
 		},
 		{
 			name:           "invalid kubeconfig - empty string",
@@ -121,12 +113,21 @@ func TestGetTransportFromDecodedKubeConfig(t *testing.T) {
 			transport, err := GetTransportFromDecodedKubeConfig(tt.kubeconfigYAML)
 
 			if tt.expectError {
-				assert.Error(t, err)
-				assert.Nil(t, transport)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, transport)
+				require.Error(t, err)
+				require.Nil(t, transport)
+				return
 			}
+
+			require.NoError(t, err)
+			require.NotNil(t, transport)
 		})
 	}
+}
+
+func TestKubernetesClientSchemeRegistersRBAC(t *testing.T) {
+	kinds, _, err := scheme.ObjectKinds(&rbacv1.Role{})
+
+	require.NoError(t, err)
+	require.NotEmpty(t, kinds)
+	require.Equal(t, "Role", kinds[0].Kind)
 }

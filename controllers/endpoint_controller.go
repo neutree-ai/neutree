@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"reflect"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -256,6 +257,10 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 	}
 
 	if !sameOptionalString(obj.Status.ModelDownloadCompletedHash, normalizedStatus.ModelDownloadCompletedHash) {
+		return true
+	}
+
+	if !reflect.DeepEqual(obj.Status.Resources, newStatus.Resources) {
 		return true
 	}
 

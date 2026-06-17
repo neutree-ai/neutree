@@ -12,13 +12,25 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
 const (
 	NvidiaGPUKubernetesResource        corev1.ResourceName = "nvidia.com/gpu"
+	NvidiaGPUMemoryResource            corev1.ResourceName = "nvidia.com/gpumem"
+	NvidiaGPUMemoryPercentageResource  corev1.ResourceName = "nvidia.com/gpumem-percentage"
+	NvidiaGPUCoreResource              corev1.ResourceName = "nvidia.com/gpucores"
+	NvidiaGPUCountResource             string              = "nvidia.com/gpu.count"
 	NvidiaGPUKubernetesNodeSelectorKey string              = "nvidia.com/gpu.product"
+	NvidiaGPUMemoryNodeLabelKey        string              = "nvidia.com/gpu.memory"
+	NvidiaGPUVirtualizationLabelKey    string              = "neutree.ai/nvidia-vgpu-enabled"
+	NvidiaGPUDiscoveryLabelKey         string              = "nvidia.com/gpu.present"
+	NvidiaGPUDiscoveryLabelValue       string              = "true"
+	NvidiaGPUTopologyAwarePolicy       string              = "topology-aware"
+	NvidiaGPUDefaultDeviceSplitCount   int                 = 100
+	NvidiaGPUOperatorDriverRoot        string              = "/run/nvidia/driver"
 )
 
 func init() { //nolint:gochecknoinits
@@ -152,6 +164,6 @@ func (p *GPUAcceleratorPlugin) GetResourceConverter() ResourceConverter {
 	return NewGPUConverter()
 }
 
-func (p *GPUAcceleratorPlugin) GetResourceParser() ResourceParser {
+func (p *GPUAcceleratorPlugin) GetResourceParser() resourceparser.ResourceParser {
 	return &GPUResourceParser{}
 }

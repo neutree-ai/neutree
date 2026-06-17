@@ -62,6 +62,56 @@ func TestClusterResources_Serialization(t *testing.T) {
 	}
 }
 
+func TestClusterResources_NodeDevicesOnlySerializeUnderNodeResources(t *testing.T) {
+	clusterResources := &ClusterResources{
+		ResourceStatus: ResourceStatus{
+			Allocatable: &ResourceInfo{CPU: 16},
+			Available:   &ResourceInfo{CPU: 8},
+		},
+		NodeResources: map[string]*NodeResourceStatus{
+			"node-1": {
+				ResourceStatus: ResourceStatus{
+					Allocatable: &ResourceInfo{CPU: 16},
+					Available:   &ResourceInfo{CPU: 8},
+				},
+				Devices: []*DeviceResource{
+					{
+						UUID:    "GPU-1",
+						Product: "Tesla-T4",
+						Health:  true,
+					},
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(clusterResources)
+	if err != nil {
+		t.Fatalf("Failed to marshal ClusterResources: %v", err)
+	}
+
+	var root map[string]interface{}
+	if err := json.Unmarshal(jsonData, &root); err != nil {
+		t.Fatalf("Failed to unmarshal ClusterResources JSON: %v", err)
+	}
+
+	if _, exists := root["devices"]; exists {
+		t.Fatal("Expected cluster root to omit devices")
+	}
+
+	nodeResources, ok := root["node_resources"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected node_resources to be an object")
+	}
+	nodeResource, ok := nodeResources["node-1"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected node-1 resource to be an object")
+	}
+	if _, exists := nodeResource["devices"]; !exists {
+		t.Fatal("Expected node resource to include devices")
+	}
+}
+
 func TestClusterResources_HelperMethods(t *testing.T) {
 	clusterResources := &ClusterResources{
 		ResourceStatus: ResourceStatus{
@@ -157,5 +207,72 @@ func TestClusterResources_GetProductModels(t *testing.T) {
 	models = clusterResources.GetProductModels("amd_gpu")
 	if models != nil {
 		t.Errorf("Expected nil for non-existent accelerator type, got %v", models)
+	}
+
+	clusterResources.Allocatable.AcceleratorGroups["nvidia_gpu"].ProductGroups = map[AcceleratorProduct]float64{}
+	clusterResources.Allocatable.AcceleratorGroups["nvidia_gpu"].Products = map[AcceleratorProduct]*AcceleratorProductResource{
+		"Tesla-A10": {
+			Quantity: 1,
+		},
+	}
+	models = clusterResources.GetProductModels("nvidia_gpu")
+	if len(models) != 1 || models[0] != "Tesla-A10" {
+		t.Errorf("Expected product model fallback from Products, got %v", models)
+	}
+}
+
+func TestClusterResources_ProductVirtualizationSerialization(t *testing.T) {
+	clusterResources := &ClusterResources{
+		AcceleratorMetadata: map[AcceleratorType]*AcceleratorMetadata{
+			AcceleratorTypeNVIDIAGPU: {
+				Products: map[AcceleratorProduct]*AcceleratorProductMetadata{
+					"Tesla-T4": {
+						MemoryTotalMiB: 15360,
+					},
+				},
+			},
+		},
+		ResourceStatus: ResourceStatus{
+			Allocatable: &ResourceInfo{
+				AcceleratorGroups: map[AcceleratorType]*AcceleratorGroup{
+					AcceleratorTypeNVIDIAGPU: {
+						Quantity: 3,
+						ProductGroups: map[AcceleratorProduct]float64{
+							"Tesla-T4": 3,
+						},
+						Products: map[AcceleratorProduct]*AcceleratorProductResource{
+							"Tesla-T4": {
+								Quantity: 3,
+								Virtualization: &AcceleratorVirtualizationResource{
+									MemoryMiB: 46080,
+									CoreUnits: 300,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(clusterResources)
+	if err != nil {
+		t.Fatalf("Failed to marshal ClusterResources: %v", err)
+	}
+
+	var deserialized ClusterResources
+	if err := json.Unmarshal(jsonData, &deserialized); err != nil {
+		t.Fatalf("Failed to unmarshal ClusterResources: %v", err)
+	}
+
+	product := deserialized.Allocatable.AcceleratorGroups[AcceleratorTypeNVIDIAGPU].Products["Tesla-T4"]
+	if product.Quantity != 3 {
+		t.Fatalf("Expected product quantity 3, got %f", product.Quantity)
+	}
+	if product.Virtualization.MemoryMiB != 46080 {
+		t.Fatalf("Expected product virtualization memory 46080, got %f", product.Virtualization.MemoryMiB)
+	}
+	if deserialized.AcceleratorMetadata[AcceleratorTypeNVIDIAGPU].Products["Tesla-T4"].MemoryTotalMiB != 15360 {
+		t.Fatalf("Expected product memory metadata 15360, got %f", deserialized.AcceleratorMetadata[AcceleratorTypeNVIDIAGPU].Products["Tesla-T4"].MemoryTotalMiB)
 	}
 }

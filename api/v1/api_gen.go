@@ -529,6 +529,7 @@ type ApiEndpointStatus struct {
 	ErrorMessage               string      `json:"error_message"`
 	ModelDownloadCompleted     interface{} `json:"model_download_completed"`
 	ModelDownloadCompletedHash interface{} `json:"model_download_completed_hash"`
+	Resources                  interface{} `json:"resources"`
 }
 
 type ApiImageRegistrySpec struct {

@@ -365,6 +365,35 @@ func Test_UpdateStatusOnError(t *testing.T) {
 }
 
 func Test_ShouldUpdateStatus(t *testing.T) {
+	endpointResources := func(memoryMiB, coreUnits int64) *v1.EndpointResourceStatus {
+		return &v1.EndpointResourceStatus{
+			Replicas: []v1.ReplicaDeviceAllocation{
+				{
+					InstanceID: "pod-1",
+					ReplicaID:  "replica-1",
+					NodeID:     "node-1",
+					Devices: []v1.DeviceAllocation{
+						{
+							UUID:      "GPU-1",
+							Product:   "Tesla-T4",
+							MemoryMiB: memoryMiB,
+							CoreUnits: coreUnits,
+							NodeID:    "node-1",
+						},
+					},
+				},
+			},
+			Summary: &v1.EndpointResourceSummary{
+				Products: map[v1.AcceleratorProduct]*v1.ProductUsage{
+					"Tesla-T4": {
+						MemoryMiB: memoryMiB,
+						CoreUnits: coreUnits,
+					},
+				},
+			},
+		}
+	}
+
 	tests := []struct {
 		name      string
 		oldStatus *v1.EndpointStatus
@@ -433,6 +462,15 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			want: true,
 		},
 		{
+			name:      "same phase, resources added",
+			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+			newStatus: &v1.EndpointStatus{
+				Phase:     v1.EndpointPhaseRUNNING,
+				Resources: endpointResources(8192, 50),
+			},
+			want: true,
+		},
+		{
 			name: "same phase, different model download completion hash",
 			oldStatus: &v1.EndpointStatus{
 				Phase:                      v1.EndpointPhaseDEPLOYING,
@@ -461,6 +499,18 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "same phase, same resources",
+			oldStatus: &v1.EndpointStatus{
+				Phase:     v1.EndpointPhaseRUNNING,
+				Resources: endpointResources(8192, 50),
+			},
+			newStatus: &v1.EndpointStatus{
+				Phase:     v1.EndpointPhaseRUNNING,
+				Resources: endpointResources(8192, 50),
+			},
+			want: false,
+		},
+		{
 			name: "same phase and omitted model download metadata that will be preserved",
 			oldStatus: &v1.EndpointStatus{
 				Phase:                      v1.EndpointPhaseDEPLOYING,
@@ -471,6 +521,15 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 				Phase: v1.EndpointPhaseDEPLOYING,
 			},
 			want: false,
+		},
+		{
+			name: "same phase, resources removed",
+			oldStatus: &v1.EndpointStatus{
+				Phase:     v1.EndpointPhaseRUNNING,
+				Resources: endpointResources(8192, 50),
+			},
+			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+			want:      true,
 		},
 	}
 

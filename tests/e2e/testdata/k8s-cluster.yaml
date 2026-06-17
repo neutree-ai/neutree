@@ -7,6 +7,10 @@ spec:
   type: kubernetes
   image_registry: {{ .CLUSTER_IMAGE_REGISTRY }}
   version: "{{ .CLUSTER_VERSION }}"
+{{- if .CLUSTER_ACCELERATOR_VIRTUALIZATION_ENABLED }}
+  accelerator_virtualization:
+    enabled: true
+{{- end }}
   config:
     kubernetes_config:
       kubeconfig: {{ .CLUSTER_KUBECONFIG }}

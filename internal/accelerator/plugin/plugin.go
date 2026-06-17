@@ -4,10 +4,8 @@ import (
 	"context"
 	"sync"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 const (
@@ -29,6 +27,15 @@ type AcceleratorPlugin interface {
 	Type() string
 }
 
+type AcceleratorPluginProvider interface {
+	SupportPlugins() []string
+	GetPlugin(acceleratorType string) (AcceleratorPlugin, bool)
+}
+
+type ClusterVirtualizationConfigProvider interface {
+	ResolveClusterVirtualizationConfig(ctx context.Context, cluster *v1.Cluster) (*VirtualizationConfig, error)
+}
+
 type AcceleratorPluginHandle interface {
 	GetNodeAccelerator(ctx context.Context, request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
 	GetNodeRuntimeConfig(ctx context.Context, request *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
@@ -37,7 +44,7 @@ type AcceleratorPluginHandle interface {
 	GetResourceConverter() ResourceConverter
 
 	// GetResourceParser returns the resource parser
-	GetResourceParser() ResourceParser
+	GetResourceParser() resourceparser.ResourceParser
 
 	// GetContainerRuntimeConfig returns the static RuntimeConfig for engine containers.
 	// Unlike GetNodeRuntimeConfig, this does NOT require SSH access to a node.
@@ -53,14 +60,6 @@ type ResourceConverter interface {
 
 	// ConvertToKubernetes converts to Kubernetes resource configuration
 	ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)
-}
-
-type ResourceParser interface {
-	// ParseFromRay parses Ray resource configuration to Neutree's unified resource specification
-	ParseFromRay(resource map[string]float64) (*v1.ResourceInfo, error)
-
-	// ParseFromKubernetes parses Kubernetes resource configuration to Neutree's unified resource specification
-	ParseFromKubernetes(resource map[corev1.ResourceName]resource.Quantity, labels map[string]string) (*v1.ResourceInfo, error)
 }
 
 type RegisterHandle func(plugin AcceleratorPlugin)
