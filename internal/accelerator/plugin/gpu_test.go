@@ -8,6 +8,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
+	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -171,6 +172,64 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 			assert.Len(t, accelerators, tt.expectedAcceleratorCount)
 		})
 	}
+}
+
+func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo_ConnectionFailureExposesContext(t *testing.T) {
+	mockExec := &commandmocks.MockExecutor{}
+	// First call = precheck (uptime). Simulate SSH connect-refused.
+	mockExec.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		cmds := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmds, " "), "uptime")
+	}).Return([]byte(""), errors.New("exit status 255: ssh: connect to host 10.255.1.54 port 22: Connection refused")).Once()
+
+	p := &GPUAcceleratorPlugin{executor: mockExec}
+	_, err := p.getNodeAcceleratorInfo(context.Background(), "10.255.1.54", v1.Auth{
+		SSHUser:       "root",
+		SSHPrivateKey: "MTIzCg==",
+	})
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, command_runner.ErrConnectionFailed),
+		"errors.Is must report ErrConnectionFailed; got %v", err)
+	// Plugin must NOT double-wrap connection failures — the runner already
+	// constructed the full message. The plugin only propagates the error.
+	assert.NotContains(t, err.Error(), "get node 10.255.1.54 pci info failed",
+		"connection failure must not be wrapped with the misleading pci-info prefix")
+	assert.Contains(t, err.Error(), "ssh connection failed to node",
+		"connection-phase identification must reach the caller")
+	assert.Contains(t, err.Error(), "10.255.1.54", "target IP must be surfaced")
+	assert.Contains(t, err.Error(), "Connection refused", "underlying SSH stderr must survive")
+	assert.Contains(t, err.Error(), "hint:", "static-cluster hint must be present")
+	mockExec.AssertExpectations(t)
+}
+
+func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo_CommandFailureKeepsPCIWording(t *testing.T) {
+	mockExec := &commandmocks.MockExecutor{}
+	// First call = precheck (uptime) — success.
+	mockExec.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		cmds := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmds, " "), "uptime")
+	}).Return([]byte("ok"), nil).Once()
+	// Second call = lspci — fails with exit status (i.e., post-connection failure).
+	mockExec.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		cmds := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmds, " "), "lspci -nn")
+	}).Return([]byte("lspci: command not found"), errors.New("exit status 127")).Once()
+
+	p := &GPUAcceleratorPlugin{executor: mockExec}
+	_, err := p.getNodeAcceleratorInfo(context.Background(), "10.0.0.5", v1.Auth{
+		SSHUser:       "root",
+		SSHPrivateKey: "MTIzCg==",
+	})
+
+	assert.Error(t, err)
+	assert.False(t, errors.Is(err, command_runner.ErrConnectionFailed),
+		"post-connection command failure must not look like a connection failure")
+	assert.Contains(t, err.Error(), "get node 10.0.0.5 pci info failed",
+		"command-phase failure must keep the pci-info wording")
+	assert.NotContains(t, err.Error(), "hint:",
+		"command-phase failure must not carry the static-cluster hint (it is connection-specific)")
+	mockExec.AssertExpectations(t)
 }
 
 func TestGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {

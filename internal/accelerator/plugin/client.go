@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 type acceleratorPluginClient struct {
@@ -110,8 +111,20 @@ func (u *acceleratorPluginClient) GetResourceConverter() ResourceConverter {
 	return u
 }
 
-func (u *acceleratorPluginClient) GetResourceParser() ResourceParser {
+func (u *acceleratorPluginClient) GetResourceParser() resourceparser.ResourceParser {
 	return u
+}
+
+func (u *acceleratorPluginClient) ResolveVirtualizationConfig(
+	ctx context.Context,
+	input VirtualizationConfigInput,
+) (*VirtualizationConfig, error) {
+	resp := &VirtualizationConfig{}
+	if err := u.doPost(ctx, v1.ResolveVirtualizationConfigPath, input, resp); err != nil {
+		return nil, err
+	}
+
+	return resp, nil
 }
 
 func (u *acceleratorPluginClient) doPost(ctx context.Context, path string, request, response interface{}) error {

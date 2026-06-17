@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -15,18 +16,23 @@ type AMDGPUResourceParser struct {
 
 // ParseFromKubernetes parses AMD GPU resources from Kubernetes node
 func (p *AMDGPUResourceParser) ParseFromKubernetes(resource map[corev1.ResourceName]resource.Quantity, labels map[string]string) (*v1.ResourceInfo, error) {
-	if resource == nil || labels == nil {
-		return nil, errors.New("resource or label is nil")
+	return parseStandardAMDKubernetesResources(resource, labels)
+}
+
+func parseStandardAMDKubernetesResources(
+	resources map[corev1.ResourceName]resource.Quantity,
+	labels map[string]string,
+) (*v1.ResourceInfo, error) {
+	if resources == nil || labels == nil {
+		return nil, fmt.Errorf("resource or label is nil")
 	}
 
-	// Check if this node has AMD GPU resources
-	gpuQuantity, hasGPU := resource[AMDGPUKubernetesResource]
+	gpuQuantity, hasGPU := resources[AMDGPUKubernetesResource]
 	if !hasGPU {
 		return nil, nil
 	}
 
 	totalGPUs := float64(gpuQuantity.Value())
-
 	resourceInfo := &v1.ResourceInfo{
 		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 			v1.AcceleratorTypeAMDGPU: {
@@ -36,9 +42,9 @@ func (p *AMDGPUResourceParser) ParseFromKubernetes(resource map[corev1.ResourceN
 		},
 	}
 
-	// set product model if label exists
 	if product, ok := labels[AMDGPUKubernetesNodeSelectorKey]; ok {
-		resourceInfo.AcceleratorGroups[v1.AcceleratorTypeAMDGPU].ProductGroups[v1.AcceleratorProduct(product)] = totalGPUs
+		resourceInfo.AcceleratorGroups[v1.AcceleratorTypeAMDGPU].
+			ProductGroups[v1.AcceleratorProduct(product)] = totalGPUs
 	}
 
 	return resourceInfo, nil

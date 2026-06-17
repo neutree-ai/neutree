@@ -1,0 +1,4 @@
+-- No-op. admin retains workspace:usage-read because enum values cannot be
+-- removed and update_admin_permissions() always re-aggregates the full enum.
+-- workspace-user was never granted this permission, so there is nothing to
+-- revert here.

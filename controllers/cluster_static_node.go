@@ -12,9 +12,9 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
-	"github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -400,15 +400,18 @@ func (controller *ClusterController) copyStaticNodeClusterStatus(
 func (controller *ClusterController) calculateStaticNodeClusterResources(
 	staticCluster *v1.StaticNodeCluster,
 ) (*v1.ClusterResources, error) {
-	var resourceParsers map[string]plugin.ResourceParser
+	var resourceParsers map[string]resourceparser.ResourceParser
 	if controller.acceleratorManager != nil {
 		resourceParsers = controller.acceleratorManager.GetAllParsers()
 	}
 
-	return cluster.CalculateRayDashboardClusterResources(
+	resourceClient := resourceview.NewRayResourceClient(
 		dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)),
 		resourceParsers,
 	)
+	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
+
+	return resourceBuilder.BuildClusterResources(context.Background(), nil)
 }
 
 func (controller *ClusterController) getUsedImageRegistry(c *v1.Cluster) (*v1.ImageRegistry, error) {

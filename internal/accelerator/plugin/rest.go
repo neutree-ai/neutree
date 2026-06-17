@@ -65,3 +65,10 @@ func (p *acceleratorRestPlugin) RuntimeProfile(
 
 	return profile, true, nil
 }
+
+func (p *acceleratorRestPlugin) ResolveClusterVirtualizationConfig(
+	context.Context,
+	*v1.Cluster,
+) (*VirtualizationConfig, error) {
+	return NewUnsupportedVirtualizationConfig(p.resource), nil
+}

@@ -1,0 +1,2 @@
+-- PostgreSQL does not support removing enum values.
+-- The workspace:usage-read value will remain.

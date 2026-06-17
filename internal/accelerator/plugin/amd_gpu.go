@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -142,6 +143,12 @@ func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, no
 	// todo: more analysis for lspci output
 	output, err := sshRunner.Run(ctx, "lspci -nn", true, nil, true, nil, "", false)
 	if err != nil {
+		if errors.Is(err, command_runner.ErrConnectionFailed) {
+			// The runner already produced an actionable message including the
+			// target IP, underlying SSH stderr, and static-cluster hint.
+			return nil, err
+		}
+
 		return nil, errors.Wrapf(err, "get node %s pci info failed", nodeIP)
 	}
 
@@ -219,6 +226,13 @@ func (p *AMDGPUAcceleratorPlugin) GetResourceConverter() ResourceConverter {
 	return NewAMDGPUConverter()
 }
 
-func (p *AMDGPUAcceleratorPlugin) GetResourceParser() ResourceParser {
+func (p *AMDGPUAcceleratorPlugin) GetResourceParser() resourceparser.ResourceParser {
 	return &AMDGPUResourceParser{}
+}
+
+func (p *AMDGPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
+	context.Context,
+	*v1.Cluster,
+) (*VirtualizationConfig, error) {
+	return NewUnsupportedVirtualizationConfig(string(v1.AcceleratorTypeAMDGPU)), nil
 }

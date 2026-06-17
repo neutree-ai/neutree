@@ -10,6 +10,36 @@ import (
 
 var _ = Describe("Image Registry", Label("image-registry"), func() {
 
+	Describe("URL validation", Label("validation"), func() {
+		It("should reject URL with invalid host characters", Label("C2711809"), func() {
+			name := "e2e-ir-invalid-host-" + Cfg.RunID
+
+			yamlPath, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
+				"E2E_IMAGE_REGISTRY":          name,
+				"E2E_IMAGE_REGISTRY_URL":      "https://index.docker<>.io",
+				"E2E_IMAGE_REGISTRY_REPO":     "neutree",
+				"E2E_IMAGE_REGISTRY_USERNAME": "",
+				"E2E_IMAGE_REGISTRY_PASSWORD": "",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(yamlPath)
+
+			DeferCleanup(func() {
+				RunCLI("delete", "imageregistry", name,
+					"-w", profileWorkspace(), "--force", "--ignore-not-found")
+			})
+
+			By("Applying image registry with invalid host characters")
+			r := RunCLI("apply", "-f", yamlPath)
+			ExpectFailed(r)
+			Expect(r.Stderr + r.Stdout).To(ContainSubstring("invalid image registry url"))
+
+			By("Verifying invalid image registry was not persisted")
+			r = RunCLI("get", "imageregistry", name, "-w", profileWorkspace())
+			ExpectFailed(r)
+		})
+	})
+
 	Describe("No-Protocol URL", Label("no-protocol"), func() {
 		It("should create image registry with URL without protocol prefix", Label("C2642281"), func() {
 			requireImageRegistryProfile()

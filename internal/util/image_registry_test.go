@@ -123,6 +123,17 @@ func TestGetImagePrefix(t *testing.T) {
 			want:    "registry.example.com:5000/repo",
 			wantErr: false,
 		},
+		{
+			name: "URL with invalid host characters",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL:        "https://index.docker<>.io",
+					Repository: "repo",
+				},
+			},
+			want:    "",
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -352,10 +363,40 @@ func TestGetImageRegistryHost(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "URL with IPv6 literal host and port",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL: "https://[2001:db8::1]:5000",
+				},
+			},
+			want:    "[2001:db8::1]:5000",
+			wantErr: false,
+		},
+		{
 			name: "empty URL",
 			imageRegistry: &v1.ImageRegistry{
 				Spec: &v1.ImageRegistrySpec{
 					URL: "",
+				},
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "URL with invalid host characters",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL: "https://index.docker<>.io",
+				},
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "URL with invalid port characters",
+			imageRegistry: &v1.ImageRegistry{
+				Spec: &v1.ImageRegistrySpec{
+					URL: "registry.example.com:5<00",
 				},
 			},
 			want:    "",

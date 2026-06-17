@@ -571,6 +571,31 @@ func TestResourceSpecIntegration(t *testing.T) {
 	}
 }
 
+func TestResourceSpecAcceleratorVirtualizationHelpers(t *testing.T) {
+	resource := &ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			AcceleratorTypeKey:                      string(AcceleratorTypeNVIDIAGPU),
+			AcceleratorProductKey:                   "Tesla-T4",
+			AcceleratorVirtualizationMemoryMiBKey:   "10240",
+			AcceleratorVirtualizationCorePercentKey: "30",
+			"nvidia.com/gpumem":                     "legacy-raw-value",
+			"custom":                                "5",
+		},
+	}
+
+	assert.True(t, resource.HasAcceleratorVirtualization())
+	assert.Equal(t, "10240", resource.GetAcceleratorVirtualizationMemoryMiB())
+	assert.Equal(t, "", resource.GetAcceleratorVirtualizationMemoryPercent())
+	assert.Equal(t, "30", resource.GetAcceleratorVirtualizationCorePercent())
+
+	custom := resource.GetCustomResources()
+	assert.Equal(t, map[string]string{
+		"custom":            "5",
+		"nvidia.com/gpumem": "legacy-raw-value",
+	}, custom)
+}
+
 func Test_GetGPUCount(t *testing.T) {
 	tests := []struct {
 		name     string

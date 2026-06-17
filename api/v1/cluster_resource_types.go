@@ -35,17 +35,29 @@ import (
 type ClusterResources struct {
 	ResourceStatus `json:",inline"`
 
+	// AcceleratorMetadata contains hardware metadata that is not specific to
+	// allocatable or available resource dimensions.
+	AcceleratorMetadata map[AcceleratorType]*AcceleratorMetadata `json:"accelerator_metadata,omitempty"`
+
 	// NodeResources contains per-node resource information.
 	// Key: node identifier (IP address for SSH clusters, node name for Kubernetes clusters).
-	// Value: ResourceStatus for that node.
-	NodeResources map[string]*ResourceStatus `json:"node_resources,omitempty"`
+	// Value: NodeResourceStatus for that node.
+	NodeResources map[string]*NodeResourceStatus `json:"node_resources,omitempty"`
 }
 
 type ResourceStatus struct {
-	// Allocatable represents the total resources that can be allocated on the node.
+	// Allocatable represents the total resources that can be allocated in this resource scope.
 	Allocatable *ResourceInfo `json:"allocatable,omitempty"`
-	// Available represents the currently available (unallocated) resources on the node.
+	// Available represents the currently available (unallocated) resources in this resource scope.
 	Available *ResourceInfo `json:"available,omitempty"`
+}
+
+type NodeResourceStatus struct {
+	ResourceStatus `json:",inline"`
+
+	// Devices contains per-device resource details when the accelerator
+	// plugin can expose a card-level view.
+	Devices []*DeviceResource `json:"devices,omitempty"`
 }
 
 // ResourceInfo represents a complete set of resources including CPU, Memory, and Accelerators.
@@ -69,6 +81,11 @@ type ResourceInfo struct {
 	//     "amd_gpu": {...}
 	//   }
 	AcceleratorGroups map[AcceleratorType]*AcceleratorGroup `json:"accelerator_groups,omitempty"`
+
+	// AcceleratorMetadata is used by parsers to return product metadata along
+	// with resource dimensions. Cluster aggregation lifts it to
+	// ClusterResources.AcceleratorMetadata.
+	AcceleratorMetadata map[AcceleratorType]*AcceleratorMetadata `json:"accelerator_metadata,omitempty"`
 }
 
 // AcceleratorGroup represents accelerator resources grouped by type.
@@ -99,6 +116,39 @@ type AcceleratorGroup struct {
 	//     "Tesla-T4": 4
 	//   }
 	ProductGroups map[AcceleratorProduct]float64 `json:"product_groups,omitempty"`
+
+	Products map[AcceleratorProduct]*AcceleratorProductResource `json:"products,omitempty"`
+}
+
+type AcceleratorProductResource struct {
+	Quantity       float64                            `json:"quantity,omitempty"`
+	Virtualization *AcceleratorVirtualizationResource `json:"virtualization,omitempty"`
+}
+
+type AcceleratorVirtualizationResource struct {
+	MemoryMiB float64 `json:"memory_mib,omitempty"`
+	CoreUnits float64 `json:"core_units,omitempty"`
+}
+
+type AcceleratorMetadata struct {
+	Products map[AcceleratorProduct]*AcceleratorProductMetadata `json:"products,omitempty"`
+}
+
+type AcceleratorProductMetadata struct {
+	MemoryTotalMiB float64 `json:"memory_total_mib,omitempty"`
+}
+
+type DeviceResource struct {
+	UUID        string              `json:"uuid"`
+	Product     string              `json:"product"`
+	Health      bool                `json:"health"`
+	Allocatable *DeviceResourcePool `json:"allocatable,omitempty"`
+	Available   *DeviceResourcePool `json:"available,omitempty"`
+}
+
+type DeviceResourcePool struct {
+	MemoryMiB int64 `json:"memory_mib"`
+	CoreUnits int64 `json:"core_units"`
 }
 
 // ============================================================================
@@ -199,12 +249,25 @@ func (c *ClusterResources) GetProductModels(acceleratorType string) []string {
 	}
 
 	group, ok := c.Allocatable.AcceleratorGroups[AcceleratorType(acceleratorType)]
-	if !ok || group.ProductGroups == nil {
+	if !ok {
 		return nil
 	}
 
-	models := make([]string, 0, len(group.ProductGroups))
-	for m := range group.ProductGroups {
+	if len(group.ProductGroups) > 0 {
+		models := make([]string, 0, len(group.ProductGroups))
+		for m := range group.ProductGroups {
+			models = append(models, string(m))
+		}
+
+		return models
+	}
+
+	if len(group.Products) == 0 {
+		return nil
+	}
+
+	models := make([]string, 0, len(group.Products))
+	for m := range group.Products {
 		models = append(models, string(m))
 	}
 

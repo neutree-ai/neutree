@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -188,6 +189,10 @@ func (m *ManifestApply) ApplyManifests(
 		return 0, errors.Wrap(err, "failed to compute manifest diff")
 	}
 
+	if err := m.addLiveDriftedObjects(ctx, diff); err != nil {
+		return 0, errors.Wrap(err, "failed to detect live manifest drift")
+	}
+
 	if !diff.NeedsUpdate {
 		m.logger.V(4).Info("No manifest changes to apply")
 		return 0, nil
@@ -240,6 +245,123 @@ func (m *ManifestApply) ApplyManifests(
 	}
 
 	return len(objects) + len(deleteObjects), nil
+}
+
+func (m *ManifestApply) addLiveDriftedObjects(ctx context.Context, diff *ManifestDiff) error {
+	changedKeys := make(map[string]bool, len(diff.ChangedObjects))
+	for i := range diff.ChangedObjects {
+		changedKeys[objectKey(&diff.ChangedObjects[i])] = true
+	}
+
+	for i := range m.newObjects.Items {
+		newObj := &m.newObjects.Items[i]
+		key := objectKey(newObj)
+
+		if changedKeys[key] {
+			continue
+		}
+
+		liveObj := &unstructured.Unstructured{}
+		liveObj.SetAPIVersion(newObj.GetAPIVersion())
+		liveObj.SetKind(newObj.GetKind())
+
+		err := m.ctrlClient.Get(ctx, client.ObjectKey{
+			Namespace: newObj.GetNamespace(),
+			Name:      newObj.GetName(),
+		}, liveObj)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				m.logger.V(4).Info("Live object missing, marking for apply",
+					"kind", newObj.GetKind(),
+					"name", newObj.GetName())
+
+				diff.ChangedObjects = append(diff.ChangedObjects, *newObj)
+				changedKeys[key] = true
+
+				continue
+			}
+
+			return errors.Wrapf(err, "failed to get live object %s/%s/%s",
+				newObj.GetKind(), newObj.GetNamespace(), newObj.GetName())
+		}
+
+		drifted, err := specDrifted(newObj, liveObj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to compare live object %s/%s/%s",
+				newObj.GetKind(), newObj.GetNamespace(), newObj.GetName())
+		}
+
+		if !drifted {
+			continue
+		}
+
+		m.logger.V(4).Info("Live object drift detected, marking for apply",
+			"kind", newObj.GetKind(),
+			"name", newObj.GetName())
+
+		diff.ChangedObjects = append(diff.ChangedObjects, *newObj)
+		changedKeys[key] = true
+	}
+
+	diff.NeedsUpdate = len(diff.ChangedObjects) > 0 || len(diff.DeletedObjects) > 0
+
+	return nil
+}
+
+func specDrifted(desiredObj, liveObj *unstructured.Unstructured) (bool, error) {
+	desiredSpec, found, err := unstructured.NestedFieldNoCopy(desiredObj.Object, "spec")
+	if err != nil {
+		return false, err
+	}
+
+	if !found {
+		return !containsDesiredFields(desiredObj.Object, liveObj.Object), nil
+	}
+
+	liveSpec, found, err := unstructured.NestedFieldNoCopy(liveObj.Object, "spec")
+	if err != nil {
+		return false, err
+	}
+
+	if !found {
+		return true, nil
+	}
+
+	return !containsDesiredFields(desiredSpec, liveSpec), nil
+}
+
+func containsDesiredFields(desired, live interface{}) bool {
+	switch desiredValue := desired.(type) {
+	case map[string]interface{}:
+		liveValue, ok := live.(map[string]interface{})
+		if !ok {
+			return false
+		}
+
+		for key, desiredField := range desiredValue {
+			liveField, ok := liveValue[key]
+			if !ok || !containsDesiredFields(desiredField, liveField) {
+				return false
+			}
+		}
+
+		return true
+	case []interface{}:
+		liveValue, ok := live.([]interface{})
+		if !ok || len(desiredValue) != len(liveValue) {
+			return false
+		}
+
+		for i, desiredItem := range desiredValue {
+			if !containsDesiredFields(desiredItem, liveValue[i]) {
+				return false
+			}
+		}
+
+		return true
+	default:
+		return reflect.DeepEqual(desired, live)
+	}
 }
 
 func (m *ManifestApply) Delete(

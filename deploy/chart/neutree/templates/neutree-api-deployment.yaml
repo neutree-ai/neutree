@@ -39,6 +39,10 @@ spec:
             {{- else if .Values.system.grafana.url }}
             - --grafana-url={{ .Values.system.grafana.url }}
             {{- end }}
+            {{- $aiTraceStoreUrl := include "neutree.aiTraceStoreUrl" . }}
+            {{- if $aiTraceStoreUrl }}
+            - --ai-trace-store-url={{ $aiTraceStoreUrl }}
+            {{- end }}
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.api.image.registry "repository" .Values.api.image.repository "tag" .Values.api.image.tag "defaultTag" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Neutree pre-commit hook. Activate once with `make install-hooks`.
 # Gates:
-#   1. gofmt                       — format check
-#   2. go vet                      — static analysis
-#   3. architecture boundaries     — import-direction rules (scripts/check-boundaries.sh)
-#   4. migration pairs             — every new *.up.sql ships with *.down.sql (scripts/check-migration-pairs.sh)
-#   5. golangci-lint (incremental) — linter on staged files
-#   6. go test -short              — affected packages only
+#   1. controlplane images list    — auto-sync when deploy image sources change
+#   2. gofmt                       — format check
+#   3. go vet                      — static analysis
+#   4. architecture boundaries     — import-direction rules (scripts/check-boundaries.sh)
+#   5. migration pairs             — every new *.up.sql ships with *.down.sql (scripts/check-migration-pairs.sh)
+#   6. golangci-lint (full)        — CI-equivalent lint for non-test/non-mock files
+#   7. go test -short              — affected packages only
 #
 # Skip with `git commit --no-verify` only in emergencies.
 set -e
@@ -14,8 +15,35 @@ set -e
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
 
-# ── Gate 1: gofmt ──
-echo "[1/6] gofmt..."
+# ── Gate 1: controlplane images list ──
+echo "[1/7] controlplane images list..."
+IMAGE_SOURCE_PATTERN='^(deploy/chart/neutree/.*|scripts/builder/sync-controlplane-images\.sh|scripts/builder/image-lists/controlplane/images\.txt|Makefile)$'
+IMAGE_SOURCE_CHANGES=$(git diff --cached --name-only --diff-filter=ACMRD | grep -E "$IMAGE_SOURCE_PATTERN" || true)
+if [ -n "$IMAGE_SOURCE_CHANGES" ]; then
+  UNSTAGED_IMAGE_SOURCE_CHANGES=$(git diff --name-only --diff-filter=ACMRD | grep -E "$IMAGE_SOURCE_PATTERN" || true)
+  if [ -n "$UNSTAGED_IMAGE_SOURCE_CHANGES" ]; then
+    echo "❌ unstaged deploy image source changes:"
+    echo "$UNSTAGED_IMAGE_SOURCE_CHANGES" | sed 's/^/   /'
+    echo "   ✅ FIX: stage or discard these changes before committing so images.txt matches the commit"
+    exit 1
+  fi
+  UNTRACKED_IMAGE_SOURCE_CHANGES=$(git ls-files --others --exclude-standard | grep -E "$IMAGE_SOURCE_PATTERN" || true)
+  if [ -n "$UNTRACKED_IMAGE_SOURCE_CHANGES" ]; then
+    echo "❌ untracked deploy image source files:"
+    echo "$UNTRACKED_IMAGE_SOURCE_CHANGES" | sed 's/^/   /'
+    echo "   ✅ FIX: stage or remove these files before committing so images.txt matches the commit"
+    exit 1
+  fi
+
+  bash scripts/builder/sync-controlplane-images.sh --write
+  git add scripts/builder/image-lists/controlplane/images.txt
+  bash scripts/builder/sync-controlplane-images.sh --check
+else
+  echo "   (skipped: no staged deploy image source changes)"
+fi
+
+# ── Gate 2: gofmt ──
+echo "[2/7] gofmt..."
 FMT=$(gofmt -l . 2>/dev/null | grep -vE '^(vendor|bin|out|tmp|.*/mocks)/' || true)
 if [ -n "$FMT" ]; then
   echo "❌ gofmt violations:"
@@ -24,8 +52,8 @@ if [ -n "$FMT" ]; then
   exit 1
 fi
 
-# ── Gate 2: go vet ──
-echo "[2/6] go vet..."
+# ── Gate 3: go vet ──
+echo "[3/7] go vet..."
 if ! go vet ./... >/tmp/neutree-vet.log 2>&1; then
   echo "❌ go vet failed:"
   sed 's/^/   /' /tmp/neutree-vet.log
@@ -33,32 +61,48 @@ if ! go vet ./... >/tmp/neutree-vet.log 2>&1; then
   exit 1
 fi
 
-# ── Gate 3: architecture boundaries ──
-echo "[3/6] architecture boundaries..."
+# ── Gate 4: architecture boundaries ──
+echo "[4/7] architecture boundaries..."
 bash scripts/check-boundaries.sh
 
-# ── Gate 4: migration pairs ──
-echo "[4/6] migration pairs..."
+# ── Gate 5: migration pairs ──
+echo "[5/7] migration pairs..."
 bash scripts/check-migration-pairs.sh
 
-# ── Gate 5: golangci-lint (incremental) ──
-echo "[5/6] golangci-lint (incremental)..."
-CHANGED_GO=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' | grep -v '/mocks/' || true)
-if [ -n "$CHANGED_GO" ]; then
-  if [ -x ./bin/golangci-lint ]; then
-    if ! ./bin/golangci-lint run --new-from-rev=HEAD --timeout=120s; then
-      echo "   ✅ FIX: see contributing/coding-standards.md#lint-error-cheatsheet"
-      exit 1
-    fi
-  else
-    echo "   (skipped: ./bin/golangci-lint not present — run 'make lint' once to install it)"
+# ── Gate 6: golangci-lint (full) ──
+echo "[6/7] golangci-lint (full)..."
+CHANGED_GO=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)
+CHANGED_LINT_GO=$(echo "$CHANGED_GO" | grep -Ev '(^|/)mock_[^/]*\.go$|_test\.go$' | grep -v '/mocks/' || true)
+if [ -n "$CHANGED_LINT_GO" ]; then
+  if [ ! -x ./bin/golangci-lint ]; then
+    echo "   installing ./bin/golangci-lint..."
+    make golangci-lint
+  fi
+
+  if ! ./bin/golangci-lint run; then
+    echo "   ✅ FIX: see contributing/coding-standards.md#lint-error-cheatsheet"
+    exit 1
   fi
 fi
 
-# ── Gate 6: go test -short on affected packages ──
-echo "[6/6] go test -short on affected packages..."
+# ── Gate 7: go test -short on affected packages ──
+echo "[7/7] go test -short on affected packages..."
 if [ -n "$CHANGED_GO" ]; then
-  PKGS=$(echo "$CHANGED_GO" | xargs -n1 dirname 2>/dev/null | sort -u | grep -vE '(^tests/e2e|/mocks$|^db/dbtest)' | sed 's|^|./|' || true)
+  PKGS=$(echo "$CHANGED_GO" | while IFS= read -r file; do
+    [ -z "$file" ] && continue
+
+    dir=$(dirname "$file")
+    if [[ "$dir" == tests/e2e* || "$dir" == db/dbtest* ]]; then
+      continue
+    fi
+    if [[ "$dir" == "mocks" ]]; then
+      dir="."
+    elif [[ "$dir" == */mocks ]]; then
+      dir="${dir%/mocks}"
+    fi
+
+    echo "./$dir"
+  done | sort -u || true)
   if [ -n "$PKGS" ]; then
     # shellcheck disable=SC2086
     if ! go test -short -count=1 $PKGS; then

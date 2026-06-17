@@ -34,6 +34,7 @@ from downloader import get_downloader, build_request_from_model_args
 from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
+from serve._utils.vllm_task_translate import task_kwargs as _task_kwargs
 
 
 class SchedulerType(str, enum.Enum):
@@ -149,8 +150,12 @@ class Backend:
         engine_kwargs.pop("enable_server_load_tracking", None)
         engine_kwargs.pop("enable_tokenizer_info_endpoint", None)
 
-        # v0.17.1: --task removed, replaced by --runner/--convert (both default "auto").
-        # vLLM auto-detects the correct mode from model architecture.
+        # vLLM v0.17.1 removed --task; auto-detect can fall back to a
+        # generate runner for multimodal embedding architectures, so the
+        # registry-level task is translated to --runner/--convert kwargs
+        # here. setdefault keeps user-supplied engine_args overrides intact.
+        for _k, _v in _task_kwargs(model_task).items():
+            engine_kwargs.setdefault(_k, _v)
 
         # merge engine args
         # NOTE: enable_prefix_caching is intentionally NOT set here.

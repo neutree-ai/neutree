@@ -12,12 +12,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
 const (
 	NvidiaGPUKubernetesResource        corev1.ResourceName = "nvidia.com/gpu"
+	NvidiaGPUMemoryResource            corev1.ResourceName = "nvidia.com/gpumem"
+	NvidiaGPUMemoryPercentageResource  corev1.ResourceName = "nvidia.com/gpumem-percentage"
+	NvidiaGPUCoreResource              corev1.ResourceName = "nvidia.com/gpucores"
+	NvidiaGPUCountResource             string              = "nvidia.com/gpu.count"
 	NvidiaGPUKubernetesNodeSelectorKey string              = "nvidia.com/gpu.product"
 	nvidiaDCGMExporterImage            string              = "nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04"
 	nvidiaDCGMExporterPort             int                 = 9400
@@ -35,6 +40,13 @@ DCGM_FI_DEV_FB_USED, gauge, Frame buffer memory used (in MB).
 DCGM_FI_DEV_XID_ERRORS, gauge, Value of the last XID error encountered.
 DCGM_FI_DRIVER_VERSION, label, Driver Version.
 `
+	NvidiaGPUMemoryNodeLabelKey      string = "nvidia.com/gpu.memory"
+	NvidiaGPUVirtualizationLabelKey  string = "neutree.ai/nvidia-vgpu-enabled"
+	NvidiaGPUDiscoveryLabelKey       string = "nvidia.com/gpu.present"
+	NvidiaGPUDiscoveryLabelValue     string = "true"
+	NvidiaGPUTopologyAwarePolicy     string = "topology-aware"
+	NvidiaGPUDefaultDeviceSplitCount int    = 100
+	NvidiaGPUOperatorDriverRoot      string = "/run/nvidia/driver"
 )
 
 func init() { //nolint:gochecknoinits
@@ -150,8 +162,10 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 	// avoiding race conditions during boot when nvidia driver is still loading.
 	output, err := sshRunner.Run(ctx, "lspci -nn", true, nil, true, nil, "", false)
 	if err != nil {
-		if err == command_runner.ErrConnectionFailed {
-			return nil, errors.Wrapf(err, "connect to node %s failed", nodeIP)
+		if errors.Is(err, command_runner.ErrConnectionFailed) {
+			// The runner already produced an actionable message including the
+			// target IP, underlying SSH stderr, and static-cluster hint.
+			return nil, err
 		}
 
 		return nil, errors.Wrapf(err, "get node %s pci info failed", nodeIP)
@@ -254,6 +268,6 @@ func (p *GPUAcceleratorPlugin) GetResourceConverter() ResourceConverter {
 	return NewGPUConverter()
 }
 
-func (p *GPUAcceleratorPlugin) GetResourceParser() ResourceParser {
+func (p *GPUAcceleratorPlugin) GetResourceParser() resourceparser.ResourceParser {
 	return &GPUResourceParser{}
 }

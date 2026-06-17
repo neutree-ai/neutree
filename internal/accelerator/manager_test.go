@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -229,7 +230,7 @@ func (p *fakeStaticNodeAcceleratorPlugin) GetResourceConverter() plugin.Resource
 	return nil
 }
 
-func (p *fakeStaticNodeAcceleratorPlugin) GetResourceParser() plugin.ResourceParser {
+func (p *fakeStaticNodeAcceleratorPlugin) GetResourceParser() resourceparser.ResourceParser {
 	return nil
 }
 

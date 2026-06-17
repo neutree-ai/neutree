@@ -17,6 +17,8 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
@@ -702,7 +704,15 @@ func setNodePrivisionStatus(reconcileCtx *ReconcileContext, nodeIP, status strin
 func (c *sshRayClusterReconciler) calculateClusterResources(
 	reconcileCtx *ReconcileContext,
 ) (*v1.ClusterResources, error) {
-	return calculateRayDashboardClusterResources(reconcileCtx.rayService, c.acceleratorManager.GetAllParsers())
+	parsers := map[string]resourceparser.ResourceParser{}
+	if c.acceleratorManager != nil {
+		parsers = c.acceleratorManager.GetAllParsers()
+	}
+
+	resourceClient := resourceview.NewRayResourceClient(reconcileCtx.rayService, parsers)
+	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
+
+	return resourceBuilder.BuildClusterResources(reconcileCtx.Ctx, reconcileCtx.Cluster)
 }
 
 func formatMessageWithTimestamp(message string) string {

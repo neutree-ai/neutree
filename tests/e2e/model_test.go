@@ -43,8 +43,10 @@ func SetupModelRegistry() {
 // TeardownModelRegistry deletes the model registry and cleans up the temp YAML.
 func TeardownModelRegistry() {
 	if registryYAML != "" {
-		RunCLI("delete", "-f", registryYAML, "--force", "--ignore-not-found")
+		r := RunCLI("delete", "-f", registryYAML, "--force", "--ignore-not-found")
+		ExpectSuccess(r)
 		os.Remove(registryYAML)
+		registryYAML = ""
 	}
 }
 

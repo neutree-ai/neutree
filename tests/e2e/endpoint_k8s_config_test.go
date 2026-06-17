@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -439,6 +440,54 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 	})
 
+	Describe("vLLM Task Translation", Ordered, Label("config", "task-translation", "vllm"), func() {
+		type taskCase struct {
+			suffix      string
+			task        string
+			wantRunner  string
+			wantConvert string
+		}
+
+		DescribeTable("should translate model task into runner and convert flags",
+			func(tc taskCase) {
+				if profileEngineName() != v1.EngineNameVLLM {
+					Skip("vLLM task translation is only applicable to the vLLM engine")
+				}
+
+				epName := "e2e-ep-k8s-task-" + tc.suffix + "-" + Cfg.RunID
+				yamlPath := applyEndpoint(epName, clusterName,
+					withTask(tc.task),
+					withEngineArgs([]EngineArg{{Key: "dtype", Value: "half"}}))
+				DeferCleanup(func() { deleteEndpoint(epName) })
+				DeferCleanup(os.Remove, yamlPath)
+
+				cmd := eventuallyEndpointContainerCommand(k8sH, namespace, epName, profileEngineName())
+				Expect(commandFlagValue(cmd, "--runner")).To(Equal(tc.wantRunner),
+					"--runner mismatch for task %s (command=%v)", tc.task, cmd)
+				Expect(commandFlagValue(cmd, "--convert")).To(Equal(tc.wantConvert),
+					"--convert mismatch for task %s (command=%v)", tc.task, cmd)
+			},
+			Entry("text-embedding uses pooling/embed", taskCase{
+				suffix:      "embed",
+				task:        "text-embedding",
+				wantRunner:  "pooling",
+				wantConvert: "embed",
+			}),
+			Entry("text-rerank uses pooling/classify", taskCase{
+				suffix:      "rerank",
+				task:        "text-rerank",
+				wantRunner:  "pooling",
+				wantConvert: "classify",
+			}),
+			Entry("text-generation keeps vLLM auto defaults", taskCase{
+				suffix:      "gen",
+				task:        "text-generation",
+				wantRunner:  "",
+				wantConvert: "",
+			}),
+		)
+	})
+
 	// --- All Schema Types ---
 
 	Describe("All Schema Types Engine Args", Ordered, Label("config", "schema"), func() {
@@ -604,3 +653,41 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 	})
 })
+
+func eventuallyEndpointContainerCommand(k8sH *K8sHelper, namespace, epName, containerName string) []string {
+	var cmd []string
+	Eventually(func() error {
+		var err error
+		cmd, err = endpointContainerCommand(context.Background(), k8sH, namespace, epName, containerName)
+		return err
+	}, TerminalPhaseTimeout).Should(Succeed(), "should find container %s in endpoint deployment %s", containerName, epName)
+
+	return cmd
+}
+
+func endpointContainerCommand(ctx context.Context, k8sH *K8sHelper, namespace, epName, containerName string) ([]string, error) {
+	d, err := k8sH.GetDeployment(ctx, namespace, epName)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, c := range d.Spec.Template.Spec.Containers {
+		if c.Name == containerName {
+			cmd := append([]string{}, c.Command...)
+			cmd = append(cmd, c.Args...)
+			return cmd, nil
+		}
+	}
+
+	return nil, fmt.Errorf("container %q not found in deployment %s/%s", containerName, namespace, epName)
+}
+
+func commandFlagValue(cmd []string, flag string) string {
+	for i, tok := range cmd {
+		if tok == flag && i+1 < len(cmd) {
+			return strings.Trim(cmd[i+1], `"`)
+		}
+	}
+
+	return ""
+}

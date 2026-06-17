@@ -452,7 +452,8 @@ func SetupImageRegistry() {
 // TeardownImageRegistry deletes the image registry and cleans up the temp YAML.
 func TeardownImageRegistry() {
 	if imageRegistryYAML != "" {
-		RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
+		r := RunCLI("delete", "-f", imageRegistryYAML, "--force", "--ignore-not-found")
+		ExpectSuccess(r)
 		os.Remove(imageRegistryYAML)
 		imageRegistryYAML = ""
 	}
@@ -503,17 +504,19 @@ func renderSSHClusterYAML(overrides map[string]any) string {
 //   - "router_cpu"       (string)         defaults to "1"
 //   - "router_memory"    (string)         defaults to "2Gi"
 //   - "model_caches"     ([]ModelCache)   optional
+//   - "accelerator_virtualization_enabled" (bool) optional
 func renderK8sClusterYAML(overrides map[string]any) string {
 	data := map[string]any{
-		"CLUSTER_NAME":            stringOr(overrides, "name", ""),
-		"CLUSTER_WORKSPACE":       profileWorkspace(),
-		"CLUSTER_IMAGE_REGISTRY":  stringOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":         stringOr(overrides, "version", profileClusterVersion()),
-		"CLUSTER_KUBECONFIG":      stringOr(overrides, "kubeconfig", ""),
-		"CLUSTER_ROUTER_REPLICAS": stringOr(overrides, "router_replicas", "1"),
-		"CLUSTER_ROUTER_CPU":      stringOr(overrides, "router_cpu", "1"),
-		"CLUSTER_ROUTER_MEMORY":   stringOr(overrides, "router_memory", "2Gi"),
-		"CLUSTER_MODEL_CACHES":    anySliceOr[ModelCache](overrides, "model_caches", nil),
+		"CLUSTER_NAME":                               stringOr(overrides, "name", ""),
+		"CLUSTER_WORKSPACE":                          profileWorkspace(),
+		"CLUSTER_IMAGE_REGISTRY":                     stringOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":                            stringOr(overrides, "version", profileClusterVersion()),
+		"CLUSTER_KUBECONFIG":                         stringOr(overrides, "kubeconfig", ""),
+		"CLUSTER_ROUTER_REPLICAS":                    stringOr(overrides, "router_replicas", "1"),
+		"CLUSTER_ROUTER_CPU":                         stringOr(overrides, "router_cpu", "1"),
+		"CLUSTER_ROUTER_MEMORY":                      stringOr(overrides, "router_memory", "2Gi"),
+		"CLUSTER_MODEL_CACHES":                       anySliceOr[ModelCache](overrides, "model_caches", nil),
+		"CLUSTER_ACCELERATOR_VIRTUALIZATION_ENABLED": boolOr(overrides, "accelerator_virtualization_enabled", false),
 	}
 
 	path, err := renderTemplateToTempFile(filepath.Join("testdata", "k8s-cluster.yaml"), data)
@@ -527,6 +530,16 @@ func stringOr(m map[string]any, key, fallback string) string {
 	if v, ok := m[key]; ok {
 		if s, ok := v.(string); ok && s != "" {
 			return s
+		}
+	}
+
+	return fallback
+}
+
+func boolOr(m map[string]any, key string, fallback bool) bool {
+	if v, ok := m[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
 		}
 	}
 
@@ -699,8 +712,11 @@ func (c *ClusterHelper) EventuallyObservedSpecHashAdvanced(name, oldHash string,
 
 // EnsureDeleted deletes a cluster and waits for full removal (for cleanup).
 func (c *ClusterHelper) EnsureDeleted(name string) {
-	c.Delete(name)
-	c.WaitForDelete(name, TerminalPhaseTimeout)
+	r := c.Delete(name)
+	ExpectSuccess(r)
+
+	r = c.WaitForDelete(name, TerminalPhaseTimeout)
+	ExpectSuccess(r)
 }
 
 // --- Cluster JSON parsing ---
@@ -1075,13 +1091,30 @@ func createAPIKey(serverURL, jwt, workspace, name string) string {
 // boilerplate without merging the auth conventions, and would give
 // future tests one obvious place to look for "how do I call the API".
 func callNeutreeAPI(method, path string) ([]byte, int) {
+	return callNeutreeAPIWithBody(method, path, nil)
+}
+
+func callNeutreeAPIWithJSON(method, path string, payload any) ([]byte, int) {
+	GinkgoHelper()
+
+	body, err := json.Marshal(payload)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	return callNeutreeAPIWithBody(method, path, bytes.NewReader(body))
+}
+
+func callNeutreeAPIWithBody(method, path string, requestBody io.Reader) ([]byte, int) {
 	GinkgoHelper()
 
 	url := strings.TrimRight(Cfg.ServerURL, "/") + path
-	req, err := http.NewRequest(method, url, nil)
+	req, err := http.NewRequest(method, url, requestBody)
 	Expect(err).NotTo(HaveOccurred())
 
 	req.Header.Set("Authorization", Cfg.APIKey)
+
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
@@ -1222,18 +1255,16 @@ func teardownCluster(clusterName string) {
 
 // --- Endpoint helpers ---
 
-// engineArgs parses the named engine's profile engine_args
-// ("k=v,k2=v2,...") into a structured slice for direct injection into the
-// endpoint template via {{range}}.
-func engineArgs(engineName string) []EngineArg {
-	raw := profileEngineArgsFor(engineName)
+// parseEngineArgs parses a comma-separated "k=v,k2=v2" string into a structured
+// slice for direct injection into the endpoint template via {{range}}.
+func parseEngineArgs(raw string) []EngineArg {
 	if raw == "" {
 		return nil
 	}
 
 	var args []EngineArg
 
-	for _, pair := range strings.Split(raw, ",") {
+	for _, pair := range splitEngineArgPairs(raw) {
 		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
 		if !ok || k == "" {
 			continue
@@ -1245,22 +1276,116 @@ func engineArgs(engineName string) []EngineArg {
 	return args
 }
 
+func splitEngineArgPairs(raw string) []string {
+	var pairs []string
+	start := 0
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i, r := range raw {
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if inString {
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+
+			if r == '"' {
+				inString = false
+			}
+
+			continue
+		}
+
+		switch r {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				pairs = append(pairs, raw[start:i])
+				start = i + 1
+			}
+		}
+	}
+
+	pairs = append(pairs, raw[start:])
+
+	return pairs
+}
+
+// engineArgs parses the named engine's profile engine_args.
+func engineArgs(engineName string) []EngineArg {
+	return parseEngineArgs(profileEngineArgsFor(engineName))
+}
+
+// mergeEngineArgs overlays model-level engine args onto engine-level defaults.
+// Existing keys keep their position; model-level values win on duplicate keys.
+func mergeEngineArgs(base, overlay []EngineArg) []EngineArg {
+	if len(base) == 0 {
+		return append([]EngineArg(nil), overlay...)
+	}
+
+	merged := append([]EngineArg(nil), base...)
+
+	indexByKey := make(map[string]int, len(merged))
+	for i, arg := range merged {
+		indexByKey[arg.Key] = i
+	}
+
+	for _, arg := range overlay {
+		if arg.Key == "" {
+			continue
+		}
+
+		if i, ok := indexByKey[arg.Key]; ok {
+			merged[i] = arg
+			continue
+		}
+
+		indexByKey[arg.Key] = len(merged)
+		merged = append(merged, arg)
+	}
+
+	return merged
+}
+
+func defaultEndpointEngineArgs(engineName, task string) []EngineArg {
+	return mergeEngineArgs(
+		engineArgs(engineName),
+		parseEngineArgs(profileModelEngineArgsFor(task)),
+	)
+}
+
 // endpointOpts holds configurable fields for applyEndpoint.
 type endpointOpts struct {
-	engineName    string
-	engineVersion string
-	model         string
-	modelVersion  string
-	task          string
-	engineArgs    []EngineArg
-	gpu           string
-	cpu           string
-	memory        string
-	accType       string
-	accProduct    string
-	env           map[string]string
-	forceUpdate   bool
-	replicas      int
+	engineName        string
+	engineVersion     string
+	model             string
+	modelVersion      string
+	task              string
+	engineArgs        []EngineArg
+	gpu               string
+	cpu               string
+	memory            string
+	accType           string
+	accProduct        string
+	vgpuMemoryMiB     string
+	vgpuMemoryPercent string
+	vgpuCorePercent   string
+	env               map[string]string
+	forceUpdate       bool
+	replicas          int
 }
 
 // EndpointOption configures a single field of endpointOpts.
@@ -1301,6 +1426,14 @@ func withEngineArgs(args []EngineArg) EndpointOption {
 
 func withGPU(n string) EndpointOption {
 	return func(o *endpointOpts) { o.gpu = n }
+}
+
+func withAcceleratorVirtualization(memoryMiB, memoryPercent, corePercent string) EndpointOption {
+	return func(o *endpointOpts) {
+		o.vgpuMemoryMiB = memoryMiB
+		o.vgpuMemoryPercent = memoryPercent
+		o.vgpuCorePercent = corePercent
+	}
 }
 
 func withCPU(cpu string) EndpointOption {
@@ -1345,7 +1478,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 	}
 
 	if len(o.engineArgs) == 0 {
-		o.engineArgs = engineArgs(o.engineName)
+		o.engineArgs = defaultEndpointEngineArgs(o.engineName, o.task)
 	}
 
 	if o.accType == "" || o.accProduct == "" {
@@ -1353,23 +1486,26 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 	}
 
 	data := map[string]any{
-		"E2E_ENDPOINT_NAME":       name,
-		"E2E_WORKSPACE":           profileWorkspace(),
-		"E2E_CLUSTER_NAME":        cluster,
-		"E2E_ENGINE_NAME":         o.engineName,
-		"E2E_ENGINE_VERSION":      o.engineVersion,
-		"E2E_MODEL_REGISTRY":      testRegistry(),
-		"E2E_MODEL_NAME":          o.model,
-		"E2E_MODEL_VERSION":       o.modelVersion,
-		"E2E_MODEL_TASK":          o.task,
-		"E2E_ACCELERATOR_TYPE":    o.accType,
-		"E2E_ACCELERATOR_PRODUCT": o.accProduct,
-		"E2E_GPU":                 o.gpu,
-		"E2E_CPU":                 o.cpu,
-		"E2E_MEMORY":              o.memory,
-		"E2E_ENGINE_ARGS":         o.engineArgs,
-		"E2E_ENV":                 o.env,
-		"E2E_REPLICAS_NUM":        o.replicas,
+		"E2E_ENDPOINT_NAME":                             name,
+		"E2E_WORKSPACE":                                 profileWorkspace(),
+		"E2E_CLUSTER_NAME":                              cluster,
+		"E2E_ENGINE_NAME":                               o.engineName,
+		"E2E_ENGINE_VERSION":                            o.engineVersion,
+		"E2E_MODEL_REGISTRY":                            testRegistry(),
+		"E2E_MODEL_NAME":                                o.model,
+		"E2E_MODEL_VERSION":                             o.modelVersion,
+		"E2E_MODEL_TASK":                                o.task,
+		"E2E_ACCELERATOR_TYPE":                          o.accType,
+		"E2E_ACCELERATOR_PRODUCT":                       o.accProduct,
+		"E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_MIB":     o.vgpuMemoryMiB,
+		"E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_PERCENT": o.vgpuMemoryPercent,
+		"E2E_ACCELERATOR_VIRTUALIZATION_CORE_PERCENT":   o.vgpuCorePercent,
+		"E2E_GPU":                                       o.gpu,
+		"E2E_CPU":                                       o.cpu,
+		"E2E_MEMORY":                                    o.memory,
+		"E2E_ENGINE_ARGS":                               o.engineArgs,
+		"E2E_ENV":                                       o.env,
+		"E2E_REPLICAS_NUM":                              o.replicas,
 	}
 
 	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), data)
@@ -1476,12 +1612,15 @@ func getEndpoint(name string) v1.Endpoint {
 
 // deleteEndpoint deletes an endpoint and waits for it to be removed.
 func deleteEndpoint(name string) {
-	RunCLI("delete", "endpoint", name, "-w", profileWorkspace(), "--force", "--ignore-not-found")
-	RunCLI("wait", "endpoint", name,
+	r := RunCLI("delete", "endpoint", name, "-w", profileWorkspace(), "--force", "--ignore-not-found")
+	ExpectSuccess(r)
+
+	r = RunCLI("wait", "endpoint", name,
 		"-w", profileWorkspace(),
 		"--for", "delete",
 		"--timeout", "5m",
 	)
+	ExpectSuccess(r)
 }
 
 func parseEndpointJSON(stdout string) v1.Endpoint {

@@ -3,6 +3,7 @@ import os
 import enum
 import json
 import time
+import inspect
 import fnmatch
 from typing import Dict, Any, AsyncGenerator, Optional
 
@@ -31,6 +32,30 @@ class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
     CONSISTENT_HASH = "consistent_hash"
+
+
+def _supported_params(func) -> set:
+    """Names of keyword parameters accepted by a llama_cpp API, minus `self`."""
+    return set(inspect.signature(func).parameters) - {"self"}
+
+
+# llama-cpp-python exposes a narrower API than the OpenAI request schema. Clients
+# (including the neutree gateway's Anthropic->OpenAI translation) may send fields
+# llama_cpp does not accept, e.g. `stream_options`. Forwarding them verbatim makes
+# `Llama.create_*(**payload)` raise TypeError, which aborts the (streaming) response
+# and surfaces as an empty body / "upstream prematurely closed". Drop unsupported
+# keys up front. Computed from the real signatures so new OpenAI fields stay safe.
+_CHAT_PARAMS = _supported_params(Llama.create_chat_completion)
+_COMPLETION_PARAMS = _supported_params(Llama.create_completion)
+_EMBEDDING_PARAMS = _supported_params(Llama.create_embedding)
+
+
+def _filter_supported(payload: Dict[str, Any], allowed: set) -> Dict[str, Any]:
+    """Return payload without keys llama_cpp does not accept (logs what it drops)."""
+    dropped = [k for k in payload if k not in allowed]
+    if dropped:
+        print(f"[Backend] dropping params unsupported by llama_cpp: {dropped}")
+    return {k: v for k, v in payload.items() if k in allowed}
 
 
 # Mapping from scheduler type to request router class path
@@ -165,16 +190,16 @@ class Backend:
         llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
         if "messages" in payload:
             # Chat completion
-            response = llama.create_chat_completion(**payload)
+            response = llama.create_chat_completion(**_filter_supported(payload, _CHAT_PARAMS))
             return response
         else:
             # Regular completion
-            response = llama.create_completion(**payload)
+            response = llama.create_completion(**_filter_supported(payload, _COMPLETION_PARAMS))
             return response
 
     async def generate_embeddings(self, payload: Any):
         llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
-        response = llama.create_embedding(**payload)
+        response = llama.create_embedding(**_filter_supported(payload, _EMBEDDING_PARAMS))
         return response
 
     async def show_available_models(self) -> Dict[str, Any]:

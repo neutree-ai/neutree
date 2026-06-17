@@ -23,6 +23,9 @@ const (
 	ParseFromRayPath        = "/v1/resource/parse-from-ray"
 	ParseFromKubernetesPath = "/v1/resource/parse-from-kubernetes"
 
+	// Virtualization API paths
+	ResolveVirtualizationConfigPath = "/v1/virtualization/resolve-config"
+
 	PluginAPIGroupPath = "/v1/plugin"
 	RegisterPath       = PluginAPIGroupPath + "/register"
 )

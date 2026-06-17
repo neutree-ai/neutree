@@ -54,7 +54,7 @@ func (m *MetricsComponent) Reconcile() error {
 		return errors.Wrap(err, "failed to check metrics resources status")
 	}
 
-	if status.DeploymentReady {
+	if status.Ready() {
 		// All resources are ready
 		return nil
 	}

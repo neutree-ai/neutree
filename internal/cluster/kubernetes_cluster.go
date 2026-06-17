@@ -2,24 +2,21 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
-	resourceutil "k8s.io/kubectl/pkg/util/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/cluster/component"
+	"github.com/neutree-ai/neutree/internal/cluster/component/hami"
 	"github.com/neutree-ai/neutree/internal/cluster/component/metrics"
 	"github.com/neutree-ai/neutree/internal/cluster/component/router"
+	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -222,6 +219,15 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 		reconcileDeleteComps = append(reconcileDeleteComps, metricsComp)
 	}
 
+	hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
+		*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
+	if reconcileCtx.Cluster.Spec.AcceleratorVirtualizationEnabled() {
+		reconcileComps = append(reconcileComps, hamiComp)
+	} else {
+		reconcileDeleteComps = append(reconcileDeleteComps, hamiComp)
+	}
+
 	return reconcileComps, reconcileDeleteComps
 }
 
@@ -256,8 +262,11 @@ func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *Reconc
 	}
 
 	if ns.DeletionTimestamp != nil {
-		// Namespace is already being deleted
 		return errors.New("waiting for namespace deletion")
+	}
+
+	if err := c.deleteClusterComponents(reconcileCtx); err != nil {
+		return err
 	}
 
 	err = reconcileCtx.ctrClient.Delete(reconcileCtx.Ctx, ns)
@@ -268,283 +277,67 @@ func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *Reconc
 	return errors.New("waiting for namespace deletion")
 }
 
+func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
+	reconcileCtx *ReconcileContext,
+) error {
+	var errs []error
+
+	if shouldDeleteAcceleratorVirtualizationComponent(reconcileCtx.Cluster) {
+		hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
+			reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+			*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
+
+		if err := hamiComp.Delete(); err != nil {
+			errs = append(errs, errors.Wrap(err, "failed to delete accelerator virtualization component"))
+		}
+	}
+
+	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	if err := metricsComp.Delete(); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to delete metrics component"))
+	}
+
+	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+		*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	if err := routerComp.Delete(); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to delete router component"))
+	}
+
+	return utilerrors.NewAggregate(errs)
+}
+
+func shouldDeleteAcceleratorVirtualizationComponent(cluster *v1.Cluster) bool {
+	if cluster == nil {
+		return false
+	}
+
+	if cluster.Spec != nil && cluster.Spec.AcceleratorVirtualizationEnabled() {
+		return true
+	}
+
+	if cluster.Status == nil || cluster.Status.ComponentStatus == nil {
+		return false
+	}
+
+	_, ok := cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
+
+	return ok
+}
+
 // calculateResources calculates the allocatable and available resources of the cluster.
 func (c *NativeKubernetesClusterReconciler) calculateResources( //nolint:gocyclo
 	reconcileCtx *ReconcileContext,
 ) (*v1.ClusterResources, error) {
-	// todo: improve function performance through caching
-	nodeList := &corev1.NodeList{}
-
-	err := reconcileCtx.ctrClient.List(reconcileCtx.Ctx, nodeList)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list k8s nodes: %w", err)
+	parsers := map[string]resourceparser.ResourceParser{}
+	if c.acceleratorMgr != nil {
+		parsers = c.acceleratorMgr.GetAllParsers()
 	}
 
-	podList := &corev1.PodList{}
+	resourceClient := resourceview.NewK8sResourceClient(reconcileCtx.ctrClient, parsers)
+	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
-	err = reconcileCtx.ctrClient.List(reconcileCtx.Ctx, podList, &client.ListOptions{
-		Raw: &metav1.ListOptions{
-			FieldSelector: "spec.nodeName!=,status.phase!=Failed,status.phase!=Succeeded",
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list k8s pods: %w", err)
-	}
-
-	type nodeResourceInfo struct {
-		allocatableResource map[corev1.ResourceName]resource.Quantity
-		availableResource   map[corev1.ResourceName]resource.Quantity
-		labels              map[string]string
-	}
-	nodeResources := make(map[string]*nodeResourceInfo)
-
-	for _, node := range nodeList.Items {
-		if node.Spec.Unschedulable {
-			continue
-		}
-
-		nodeInfo := &nodeResourceInfo{
-			allocatableResource: make(map[corev1.ResourceName]resource.Quantity),
-			availableResource:   make(map[corev1.ResourceName]resource.Quantity),
-			labels:              node.Labels,
-		}
-
-		nodeInfo.allocatableResource = node.Status.Allocatable.DeepCopy()
-		nodeInfo.availableResource = node.Status.Allocatable.DeepCopy()
-
-		nodeResources[node.Name] = nodeInfo
-	}
-
-	for _, pod := range podList.Items {
-		nodeName := pod.Spec.NodeName
-		// double check
-		if nodeName == "" {
-			continue
-		}
-
-		if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
-			continue
-		}
-
-		nodeInfo, exists := nodeResources[nodeName]
-		if !exists {
-			continue
-		}
-
-		totalRequested, _ := resourceutil.PodRequestsAndLimits(&pod)
-
-		for resourceName, quantity := range totalRequested {
-			if existingQty, exists := nodeInfo.availableResource[resourceName]; exists {
-				existingQty.Sub(quantity)
-				nodeInfo.availableResource[resourceName] = existingQty
-			} else {
-				klog.Warningf("pod %s requests unknown resource %s on node %s", pod.Name, resourceName, nodeName)
-			}
-		}
-	}
-
-	// Initialize result
-	result := &v1.ClusterResources{
-		ResourceStatus: v1.ResourceStatus{
-			Allocatable: &v1.ResourceInfo{
-				CPU:               0,
-				Memory:            0,
-				AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
-			},
-			Available: &v1.ResourceInfo{
-				CPU:               0,
-				Memory:            0,
-				AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
-			},
-		},
-		NodeResources: make(map[string]*v1.ResourceStatus),
-	}
-
-	for nodeName, nodeInfo := range nodeResources {
-		klog.V(4).Infof("Node %s allocatable resources: %+v", nodeName, nodeInfo.allocatableResource)
-		klog.V(4).Infof("Node %s available resources: %+v", nodeName, nodeInfo.availableResource)
-
-		nodeResourceStatus, err := c.transformResources(
-			nodeInfo.availableResource,
-			nodeInfo.allocatableResource,
-			nodeInfo.labels,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to transform resources for node %s: %w", nodeName, err)
-		}
-
-		result.NodeResources[nodeName] = nodeResourceStatus
-
-		result.Allocatable.CPU += nodeResourceStatus.Allocatable.CPU
-		result.Allocatable.Memory += nodeResourceStatus.Allocatable.Memory
-		result.Available.CPU += nodeResourceStatus.Available.CPU
-		result.Available.Memory += nodeResourceStatus.Available.Memory
-
-		for acceleratorType, acceleratorGroups := range nodeResourceStatus.Allocatable.AcceleratorGroups {
-			existingGroup, exists := result.Allocatable.AcceleratorGroups[acceleratorType]
-			if exists {
-				existingGroup.Quantity += acceleratorGroups.Quantity
-			} else {
-				existingGroup = &v1.AcceleratorGroup{
-					Quantity:      acceleratorGroups.Quantity,
-					ProductGroups: make(map[v1.AcceleratorProduct]float64),
-				}
-				result.Allocatable.AcceleratorGroups[acceleratorType] = existingGroup
-			}
-
-			for productType, quantity := range acceleratorGroups.ProductGroups {
-				if existingQuantity, exists := existingGroup.ProductGroups[productType]; exists {
-					existingGroup.ProductGroups[productType] = existingQuantity + quantity
-				} else {
-					existingGroup.ProductGroups[productType] = quantity
-				}
-			}
-		}
-
-		for acceleratorType, acceleratorGroups := range nodeResourceStatus.Available.AcceleratorGroups {
-			existingGroup, exists := result.Available.AcceleratorGroups[acceleratorType]
-			if exists {
-				existingGroup.Quantity += acceleratorGroups.Quantity
-			} else {
-				existingGroup = &v1.AcceleratorGroup{
-					Quantity:      acceleratorGroups.Quantity,
-					ProductGroups: make(map[v1.AcceleratorProduct]float64),
-				}
-				result.Available.AcceleratorGroups[acceleratorType] = existingGroup
-			}
-
-			for productType, quantity := range acceleratorGroups.ProductGroups {
-				if existingQuantity, exists := existingGroup.ProductGroups[productType]; exists {
-					existingGroup.ProductGroups[productType] = existingQuantity + quantity
-				} else {
-					existingGroup.ProductGroups[productType] = quantity
-				}
-			}
-		}
-	}
-
-	return result, nil
-}
-
-func (c *NativeKubernetesClusterReconciler) transformResources(
-	availableResource, allocatableResource map[corev1.ResourceName]resource.Quantity,
-	labels map[string]string,
-) (*v1.ResourceStatus, error) {
-	result := &v1.ResourceStatus{
-		Allocatable: &v1.ResourceInfo{
-			CPU:               0,
-			Memory:            0,
-			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
-		},
-		Available: &v1.ResourceInfo{
-			CPU:               0,
-			Memory:            0,
-			AcceleratorGroups: make(map[v1.AcceleratorType]*v1.AcceleratorGroup),
-		},
-	}
-
-	allocatableCPU := allocatableResource[corev1.ResourceCPU]
-	allocatableMemory := allocatableResource[corev1.ResourceMemory]
-	result.Allocatable.CPU = allocatableCPU.AsApproximateFloat64()
-	result.Allocatable.Memory = allocatableMemory.AsApproximateFloat64()
-
-	availableCPU := availableResource[corev1.ResourceCPU]
-	availableMemory := availableResource[corev1.ResourceMemory]
-	result.Available.CPU = availableCPU.AsApproximateFloat64()
-	result.Available.Memory = availableMemory.AsApproximateFloat64()
-
-	resourceParserMap := c.acceleratorMgr.GetAllParsers()
-	for _, parser := range resourceParserMap {
-		match := false
-
-		accelInfo, err := parser.ParseFromKubernetes(allocatableResource, labels)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse allocatable resources from Kubernetes: %w", err)
-		}
-
-		if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
-			match = true
-
-			for acceleratorType, acceleratorGroups := range accelInfo.AcceleratorGroups {
-				existingGroup, exists := result.Allocatable.AcceleratorGroups[acceleratorType]
-				if exists {
-					existingGroup.Quantity += acceleratorGroups.Quantity
-				} else {
-					existingGroup = &v1.AcceleratorGroup{
-						Quantity:      acceleratorGroups.Quantity,
-						ProductGroups: make(map[v1.AcceleratorProduct]float64),
-					}
-					result.Allocatable.AcceleratorGroups[acceleratorType] = existingGroup
-				}
-
-				for productType, quantity := range acceleratorGroups.ProductGroups {
-					if existingQuantity, exists := existingGroup.ProductGroups[productType]; exists {
-						existingGroup.ProductGroups[productType] = existingQuantity + quantity
-					} else {
-						existingGroup.ProductGroups[productType] = quantity
-					}
-				}
-			}
-		}
-
-		accelInfo, err = parser.ParseFromKubernetes(availableResource, labels)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse available resources from Kubernetes: %w", err)
-		}
-
-		if accelInfo != nil && len(accelInfo.AcceleratorGroups) > 0 {
-			match = true
-
-			for acceleratorType, acceleratorGroups := range accelInfo.AcceleratorGroups {
-				existingGroup, exists := result.Available.AcceleratorGroups[acceleratorType]
-				if exists {
-					existingGroup.Quantity += acceleratorGroups.Quantity
-				} else {
-					existingGroup = &v1.AcceleratorGroup{
-						Quantity:      acceleratorGroups.Quantity,
-						ProductGroups: make(map[v1.AcceleratorProduct]float64),
-					}
-					result.Available.AcceleratorGroups[acceleratorType] = existingGroup
-				}
-
-				for productType, quantity := range acceleratorGroups.ProductGroups {
-					if existingQuantity, exists := existingGroup.ProductGroups[productType]; exists {
-						existingGroup.ProductGroups[productType] = existingQuantity + quantity
-					} else {
-						existingGroup.ProductGroups[productType] = quantity
-					}
-				}
-			}
-		}
-
-		if match {
-			break
-		}
-	}
-
-	if result.Allocatable.CPU < 0 {
-		result.Allocatable.CPU = 0
-	} else {
-		result.Allocatable.CPU = roundFloat64ToTwoDecimals(result.Allocatable.CPU)
-	}
-
-	if result.Allocatable.Memory < 0 {
-		result.Allocatable.Memory = 0
-	} else {
-		result.Allocatable.Memory = roundFloat64ToTwoDecimals(result.Allocatable.Memory / plugin.BytesPerGiB)
-	}
-
-	if result.Available.CPU < 0 {
-		result.Available.CPU = 0
-	} else {
-		result.Available.CPU = roundFloat64ToTwoDecimals(result.Available.CPU)
-	}
-
-	if result.Available.Memory < 0 {
-		result.Available.Memory = 0
-	} else {
-		result.Available.Memory = roundFloat64ToTwoDecimals(result.Available.Memory / plugin.BytesPerGiB)
-	}
-
-	return result, nil
+	return resourceBuilder.BuildClusterResources(reconcileCtx.Ctx, reconcileCtx.Cluster)
 }

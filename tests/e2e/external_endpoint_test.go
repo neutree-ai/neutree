@@ -110,6 +110,56 @@ func waitForUpstreamRequest() (last *RecordedRequest, body map[string]any) {
 	return last, body
 }
 
+func sendRawAnthropicMessage(serviceURL string, payload map[string]any) (map[string]any, int) {
+	status, body, err := doInferenceRequest(serviceURL, "/anthropic/v1/messages", payload)
+	Expect(err).NotTo(HaveOccurred())
+
+	var resp map[string]any
+	Expect(json.Unmarshal([]byte(body), &resp)).To(Succeed())
+
+	return resp, status
+}
+
+func upstreamMessages(upstreamReq map[string]any) []any {
+	messages, ok := upstreamReq["messages"].([]any)
+	Expect(ok).To(BeTrue(), "upstream request should contain a messages array")
+
+	return messages
+}
+
+func countMessagesByRole(messages []any, role string) int {
+	count := 0
+	for _, raw := range messages {
+		msg, ok := raw.(map[string]any)
+		Expect(ok).To(BeTrue(), "message entries should be objects")
+		if msg["role"] == role {
+			count++
+		}
+	}
+
+	return count
+}
+
+func assertMalformedToolUseBlocks(content []anthropic.ContentBlockUnion) {
+	toolUses := make(map[string]anthropic.ContentBlockUnion)
+	for _, block := range content {
+		if block.Type == "tool_use" {
+			toolUses[block.ID] = block
+		}
+	}
+
+	Expect(toolUses).To(HaveLen(3))
+
+	Expect(toolUses["call-function-null"].Name).To(Equal(""))
+	Expect(string(toolUses["call-function-null"].Input)).To(MatchJSON(`{}`))
+
+	Expect(toolUses["call-name-null"].Name).To(Equal(""))
+	Expect(string(toolUses["call-name-null"].Input)).To(MatchJSON(`{"city":"shanghai"}`))
+
+	Expect(toolUses["call-arguments-null"].Name).To(Equal("lookup_weather"))
+	Expect(string(toolUses["call-arguments-null"].Input)).To(MatchJSON(`{}`))
+}
+
 // --- Tests ---
 
 var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func() {
@@ -291,6 +341,98 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(upstreamReq["stream"]).To(BeTrue())
 		})
 
+		It("should merge inline system messages into the first OpenAI system message", Label("C2705749", "system-normalization"), func() {
+			mockUpstream.ClearRequests()
+
+			resp, status := sendRawAnthropicMessage(serviceURL, map[string]any{
+				"model":      "fast",
+				"max_tokens": 32,
+				"system":     "Top-level system.",
+				"messages": []map[string]any{
+					{"role": "user", "content": "Hi"},
+					{"role": "system", "content": "Inline system hint."},
+					{"role": "assistant", "content": "Previous answer."},
+				},
+			})
+			Expect(status).To(Equal(http.StatusOK), "unexpected Anthropic response: %v", resp)
+
+			last, upstreamReq := waitForUpstreamRequest()
+			Expect(last.Path).To(Equal("/v1/chat/completions"))
+
+			messages := upstreamMessages(upstreamReq)
+			Expect(messages).To(HaveLen(3))
+			Expect(countMessagesByRole(messages, "system")).To(Equal(1))
+
+			first, ok := messages[0].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(first["role"]).To(Equal("system"))
+			Expect(first["content"]).To(Equal("Top-level system.\n\nInline system hint."))
+
+			second, ok := messages[1].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(second["role"]).To(Equal("user"))
+			Expect(second["content"]).To(Equal("Hi"))
+
+			third, ok := messages[2].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(third["role"]).To(Equal("assistant"))
+			Expect(third["content"]).To(Equal("Previous answer."))
+		})
+
+		It("should normalize Claude Code ctx and msg roles to user messages", Label("C2705750", "role-normalization"), func() {
+			mockUpstream.ClearRequests()
+
+			resp, status := sendRawAnthropicMessage(serviceURL, map[string]any{
+				"model":      "fast",
+				"max_tokens": 32,
+				"messages": []map[string]any{
+					{"role": "ctx", "content": "Context note."},
+					{"role": "msg", "content": "Current user message."},
+				},
+			})
+			Expect(status).To(Equal(http.StatusOK), "unexpected Anthropic response: %v", resp)
+
+			last, upstreamReq := waitForUpstreamRequest()
+			Expect(last.Path).To(Equal("/v1/chat/completions"))
+
+			messages := upstreamMessages(upstreamReq)
+			Expect(messages).To(HaveLen(2))
+
+			first, ok := messages[0].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(first["role"]).To(Equal("user"))
+			Expect(first["content"]).To(Equal("Context note."))
+
+			second, ok := messages[1].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(second["role"]).To(Equal("user"))
+			Expect(second["content"]).To(Equal("Current user message."))
+		})
+
+		It("should pass unrecognized message roles through unchanged", Label("C2705751", "role-pass-through"), func() {
+			mockUpstream.ClearRequests()
+
+			resp, status := sendRawAnthropicMessage(serviceURL, map[string]any{
+				"model":      "fast",
+				"max_tokens": 32,
+				"messages": []map[string]any{
+					{"role": "developer", "content": "unsupported"},
+				},
+			})
+			Expect(status).To(Equal(http.StatusOK), "unexpected Anthropic response: %v", resp)
+
+			last, upstreamReq := waitForUpstreamRequest()
+			Expect(last.Path).To(Equal("/v1/chat/completions"))
+
+			messages := upstreamMessages(upstreamReq)
+			Expect(messages).To(HaveLen(1))
+
+			first, ok := messages[0].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(first["role"]).To(Equal("developer"))
+			Expect(first["content"]).To(Equal("unsupported"))
+		})
+
 		// NEU-428: when an OpenAI-compatible upstream returns "tool_calls": null
 		// (a JSON null sentinel rather than a missing field), the Anthropic
 		// conversion path used to crash with
@@ -360,6 +502,64 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 
 				Expect(string(message.Role)).To(Equal("assistant"))
 				Expect(len(message.Content)).To(BeNumerically(">", 0))
+
+				last, upstreamReq := waitForUpstreamRequest()
+				Expect(last.Path).To(Equal("/v1/chat/completions"))
+				Expect(upstreamReq["stream"]).To(BeTrue())
+			})
+		})
+
+		// NEU-404: some OpenAI-compatible upstreams can return a real tool_calls
+		// array whose nested function/name/arguments fields are JSON null. This is
+		// distinct from NEU-428's outer tool_calls:null case because the converter
+		// enters the per-tool-call path before seeing the null sentinel.
+		Context("when upstream emits malformed tool call function fields", Label("tool-call-function-null"), func() {
+			BeforeEach(func() {
+				mockUpstream.SetEmitMalformedToolCallFunction(true)
+				mockUpstream.ClearRequests()
+			})
+
+			AfterEach(func() {
+				mockUpstream.SetEmitMalformedToolCallFunction(false)
+			})
+
+			It("should normalize non-stream tool_use fields", func() {
+				msg, err := anthropicClient.Messages.New(context.Background(), anthropic.MessageNewParams{
+					Model:     "fast",
+					MaxTokens: 100,
+					Messages: []anthropic.MessageParam{
+						anthropic.NewUserMessage(anthropic.NewTextBlock("hello malformed tool calls")),
+					},
+				})
+				Expect(err).NotTo(HaveOccurred(),
+					"Anthropic conversion must not fail when tool_call.function/name/arguments contain JSON null")
+
+				assertMalformedToolUseBlocks(msg.Content)
+
+				last, _ := waitForUpstreamRequest()
+				Expect(last.Path).To(Equal("/v1/chat/completions"))
+			})
+
+			It("should normalize stream tool_use fields", func() {
+				stream := anthropicClient.Messages.NewStreaming(context.Background(), anthropic.MessageNewParams{
+					Model:     "smart",
+					MaxTokens: 100,
+					Messages: []anthropic.MessageParam{
+						anthropic.NewUserMessage(anthropic.NewTextBlock("hello stream malformed tool calls")),
+					},
+				})
+				defer stream.Close()
+
+				var message anthropic.Message
+				for stream.Next() {
+					event := stream.Current()
+					err := message.Accumulate(event)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				Expect(stream.Err()).NotTo(HaveOccurred(),
+					"stream must complete cleanly when nested tool_call function fields contain JSON null")
+
+				assertMalformedToolUseBlocks(message.Content)
 
 				last, upstreamReq := waitForUpstreamRequest()
 				Expect(last.Path).To(Equal("/v1/chat/completions"))

@@ -82,20 +82,23 @@ type Profile struct {
 	Engines map[string]EngineProfile `yaml:"engines"`
 
 	Model struct {
-		Name    string `yaml:"name"`
-		Version string `yaml:"version"`
-		File    string `yaml:"file"`
-		Task    string `yaml:"task"`
+		Name       string `yaml:"name"`
+		Version    string `yaml:"version"`
+		File       string `yaml:"file"`
+		Task       string `yaml:"task"`
+		EngineArgs string `yaml:"engine_args"`
 	} `yaml:"model"`
 
 	EmbeddingModel struct {
-		Name    string `yaml:"name"`
-		Version string `yaml:"version"`
+		Name       string `yaml:"name"`
+		Version    string `yaml:"version"`
+		EngineArgs string `yaml:"engine_args"`
 	} `yaml:"embedding_model"`
 
 	RerankModel struct {
-		Name    string `yaml:"name"`
-		Version string `yaml:"version"`
+		Name       string `yaml:"name"`
+		Version    string `yaml:"version"`
+		EngineArgs string `yaml:"engine_args"`
 	} `yaml:"rerank_model"`
 
 	Endpoint struct {
@@ -356,6 +359,17 @@ func profileEngineArgsFor(name string) string {
 	}
 
 	return ""
+}
+
+func profileModelEngineArgsFor(task string) string {
+	switch task {
+	case "text-embedding":
+		return profile.EmbeddingModel.EngineArgs
+	case "text-rerank":
+		return profile.RerankModel.EngineArgs
+	default:
+		return profile.Model.EngineArgs
+	}
 }
 
 func profileEndpointTimeout() string {

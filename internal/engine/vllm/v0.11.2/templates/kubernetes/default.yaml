@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .EndpointName }}
+  name: "{{ .EndpointName }}"
   namespace: {{ .Namespace }}
   labels:
     engine: {{ .EngineName }}
@@ -20,16 +20,22 @@ spec:
     matchLabels:
       cluster: {{ .ClusterName }}
       workspace: {{ .Workspace }}
-      endpoint: {{ .EndpointName }}
+      endpoint: "{{ .EndpointName }}"
       app: inference
   template:
     metadata:
+      {{- if .Annotations }}
+      annotations:
+        {{- range $key, $value := .Annotations }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+      {{- end }}
       labels:
         engine: {{ .EngineName }}
         engine_version: {{ .EngineVersion }}
         cluster: {{ .ClusterName }}
         workspace: {{ .Workspace }}
-        endpoint: {{ .EndpointName }}
+        endpoint: "{{ .EndpointName }}"
         routing_logic: {{ .RoutingLogic }}
         app: inference
     spec:
@@ -43,7 +49,7 @@ spec:
                     - key: endpoint
                       operator: In
                       values:
-                        - {{ .EndpointName }}
+                        - "{{ .EndpointName }}"
                 topologyKey: "kubernetes.io/hostname"
       {{- if .NodeSelector }}
       nodeSelector:
