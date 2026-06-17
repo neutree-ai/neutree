@@ -277,3 +277,58 @@ func TestAccessAllowlistAndDay(t *testing.T) {
 		}
 	})
 }
+
+// TestAccessDisable covers the API key temporary-disable rule (075): a 'disabled'
+// access rule makes get_api_key_access report disabled=true (the gateway then 403s
+// every request); deleting it restores the key. Non-destructive and reversible.
+func TestAccessDisable(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	const ws = "access-disable-ws"
+	user1 := CreateTestUser(t, "accessdisable1", "accessdisable1@example.com", "testpassword")
+
+	var k1 string
+	err := execWithContext(t, db, []SetContextFunc{setUserContext(user1.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `
+			SELECT id FROM api.create_api_key(
+				p_workspace := $1, p_name := $2, p_quota := 1000)`, ws, "access-disable-k1").Scan(&k1)
+	})
+	if err != nil {
+		t.Fatalf("failed to create API key: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.access_policies WHERE workspace = $1", ws)
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", k1)
+	})
+
+	disabled := func() bool {
+		var b bool
+		if err := db.QueryRowContext(ctx,
+			`SELECT (api.get_api_key_access($1)->>'disabled')::bool`, k1).Scan(&b); err != nil {
+			t.Fatalf("disabled(): %v", err)
+		}
+		return b
+	}
+
+	if disabled() {
+		t.Fatalf("expected key to start enabled")
+	}
+
+	var id int64
+	if err := db.QueryRowContext(ctx,
+		`SELECT (api.set_access_policy('api_key', 'disabled', '{}'::jsonb, NULL, NULL, $1)).id`,
+		k1).Scan(&id); err != nil {
+		t.Fatalf("set disabled: %v", err)
+	}
+	if !disabled() {
+		t.Fatalf("expected key to be disabled after rule insert")
+	}
+
+	if _, err := db.ExecContext(ctx, `SELECT api.delete_access_policy($1)`, id); err != nil {
+		t.Fatalf("delete disabled: %v", err)
+	}
+	if disabled() {
+		t.Fatalf("expected key to be enabled after rule delete")
+	}
+}

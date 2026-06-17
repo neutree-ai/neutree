@@ -24,7 +24,7 @@ local cjson = require("cjson.safe")
 
 local AccessHandler = {
     PRIORITY = 895,
-    VERSION = "0.0.2",
+    VERSION = "0.0.3",
 }
 
 local WINDOW_SECONDS = { second = 1, minute = 60, hour = 3600, day = 86400 }
@@ -126,6 +126,7 @@ local function fetch_access(conf, api_key_id)
     if type(allowed_endpoints) ~= "table" then allowed_endpoints = nil end
 
     return {
+        disabled = decoded.disabled == true,
         rate_limits = decoded.rate_limits or {},
         concurrency = decoded.concurrency,
         allowed_models = allowed_models,
@@ -190,6 +191,18 @@ function AccessHandler:access(conf)
     end
     if not gate or gate.unlimited then
         return
+    end
+
+    -- Disabled key: reject every request (403) before any other check. The
+    -- management plane sets/clears this; clearing restores the key unchanged.
+    if gate.disabled then
+        return kong.response.exit(403, {
+            error = {
+                message = "This API key is disabled",
+                type = "not_permitted",
+                code = "key_disabled",
+            },
+        })
     end
 
     -- Allowlists (403 not_permitted) are checked before the 429 rate/concurrency
