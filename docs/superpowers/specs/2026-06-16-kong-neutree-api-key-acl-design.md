@@ -43,6 +43,15 @@ should enforce the decision locally.
   avoid oversized helpers, and pass scoped lint/vet gates.
 - `contributing/database.md`: RBAC remains database-backed through
   `has_permission`; this change does not add a migration.
+- `neutree-dev` enterprise impact rules: this change affects workspace-scoped
+  API key authorization, RBAC `has_permission`, endpoint/external-endpoint
+  access control, and community code consumed by enterprise, so the
+  `neutree-enterprise` surface is not `N/A`.
+- `neutree-enterprise/CLAUDE.md` and
+  `neutree-enterprise/docs/enterprise_development_guide.md`: enterprise
+  consumes community through Go modules and `make sync-community`. This change
+  does not touch license, signing, quota, UI, localization, or vendor branding,
+  but it needs enterprise compatibility/build verification.
 
 ## Minimal Change Boundary
 
@@ -57,6 +66,17 @@ surface needed to prove route-level API-key authorization:
   permissions, CLI/API wire-shape changes, and UI changes.
 - Existing non-Neutree Kong ACL groups are preserved; only groups with the
   `nt:` prefix are managed by this feature.
+
+## Impact Surface Matrix
+
+| Surface | Impact | Verification |
+|---|---|---|
+| Backend / API / Controller / DB | Affected. Kong gateway sync, API key ACL membership, RBAC `has_permission`, and DB regression behavior change. | Unit test, DB test, and Step 5 manual E2E. |
+| OSS UI/UX | N/A. No UI, CLI, or user-visible copy changes. | No UI verification required. |
+| `neutree-enterprise` | Affected. Enterprise consumes community gateway/core code, and this change touches workspace, role/permission, endpoint, and external-endpoint access control. | Run `COMMUNITY_VERSION=<PR branch or sha> make sync-community`, then enterprise compatibility/build checks for affected components. |
+| Enterprise UI/UX / Chinese localization / vendor branding | N/A. No enterprise UI, copy, or vendor asset changes. | No screenshot/browser verification required. |
+| API/UI contract | N/A. No API fields, statuses, or error codes are added. | No frontend contract update required. |
+| E2E / manual verification | Affected. The plan includes same-workspace allow, cross-workspace deny, permission revoke, and usage/trace checks. | Cross-workspace EE/IE deny must run on enterprise or another multi-workspace-capable runtime; single-workspace community runtime is insufficient for full acceptance. |
 
 ## Decisions
 
@@ -292,6 +312,9 @@ does not replace automated E2E acceptance.
 - Successful usage and trace records still include `api_key_id`, target
   workspace, target endpoint type, and target endpoint name.
 - Rejected cross-workspace calls do not create successful usage records.
+- Same-workspace allow cases may run on community or enterprise if the build
+  contains PR #422. Cross-workspace denial cases must run on enterprise or
+  another multi-workspace-capable runtime.
 
 ### E2E Classification
 
@@ -304,8 +327,8 @@ verification.
 | Authorized same-workspace EE model list and OpenAI chat | Manual Step 5 + Code E2E | Reuse `external-endpoint && openai` |
 | Authorized same-workspace EE Anthropic messages | Manual Step 5 only | Existing suite covers protocol behavior; ACL proof is manual |
 | Authorized same-workspace IE chat on a Running endpoint | Manual Step 5 only | Depends on cluster/model capacity |
-| Cross-workspace EE denied with `403` | Manual Step 5 only | Requires multi-workspace environment |
-| Cross-workspace IE denied with `403` | Manual Step 5 only | Requires multi-workspace plus Running IE |
+| Cross-workspace EE denied with `403` | Manual Step 5 only | Requires enterprise or another multi-workspace-capable runtime |
+| Cross-workspace IE denied with `403` | Manual Step 5 only | Requires enterprise or another multi-workspace-capable runtime plus Running IE |
 | Permission removal followed by reconcile denies access | Manual Step 5 only | Requires non-admin role mutation and reconcile observation |
 | Direct Kong ACL membership removal denies access | Manual Step 5 only | Route default-deny proof |
 | Successful usage/trace records still include API-key and target metadata | Manual Step 5 only | Requires usage/trace query access |
@@ -317,14 +340,17 @@ verification.
 |---|---|---|---|
 | EE with mock upstream | EE allow/deny happy path | Created temporary EE and upstream mock | Available |
 | Running IE | IE allow/deny path | Environment listed zero clusters and endpoints | Missing |
-| Two workspaces | Cross-workspace denial | Current DB migration allows one workspace | Missing |
+| Two workspaces | Cross-workspace denial | Current community shared environment is single-workspace; enterprise or another multi-workspace-capable runtime is required | Missing |
 | Non-admin role assignment and permission revoke | Permission-removal reconcile | Shared environment only validated admin/global path | Missing |
 | Kong Admin access | Route ACL and membership evidence | Kong Admin reachable through container network | Available |
 | Usage/trace query visibility | Usage/trace assertions | Existing scoped E2E does not assert these fields | Missing |
 
 Step 5 cannot be considered complete until the missing capabilities are supplied
 and the corresponding manual cases pass, or the remaining risk is explicitly
-accepted before Step 9.
+accepted before Step 9. In particular, the cross-workspace denial cases require a
+build containing PR #422 on enterprise or another multi-workspace-capable
+runtime; the pre-PR base nightly and single-workspace community runtime are not
+sufficient for full acceptance.
 
 ## Rollout Notes
 
