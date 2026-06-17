@@ -31,6 +31,10 @@ func IsDeploymentUpdatedAndReady(deployment *appsv1.Deployment) bool {
 		return false
 	}
 
+	if deployment.Status.Replicas != *deployment.Spec.Replicas {
+		return false
+	}
+
 	if deployment.Status.UpdatedReplicas != *deployment.Spec.Replicas {
 		return false
 	}
