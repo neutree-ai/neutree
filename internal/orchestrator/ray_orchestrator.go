@@ -553,20 +553,16 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 	return modelDownloadMarkerNone, "", firstErr
 }
 
-func currentModelDownloadCompleted(endpoint *v1.Endpoint, currentModelHash string) bool {
+func currentModelDownloadHashMatches(endpoint *v1.Endpoint, currentModelHash string) bool {
 	if currentModelHash == "" || endpoint == nil || endpoint.Status == nil {
 		return false
 	}
 
-	return endpoint.Status.ModelDownloadCompleted != nil &&
-		*endpoint.Status.ModelDownloadCompleted &&
-		endpoint.Status.ModelDownloadCompletedHash != nil &&
+	return endpoint.Status.ModelDownloadCompletedHash != nil &&
 		*endpoint.Status.ModelDownloadCompletedHash == currentModelHash
 }
 
 func setModelDownloadStatus(status *v1.EndpointStatus, completed bool, currentModelHash string) {
-	status.ModelDownloadCompleted = &completed
-
 	if completed {
 		status.ModelDownloadCompletedHash = &currentModelHash
 		return
@@ -681,7 +677,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		klog.Warningf("failed to compute endpoint %s model hash: %v", endpoint.Metadata.WorkspaceName(), hashErr)
 	}
 
-	modelDownloadCompleted := currentModelDownloadCompleted(endpoint, currentModelHash)
+	modelDownloadCompleted := currentModelDownloadHashMatches(endpoint, currentModelHash)
 	modelDownloadIncomplete := false
 
 	// Basic status mapping

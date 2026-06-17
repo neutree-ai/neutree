@@ -9,6 +9,7 @@ import (
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
 	orchestratormocks "github.com/neutree-ai/neutree/internal/orchestrator/mocks"
+	"github.com/neutree-ai/neutree/internal/util"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -28,8 +29,6 @@ func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratorm
 	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Gw: gw})
 	return c
 }
-
-func boolPtr(v bool) *bool { return &v }
 
 func stringPtr(v string) *string { return &v }
 
@@ -450,18 +449,6 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			want:      false,
 		},
 		{
-			name: "same phase, different model download completion flag",
-			oldStatus: &v1.EndpointStatus{
-				Phase:                  v1.EndpointPhaseDEPLOYING,
-				ModelDownloadCompleted: boolPtr(false),
-			},
-			newStatus: &v1.EndpointStatus{
-				Phase:                  v1.EndpointPhaseDEPLOYING,
-				ModelDownloadCompleted: boolPtr(true),
-			},
-			want: true,
-		},
-		{
 			name:      "same phase, resources added",
 			oldStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
 			newStatus: &v1.EndpointStatus{
@@ -474,12 +461,10 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			name: "same phase, different model download completion hash",
 			oldStatus: &v1.EndpointStatus{
 				Phase:                      v1.EndpointPhaseDEPLOYING,
-				ModelDownloadCompleted:     boolPtr(true),
 				ModelDownloadCompletedHash: stringPtr("old-hash"),
 			},
 			newStatus: &v1.EndpointStatus{
 				Phase:                      v1.EndpointPhaseDEPLOYING,
-				ModelDownloadCompleted:     boolPtr(true),
 				ModelDownloadCompletedHash: stringPtr("new-hash"),
 			},
 			want: true,
@@ -488,12 +473,10 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			name: "same phase and same model download metadata",
 			oldStatus: &v1.EndpointStatus{
 				Phase:                      v1.EndpointPhaseDEPLOYING,
-				ModelDownloadCompleted:     boolPtr(true),
 				ModelDownloadCompletedHash: stringPtr("same-hash"),
 			},
 			newStatus: &v1.EndpointStatus{
 				Phase:                      v1.EndpointPhaseDEPLOYING,
-				ModelDownloadCompleted:     boolPtr(true),
 				ModelDownloadCompletedHash: stringPtr("same-hash"),
 			},
 			want: false,
@@ -514,7 +497,6 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			name: "same phase and omitted model download metadata that will be preserved",
 			oldStatus: &v1.EndpointStatus{
 				Phase:                      v1.EndpointPhaseDEPLOYING,
-				ModelDownloadCompleted:     boolPtr(true),
 				ModelDownloadCompletedHash: stringPtr("same-hash"),
 			},
 			newStatus: &v1.EndpointStatus{
@@ -542,4 +524,20 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_PrepareStatusForUpdate_ClearsStaleModelDownloadHash(t *testing.T) {
+	endpoint := ep(1, v1.EndpointPhaseDEPLOYING)
+	currentHash, err := util.ComputeEndpointModelHash(endpoint)
+	assert.NoError(t, err)
+	assert.NotEqual(t, "stale-hash", currentHash)
+	endpoint.Status.ModelDownloadCompletedHash = stringPtr("stale-hash")
+
+	status := &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}
+	c := &EndpointController{}
+	c.prepareStatusForUpdate(endpoint, status)
+
+	assert.NotNil(t, status.ModelDownloadCompletedHash)
+	assert.Equal(t, "", *status.ModelDownloadCompletedHash)
+	assert.True(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}))
 }

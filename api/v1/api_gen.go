@@ -527,7 +527,6 @@ type ApiEndpointStatus struct {
 	ServiceUrl                 string      `json:"service_url"`
 	LastTransitionTime         interface{} `json:"last_transition_time"`
 	ErrorMessage               string      `json:"error_message"`
-	ModelDownloadCompleted     interface{} `json:"model_download_completed"`
 	ModelDownloadCompletedHash interface{} `json:"model_download_completed_hash"`
 	Resources                  interface{} `json:"resources"`
 }

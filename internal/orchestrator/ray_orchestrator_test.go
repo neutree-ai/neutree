@@ -29,8 +29,6 @@ import (
 
 func intPtr(i int) *int { return &i }
 
-func boolPtr(v bool) *bool { return &v }
-
 func stringPtr(v string) *string { return &v }
 
 func endpointModelHashForTest(t *testing.T, endpoint *v1.Endpoint) string {
@@ -2207,7 +2205,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 		inputEndpoint                func() *v1.Endpoint
 		setupMock                    func(*dashboardmocks.MockDashboardService)
 		expectedPhase                v1.EndpointPhase
-		expectedModelDownloadDone    *bool
 		expectCurrentModelHash       bool
 		expectedModelDownloadHash    *string
 		expectModelDownloadHashEmpty bool
@@ -2632,7 +2629,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				}, nil)
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
-			expectedModelDownloadDone:    boolPtr(false),
 			expectModelDownloadHashEmpty: true,
 			expectErrorMsg:               "model download is not completed",
 			expectError:                  false,
@@ -2674,7 +2670,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				mockDashboard.On("GetActorLog", "actor-1", "err", 200).Return("", nil)
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
-			expectedModelDownloadDone:    boolPtr(false),
 			expectModelDownloadHashEmpty: true,
 			expectErrorMsg:               "model download in progress",
 			expectError:                  false,
@@ -2716,10 +2711,9 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 					Return("NEUTREE_MODEL_DOWNLOAD_START\nNEUTREE_MODEL_DOWNLOAD_DONE\n", nil)
 				mockDashboard.On("GetActorLog", "actor-1", "err", 200).Return("", nil)
 			},
-			expectedPhase:             v1.EndpointPhaseDEPLOYING,
-			expectedModelDownloadDone: boolPtr(true),
-			expectCurrentModelHash:    true,
-			expectError:               false,
+			expectedPhase:          v1.EndpointPhaseDEPLOYING,
+			expectCurrentModelHash: true,
+			expectError:            false,
 		},
 		{
 			name: "return Deploying when backend actor is done even if controller actor has no download markers",
@@ -2770,10 +2764,9 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				mockDashboard.On("GetActorLog", "actor-controller", "out", 200).Maybe().Return("", nil)
 				mockDashboard.On("GetActorLog", "actor-controller", "err", 200).Maybe().Return("", nil)
 			},
-			expectedPhase:             v1.EndpointPhaseDEPLOYING,
-			expectedModelDownloadDone: boolPtr(true),
-			expectCurrentModelHash:    true,
-			expectError:               false,
+			expectedPhase:          v1.EndpointPhaseDEPLOYING,
+			expectCurrentModelHash: true,
+			expectError:            false,
 		},
 		{
 			name: "return ModelDownloading when one backend replica is still downloading even if another replica is done",
@@ -2819,7 +2812,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				mockDashboard.On("GetActorLog", "actor-2", "err", 200).Return("", nil)
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
-			expectedModelDownloadDone:    boolPtr(false),
 			expectModelDownloadHashEmpty: true,
 			expectErrorMsg:               "model download in progress",
 			expectError:                  false,
@@ -2831,7 +2823,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				currentHash := endpointModelHashForTest(t, ep)
 				ep.Status = &v1.EndpointStatus{
 					Phase:                      v1.EndpointPhaseDEPLOYING,
-					ModelDownloadCompleted:     boolPtr(true),
 					ModelDownloadCompletedHash: stringPtr(currentHash),
 				}
 				return ep
@@ -2867,10 +2858,9 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				mockDashboard.On("GetActorLog", "actor-1", "out", 200).Return("", nil)
 				mockDashboard.On("GetActorLog", "actor-1", "err", 200).Return("", nil)
 			},
-			expectedPhase:             v1.EndpointPhaseDEPLOYING,
-			expectedModelDownloadDone: boolPtr(true),
-			expectCurrentModelHash:    true,
-			expectError:               false,
+			expectedPhase:          v1.EndpointPhaseDEPLOYING,
+			expectCurrentModelHash: true,
+			expectError:            false,
 		},
 		{
 			name: "return ModelDownloading when stored model download hash does not match current model",
@@ -2878,7 +2868,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				ep := newEndpoint()
 				ep.Status = &v1.EndpointStatus{
 					Phase:                      v1.EndpointPhaseDEPLOYING,
-					ModelDownloadCompleted:     boolPtr(true),
 					ModelDownloadCompletedHash: stringPtr("stale-model-hash"),
 				}
 				return ep
@@ -2915,7 +2904,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				mockDashboard.On("GetActorLog", "actor-1", "err", 200).Return("", nil)
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
-			expectedModelDownloadDone:    boolPtr(false),
 			expectModelDownloadHashEmpty: true,
 			expectErrorMsg:               "model download is not completed",
 			expectError:                  false,
@@ -2957,7 +2945,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				mockDashboard.On("GetActorLog", "actor-1", "err", 200).Return("NEUTREE_MODEL_DOWNLOAD_FAILED\n", nil)
 			},
 			expectedPhase:                v1.EndpointPhaseFAILED,
-			expectedModelDownloadDone:    boolPtr(false),
 			expectModelDownloadHashEmpty: true,
 			expectErrorMsg:               "model download failed",
 			expectError:                  false,
@@ -2999,7 +2986,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				mockDashboard.On("GetActorLog", "actor-1", "err", 200).Return("", assert.AnError)
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
-			expectedModelDownloadDone:    boolPtr(false),
 			expectModelDownloadHashEmpty: true,
 			expectErrorMsg:               "model download is not completed",
 			expectError:                  false,
@@ -3339,10 +3325,6 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.Equal(t, tt.expectedPhase, status.Phase)
-				if tt.expectedModelDownloadDone != nil {
-					require.NotNil(t, status.ModelDownloadCompleted)
-					assert.Equal(t, *tt.expectedModelDownloadDone, *status.ModelDownloadCompleted)
-				}
 				if tt.expectCurrentModelHash {
 					require.NotNil(t, status.ModelDownloadCompletedHash)
 					assert.Equal(t, endpointModelHashForTest(t, endpoint), *status.ModelDownloadCompletedHash)

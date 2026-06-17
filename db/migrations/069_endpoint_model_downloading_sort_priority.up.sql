@@ -1,4 +1,3 @@
-ALTER TYPE api.endpoint_status ADD ATTRIBUTE model_download_completed boolean;
 ALTER TYPE api.endpoint_status ADD ATTRIBUTE model_download_completed_hash TEXT;
 
 ALTER TABLE api.endpoints DROP COLUMN IF EXISTS status_sort_priority;

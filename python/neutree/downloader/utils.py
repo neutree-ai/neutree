@@ -55,6 +55,29 @@ def env_bool(key: str, default: bool) -> bool:
         return default
     return v.lower() not in ("0", "false", "no")
 
+
+MODEL_DOWNLOAD_START_MARKER = "NEUTREE_MODEL_DOWNLOAD_START"
+MODEL_DOWNLOAD_DONE_MARKER = "NEUTREE_MODEL_DOWNLOAD_DONE"
+MODEL_DOWNLOAD_FAILED_MARKER = "NEUTREE_MODEL_DOWNLOAD_FAILED"
+
+
+def download_with_markers(downloader: Any, source: str, dest: str, *,
+                          credentials: Optional[Dict[str, str]] = None,
+                          recursive: bool = True, overwrite: bool = False,
+                          retries: int = 3, timeout: Optional[float] = None,
+                          metadata: Optional[Dict[str, Any]] = None) -> None:
+    print(MODEL_DOWNLOAD_START_MARKER, flush=True)
+    try:
+        downloader.download(source, dest, credentials=credentials,
+                            recursive=recursive, overwrite=overwrite,
+                            retries=retries, timeout=timeout, metadata=metadata)
+    except Exception:
+        print(MODEL_DOWNLOAD_FAILED_MARKER, flush=True)
+        raise
+
+    print(MODEL_DOWNLOAD_DONE_MARKER, flush=True)
+
+
 def build_request_from_model_args(model_args: Dict[str, Any]) -> Tuple[str, DownloadRequest]:
     """Convert high-level model_args + environment into (backend, DownloadRequest).
 

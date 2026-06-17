@@ -252,10 +252,6 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 	}
 
 	// Update if Ray model download completion metadata changed.
-	if !sameOptionalBool(obj.Status.ModelDownloadCompleted, normalizedStatus.ModelDownloadCompleted) {
-		return true
-	}
-
 	if !sameOptionalString(obj.Status.ModelDownloadCompletedHash, normalizedStatus.ModelDownloadCompletedHash) {
 		return true
 	}
@@ -265,14 +261,6 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 	}
 
 	return false
-}
-
-func sameOptionalBool(left, right *bool) bool {
-	if left == nil || right == nil {
-		return left == right
-	}
-
-	return *left == *right
 }
 
 func sameOptionalString(left, right *string) bool {
@@ -329,16 +317,8 @@ func (c *EndpointController) preserveModelDownloadStatus(obj *v1.Endpoint, statu
 		return
 	}
 
-	if status.ModelDownloadCompleted != nil {
-		if *status.ModelDownloadCompleted {
-			if currentModelHash != "" {
-				status.ModelDownloadCompletedHash = &currentModelHash
-			}
-
-			return
-		}
-
-		if status.ModelDownloadCompletedHash == nil {
+	if status.ModelDownloadCompletedHash != nil {
+		if currentModelHash != "" && *status.ModelDownloadCompletedHash != currentModelHash {
 			emptyHash := ""
 			status.ModelDownloadCompletedHash = &emptyHash
 		}
@@ -346,11 +326,19 @@ func (c *EndpointController) preserveModelDownloadStatus(obj *v1.Endpoint, statu
 		return
 	}
 
-	if status.ModelDownloadCompletedHash != nil {
+	if obj.Status.ModelDownloadCompletedHash == nil {
 		return
 	}
 
-	status.ModelDownloadCompleted = obj.Status.ModelDownloadCompleted
+	if currentModelHash != "" &&
+		*obj.Status.ModelDownloadCompletedHash != "" &&
+		*obj.Status.ModelDownloadCompletedHash != currentModelHash {
+		emptyHash := ""
+		status.ModelDownloadCompletedHash = &emptyHash
+
+		return
+	}
+
 	status.ModelDownloadCompletedHash = obj.Status.ModelDownloadCompletedHash
 }
 
