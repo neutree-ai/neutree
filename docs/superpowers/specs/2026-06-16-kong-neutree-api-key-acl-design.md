@@ -327,17 +327,24 @@ Every case keeps a manual Step 5 execution requirement. Code-backed E2E is an
 additional layer for the deterministic happy path, not a replacement for manual
 verification.
 
-| Case | Classification | Code E2E decision |
-|---|---|---|
-| Authorized same-workspace EE model list and OpenAI chat | Manual Step 5 + Code E2E | Reuse `external-endpoint && openai` |
-| Authorized same-workspace EE Anthropic messages | Manual Step 5 only | Existing suite covers protocol behavior; ACL proof is manual |
-| Authorized same-workspace IE chat on a Running endpoint | Manual Step 5 only | Depends on cluster/model capacity |
-| Cross-workspace EE denied with `403` | Manual Step 5 only | Enterprise runtime manual acceptance; not automated in the community main repo |
-| Cross-workspace IE denied with `403` | Manual Step 5 only | Enterprise runtime manual acceptance with Running IE; not automated in the community main repo |
-| Permission removal followed by reconcile denies access | Manual Step 5 only | Requires non-admin role mutation and reconcile observation |
-| Direct Kong ACL membership removal denies access | Manual Step 5 only | Route default-deny proof |
-| Successful usage/trace records still include API-key and target metadata | Manual Step 5 only | Requires usage/trace query access |
-| Rejected calls do not create successful usage records | Manual Step 5 only | Requires usage query access |
+| Case | TestRail | Classification | Code E2E decision |
+|---|---|---|---|
+| Authorized same-workspace EE model list and OpenAI chat | `C2717405` | Manual Step 5 + Code E2E | Reuse `external-endpoint && openai` |
+| Authorized same-workspace EE Anthropic messages | `C2717406` | Manual Step 5 only | Existing suite covers protocol behavior; ACL proof is manual |
+| Authorized same-workspace IE chat on a Running endpoint | `C2717407` | Manual Step 5 only | Depends on cluster/model capacity |
+| Cross-workspace EE denied with `403` | `C2717408` | Manual Step 5 only | Enterprise runtime manual acceptance; not automated in the community main repo |
+| Cross-workspace IE denied with `403` | `C2717409` | Manual Step 5 only | Enterprise runtime manual acceptance with Running IE; not automated in the community main repo |
+| Permission removal followed by reconcile denies access | `C2717410` | Manual Step 5 only | Requires non-admin role mutation and reconcile observation |
+| Successful usage/trace records still include API-key and target metadata | `C2717411` | Manual Step 5 only | Requires usage/trace query access |
+| Rejected calls do not create successful usage records | Covered by `C2717408` / `C2717411` | Manual Step 5 only | Requires usage query access |
+
+### TestRail Sync
+
+The approved E2E design was synced to TestRail project `22`, suite `2420`, with
+`refs=NEU-167`. Existing sections were reused: `ExternalEndpoint` (`380848`),
+`推理实例` (`379942`), `API 秘钥` (`379884`), and `AI 网关` (`379953`). The
+community main repo code-backed scope remains Case 1 only; the cross-workspace
+EE/IE denial cases are enterprise runtime manual/TestRail coverage.
 
 ### E2E Environment Capability Matrix
 
