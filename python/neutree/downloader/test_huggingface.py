@@ -31,8 +31,11 @@ class TestHuggingFaceDownloaderGGUFFilter(unittest.TestCase):
 
     def setUp(self):
         self.dest_dir = tempfile.mkdtemp()
+        self.interactive_patcher = mock.patch("neutree.downloader.huggingface.is_interactive", return_value=True)
+        self.interactive_patcher.start()
 
     def tearDown(self):
+        self.interactive_patcher.stop()
         import shutil
         shutil.rmtree(self.dest_dir, ignore_errors=True)
 
@@ -71,6 +74,40 @@ class TestHuggingFaceDownloaderGGUFFilter(unittest.TestCase):
         fake_hf.snapshot_download.assert_called_once()
         _, kwargs = fake_hf.snapshot_download.call_args
         self.assertIsNone(kwargs.get("allow_patterns"))
+
+    @mock.patch("neutree.downloader.huggingface.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.huggingface.is_interactive", return_value=False)
+    @mock.patch("neutree.downloader.huggingface.ProgressReporter")
+    def test_non_tty_disables_hf_progress_bars_and_wraps_download(self, mock_reporter, _mock_interactive, _mock_skip):
+        """Non-TTY downloads should disable HF bars and use log-based progress."""
+        dl = HuggingFaceDownloader()
+        fake_hf = mock.MagicMock()
+        reporter_context = mock_reporter.return_value
+        reporter_context.__enter__.return_value = reporter_context
+        reporter_context.__exit__.return_value = False
+
+        with mock.patch.object(dl, "_ensure_hf", return_value=fake_hf):
+            dl.download("org/model", self.dest_dir, metadata={"file": ""})
+
+        fake_hf.utils.disable_progress_bars.assert_called_once()
+        mock_reporter.assert_called_once()
+        args, kwargs = mock_reporter.call_args
+        self.assertEqual(args[0], self.dest_dir)
+        self.assertEqual(kwargs["label"], "HuggingFace download")
+        reporter_context.__enter__.assert_called_once()
+        reporter_context.__exit__.assert_called_once()
+
+    @mock.patch("neutree.downloader.huggingface.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.huggingface.is_interactive", return_value=True)
+    def test_tty_keeps_hf_progress_bars_enabled(self, _mock_interactive, _mock_skip):
+        """Interactive downloads should leave upstream HF progress behavior intact."""
+        dl = HuggingFaceDownloader()
+        fake_hf = mock.MagicMock()
+
+        with mock.patch.object(dl, "_ensure_hf", return_value=fake_hf):
+            dl.download("org/model", self.dest_dir, metadata={"file": ""})
+
+        fake_hf.utils.disable_progress_bars.assert_not_called()
 
 
 if __name__ == "__main__":

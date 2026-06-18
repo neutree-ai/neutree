@@ -61,6 +61,8 @@ class TestLocalDownloaderVerification(unittest.TestCase):
     def setUp(self):
         self.src_dir = tempfile.mkdtemp()
         self.dest_dir = tempfile.mkdtemp()
+        self.interactive_patcher = mock.patch("neutree.downloader.local.is_interactive", return_value=True)
+        self.interactive_patcher.start()
 
         # Create source files
         self.model_content = b"fake model weights data"
@@ -71,6 +73,7 @@ class TestLocalDownloaderVerification(unittest.TestCase):
             f.write(self.config_content)
 
     def tearDown(self):
+        self.interactive_patcher.stop()
         shutil.rmtree(self.src_dir, ignore_errors=True)
         shutil.rmtree(self.dest_dir, ignore_errors=True)
 
@@ -254,6 +257,45 @@ class TestLocalDownloaderVerification(unittest.TestCase):
 
         self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
         self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "config.json")))
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.local.is_interactive", return_value=False)
+    @mock.patch("neutree.downloader.local.get_dir_size", return_value=123)
+    @mock.patch("neutree.downloader.local.ProgressReporter")
+    def test_non_tty_prescans_source_size_and_reports_progress(
+            self, mock_reporter, mock_size, _mock_interactive, _mock_skip):
+        """Non-TTY local copies should precompute total size for percentage logs."""
+        reporter_context = mock_reporter.return_value
+        reporter_context.__enter__.return_value = reporter_context
+        reporter_context.__exit__.return_value = False
+
+        dl = LocalDownloader()
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": ""})
+
+        mock_size.assert_called_once_with(self.src_dir)
+        mock_reporter.assert_called_once()
+        args, kwargs = mock_reporter.call_args
+        self.assertEqual(args[0], self.dest_dir)
+        self.assertEqual(kwargs["label"], "Local download")
+        self.assertEqual(kwargs["total_size"], 123)
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.local.is_interactive", return_value=True)
+    @mock.patch("neutree.downloader.local.get_dir_size")
+    @mock.patch("neutree.downloader.local.ProgressReporter")
+    def test_tty_skips_source_size_prescan(self, mock_reporter, mock_size, _mock_interactive, _mock_skip):
+        """Interactive local copies should not pay the source pre-scan cost."""
+        reporter_context = mock_reporter.return_value
+        reporter_context.__enter__.return_value = reporter_context
+        reporter_context.__exit__.return_value = False
+
+        dl = LocalDownloader()
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": ""})
+
+        mock_size.assert_not_called()
+        args, kwargs = mock_reporter.call_args
+        self.assertEqual(args[0], self.dest_dir)
+        self.assertIsNone(kwargs["total_size"])
 
 
 if __name__ == "__main__":

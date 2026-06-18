@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any
 
 from .base import Downloader
 from huggingface_hub.hf_api import RepoFile
+from .progress import ProgressReporter, is_interactive
 from .utils import (
     ensure_dir,
     resolve_allow_pattern,
@@ -73,11 +74,24 @@ class HuggingFaceDownloader(Downloader):
         # Empty string would be treated as an invalid branch name
         version = metadata.get("version") or None if metadata else None
 
-        hf.snapshot_download(repo_id=repo_id, allow_patterns=allow_pattern, local_dir=dest, token=token, revision=version)
+        interactive = is_interactive()
+        if not interactive:
+            disable_progress_bars = getattr(getattr(hf, "utils", None), "disable_progress_bars", None)
+            if callable(disable_progress_bars):
+                disable_progress_bars()
 
-        # Verify downloaded files if not skipped
-        if not should_skip_verification():
-            self._verify_downloaded_files(repo_id, dest, revision=version, token=token)
+        with ProgressReporter(dest, logger, label="HuggingFace download", interactive=interactive):
+            hf.snapshot_download(
+                repo_id=repo_id,
+                allow_patterns=allow_pattern,
+                local_dir=dest,
+                token=token,
+                revision=version,
+            )
+
+            # Verify downloaded files if not skipped
+            if not should_skip_verification():
+                self._verify_downloaded_files(repo_id, dest, revision=version, token=token)
 
     def _verify_downloaded_files(self, repo_id: str, dest: str, revision: Optional[str] = None, token: Optional[str] = None) -> None:
         """Verify downloaded files against HF repository checksums.
