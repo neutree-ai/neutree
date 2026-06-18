@@ -179,13 +179,18 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 	}
 
 	l := apiKey.Spec.Limits
-	cfg := map[string]interface{}{}
-	needed := false
-
-	if l.Disabled {
-		cfg["disabled"] = true
-		needed = true
+	// Emit a COMPLETE config: every field is set, with nil for "off". syncPlugin
+	// reconciles via JSON merge-patch (RFC 7386) where an omitted key keeps the
+	// stale value and a null key clears it — so a sparse config would never turn a
+	// limit back off. disabled is always an explicit bool; the optional fields are
+	// the value when active or nil (merge-patch null) to clear any prior value.
+	cfg := map[string]interface{}{
+		"disabled":       l.Disabled,
+		"allowed_models": nil,
+		"concurrency":    nil,
+		"rate_limits":    nil,
 	}
+	needed := l.Disabled
 
 	if len(l.AllowedModels) > 0 {
 		cfg["allowed_models"] = l.AllowedModels
@@ -211,6 +216,8 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 		needed = true
 	}
 
+	// No active limit -> no plugin (syncAPIKeyLimitPlugins deletes any stale one),
+	// so an unconfigured key stays unrestricted (the agreed boundary).
 	if !needed {
 		return nil
 	}
