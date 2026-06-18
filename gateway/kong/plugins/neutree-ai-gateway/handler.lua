@@ -1179,6 +1179,11 @@ function AIGatewayHandler:access(conf)
     end
 
     if is_anthropic_messages_path(suffix) then
+        if not conf.upstreams and conf.route_type and conf.route_type ~= "/v1/chat/completions" then
+            kong.ctx.plugin.skip = true
+            return
+        end
+
         local content_type = kong.request.get_header("Content-Type") or "application/json"
         if not string.find(content_type, "application/json", nil, true) then
             return anthropic_error(400, "invalid_request_error", "Content-Type must be application/json")
