@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -80,6 +81,11 @@ func (h *K8sHelper) GetService(ctx context.Context, namespace, name string) (*co
 	return h.clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
+// GetIngress retrieves a specific ingress.
+func (h *K8sHelper) GetIngress(ctx context.Context, namespace, name string) (*networkingv1.Ingress, error) {
+	return h.clientset.NetworkingV1().Ingresses(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
 // GetSecret retrieves a specific secret.
 func (h *K8sHelper) GetSecret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
 	return h.clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -115,6 +121,16 @@ func (h *K8sHelper) ListServices(ctx context.Context, namespace, labelSelector s
 	list, err := h.clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return list.Items, nil
+}
+
+// ListNodes lists cluster nodes.
+func (h *K8sHelper) ListNodes(ctx context.Context) ([]corev1.Node, error) {
+	list, err := h.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
