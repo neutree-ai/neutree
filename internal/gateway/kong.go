@@ -105,7 +105,7 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 		return errors.Wrapf(err, "failed to create key auth for consumer %s", *consumer.CustomID)
 	}
 
-	return k.syncAPIKeyACLGroups(consumer.ID, apiKey)
+	return k.syncAPIKeyGatewayConfig(consumer.ID, apiKey)
 }
 
 func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error {
@@ -137,6 +137,116 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 		err = k.kongClient.ACLs.Delete(context.Background(), consumerID, group.Group)
 		if err != nil {
 			return errors.Wrapf(err, "failed to delete ACL group %s from consumer %s", *group.Group, apiKey.ID)
+		}
+	}
+
+	return nil
+}
+
+// syncAPIKeyGatewayConfig reconciles everything we push to the gateway for an
+// API key: its ACL groups (authorization) and its limit plugins (quota/access).
+func (k *Kong) syncAPIKeyGatewayConfig(consumerID *string, apiKey *v1.ApiKey) error {
+	if err := k.syncAPIKeyACLGroups(consumerID, apiKey); err != nil {
+		return err
+	}
+
+	return k.syncAPIKeyLimitPlugins(consumerID, apiKey)
+}
+
+// isManagedAPIKeyLimitPlugin reports whether a consumer plugin is one this
+// controller manages from api_key.spec.limits (so stale ones can be pruned).
+func isManagedAPIKeyLimitPlugin(p *kong.Plugin) bool {
+	if p == nil || p.InstanceName == nil {
+		return false
+	}
+
+	return strings.HasPrefix(*p.InstanceName, "neutree-ai-access-") ||
+		strings.HasPrefix(*p.InstanceName, "neutree-ai-quota-")
+}
+
+// generateAPIKeyAccessPlugin builds the per-consumer neutree-ai-access plugin
+// from the key's static access limits (disabled / allowed models / concurrency /
+// RPS+RPM). Returns nil when the key has no access limits (so the plugin is
+// absent and the key is unrestricted on the access dimension).
+func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {
+	if apiKey.Spec == nil || apiKey.Spec.Limits == nil {
+		return nil
+	}
+
+	l := apiKey.Spec.Limits
+	cfg := map[string]interface{}{}
+	needed := false
+
+	if l.Disabled {
+		cfg["disabled"] = true
+		needed = true
+	}
+
+	if len(l.AllowedModels) > 0 {
+		cfg["allowed_models"] = l.AllowedModels
+		needed = true
+	}
+
+	if l.Concurrency > 0 {
+		cfg["concurrency"] = l.Concurrency
+		needed = true
+	}
+
+	rateLimits := make([]map[string]interface{}, 0, 2)
+	if l.RPS > 0 {
+		rateLimits = append(rateLimits, map[string]interface{}{"limit": l.RPS, "window": "second"})
+	}
+
+	if l.RPM > 0 {
+		rateLimits = append(rateLimits, map[string]interface{}{"limit": l.RPM, "window": "minute"})
+	}
+
+	if len(rateLimits) > 0 {
+		cfg["rate_limits"] = rateLimits
+		needed = true
+	}
+
+	if !needed {
+		return nil
+	}
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-access"),
+		InstanceName: pointy.String("neutree-ai-access-" + util.HashString(apiKey.ID)),
+		Consumer:     &kong.Consumer{ID: consumerID},
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config:       cfg,
+	}
+}
+
+// syncAPIKeyLimitPlugins reconciles the key's per-consumer limit plugins: upsert
+// the desired ones and prune managed plugins that are no longer desired.
+func (k *Kong) syncAPIKeyLimitPlugins(consumerID *string, apiKey *v1.ApiKey) error {
+	desired := make(map[string]*kong.Plugin)
+	if p := k.generateAPIKeyAccessPlugin(consumerID, apiKey); p != nil {
+		desired[*p.InstanceName] = p
+	}
+
+	for _, p := range desired {
+		if err := k.syncPlugin(p); err != nil {
+			return err
+		}
+	}
+
+	curPlugins, err := k.kongClient.Plugins.ListAllForConsumer(context.Background(), consumerID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list plugins for consumer %s", apiKey.ID)
+	}
+
+	for _, cur := range curPlugins {
+		if !isManagedAPIKeyLimitPlugin(cur) {
+			continue
+		}
+
+		if _, ok := desired[*cur.InstanceName]; !ok {
+			if err = k.kongClient.Plugins.Delete(context.Background(), cur.ID); err != nil {
+				return errors.Wrapf(err, "failed to delete plugin %s for consumer %s", *cur.InstanceName, apiKey.ID)
+			}
 		}
 	}
 
