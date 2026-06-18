@@ -97,7 +97,7 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 
 	for _, keyAuth := range keyAuthList {
 		if keyAuth.Key != nil && apiKey.Status != nil && *keyAuth.Key == apiKey.Status.SkValue {
-			return k.syncAPIKeyACLGroups(consumer.ID, apiKey)
+			return k.syncAPIKeyGatewayConfig(consumer.ID, apiKey)
 		}
 	}
 
