@@ -1,5 +1,7 @@
 -- Revert API Key 限额收敛 v1.
 
+DROP FUNCTION IF EXISTS api.get_api_keys_usage_summary(TEXT);
+DROP FUNCTION IF EXISTS api.get_workspace_models(TEXT);
 DROP FUNCTION IF EXISTS api.get_api_key_limits(UUID);
 DROP FUNCTION IF EXISTS api.get_api_key_remaining(UUID);
 DROP FUNCTION IF EXISTS api.api_key_period_usage(UUID, TEXT);

@@ -173,4 +173,59 @@ BEGIN
 END;
 $$;
 
+-- 8) get_workspace_models：allowed-models 下拉的选项来源——工作区内可见的
+-- client-facing model 名 + 承载它的 endpoint 名/类型。SECURITY INVOKER（RLS 决定可见性）。
+CREATE OR REPLACE FUNCTION api.get_workspace_models(p_workspace TEXT)
+RETURNS TABLE (model TEXT, source TEXT, endpoint_name TEXT)
+LANGUAGE sql STABLE SECURITY INVOKER
+AS $$
+    SELECT DISTINCT
+        (e.spec).model.name::text AS model,
+        'endpoint'::text          AS source,
+        (e.metadata).name::text   AS endpoint_name
+    FROM api.endpoints e
+    WHERE (e.metadata).workspace = p_workspace
+      AND (e.metadata).deletion_timestamp IS NULL
+      AND (e.spec).model.name IS NOT NULL
+      AND trim((e.spec).model.name) <> ''
+    UNION
+    SELECT DISTINCT
+        k::text                    AS model,
+        'external_endpoint'::text  AS source,
+        (ee.metadata).name::text   AS endpoint_name
+    FROM api.external_endpoints ee
+    CROSS JOIN LATERAL unnest((ee.spec).upstreams) AS u
+    CROSS JOIN LATERAL jsonb_object_keys(u.model_mapping) AS k
+    WHERE (ee.metadata).workspace = p_workspace
+      AND (ee.metadata).deletion_timestamp IS NULL
+      AND u.model_mapping IS NOT NULL;
+$$;
+
+-- 9) get_api_keys_usage_summary：列表页批量用量（每个 api_key 的总额 token 配额 +
+-- 当期 used/remaining），一次返回，避免 N+1。读 spec.limits.token_quota + 流水聚合。
+-- SECURITY DEFINER（流水跨 key），workspace:read 守卫。
+CREATE OR REPLACE FUNCTION api.get_api_keys_usage_summary(p_workspace TEXT)
+RETURNS TABLE (api_key_id UUID, period TEXT, token_limit BIGINT, used BIGINT, remaining BIGINT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+BEGIN
+    IF NOT api.has_permission(auth.uid(), 'workspace:read', p_workspace) THEN
+        RAISE EXCEPTION 'permission denied';
+    END IF;
+    RETURN QUERY
+        SELECT
+            k.id,
+            COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly') AS period,
+            ((k.spec).limits #>> '{token_quota,limit}')::bigint AS token_limit,
+            api.api_key_period_usage(k.id, COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly')) AS used,
+            ((k.spec).limits #>> '{token_quota,limit}')::bigint
+                - api.api_key_period_usage(k.id, COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly')) AS remaining
+        FROM api.api_keys k
+        WHERE (k.metadata).workspace = p_workspace
+          AND (k.metadata).deletion_timestamp IS NULL
+          AND ((k.spec).limits #>> '{token_quota,limit}') IS NOT NULL
+          AND ((k.spec).limits #>> '{token_quota,limit}')::bigint > 0;
+END;
+$$;
+
 NOTIFY pgrst, 'reload schema';
