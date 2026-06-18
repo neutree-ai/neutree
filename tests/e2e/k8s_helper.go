@@ -25,7 +25,7 @@ import (
 
 // K8sHelper provides Kubernetes client operations for e2e tests.
 type K8sHelper struct {
-	clientset  *kubernetes.Clientset
+	clientset  kubernetes.Interface
 	restConfig *rest.Config
 }
 
@@ -177,33 +177,49 @@ func (h *K8sHelper) ListPVCs(ctx context.Context, namespace, labelSelector strin
 // NamespaceExists checks if a namespace exists.
 // Returns false only for NotFound errors; other errors cause a test failure.
 func (h *K8sHelper) NamespaceExists(ctx context.Context, name string) bool {
-	_, err := h.GetNamespace(ctx, name)
-	if err == nil {
-		return true
-	}
-
-	if apierrors.IsNotFound(err) {
-		return false
-	}
-
+	exists, err := h.namespaceExists(ctx, name)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "unexpected error checking namespace %s", name)
 
-	return false
+	return exists
 }
 
 // WaitForNamespaceDeleted waits until a namespace no longer exists.
 func (h *K8sHelper) WaitForNamespaceDeleted(ctx context.Context, name string, timeout time.Duration) {
+	h.waitForNamespaceDeleted(ctx, name, timeout, 5*time.Second)
+}
+
+func (h *K8sHelper) namespaceExists(ctx context.Context, name string) (bool, error) {
+	_, err := h.GetNamespace(ctx, name)
+	if err == nil {
+		return true, nil
+	}
+
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+
+	return false, err
+}
+
+func (h *K8sHelper) waitForNamespaceDeleted(ctx context.Context, name string, timeout, pollInterval time.Duration) {
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Second
+	}
+
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		if !h.NamespaceExists(ctx, name) {
+		exists, err := h.namespaceExists(ctx, name)
+		if err == nil && !exists {
 			return
 		}
 
-		time.Sleep(5 * time.Second)
+		time.Sleep(pollInterval)
 	}
 
-	ExpectWithOffset(1, h.NamespaceExists(ctx, name)).To(BeFalse(),
+	exists, err := h.namespaceExists(ctx, name)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "unexpected error checking namespace %s", name)
+	ExpectWithOffset(1, exists).To(BeFalse(),
 		"namespace %s should be deleted within %s", name, timeout)
 }
 

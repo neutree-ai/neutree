@@ -38,6 +38,7 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 			"vmagent.persistence.size=2Gi",
 			"db.persistence.size=2Gi",
 		}
+		baseValues = append(baseValues, profileCPHelmSetValues()...)
 	})
 
 	// --- Default install (no custom values) ---
@@ -256,6 +257,7 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 	Describe("Ingress Deploy", Ordered, Label("ingress"), func() {
 		var (
 			ctx          = context.Background()
+			secretName   = "e2e-ingress-pull-secret"
 			apiHost      string
 			kongHost     string
 			grafanaHost  string
@@ -288,6 +290,22 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 				"victoria-metrics-cluster.vminsert.ingress.hosts[0].name=" + vminsertHost,
 				"victoria-metrics-cluster.vminsert.ingress.hosts[0].path[0]=/insert",
 			}
+
+			if len(profileCPHelmSetValues()) > 0 && profileCPMirrorRegistry() != "" {
+				ingressValues = append(ingressValues, "global.imagePullSecrets[0].name="+secretName)
+
+				By("Creating docker-registry secret for ingress deploy image overrides")
+				err := h.K8s.CreateNamespace(ctx, h.Namespace)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = h.K8s.CreateDockerRegistrySecret(ctx, h.Namespace, secretName,
+					profileCPMirrorRegistry(),
+					profile.ImageRegistry.Username,
+					profile.ImageRegistry.Password,
+				)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
 			setValues = append(baseValues, ingressValues...)
 
 			By("Installing with Contour Ingress values")
@@ -322,7 +340,8 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 			baseURL := contourHTTPBaseURL(ctx, h.K8s)
 			expectHostGETStatus(baseURL, apiHost, "/health", http.StatusOK)
 			expectHostGETStatus(baseURL, grafanaHost, "/api/health", http.StatusOK)
-			expectHostGETStatus(baseURL, vminsertHost, "/health", http.StatusOK)
+			expectHostRequestStatus(baseURL, vminsertHost, http.MethodPost,
+				"/insert/0/prometheus/api/v1/write", http.StatusNoContent)
 		})
 	})
 })
@@ -348,7 +367,8 @@ func expectIngressBackend(
 
 	pathRule := findIngressPath(rule.HTTP.Paths, path)
 	Expect(pathRule).NotTo(BeNil(), "ingress %s host %s should route path %s", name, host, path)
-	Expect(pathRule.PathType).To(Equal(networkingv1.PathTypePrefix), "ingress %s path %s pathType", name, path)
+	Expect(pathRule.PathType).NotTo(BeNil(), "ingress %s path %s should set pathType", name, path)
+	Expect(*pathRule.PathType).To(Equal(networkingv1.PathTypePrefix), "ingress %s path %s pathType", name, path)
 	Expect(pathRule.Backend.Service).NotTo(BeNil(), "ingress %s path %s should use a service backend", name, path)
 	Expect(pathRule.Backend.Service.Name).To(Equal(serviceName), "ingress %s backend service", name)
 
@@ -436,10 +456,14 @@ func nodeReady(node corev1.Node) bool {
 }
 
 func expectHostGETStatus(baseURL, host, path string, expectedStatus int) {
-	client := &http.Client{Timeout: 10 * time.Second}
+	expectHostRequestStatus(baseURL, host, http.MethodGet, path, expectedStatus)
+}
+
+func expectHostRequestStatus(baseURL, host, method, path string, expectedStatus int) {
+	client := newNoProxyHTTPClient(10 * time.Second)
 
 	Eventually(func() int {
-		req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
+		req, err := http.NewRequest(method, baseURL+path, nil)
 		if err != nil {
 			return 0
 		}
@@ -455,5 +479,15 @@ func expectHostGETStatus(baseURL, host, path string, expectedStatus int) {
 
 		return resp.StatusCode
 	}, 2*time.Minute, 5*time.Second).Should(Equal(expectedStatus),
-		"%s should return %d through %s with Host %s", path, expectedStatus, baseURL, host)
+		"%s %s should return %d through %s with Host %s", method, path, expectedStatus, baseURL, host)
+}
+
+func newNoProxyHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+	}
 }

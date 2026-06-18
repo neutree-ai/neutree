@@ -115,22 +115,23 @@ type Profile struct {
 	} `yaml:"model_cache"`
 
 	ControlPlane struct {
-		DeployMode      string `yaml:"deploy_mode"`       // docker-compose | kubernetes
-		Host            string `yaml:"host"`              // VM IP (docker-compose mode)
-		SSHUser         string `yaml:"ssh_user"`          // SSH user (docker-compose mode)
-		SSHKey          string `yaml:"ssh_key"`           // path to SSH private key (docker-compose mode)
-		ComposeDir      string `yaml:"compose_dir"`       // neutree-cli working directory on VM (docker-compose mode)
-		Kubeconfig      string `yaml:"kubeconfig"`        // kubeconfig file path (kubernetes mode)
-		K8sNamespace    string `yaml:"k8s_namespace"`     // helm install namespace (kubernetes mode, default: neutree-e2e)
-		APIPort         int    `yaml:"api_port"`          // neutree-api port (default 3000)
-		Version         string `yaml:"version"`           // CP version for launch --version (e.g. v1.0.1)
-		CLIURL          string `yaml:"cli_url"`           // URL to download CLI binary (enterprise); if empty, compile from source
-		ChartURL        string `yaml:"chart_url"`         // URL to download helm chart .tgz (enterprise); if empty, use local chart
-		MirrorRegistry  string `yaml:"mirror_registry"`   // mirror registry for launch --mirror-registry
-		RegistryProject string `yaml:"registry_project"`  // registry project for launch --registry-project
-		OfflineImageURL string `yaml:"offline_image_url"` // URL to download offline image archive
-		OldVersion      string `yaml:"old_version"`       // old CP version for upgrade tests (e.g. v1.0.0)
-		OldCLIURL       string `yaml:"old_cli_url"`       // URL to download old version CLI binary
+		DeployMode      string   `yaml:"deploy_mode"`       // docker-compose | kubernetes
+		Host            string   `yaml:"host"`              // VM IP (docker-compose mode)
+		SSHUser         string   `yaml:"ssh_user"`          // SSH user (docker-compose mode)
+		SSHKey          string   `yaml:"ssh_key"`           // path to SSH private key (docker-compose mode)
+		ComposeDir      string   `yaml:"compose_dir"`       // neutree-cli working directory on VM (docker-compose mode)
+		Kubeconfig      string   `yaml:"kubeconfig"`        // kubeconfig file path (kubernetes mode)
+		K8sNamespace    string   `yaml:"k8s_namespace"`     // helm install namespace (kubernetes mode, default: neutree-e2e)
+		APIPort         int      `yaml:"api_port"`          // neutree-api port (default 3000)
+		Version         string   `yaml:"version"`           // CP version for launch --version (e.g. v1.0.1)
+		CLIURL          string   `yaml:"cli_url"`           // URL to download CLI binary (enterprise); if empty, compile from source
+		ChartURL        string   `yaml:"chart_url"`         // URL to download helm chart .tgz (enterprise); if empty, use local chart
+		MirrorRegistry  string   `yaml:"mirror_registry"`   // mirror registry for launch --mirror-registry
+		RegistryProject string   `yaml:"registry_project"`  // registry project for launch --registry-project
+		HelmSetValues   []string `yaml:"helm_set_values"`   // extra Helm --set values for kubernetes-mode CP installs
+		OfflineImageURL string   `yaml:"offline_image_url"` // URL to download offline image archive
+		OldVersion      string   `yaml:"old_version"`       // old CP version for upgrade tests (e.g. v1.0.0)
+		OldCLIURL       string   `yaml:"old_cli_url"`       // URL to download old version CLI binary
 	} `yaml:"control_plane"`
 
 	// Computed fields (populated by LoadProfile, not from YAML directly)
@@ -418,6 +419,7 @@ func profileCPCLIURL() string          { return profile.ControlPlane.CLIURL }
 func profileCPChartURL() string        { return profile.ControlPlane.ChartURL }
 func profileCPMirrorRegistry() string  { return profile.ControlPlane.MirrorRegistry }
 func profileCPRegistryProject() string { return profile.ControlPlane.RegistryProject }
+func profileCPHelmSetValues() []string { return profile.ControlPlane.HelmSetValues }
 func profileCPOfflineImageURL() string { return profile.ControlPlane.OfflineImageURL }
 func profileCPKubeconfig() string      { return profile.ControlPlane.Kubeconfig }
 func profileCPK8sNamespace() string    { return profile.ControlPlane.K8sNamespace }
