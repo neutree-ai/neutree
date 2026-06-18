@@ -79,6 +79,9 @@ local function extract_suffix(request_path, prefix)
     if prefix and prefix ~= "" then
         local prefix_pattern = "^" .. prefix:gsub("([%-%.%+%[%]%(%)%$%^%%%?%*])", "%%%1")
         suffix = request_path:gsub(prefix_pattern, "", 1)
+    else
+        suffix = request_path:gsub("^/workspace/[^/]+/external%-endpoint/[^/]+", "", 1)
+        suffix = suffix:gsub("^/workspace/[^/]+/endpoint/[^/]+", "", 1)
     end
     if suffix == "" then
         return "/"
@@ -1176,6 +1179,11 @@ function AIGatewayHandler:access(conf)
     end
 
     if is_anthropic_messages_path(suffix) then
+        if not conf.upstreams and conf.route_type and conf.route_type ~= "/v1/chat/completions" then
+            kong.ctx.plugin.skip = true
+            return
+        end
+
         local content_type = kong.request.get_header("Content-Type") or "application/json"
         if not string.find(content_type, "application/json", nil, true) then
             return anthropic_error(400, "invalid_request_error", "Content-Type must be application/json")
@@ -1217,7 +1225,15 @@ function AIGatewayHandler:access(conf)
             end
             openai_req.model = matched_entry.model_mapping[openai_req.model]
         else
-            kong.service.request.set_path(string.gsub(request_path, "/anthropic/v1/messages/?$", "/v1/chat/completions"))
+            local upstream_path = request_path:gsub(
+                "^/workspace/([^/]+)/endpoint/([^/]+)/anthropic/v1/messages/?$",
+                "/%1/%2/v1/chat/completions",
+                1
+            )
+            if upstream_path == request_path then
+                upstream_path = "/v1/chat/completions"
+            end
+            kong.service.request.set_path(upstream_path)
         end
 
         local openai_json = cjson.encode(openai_req)
