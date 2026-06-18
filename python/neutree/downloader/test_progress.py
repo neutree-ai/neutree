@@ -109,6 +109,24 @@ class TestProgressReporter(unittest.TestCase):
         self.assertTrue(any("Test download progress" in message for message in messages))
         self.assertTrue(any("Test download completed" in message for message in messages))
 
+    def test_reporter_logs_download_delta_for_prepopulated_destination(self):
+        with open(os.path.join(self.tmpdir, "existing.bin"), "wb") as f:
+            f.write(b"old data")
+
+        with ProgressReporter(
+                self.tmpdir,
+                self.logger,
+                label="Test download",
+                total_size=7,
+                interactive=False):
+            with open(os.path.join(self.tmpdir, "new.bin"), "wb") as f:
+                f.write(b"content")
+
+        messages = [call.args[0] for call in self.logger.info.call_args_list]
+        self.assertTrue(any("Test download progress: 0 B / 7 B" in message for message in messages))
+        self.assertTrue(any("Test download completed: 7 B downloaded" in message for message in messages))
+        self.assertFalse(any("15 B downloaded" in message for message in messages))
+
     def test_reporter_logs_aborted_on_exception(self):
         with self.assertRaisesRegex(RuntimeError, "boom"):
             with ProgressReporter(self.tmpdir, self.logger, label="Test download", interactive=False):

@@ -82,6 +82,8 @@ class TestHuggingFaceDownloaderGGUFFilter(unittest.TestCase):
         """Non-TTY downloads should disable HF bars and use log-based progress."""
         dl = HuggingFaceDownloader()
         fake_hf = mock.MagicMock()
+        fake_hf.utils.disable_progress_bars.return_value = None
+        fake_hf.utils.are_progress_bars_disabled.return_value = False
         reporter_context = mock_reporter.return_value
         reporter_context.__enter__.return_value = reporter_context
         reporter_context.__exit__.return_value = False
@@ -90,12 +92,29 @@ class TestHuggingFaceDownloaderGGUFFilter(unittest.TestCase):
             dl.download("org/model", self.dest_dir, metadata={"file": ""})
 
         fake_hf.utils.disable_progress_bars.assert_called_once()
+        fake_hf.utils.enable_progress_bars.assert_called_once()
         mock_reporter.assert_called_once()
         args, kwargs = mock_reporter.call_args
         self.assertEqual(args[0], self.dest_dir)
         self.assertEqual(kwargs["label"], "HuggingFace download")
         reporter_context.__enter__.assert_called_once()
         reporter_context.__exit__.assert_called_once()
+
+    @mock.patch("neutree.downloader.huggingface.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.huggingface.is_interactive", return_value=False)
+    def test_non_tty_keeps_previously_disabled_hf_progress_bars_disabled(
+            self, _mock_interactive, _mock_skip):
+        """A non-TTY download should not re-enable bars that were already disabled."""
+        dl = HuggingFaceDownloader()
+        fake_hf = mock.MagicMock()
+        fake_hf.utils.disable_progress_bars.return_value = None
+        fake_hf.utils.are_progress_bars_disabled.return_value = True
+
+        with mock.patch.object(dl, "_ensure_hf", return_value=fake_hf):
+            dl.download("org/model", self.dest_dir, metadata={"file": ""})
+
+        fake_hf.utils.disable_progress_bars.assert_called_once()
+        fake_hf.utils.enable_progress_bars.assert_not_called()
 
     @mock.patch("neutree.downloader.huggingface.should_skip_verification", return_value=True)
     @mock.patch("neutree.downloader.huggingface.is_interactive", return_value=True)

@@ -260,11 +260,10 @@ class TestLocalDownloaderVerification(unittest.TestCase):
 
     @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
     @mock.patch("neutree.downloader.local.is_interactive", return_value=False)
-    @mock.patch("neutree.downloader.local.get_dir_size", return_value=123)
     @mock.patch("neutree.downloader.local.ProgressReporter")
     def test_non_tty_prescans_source_size_and_reports_progress(
-            self, mock_reporter, mock_size, _mock_interactive, _mock_skip):
-        """Non-TTY local copies should precompute total size for percentage logs."""
+            self, mock_reporter, _mock_interactive, _mock_skip):
+        """Non-TTY local copies should precompute the planned copy size."""
         reporter_context = mock_reporter.return_value
         reporter_context.__enter__.return_value = reporter_context
         reporter_context.__exit__.return_value = False
@@ -272,18 +271,48 @@ class TestLocalDownloaderVerification(unittest.TestCase):
         dl = LocalDownloader()
         dl.download(self.src_dir, self.dest_dir, metadata={"file": ""})
 
-        mock_size.assert_called_once_with(self.src_dir)
         mock_reporter.assert_called_once()
         args, kwargs = mock_reporter.call_args
         self.assertEqual(args[0], self.dest_dir)
         self.assertEqual(kwargs["label"], "Local download")
-        self.assertEqual(kwargs["total_size"], 123)
+        self.assertEqual(kwargs["total_size"], len(self.model_content) + len(self.config_content))
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.local.is_interactive", return_value=False)
+    @mock.patch("neutree.downloader.local.ProgressReporter")
+    def test_non_tty_planned_size_respects_filter_recursive_and_existing_files(
+            self, mock_reporter, _mock_interactive, _mock_skip):
+        """Planned size should match files that will actually be copied."""
+        reporter_context = mock_reporter.return_value
+        reporter_context.__enter__.return_value = reporter_context
+        reporter_context.__exit__.return_value = False
+
+        with open(os.path.join(self.src_dir, "model-q4_0.gguf"), "wb") as f:
+            f.write(b"q4")
+        with open(os.path.join(self.src_dir, "model-q8_0.gguf"), "wb") as f:
+            f.write(b"q8")
+        nested = os.path.join(self.src_dir, "nested")
+        os.makedirs(nested)
+        with open(os.path.join(nested, "ignored.gguf"), "wb") as f:
+            f.write(b"nested")
+        with open(os.path.join(self.dest_dir, "model-q4_0.gguf"), "wb") as f:
+            f.write(b"already")
+
+        dl = LocalDownloader()
+        dl.download(
+            self.src_dir,
+            self.dest_dir,
+            recursive=False,
+            metadata={"file": "*.gguf"})
+
+        args, kwargs = mock_reporter.call_args
+        self.assertEqual(args[0], self.dest_dir)
+        self.assertEqual(kwargs["total_size"], len(b"q8"))
 
     @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
     @mock.patch("neutree.downloader.local.is_interactive", return_value=True)
-    @mock.patch("neutree.downloader.local.get_dir_size")
     @mock.patch("neutree.downloader.local.ProgressReporter")
-    def test_tty_skips_source_size_prescan(self, mock_reporter, mock_size, _mock_interactive, _mock_skip):
+    def test_tty_skips_source_size_prescan(self, mock_reporter, _mock_interactive, _mock_skip):
         """Interactive local copies should not pay the source pre-scan cost."""
         reporter_context = mock_reporter.return_value
         reporter_context.__enter__.return_value = reporter_context
@@ -292,7 +321,6 @@ class TestLocalDownloaderVerification(unittest.TestCase):
         dl = LocalDownloader()
         dl.download(self.src_dir, self.dest_dir, metadata={"file": ""})
 
-        mock_size.assert_not_called()
         args, kwargs = mock_reporter.call_args
         self.assertEqual(args[0], self.dest_dir)
         self.assertIsNone(kwargs["total_size"])

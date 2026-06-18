@@ -103,12 +103,14 @@ class ProgressReporter:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._started_at: Optional[float] = None
+        self._baseline_size = 0
 
     def __enter__(self):
         if self.interactive:
             return self
 
         self._started_at = time.time()
+        self._baseline_size = get_dir_size(self.path)
         self._log_progress()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -123,7 +125,7 @@ class ProgressReporter:
             self._thread.join(timeout=1.0)
 
         elapsed = time.time() - self._started_at if self._started_at else 0.0
-        size = get_dir_size(self.path)
+        size = self._downloaded_size()
         status = "aborted" if exc_type else "completed"
         self.logger.info(
             f"{self.label} {status}: {format_size(size)} downloaded in {elapsed:.1f}s")
@@ -135,7 +137,7 @@ class ProgressReporter:
 
     def _log_progress(self) -> None:
         try:
-            size = get_dir_size(self.path)
+            size = self._downloaded_size()
         except Exception as exc:
             self.logger.debug(f"{self.label} progress unavailable: {exc}")
             return
@@ -148,3 +150,6 @@ class ProgressReporter:
             return
 
         self.logger.info(f"{self.label} progress: {format_size(size)} downloaded")
+
+    def _downloaded_size(self) -> int:
+        return max(0, get_dir_size(self.path) - self._baseline_size)
