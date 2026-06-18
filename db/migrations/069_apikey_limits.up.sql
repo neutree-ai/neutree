@@ -29,7 +29,10 @@ WHERE (k.spec).quota IS NOT NULL
   AND (k.spec).quota > 0
   AND (k.spec).limits IS NULL;
 
--- 3) create_api_key 增加 p_limits（在 019 版基础上，ROW 加第三个属性）
+-- 3) create_api_key 增加 p_limits（在 019 版基础上，ROW 加第三个属性）。
+-- 注意：新增形参会创建“重载”而非替换，导致 create_api_key(p_workspace,p_name,p_quota)
+-- 调用产生歧义（function is not unique）。因此先 DROP 旧的 5 参签名，再建 6 参版本。
+DROP FUNCTION IF EXISTS api.create_api_key(TEXT, TEXT, INTEGER, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION api.create_api_key(
     p_workspace TEXT,
     p_name TEXT,
