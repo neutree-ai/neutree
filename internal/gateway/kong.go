@@ -28,6 +28,9 @@ type Kong struct {
 	logRemoteWriteUrl string
 
 	proxyUrl string
+
+	neutreeAPIUrl string
+	serviceToken  string
 }
 
 func newKong(opts GatewayOptions) (Gateway, error) {
@@ -41,6 +44,8 @@ func newKong(opts GatewayOptions) (Gateway, error) {
 		storage:           opts.Storage,
 		logRemoteWriteUrl: opts.LogRemoteWriteUrl,
 		proxyUrl:          opts.ProxyUrl,
+		neutreeAPIUrl:     opts.NeutreeAPIUrl,
+		serviceToken:      opts.ServiceToken,
 	}, nil
 }
 
@@ -219,11 +224,46 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 	}
 }
 
+// generateAPIKeyQuotaPlugin builds the per-consumer neutree-ai-quota plugin when
+// the key has a token quota. The plugin pulls the dynamic remaining count from
+// neutree-api at request time (A1). Returns nil when there is no token quota, or
+// when the neutree-api URL / service token are not configured (degrade to "no
+// quota enforcement" rather than mis-enforce).
+func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {
+	if apiKey.Spec == nil || apiKey.Spec.Limits == nil || apiKey.Spec.Limits.TokenQuota == nil {
+		return nil
+	}
+
+	if apiKey.Spec.Limits.TokenQuota.Limit <= 0 {
+		return nil
+	}
+
+	if k.neutreeAPIUrl == "" || k.serviceToken == "" {
+		return nil
+	}
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-quota"),
+		InstanceName: pointy.String("neutree-ai-quota-" + util.HashString(apiKey.ID)),
+		Consumer:     &kong.Consumer{ID: consumerID},
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config: map[string]interface{}{
+			"api_url":       k.neutreeAPIUrl,
+			"service_token": k.serviceToken,
+			"cache_ttl":     5,
+		},
+	}
+}
+
 // syncAPIKeyLimitPlugins reconciles the key's per-consumer limit plugins: upsert
 // the desired ones and prune managed plugins that are no longer desired.
 func (k *Kong) syncAPIKeyLimitPlugins(consumerID *string, apiKey *v1.ApiKey) error {
 	desired := make(map[string]*kong.Plugin)
 	if p := k.generateAPIKeyAccessPlugin(consumerID, apiKey); p != nil {
+		desired[*p.InstanceName] = p
+	}
+
+	if p := k.generateAPIKeyQuotaPlugin(consumerID, apiKey); p != nil {
 		desired[*p.InstanceName] = p
 	}
 

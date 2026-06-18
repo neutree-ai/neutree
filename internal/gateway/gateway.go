@@ -17,6 +17,10 @@ type GatewayOptions struct {
 	AdminUrl          string
 	LogRemoteWriteUrl string
 	Storage           storage.Storage
+	// NeutreeAPIUrl + ServiceToken let the per-key quota plugin pull the dynamic
+	// remaining token count from neutree-api (PostgREST) at request time (A1).
+	NeutreeAPIUrl string
+	ServiceToken  string
 }
 
 // Gateway defines the interface for API gateway operations
