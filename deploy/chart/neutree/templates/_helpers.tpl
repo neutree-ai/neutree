@@ -189,7 +189,7 @@ Priority:
 {{- end -}}
 {{- $hostConfig := first $vminsert.ingress.hosts -}}
 {{- if not (hasKey $hostConfig "name") -}}
-{{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.vminsert.ingress.hosts[0].name is empty" -}}
+{{- fail "victoria-metrics-cluster.vminsert.ingress.enabled is true but victoria-metrics-cluster.vminsert.ingress.hosts[0].name is missing" -}}
 {{- end -}}
 {{- $rawHost := get $hostConfig "name" -}}
 {{- if not $rawHost -}}
