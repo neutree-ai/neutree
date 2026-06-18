@@ -36,8 +36,6 @@ def format_size(size: int) -> str:
         if value < 1024.0 or unit == "TiB":
             return f"{value:.1f} {unit}"
 
-    return f"{value:.1f} TiB"
-
 
 def get_dir_size(path: str) -> int:
     """Return total file size for a file or directory, ignoring transient races."""
@@ -136,10 +134,17 @@ class ProgressReporter:
             self._log_progress()
 
     def _log_progress(self) -> None:
+        if self._stop.is_set():
+            return
+
         try:
             size = self._downloaded_size()
         except Exception as exc:
-            self.logger.debug(f"{self.label} progress unavailable: {exc}")
+            if not self._stop.is_set():
+                self.logger.debug(f"{self.label} progress unavailable: {exc}")
+            return
+
+        if self._stop.is_set():
             return
 
         if self.total_size:

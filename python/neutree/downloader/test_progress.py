@@ -127,6 +127,19 @@ class TestProgressReporter(unittest.TestCase):
         self.assertTrue(any("Test download completed: 7 B downloaded" in message for message in messages))
         self.assertFalse(any("15 B downloaded" in message for message in messages))
 
+    def test_log_progress_suppressed_after_stop_requested(self):
+        reporter = ProgressReporter(
+            self.tmpdir,
+            self.logger,
+            label="Test download",
+            interactive=False)
+        reporter._baseline_size = 0
+
+        with mock.patch.object(reporter, "_downloaded_size", side_effect=lambda: reporter._stop.set() or 7):
+            reporter._log_progress()
+
+        self.logger.info.assert_not_called()
+
     def test_reporter_logs_aborted_on_exception(self):
         with self.assertRaisesRegex(RuntimeError, "boom"):
             with ProgressReporter(self.tmpdir, self.logger, label="Test download", interactive=False):
