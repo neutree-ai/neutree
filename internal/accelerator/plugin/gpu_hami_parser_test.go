@@ -59,6 +59,48 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationNodeWithUsage(t *testing
 	require.Equal(t, float64(15360), metadata.Products["Tesla-T4"].MemoryTotalMiB)
 }
 
+func TestGPUResourceParser_ParseKubernetesVirtualizationNodeCountsColonSeparatedAllocations(t *testing.T) {
+	parser := &GPUResourceParser{}
+	input := resourceparser.KubernetesNodeResourceContext{
+		NodeName: "gpu-node",
+		Labels: map[string]string{
+			NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+			NvidiaGPUVirtualizationLabelKey:    "true",
+			NvidiaGPUCountResource:             "2",
+		},
+		Annotations: map[string]string{
+			HAMiNodeNvidiaRegisterAnnotation: `[
+				{"id":"GPU-1","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true},
+				{"id":"GPU-2","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true}
+			]`,
+		},
+		Pods: []resourceparser.KubernetesPodResourceContext{
+			{
+				Namespace: "default",
+				Name:      "infer-1",
+				Annotations: map[string]string{
+					HAMiVGPUDevicesAllocatedAnnotation: ";GPU-1,NVIDIA,15360,100:GPU-2,NVIDIA,7680,50:;",
+				},
+			},
+		},
+	}
+
+	result, matched, err := parser.ParseKubernetesVirtualizationNode(input)
+
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Len(t, result.Devices, 2)
+	require.Equal(t, int64(0), result.Devices[0].Available.MemoryMiB)
+	require.Equal(t, int64(0), result.Devices[0].Available.CoreUnits)
+	require.Equal(t, int64(7680), result.Devices[1].Available.MemoryMiB)
+	require.Equal(t, int64(50), result.Devices[1].Available.CoreUnits)
+
+	available := result.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.Equal(t, float64(1), available.Quantity)
+	require.Equal(t, float64(7680), available.Products["Tesla-T4"].Virtualization.MemoryMiB)
+	require.Equal(t, float64(50), available.Products["Tesla-T4"].Virtualization.CoreUnits)
+}
+
 func TestGPUResourceParser_ParseKubernetesVirtualizationNode(t *testing.T) {
 	parser := &GPUResourceParser{}
 	input := resourceparser.KubernetesNodeResourceContext{
@@ -166,5 +208,52 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationEndpoint(t *testing.T) {
 	require.Equal(t, "gpu-node", instances[0].Devices[0].NodeID)
 	require.Equal(t, "GPU-2", instances[0].Devices[1].UUID)
 	require.Equal(t, int64(7680), instances[0].Devices[1].MemoryMiB)
+	require.Equal(t, int64(50), instances[0].Devices[1].CoreUnits)
+}
+
+func TestGPUResourceParser_ParseKubernetesVirtualizationEndpointWithColonSeparatedAllocations(t *testing.T) {
+	parser := &GPUResourceParser{}
+	input := resourceparser.KubernetesEndpointResourceContext{
+		EndpointName: "chat",
+		Namespace:    "default",
+		Nodes: map[string]resourceparser.KubernetesEndpointNodeResourceContext{
+			"gpu-node": {
+				Name: "gpu-node",
+				Labels: map[string]string{
+					NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+					NvidiaGPUVirtualizationLabelKey:    "true",
+				},
+				Annotations: map[string]string{
+					HAMiNodeNvidiaRegisterAnnotation: `[
+						{"id":"GPU-1","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true},
+						{"id":"GPU-2","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true}
+					]`,
+				},
+			},
+		},
+		Pods: []resourceparser.KubernetesPodResourceContext{
+			{
+				Namespace: "default",
+				Name:      "chat-abc",
+				UID:       "uid-1",
+				NodeName:  "gpu-node",
+				Annotations: map[string]string{
+					HAMiVGPUDevicesAllocatedAnnotation: ";GPU-1,NVIDIA,8192,50:GPU-2,NVIDIA,8192,50:;",
+				},
+			},
+		},
+	}
+
+	instances, matched, err := parser.ParseKubernetesVirtualizationEndpoint(input)
+
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Len(t, instances, 1)
+	require.Len(t, instances[0].Devices, 2)
+	require.Equal(t, "GPU-1", instances[0].Devices[0].UUID)
+	require.Equal(t, int64(8192), instances[0].Devices[0].MemoryMiB)
+	require.Equal(t, int64(50), instances[0].Devices[0].CoreUnits)
+	require.Equal(t, "GPU-2", instances[0].Devices[1].UUID)
+	require.Equal(t, int64(8192), instances[0].Devices[1].MemoryMiB)
 	require.Equal(t, int64(50), instances[0].Devices[1].CoreUnits)
 }
