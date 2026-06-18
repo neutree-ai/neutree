@@ -19,6 +19,7 @@ type DashboardService interface {
 	// Serve related methods
 	GetServeApplications() (*RayServeApplicationsResponse, error)
 	UpdateServeApplications(appsReq RayServeApplicationsRequest) error
+	GetActorLog(actorID, suffix string, lines int) (string, error)
 
 	// State API: actor listing with filters
 	ListActors(filters []ActorFilter, detail bool, limit int) (*ActorsResponse, error)

@@ -33,7 +33,7 @@ from ray.serve import Application
 from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
-from downloader import build_request_from_model_args, get_downloader
+from downloader import build_request_from_model_args, download_with_markers, get_downloader
 from serve._metrics.sglang_ray_bridge import PromToRayBridge
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
@@ -216,7 +216,8 @@ class Backend:
             f"[Backend] Downloading model using backend={backend} "
             f"from source={dl_req.source} to dest={dl_req.dest}"
         )
-        downloader.download(
+        download_with_markers(
+            downloader,
             dl_req.source,
             dl_req.dest,
             credentials=dl_req.credentials,

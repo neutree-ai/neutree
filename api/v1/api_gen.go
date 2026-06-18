@@ -523,11 +523,12 @@ type ApiEndpointSpec struct {
 }
 
 type ApiEndpointStatus struct {
-	Phase              string      `json:"phase"`
-	ServiceUrl         string      `json:"service_url"`
-	LastTransitionTime interface{} `json:"last_transition_time"`
-	ErrorMessage       string      `json:"error_message"`
-	Resources          interface{} `json:"resources"`
+	Phase                      string      `json:"phase"`
+	ServiceUrl                 string      `json:"service_url"`
+	LastTransitionTime         interface{} `json:"last_transition_time"`
+	ErrorMessage               string      `json:"error_message"`
+	ModelDownloadCompletedHash interface{} `json:"model_download_completed_hash"`
+	Resources                  interface{} `json:"resources"`
 }
 
 type ApiImageRegistrySpec struct {

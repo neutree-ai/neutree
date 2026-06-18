@@ -30,7 +30,7 @@ from vllm.entrypoints.openai.serving_score import ServingScores
 from vllm.entrypoints.openai.serving_models import BaseModelPath, OpenAIServingModels
 from vllm.engine.metrics import RayPrometheusStatLogger
 
-from downloader import get_downloader, build_request_from_model_args
+from downloader import get_downloader, build_request_from_model_args, download_with_markers
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
 
@@ -111,9 +111,9 @@ class Backend:
 
         downloader = get_downloader(backend)
         print(f"[Backend] Downloading model using backend={backend} from source={dl_req.source} to dest={dl_req.dest}")
-        downloader.download(dl_req.source, dl_req.dest, credentials=dl_req.credentials,
-                            recursive=dl_req.recursive, overwrite=dl_req.overwrite,
-                            retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
+        download_with_markers(downloader, dl_req.source, dl_req.dest, credentials=dl_req.credentials,
+                              recursive=dl_req.recursive, overwrite=dl_req.overwrite,
+                              retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
         print(f"[Backend] Model download completed.")
 
         self.model_id = model_serve_name
