@@ -489,11 +489,12 @@ type ApiApiDailyUsageStatus struct {
 }
 
 type ApiModelSpec struct {
-	Registry string `json:"registry"`
-	Name     string `json:"name"`
-	File     string `json:"file"`
-	Version  string `json:"version"`
-	Task     string `json:"task"`
+	Registry string      `json:"registry"`
+	Name     string      `json:"name"`
+	File     string      `json:"file"`
+	Version  string      `json:"version"`
+	Task     string      `json:"task"`
+	Info     interface{} `json:"info"`
 }
 
 type ApiEndpointEngineSpec struct {
