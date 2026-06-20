@@ -24,11 +24,11 @@ func TestGetUsageByDimensionWorkspaceFilter(t *testing.T) {
 	ctx := context.Background()
 
 	const (
-		wsA          = "neu-463-ws-a"
-		wsB          = "neu-463-ws-b"
-		dimension    = "neu-463-gpt" // same dimension/endpoint name used in both workspaces
-		usageA int64 = 100
-		usageB int64 = 200
+		wsA             = "neu-463-ws-a"
+		wsB             = "neu-463-ws-b"
+		dimension       = "neu-463-gpt" // same dimension/endpoint name used in both workspaces
+		usageA    int64 = 100
+		usageB    int64 = 200
 	)
 
 	// One user owns API keys in two different workspaces.
