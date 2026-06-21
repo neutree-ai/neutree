@@ -850,15 +850,18 @@ func buildNodeAgentComponent(
 			"--static-node-cluster="+cluster.Metadata.Name,
 		)
 	}
+
 	if node != nil && node.Metadata != nil {
 		args = append(args, "--node="+node.Metadata.Name)
 	}
+
 	if node != nil && node.Spec != nil {
 		args = append(args,
 			"--node-ip="+node.Spec.IP,
 			"--node-role="+string(node.Spec.Role),
 		)
 	}
+
 	if profile != nil && profile.Metrics != nil && profile.Metrics.Exporter != nil {
 		exporter := profile.Metrics.Exporter
 		args = append(args, fmt.Sprintf(
@@ -1022,7 +1025,7 @@ func renderVMAgentNodeExporterFileSDTargets(
 
 		targets = append(targets, vmagentFileSDTarget{
 			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, defaultNodeExporterPort)},
-			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeExporterComponentName, nil),
+			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeExporterComponentName),
 		})
 	}
 
@@ -1042,7 +1045,7 @@ func renderVMAgentNodeAgentFileSDTargets(
 
 		targets = append(targets, vmagentFileSDTarget{
 			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, defaultNodeAgentPort)},
-			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeAgentComponentName, nil),
+			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeAgentComponentName),
 		})
 	}
 
@@ -1062,7 +1065,7 @@ func renderVMAgentRayFileSDTargets(
 
 		targets = append(targets, vmagentFileSDTarget{
 			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, v1.RayletMetricsPort)},
-			Labels:  vmagentTargetLabels(cluster, plan.Node, "ray", nil),
+			Labels:  vmagentTargetLabels(cluster, plan.Node, "ray"),
 		})
 	}
 
@@ -1107,7 +1110,7 @@ func renderVMAgentAcceleratorExporterFileSDTargets(
 	for _, target := range targets {
 		result = append(result, vmagentFileSDTarget{
 			Targets: []string{fmt.Sprintf("%s:%d", target.Node.Spec.IP, target.Exporter.Port)},
-			Labels:  vmagentTargetLabels(cluster, target.Node, acceleratorExporterComponentName, nil),
+			Labels:  vmagentTargetLabels(cluster, target.Node, acceleratorExporterComponentName),
 		})
 	}
 
@@ -1195,9 +1198,8 @@ func vmagentTargetLabels(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
 	source string,
-	extraLabels map[string]string,
 ) map[string]string {
-	labels := map[string]string{
+	return map[string]string{
 		"source":              source,
 		"workspace":           cluster.Metadata.Workspace,
 		"neutree_cluster":     cluster.Metadata.Name,
@@ -1207,12 +1209,6 @@ func vmagentTargetLabels(
 		"node_ip":             node.Spec.IP,
 		"node_role":           string(node.Spec.Role),
 	}
-
-	for key, value := range extraLabels {
-		labels[key] = value
-	}
-
-	return labels
 }
 
 func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
@@ -1239,9 +1235,11 @@ func acceleratorExporterDockerRunOptions(
 	if runtime.HostNetwork {
 		options = append(options, "--net=host")
 	}
+
 	if runtime.HostPID {
 		options = append(options, "--pid=host")
 	}
+
 	if runtime.Capabilities != nil {
 		for _, capability := range runtime.Capabilities.Add {
 			capability = strings.TrimSpace(capability)
@@ -1262,6 +1260,7 @@ func acceleratorExporterConfigVolumes(
 	configFiles []v1.NodeComponentConfigFile,
 ) []v1.NodeComponentVolume {
 	volumes := make([]v1.NodeComponentVolume, 0, len(configFiles))
+
 	for i, configFile := range configFiles {
 		if configFile.Path == "" {
 			continue

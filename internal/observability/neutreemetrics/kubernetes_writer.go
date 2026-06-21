@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 type KubernetesAnnotationWriter struct {
@@ -44,10 +45,12 @@ func (w *KubernetesAnnotationWriter) writeNodeDevices(
 
 	original := node.DeepCopy()
 	annotations := copyAnnotations(node.Annotations)
+
 	value, err := json.Marshal(kubernetesDeviceAnnotations(devices))
 	if err != nil {
 		return err
 	}
+
 	annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation] = string(value)
 	node.Annotations = annotations
 
@@ -65,6 +68,7 @@ func (w *KubernetesAnnotationWriter) writePodAllocations(
 
 	allocationsByPod := map[client.ObjectKey][]v1.StaticNodeAllocationStatus{}
 	localPods := make([]client.ObjectKey, 0)
+
 	for _, pod := range podList.Items {
 		if pod.Spec.NodeName != w.NodeName {
 			continue
@@ -84,6 +88,7 @@ func (w *KubernetesAnnotationWriter) writePodAllocations(
 
 	for _, key := range localPods {
 		pod := &corev1.Pod{}
+
 		if err := w.Client.Get(ctx, key, pod); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
@@ -94,6 +99,7 @@ func (w *KubernetesAnnotationWriter) writePodAllocations(
 
 		original := pod.DeepCopy()
 		annotations := copyAnnotations(pod.Annotations)
+
 		podAllocations := allocationsByPod[key]
 		if len(podAllocations) == 0 {
 			if _, exists := annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation]; !exists {
@@ -106,6 +112,7 @@ func (w *KubernetesAnnotationWriter) writePodAllocations(
 			if err != nil {
 				return err
 			}
+
 			annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation] = string(value)
 		}
 
@@ -134,6 +141,7 @@ func allocationMatchesPod(allocation v1.StaticNodeAllocationStatus, pod corev1.P
 		if candidate == "" {
 			continue
 		}
+
 		if candidate == pod.Name || candidate == string(pod.UID) {
 			return true
 		}
@@ -162,6 +170,7 @@ type kubernetesAllocationAnnotation struct {
 
 func kubernetesDeviceAnnotations(devices []v1.StaticNodeAcceleratorDeviceStatus) []kubernetesDeviceAnnotation {
 	result := make([]kubernetesDeviceAnnotation, 0, len(devices))
+
 	for _, device := range devices {
 		if device.UUID == "" {
 			continue
@@ -183,6 +192,7 @@ func kubernetesDeviceAnnotations(devices []v1.StaticNodeAcceleratorDeviceStatus)
 
 func kubernetesAllocationAnnotations(allocations []v1.StaticNodeAllocationStatus) []kubernetesAllocationAnnotation {
 	result := []kubernetesAllocationAnnotation{}
+
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
 			if device.UUID == "" {

@@ -59,6 +59,7 @@ func acceleratorDevicesFromMetrics(raw string) []v1.StaticNodeAcceleratorDeviceS
 		if id := firstNonEmpty(metric.labels["gpu"], metric.labels["GPU_I_ID"]); id != "" {
 			device.ID = id
 		}
+
 		if model := firstNonEmpty(metric.labels["modelName"], metric.labels["model"]); model != "" {
 			device.ProductName = model
 			device.ProductModel = model

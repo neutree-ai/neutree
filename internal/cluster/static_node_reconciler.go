@@ -206,6 +206,7 @@ func (r *StaticNodeReconciler) ReconcileNodeSnapshot(
 	if err != nil {
 		return fallback, currentStaticNodeAllocations(node), err
 	}
+
 	if snapshot == nil {
 		return fallback, currentStaticNodeAllocations(node), nil
 	}
@@ -269,6 +270,7 @@ func (c StaticNodeHTTPSnapshotClient) Snapshot(ctx context.Context, node *v1.Sta
 	if err != nil {
 		return nil, err
 	}
+
 	if c.Token != "" {
 		request.Header.Set("Authorization", "Bearer "+c.Token)
 	}

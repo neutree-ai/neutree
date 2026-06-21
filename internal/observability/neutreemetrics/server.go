@@ -181,6 +181,7 @@ func (s *Server) nodeSnapshot(r *http.Request) (*NodeSnapshot, error) {
 	if r != nil {
 		acceleratorExporter = s.scrapeAcceleratorExporters(r.Context())
 	}
+
 	if acceleratorExporter == nil || !acceleratorExporter.Up {
 		cpu := snapshotFromAcceleratorMetrics("")
 

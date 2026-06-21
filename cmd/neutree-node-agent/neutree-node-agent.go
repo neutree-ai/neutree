@@ -114,6 +114,7 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	if err != nil {
 		return neutreemetrics.Config{}, err
 	}
+
 	config.KubernetesWriter = writer
 
 	return config, nil
@@ -123,6 +124,7 @@ func (o *options) kubernetesWriter() (*neutreemetrics.KubernetesAnnotationWriter
 	if !o.enableKubernetesWriter || o.clusterType != "kubernetes" {
 		return nil, nil
 	}
+
 	if o.node == "" {
 		return nil, fmt.Errorf("node name is required when kubernetes annotation writer is enabled")
 	}

@@ -815,6 +815,7 @@ func (o *RayOrchestrator) usesStaticNodeEndpointResources() bool {
 	}
 
 	enabled, err := semver.LessThan("v1.0.1", o.cluster.Spec.Version)
+
 	return err == nil && enabled
 }
 
@@ -823,6 +824,7 @@ func staticNodeEndpointInstances(
 	endpoint *v1.Endpoint,
 ) []resourceview.EndpointInstanceResource {
 	instances := make([]resourceview.EndpointInstanceResource, 0)
+
 	for _, node := range nodes {
 		if node.Status == nil {
 			continue
@@ -835,6 +837,7 @@ func staticNodeEndpointInstances(
 
 			nodeID := staticNodeAllocationNodeID(node, allocation)
 			devices := staticNodeAllocationDevices(nodeID, allocation.Devices)
+
 			if len(devices) == 0 {
 				continue
 			}
@@ -902,6 +905,7 @@ func staticNodeAllocationNodeID(node v1.StaticNode, allocation v1.StaticNodeAllo
 
 func staticNodeAllocationDevices(nodeID string, devices []v1.DeviceAllocation) []v1.DeviceAllocation {
 	result := make([]v1.DeviceAllocation, 0, len(devices))
+
 	for _, device := range devices {
 		if device.UUID == "" {
 			continue

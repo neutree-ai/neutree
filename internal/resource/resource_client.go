@@ -523,6 +523,7 @@ func transformKubernetesNeutreeNodeDevices(
 	}
 
 	usageByUUID := make(map[string]v1.DeviceResourcePool)
+
 	for _, pod := range pods {
 		allocations, err := parseNeutreeAcceleratorAllocations(pod.Annotations)
 		if err != nil {
@@ -542,6 +543,7 @@ func transformKubernetesNeutreeNodeDevices(
 	}
 
 	result := make([]*v1.DeviceResource, 0, len(devices))
+
 	for _, device := range devices {
 		if device.UUID == "" {
 			continue
@@ -576,6 +578,7 @@ func transformKubernetesNeutreeEndpointResources(
 	input resourceparser.KubernetesEndpointResourceContext,
 ) ([]EndpointInstanceResource, bool, error) {
 	devicesByNode := make(map[string]map[string]neutreeAcceleratorDeviceAnnotation)
+
 	for nodeName, node := range input.Nodes {
 		devices, err := parseNeutreeAcceleratorDevices(node.Annotations)
 		if err != nil {
@@ -587,6 +590,7 @@ func transformKubernetesNeutreeEndpointResources(
 		}
 
 		devicesByNode[nodeName] = make(map[string]neutreeAcceleratorDeviceAnnotation, len(devices))
+
 		for _, device := range devices {
 			if device.UUID == "" {
 				continue
@@ -598,6 +602,7 @@ func transformKubernetesNeutreeEndpointResources(
 
 	var instances []EndpointInstanceResource
 	matched := false
+
 	for _, pod := range input.Pods {
 		allocations, err := parseNeutreeAcceleratorAllocations(pod.Annotations)
 		if err != nil {
@@ -623,6 +628,7 @@ func transformKubernetesNeutreeEndpointResources(
 			}
 
 			detail := nodeDevices[allocation.UUID]
+
 			nodeID := allocation.NodeID
 			if nodeID == "" {
 				nodeID = pod.NodeName
