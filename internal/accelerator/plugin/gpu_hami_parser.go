@@ -217,11 +217,12 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 	// Empty fields are common because the annotation keeps slots for each
 	// container/device position. Example:
 	//
-	//	;;GPU-5ad72eb2,NVIDIA,15360,100:;GPU-cd4432b1,NVIDIA,15360,100:;
+	//	;;GPU-5ad72eb2,NVIDIA,15360,100:GPU-cd4432b1,NVIDIA,15360,100:;
 	//
-	// Each non-empty record is parsed as:
+	// The semicolon entry can contain multiple colon-separated allocation
+	// segments. Each non-empty segment is parsed as:
 	//
-	//	<device_uuid>,<vendor>,<memory_mib>,<core_units>[:optional_suffix]
+	//	<device_uuid>,<vendor>,<memory_mib>,<core_units>
 	//
 	// Neutree only needs the UUID plus the memory/core allocation. The vendor
 	// is kept as Product only as a fallback when node registration metadata is
@@ -229,36 +230,34 @@ func parseHAMiNvidiaDeviceAllocations(value string) ([]hamiNvidiaDeviceAllocatio
 	var allocations []hamiNvidiaDeviceAllocation
 
 	for _, entry := range strings.Split(value, ";") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
+		for _, segment := range strings.Split(entry, ":") {
+			segment = strings.TrimSpace(segment)
+			if segment == "" {
+				continue
+			}
 
-		if colon := strings.Index(entry, ":"); colon >= 0 {
-			entry = entry[:colon]
-		}
+			fields := strings.Split(segment, ",")
+			if len(fields) < hamiNvidiaDeviceAllocationFieldCount {
+				continue
+			}
 
-		fields := strings.Split(entry, ",")
-		if len(fields) < hamiNvidiaDeviceAllocationFieldCount {
-			continue
-		}
+			memoryMiB, err := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid memory value %q: %w", fields[2], err)
+			}
 
-		memoryMiB, err := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid memory value %q: %w", fields[2], err)
-		}
+			coreUnits, err := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid core value %q: %w", fields[3], err)
+			}
 
-		coreUnits, err := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid core value %q: %w", fields[3], err)
+			allocations = append(allocations, hamiNvidiaDeviceAllocation{
+				DeviceID:  strings.TrimSpace(fields[0]),
+				Product:   strings.TrimSpace(fields[1]),
+				MemoryMiB: memoryMiB,
+				CoreUnits: coreUnits,
+			})
 		}
-
-		allocations = append(allocations, hamiNvidiaDeviceAllocation{
-			DeviceID:  strings.TrimSpace(fields[0]),
-			Product:   strings.TrimSpace(fields[1]),
-			MemoryMiB: memoryMiB,
-			CoreUnits: coreUnits,
-		})
 	}
 
 	return allocations, nil
