@@ -136,13 +136,15 @@ func copyAnnotations(input map[string]string) map[string]string {
 }
 
 func allocationMatchesPod(allocation v1.StaticNodeAllocationStatus, pod corev1.Pod) bool {
+	namespacedName := pod.Namespace + "/" + pod.Name
 	candidates := []string{allocation.ReplicaID, allocation.InstanceID, allocation.RuntimeID}
+
 	for _, candidate := range candidates {
 		if candidate == "" {
 			continue
 		}
 
-		if candidate == pod.Name || candidate == string(pod.UID) {
+		if candidate == pod.Name || candidate == namespacedName || candidate == string(pod.UID) {
 			return true
 		}
 	}

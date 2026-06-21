@@ -22,6 +22,7 @@ type Config struct {
 	AcceleratorExporterURLs []string
 	SnapshotToken           string
 	SnapshotProvider        SnapshotProvider
+	AllocationProvider      AllocationProvider
 	KubernetesWriter        *KubernetesAnnotationWriter
 	AnnotationSyncInterval  time.Duration
 	HTTPClient              *http.Client
@@ -138,6 +139,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	if acceleratorExporter := s.scrapeAcceleratorExporters(r.Context()); acceleratorExporter != nil {
 		normalizeReq.AcceleratorExporter = acceleratorExporter
+		normalizeReq.EndpointAllocations = s.endpointAllocationsFromScrape(r.Context(), acceleratorExporter)
 	}
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -177,18 +179,48 @@ func (s *Server) nodeSnapshot(r *http.Request) (*NodeSnapshot, error) {
 		return s.config.SnapshotProvider.Snapshot(r)
 	}
 
-	acceleratorExporter := s.scrapeAcceleratorExporters(context.Background())
+	ctx := context.Background()
 	if r != nil {
-		acceleratorExporter = s.scrapeAcceleratorExporters(r.Context())
+		ctx = r.Context()
 	}
 
+	acceleratorExporter := s.scrapeAcceleratorExporters(ctx)
 	if acceleratorExporter == nil || !acceleratorExporter.Up {
-		cpu := snapshotFromAcceleratorMetrics("")
-
-		return cpu, nil
+		return s.withAllocations(ctx, snapshotFromAcceleratorMetrics(""))
 	}
 
-	return snapshotFromAcceleratorMetrics(acceleratorExporter.Body), nil
+	return s.withAllocations(ctx, snapshotFromAcceleratorMetrics(acceleratorExporter.Body))
+}
+
+func (s *Server) withAllocations(ctx context.Context, snapshot *NodeSnapshot) (*NodeSnapshot, error) {
+	if s.config.AllocationProvider == nil || snapshot == nil {
+		return snapshot, nil
+	}
+
+	allocations, err := s.config.AllocationProvider.Allocations(ctx, snapshot)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshot.Allocations = allocations
+
+	return snapshot, nil
+}
+
+func (s *Server) endpointAllocationsFromScrape(
+	ctx context.Context,
+	acceleratorExporter *ScrapeResult,
+) []EndpointAllocation {
+	if s.config.AllocationProvider == nil || acceleratorExporter == nil || !acceleratorExporter.Up {
+		return nil
+	}
+
+	snapshot, err := s.withAllocations(ctx, snapshotFromAcceleratorMetrics(acceleratorExporter.Body))
+	if err != nil || snapshot == nil {
+		return nil
+	}
+
+	return endpointAllocationsFromStaticNodeAllocations(s.config.Labels, snapshot.Allocations)
 }
 
 func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *ScrapeResult {

@@ -1,6 +1,7 @@
 package neutreemetrics
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -62,6 +63,66 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="",source="neutree-node-agent",static_node_cluster="",target="node-exporter",workspace="default"} 1`)
 	assert.Contains(t, body, `neutree_node_memory_used_bytes{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="",source="node-exporter",static_node_cluster="",workspace="default"} 10737418240`)
 	assert.Contains(t, body, `neutree_gpu_utilization_ratio{cluster_type="kubernetes",gpu_index="0",gpu_uuid="GPU-abc",model="A100",neutree_cluster="k8s-a",node="node-a",node_ip="10.0.0.10",node_role="",source="accelerator-exporter",static_node_cluster="",workspace="default"} 0.87`)
+}
+
+func TestServerMetricsIncludesDiscoveredEndpointAllocations(t *testing.T) {
+	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184
+node_memory_MemAvailable_bytes 6442450944
+`))
+	}))
+	t.Cleanup(nodeExporter.Close)
+
+	acceleratorExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
+`))
+	}))
+	t.Cleanup(acceleratorExporter.Close)
+
+	server, err := NewServer(Config{
+		Labels: CanonicalLabels{
+			Workspace:         "default",
+			NeutreeCluster:    "static-a",
+			StaticNodeCluster: "static-a",
+			ClusterType:       "ray",
+			Node:              "head-0",
+			NodeIP:            "10.0.0.10",
+			NodeRole:          "head",
+		},
+		NodeExporterURL:        nodeExporter.URL + "/metrics",
+		AcceleratorExporterURL: acceleratorExporter.URL + "/metrics",
+		HTTPClient:             nodeExporter.Client(),
+		AllocationProvider: AllocationProviderFunc(func(_ context.Context, snapshot *NodeSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
+			require.Len(t, snapshot.Accelerator.Devices, 1)
+			assert.Equal(t, "GPU-abc", snapshot.Accelerator.Devices[0].UUID)
+
+			return []v1.StaticNodeAllocationStatus{
+				{
+					WorkloadType: "endpoint",
+					Workspace:    "default",
+					Endpoint:     "chat",
+					InstanceID:   "actor-a",
+					ReplicaID:    "replica-a",
+					Devices: []v1.DeviceAllocation{
+						{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920, CoreUnits: 100, NodeID: "head-0"},
+					},
+				},
+			}, nil
+		}),
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
+
+	body := readResponseBody(t, metricsResp)
+	assert.Contains(t, body, `neutree_endpoint_replica_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 }
 
 func TestServerNodeSnapshotRequiresBearerToken(t *testing.T) {

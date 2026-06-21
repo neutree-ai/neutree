@@ -1,0 +1,266 @@
+package neutreemetrics
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+)
+
+func TestKubernetesAllocationProviderMapsPodResourcesToExactDeviceUUIDs(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	kubernetesClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "chat-pod",
+					Labels: map[string]string{
+						"endpoint":                         "chat",
+						v1.NeutreeClusterLabelKey:          "cluster-a",
+						v1.NeutreeClusterWorkspaceLabelKey: "default",
+					},
+				},
+				Spec: corev1.PodSpec{NodeName: "node-a"},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "remote-pod",
+					Labels: map[string]string{
+						"endpoint":                         "remote",
+						v1.NeutreeClusterWorkspaceLabelKey: "default",
+					},
+				},
+				Spec: corev1.PodSpec{NodeName: "node-b"},
+			},
+		).
+		Build()
+	provider := KubernetesAllocationProvider{
+		Client:   kubernetesClient,
+		NodeName: "node-a",
+		PodResources: PodResourceListerFunc(func(_ context.Context) ([]PodResource, error) {
+			return []PodResource{
+				{
+					Namespace: "default",
+					Name:      "chat-pod",
+					Containers: []ContainerDevices{
+						{
+							ResourceName: "nvidia.com/gpu",
+							DeviceIDs:    []string{"0", "GPU-def", "not-a-known-device"},
+						},
+					},
+				},
+				{
+					Namespace: "default",
+					Name:      "remote-pod",
+					Containers: []ContainerDevices{
+						{ResourceName: "nvidia.com/gpu", DeviceIDs: []string{"GPU-remote"}},
+					},
+				},
+			}, nil
+		}),
+	}
+	snapshot := &NodeSnapshot{
+		Accelerator: v1.StaticNodeAcceleratorStatus{
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+				{ID: "1", UUID: "GPU-def", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+	}
+
+	allocations, err := provider.Allocations(context.Background(), snapshot)
+
+	require.NoError(t, err)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "endpoint", allocations[0].WorkloadType)
+	assert.Equal(t, "default", allocations[0].Workspace)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+	assert.Equal(t, "chat-pod", allocations[0].InstanceID)
+	assert.Equal(t, "chat-pod", allocations[0].ReplicaID)
+	assert.Equal(t, "default/chat-pod", allocations[0].RuntimeID)
+	require.Len(t, allocations[0].Devices, 2)
+	assert.Equal(t, "GPU-abc", allocations[0].Devices[0].UUID)
+	assert.Equal(t, "GPU-def", allocations[0].Devices[1].UUID)
+	assert.Equal(t, int64(81920), allocations[0].Devices[0].MemoryMiB)
+	assert.Equal(t, int64(100), allocations[0].Devices[0].CoreUnits)
+}
+
+func TestRayServeAllocationProviderMapsActorProcessVisibleDevices(t *testing.T) {
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{
+				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
+			},
+			applications: &dashboard.RayServeApplicationsResponse{
+				Applications: map[string]dashboard.RayServeApplicationStatus{
+					"default_chat": {
+						Status: dashboard.ApplicationStatusRunning,
+						Deployments: map[string]dashboard.Deployment{
+							"Backend": {
+								Name: "Backend",
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "actor-a", ReplicaID: "replica-a"},
+								},
+							},
+						},
+					},
+				},
+			},
+			actors: map[string]dashboard.Actor{
+				"actor-a": {ActorID: "actor-a", PID: 1234},
+			},
+		},
+		NodeIP: "10.0.0.10",
+		Node:   "head-0",
+		ProcEnv: ProcessEnvReaderFunc(func(pid int) (map[string]string, error) {
+			require.Equal(t, 1234, pid)
+
+			return map[string]string{"CUDA_VISIBLE_DEVICES": "0"}, nil
+		}),
+	}
+	snapshot := &NodeSnapshot{
+		Accelerator: v1.StaticNodeAcceleratorStatus{
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+	}
+
+	allocations, err := provider.Allocations(context.Background(), snapshot)
+
+	require.NoError(t, err)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "endpoint", allocations[0].WorkloadType)
+	assert.Equal(t, "default", allocations[0].Workspace)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+	assert.Equal(t, "actor-a", allocations[0].InstanceID)
+	assert.Equal(t, "replica-a", allocations[0].ReplicaID)
+	assert.Equal(t, "actor-a", allocations[0].RuntimeID)
+	assert.Equal(t, 1234, allocations[0].PID)
+	require.Len(t, allocations[0].Devices, 1)
+	assert.Equal(t, "GPU-abc", allocations[0].Devices[0].UUID)
+	assert.Equal(t, "NVIDIA_A100", allocations[0].Devices[0].Product)
+	assert.Equal(t, "head-0", allocations[0].Devices[0].NodeID)
+}
+
+func TestRayServeAllocationProviderPrefersExactNVIDIAUUIDOverRelativeCUDAIndex(t *testing.T) {
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{
+				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
+			},
+			applications: &dashboard.RayServeApplicationsResponse{
+				Applications: map[string]dashboard.RayServeApplicationStatus{
+					"default_chat": {
+						Status: dashboard.ApplicationStatusRunning,
+						Deployments: map[string]dashboard.Deployment{
+							"Backend": {
+								Name: "Backend",
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "actor-a", ReplicaID: "replica-a"},
+								},
+							},
+						},
+					},
+				},
+			},
+			actors: map[string]dashboard.Actor{
+				"actor-a": {ActorID: "actor-a", PID: 1234},
+			},
+		},
+		NodeIP: "10.0.0.10",
+		Node:   "head-0",
+		ProcEnv: ProcessEnvReaderFunc(func(_ int) (map[string]string, error) {
+			return map[string]string{
+				"CUDA_VISIBLE_DEVICES":   "0",
+				"NVIDIA_VISIBLE_DEVICES": "GPU-def",
+			}, nil
+		}),
+	}
+	snapshot := &NodeSnapshot{
+		Accelerator: v1.StaticNodeAcceleratorStatus{
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+				{ID: "1", UUID: "GPU-def", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+	}
+
+	allocations, err := provider.Allocations(context.Background(), snapshot)
+
+	require.NoError(t, err)
+	require.Len(t, allocations, 1)
+	require.Len(t, allocations[0].Devices, 1)
+	assert.Equal(t, "GPU-def", allocations[0].Devices[0].UUID)
+}
+
+type fakeRayDashboardService struct {
+	nodes        []v1.NodeSummary
+	applications *dashboard.RayServeApplicationsResponse
+	actors       map[string]dashboard.Actor
+}
+
+func (f *fakeRayDashboardService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {
+	return &dashboard.ClusterMetadataResponse{}, nil
+}
+
+func (f *fakeRayDashboardService) ListNodes() ([]v1.NodeSummary, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeRayDashboardService) GetClusterStatus() (v1.RayAPIClusterStatus, error) {
+	return v1.RayAPIClusterStatus{}, nil
+}
+
+func (f *fakeRayDashboardService) GetServeApplications() (*dashboard.RayServeApplicationsResponse, error) {
+	return f.applications, nil
+}
+
+func (f *fakeRayDashboardService) UpdateServeApplications(_ dashboard.RayServeApplicationsRequest) error {
+	return nil
+}
+
+func (f *fakeRayDashboardService) GetActorLog(_, _ string, _ int) (string, error) {
+	return "", nil
+}
+
+func (f *fakeRayDashboardService) ListActors(
+	filters []dashboard.ActorFilter,
+	_ bool,
+	_ int,
+) (*dashboard.ActorsResponse, error) {
+	actorID := ""
+	for _, filter := range filters {
+		if filter.Key == "actor_id" && filter.Predicate == "=" {
+			actorID = filter.Value
+		}
+	}
+
+	actor, ok := f.actors[actorID]
+	if !ok {
+		return nil, errors.New("actor not found")
+	}
+
+	return &dashboard.ActorsResponse{
+		Result: true,
+		Data: dashboard.ActorsResponseData{
+			Result: dashboard.ActorsListResult{
+				Result: []dashboard.Actor{actor},
+			},
+		},
+	}, nil
+}

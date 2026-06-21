@@ -841,6 +841,7 @@ func buildNodeAgentComponent(
 		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
 		"--cluster-type=ray",
 		fmt.Sprintf("--node-exporter-url=http://127.0.0.1:%d%s", defaultNodeExporterPort, defaultPrometheusHTTPPath),
+		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), defaultRayDashboardPort),
 	}
 
 	if cluster != nil && cluster.Metadata != nil {
@@ -876,7 +877,7 @@ func buildNodeAgentComponent(
 		Type:             v1.NodeComponentTypeNodeAgent,
 		Image:            staticComponentImage(cluster, defaultNodeAgentImage),
 		Args:             args,
-		DockerRunOptions: []string{"--net=host"},
+		DockerRunOptions: []string{"--net=host", "--pid=host"},
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
 		},

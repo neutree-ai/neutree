@@ -19,6 +19,11 @@ import (
 	"github.com/neutree-ai/neutree/internal/version"
 )
 
+const (
+	clusterTypeKubernetes = "kubernetes"
+	clusterTypeRay        = "ray"
+)
+
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
 		info := version.Get()
@@ -63,6 +68,9 @@ type options struct {
 	nodeRole                string
 	nodeExporterURL         string
 	acceleratorExporterURLs []string
+	kubeletPodResourcesSock string
+	rayDashboardURL         string
+	procFSRoot              string
 	snapshotToken           string
 	enableKubernetesWriter  bool
 }
@@ -70,8 +78,9 @@ type options struct {
 func newOptions() *options {
 	return &options{
 		listenAddress:   ":9101",
-		clusterType:     "kubernetes",
+		clusterType:     clusterTypeKubernetes,
 		nodeExporterURL: "http://127.0.0.1:9100/metrics",
+		procFSRoot:      "/proc",
 	}
 }
 
@@ -87,6 +96,13 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.nodeExporterURL, "node-exporter-url", o.nodeExporterURL, "Node exporter metrics URL")
 	fs.StringArrayVar(&o.acceleratorExporterURLs, "accelerator-exporter-url", nil,
 		"Accelerator exporter metrics URL; can be specified multiple times")
+	fs.StringVar(&o.kubeletPodResourcesSock, "kubelet-pod-resources-socket",
+		neutreemetrics.DefaultKubeletPodResourcesSocket,
+		"Kubelet pod resources socket path used to discover Kubernetes accelerator allocations")
+	fs.StringVar(&o.rayDashboardURL, "ray-dashboard-url", o.rayDashboardURL,
+		"Ray dashboard URL used to discover Ray Serve replica accelerator allocations")
+	fs.StringVar(&o.procFSRoot, "procfs-root", o.procFSRoot,
+		"procfs root used to read Ray actor process environments")
 	fs.StringVar(&o.snapshotToken, "snapshot-token", o.snapshotToken,
 		"Optional bearer token required by /v1/node/snapshot when configured")
 	fs.BoolVar(&o.enableKubernetesWriter, "enable-kubernetes-annotation-writer", o.enableKubernetesWriter,
@@ -116,12 +132,45 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	}
 
 	config.KubernetesWriter = writer
+	config.AllocationProvider = o.allocationProvider(writer)
 
 	return config, nil
 }
 
+func (o *options) allocationProvider(
+	writer *neutreemetrics.KubernetesAnnotationWriter,
+) neutreemetrics.AllocationProvider {
+	switch o.clusterType {
+	case clusterTypeKubernetes:
+		if writer == nil {
+			return nil
+		}
+
+		return neutreemetrics.KubernetesAllocationProvider{
+			Client:   writer.Client,
+			NodeName: writer.NodeName,
+			PodResources: neutreemetrics.KubeletPodResourceLister{
+				SocketPath: o.kubeletPodResourcesSock,
+			},
+		}
+	case clusterTypeRay:
+		if o.rayDashboardURL == "" {
+			return nil
+		}
+
+		return neutreemetrics.RayServeAllocationProvider{
+			DashboardURL: o.rayDashboardURL,
+			Node:         o.node,
+			NodeIP:       o.nodeIP,
+			ProcEnv:      neutreemetrics.ProcFSEnvReader{Root: o.procFSRoot},
+		}
+	default:
+		return nil
+	}
+}
+
 func (o *options) kubernetesWriter() (*neutreemetrics.KubernetesAnnotationWriter, error) {
-	if !o.enableKubernetesWriter || o.clusterType != "kubernetes" {
+	if !o.enableKubernetesWriter || o.clusterType != clusterTypeKubernetes {
 		return nil, nil
 	}
 

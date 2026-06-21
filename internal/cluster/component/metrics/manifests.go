@@ -610,6 +610,7 @@ spec:
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
         - --node-exporter-url=http://127.0.0.1:{{ .NodeExporterPort }}/metrics
+        - --kubelet-pod-resources-socket={{ .KubeletPodResourcesSocket }}
         - --enable-kubernetes-annotation-writer
 {{ range .NeutreeMetricsAcceleratorExporterURLs }}
         - --accelerator-exporter-url={{ . }}
@@ -638,6 +639,9 @@ spec:
             port: metrics
           initialDelaySeconds: 5
           periodSeconds: 10
+        volumeMounts:
+        - name: kubelet-pod-resources
+          mountPath: /var/lib/kubelet/pod-resources
         resources:
           limits:
             {{- range $key, $value := .NeutreeMetricsResources }}
@@ -647,6 +651,11 @@ spec:
             {{- range $key, $value := .NeutreeMetricsResources }}
             {{ $key }}: {{ $value }}
             {{- end }}
+      volumes:
+      - name: kubelet-pod-resources
+        hostPath:
+          path: /var/lib/kubelet/pod-resources
+          type: DirectoryOrCreate
 {{ range .AcceleratorExporters }}
 {{ if .ConfigFileData }}
 ---
@@ -803,6 +812,7 @@ type MetricsManifestVariables struct {
 	NeutreeMetricsName                    string
 	NeutreeMetricsImage                   string
 	NeutreeMetricsPort                    int
+	KubeletPodResourcesSocket             string
 	KubeStateMetricsVersion               string
 	ClusterVersion                        string
 	MetricsRemoteWriteURL                 string
@@ -848,6 +858,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NeutreeMetricsName:        neutreeMetricsName,
 		NeutreeMetricsImage:       m.imagePrefix + "/neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent,
 		NeutreeMetricsPort:        neutreeMetricsPort,
+		KubeletPodResourcesSocket: "/var/lib/kubelet/pod-resources/kubelet.sock",
 		KubeStateMetricsVersion:   componentversion.KubeStateMetrics,
 		ClusterVersion:            m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:     m.metricsRemoteWriteURL,

@@ -327,17 +327,35 @@ func TestBuildMetricsResourcesIncludesNeutreeNodeAgentDaemonSet(t *testing.T) {
 	assert.Assert(t, strings.Contains(args, "--node=$(NODE_NAME)"))
 	assert.Assert(t, strings.Contains(args, "--node-ip=$(NODE_IP)"))
 	assert.Assert(t, strings.Contains(args, "--node-exporter-url=http://127.0.0.1:9100/metrics"))
+	assert.Assert(t, strings.Contains(args,
+		"--kubelet-pod-resources-socket=/var/lib/kubelet/pod-resources/kubelet.sock"))
 
 	envs := nodeAgent.Spec.Template.Spec.Containers[0].Env
 	assert.Equal(t, "NODE_NAME", envs[0].Name)
 	assert.Equal(t, "spec.nodeName", envs[0].ValueFrom.FieldRef.FieldPath)
 	assert.Equal(t, "NODE_IP", envs[1].Name)
 	assert.Equal(t, "status.hostIP", envs[1].ValueFrom.FieldRef.FieldPath)
+	requireVolumeMount(t, nodeAgent, "kubelet-pod-resources", "/var/lib/kubelet/pod-resources")
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'neutree-node-agent'"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=neutree-node-agent"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:9101"))
+}
+
+func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) {
+	t.Helper()
+
+	if len(daemonSet.Spec.Template.Spec.Containers) == 0 {
+		t.Fatal("expected daemonset to have containers")
+	}
+	for _, mount := range daemonSet.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if mount.Name == name && mount.MountPath == mountPath {
+			return
+		}
+	}
+
+	t.Fatalf("expected volume mount %s at %s", name, mountPath)
 }
 
 func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *testing.T) {

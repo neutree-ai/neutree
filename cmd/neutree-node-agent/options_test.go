@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 )
 
 func TestOptionsConfigDefaults(t *testing.T) {
@@ -46,4 +49,21 @@ func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Nil(t, config.KubernetesWriter)
+}
+
+func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = "ray"
+	opts.rayDashboardURL = "http://10.0.0.10:8265"
+	opts.node = "head-0"
+	opts.nodeIP = "10.0.0.10"
+
+	config, err := opts.config()
+
+	require.NoError(t, err)
+	provider, ok := config.AllocationProvider.(neutreemetrics.RayServeAllocationProvider)
+	require.True(t, ok)
+	assert.Equal(t, "http://10.0.0.10:8265", provider.DashboardURL)
+	assert.Equal(t, "head-0", provider.Node)
+	assert.Equal(t, "10.0.0.10", provider.NodeIP)
 }
