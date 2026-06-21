@@ -27,8 +27,20 @@ import (
 )
 
 const (
-	annEndpointSpecHash = "neutree.ai/endpoint-spec-hash"
-	annNeutreeVersion   = "neutree.ai/neutree-version"
+	annEndpointSpecHash              = "neutree.ai/endpoint-spec-hash"
+	annNeutreeVersion                = "neutree.ai/neutree-version"
+	containerFailureRestartThreshold = 5
+	modelDownloaderInitContainerName = "model-downloader"
+)
+
+// Kubernetes does not expose these kubelet container reasons as corev1 constants.
+// Keep the standard reason strings centralized so status checks and tests share one definition.
+const (
+	k8sContainerReasonOOMKilled        = "OOMKilled"
+	k8sContainerReasonCrashLoopBackOff = "CrashLoopBackOff"
+	k8sContainerReasonImagePullBackOff = "ImagePullBackOff"
+	k8sContainerReasonErrImagePull     = "ErrImagePull"
+	k8sContainerReasonPodInitializing  = "PodInitializing"
 )
 
 var _ Orchestrator = &kubernetesOrchestrator{}
@@ -588,6 +600,13 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 		}, nil
 	}
 
+	if hasIncomplete, detail := hasIncompleteModelDownloaderInitContainer(pods); hasIncomplete {
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseMODELDOWNLOADING,
+			ErrorMessage: "Endpoint model download in progress: " + detail,
+		}, nil
+	}
+
 	// Otherwise, still deploying
 	errorMessage := k.buildDeploymentErrorMessage(dep)
 
@@ -636,6 +655,28 @@ func (k *kubernetesOrchestrator) listPods(ctrlClient client.Client, namespace st
 	return podList.Items, nil
 }
 
+func hasIncompleteModelDownloaderInitContainer(pods []corev1.Pod) (bool, string) {
+	for _, pod := range pods {
+		for _, initStatus := range pod.Status.InitContainerStatuses {
+			if initStatus.Name != modelDownloaderInitContainerName {
+				continue
+			}
+
+			if initStatus.State.Terminated != nil && initStatus.State.Terminated.ExitCode == 0 {
+				continue
+			}
+
+			if initStatus.State.Running != nil {
+				return true, modelDownloaderInitContainerName + " init container is running"
+			}
+
+			return true, modelDownloaderInitContainerName + " init container has not completed"
+		}
+	}
+
+	return false, ""
+}
+
 // checkContainerStatuses checks a slice of container statuses for critical failures.
 // containerType should be "Container" or "Init Container" for error message clarity.
 func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, containerType string) (bool, []string) {
@@ -648,8 +689,8 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 		// Check for OOMKilled in both current state and last termination state.
 		// The first OOM kill appears in State.Terminated before any restart;
 		// subsequent OOM kills appear in LastTerminationState.Terminated.
-		if (cs.State.Terminated != nil && cs.State.Terminated.Reason == "OOMKilled") ||
-			(cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == "OOMKilled") {
+		if (cs.State.Terminated != nil && cs.State.Terminated.Reason == k8sContainerReasonOOMKilled) ||
+			(cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == k8sContainerReasonOOMKilled) {
 			failed = true
 
 			errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' was killed due to OOM (Out of Memory)",
@@ -658,11 +699,23 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 			continue
 		}
 
+		if containerType == "Init Container" &&
+			cs.State.Terminated != nil &&
+			cs.State.Terminated.ExitCode != 0 &&
+			cs.RestartCount >= containerFailureRestartThreshold {
+			failed = true
+
+			errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' terminated with exit code %d after %d restarts: %s",
+				podName, containerType, cs.Name, cs.State.Terminated.ExitCode, cs.RestartCount, cs.State.Terminated.Message))
+
+			continue
+		}
+
 		// Check for CrashLoopBackOff with restart count >= 5
 		if cs.State.Waiting != nil {
 			reason := cs.State.Waiting.Reason
 
-			if reason == "CrashLoopBackOff" && cs.RestartCount >= 5 {
+			if reason == k8sContainerReasonCrashLoopBackOff && cs.RestartCount >= containerFailureRestartThreshold {
 				failed = true
 
 				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' in CrashLoopBackOff (restarted %d times): %s",
@@ -671,7 +724,7 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 				continue
 			}
 			// Check for ImagePullBackOff
-			if reason == "ImagePullBackOff" || reason == "ErrImagePull" {
+			if reason == k8sContainerReasonImagePullBackOff || reason == k8sContainerReasonErrImagePull {
 				failed = true
 
 				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' failed to pull image: %s",

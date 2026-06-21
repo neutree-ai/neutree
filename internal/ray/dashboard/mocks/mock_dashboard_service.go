@@ -22,6 +22,64 @@ func (_m *MockDashboardService) EXPECT() *MockDashboardService_Expecter {
 	return &MockDashboardService_Expecter{mock: &_m.Mock}
 }
 
+// GetActorLog provides a mock function with given fields: actorID, suffix, lines
+func (_m *MockDashboardService) GetActorLog(actorID string, suffix string, lines int) (string, error) {
+	ret := _m.Called(actorID, suffix, lines)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetActorLog")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, int) (string, error)); ok {
+		return rf(actorID, suffix, lines)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, int) string); ok {
+		r0 = rf(actorID, suffix, lines)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, int) error); ok {
+		r1 = rf(actorID, suffix, lines)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDashboardService_GetActorLog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetActorLog'
+type MockDashboardService_GetActorLog_Call struct {
+	*mock.Call
+}
+
+// GetActorLog is a helper method to define mock.On call
+//   - actorID string
+//   - suffix string
+//   - lines int
+func (_e *MockDashboardService_Expecter) GetActorLog(actorID interface{}, suffix interface{}, lines interface{}) *MockDashboardService_GetActorLog_Call {
+	return &MockDashboardService_GetActorLog_Call{Call: _e.mock.On("GetActorLog", actorID, suffix, lines)}
+}
+
+func (_c *MockDashboardService_GetActorLog_Call) Run(run func(actorID string, suffix string, lines int)) *MockDashboardService_GetActorLog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].(int))
+	})
+	return _c
+}
+
+func (_c *MockDashboardService_GetActorLog_Call) Return(_a0 string, _a1 error) *MockDashboardService_GetActorLog_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDashboardService_GetActorLog_Call) RunAndReturn(run func(string, string, int) (string, error)) *MockDashboardService_GetActorLog_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetClusterMetadata provides a mock function with no fields
 func (_m *MockDashboardService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {
 	ret := _m.Called()

@@ -232,18 +232,26 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 		return false
 	}
 
+	normalizedStatus := *newStatus
+	c.prepareStatusForUpdate(obj, &normalizedStatus)
+
 	// Update if phase changed
-	if obj.Status.Phase != newStatus.Phase {
+	if obj.Status.Phase != normalizedStatus.Phase {
 		return true
 	}
 
 	// Update if service URL changed
-	if obj.Status.ServiceURL != newStatus.ServiceURL {
+	if obj.Status.ServiceURL != normalizedStatus.ServiceURL {
 		return true
 	}
 
 	// Update if error message changed
-	if obj.Status.ErrorMessage != newStatus.ErrorMessage {
+	if obj.Status.ErrorMessage != normalizedStatus.ErrorMessage {
+		return true
+	}
+
+	// Update if Ray model download completion metadata changed.
+	if !sameOptionalString(obj.Status.ModelDownloadCompletedHash, normalizedStatus.ModelDownloadCompletedHash) {
 		return true
 	}
 
@@ -252,6 +260,14 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 	}
 
 	return false
+}
+
+func sameOptionalString(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+
+	return *left == *right
 }
 
 func (c *EndpointController) cleanupEndpoint(obj *v1.Endpoint) error {
@@ -275,13 +291,30 @@ func (c *EndpointController) cleanupEndpoint(obj *v1.Endpoint) error {
 
 func (c *EndpointController) updateStatus(obj *v1.Endpoint, status *v1.EndpointStatus) error {
 	status.LastTransitionTime = FormatStatusTime()
+	c.prepareStatusForUpdate(obj, status)
 
+	return c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Status: status})
+}
+
+func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1.EndpointStatus) {
 	// If the new service URL is empty, use the old service URL to avoid it being set to empty.
 	if status.ServiceURL == "" && obj.Status != nil && obj.Status.ServiceURL != "" {
 		status.ServiceURL = obj.Status.ServiceURL
 	}
 
-	return c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Status: status})
+	c.preserveModelDownloadStatus(obj, status)
+}
+
+func (c *EndpointController) preserveModelDownloadStatus(obj *v1.Endpoint, status *v1.EndpointStatus) {
+	if obj.Status == nil || obj.Status.ModelDownloadCompletedHash == nil {
+		return
+	}
+
+	if status.ModelDownloadCompletedHash != nil {
+		return
+	}
+
+	status.ModelDownloadCompletedHash = obj.Status.ModelDownloadCompletedHash
 }
 
 func (c *EndpointController) formatStatus(phase v1.EndpointPhase, err error) *v1.EndpointStatus {

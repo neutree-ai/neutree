@@ -205,6 +205,8 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 		})
 	})
 
+	// TestRail: C2717405 covers the NEU-167 same-workspace ACL happy path
+	// through this existing OpenAI ExternalEndpoint suite.
 	Describe("OpenAI Compatibility", Label("openai"), func() {
 		It("should return exposed model names via OpenAI SDK", Label("C2642174"), func() {
 			page, err := oaiClient.Models.List(context.Background())

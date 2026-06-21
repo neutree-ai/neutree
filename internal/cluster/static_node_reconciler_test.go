@@ -1019,6 +1019,10 @@ func (f *fakeStaticNodeDashboardService) UpdateServeApplications(_ dashboard.Ray
 	return nil
 }
 
+func (f *fakeStaticNodeDashboardService) GetActorLog(_ string, _ string, _ int) (string, error) {
+	return "", nil
+}
+
 type fakeStaticNodeHeadReadyChecker struct {
 	ready bool
 	err   error

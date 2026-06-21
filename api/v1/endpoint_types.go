@@ -44,21 +44,23 @@ type EndpointSpec struct {
 type EndpointPhase string
 
 const (
-	EndpointPhasePENDING   EndpointPhase = "Pending"
-	EndpointPhaseRUNNING   EndpointPhase = "Running"
-	EndpointPhaseFAILED    EndpointPhase = "Failed"
-	EndpointPhaseDELETED   EndpointPhase = "Deleted"
-	EndpointPhasePAUSED    EndpointPhase = "Paused"
-	EndpointPhaseDEPLOYING EndpointPhase = "Deploying"
-	EndpointPhaseDELETING  EndpointPhase = "Deleting"
+	EndpointPhasePENDING          EndpointPhase = "Pending"
+	EndpointPhaseRUNNING          EndpointPhase = "Running"
+	EndpointPhaseFAILED           EndpointPhase = "Failed"
+	EndpointPhaseDELETED          EndpointPhase = "Deleted"
+	EndpointPhasePAUSED           EndpointPhase = "Paused"
+	EndpointPhaseDEPLOYING        EndpointPhase = "Deploying"
+	EndpointPhaseMODELDOWNLOADING EndpointPhase = "ModelDownloading"
+	EndpointPhaseDELETING         EndpointPhase = "Deleting"
 )
 
 type EndpointStatus struct {
-	Phase              EndpointPhase           `json:"phase,omitempty"`
-	ServiceURL         string                  `json:"service_url,omitempty"`
-	LastTransitionTime string                  `json:"last_transition_time,omitempty"`
-	ErrorMessage       string                  `json:"error_message,omitempty"`
-	Resources          *EndpointResourceStatus `json:"resources,omitempty"`
+	Phase                      EndpointPhase           `json:"phase,omitempty"`
+	ServiceURL                 string                  `json:"service_url,omitempty"`
+	LastTransitionTime         string                  `json:"last_transition_time,omitempty"`
+	ErrorMessage               string                  `json:"error_message,omitempty"`
+	ModelDownloadCompletedHash *string                 `json:"model_download_completed_hash,omitempty"`
+	Resources                  *EndpointResourceStatus `json:"resources,omitempty"`
 }
 
 type EndpointResourceStatus struct {

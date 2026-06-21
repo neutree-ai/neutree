@@ -29,6 +29,8 @@ func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratorm
 	return c
 }
 
+func stringPtr(v string) *string { return &v }
+
 func ep(id int, phase v1.EndpointPhase) *v1.Endpoint {
 	e := &v1.Endpoint{
 		ID: id,
@@ -455,6 +457,30 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "same phase, different model download completion hash",
+			oldStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: stringPtr("old-hash"),
+			},
+			newStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: stringPtr("new-hash"),
+			},
+			want: true,
+		},
+		{
+			name: "same phase and same model download metadata",
+			oldStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: stringPtr("same-hash"),
+			},
+			newStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: stringPtr("same-hash"),
+			},
+			want: false,
+		},
+		{
 			name: "same phase, same resources",
 			oldStatus: &v1.EndpointStatus{
 				Phase:     v1.EndpointPhaseRUNNING,
@@ -463,6 +489,17 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			newStatus: &v1.EndpointStatus{
 				Phase:     v1.EndpointPhaseRUNNING,
 				Resources: endpointResources(8192, 50),
+			},
+			want: false,
+		},
+		{
+			name: "same phase and omitted model download metadata that will be preserved",
+			oldStatus: &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: stringPtr("same-hash"),
+			},
+			newStatus: &v1.EndpointStatus{
+				Phase: v1.EndpointPhaseDEPLOYING,
 			},
 			want: false,
 		},
@@ -484,6 +521,59 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("shouldUpdateStatus() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func Test_PrepareStatusForUpdate_PreservesOmittedModelDownloadHash(t *testing.T) {
+	endpoint := ep(1, v1.EndpointPhaseDEPLOYING)
+	endpoint.Status.ModelDownloadCompletedHash = stringPtr("completed-hash")
+
+	status := &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}
+	c := &EndpointController{}
+	c.prepareStatusForUpdate(endpoint, status)
+
+	assert.NotNil(t, status.ModelDownloadCompletedHash)
+	assert.Equal(t, "completed-hash", *status.ModelDownloadCompletedHash)
+	assert.False(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}))
+}
+
+func Test_PrepareStatusForUpdate_UsesExplicitModelDownloadHash(t *testing.T) {
+	tests := []struct {
+		name     string
+		newHash  *string
+		expected string
+	}{
+		{
+			name:     "empty hash clears stale completion",
+			newHash:  stringPtr(""),
+			expected: "",
+		},
+		{
+			name:     "new hash updates completion",
+			newHash:  stringPtr("new-hash"),
+			expected: "new-hash",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint := ep(1, v1.EndpointPhaseDEPLOYING)
+			endpoint.Status.ModelDownloadCompletedHash = stringPtr("old-hash")
+
+			status := &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: tt.newHash,
+			}
+			c := &EndpointController{}
+			c.prepareStatusForUpdate(endpoint, status)
+
+			assert.NotNil(t, status.ModelDownloadCompletedHash)
+			assert.Equal(t, tt.expected, *status.ModelDownloadCompletedHash)
+			assert.True(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{
+				Phase:                      v1.EndpointPhaseDEPLOYING,
+				ModelDownloadCompletedHash: tt.newHash,
+			}))
 		})
 	}
 }

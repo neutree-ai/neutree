@@ -61,6 +61,14 @@ func (k *Kong) Init() error {
 }
 
 func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
+	if apiKey == nil || apiKey.ID == "" {
+		return errors.New("api key id is required")
+	}
+
+	if apiKey.Status == nil || apiKey.Status.SkValue == "" {
+		return errors.New("api key status.sk_value is required")
+	}
+
 	consumer, err := k.kongClient.Consumers.GetByCustomID(context.Background(), &apiKey.ID)
 	if err != nil && !isResourceNotFoundError(err) {
 		return errors.Wrapf(err, "failed to get consumer by custom id %s", apiKey.ID)
@@ -84,7 +92,7 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 
 	for _, keyAuth := range keyAuthList {
 		if keyAuth.Key != nil && apiKey.Status != nil && *keyAuth.Key == apiKey.Status.SkValue {
-			return nil
+			return k.syncAPIKeyACLGroups(consumer.ID, apiKey)
 		}
 	}
 
@@ -95,6 +103,41 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 	_, err = k.kongClient.KeyAuths.Create(context.Background(), consumer.ID, keyAuth)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create key auth for consumer %s", *consumer.CustomID)
+	}
+
+	return k.syncAPIKeyACLGroups(consumer.ID, apiKey)
+}
+
+func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error {
+	desiredGroups, err := k.desiredAPIKeyACLGroups(apiKey)
+	if err != nil {
+		return err
+	}
+
+	currentGroups, _, err := k.kongClient.ACLs.ListForConsumer(context.Background(), consumerID, nil)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list ACL groups for consumer %s", apiKey.ID)
+	}
+
+	toCreate, toDelete := diffNeutreeACLGroups(currentGroups, desiredGroups)
+	for _, group := range toCreate {
+		_, err = k.kongClient.ACLs.Create(context.Background(), consumerID, &kong.ACLGroup{
+			Group: pointy.String(group),
+		})
+		if err != nil {
+			return errors.Wrapf(err, "failed to add ACL group %s to consumer %s", group, apiKey.ID)
+		}
+	}
+
+	for _, group := range toDelete {
+		if group.Group == nil {
+			continue
+		}
+
+		err = k.kongClient.ACLs.Delete(context.Background(), consumerID, group.Group)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete ACL group %s from consumer %s", *group.Group, apiKey.ID)
+		}
 	}
 
 	return nil
@@ -144,6 +187,9 @@ func (k *Kong) SyncEndpoint(ep *v1.Endpoint) error {
 
 	aiGatewayPlugin := k.generateAIGatewayPlugin(ep, route)
 	needPluginMap[*aiGatewayPlugin.InstanceName] = aiGatewayPlugin
+
+	aclPlugin := k.generateEndpointACLPlugin(ep, route)
+	needPluginMap[*aclPlugin.InstanceName] = aclPlugin
 
 	for _, plugin := range needPluginMap {
 		err = k.syncPlugin(plugin)
@@ -247,6 +293,29 @@ func (k *Kong) generateAIGatewayPlugin(ep *v1.Endpoint, curRoute *kong.Route) *k
 	}
 }
 
+func (k *Kong) generateEndpointACLPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
+	group := BuildNeutreeACLGroup(ep.Metadata.Workspace, ACLResourceEndpoint, ep.Metadata.Name)
+	return k.generateACLPlugin("neutree-acl-"+util.HashString(ep.Key()), curRoute, group)
+}
+
+func (k *Kong) generateExternalEndpointACLPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) *kong.Plugin {
+	group := BuildNeutreeACLGroup(ee.Metadata.Workspace, ACLResourceExternalEndpoint, ee.Metadata.Name)
+	return k.generateACLPlugin("neutree-acl-"+util.HashString(ee.Key()), curRoute, group)
+}
+
+func (k *Kong) generateACLPlugin(instanceName string, curRoute *kong.Route, group string) *kong.Plugin {
+	return &kong.Plugin{
+		Name:         pointy.String("acl"),
+		InstanceName: pointy.String(instanceName),
+		Route:        curRoute,
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config: map[string]interface{}{
+			"allow":              []string{group},
+			"hide_groups_header": true,
+		},
+	}
+}
+
 func (k *Kong) generateHttpLogPlugin() *kong.Plugin {
 	return &kong.Plugin{
 		Name:         pointy.String("http-log"),
@@ -329,7 +398,9 @@ func isManagedAIRoutePlugin(plugin *kong.Plugin) bool {
 
 	switch *plugin.Name {
 	case "neutree-ai-gateway", "neutree-ai-statistics":
-		return true
+		return plugin.InstanceName != nil
+	case "acl":
+		return plugin.InstanceName != nil && strings.HasPrefix(*plugin.InstanceName, "neutree-acl-")
 	default:
 		return false
 	}
@@ -531,6 +602,9 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
 	}
 
 	needPluginMap[*aiGatewayPlugin.InstanceName] = aiGatewayPlugin
+
+	aclPlugin := k.generateExternalEndpointACLPlugin(ee, route)
+	needPluginMap[*aclPlugin.InstanceName] = aclPlugin
 
 	for _, plugin := range needPluginMap {
 		err = k.syncPlugin(plugin)

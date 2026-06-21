@@ -5,7 +5,7 @@ Run as module: python -m neutree.downloader
 """
 
 from .dispatcher import get_downloader
-from .utils import build_request_from_model_args
+from .utils import build_request_from_model_args, download_with_markers
 
 __all__ = [
     "base",
@@ -15,4 +15,5 @@ __all__ = [
     "utils",
     "get_downloader",
     "build_request_from_model_args",
+    "download_with_markers",
 ]

@@ -5,7 +5,7 @@ local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
 
 local AIStatisticsPluginHandler = {
-    PRIORITY = 1000,
+    PRIORITY = 890,
     VERSION = "0.0.1",
 }
 

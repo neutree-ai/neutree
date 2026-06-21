@@ -98,6 +98,86 @@ func TestK8sResourceClientListEndpointInstancesWithHAMiAllocation(t *testing.T) 
 	require.Equal(t, "gpu-node", instances[0].Devices[0].NodeID)
 }
 
+func TestK8sResourceClientListEndpointInstancesWithColonSeparatedHAMiAllocations(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node",
+			Labels: map[string]string{
+				plugin.NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+				plugin.NvidiaGPUVirtualizationLabelKey:    "true",
+			},
+			Annotations: map[string]string{
+				plugin.HAMiNodeNvidiaRegisterAnnotation: `[
+					{"id":"GPU-1","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true},
+					{"id":"GPU-2","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true}
+				]`,
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat-abc",
+			Namespace: "default",
+			UID:       types.UID("uid-1"),
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat",
+			},
+			Annotations: map[string]string{
+				plugin.HAMiVGPUDevicesAllocatedAnnotation: ";GPU-1,NVIDIA,8192,50:GPU-2,NVIDIA,8192,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node",
+			Containers: []corev1.Container{
+				{
+					Name: "main",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("2"),
+							plugin.NvidiaGPUCoreResource:       k8sresource.MustParse("100"),
+						},
+						Requests: corev1.ResourceList{
+							plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("2"),
+							plugin.NvidiaGPUCoreResource:       k8sresource.MustParse("100"),
+						},
+					},
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node, pod).
+		Build()
+	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+
+	instances, err := client.ListEndpointInstances(context.Background(), resourceview.ListEndpointInstancesOptions{
+		EndpointName:                     "chat",
+		Namespace:                        "default",
+		AcceleratorVirtualizationEnabled: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	require.Len(t, instances[0].Devices, 2)
+	require.Equal(t, "GPU-1", instances[0].Devices[0].UUID)
+	require.Equal(t, int64(8192), instances[0].Devices[0].MemoryMiB)
+	require.Equal(t, int64(50), instances[0].Devices[0].CoreUnits)
+	require.Equal(t, "GPU-2", instances[0].Devices[1].UUID)
+	require.Equal(t, int64(8192), instances[0].Devices[1].MemoryMiB)
+	require.Equal(t, int64(50), instances[0].Devices[1].CoreUnits)
+}
+
 func TestK8sResourceClientListEndpointInstancesWithNeutreeAllocationWhenVirtualizationDisabled(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
