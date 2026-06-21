@@ -96,6 +96,7 @@ const (
 type StaticNodeStatus struct {
 	Phase              StaticNodePhase              `json:"phase,omitempty"`
 	Accelerator        *StaticNodeAcceleratorStatus `json:"accelerator,omitempty"`
+	Allocations        []StaticNodeAllocationStatus `json:"allocations,omitempty"`
 	Warm               *WarmStatus                  `json:"warm,omitempty"`
 	Components         []NodeComponentStatus        `json:"components,omitempty"`
 	LastTransitionTime string                       `json:"last_transition_time,omitempty"`
@@ -113,10 +114,24 @@ type StaticNodeAcceleratorStatus struct {
 }
 
 type StaticNodeAcceleratorDeviceStatus struct {
-	ID          string `json:"id,omitempty"`
-	UUID        string `json:"uuid,omitempty"`
-	ProductName string `json:"product_name,omitempty"`
-	Healthy     bool   `json:"healthy,omitempty"`
+	ID           string `json:"id,omitempty"`
+	UUID         string `json:"uuid,omitempty"`
+	ProductName  string `json:"product_name,omitempty"`
+	ProductModel string `json:"product_model,omitempty"`
+	MinorNumber  int    `json:"minor_number,omitempty"`
+	MemoryMiB    int64  `json:"memory_mib,omitempty"`
+	Healthy      bool   `json:"healthy,omitempty"`
+}
+
+type StaticNodeAllocationStatus struct {
+	WorkloadType string             `json:"workload_type,omitempty"`
+	Workspace    string             `json:"workspace,omitempty"`
+	Endpoint     string             `json:"endpoint,omitempty"`
+	InstanceID   string             `json:"instance_id,omitempty"`
+	ReplicaID    string             `json:"replica_id,omitempty"`
+	RuntimeID    string             `json:"runtime_id,omitempty"`
+	PID          int                `json:"pid,omitempty"`
+	Devices      []DeviceAllocation `json:"devices,omitempty"`
 }
 
 func CPUStaticNodeAcceleratorStatus() StaticNodeAcceleratorStatus {
@@ -162,6 +177,7 @@ const (
 	NodeComponentTypeRayWorker           NodeComponentType = "ray-worker"
 	NodeComponentTypeNodeExporter        NodeComponentType = "node-exporter"
 	NodeComponentTypeAcceleratorExporter NodeComponentType = "accelerator-exporter"
+	NodeComponentTypeNodeAgent           NodeComponentType = "node-agent"
 	NodeComponentTypeMetricsAgent        NodeComponentType = "metrics-agent"
 )
 

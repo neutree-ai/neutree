@@ -36,15 +36,13 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 							Content: "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.",
 						},
 					},
-					Volumes: []v1.NodeComponentVolume{
-						{
-							Name:      "dcgm-counters",
-							HostPath:  "/etc/neutree/dcgm-exporter/default-counters.csv",
-							MountPath: "/etc/neutree/dcgm-exporter/default-counters.csv",
-							ReadOnly:  true,
+					Runtime: &v1.AcceleratorExporterRuntimeProfile{
+						HostNetwork: true,
+						Capabilities: &v1.AcceleratorExporterCapabilities{
+							Add: []string{"SYS_ADMIN"},
 						},
+						DockerRunOptions: []string{"--gpus all"},
 					},
-					DockerRunOptions: []string{"--gpus all", "--cap-add=SYS_ADMIN"},
 				},
 			},
 		},
@@ -120,12 +118,14 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
+		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:latest",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 	assertNodeComponentTypes(t, head.Spec.Components, []v1.NodeComponentType{
 		v1.NodeComponentTypeRayHead,
 		v1.NodeComponentTypeNodeExporter,
 		v1.NodeComponentTypeAcceleratorExporter,
+		v1.NodeComponentTypeNodeAgent,
 		v1.NodeComponentTypeMetricsAgent,
 	})
 	nodeExporter := findComponent(head.Spec.Components, nodeExporterComponentName)
@@ -139,12 +139,30 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	require.NotNil(t, exporter)
 	assert.Equal(t, "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test", exporter.Image)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, exporter.Args)
-	assert.Equal(t, []string{"--gpus all", "--cap-add=SYS_ADMIN"}, exporter.DockerRunOptions)
+	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--gpus all"}, exporter.DockerRunOptions)
 	assert.Equal(t, "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.", exporter.ConfigFiles[0].Content)
 	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", exporter.Volumes[0].MountPath)
 	assert.Equal(t, 9400, exporter.Ports[0].Port)
 	require.NotNil(t, exporter.HealthCheck)
 	assert.Equal(t, "/dcgm/metrics", exporter.HealthCheck.HTTPPath)
+
+	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	assert.Equal(t, v1.NodeComponentTypeNodeAgent, nodeAgent.Type)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:latest", nodeAgent.Image)
+	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
+	assert.Contains(t, nodeAgent.Args, "--workspace=default")
+	assert.Contains(t, nodeAgent.Args, "--cluster=static-a")
+	assert.Contains(t, nodeAgent.Args, "--static-node-cluster=static-a")
+	assert.Contains(t, nodeAgent.Args, "--node=head-0")
+	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
+	assert.Contains(t, nodeAgent.Args, "--node-role=head")
+	assert.Contains(t, nodeAgent.Args, "--node-exporter-url=http://127.0.0.1:19100/metrics")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-url=http://127.0.0.1:9400/dcgm/metrics")
+	assert.Equal(t, []string{"--net=host"}, nodeAgent.DockerRunOptions)
+	assert.Equal(t, defaultNodeAgentPort, nodeAgent.Ports[0].Port)
+	require.NotNil(t, nodeAgent.HealthCheck)
+	assert.Equal(t, defaultHealthHTTPPath, nodeAgent.HealthCheck.HTTPPath)
 
 	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
 	require.NotNil(t, vmagentComponent)
@@ -158,6 +176,10 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-exporter.json`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.10:19100"`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:19100"`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-agent`)
+	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-agent.json`)
+	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.10:9101"`)
+	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:9101"`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-ray`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/ray.json`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter-dcgm-metrics`)
@@ -174,6 +196,12 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeTargets.Content, `"10.0.0.11:19100"`)
 	assert.Contains(t, nodeTargets.Content, `"neutree_cluster": "static-a"`)
 	assert.Contains(t, nodeTargets.Content, `"static_node_cluster": "static-a"`)
+	nodeAgentTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/node-agent.json")
+	require.NotNil(t, nodeAgentTargets)
+	assert.True(t, nodeAgentTargets.SkipRestartOnChange)
+	assert.Contains(t, nodeAgentTargets.Content, `"10.0.0.10:9101"`)
+	assert.Contains(t, nodeAgentTargets.Content, `"10.0.0.11:9101"`)
+	assert.Contains(t, nodeAgentTargets.Content, `"source": "neutree-node-agent"`)
 	rayTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/ray.json")
 	require.NotNil(t, rayTargets)
 	assert.True(t, rayTargets.SkipRestartOnChange)
@@ -218,10 +246,12 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assertNodeComponentTypes(t, worker.Spec.Components, []v1.NodeComponentType{
 		v1.NodeComponentTypeRayWorker,
 		v1.NodeComponentTypeNodeExporter,
+		v1.NodeComponentTypeNodeAgent,
 	})
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:latest",
 	})
 
 	cluster.Spec.Version = "mutated"

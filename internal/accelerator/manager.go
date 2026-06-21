@@ -23,6 +23,7 @@ type Manager interface {
 	Start(ctx context.Context)
 	DetectAccelerator(ctx context.Context, runner NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)
 	RuntimeProfile(ctx context.Context, accelerator v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)
+	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, bool, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
 

@@ -22,18 +22,22 @@ const (
 	staticNodeRoleLabelKey    = "neutree.ai/static-node-role"
 
 	nodeExporterComponentName        = "node-exporter"
+	nodeAgentComponentName           = "neutree-node-agent"
 	vmagentComponentName             = "vmagent"
 	acceleratorExporterComponentName = "accelerator-exporter"
 	defaultVMAgentPort               = 8429
 	defaultNodeExporterPort          = 19100
+	defaultNodeAgentPort             = 9101
 	defaultRayDashboardPort          = 8265
 	defaultPrometheusHTTPPath        = "/metrics"
 	defaultHealthHTTPPath            = "/health"
 	vmagentConfigPath                = "/etc/neutree/vmagent/config.yaml"
 	vmagentFileSDDir                 = "/etc/neutree/vmagent/file_sd"
 	vmagentNodeExporterFileSDPath    = vmagentFileSDDir + "/node-exporter.json"
+	vmagentNodeAgentFileSDPath       = vmagentFileSDDir + "/node-agent.json"
 	vmagentRayFileSDPath             = vmagentFileSDDir + "/ray.json"
 	defaultNodeExporterImage         = "quay.io/prometheus/node-exporter:v1.8.2"
+	defaultNodeAgentImage            = "neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent
 	defaultVMAgentImage              = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
 )
 
@@ -188,7 +192,7 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 			return nil, err
 		}
 
-		components := buildNodeComponents(cluster, role, profile)
+		components := buildNodeComponents(cluster, desiredNode, profile)
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, staticNodeDesiredPlan{
@@ -728,9 +732,14 @@ func runtimeProfileFallbackMessage(accelerator v1.StaticNodeAcceleratorStatus) s
 
 func buildNodeComponents(
 	cluster *v1.StaticNodeCluster,
-	role v1.StaticNodeRole,
+	node *v1.StaticNode,
 	profile *v1.AcceleratorProfile,
 ) []v1.NodeComponentSpec {
+	role := v1.StaticNodeRoleWorker
+	if node != nil && node.Spec != nil {
+		role = node.Spec.Role
+	}
+
 	components := []v1.NodeComponentSpec{
 		buildRayComponent(cluster, role, profile),
 		{
@@ -772,9 +781,9 @@ func buildNodeComponents(
 			Image:            staticComponentImage(cluster, exporter.Image),
 			Args:             append([]string{}, exporter.Args...),
 			Env:              copyStringMap(exporter.Env),
-			Volumes:          append([]v1.NodeComponentVolume{}, exporter.Volumes...),
+			Volumes:          acceleratorExporterConfigVolumes(exporter.ConfigFiles),
 			ConfigFiles:      append([]v1.NodeComponentConfigFile{}, exporter.ConfigFiles...),
-			DockerRunOptions: append([]string{}, exporter.DockerRunOptions...),
+			DockerRunOptions: acceleratorExporterDockerRunOptions(exporter.Runtime),
 			Ports: []v1.NodeComponentPort{
 				{Name: "metrics", Port: exporter.Port, Protocol: "TCP"},
 			},
@@ -784,6 +793,8 @@ func buildNodeComponents(
 			},
 		})
 	}
+
+	components = append(components, buildNodeAgentComponent(cluster, node, profile))
 
 	if role == v1.StaticNodeRoleHead {
 		vmagentArgs := []string{
@@ -819,6 +830,58 @@ func buildNodeComponents(
 	}
 
 	return components
+}
+
+func buildNodeAgentComponent(
+	cluster *v1.StaticNodeCluster,
+	node *v1.StaticNode,
+	profile *v1.AcceleratorProfile,
+) v1.NodeComponentSpec {
+	args := []string{
+		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
+		"--cluster-type=ray",
+		fmt.Sprintf("--node-exporter-url=http://127.0.0.1:%d%s", defaultNodeExporterPort, defaultPrometheusHTTPPath),
+	}
+
+	if cluster != nil && cluster.Metadata != nil {
+		args = append(args,
+			"--workspace="+cluster.Metadata.Workspace,
+			"--cluster="+cluster.Metadata.Name,
+			"--static-node-cluster="+cluster.Metadata.Name,
+		)
+	}
+	if node != nil && node.Metadata != nil {
+		args = append(args, "--node="+node.Metadata.Name)
+	}
+	if node != nil && node.Spec != nil {
+		args = append(args,
+			"--node-ip="+node.Spec.IP,
+			"--node-role="+string(node.Spec.Role),
+		)
+	}
+	if profile != nil && profile.Metrics != nil && profile.Metrics.Exporter != nil {
+		exporter := profile.Metrics.Exporter
+		args = append(args, fmt.Sprintf(
+			"--accelerator-exporter-url=http://127.0.0.1:%d%s",
+			exporter.Port,
+			exporterMetricsPath(exporter),
+		))
+	}
+
+	return v1.NodeComponentSpec{
+		Name:             nodeAgentComponentName,
+		Type:             v1.NodeComponentTypeNodeAgent,
+		Image:            staticComponentImage(cluster, defaultNodeAgentImage),
+		Args:             args,
+		DockerRunOptions: []string{"--net=host"},
+		Ports: []v1.NodeComponentPort{
+			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
+		},
+		HealthCheck: &v1.NodeComponentHealthCheck{
+			HTTPPath: defaultHealthHTTPPath,
+			Port:     defaultNodeAgentPort,
+		},
+	}
 }
 
 func attachMetricsConfigFiles(
@@ -866,6 +929,9 @@ func renderVMAgentConfig(plans []staticNodeDesiredPlan) string {
 	builder.WriteString("- job_name: static-node-node-exporter\n")
 	writeVMAgentFileSDConfig(&builder, vmagentNodeExporterFileSDPath)
 
+	builder.WriteString("- job_name: static-node-node-agent\n")
+	writeVMAgentFileSDConfig(&builder, vmagentNodeAgentFileSDPath)
+
 	builder.WriteString("- job_name: static-node-ray\n")
 	writeVMAgentFileSDConfig(&builder, vmagentRayFileSDPath)
 
@@ -903,6 +969,10 @@ func renderVMAgentFileSDConfigFiles(
 		vmagentFileSDConfigFile(
 			vmagentNodeExporterFileSDPath,
 			renderVMAgentNodeExporterFileSDTargets(cluster, plans),
+		),
+		vmagentFileSDConfigFile(
+			vmagentNodeAgentFileSDPath,
+			renderVMAgentNodeAgentFileSDTargets(cluster, plans),
 		),
 		vmagentFileSDConfigFile(
 			vmagentRayFileSDPath,
@@ -959,6 +1029,26 @@ func renderVMAgentNodeExporterFileSDTargets(
 	return mustMarshalVMAgentFileSDTargets(targets)
 }
 
+func renderVMAgentNodeAgentFileSDTargets(
+	cluster *v1.StaticNodeCluster,
+	plans []staticNodeDesiredPlan,
+) string {
+	targets := make([]vmagentFileSDTarget, 0, len(plans))
+
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Spec == nil || !staticNodeHasNodeAgentComponent(plan.Node) {
+			continue
+		}
+
+		targets = append(targets, vmagentFileSDTarget{
+			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, defaultNodeAgentPort)},
+			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeAgentComponentName, nil),
+		})
+	}
+
+	return mustMarshalVMAgentFileSDTargets(targets)
+}
+
 func renderVMAgentRayFileSDTargets(
 	cluster *v1.StaticNodeCluster,
 	plans []staticNodeDesiredPlan,
@@ -987,6 +1077,20 @@ func staticNodeHasRayComponent(node *v1.StaticNode) bool {
 	for _, component := range node.Spec.Components {
 		switch component.Type {
 		case v1.NodeComponentTypeRayHead, v1.NodeComponentTypeRayWorker:
+			return true
+		}
+	}
+
+	return false
+}
+
+func staticNodeHasNodeAgentComponent(node *v1.StaticNode) bool {
+	if node == nil || node.Spec == nil {
+		return false
+	}
+
+	for _, component := range node.Spec.Components {
+		if component.Name == nodeAgentComponentName || component.Type == v1.NodeComponentTypeNodeAgent {
 			return true
 		}
 	}
@@ -1122,6 +1226,56 @@ func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
 	}
 
 	return path
+}
+
+func acceleratorExporterDockerRunOptions(
+	runtime *v1.AcceleratorExporterRuntimeProfile,
+) []string {
+	if runtime == nil {
+		return nil
+	}
+
+	options := []string{}
+	if runtime.HostNetwork {
+		options = append(options, "--net=host")
+	}
+	if runtime.HostPID {
+		options = append(options, "--pid=host")
+	}
+	if runtime.Capabilities != nil {
+		for _, capability := range runtime.Capabilities.Add {
+			capability = strings.TrimSpace(capability)
+			if capability == "" {
+				continue
+			}
+
+			options = append(options, "--cap-add="+capability)
+		}
+	}
+
+	options = append(options, runtime.DockerRunOptions...)
+
+	return options
+}
+
+func acceleratorExporterConfigVolumes(
+	configFiles []v1.NodeComponentConfigFile,
+) []v1.NodeComponentVolume {
+	volumes := make([]v1.NodeComponentVolume, 0, len(configFiles))
+	for i, configFile := range configFiles {
+		if configFile.Path == "" {
+			continue
+		}
+
+		volumes = append(volumes, v1.NodeComponentVolume{
+			Name:      "accelerator-exporter-config-" + strconv.Itoa(i),
+			HostPath:  configFile.Path,
+			MountPath: configFile.Path,
+			ReadOnly:  true,
+		})
+	}
+
+	return volumes
 }
 
 func appendComponentConfigFile(node *v1.StaticNode, componentName string, configFile v1.NodeComponentConfigFile) {

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 const (
@@ -15,6 +17,7 @@ const (
 
 type CanonicalLabels struct {
 	Workspace         string
+	NeutreeCluster    string
 	StaticNodeCluster string
 	ClusterType       string
 	Node              string
@@ -33,6 +36,17 @@ type NormalizeRequest struct {
 	Labels              CanonicalLabels
 	NodeExporter        ScrapeResult
 	AcceleratorExporter *ScrapeResult
+	EndpointAllocations []EndpointAllocation
+}
+
+type EndpointAllocation struct {
+	Workspace  string
+	Cluster    string
+	Endpoint   string
+	InstanceID string
+	ReplicaID  string
+	NodeID     string
+	Devices    []v1.DeviceAllocation
 }
 
 type Normalizer struct{}
@@ -59,7 +73,12 @@ func (n *Normalizer) Normalize(req NormalizeRequest) string {
 
 	if req.AcceleratorExporter != nil {
 		samples = append(samples, scrapeUpSample(req.Labels, TargetAcceleratorExporter, req.AcceleratorExporter.Up))
+		if req.AcceleratorExporter.Up {
+			samples = append(samples, normalizeAcceleratorSamples(req.Labels, req.AcceleratorExporter.Body)...)
+		}
 	}
+
+	samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations)...)
 
 	sort.SliceStable(samples, func(i, j int) bool {
 		if samples[i].name == samples[j].name {
@@ -120,13 +139,86 @@ func normalizeNodeSamples(labels CanonicalLabels, raw string) []canonicalSample 
 	return result
 }
 
+func normalizeAcceleratorSamples(labels CanonicalLabels, raw string) []canonicalSample {
+	parsed := parsePrometheusText(raw)
+	result := make([]canonicalSample, 0)
+
+	for _, s := range parsed {
+		metricLabels, ok := acceleratorMetricLabels(labels, s)
+		if !ok {
+			continue
+		}
+
+		switch s.name {
+		case "DCGM_FI_DEV_GPU_UTIL":
+			value := s.value
+			if value > 1 {
+				value /= 100
+			}
+
+			result = append(result, canonicalSample{
+				name:   "neutree_gpu_utilization_ratio",
+				labels: metricLabels,
+				value:  value,
+			})
+		case "DCGM_FI_DEV_FB_USED":
+			result = append(result, canonicalSample{
+				name:   "neutree_gpu_memory_used_bytes",
+				labels: metricLabels,
+				value:  s.value * 1024 * 1024,
+			})
+		case "DCGM_FI_DEV_FB_TOTAL":
+			result = append(result, canonicalSample{
+				name:   "neutree_gpu_memory_total_bytes",
+				labels: metricLabels,
+				value:  s.value * 1024 * 1024,
+			})
+		}
+	}
+
+	return result
+}
+
+func normalizeEndpointAllocationSamples(
+	labels CanonicalLabels,
+	allocations []EndpointAllocation,
+) []canonicalSample {
+	result := make([]canonicalSample, 0)
+
+	for _, allocation := range allocations {
+		for _, device := range allocation.Devices {
+			if device.UUID == "" {
+				continue
+			}
+
+			metricLabels := baseLabels(labels, SourceNodeAgent)
+			metricLabels["workspace"] = firstNonEmpty(allocation.Workspace, labels.Workspace)
+			metricLabels["neutree_cluster"] = firstNonEmpty(allocation.Cluster, labels.NeutreeCluster, labels.StaticNodeCluster)
+			metricLabels["endpoint"] = allocation.Endpoint
+			metricLabels["instance_id"] = allocation.InstanceID
+			metricLabels["replica_id"] = allocation.ReplicaID
+			metricLabels["node"] = firstNonEmpty(allocation.NodeID, device.NodeID, labels.Node)
+			metricLabels["gpu_uuid"] = device.UUID
+			metricLabels["product"] = device.Product
+
+			result = append(result, canonicalSample{
+				name:   "neutree_endpoint_replica_gpu_allocation",
+				labels: metricLabels,
+				value:  1,
+			})
+		}
+	}
+
+	return result
+}
+
 func scrapeUpSample(labels CanonicalLabels, target string, up bool) canonicalSample {
 	value := float64(0)
 	if up {
 		value = 1
 	}
 
-	metricLabels := baseLabels(labels, "neutree-metrics")
+	metricLabels := baseLabels(labels, SourceNodeAgent)
 	metricLabels["target"] = target
 
 	return canonicalSample{
@@ -151,6 +243,37 @@ func baseLabels(labels CanonicalLabels, source string) map[string]string {
 		"node_role":           labels.NodeRole,
 		"source":              source,
 	}
+}
+
+func acceleratorMetricLabels(labels CanonicalLabels, s sample) (map[string]string, bool) {
+	uuid := firstNonEmpty(s.labels["UUID"], s.labels["uuid"])
+	if uuid == "" {
+		return nil, false
+	}
+
+	result := baseLabels(labels, TargetAcceleratorExporter)
+	result["neutree_cluster"] = firstNonEmpty(labels.NeutreeCluster, labels.StaticNodeCluster)
+	result["gpu_uuid"] = uuid
+
+	if gpuIndex := firstNonEmpty(s.labels["gpu"], s.labels["GPU_I_ID"]); gpuIndex != "" {
+		result["gpu_index"] = gpuIndex
+	}
+
+	if model := firstNonEmpty(s.labels["modelName"], s.labels["model"]); model != "" {
+		result["model"] = model
+	}
+
+	return result, true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+
+	return ""
 }
 
 func parsePrometheusText(raw string) []sample {

@@ -69,9 +69,6 @@ func TestManagerDetectAcceleratorDelegatesToPluginDetector(t *testing.T) {
 		Vendor:       "custom",
 		ProductName:  "Custom GPU",
 		ProductModel: "custom-gpu",
-		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-			{ID: "0", ProductName: "Custom GPU", Healthy: true},
-		},
 	}
 	detector := &fakeStaticNodeAcceleratorPlugin{detected: expected, matched: true}
 	m := &manager{}
@@ -85,6 +82,7 @@ func TestManagerDetectAcceleratorDelegatesToPluginDetector(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, expected, status)
+	assert.Empty(t, status.Devices, "type discovery must not report detailed device data")
 	assert.Equal(t, 1, detector.detectCalls)
 }
 

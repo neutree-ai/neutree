@@ -112,17 +112,33 @@ type AcceleratorMetricsProfile struct {
 }
 
 type AcceleratorExporterProfile struct {
-	Kind             string                    `json:"kind,omitempty"`
-	ComponentType    NodeComponentType         `json:"component_type,omitempty"`
-	Image            string                    `json:"image,omitempty"`
-	Args             []string                  `json:"args,omitempty"`
-	Port             int                       `json:"port,omitempty"`
-	MetricsPath      string                    `json:"metrics_path,omitempty"`
-	Env              map[string]string         `json:"env,omitempty"`
-	Volumes          []NodeComponentVolume     `json:"volumes,omitempty"`
-	ConfigFiles      []NodeComponentConfigFile `json:"config_files,omitempty"`
-	DockerRunOptions []string                  `json:"docker_run_options,omitempty"`
-	RawMetrics       bool                      `json:"raw_metrics,omitempty"`
+	Kind          string                             `json:"kind,omitempty"`
+	ComponentType NodeComponentType                  `json:"component_type,omitempty"`
+	Image         string                             `json:"image,omitempty"`
+	Args          []string                           `json:"args,omitempty"`
+	Port          int                                `json:"port,omitempty"`
+	MetricsPath   string                             `json:"metrics_path,omitempty"`
+	Env           map[string]string                  `json:"env,omitempty"`
+	ConfigFiles   []NodeComponentConfigFile          `json:"config_files,omitempty"`
+	Runtime       *AcceleratorExporterRuntimeProfile `json:"runtime,omitempty"`
+	RawMetrics    bool                               `json:"raw_metrics,omitempty"`
+}
+
+type AcceleratorExporterRuntimeProfile struct {
+	// HostNetwork is supported by StaticNode and Kubernetes when the backend has an equivalent.
+	HostNetwork bool `json:"host_network,omitempty"`
+	// HostPID is supported by StaticNode and Kubernetes when the backend has an equivalent.
+	HostPID bool `json:"host_pid,omitempty"`
+	// Capabilities is supported by StaticNode and Kubernetes when the backend has an equivalent.
+	Capabilities *AcceleratorExporterCapabilities `json:"capabilities,omitempty"`
+	// NodeSelector is Kubernetes-only placement; StaticNode ignores it.
+	NodeSelector map[string]string `json:"node_selector,omitempty"`
+	// DockerRunOptions is StaticNode-only Docker fallback; Kubernetes must not parse it.
+	DockerRunOptions []string `json:"docker_run_options,omitempty"`
+}
+
+type AcceleratorExporterCapabilities struct {
+	Add []string `json:"add,omitempty"`
 }
 
 type AcceleratorResourceDefaults struct {

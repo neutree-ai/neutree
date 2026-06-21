@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -52,10 +53,13 @@ type StaticNodeReconciler struct {
 	AcceleratorManager  StaticNodeAcceleratorManager
 	HeadReadyChecker    StaticNodeHeadReadyChecker
 	NewDashboardService dashboard.NewDashboardServiceFunc
+	NodeSnapshotClient  StaticNodeSnapshotClient
+	NodeSnapshotToken   string
 }
 
 type StaticNodeReconcileResult struct {
 	Accelerator *v1.StaticNodeAcceleratorStatus
+	Allocations []v1.StaticNodeAllocationStatus
 	Warm        *v1.WarmStatus
 	Components  []v1.NodeComponentStatus
 }
@@ -70,6 +74,20 @@ type StaticNodeHeadReadyChecker interface {
 
 type StaticNodeHeadReadyReader interface {
 	ListStaticNodes(ctx context.Context, workspace, clusterName string) ([]*v1.StaticNode, error)
+}
+
+type StaticNodeSnapshot struct {
+	Accelerator v1.StaticNodeAcceleratorStatus  `json:"accelerator,omitempty"`
+	Allocations []v1.StaticNodeAllocationStatus `json:"allocations,omitempty"`
+}
+
+type StaticNodeSnapshotClient interface {
+	Snapshot(ctx context.Context, node *v1.StaticNode) (*StaticNodeSnapshot, error)
+}
+
+type StaticNodeHTTPSnapshotClient struct {
+	Token      string
+	HTTPClient *http.Client
 }
 
 type StaticNodeStoreHeadReadyChecker struct {
@@ -124,9 +142,24 @@ func (r *StaticNodeReconciler) Reconcile(
 	}
 
 	componentStatuses, err := r.ReconcileComponents(ctx, node, runner)
+	if err != nil {
+		return &StaticNodeReconcileResult{
+			Accelerator: acceleratorStatus,
+			Warm:        warmStatus,
+			Components:  componentStatuses,
+		}, err
+	}
+
+	acceleratorStatus, allocations, err := r.ReconcileNodeSnapshot(
+		ctx,
+		node,
+		acceleratorStatus,
+		componentStatuses,
+	)
 
 	return &StaticNodeReconcileResult{
 		Accelerator: acceleratorStatus,
+		Allocations: allocations,
 		Warm:        warmStatus,
 		Components:  componentStatuses,
 	}, err
@@ -152,6 +185,114 @@ func (r *StaticNodeReconciler) ReconcileAccelerator(
 	}
 
 	return r.AcceleratorManager.DetectAccelerator(ctx, runner)
+}
+
+func (r *StaticNodeReconciler) ReconcileNodeSnapshot(
+	ctx context.Context,
+	node *v1.StaticNode,
+	fallback *v1.StaticNodeAcceleratorStatus,
+	componentStatuses ...[]v1.NodeComponentStatus,
+) (*v1.StaticNodeAcceleratorStatus, []v1.StaticNodeAllocationStatus, error) {
+	if !nodeAgentReady(componentStatuses...) {
+		return fallback, currentStaticNodeAllocations(node), nil
+	}
+
+	client := r.nodeSnapshotClient()
+	if client == nil {
+		return fallback, currentStaticNodeAllocations(node), nil
+	}
+
+	snapshot, err := client.Snapshot(ctx, node)
+	if err != nil {
+		return fallback, currentStaticNodeAllocations(node), err
+	}
+	if snapshot == nil {
+		return fallback, currentStaticNodeAllocations(node), nil
+	}
+
+	accelerator := snapshot.Accelerator
+	if accelerator.Type == "" {
+		return fallback, snapshot.Allocations, nil
+	}
+
+	return &accelerator, snapshot.Allocations, nil
+}
+
+func (r *StaticNodeReconciler) nodeSnapshotClient() StaticNodeSnapshotClient {
+	if r != nil && r.NodeSnapshotClient != nil {
+		return r.NodeSnapshotClient
+	}
+
+	token := ""
+	if r != nil {
+		token = r.NodeSnapshotToken
+	}
+
+	return StaticNodeHTTPSnapshotClient{Token: token}
+}
+
+func nodeAgentReady(statusGroups ...[]v1.NodeComponentStatus) bool {
+	if len(statusGroups) == 0 {
+		return true
+	}
+
+	for _, statuses := range statusGroups {
+		for _, status := range statuses {
+			if status.Name == nodeAgentComponentName || status.Type == v1.NodeComponentTypeNodeAgent {
+				return status.Ready && status.Phase == v1.NodeComponentPhaseRunning
+			}
+		}
+	}
+
+	return false
+}
+
+func currentStaticNodeAllocations(node *v1.StaticNode) []v1.StaticNodeAllocationStatus {
+	if node == nil || node.Status == nil {
+		return nil
+	}
+
+	return append([]v1.StaticNodeAllocationStatus{}, node.Status.Allocations...)
+}
+
+func (c StaticNodeHTTPSnapshotClient) Snapshot(ctx context.Context, node *v1.StaticNode) (*StaticNodeSnapshot, error) {
+	if node == nil || node.Spec == nil || node.Spec.IP == "" {
+		return nil, errors.New("static node ip is required for node snapshot")
+	}
+
+	client := c.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, staticNodeSnapshotURL(node), nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.Token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("node snapshot %s returned %s", request.URL.String(), response.Status)
+	}
+
+	var snapshot StaticNodeSnapshot
+	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+		return nil, err
+	}
+
+	return &snapshot, nil
+}
+
+func staticNodeSnapshotURL(node *v1.StaticNode) string {
+	return fmt.Sprintf("http://%s:%d/v1/node/snapshot", node.Spec.IP, defaultNodeAgentPort)
 }
 
 func (r *StaticNodeReconciler) ReconcileWarmImages(
@@ -431,16 +572,21 @@ func stopStaleComponents(
 }
 
 func implicitComponentDependencies(component v1.NodeComponentSpec, desiredComponents []v1.NodeComponentSpec) []string {
-	if component.Type != v1.NodeComponentTypeMetricsAgent && component.Name != vmagentComponentName {
-		return nil
-	}
-
 	dependencies := []string{}
 
 	for _, desired := range desiredComponents {
-		switch desired.Type {
-		case v1.NodeComponentTypeNodeExporter, v1.NodeComponentTypeAcceleratorExporter:
-			if desired.Name != "" && desired.Name != component.Name {
+		if desired.Name == "" || desired.Name == component.Name {
+			continue
+		}
+
+		switch {
+		case component.Type == v1.NodeComponentTypeNodeAgent || component.Name == nodeAgentComponentName:
+			if desired.Type == v1.NodeComponentTypeNodeExporter || desired.Type == v1.NodeComponentTypeAcceleratorExporter {
+				dependencies = append(dependencies, desired.Name)
+			}
+		case component.Type == v1.NodeComponentTypeMetricsAgent || component.Name == vmagentComponentName:
+			switch desired.Type {
+			case v1.NodeComponentTypeNodeExporter, v1.NodeComponentTypeAcceleratorExporter, v1.NodeComponentTypeNodeAgent:
 				dependencies = append(dependencies, desired.Name)
 			}
 		}

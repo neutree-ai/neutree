@@ -318,9 +318,16 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, nvidiaDCGMExporterImage, profile.Metrics.Exporter.Image)
 	assert.Equal(t, nvidiaDCGMExporterPort, profile.Metrics.Exporter.Port)
 	assert.Equal(t, []string{"--collectors", nvidiaDCGMExporterCollectorsPath}, profile.Metrics.Exporter.Args)
+	require.NotNil(t, profile.Metrics.Exporter.Runtime)
+	assert.True(t, profile.Metrics.Exporter.Runtime.HostNetwork)
+	require.NotNil(t, profile.Metrics.Exporter.Runtime.Capabilities)
+	assert.Equal(t, []string{"SYS_ADMIN"}, profile.Metrics.Exporter.Runtime.Capabilities.Add)
+	assert.Equal(t,
+		map[string]string{NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue},
+		profile.Metrics.Exporter.Runtime.NodeSelector)
+	assert.Equal(t, []string{"--gpus all"}, profile.Metrics.Exporter.Runtime.DockerRunOptions)
 	require.Len(t, profile.Metrics.Exporter.ConfigFiles, 1)
 	assert.Equal(t, nvidiaDCGMExporterCollectorsPath, profile.Metrics.Exporter.ConfigFiles[0].Path)
 	assert.NotContains(t, profile.Metrics.Exporter.ConfigFiles[0].Content, "PROF")
-	require.Len(t, profile.Metrics.Exporter.Volumes, 1)
-	assert.Equal(t, nvidiaDCGMExporterCollectorsPath, profile.Metrics.Exporter.Volumes[0].MountPath)
+	assert.Contains(t, profile.Metrics.Exporter.ConfigFiles[0].Content, "DCGM_FI_DEV_FB_TOTAL")
 }

@@ -98,6 +98,120 @@ func TestK8sResourceClientListEndpointInstancesWithHAMiAllocation(t *testing.T) 
 	require.Equal(t, "gpu-node", instances[0].Devices[0].NodeID)
 }
 
+func TestK8sResourceClientListEndpointInstancesWithNeutreeAllocationWhenVirtualizationDisabled(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node",
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorDevicesAnnotation: `[
+					{"id":"0","uuid":"GPU-1","product_name":"NVIDIA A100","product_model":"NVIDIA_A100","minor_number":0,"memory_mib":81920,"healthy":true}
+				]`,
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat-abc",
+			Namespace: "default",
+			UID:       types.UID("uid-1"),
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat",
+			},
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
+					{"uuid":"GPU-1","memory_mib":40960,"core_units":50}
+				]`,
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node, pod).
+		Build()
+	client := resourceview.NewK8sResourceClient(ctrClient, nil)
+
+	instances, err := client.ListEndpointInstances(context.Background(), resourceview.ListEndpointInstancesOptions{
+		EndpointName:                     "chat",
+		Namespace:                        "default",
+		AcceleratorVirtualizationEnabled: false,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	require.Equal(t, "chat-abc", instances[0].InstanceID)
+	require.Equal(t, "chat-abc", instances[0].ReplicaID)
+	require.Equal(t, "gpu-node", instances[0].NodeID)
+	require.Len(t, instances[0].Devices, 1)
+	require.Equal(t, "GPU-1", instances[0].Devices[0].UUID)
+	require.Equal(t, "NVIDIA_A100", instances[0].Devices[0].Product)
+	require.Equal(t, int64(40960), instances[0].Devices[0].MemoryMiB)
+	require.Equal(t, int64(50), instances[0].Devices[0].CoreUnits)
+	require.Equal(t, "gpu-node", instances[0].Devices[0].NodeID)
+}
+
+func TestK8sResourceClientListNodesExposesNeutreeAnnotatedDevices(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node",
+			Labels: map[string]string{
+				plugin.NvidiaGPUKubernetesNodeSelectorKey: "NVIDIA_A100",
+				plugin.NvidiaGPUMemoryNodeLabelKey:        "81920",
+			},
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorDevicesAnnotation: `[
+					{"id":"0","uuid":"GPU-1","product_name":"NVIDIA A100","product_model":"NVIDIA_A100","minor_number":0,"memory_mib":81920,"healthy":true},
+					{"id":"1","uuid":"GPU-2","product_name":"NVIDIA A100","product_model":"NVIDIA_A100","minor_number":1,"memory_mib":81920,"healthy":true}
+				]`,
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:                 k8sresource.MustParse("8"),
+				corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
+				plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("2"),
+			},
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node).
+		Build()
+	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+
+	nodes, err := client.ListNodes(context.Background(), resourceview.ListNodesOptions{
+		AcceleratorVirtualizationEnabled: false,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	require.Len(t, nodes[0].Status.Devices, 2)
+	require.Equal(t, "GPU-1", nodes[0].Status.Devices[0].UUID)
+	require.Equal(t, "NVIDIA_A100", nodes[0].Status.Devices[0].Product)
+	require.NotNil(t, nodes[0].Status.Devices[0].Allocatable)
+	require.Equal(t, int64(81920), nodes[0].Status.Devices[0].Allocatable.MemoryMiB)
+
+	allocatable := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.Equal(t, float64(2), allocatable.Quantity)
+	require.Equal(t, float64(2), allocatable.ProductGroups["NVIDIA_A100"])
+}
+
 func TestK8sResourceClientListNodesFallsBackToStandardParserWhenVirtualizationEnabled(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))

@@ -37,6 +37,7 @@ DCGM_FI_DEV_GPU_UTIL, gauge, GPU utilization (in %).
 DCGM_FI_DEV_MEM_COPY_UTIL, gauge, Memory utilization (in %).
 DCGM_FI_DEV_FB_FREE, gauge, Frame buffer memory free (in MB).
 DCGM_FI_DEV_FB_USED, gauge, Frame buffer memory used (in MB).
+DCGM_FI_DEV_FB_TOTAL, gauge, Total frame buffer memory (in MB).
 DCGM_FI_DEV_XID_ERRORS, gauge, Value of the last XID error encountered.
 DCGM_FI_DRIVER_VERSION, label, Driver Version.
 `
@@ -234,18 +235,15 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 						CreateParent: true,
 					},
 				},
-				Volumes: []v1.NodeComponentVolume{
-					{
-						Name:      "dcgm-counters",
-						HostPath:  nvidiaDCGMExporterCollectorsPath,
-						MountPath: nvidiaDCGMExporterCollectorsPath,
-						ReadOnly:  true,
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					HostNetwork: true,
+					Capabilities: &v1.AcceleratorExporterCapabilities{
+						Add: []string{"SYS_ADMIN"},
 					},
-				},
-				DockerRunOptions: []string{
-					"--net=host",
-					"--gpus all",
-					"--cap-add=SYS_ADMIN",
+					NodeSelector: map[string]string{
+						NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue,
+					},
+					DockerRunOptions: []string{"--gpus all"},
 				},
 			},
 		},

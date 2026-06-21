@@ -38,6 +38,7 @@ func BuildStaticNodeStatus(
 
 	if result != nil {
 		status.Accelerator = result.Accelerator
+		status.Allocations = result.Allocations
 		status.Warm = result.Warm
 		status.Components = result.Components
 	}

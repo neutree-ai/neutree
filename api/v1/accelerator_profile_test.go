@@ -35,17 +35,15 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 						Content: "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.",
 					},
 				},
-				Volumes: []NodeComponentVolume{
-					{
-						Name:      "dcgm-counters",
-						HostPath:  "/etc/neutree/dcgm-exporter/default-counters.csv",
-						MountPath: "/etc/neutree/dcgm-exporter/default-counters.csv",
-						ReadOnly:  true,
+				Runtime: &AcceleratorExporterRuntimeProfile{
+					HostNetwork: true,
+					Capabilities: &AcceleratorExporterCapabilities{
+						Add: []string{"SYS_ADMIN"},
 					},
-				},
-				DockerRunOptions: []string{
-					"--net=host",
-					"--gpus all",
+					NodeSelector: map[string]string{
+						"nvidia.com/gpu.present": "true",
+					},
+					DockerRunOptions: []string{"--gpus all"},
 				},
 				RawMetrics: true,
 			},
@@ -75,8 +73,12 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, 9400, decoded.Metrics.Exporter.Port)
 	require.Len(t, decoded.Metrics.Exporter.ConfigFiles, 1)
 	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", decoded.Metrics.Exporter.ConfigFiles[0].Path)
-	require.Len(t, decoded.Metrics.Exporter.Volumes, 1)
-	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", decoded.Metrics.Exporter.Volumes[0].MountPath)
+	require.NotNil(t, decoded.Metrics.Exporter.Runtime)
+	assert.True(t, decoded.Metrics.Exporter.Runtime.HostNetwork)
+	require.NotNil(t, decoded.Metrics.Exporter.Runtime.Capabilities)
+	assert.Equal(t, []string{"SYS_ADMIN"}, decoded.Metrics.Exporter.Runtime.Capabilities.Add)
+	assert.Equal(t, map[string]string{"nvidia.com/gpu.present": "true"}, decoded.Metrics.Exporter.Runtime.NodeSelector)
+	assert.Equal(t, []string{"--gpus all"}, decoded.Metrics.Exporter.Runtime.DockerRunOptions)
 	require.NotNil(t, decoded.ResourceDefaults)
 	assert.Equal(t, "nvidia.com/gpu", decoded.ResourceDefaults.KubernetesResourceName)
 }

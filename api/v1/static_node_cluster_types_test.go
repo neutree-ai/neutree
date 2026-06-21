@@ -96,7 +96,35 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 				ProductName:  "NVIDIA GPU",
 				ProductModel: "nvidia_gpu",
 				Devices: []StaticNodeAcceleratorDeviceStatus{
-					{ID: "0", ProductName: "NVIDIA GPU", Healthy: true},
+					{
+						ID:           "0",
+						UUID:         "GPU-abc",
+						ProductName:  "NVIDIA A100",
+						ProductModel: "NVIDIA_A100",
+						MinorNumber:  0,
+						MemoryMiB:    81920,
+						Healthy:      true,
+					},
+				},
+			},
+			Allocations: []StaticNodeAllocationStatus{
+				{
+					WorkloadType: "endpoint",
+					Workspace:    "default",
+					Endpoint:     "chat",
+					InstanceID:   "chat-replica-a",
+					ReplicaID:    "replica-a",
+					RuntimeID:    "actor-a",
+					PID:          1234,
+					Devices: []DeviceAllocation{
+						{
+							UUID:      "GPU-abc",
+							Product:   "NVIDIA_A100",
+							MemoryMiB: 81920,
+							CoreUnits: 100,
+							NodeID:    "head-0",
+						},
+					},
 				},
 			},
 			Warm: &WarmStatus{
@@ -131,6 +159,14 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.Status)
 	require.NotNil(t, decoded.Status.Accelerator)
 	assert.Equal(t, AcceleratorTypeNVIDIAGPU.String(), decoded.Status.Accelerator.Type)
+	require.Len(t, decoded.Status.Accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", decoded.Status.Accelerator.Devices[0].UUID)
+	assert.Equal(t, "NVIDIA_A100", decoded.Status.Accelerator.Devices[0].ProductModel)
+	assert.Equal(t, int64(81920), decoded.Status.Accelerator.Devices[0].MemoryMiB)
+	require.Len(t, decoded.Status.Allocations, 1)
+	assert.Equal(t, "endpoint", decoded.Status.Allocations[0].WorkloadType)
+	assert.Equal(t, "replica-a", decoded.Status.Allocations[0].ReplicaID)
+	assert.Equal(t, "GPU-abc", decoded.Status.Allocations[0].Devices[0].UUID)
 	require.Len(t, decoded.Status.Components, 1)
 	assert.Equal(t, NodeComponentPhaseRunning, decoded.Status.Components[0].Phase)
 }

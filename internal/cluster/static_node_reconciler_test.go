@@ -196,6 +196,90 @@ func TestBuildStaticNodeStatusClearsPreviousErrorOnSuccess(t *testing.T) {
 	assert.Empty(t, status.ErrorMessage)
 }
 
+func TestBuildStaticNodeStatusWritesNodeSnapshotAllocations(t *testing.T) {
+	result := &StaticNodeReconcileResult{
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+			Vendor:       "nvidia",
+			ProductModel: "nvidia_gpu",
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+		Allocations: []v1.StaticNodeAllocationStatus{
+			{
+				WorkloadType: "endpoint",
+				Workspace:    "default",
+				Endpoint:     "chat",
+				ReplicaID:    "replica-a",
+				Devices: []v1.DeviceAllocation{
+					{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920},
+				},
+			},
+		},
+		Warm:       &v1.WarmStatus{Ready: true},
+		Components: []v1.NodeComponentStatus{},
+	}
+
+	status := buildStaticNodeStatus(&v1.StaticNode{}, result, nil)
+
+	require.NotNil(t, status.Accelerator)
+	require.Len(t, status.Accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", status.Accelerator.Devices[0].UUID)
+	require.Len(t, status.Allocations, 1)
+	assert.Equal(t, "chat", status.Allocations[0].Endpoint)
+}
+
+func TestStaticNodeReconcilerReconcileNodeSnapshotUsesAgentForDetails(t *testing.T) {
+	node := &v1.StaticNode{
+		Metadata: &v1.Metadata{Name: "head-0"},
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.10",
+		},
+	}
+	reconciler := &StaticNodeReconciler{
+		NodeSnapshotClient: fakeStaticNodeSnapshotClient{
+			snapshot: &StaticNodeSnapshot{
+				Accelerator: v1.StaticNodeAcceleratorStatus{
+					Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+					Vendor:       "nvidia",
+					ProductModel: "nvidia_gpu",
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+					},
+				},
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						WorkloadType: "endpoint",
+						Workspace:    "default",
+						Endpoint:     "chat",
+						ReplicaID:    "replica-a",
+						Devices: []v1.DeviceAllocation{
+							{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920},
+						},
+					},
+				},
+			},
+		},
+	}
+	coarse := &v1.StaticNodeAcceleratorStatus{
+		Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+		Vendor:       "nvidia",
+		ProductModel: "nvidia_gpu",
+	}
+
+	accelerator, allocations, err := reconciler.ReconcileNodeSnapshot(context.Background(), node, coarse)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelerator.Type)
+	require.Len(t, accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", accelerator.Devices[0].UUID)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+}
+
 func TestInspectDockerImageIgnoresSSHWarning(t *testing.T) {
 	runner := &fakeStaticNodeRunner{
 		responses: []fakeStaticNodeResponse{
@@ -960,6 +1044,18 @@ func (f *fakeStaticNodeHeadReadyReader) ListStaticNodes(
 	f.clusterName = clusterName
 
 	return f.nodes, f.err
+}
+
+type fakeStaticNodeSnapshotClient struct {
+	snapshot *StaticNodeSnapshot
+	err      error
+}
+
+func (f fakeStaticNodeSnapshotClient) Snapshot(
+	_ context.Context,
+	_ *v1.StaticNode,
+) (*StaticNodeSnapshot, error) {
+	return f.snapshot, f.err
 }
 
 func (f *fakeStaticNodeDashboardService) ListActors(
