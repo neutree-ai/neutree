@@ -1,0 +1,101 @@
+# Neutree ModelCatalog — converted from the vLLM recipe for Qwen3.6-35B-A3B
+# Source: https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B
+# Smaller MoE sibling of Qwen3.5 — gated delta-networks MoE, 35B total /
+# 3B activated (256 experts, 8 routed + 1 shared), native 262K context.
+apiVersion: v1
+kind: ModelCatalog
+metadata:
+  name: qwen3-6-35b-a3b
+  workspace: default
+  annotations:
+    recipe.vllm.ai/hardware-verified: "H200,H100,MI300X,MI355X"
+spec:
+  engine:
+    engine: vllm
+    version: v0.17.1
+  base:
+    engine_args:
+      max_model_len: 262144
+      reasoning_parser: qwen3
+  variants:
+    bf16:
+      description: "BF16 base model — 2x H200 (TP2), or 8 GPU (TP8)."
+      model:
+        registry: huggingface
+        name: Qwen/Qwen3.6-35B-A3B
+        task: text-generation
+        info:
+          parameter_count: "35B-A3B"
+          quantization: bf16
+          context_length: "262K"
+          architecture: moe
+      resources:
+        gpu: "2"
+        accelerator:
+          type: nvidia
+          product: H200
+      vram_minimum_gb: 160
+    fp8:
+      description: "Official FP8 checkpoint — runs on a single H200."
+      model:
+        registry: huggingface
+        name: Qwen/Qwen3.6-35B-A3B-FP8
+        task: text-generation
+        info:
+          parameter_count: "35B-A3B"
+          quantization: fp8
+          context_length: "262K"
+          architecture: moe
+      resources:
+        gpu: "1"
+        accelerator:
+          type: nvidia
+          product: H200
+      vram_minimum_gb: 80
+    nvfp4:
+      description: "NVIDIA ModelOpt NVFP4 checkpoint (DGX Spark) — needs vLLM nightly / ModelOpt NVFP4 support."
+      model:
+        registry: huggingface
+        name: nvidia/Qwen3.6-35B-A3B-NVFP4
+        task: text-generation
+        info:
+          parameter_count: "35B-A3B"
+          quantization: nvfp4
+          context_length: "262K"
+          architecture: moe
+      resources:
+        gpu: "1"
+        accelerator:
+          type: nvidia
+          product: GB200
+      vram_minimum_gb: 48
+      engine_args:
+        quantization: modelopt
+        kv_cache_dtype: fp8
+        moe_backend: marlin
+  features:
+    tool-calling:
+      description: "Function / tool calling (auto tool choice, qwen3_coder parser)."
+      default: false
+      engine_args:
+        enable_auto_tool_choice: true
+        tool_call_parser: qwen3_coder
+    text-only:
+      description: "Text-only mode — skip the vision encoder to free memory for KV cache."
+      default: false
+      engine_args:
+        language_model_only: true
+    mtp-speculative:
+      description: "MTP speculative decoding (qwen3_next_mtp)."
+      category: tuning
+      default: false
+      engine_args:
+        speculative_config:
+          method: qwen3_next_mtp
+          num_speculative_tokens: 2
+    expert-parallel:
+      description: "Enable MoE expert parallelism (EP) across the engine's GPUs."
+      category: tuning
+      default: false
+      engine_args:
+        enable_expert_parallel: true
