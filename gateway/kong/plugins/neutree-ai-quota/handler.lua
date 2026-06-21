@@ -5,7 +5,7 @@
 -- reconciled onto the consumer; this plugin pulls it from neutree-api
 -- (api.get_api_key_remaining) at request time, cached briefly in kong.cache.
 --   remaining <= 0      -> 429 quota_exceeded
---   fetch fails/uncertain -> 429 quota_unavailable (FAIL-CLOSE)
+--   fetch fails/uncertain -> allowed (FAIL-OPEN: prefer inference availability)
 -- The plugin is attached only when the key has a token quota, so keys without a
 -- quota are never blocked here.
 
@@ -72,15 +72,11 @@ function QuotaHandler:access(conf)
 
     local gate, err = kong.cache:get(cache_key, { ttl = ttl, neg_ttl = ttl }, fetch_remaining, conf, api_key_id)
     if err then
-        -- FAIL-CLOSE: cannot determine remaining -> reject.
+        -- FAIL-OPEN: cannot determine remaining -> allow the request through,
+        -- preferring inference availability over strict enforcement during a
+        -- control-plane/DB outage.
         kong.log.err("neutree-ai-quota: ", err)
-        return kong.response.exit(429, {
-            error = {
-                message = "Token quota check is temporarily unavailable",
-                type = "quota_exceeded",
-                code = "quota_unavailable",
-            },
-        })
+        return
     end
 
     if gate.unlimited then
