@@ -94,8 +94,8 @@ func TestApiKeyLimits(t *testing.T) {
 		var used, rem string
 		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
 			return tx.QueryRowContext(ctx, `
-				SELECT api.get_api_key_limits($1) #>> '{token_quota,used}',
-				       api.get_api_key_limits($1) #>> '{token_quota,remaining}'`, apiKeyID).Scan(&used, &rem)
+				SELECT j #>> '{token_quota,used}', j #>> '{token_quota,remaining}'
+				FROM (SELECT api.get_api_key_limits($1) AS j) s`, apiKeyID).Scan(&used, &rem)
 		})
 		if err != nil {
 			t.Fatalf("get_api_key_limits: %v", err)
@@ -115,6 +115,18 @@ func TestApiKeyLimits(t *testing.T) {
 		}
 		if got.Valid {
 			t.Fatalf("expected NULL for non-owner, got %q", got.String)
+		}
+	})
+
+	t.Run("get_api_key_limits denies an anonymous caller (no auth.uid)", func(t *testing.T) {
+		// Without a JWT context auth.uid() is NULL; the owner check must still deny
+		// (NULL-safe), not leak limits/usage.
+		var got sql.NullString
+		if err := db.QueryRowContext(ctx, `SELECT api.get_api_key_limits($1)::text`, apiKeyID).Scan(&got); err != nil {
+			t.Fatalf("get_api_key_limits (anon): %v", err)
+		}
+		if got.Valid {
+			t.Fatalf("expected NULL for anonymous caller, got %q", got.String)
 		}
 	})
 

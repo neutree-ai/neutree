@@ -134,15 +134,26 @@ DECLARE
     v_owner UUID;
     v_ws    TEXT;
 BEGIN
-    IF current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+    -- The gateway calls with a service_role token. PostgREST exposes claims via
+    -- request.jwt.claims (JSON); some setups also set request.jwt.claim.role.
+    IF (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role') = 'service_role'
+       OR current_setting('request.jwt.claim.role', true) = 'service_role' THEN
         RETURN TRUE;
+    END IF;
+    -- No authenticated user -> deny. A NULL result here would slip past callers'
+    -- `IF NOT api.can_read_api_key_usage(...)` guards (NOT NULL is not TRUE).
+    IF auth.uid() IS NULL THEN
+        RETURN FALSE;
     END IF;
     SELECT user_id, (metadata).workspace INTO v_owner, v_ws FROM api.api_keys WHERE id = p_id;
     IF NOT FOUND THEN
         RETURN FALSE;
     END IF;
-    RETURN auth.uid() = v_owner
-        OR api.has_permission(auth.uid(), 'workspace:usage-read', v_ws);
+    RETURN COALESCE(
+        auth.uid() = v_owner
+        OR api.has_permission(auth.uid(), 'workspace:usage-read', v_ws),
+        FALSE
+    );
 END;
 $$;
 
@@ -211,7 +222,8 @@ DECLARE
     v_used   BIGINT;
 BEGIN
     SELECT (spec).limits, user_id INTO v_limits, v_uid FROM api.api_keys WHERE id = p_id;
-    IF NOT FOUND OR v_uid <> auth.uid() THEN
+    -- NULL-safe owner check: a NULL auth.uid() (anon) must not slip past `<>`.
+    IF NOT FOUND OR v_uid IS DISTINCT FROM auth.uid() THEN
         RETURN NULL;
     END IF;
     v_limits := COALESCE(v_limits, '{}'::jsonb);

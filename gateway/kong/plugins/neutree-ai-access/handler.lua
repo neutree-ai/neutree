@@ -130,10 +130,13 @@ function AccessHandler:access(conf)
                 if limit and wsec then
                     local window_start = math.floor(now / wsec) * wsec
                     local rk = "neutree_rl:" .. key .. ":" .. rl.window .. ":" .. window_start
+                    -- TTL = remaining time in this window so the counter expires
+                    -- when the window ends rather than up to a full window later.
+                    local rk_ttl = math.max(1, math.ceil(window_start + wsec - now))
                     -- Atomically initialize the window counter so two concurrent
                     -- first-requests don't both reset it to 1 (undercounting):
                     -- add() only succeeds for the first caller, then incr().
-                    dict:add(rk, 0, wsec)
+                    dict:add(rk, 0, rk_ttl)
                     local newval, err = dict:incr(rk, 1)
                     if not newval then
                         -- Counting unavailable (e.g. dict full) -> fail open.
