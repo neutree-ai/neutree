@@ -370,7 +370,7 @@ func listEndpointsByName(endpointName string) ([]v1.Endpoint, []byte, int) {
 	query.Set("metadata->>name", "eq."+endpointName)
 	query.Set("metadata->>workspace", "eq."+profileWorkspace())
 
-	body, code := callNeutreeAPI(http.MethodGet, "/api/v1/endpoints?"+query.Encode())
+	body, code := callNeutreeAPIWithBody(http.MethodGet, "/api/v1/endpoints?"+query.Encode(), nil)
 	if code != http.StatusOK {
 		return nil, body, code
 	}
