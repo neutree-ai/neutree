@@ -38,7 +38,25 @@ DCGM_FI_DEV_MEM_COPY_UTIL, gauge, Memory utilization (in %).
 DCGM_FI_DEV_FB_FREE, gauge, Frame buffer memory free (in MB).
 DCGM_FI_DEV_FB_USED, gauge, Frame buffer memory used (in MB).
 DCGM_FI_DEV_FB_TOTAL, gauge, Total frame buffer memory (in MB).
+DCGM_FI_DEV_FB_RESERVED, gauge, Frame buffer memory reserved (in MB).
+DCGM_FI_DEV_FB_USED_PERCENT, gauge, Frame buffer memory used ratio.
+DCGM_FI_DEV_BAR1_FREE, gauge, BAR1 memory free (in MB).
+DCGM_FI_DEV_BAR1_USED, gauge, BAR1 memory used (in MB).
+DCGM_FI_DEV_BAR1_TOTAL, gauge, Total BAR1 memory (in MB).
+DCGM_FI_DEV_MEMORY_TEMP, gauge, Memory temperature (in C).
+DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL, counter, Total NVLink bandwidth counter.
 DCGM_FI_DEV_XID_ERRORS, gauge, Value of the last XID error encountered.
+DCGM_FI_DEV_ECC_SBE_VOL_TOTAL, counter, Volatile single-bit ECC errors.
+DCGM_FI_DEV_ECC_DBE_VOL_TOTAL, counter, Volatile double-bit ECC errors.
+DCGM_FI_DEV_ECC_DBE_AGG_TOTAL, counter, Aggregate double-bit ECC errors.
+DCGM_FI_DEV_RETIRED_DBE, gauge, Retired pages due to double-bit ECC errors.
+DCGM_FI_DEV_RETIRED_PENDING, gauge, Pending retired pages.
+DCGM_FI_DEV_PCIE_REPLAY_COUNTER, counter, PCIe replay counter.
+DCGM_FI_DEV_NVLINK_CRC_FLIT_ERROR_COUNT_TOTAL, counter, Total NVLink CRC flit errors.
+DCGM_FI_DEV_NVLINK_REPLAY_ERROR_COUNT_TOTAL, counter, Total NVLink replay errors.
+DCGM_FI_DEV_POWER_VIOLATION, counter, Power violation counter.
+DCGM_FI_DEV_THERMAL_VIOLATION, counter, Thermal violation counter.
+DCGM_FI_DEV_PSTATE, gauge, GPU performance state.
 DCGM_FI_DRIVER_VERSION, label, Driver Version.
 `
 	NvidiaGPUMemoryNodeLabelKey      string = "nvidia.com/gpu.memory"

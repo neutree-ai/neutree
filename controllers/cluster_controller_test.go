@@ -6,10 +6,15 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/cluster"
 	clustermocks "github.com/neutree-ai/neutree/internal/cluster/mocks"
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
+	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
@@ -599,6 +604,144 @@ func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testin
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "static node cluster static-a is provisioning")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticNodeDevices(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	mockDashboard := &dashboardmocks.MockDashboardService{}
+	mockAcceleratorManager := &acceleratormocks.MockManager{}
+	controller := &ClusterController{
+		storage:            mockStorage,
+		acceleratorManager: mockAcceleratorManager,
+	}
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() {
+		dashboard.NewDashboardService = prevFactory
+	})
+
+	mockDashboard.On("ListNodes").Return([]v1.NodeSummary{
+		{
+			IP: "192.168.19.218",
+			Raylet: v1.Raylet{
+				State: v1.AliveNodeState,
+				Resources: map[string]float64{
+					"CPU":             32,
+					"GPU":             2,
+					"memory":          64 * resourceview.BytesPerGiB,
+					"NVIDIA_Tesla_T4": 2,
+				},
+				CoreWorkersStats: []v1.CoreWorkerStats{
+					{
+						UsedResources: map[string]v1.RayResourceAllocations{
+							"GPU": {
+								ResourceSlots: []v1.RayResourceSlot{{Allocation: 1}},
+							},
+							"NVIDIA_Tesla_T4": {
+								ResourceSlots: []v1.RayResourceSlot{{Allocation: 1}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+	mockAcceleratorManager.On("GetAllParsers").Return(map[string]resourceview.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	}).Once()
+
+	mockStorage.On("GenericQuery", storage.STATIC_NODE_TABLE, "*", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			nodes, ok := args.Get(3).(*[]v1.StaticNode)
+			require.True(t, ok)
+			*nodes = []v1.StaticNode{
+				{
+					Metadata: &v1.Metadata{
+						Name:      "192.168.19.218",
+						Workspace: "default",
+					},
+					Spec: &v1.StaticNodeSpec{
+						Cluster: "static-a",
+						IP:      "192.168.19.218",
+						Role:    v1.StaticNodeRoleHead,
+					},
+					Status: &v1.StaticNodeStatus{
+						Accelerator: &v1.StaticNodeAcceleratorStatus{
+							Type:         string(v1.AcceleratorTypeNVIDIAGPU),
+							ProductModel: "Tesla T4",
+							Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+								{
+									UUID:         "GPU-0",
+									ProductModel: "Tesla T4",
+									MemoryMiB:    15360,
+									Healthy:      true,
+								},
+								{
+									UUID:         "GPU-1",
+									ProductModel: "Tesla T4",
+									MemoryMiB:    15360,
+									Healthy:      true,
+								},
+							},
+						},
+						Allocations: []v1.StaticNodeAllocationStatus{
+							{
+								Endpoint:   "demo-ep",
+								InstanceID: "actor-a",
+								Devices: []v1.DeviceAllocation{
+									{
+										UUID:      "GPU-0",
+										Product:   "Tesla T4",
+										MemoryMiB: 15360,
+										CoreUnits: 100,
+										NodeID:    "192.168.19.218",
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+		}).
+		Return(nil).
+		Once()
+
+	resources, err := controller.calculateStaticNodeClusterResources(&v1.StaticNodeCluster{
+		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
+		Spec: &v1.StaticNodeClusterSpec{
+			Nodes: []v1.StaticNodeClusterNodeSpec{
+				{Name: "192.168.19.218", IP: "192.168.19.218", Role: v1.StaticNodeRoleHead},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resources)
+	require.NotNil(t, resources.AcceleratorMetadata)
+	require.Contains(t, resources.AcceleratorMetadata, v1.AcceleratorTypeNVIDIAGPU)
+	require.Contains(t, resources.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products, v1.AcceleratorProduct("NVIDIA_Tesla_T4"))
+	assert.Equal(t, float64(15360),
+		resources.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_Tesla_T4"].MemoryTotalMiB)
+	require.Contains(t, resources.Allocatable.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
+	require.Contains(t, resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Products, v1.AcceleratorProduct("NVIDIA_Tesla_T4"))
+	assert.Equal(t, float64(2),
+		resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_Tesla_T4"].Quantity)
+	require.Contains(t, resources.Available.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
+	require.Contains(t, resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Products, v1.AcceleratorProduct("NVIDIA_Tesla_T4"))
+	assert.Equal(t, float64(1),
+		resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_Tesla_T4"].Quantity)
+	require.Contains(t, resources.NodeResources, "192.168.19.218")
+	require.Len(t, resources.NodeResources["192.168.19.218"].Devices, 2)
+	assert.Equal(t, "NVIDIA_Tesla_T4", resources.NodeResources["192.168.19.218"].Devices[0].Product)
+	assert.Equal(t, int64(0), resources.NodeResources["192.168.19.218"].Devices[0].Available.MemoryMiB)
+	assert.Equal(t, int64(15360), resources.NodeResources["192.168.19.218"].Devices[1].Available.MemoryMiB)
+
+	mockDashboard.AssertExpectations(t)
+	mockAcceleratorManager.AssertExpectations(t)
 	mockStorage.AssertExpectations(t)
 }
 

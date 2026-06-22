@@ -328,6 +328,21 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, []string{"--gpus all"}, profile.Metrics.Exporter.Runtime.DockerRunOptions)
 	require.Len(t, profile.Metrics.Exporter.ConfigFiles, 1)
 	assert.Equal(t, nvidiaDCGMExporterCollectorsPath, profile.Metrics.Exporter.ConfigFiles[0].Path)
-	assert.NotContains(t, profile.Metrics.Exporter.ConfigFiles[0].Content, "PROF")
-	assert.Contains(t, profile.Metrics.Exporter.ConfigFiles[0].Content, "DCGM_FI_DEV_FB_TOTAL")
+	collectors := profile.Metrics.Exporter.ConfigFiles[0].Content
+	for _, metric := range []string{
+		"DCGM_FI_DEV_GPU_UTIL",
+		"DCGM_FI_DEV_FB_USED",
+		"DCGM_FI_DEV_FB_TOTAL",
+		"DCGM_FI_DEV_FB_USED_PERCENT",
+		"DCGM_FI_DEV_XID_ERRORS",
+		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL",
+		"DCGM_FI_DEV_RETIRED_PENDING",
+		"DCGM_FI_DEV_PCIE_REPLAY_COUNTER",
+		"DCGM_FI_DEV_POWER_VIOLATION",
+		"DCGM_FI_DEV_THERMAL_VIOLATION",
+	} {
+		assert.Contains(t, collectors, metric)
+	}
+	assert.NotContains(t, collectors, "DCGM_FI_PROF_")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_CLOCKS_EVENT_REASONS")
 }

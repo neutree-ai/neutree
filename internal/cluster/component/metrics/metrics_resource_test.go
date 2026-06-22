@@ -406,7 +406,20 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	assert.Assert(t, dcgm.Spec.Template.Spec.Affinity == nil)
 
 	config := findMetricsConfigMap(t, objs, "nvidia-dcgm-exporter-config")
-	assert.Assert(t, strings.Contains(config.Data["default-counters.csv"], "DCGM_FI_DEV_GPU_UTIL"))
+	collectors := config.Data["default-counters.csv"]
+	for _, metric := range []string{
+		"DCGM_FI_DEV_GPU_UTIL",
+		"DCGM_FI_DEV_FB_USED_PERCENT",
+		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL",
+		"DCGM_FI_DEV_RETIRED_PENDING",
+		"DCGM_FI_DEV_PCIE_REPLAY_COUNTER",
+		"DCGM_FI_DEV_POWER_VIOLATION",
+		"DCGM_FI_DEV_THERMAL_VIOLATION",
+	} {
+		assert.Assert(t, strings.Contains(collectors, metric))
+	}
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_PROF_"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_CLOCKS_EVENT_REASONS"))
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
