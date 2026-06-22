@@ -1,15 +1,15 @@
 -- neutree-ai-access: per-consumer access enforcement for an API key.
 --
--- Converged-design (NEUTREE-GENERAL-9): the management plane reconciles each API
--- key's static limits onto its Kong consumer as this plugin's config (no per-
--- request control-plane call). Enforced from local config:
+-- The management plane reconciles each API key's static limits onto its Kong
+-- consumer as this plugin's config (no per-request control-plane call).
+-- Enforced from local config:
 --   * disabled        -> 403 key_disabled
 --   * allowed_models  -> 403 model_not_permitted (fail-close: set but the request
 --                        model is missing or not in the list -> deny)
 --   * concurrency     -> 429 concurrency_exceeded (in-flight counter)
 --   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window)
 -- The plugin is attached only when the key actually has access limits, so an
--- unconfigured key has no plugin and is unrestricted (the agreed boundary).
+-- unconfigured key has no plugin and is unrestricted (by design).
 
 local cjson = require("cjson.safe")
 

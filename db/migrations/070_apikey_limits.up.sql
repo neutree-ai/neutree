@@ -1,5 +1,5 @@
--- API Key 限额收敛 v1 (NEUTREE-GENERAL-9): 把 quota + access 收敛为 API Key 自身
--- 的一个扩展字段 spec.limits（单一对象），保证创建/编辑的一致性与原子性。
+-- API Key 限额：把 quota + access 限额放在 API Key 自身的一个扩展字段
+-- spec.limits（单一对象），保证创建/编辑的一致性与原子性。
 --
 -- limits JSONB 形状（缺省/缺字段=不限）：
 --   {
@@ -117,7 +117,7 @@ AS $$
       AND (d.spec).usage_date <= CURRENT_DATE;
 $$;
 
--- 6) get_api_key_remaining：网关 quota 插件按请求拉取的「剩余 token」标量（A1）。
+-- 6) get_api_key_remaining：网关 quota 插件按请求拉取的「剩余 token」标量。
 --    无 token_quota 配额 -> NULL（不限）；否则 limit - 当期用量（可为负，网关判 ≤0 拦截）。
 CREATE OR REPLACE FUNCTION api.get_api_key_remaining(p_id UUID)
 RETURNS BIGINT

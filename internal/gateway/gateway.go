@@ -18,7 +18,7 @@ type GatewayOptions struct {
 	LogRemoteWriteUrl string
 	Storage           storage.Storage
 	// NeutreeAPIUrl + ServiceToken let the per-key quota plugin pull the dynamic
-	// remaining token count from neutree-api (PostgREST) at request time (A1).
+	// remaining token count from neutree-api (PostgREST) at request time.
 	NeutreeAPIUrl string
 	ServiceToken  string
 }

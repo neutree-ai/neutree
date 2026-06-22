@@ -217,7 +217,7 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 	}
 
 	// No active limit -> no plugin (syncAPIKeyLimitPlugins deletes any stale one),
-	// so an unconfigured key stays unrestricted (the agreed boundary).
+	// so an unconfigured key stays unrestricted (by design).
 	if !needed {
 		return nil
 	}
@@ -233,7 +233,7 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 
 // generateAPIKeyQuotaPlugin builds the per-consumer neutree-ai-quota plugin when
 // the key has a token quota. The plugin pulls the dynamic remaining count from
-// neutree-api at request time (A1). Returns nil when there is no token quota, or
+// neutree-api at request time. Returns nil when there is no token quota, or
 // when the neutree-api URL / service token are not configured (degrade to "no
 // quota enforcement" rather than mis-enforce).
 func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {

@@ -9,9 +9,9 @@ type ApiKeySpec struct {
 	Limits *ApiKeyLimits `json:"limits,omitempty"`
 }
 
-// ApiKeyLimits is the converged limit configuration carried on the API key
-// itself (NEUTREE-GENERAL-9). It holds only configuration; usage/remaining is
-// derived from the api_daily_usage ledger, never stored here.
+// ApiKeyLimits is the limit configuration carried on the API key itself. It
+// holds only configuration; usage/remaining is derived from the api_daily_usage
+// ledger, never stored here.
 type ApiKeyLimits struct {
 	TokenQuota    *ApiKeyTokenQuota `json:"token_quota,omitempty"`
 	RPS           int               `json:"rps,omitempty"`

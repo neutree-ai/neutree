@@ -1,4 +1,4 @@
--- Revert API Key 限额收敛 v1.
+-- Revert API Key 限额（spec.limits）。
 
 DROP FUNCTION IF EXISTS api.get_api_keys_usage_summary(TEXT);
 DROP FUNCTION IF EXISTS api.get_workspace_models(TEXT);

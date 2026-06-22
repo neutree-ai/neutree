@@ -1,8 +1,8 @@
 -- neutree-ai-quota: per-consumer token-quota enforcement for an API key.
 --
--- Converged-design (NEUTREE-GENERAL-9, option A1): the token quota's *remaining*
--- count is the only dynamic value, so unlike the static access limits it is NOT
--- reconciled onto the consumer; this plugin pulls it from neutree-api
+-- The token quota's *remaining* count is the only dynamic value, so unlike the
+-- static access limits it is NOT reconciled onto the consumer; this plugin pulls
+-- it from neutree-api
 -- (api.get_api_key_remaining) at request time, cached briefly in kong.cache.
 --   remaining <= 0      -> 429 quota_exceeded
 --   fetch fails/uncertain -> allowed (FAIL-OPEN: prefer inference availability)

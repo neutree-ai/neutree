@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestApiKeyLimits covers the API Key limits convergence (migration 069): limits
-// live on api_key.spec.limits (single object). Verifies create_api_key(p_limits),
+// TestApiKeyLimits covers the API Key limits that live on api_key.spec.limits
+// (single object). Verifies create_api_key(p_limits),
 // set_api_key_limits (owner-guarded), get_api_key_limits (config + period
 // used/remaining) and get_api_key_remaining (the dynamic scalar the gateway
 // quota plugin pulls), with usage drawn from the api_daily_usage ledger.
