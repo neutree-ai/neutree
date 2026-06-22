@@ -67,7 +67,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	assert.Equal(t, "minute", rl[1]["window"])
 	assert.Equal(t, 600, rl[1]["limit"])
 
-	// disabled only -> plugin present; optional fields are nil (merge-patch clears them)
+	// disabled only -> plugin present; the other fields are emitted as explicit empties
 	p2 := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
 		ID:   "k2",
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{Disabled: true}},

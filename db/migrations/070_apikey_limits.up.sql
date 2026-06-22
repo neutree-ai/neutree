@@ -73,7 +73,7 @@ BEGIN
 
     -- Keep the legacy spec.quota field consistent with the enforced token quota
     -- (spec.limits.token_quota.limit) so clients reading either see the same value.
-    v_quota := COALESCE((p_limits #>> '{token_quota,limit}')::bigint, p_quota);
+    v_quota := COALESCE((p_limits #>> '{token_quota,limit}')::bigint, 0);
 
     v_key_id := gen_random_uuid();
     v_key_value := api.generate_api_key(p_user_id, v_key_id, p_expires_in);
