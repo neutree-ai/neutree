@@ -34,12 +34,18 @@ local function fetch_remaining(conf, api_key_id)
         },
     })
 
+    -- Fail-open on any fetch problem and CACHE the decision (return a value, not
+    -- an error) so kong.cache memoizes "unlimited" for cache_ttl instead of
+    -- re-calling the control plane + logging on every request during an outage.
     if not res then
-        return nil, "remaining fetch failed: " .. tostring(err)
+        kong.log.warn("neutree-ai-quota: remaining fetch failed: ", tostring(err))
+        return { unlimited = true }
     end
 
     if res.status ~= 200 then
-        return nil, "remaining fetch status " .. tostring(res.status) .. " body " .. tostring(res.body)
+        kong.log.warn("neutree-ai-quota: remaining fetch status ", tostring(res.status),
+            " body ", tostring(res.body))
+        return { unlimited = true }
     end
 
     local body = res.body
@@ -54,7 +60,8 @@ local function fetch_remaining(conf, api_key_id)
     end
 
     if n == nil then
-        return nil, "unparseable remaining: " .. tostring(body)
+        kong.log.warn("neutree-ai-quota: unparseable remaining: ", tostring(body))
+        return { unlimited = true }
     end
 
     return { remaining = n }

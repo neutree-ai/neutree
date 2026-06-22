@@ -74,9 +74,11 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	})
 	require.NotNil(t, p2)
 	assert.Equal(t, true, p2.Config["disabled"])
-	assert.Nil(t, p2.Config["allowed_models"])
-	assert.Nil(t, p2.Config["concurrency"])
-	assert.Nil(t, p2.Config["rate_limits"])
+	// Cleared fields are emitted as explicit empties (not nil) so updates overwrite
+	// prior config; the handler treats empty list / zero as unrestricted.
+	assert.Equal(t, []string{}, p2.Config["allowed_models"])
+	assert.Equal(t, 0, p2.Config["concurrency"])
+	assert.Equal(t, []map[string]interface{}{}, p2.Config["rate_limits"])
 
 	// RPS only -> single second-window rate limit; disabled present and false
 	p3 := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
@@ -124,6 +126,13 @@ func TestGenerateAPIKeyQuotaPlugin(t *testing.T) {
 	assert.Equal(t, "http://neutree-api:3000", p.Config["api_url"])
 	assert.Equal(t, "tok", p.Config["service_token"])
 	assert.Equal(t, 5, p.Config["cache_ttl"])
+
+	// A trailing slash on the configured URL is trimmed so the plugin builds
+	// "<url>/rpc/..." rather than "<url>//rpc/...".
+	kSlash := &Kong{neutreeAPIUrl: "http://neutree-api:3000/", serviceToken: "tok"}
+	ps := kSlash.generateAPIKeyQuotaPlugin(cid, apiKey)
+	require.NotNil(t, ps)
+	assert.Equal(t, "http://neutree-api:3000", ps.Config["api_url"])
 }
 
 // TestSyncAPIKeyLimitPlugins verifies the reconcile/prune path: the desired

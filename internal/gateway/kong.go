@@ -179,16 +179,16 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 	}
 
 	l := apiKey.Spec.Limits
-	// Emit a COMPLETE config: every field is set, with nil for "off". syncPlugin
-	// reconciles via JSON merge-patch (RFC 7386) where an omitted key keeps the
-	// stale value and a null key clears it — so a sparse config would never turn a
-	// limit back off. disabled is always an explicit bool; the optional fields are
-	// the value when active or nil (merge-patch null) to clear any prior value.
+	// Emit a COMPLETE config with explicit empty values for "off" (not null) so an
+	// update always overwrites prior config. syncPlugin reconciles via JSON
+	// merge-patch (RFC 7386), under which an omitted key keeps the stale value;
+	// using [] / 0 / false avoids depending on null-clearing to turn a limit back
+	// off, and the handler treats an empty list / zero as "unrestricted".
 	cfg := map[string]interface{}{
 		"disabled":       l.Disabled,
-		"allowed_models": nil,
-		"concurrency":    nil,
-		"rate_limits":    nil,
+		"allowed_models": []string{},
+		"concurrency":    0,
+		"rate_limits":    []map[string]interface{}{},
 	}
 	needed := l.Disabled
 
@@ -255,7 +255,7 @@ func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) 
 		Consumer:     &kong.Consumer{ID: consumerID},
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
 		Config: map[string]interface{}{
-			"api_url":       k.neutreeAPIUrl,
+			"api_url":       strings.TrimRight(k.neutreeAPIUrl, "/"),
 			"service_token": k.serviceToken,
 			"cache_ttl":     5,
 		},

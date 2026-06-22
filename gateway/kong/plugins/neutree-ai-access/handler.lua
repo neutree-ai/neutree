@@ -20,13 +20,16 @@ local AccessHandler = {
 }
 
 local WINDOW_SECONDS = { second = 1, minute = 60, hour = 3600, day = 86400 }
+-- TTL on the in-flight concurrency counter so stale per-key entries expire
+-- instead of accumulating forever (it is far longer than any single request).
+local CONCURRENCY_TTL = 3600
 
 local function consumer_id()
     local c = kong.client.get_consumer()
     if c and c.custom_id and c.custom_id ~= "" then
         return c.custom_id
     end
-    return "unknown"
+    return nil
 end
 
 local function request_model()
@@ -53,7 +56,9 @@ local function list_has(list, value)
 end
 
 local function counter_dict()
-    return ngx.shared.kong_rate_limiting_counters or ngx.shared.kong_locks
+    -- Only the dedicated rate-limiting counters dict; return nil (callers fail
+    -- open) rather than writing into kong_locks, which Kong uses for locking.
+    return ngx.shared.kong_rate_limiting_counters
 end
 
 local function deny403(code, message)
@@ -81,12 +86,18 @@ function AccessHandler:access(conf)
 
     local key = consumer_id()
 
+    -- Counter-based limits below need an identified consumer; without one, fail
+    -- open rather than throttle every such request against a shared bucket.
+    if not key then
+        return
+    end
+
     -- 3) Concurrency: increment in-flight, remember it for log() to decrement.
     if conf.concurrency and tonumber(conf.concurrency) and tonumber(conf.concurrency) > 0 then
         local dict = counter_dict()
         if dict then
             local cc_key = "neutree_cc:" .. key
-            local inflight = dict:incr(cc_key, 1, 0)
+            local inflight = dict:incr(cc_key, 1, 0, CONCURRENCY_TTL)
             kong.ctx.plugin.cc_key = cc_key
             if inflight and inflight > tonumber(conf.concurrency) then
                 dict:incr(cc_key, -1)
