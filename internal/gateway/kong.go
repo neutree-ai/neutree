@@ -121,7 +121,7 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 
 	currentGroups, _, err := k.kongClient.ACLs.ListForConsumer(context.Background(), consumerID, nil)
 	if err != nil {
-		return errors.Wrapf(err, "failed to list ACL groups for consumer %s", apiKey.ID)
+		return errors.Wrapf(err, "failed to list ACL groups for api key %s", apiKey.ID)
 	}
 
 	toCreate, toDelete := diffNeutreeACLGroups(currentGroups, desiredGroups)
@@ -282,7 +282,7 @@ func (k *Kong) syncAPIKeyLimitPlugins(consumerID *string, apiKey *v1.ApiKey) err
 
 	curPlugins, err := k.kongClient.Plugins.ListAllForConsumer(context.Background(), consumerID)
 	if err != nil {
-		return errors.Wrapf(err, "failed to list plugins for consumer %s", apiKey.ID)
+		return errors.Wrapf(err, "failed to list plugins for api key %s", apiKey.ID)
 	}
 
 	for _, cur := range curPlugins {

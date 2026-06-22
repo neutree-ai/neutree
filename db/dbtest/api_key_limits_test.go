@@ -40,16 +40,21 @@ func TestApiKeyLimits(t *testing.T) {
 	})
 
 	t.Run("limits round-trip on spec", func(t *testing.T) {
-		var lim, disabled, model string
+		var lim, disabled, model, quota string
 		if err := db.QueryRowContext(ctx, `
 			SELECT (spec).limits #>> '{token_quota,limit}',
 			       (spec).limits #>> '{disabled}',
-			       (spec).limits #>> '{allowed_models,0}'
-			FROM api.api_keys WHERE id = $1`, apiKeyID).Scan(&lim, &disabled, &model); err != nil {
+			       (spec).limits #>> '{allowed_models,0}',
+			       (spec).quota::text
+			FROM api.api_keys WHERE id = $1`, apiKeyID).Scan(&lim, &disabled, &model, &quota); err != nil {
 			t.Fatalf("read spec.limits: %v", err)
 		}
 		if lim != "300" || disabled != "false" || model != "gpt-4" {
 			t.Fatalf("unexpected limits: limit=%s disabled=%s model=%s", lim, disabled, model)
+		}
+		// legacy spec.quota mirrors the enforced token_quota.limit (p_quota was 0)
+		if quota != "300" {
+			t.Fatalf("expected spec.quota mirrored to 300, got %s", quota)
 		}
 	})
 
@@ -122,14 +127,17 @@ func TestApiKeyLimits(t *testing.T) {
 		if err != nil {
 			t.Fatalf("set_api_key_limits: %v", err)
 		}
-		var lim, period string
+		var lim, period, quota string
 		if err := db.QueryRowContext(ctx, `
-			SELECT (spec).limits #>> '{token_quota,limit}', (spec).limits #>> '{token_quota,period}'
-			FROM api.api_keys WHERE id = $1`, apiKeyID).Scan(&lim, &period); err != nil {
+			SELECT (spec).limits #>> '{token_quota,limit}', (spec).limits #>> '{token_quota,period}', (spec).quota::text
+			FROM api.api_keys WHERE id = $1`, apiKeyID).Scan(&lim, &period, &quota); err != nil {
 			t.Fatalf("read updated limits: %v", err)
 		}
 		if lim != "500" || period != "daily" {
 			t.Fatalf("expected limit=500 period=daily, got limit=%s period=%s", lim, period)
+		}
+		if quota != "500" {
+			t.Fatalf("expected spec.quota mirrored to 500, got %s", quota)
 		}
 	})
 

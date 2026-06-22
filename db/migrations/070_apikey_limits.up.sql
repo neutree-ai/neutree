@@ -49,6 +49,7 @@ DECLARE
     p_user_id UUID;
     v_key_id UUID;
     v_key_value TEXT;
+    v_quota BIGINT;
     v_result api.api_keys;
 BEGIN
     p_user_id = auth.uid();
@@ -70,6 +71,10 @@ BEGIN
         );
     END IF;
 
+    -- Keep the legacy spec.quota field consistent with the enforced token quota
+    -- (spec.limits.token_quota.limit) so clients reading either see the same value.
+    v_quota := COALESCE((p_limits #>> '{token_quota,limit}')::bigint, p_quota);
+
     v_key_id := gen_random_uuid();
     v_key_value := api.generate_api_key(p_user_id, v_key_id, p_expires_in);
 
@@ -80,7 +85,7 @@ BEGIN
         'v1',
         'ApiKey',
         ROW(p_name, p_display_name, p_workspace, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-        ROW(p_quota, p_expires_in, p_limits)::api.api_key_spec,
+        ROW(v_quota, p_expires_in, p_limits)::api.api_key_spec,
         ROW('Pending', CURRENT_TIMESTAMP, NULL, v_key_value, 0, CURRENT_TIMESTAMP, NULL)::api.api_key_status,
         p_user_id
     )
@@ -99,7 +104,13 @@ DECLARE
     v_result api.api_keys;
 BEGIN
     UPDATE api.api_keys k
-    SET spec = ROW((k.spec).quota, (k.spec).expires_in, p_limits)::api.api_key_spec
+    -- Mirror the enforced token quota into the legacy spec.quota so both stay
+    -- consistent (0 when the new limits carry no token_quota).
+    SET spec = ROW(
+        COALESCE((p_limits #>> '{token_quota,limit}')::bigint, 0),
+        (k.spec).expires_in,
+        p_limits
+    )::api.api_key_spec
     WHERE k.id = p_id AND k.user_id = auth.uid()
     RETURNING * INTO v_result;
 

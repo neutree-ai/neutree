@@ -20,6 +20,17 @@ local QuotaHandler = {
 -- Returns a table so kong.cache can memoize:
 --   { remaining = <number> }  -> enforce
 --   { unlimited = true }      -> never block (no quota set)
+-- Cap how much of an upstream body we log so a large/HTML error page can't spam
+-- logs or leak details.
+local MAX_LOG_BODY = 256
+local function trunc_body(b)
+    b = tostring(b)
+    if #b > MAX_LOG_BODY then
+        return string.sub(b, 1, MAX_LOG_BODY) .. "...(truncated)"
+    end
+    return b
+end
+
 local function fetch_remaining(conf, api_key_id)
     local httpc = http.new()
     httpc:set_timeout(conf.timeout or 2000)
@@ -44,7 +55,7 @@ local function fetch_remaining(conf, api_key_id)
 
     if res.status ~= 200 then
         kong.log.warn("neutree-ai-quota: remaining fetch status ", tostring(res.status),
-            " body ", tostring(res.body))
+            " body ", trunc_body(res.body))
         return { unlimited = true }
     end
 
@@ -60,7 +71,7 @@ local function fetch_remaining(conf, api_key_id)
     end
 
     if n == nil then
-        kong.log.warn("neutree-ai-quota: unparseable remaining: ", tostring(body))
+        kong.log.warn("neutree-ai-quota: unparseable remaining: ", trunc_body(body))
         return { unlimited = true }
     end
 
