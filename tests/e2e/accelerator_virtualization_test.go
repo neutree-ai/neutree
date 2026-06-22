@@ -1,8 +1,12 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -81,6 +85,61 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			Expect(component.Version).NotTo(BeEmpty())
 
 			productName = expectNVIDIAVirtualizedClusterResources(cluster)
+		})
+
+		// TestRail: C2722839
+		It("should reject a vGPU endpoint when requested memory exceeds per-device availability", Label("C2722839", "negative"), func() {
+			cluster := eventuallyVirtualizedClusterResourceInfo(clusterName)
+			if productName == "" {
+				productName = expectNVIDIAVirtualizedClusterResources(cluster)
+			}
+
+			requestedMemoryMiB := maxHealthyProductAvailableMemoryMiB(cluster, productName) + 1
+			endpointName := "e2e-vgpu-overmem-" + Cfg.RunID
+			DeferCleanup(func() {
+				endpoints, _, code := listEndpointsByName(endpointName)
+				if code == http.StatusOK && len(endpoints) > 0 {
+					deleteEndpoint(endpointName)
+				}
+			})
+
+			payload := map[string]any{
+				"metadata": map[string]any{
+					"name":      endpointName,
+					"workspace": profileWorkspace(),
+				},
+				"spec": map[string]any{
+					"cluster": clusterName,
+					"resources": map[string]any{
+						"gpu": "1",
+						"accelerator": map[string]any{
+							v1.AcceleratorTypeKey:                      string(v1.AcceleratorTypeNVIDIAGPU),
+							v1.AcceleratorProductKey:                   productName,
+							v1.AcceleratorVirtualizationMemoryMiBKey:   strconv.FormatInt(requestedMemoryMiB, 10),
+							v1.AcceleratorVirtualizationCorePercentKey: vgpuEndpointCorePercent,
+						},
+					},
+				},
+			}
+
+			By("Posting an over-capacity vGPU endpoint")
+			body, code := callNeutreeAPIWithJSON(http.MethodPost, "/api/v1/endpoints", payload)
+			Expect(code).To(Equal(http.StatusBadRequest), "POST response: %s", string(body))
+
+			var response struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+				Hint    string `json:"hint"`
+			}
+			Expect(json.Unmarshal(body, &response)).To(Succeed(), "POST response: %s", string(body))
+			Expect(response.Code).To(Equal("10220"))
+			Expect(response.Message).To(Equal("endpoint accelerator virtualization resources exceed cluster availability"))
+			Expect(response.Hint).To(ContainSubstring(productName))
+
+			By("Confirming the rejected endpoint was not persisted")
+			endpoints, listBody, listCode := listEndpointsByName(endpointName)
+			Expect(listCode).To(Equal(http.StatusOK), "GET endpoint response: %s", string(listBody))
+			Expect(endpoints).To(BeEmpty())
 		})
 
 		It("should deploy a vGPU endpoint and expose endpoint resource allocation", func() {
@@ -277,6 +336,49 @@ func expectClusterProductDevices(nodes map[string]*v1.NodeResourceStatus, produc
 	ExpectWithOffset(1, count).To(BeNumerically(">", 0))
 
 	return count
+}
+
+func maxHealthyProductAvailableMemoryMiB(cluster v1.Cluster, productName string) int64 {
+	ExpectWithOffset(1, cluster.Status).NotTo(BeNil())
+	ExpectWithOffset(1, cluster.Status.ResourceInfo).NotTo(BeNil())
+
+	var maxMemoryMiB int64
+	for nodeID, node := range cluster.Status.ResourceInfo.NodeResources {
+		ExpectWithOffset(1, node).NotTo(BeNil(), "node %s", nodeID)
+
+		for _, device := range node.Devices {
+			if device == nil || !device.Health || device.Product != productName {
+				continue
+			}
+
+			ExpectWithOffset(1, device.Available).NotTo(BeNil(), "node %s device %s", nodeID, device.UUID)
+			if device.Available.MemoryMiB > maxMemoryMiB {
+				maxMemoryMiB = device.Available.MemoryMiB
+			}
+		}
+	}
+
+	ExpectWithOffset(1, maxMemoryMiB).To(BeNumerically(">", 0), "product %s should have healthy available devices", productName)
+
+	return maxMemoryMiB
+}
+
+func listEndpointsByName(endpointName string) ([]v1.Endpoint, []byte, int) {
+	GinkgoHelper()
+
+	query := url.Values{}
+	query.Set("metadata->>name", "eq."+endpointName)
+	query.Set("metadata->>workspace", "eq."+profileWorkspace())
+
+	body, code := callNeutreeAPI(http.MethodGet, "/api/v1/endpoints?"+query.Encode())
+	if code != http.StatusOK {
+		return nil, body, code
+	}
+
+	var endpoints []v1.Endpoint
+	ExpectWithOffset(1, json.Unmarshal(body, &endpoints)).To(Succeed(), "GET endpoint response: %s", string(body))
+
+	return endpoints, body, code
 }
 
 func expectNVIDIAProductMemoryMiB(cluster v1.Cluster, productName string) int64 {

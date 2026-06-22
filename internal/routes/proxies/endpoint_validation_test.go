@@ -3,6 +3,8 @@ package proxies
 import (
 	"testing"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -181,4 +183,234 @@ func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
 
 		assert.Nil(t, err)
 	})
+}
+
+func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
+	t.Run("rejects request that exceeds per device memory availability", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "8193",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10220", err.Code)
+		assert.Contains(t, err.Hint, "Tesla-T4")
+		assert.Contains(t, err.Hint, "satisfiable")
+	})
+
+	t.Run("rejects product absent from cluster resource info", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Missing-GPU", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10220", err.Code)
+		assert.Contains(t, err.Hint, "Missing-GPU")
+	})
+
+	t.Run("rejects fragmented capacity that cannot satisfy each requested virtual card", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "8193",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 32768, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
+			healthyDevice("gpu-1", "Tesla-T4", 8192, 100),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10220", err.Code)
+		assert.Contains(t, err.Hint, "requested_gpu=2")
+	})
+
+	t.Run("ignores unhealthy matching devices", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 32768, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
+			unhealthyDevice("gpu-1", "Tesla-T4", 8192, 100),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10220", err.Code)
+		assert.Contains(t, err.Hint, "satisfiable_devices=1")
+	})
+
+	t.Run("allows request when enough healthy matching devices fit", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 8192, 50),
+			healthyDevice("gpu-1", "Tesla-T4", 8192, 50),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("derives memory from memory percent using product metadata", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryPercentKey: "51",
+			v1.AcceleratorVirtualizationCorePercentKey:   "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 10001, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 5101, 100),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.Nil(t, err)
+	})
+}
+
+func TestValidateEndpointAcceleratorVirtualizationCreateCapacityLooksUpClusterByNameAndWorkspace(t *testing.T) {
+	resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+		v1.AcceleratorVirtualizationCorePercentKey: "50",
+	})
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
+	})
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Name:      "endpoint",
+			Workspace: "team-a",
+		},
+		Spec: &v1.EndpointSpec{
+			Cluster:   "cluster-a",
+			Resources: resources,
+		},
+	}
+
+	err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
+
+	assert.Nil(t, err)
+	assert.Equal(t, []storage.Filter{
+		{Column: "metadata->name", Operator: "eq", Value: `"cluster-a"`},
+		{Column: "metadata->workspace", Operator: "eq", Value: `"team-a"`},
+	}, clusterStorage.listOption.Filters)
+}
+
+func acceleratorVirtualizationResources(gpu string, product string, virtualization map[string]string) *v1.ResourceSpec {
+	accelerator := map[string]string{
+		v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
+		v1.AcceleratorProductKey: product,
+	}
+	for key, value := range virtualization {
+		accelerator[key] = value
+	}
+
+	return &v1.ResourceSpec{
+		GPU:         &gpu,
+		Accelerator: accelerator,
+	}
+}
+
+func clusterWithNVIDIAGPUProduct(product string, productMemoryMiB float64, devices []*v1.DeviceResource) *v1.Cluster {
+	return &v1.Cluster{
+		Status: &v1.ClusterStatus{
+			ResourceInfo: &v1.ClusterResources{
+				ResourceStatus: v1.ResourceStatus{
+					Available: &v1.ResourceInfo{
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
+									v1.AcceleratorProduct(product): {
+										Quantity: 1,
+										Virtualization: &v1.AcceleratorVirtualizationResource{
+											MemoryMiB: productMemoryMiB,
+											CoreUnits: 100,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+					v1.AcceleratorTypeNVIDIAGPU: {
+						Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
+							v1.AcceleratorProduct(product): {
+								MemoryTotalMiB: productMemoryMiB,
+							},
+						},
+					},
+				},
+				NodeResources: map[string]*v1.NodeResourceStatus{
+					"node-0": {
+						Devices: devices,
+					},
+				},
+			},
+		},
+	}
+}
+
+func healthyDevice(uuid string, product string, memoryMiB int64, coreUnits int64) *v1.DeviceResource {
+	return &v1.DeviceResource{
+		UUID:    uuid,
+		Product: product,
+		Health:  true,
+		Available: &v1.DeviceResourcePool{
+			MemoryMiB: memoryMiB,
+			CoreUnits: coreUnits,
+		},
+	}
+}
+
+func unhealthyDevice(uuid string, product string, memoryMiB int64, coreUnits int64) *v1.DeviceResource {
+	device := healthyDevice(uuid, product, memoryMiB, coreUnits)
+	device.Health = false
+
+	return device
+}
+
+type fakeClusterStorage struct {
+	clusters   []v1.Cluster
+	listOption storage.ListOption
+}
+
+func (s *fakeClusterStorage) CreateCluster(data *v1.Cluster) error {
+	return nil
+}
+
+func (s *fakeClusterStorage) DeleteCluster(id string) error {
+	return nil
+}
+
+func (s *fakeClusterStorage) UpdateCluster(id string, data *v1.Cluster) error {
+	return nil
+}
+
+func (s *fakeClusterStorage) GetCluster(id string) (*v1.Cluster, error) {
+	return nil, nil
+}
+
+func (s *fakeClusterStorage) ListCluster(option storage.ListOption) ([]v1.Cluster, error) {
+	s.listOption = option
+
+	return s.clusters, nil
 }
