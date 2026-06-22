@@ -113,13 +113,17 @@ function AccessHandler:access(conf)
                 if limit and wsec then
                     local window_start = math.floor(now / wsec) * wsec
                     local rk = "neutree_rl:" .. key .. ":" .. rl.window .. ":" .. window_start
+                    -- Atomically initialize the window counter so two concurrent
+                    -- first-requests don't both reset it to 1 (undercounting):
+                    -- add() only succeeds for the first caller, then incr().
+                    dict:add(rk, 0, wsec)
                     local newval, err = dict:incr(rk, 1)
                     if not newval then
-                        dict:set(rk, 1, wsec)
-                        newval = 1
+                        -- Counting unavailable (e.g. dict full) -> fail open.
                         if err then
                             kong.log.warn("neutree-ai-access: counter incr: ", err)
                         end
+                        newval = 0
                     end
                     if newval > limit then
                         if kong.ctx.plugin.cc_key then

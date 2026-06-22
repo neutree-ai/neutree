@@ -796,8 +796,15 @@ func queryAITraceKeyStats(deps *Dependencies, query string, params url.Values) (
 
 // parseIntLoose parses a VL numeric result (which may be int- or float-
 // formatted) into an int64, truncating any fractional part. Returns 0 on error.
+// Integer-formatted values parse as base-10 int64 first so large counts
+// (>= 2^53) keep full precision; only float/scientific forms fall back to float.
 func parseIntLoose(s string) int64 {
-	if f, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil {
+	s = strings.TrimSpace(s)
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n
+	}
+
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
 		return int64(f)
 	}
 

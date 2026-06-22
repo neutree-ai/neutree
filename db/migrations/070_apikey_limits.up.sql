@@ -61,6 +61,15 @@ BEGIN
         p_display_name := p_name;
     END IF;
 
+    -- Preserve legacy behavior: when only p_quota is given (no explicit limits),
+    -- derive a monthly token quota so the gateway still enforces it (mirrors the
+    -- spec.quota -> token_quota backfill above).
+    IF p_limits IS NULL AND p_quota IS NOT NULL AND p_quota > 0 THEN
+        p_limits := jsonb_build_object(
+            'token_quota', jsonb_build_object('limit', p_quota, 'period', 'monthly')
+        );
+    END IF;
+
     v_key_id := gen_random_uuid();
     v_key_value := api.generate_api_key(p_user_id, v_key_id, p_expires_in);
 
@@ -254,12 +263,22 @@ BEGIN
     RETURN QUERY
         SELECT
             k.id,
-            COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly') AS period,
-            ((k.spec).limits #>> '{token_quota,limit}')::bigint AS token_limit,
-            api.api_key_period_usage(k.id, COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly')) AS used,
-            ((k.spec).limits #>> '{token_quota,limit}')::bigint
-                - api.api_key_period_usage(k.id, COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly')) AS remaining
+            x.period,
+            x.token_limit,
+            x.used,
+            x.token_limit - x.used AS remaining
         FROM api.api_keys k
+        -- Compute period/limit and call the (ledger-scanning) usage helper once
+        -- per key, then derive remaining, instead of summing usage twice per row.
+        CROSS JOIN LATERAL (
+            SELECT
+                COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly') AS period,
+                ((k.spec).limits #>> '{token_quota,limit}')::bigint             AS token_limit,
+                api.api_key_period_usage(
+                    k.id,
+                    COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly')
+                )                                                               AS used
+        ) x
         WHERE (k.metadata).workspace = p_workspace
           AND (k.metadata).deletion_timestamp IS NULL
           AND ((k.spec).limits #>> '{token_quota,limit}') IS NOT NULL
