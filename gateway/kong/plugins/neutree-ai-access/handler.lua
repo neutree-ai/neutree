@@ -97,18 +97,24 @@ function AccessHandler:access(conf)
         local dict = counter_dict()
         if dict then
             local cc_key = "neutree_cc:" .. key
-            local inflight = dict:incr(cc_key, 1, 0, CONCURRENCY_TTL)
-            kong.ctx.plugin.cc_key = cc_key
-            if inflight and inflight > tonumber(conf.concurrency) then
-                dict:incr(cc_key, -1)
-                kong.ctx.plugin.cc_key = nil
-                return kong.response.exit(429, {
-                    error = {
-                        message = "Concurrency limit exceeded for this API key",
-                        type = "rate_limited",
-                        code = "concurrency_exceeded",
-                    },
-                })
+            local inflight, cerr = dict:incr(cc_key, 1, 0, CONCURRENCY_TTL)
+            if not inflight then
+                -- Counting unavailable (e.g. dict full): fail open and do not set
+                -- cc_key, so log() won't decrement a counter we never incremented.
+                kong.log.warn("neutree-ai-access: concurrency incr: ", tostring(cerr))
+            else
+                kong.ctx.plugin.cc_key = cc_key
+                if inflight > tonumber(conf.concurrency) then
+                    dict:incr(cc_key, -1)
+                    kong.ctx.plugin.cc_key = nil
+                    return kong.response.exit(429, {
+                        error = {
+                            message = "Concurrency limit exceeded for this API key",
+                            type = "rate_limited",
+                            code = "concurrency_exceeded",
+                        },
+                    })
+                end
             end
         end
     end

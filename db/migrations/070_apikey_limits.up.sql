@@ -272,28 +272,37 @@ BEGIN
         RAISE EXCEPTION 'permission denied';
     END IF;
     RETURN QUERY
+        -- Single pass: derive each key's period / limit / period-start once, then
+        -- LEFT JOIN + GROUP BY aggregates api_daily_usage in one scan rather than
+        -- calling the ledger-summing helper once per key.
         SELECT
             k.id,
-            x.period,
-            x.token_limit,
-            x.used,
-            x.token_limit - x.used AS remaining
+            lim.period,
+            lim.token_limit,
+            COALESCE(SUM((d.spec).total_usage), 0)::bigint AS used,
+            lim.token_limit - COALESCE(SUM((d.spec).total_usage), 0)::bigint AS remaining
         FROM api.api_keys k
-        -- Compute period/limit and call the (ledger-scanning) usage helper once
-        -- per key, then derive remaining, instead of summing usage twice per row.
         CROSS JOIN LATERAL (
             SELECT
                 COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly') AS period,
-                ((k.spec).limits #>> '{token_quota,limit}')::bigint             AS token_limit,
-                api.api_key_period_usage(
-                    k.id,
-                    COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly')
-                )                                                               AS used
-        ) x
+                ((k.spec).limits #>> '{token_quota,limit}')::bigint AS token_limit,
+                CASE COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly')
+                    WHEN 'daily'   THEN CURRENT_DATE
+                    WHEN 'weekly'  THEN date_trunc('week',  CURRENT_DATE)::date
+                    WHEN 'monthly' THEN date_trunc('month', CURRENT_DATE)::date
+                    WHEN 'yearly'  THEN date_trunc('year',  CURRENT_DATE)::date
+                    ELSE date_trunc('month', CURRENT_DATE)::date
+                END AS period_start
+        ) lim
+        LEFT JOIN api.api_daily_usage d
+            ON (d.spec).api_key_id = k.id
+           AND (d.spec).usage_date >= lim.period_start
+           AND (d.spec).usage_date <= CURRENT_DATE
         WHERE (k.metadata).workspace = p_workspace
           AND (k.metadata).deletion_timestamp IS NULL
           AND ((k.spec).limits #>> '{token_quota,limit}') IS NOT NULL
-          AND ((k.spec).limits #>> '{token_quota,limit}')::bigint > 0;
+          AND ((k.spec).limits #>> '{token_quota,limit}')::bigint > 0
+        GROUP BY k.id, lim.period, lim.token_limit;
 END;
 $$;
 
