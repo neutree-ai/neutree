@@ -77,6 +77,7 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 
 				return
 			}
+
 			if !disableRequested {
 				c.Next()
 				return
@@ -152,6 +153,7 @@ func validateClusterAcceleratorVirtualizationDisable(
 	}
 
 	vGPUEndpointCount := 0
+
 	for _, endpoint := range endpoints {
 		if endpoint.Spec != nil &&
 			endpoint.Spec.Resources != nil &&
