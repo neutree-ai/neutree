@@ -2,9 +2,13 @@ package proxies
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -404,6 +408,69 @@ func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 			assert.Contains(t, err.Hint, "1 vGPU endpoint(s) still reference this cluster")
 		}
 		mockStorage.AssertExpectations(t)
+	})
+}
+
+func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("rejects disable patch before proxy handler when vGPU endpoint references cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListEndpoint", storage.ListOption{
+			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+		}).Return([]v1.Endpoint{
+			{
+				Spec: &v1.EndpointSpec{
+					Resources: &v1.ResourceSpec{
+						Accelerator: map[string]string{
+							v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
+						},
+					},
+				},
+			},
+		}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterAcceleratorVirtualization(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := `{
+			"metadata": {"workspace": "default", "name": "gpu-cluster"},
+			"spec": {"accelerator_virtualization": {"enabled": false}}
+		}`
+		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10211"`)
+		assert.Contains(t, recorder.Body.String(), "vGPU endpoint(s) still reference this cluster")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("allows non-disable patch to continue to proxy handler", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterAcceleratorVirtualization(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := `{"metadata": {"workspace": "default", "name": "gpu-cluster"}}`
+		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 }
 
