@@ -156,7 +156,7 @@ func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {
 func validateClusterAcceleratorVirtualizationDisable(
 	s storage.Storage, cluster v1.Cluster, queryParams url.Values,
 ) *validationError {
-	if cluster.GetDeletionTimestamp() != "" || !isDisablingAcceleratorVirtualization(cluster) {
+	if cluster.GetDeletionTimestamp() != "" {
 		return nil
 	}
 
@@ -197,12 +197,6 @@ func validateClusterAcceleratorVirtualizationDisable(
 	}
 
 	return nil
-}
-
-func isDisablingAcceleratorVirtualization(cluster v1.Cluster) bool {
-	return cluster.Spec != nil &&
-		cluster.Spec.AcceleratorVirtualization != nil &&
-		!cluster.Spec.AcceleratorVirtualization.Enabled
 }
 
 func resolveClusterIdentityForAcceleratorVirtualizationDisable(

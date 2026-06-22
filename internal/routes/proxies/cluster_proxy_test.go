@@ -385,6 +385,26 @@ func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 		assert.Contains(t, err.Hint, "database error")
 		mockStorage.AssertExpectations(t)
 	})
+
+	t.Run("rejects clearing accelerator virtualization with null while vGPU endpoint references cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		cluster := v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec:     &v1.ClusterSpec{AcceleratorVirtualization: nil},
+		}
+		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
+
+		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
+			Return([]v1.Endpoint{vGPUEndpoint}, nil)
+
+		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, cluster, nil)
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10211", err.Code)
+			assert.Contains(t, err.Hint, "1 vGPU endpoint(s) still reference this cluster")
+		}
+		mockStorage.AssertExpectations(t)
+	})
 }
 
 func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {
@@ -414,6 +434,17 @@ func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {
 		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
 			"spec": {
 				"accelerator_virtualization": {}
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.True(t, requested)
+	})
+
+	t.Run("true when accelerator virtualization patch is null", func(t *testing.T) {
+		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
+			"spec": {
+				"accelerator_virtualization": null
 			}
 		}`))
 
