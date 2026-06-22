@@ -130,7 +130,7 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 			Group: pointy.String(group),
 		})
 		if err != nil {
-			return errors.Wrapf(err, "failed to add ACL group %s to consumer %s", group, apiKey.ID)
+			return errors.Wrapf(err, "failed to add ACL group %s to api key %s", group, apiKey.ID)
 		}
 	}
 
@@ -141,7 +141,7 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 
 		err = k.kongClient.ACLs.Delete(context.Background(), consumerID, group.Group)
 		if err != nil {
-			return errors.Wrapf(err, "failed to delete ACL group %s from consumer %s", *group.Group, apiKey.ID)
+			return errors.Wrapf(err, "failed to delete ACL group %s from api key %s", *group.Group, apiKey.ID)
 		}
 	}
 
@@ -292,7 +292,7 @@ func (k *Kong) syncAPIKeyLimitPlugins(consumerID *string, apiKey *v1.ApiKey) err
 
 		if _, ok := desired[*cur.InstanceName]; !ok {
 			if err = k.kongClient.Plugins.Delete(context.Background(), cur.ID); err != nil {
-				return errors.Wrapf(err, "failed to delete plugin %s for consumer %s", *cur.InstanceName, apiKey.ID)
+				return errors.Wrapf(err, "failed to delete plugin %s for api key %s", *cur.InstanceName, apiKey.ID)
 			}
 		}
 	}
