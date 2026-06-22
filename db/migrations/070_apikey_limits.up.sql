@@ -1,21 +1,21 @@
--- API Key 限额：把 quota + access 限额放在 API Key 自身的一个扩展字段
--- spec.limits（单一对象），保证创建/编辑的一致性与原子性。
+-- API key limits: carry the quota + access limits on the API key itself via an
+-- extra field spec.limits (a single object), keeping create/edit atomic.
 --
--- limits JSONB 形状（缺省/缺字段=不限）：
+-- limits JSONB shape (absent object / absent field = unlimited):
 --   {
 --     "token_quota": { "limit": <bigint>, "period": "daily|weekly|monthly|yearly" },
 --     "rps": <int>, "rpm": <int>, "concurrency": <int>,
---     "allowed_models": ["model-a", ...],   -- 空数组/缺省=不限
+--     "allowed_models": ["model-a", ...],   -- empty array / absent = unlimited
 --     "disabled": <bool>
 --   }
 --
--- 边界：合并的是「配置」。用量/剩余仍由不可变流水 api_daily_usage 聚合得出，
--- 不写进 spec（spec.limits 只存配置）。仅 api_key 维度。
+-- Scope: only configuration lives here. Usage/remaining is still derived from
+-- the immutable api_daily_usage ledger and never written into spec. API key only.
 
--- 1) 扩 api_key_spec（沿用 012 的 ALTER TYPE ADD ATTRIBUTE 手法）
+-- 1) Extend api_key_spec via ALTER TYPE ADD ATTRIBUTE.
 ALTER TYPE api.api_key_spec ADD ATTRIBUTE limits JSONB;
 
--- 2) 回填遗留 spec.quota -> limits.token_quota（默认 monthly），仅当 quota>0
+-- 2) Backfill the legacy spec.quota -> limits.token_quota (default monthly), only when quota > 0.
 UPDATE api.api_keys k
 SET spec = ROW(
         (k.spec).quota,
@@ -29,9 +29,11 @@ WHERE (k.spec).quota IS NOT NULL
   AND (k.spec).quota > 0
   AND (k.spec).limits IS NULL;
 
--- 3) create_api_key 增加 p_limits（在 019 版基础上，ROW 加第三个属性）。
--- 注意：新增形参会创建“重载”而非替换，导致 create_api_key(p_workspace,p_name,p_quota)
--- 调用产生歧义（function is not unique）。因此先 DROP 旧的 5 参签名，再建 6 参版本。
+-- 3) Add p_limits to create_api_key (a third attribute on the spec ROW).
+-- Adding a parameter creates an overload rather than replacing the function,
+-- which makes create_api_key(p_workspace, p_name, p_quota) calls ambiguous
+-- (function is not unique). So drop the old 5-arg signature first, then create
+-- the 6-arg version.
 DROP FUNCTION IF EXISTS api.create_api_key(TEXT, TEXT, INTEGER, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION api.create_api_key(
     p_workspace TEXT,
@@ -79,7 +81,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 4) set_api_key_limits：编辑限额（owner 鉴权）。SECURITY DEFINER + 显式 owner 校验。
+-- 4) set_api_key_limits: edit limits (owner-authorized). SECURITY DEFINER with an explicit owner check.
 CREATE OR REPLACE FUNCTION api.set_api_key_limits(p_id UUID, p_limits JSONB)
 RETURNS api.api_keys
 SECURITY DEFINER
@@ -99,7 +101,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 5) 周期用量助手：当前周期窗口内该 key 的 total_usage 求和（不可变流水聚合）。
+-- 5) Period-usage helper: sum the key's total_usage over the current period window (from the immutable ledger).
 CREATE OR REPLACE FUNCTION api.api_key_period_usage(p_id UUID, p_period TEXT)
 RETURNS BIGINT
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -117,8 +119,9 @@ AS $$
       AND (d.spec).usage_date <= CURRENT_DATE;
 $$;
 
--- 6) get_api_key_remaining：网关 quota 插件按请求拉取的「剩余 token」标量。
---    无 token_quota 配额 -> NULL（不限）；否则 limit - 当期用量（可为负，网关判 ≤0 拦截）。
+-- 6) get_api_key_remaining: the "remaining token" scalar the gateway quota
+--    plugin pulls per request. No token_quota -> NULL (unlimited); otherwise
+--    limit - current-period usage (may be negative; the gateway blocks at <= 0).
 CREATE OR REPLACE FUNCTION api.get_api_key_remaining(p_id UUID)
 RETURNS BIGINT
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -141,7 +144,7 @@ BEGIN
 END;
 $$;
 
--- 7) get_api_key_limits：UI 读单一对象（配置 + 当期 used/remaining 展示）。owner 限定。
+-- 7) get_api_key_limits: the single object the UI reads (config + current-period used/remaining). Owner-only.
 CREATE OR REPLACE FUNCTION api.get_api_key_limits(p_id UUID)
 RETURNS JSONB
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -173,8 +176,9 @@ BEGIN
 END;
 $$;
 
--- 8) get_workspace_models：allowed-models 下拉的选项来源——工作区内可见的
--- client-facing model 名 + 承载它的 endpoint 名/类型。SECURITY INVOKER（RLS 决定可见性）。
+-- 8) get_workspace_models: options for the allowed-models dropdown — the
+-- client-facing model names visible in the workspace plus the name/type of the
+-- endpoint serving them. SECURITY INVOKER (RLS decides visibility).
 CREATE OR REPLACE FUNCTION api.get_workspace_models(p_workspace TEXT)
 RETURNS TABLE (model TEXT, source TEXT, endpoint_name TEXT)
 LANGUAGE sql STABLE SECURITY INVOKER
@@ -201,9 +205,10 @@ AS $$
       AND u.model_mapping IS NOT NULL;
 $$;
 
--- 9) get_api_keys_usage_summary：列表页批量用量（每个 api_key 的总额 token 配额 +
--- 当期 used/remaining），一次返回，避免 N+1。读 spec.limits.token_quota + 流水聚合。
--- SECURITY DEFINER（流水跨 key），workspace:read 守卫。
+-- 9) get_api_keys_usage_summary: batched list-page usage (each api_key's total
+-- token quota + current-period used/remaining) returned in one call to avoid
+-- N+1. Reads spec.limits.token_quota + the usage ledger. SECURITY DEFINER
+-- (ledger spans keys), guarded by workspace:read.
 CREATE OR REPLACE FUNCTION api.get_api_keys_usage_summary(p_workspace TEXT)
 RETURNS TABLE (api_key_id UUID, period TEXT, token_limit BIGINT, used BIGINT, remaining BIGINT)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
