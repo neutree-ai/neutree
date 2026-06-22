@@ -399,7 +399,7 @@ func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {
 		assert.True(t, requested)
 	})
 
-	t.Run("false when enabled is omitted", func(t *testing.T) {
+	t.Run("true when enabled is omitted from accelerator virtualization patch", func(t *testing.T) {
 		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
 			"spec": {
 				"accelerator_virtualization": {"config_patch": {"devicePlugin": {}}}
@@ -407,7 +407,18 @@ func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {
 		}`))
 
 		assert.NoError(t, err)
-		assert.False(t, requested)
+		assert.True(t, requested)
+	})
+
+	t.Run("true when accelerator virtualization patch is empty after omitempty marshal", func(t *testing.T) {
+		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
+			"spec": {
+				"accelerator_virtualization": {}
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.True(t, requested)
 	})
 }
 
