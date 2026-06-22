@@ -280,6 +280,51 @@ func TestStaticNodeReconcilerReconcileNodeSnapshotUsesAgentForDetails(t *testing
 	assert.Equal(t, "chat", allocations[0].Endpoint)
 }
 
+func TestStaticNodeReconcilerReconcileNodeSnapshotDoesNotDowngradeDetectedGPUToCPU(t *testing.T) {
+	node := &v1.StaticNode{
+		Metadata: &v1.Metadata{Name: "head-0"},
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.10",
+		},
+	}
+	cpuSnapshot := v1.CPUStaticNodeAcceleratorStatus()
+	reconciler := &StaticNodeReconciler{
+		NodeSnapshotClient: fakeStaticNodeSnapshotClient{
+			snapshot: &StaticNodeSnapshot{
+				Accelerator: cpuSnapshot,
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						WorkloadType: "endpoint",
+						Workspace:    "default",
+						Endpoint:     "chat",
+						ReplicaID:    "replica-a",
+					},
+				},
+			},
+		},
+	}
+	coarse := &v1.StaticNodeAcceleratorStatus{
+		Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+		Vendor:       "nvidia",
+		ProductModel: "nvidia_gpu",
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+			{ID: "0", ProductName: "NVIDIA GPU", Healthy: true},
+		},
+	}
+
+	accelerator, allocations, err := reconciler.ReconcileNodeSnapshot(context.Background(), node, coarse)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelerator.Type)
+	assert.Equal(t, "nvidia", accelerator.Vendor)
+	require.Len(t, accelerator.Devices, 1)
+	assert.Equal(t, "0", accelerator.Devices[0].ID)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+}
+
 func TestInspectDockerImageIgnoresSSHWarning(t *testing.T) {
 	runner := &fakeStaticNodeRunner{
 		responses: []fakeStaticNodeResponse{

@@ -14,9 +14,9 @@ import (
 
 const (
 	nodeExporterDaemonSetName = "neutree-node-exporter"
-	nodeExporterPort          = 9100
+	nodeExporterPort          = 19100
 	neutreeMetricsName        = "neutree-node-agent"
-	neutreeMetricsPort        = 9101
+	neutreeMetricsPort        = 19101
 
 	defaultNodeExporterImage = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
 	defaultMetricsPath       = "/metrics"

@@ -5,6 +5,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizerNormalizeNodeMetrics(t *testing.T) {
@@ -71,6 +72,32 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 8
 	assert.Contains(t, output, `neutree_gpu_memory_total_bytes{cluster_type="ray",gpu_index="0",gpu_uuid="GPU-abc",model="A100",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",source="accelerator-exporter",static_node_cluster="static-a",workspace="default"} 85899345920`)
 	assert.Contains(t, output, `neutree_endpoint_replica_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 	assert.NotContains(t, output, "neutree_metrics_mapping_supported")
+}
+
+func TestNormalizerParsesDCGMLabelsWithSpaces(t *testing.T) {
+	raw := `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="Tesla T4",Hostname="gpu-node"} 87
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="Tesla T4",Hostname="gpu-node"} 15360
+`
+
+	output := (&Normalizer{}).Normalize(NormalizeRequest{
+		Labels: testLabels(),
+		AcceleratorExporter: &ScrapeResult{
+			Target: TargetAcceleratorExporter,
+			Up:     true,
+			Body:   raw,
+		},
+	})
+
+	assert.Contains(t, output, `neutree_gpu_utilization_ratio{cluster_type="ray",gpu_index="0",gpu_uuid="GPU-abc",model="Tesla T4",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",source="accelerator-exporter",static_node_cluster="static-a",workspace="default"} 0.87`)
+	assert.Contains(t, output, `neutree_gpu_memory_total_bytes{cluster_type="ray",gpu_index="0",gpu_uuid="GPU-abc",model="Tesla T4",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",source="accelerator-exporter",static_node_cluster="static-a",workspace="default"} 16106127360`)
+
+	snapshot := snapshotFromAcceleratorMetrics(raw)
+	require.NotNil(t, snapshot)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), snapshot.Accelerator.Type)
+	require.Len(t, snapshot.Accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", snapshot.Accelerator.Devices[0].UUID)
+	assert.Equal(t, "Tesla T4", snapshot.Accelerator.Devices[0].ProductName)
+	assert.Equal(t, int64(15360), snapshot.Accelerator.Devices[0].MemoryMiB)
 }
 
 func testLabels() CanonicalLabels {

@@ -216,6 +216,13 @@ func (r *StaticNodeReconciler) ReconcileNodeSnapshot(
 		return fallback, snapshot.Allocations, nil
 	}
 
+	if accelerator.Type == v1.StaticNodeAcceleratorTypeCPU &&
+		fallback != nil &&
+		fallback.Type != "" &&
+		fallback.Type != v1.StaticNodeAcceleratorTypeCPU {
+		return fallback, snapshot.Allocations, nil
+	}
+
 	return &accelerator, snapshot.Allocations, nil
 }
 

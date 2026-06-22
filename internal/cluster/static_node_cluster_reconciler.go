@@ -27,7 +27,7 @@ const (
 	acceleratorExporterComponentName = "accelerator-exporter"
 	defaultVMAgentPort               = 8429
 	defaultNodeExporterPort          = 19100
-	defaultNodeAgentPort             = 9101
+	defaultNodeAgentPort             = 19101
 	defaultRayDashboardPort          = 8265
 	defaultPrometheusHTTPPath        = "/metrics"
 	defaultHealthHTTPPath            = "/health"

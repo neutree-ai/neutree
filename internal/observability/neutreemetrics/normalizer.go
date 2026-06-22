@@ -286,7 +286,7 @@ func parsePrometheusText(raw string) []sample {
 			continue
 		}
 
-		metricPart, valuePart, ok := strings.Cut(line, " ")
+		metricPart, valuePart, ok := splitPrometheusSampleLine(line)
 		if !ok {
 			continue
 		}
@@ -305,6 +305,29 @@ func parsePrometheusText(raw string) []sample {
 	}
 
 	return result
+}
+
+func splitPrometheusSampleLine(line string) (string, string, bool) {
+	escaped := false
+	inQuote := false
+
+	for index, ch := range line {
+		switch {
+		case escaped:
+			escaped = false
+		case ch == '\\':
+			escaped = true
+		case ch == '"':
+			inQuote = !inQuote
+		case (ch == ' ' || ch == '\t') && !inQuote:
+			metricPart := strings.TrimSpace(line[:index])
+			valuePart := strings.TrimSpace(line[index:])
+
+			return metricPart, valuePart, metricPart != "" && valuePart != ""
+		}
+	}
+
+	return "", "", false
 }
 
 func parseMetricPart(metricPart string) (string, map[string]string) {

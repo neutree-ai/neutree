@@ -23,6 +23,7 @@ type Config struct {
 	SnapshotToken           string
 	SnapshotProvider        SnapshotProvider
 	AllocationProvider      AllocationProvider
+	AllocationTimeout       time.Duration
 	KubernetesWriter        *KubernetesAnnotationWriter
 	AnnotationSyncInterval  time.Duration
 	HTTPClient              *http.Client
@@ -215,12 +216,23 @@ func (s *Server) endpointAllocationsFromScrape(
 		return nil
 	}
 
-	snapshot, err := s.withAllocations(ctx, snapshotFromAcceleratorMetrics(acceleratorExporter.Body))
+	allocationCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
+	defer cancel()
+
+	snapshot, err := s.withAllocations(allocationCtx, snapshotFromAcceleratorMetrics(acceleratorExporter.Body))
 	if err != nil || snapshot == nil {
 		return nil
 	}
 
 	return endpointAllocationsFromStaticNodeAllocations(s.config.Labels, snapshot.Allocations)
+}
+
+func (s *Server) allocationTimeout() time.Duration {
+	if s.config.AllocationTimeout > 0 {
+		return s.config.AllocationTimeout
+	}
+
+	return defaultHTTPTimeout
 }
 
 func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *ScrapeResult {
