@@ -2,10 +2,13 @@ package proxies
 
 import (
 	"errors"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
@@ -270,4 +273,163 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		assert.Equal(t, "10208", err.Code)
 		assert.Contains(t, err.Message, "requires cluster version >= v1.1.0")
 	})
+}
+
+func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
+	vGPUEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{
+					v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
+				},
+			},
+		},
+	}
+	nonVGPUEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{
+					v1.AcceleratorTypeKey: "nvidia_gpu",
+				},
+			},
+		},
+	}
+
+	t.Run("rejects disabling when vGPU endpoint references cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		cluster := v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
+			},
+		}
+		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
+
+		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
+			Return([]v1.Endpoint{vGPUEndpoint}, nil)
+
+		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, cluster, nil)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10211", err.Code)
+		assert.Contains(t, err.Message, "cannot disable accelerator virtualization")
+		assert.Contains(t, err.Hint, "1 vGPU endpoint(s) still reference this cluster")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("allows disabling when only non-vGPU endpoint references cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		cluster := v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
+			},
+		}
+		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
+
+		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
+			Return([]v1.Endpoint{nonVGPUEndpoint}, nil)
+
+		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, cluster, nil)
+
+		assert.Nil(t, err)
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("resolves cluster identity from patch query filters", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		clusterPatch := v1.Cluster{
+			Spec: &v1.ClusterSpec{
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
+			},
+		}
+		query := url.Values{
+			"metadata->>workspace": []string{"eq.default"},
+			"metadata->>name":      []string{"eq.gpu-cluster"},
+		}
+		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
+
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{
+			{Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"}},
+		}, nil)
+		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
+			Return([]v1.Endpoint{vGPUEndpoint}, nil)
+
+		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, clusterPatch, query)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10211", err.Code)
+		assert.Contains(t, err.Hint, "1 vGPU endpoint(s) still reference this cluster")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("returns validation error when endpoint lookup fails", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		cluster := v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
+			},
+		}
+		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
+
+		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
+			Return(nil, errors.New("database error"))
+
+		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, cluster, nil)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10209", err.Code)
+		assert.Contains(t, err.Hint, "database error")
+		mockStorage.AssertExpectations(t)
+	})
+}
+
+func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {
+	t.Run("true when payload explicitly sets enabled false", func(t *testing.T) {
+		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
+			"spec": {
+				"accelerator_virtualization": {"enabled": false}
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.True(t, requested)
+	})
+
+	t.Run("false when enabled is omitted", func(t *testing.T) {
+		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
+			"spec": {
+				"accelerator_virtualization": {"config_patch": {"devicePlugin": {}}}
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.False(t, requested)
+	})
+}
+
+func sameFilters(actual, expected []storage.Filter) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+
+	unmatched := append([]storage.Filter(nil), actual...)
+	for _, expectedFilter := range expected {
+		matched := false
+		for i, actualFilter := range unmatched {
+			if actualFilter == expectedFilter {
+				unmatched = append(unmatched[:i], unmatched[i+1:]...)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	return true
 }
