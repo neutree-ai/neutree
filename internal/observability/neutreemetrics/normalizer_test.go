@@ -23,6 +23,7 @@ node_load1 2.5
 	})
 
 	assert.Contains(t, output, `neutree_metrics_scrape_up{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="neutree-node-agent",static_node_cluster="static-a",target="node-exporter",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_node_ready{cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 	assert.Contains(t, output, `neutree_node_memory_total_bytes{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="node-exporter",static_node_cluster="static-a",workspace="default"} 17179869184`)
 	assert.Contains(t, output, `neutree_node_memory_available_bytes{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="node-exporter",static_node_cluster="static-a",workspace="default"} 6442450944`)
 	assert.Contains(t, output, `neutree_node_memory_used_bytes{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="node-exporter",static_node_cluster="static-a",workspace="default"} 10737418240`)
@@ -70,7 +71,12 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 8
 	assert.Contains(t, output, `neutree_gpu_utilization_ratio{cluster_type="ray",gpu_index="0",gpu_uuid="GPU-abc",model="A100",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",source="accelerator-exporter",static_node_cluster="static-a",workspace="default"} 0.87`)
 	assert.Contains(t, output, `neutree_gpu_memory_used_bytes{cluster_type="ray",gpu_index="0",gpu_uuid="GPU-abc",model="A100",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",source="accelerator-exporter",static_node_cluster="static-a",workspace="default"} 1073741824`)
 	assert.Contains(t, output, `neutree_gpu_memory_total_bytes{cluster_type="ray",gpu_index="0",gpu_uuid="GPU-abc",model="A100",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",source="accelerator-exporter",static_node_cluster="static-a",workspace="default"} 85899345920`)
+	assert.Contains(t, output, `neutree_node_gpu_total{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_node_gpu_allocated{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_node_gpu_free{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 0`)
+	assert.Contains(t, output, `neutree_node_gpu_info{accelerator_type="nvidia_gpu",cluster_type="ray",gpu_index="0",gpu_uuid="GPU-abc",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 	assert.Contains(t, output, `neutree_endpoint_replica_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_node_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 	assert.NotContains(t, output, "neutree_metrics_mapping_supported")
 }
 

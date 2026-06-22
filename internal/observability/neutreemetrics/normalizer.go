@@ -66,6 +66,7 @@ type canonicalSample struct {
 func (n *Normalizer) Normalize(req NormalizeRequest) string {
 	var samples []canonicalSample
 
+	samples = append(samples, nodeReadySample(req.Labels))
 	samples = append(samples, scrapeUpSample(req.Labels, TargetNodeExporter, req.NodeExporter.Up))
 	if req.NodeExporter.Up {
 		samples = append(samples, normalizeNodeSamples(req.Labels, req.NodeExporter.Body)...)
@@ -75,6 +76,11 @@ func (n *Normalizer) Normalize(req NormalizeRequest) string {
 		samples = append(samples, scrapeUpSample(req.Labels, TargetAcceleratorExporter, req.AcceleratorExporter.Up))
 		if req.AcceleratorExporter.Up {
 			samples = append(samples, normalizeAcceleratorSamples(req.Labels, req.AcceleratorExporter.Body)...)
+			samples = append(samples, normalizeNodeGPUSamples(
+				req.Labels,
+				req.AcceleratorExporter.Body,
+				req.EndpointAllocations,
+			)...)
 		}
 	}
 
@@ -179,6 +185,80 @@ func normalizeAcceleratorSamples(labels CanonicalLabels, raw string) []canonical
 	return result
 }
 
+func normalizeNodeGPUSamples(
+	labels CanonicalLabels,
+	raw string,
+	allocations []EndpointAllocation,
+) []canonicalSample {
+	devices := acceleratorDevicesFromMetrics(raw)
+	if len(devices) == 0 {
+		return nil
+	}
+
+	allocatedByUUID := allocatedDeviceUUIDs(allocations)
+	totalByProduct := map[string]float64{}
+	allocatedByProduct := map[string]float64{}
+	result := make([]canonicalSample, 0, len(devices)*2+len(totalByProduct)*3)
+
+	for _, device := range devices {
+		if device.UUID == "" {
+			continue
+		}
+
+		product := firstNonEmpty(device.ProductModel, device.ProductName, v1.AcceleratorTypeNVIDIAGPU.String())
+		totalByProduct[product]++
+
+		if _, ok := allocatedByUUID[device.UUID]; ok {
+			allocatedByProduct[product]++
+		}
+
+		metricLabels := nodeGPULabels(labels, product)
+		metricLabels["gpu_uuid"] = device.UUID
+		if device.ID != "" {
+			metricLabels["gpu_index"] = device.ID
+		}
+
+		result = append(result, canonicalSample{
+			name:   "neutree_node_gpu_info",
+			labels: metricLabels,
+			value:  1,
+		})
+	}
+
+	products := make([]string, 0, len(totalByProduct))
+	for product := range totalByProduct {
+		products = append(products, product)
+	}
+	sort.Strings(products)
+
+	for _, product := range products {
+		total := totalByProduct[product]
+		allocated := allocatedByProduct[product]
+		free := total - allocated
+		metricLabels := nodeGPULabels(labels, product)
+
+		result = append(result,
+			canonicalSample{
+				name:   "neutree_node_gpu_total",
+				labels: cloneLabels(metricLabels),
+				value:  total,
+			},
+			canonicalSample{
+				name:   "neutree_node_gpu_allocated",
+				labels: cloneLabels(metricLabels),
+				value:  allocated,
+			},
+			canonicalSample{
+				name:   "neutree_node_gpu_free",
+				labels: cloneLabels(metricLabels),
+				value:  free,
+			},
+		)
+	}
+
+	return result
+}
+
 func normalizeEndpointAllocationSamples(
 	labels CanonicalLabels,
 	allocations []EndpointAllocation,
@@ -206,10 +286,30 @@ func normalizeEndpointAllocationSamples(
 				labels: metricLabels,
 				value:  1,
 			})
+
+			nodeGPUMetricLabels := cloneLabels(metricLabels)
+			nodeGPUMetricLabels["replica"] = allocation.ReplicaID
+
+			result = append(result, canonicalSample{
+				name:   "neutree_node_gpu_allocation",
+				labels: nodeGPUMetricLabels,
+				value:  1,
+			})
 		}
 	}
 
 	return result
+}
+
+func nodeReadySample(labels CanonicalLabels) canonicalSample {
+	metricLabels := baseLabels(labels, SourceNodeAgent)
+	metricLabels["neutree_cluster"] = firstNonEmpty(labels.NeutreeCluster, labels.StaticNodeCluster)
+
+	return canonicalSample{
+		name:   "neutree_node_ready",
+		labels: metricLabels,
+		value:  1,
+	}
 }
 
 func scrapeUpSample(labels CanonicalLabels, target string, up bool) canonicalSample {
@@ -226,6 +326,39 @@ func scrapeUpSample(labels CanonicalLabels, target string, up bool) canonicalSam
 		labels: metricLabels,
 		value:  value,
 	}
+}
+
+func nodeGPULabels(labels CanonicalLabels, product string) map[string]string {
+	metricLabels := baseLabels(labels, SourceNodeAgent)
+	metricLabels["neutree_cluster"] = firstNonEmpty(labels.NeutreeCluster, labels.StaticNodeCluster)
+	metricLabels["accelerator_type"] = v1.AcceleratorTypeNVIDIAGPU.String()
+	metricLabels["product"] = product
+
+	return metricLabels
+}
+
+func allocatedDeviceUUIDs(allocations []EndpointAllocation) map[string]struct{} {
+	result := map[string]struct{}{}
+	for _, allocation := range allocations {
+		for _, device := range allocation.Devices {
+			if device.UUID == "" {
+				continue
+			}
+
+			result[device.UUID] = struct{}{}
+		}
+	}
+
+	return result
+}
+
+func cloneLabels(labels map[string]string) map[string]string {
+	result := make(map[string]string, len(labels))
+	for key, value := range labels {
+		result[key] = value
+	}
+
+	return result
 }
 
 func baseLabels(labels CanonicalLabels, source string) map[string]string {

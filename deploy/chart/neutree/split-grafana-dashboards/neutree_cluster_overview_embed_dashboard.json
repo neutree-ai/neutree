@@ -1,0 +1,27 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0}, "id": 1, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "count(count by (node) (neutree_node_ready{neutree_cluster=~\"$Cluster\"}))", "refId": "A"}], "title": "Workers", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0}, "id": 2, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_node_gpu_total{neutree_cluster=~\"$Cluster\"})", "refId": "A"}], "title": "GPU Total", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0}, "id": 3, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_node_gpu_free{neutree_cluster=~\"$Cluster\"})", "refId": "A"}], "title": "GPU Free", "type": "stat"},
+    {"datasource": "${datasource}", "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []}, "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0}, "id": 4, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "avg(neutree_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\"}) or avg(DCGM_FI_DEV_GPU_UTIL{neutree_cluster=~\"$Cluster\"}) / 100", "refId": "A"}], "title": "GPU Avg", "type": "stat"},
+    {"datasource": "${datasource}", "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []}, "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0}, "id": 5, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_gpu_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_gpu_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)", "refId": "A"}], "title": "VRAM Avg", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 2, "x": 20, "y": 0}, "id": 6, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_endpoint_pending_replicas{neutree_cluster=~\"$Cluster\"}) or vector(0)", "refId": "A"}], "title": "Pending", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 2, "x": 22, "y": 0}, "id": 7, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_endpoint_failed_replicas{neutree_cluster=~\"$Cluster\"}) or vector(0)", "refId": "A"}], "title": "Failed", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4}, "id": 8, "targets": [{"expr": "sum(neutree_node_gpu_total{neutree_cluster=~\"$Cluster\"})", "legendFormat": "GPU total", "refId": "A"}, {"expr": "sum(neutree_node_gpu_allocated{neutree_cluster=~\"$Cluster\"})", "legendFormat": "GPU allocated", "refId": "B"}, {"expr": "sum(neutree_node_gpu_free{neutree_cluster=~\"$Cluster\"})", "legendFormat": "GPU free", "refId": "C"}], "title": "Resource Trend", "type": "timeseries"}
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": ["neutree", "cluster", "overview", "embed"],
+  "templating": {"list": [
+    {"current": {"text": "Prometheus", "value": "Prometheus"}, "name": "datasource", "query": "prometheus", "type": "datasource"},
+    {"datasource": "${datasource}", "definition": "label_values(neutree_node_ready, neutree_cluster)", "includeAll": true, "name": "Cluster", "query": "label_values(neutree_node_ready, neutree_cluster)", "refresh": 1, "type": "query"}
+  ]},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "Neutree Cluster Overview Embed",
+  "uid": "neutree-cluster-overview-embed",
+  "version": 1
+}

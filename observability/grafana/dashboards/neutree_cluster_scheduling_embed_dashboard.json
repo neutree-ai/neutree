@@ -1,0 +1,26 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}, "id": 1, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_endpoint_pending_replicas{neutree_cluster=~\"$Cluster\"}) or vector(0)", "refId": "A"}], "title": "Pending Replicas", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0}, "id": 2, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_endpoint_failed_replicas{neutree_cluster=~\"$Cluster\"}) or vector(0)", "refId": "A"}], "title": "Failed Replicas", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0}, "id": 3, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_node_gpu_free{neutree_cluster=~\"$Cluster\"})", "refId": "A"}], "title": "Free GPUs", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0}, "id": 4, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "count(count by (node) (neutree_node_ready{neutree_cluster=~\"$Cluster\"}))", "refId": "A"}], "title": "Ready Nodes", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4}, "id": 5, "targets": [{"expr": "sum by (endpoint, reason) (neutree_endpoint_pending_replicas{neutree_cluster=~\"$Cluster\"}) or vector(0)", "format": "table", "instant": true, "refId": "A"}], "title": "Pending Reason Summary", "type": "table"},
+    {"datasource": "${datasource}", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4}, "id": 6, "targets": [{"expr": "sum by (endpoint, reason) (neutree_endpoint_failed_replicas{neutree_cluster=~\"$Cluster\"}) or vector(0)", "format": "table", "instant": true, "refId": "A"}], "title": "Failed Replicas", "type": "table"},
+    {"datasource": "${datasource}", "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12}, "id": 7, "targets": [{"expr": "sum by (node, product) (neutree_node_gpu_total{neutree_cluster=~\"$Cluster\"})", "legendFormat": "{{node}} {{product}} total", "refId": "A"}, {"expr": "sum by (node, product) (neutree_node_gpu_allocated{neutree_cluster=~\"$Cluster\"})", "legendFormat": "{{node}} {{product}} allocated", "refId": "B"}, {"expr": "sum by (node, product) (neutree_node_gpu_free{neutree_cluster=~\"$Cluster\"})", "legendFormat": "{{node}} {{product}} free", "refId": "C"}], "title": "Scheduling Capacity", "type": "timeseries"}
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": ["neutree", "cluster", "scheduling", "embed"],
+  "templating": {"list": [
+    {"current": {"text": "Prometheus", "value": "Prometheus"}, "name": "datasource", "query": "prometheus", "type": "datasource"},
+    {"datasource": "${datasource}", "definition": "label_values(neutree_node_ready, neutree_cluster)", "includeAll": true, "name": "Cluster", "query": "label_values(neutree_node_ready, neutree_cluster)", "refresh": 1, "type": "query"}
+  ]},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "Neutree Cluster Scheduling Embed",
+  "uid": "neutree-cluster-scheduling-embed",
+  "version": 1
+}

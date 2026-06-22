@@ -62,6 +62,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 
 	body := readResponseBody(t, metricsResp)
 	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="",source="neutree-node-agent",static_node_cluster="",target="node-exporter",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_node_ready{cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",node_ip="10.0.0.10",node_role="",source="neutree-node-agent",static_node_cluster="",workspace="default"} 1`)
 	assert.Contains(t, body, `neutree_node_memory_used_bytes{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="",source="node-exporter",static_node_cluster="",workspace="default"} 10737418240`)
 	assert.Contains(t, body, `neutree_gpu_utilization_ratio{cluster_type="kubernetes",gpu_index="0",gpu_uuid="GPU-abc",model="A100",neutree_cluster="k8s-a",node="node-a",node_ip="10.0.0.10",node_role="",source="accelerator-exporter",static_node_cluster="",workspace="default"} 0.87`)
 }
@@ -123,7 +124,11 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
+	assert.Contains(t, body, `neutree_node_gpu_total{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_node_gpu_allocated{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_node_gpu_free{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 0`)
 	assert.Contains(t, body, `neutree_endpoint_replica_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_node_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 }
 
 func TestServerMetricsDoesNotBlockOnSlowAllocationProvider(t *testing.T) {

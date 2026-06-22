@@ -1,0 +1,26 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}, "id": 1, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "count(count by (device_uuid) (hami_host_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\",zone=\"vGPU\"})) or vector(0)", "refId": "A"}], "title": "Physical GPUs", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0}, "id": 2, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "count(count by (namespace, pod, container, vdevice_index) (hami_vgpu_memory_limit_bytes{neutree_cluster=~\"$Cluster\"})) or vector(0)", "refId": "A"}], "title": "vGPU Allocations", "type": "stat"},
+    {"datasource": "${datasource}", "fieldConfig": {"defaults": {"unit": "percent"}, "overrides": []}, "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0}, "id": 3, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(kube_pod_container_resource_limits{neutree_cluster=~\"$Cluster\",resource=\"nvidia_com_gpucores\"}) / clamp_min(count(count by (device_uuid) (hami_host_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\",zone=\"vGPU\"})) * 100, 1) * 100", "refId": "A"}], "title": "vGPU Core Allocation", "type": "stat"},
+    {"datasource": "${datasource}", "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}, "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0}, "id": 4, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(hami_vgpu_memory_limit_bytes{neutree_cluster=~\"$Cluster\"}) or vector(0)", "refId": "A"}], "title": "vGPU Memory Allocated", "type": "stat"},
+    {"datasource": "${datasource}", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4}, "id": 5, "targets": [{"expr": "avg by (node, device_uuid, device_type) (hami_host_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\",zone=\"vGPU\"})", "legendFormat": "{{node}} {{device_uuid}}", "refId": "A"}], "title": "Host GPU Utilization", "type": "timeseries"},
+    {"datasource": "${datasource}", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4}, "id": 6, "targets": [{"expr": "sum by (node, device_uuid) (hami_vgpu_memory_limit_bytes{neutree_cluster=~\"$Cluster\"})", "legendFormat": "{{node}} {{device_uuid}}", "refId": "A"}, {"expr": "sum by (node, device_uuid) (hami_vgpu_memory_used_bytes{neutree_cluster=~\"$Cluster\"})", "legendFormat": "{{node}} {{device_uuid}} used", "refId": "B"}], "title": "vGPU Memory", "type": "timeseries"},
+    {"datasource": "${datasource}", "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12}, "id": 7, "targets": [{"expr": "max by (namespace, pod, node, container, device_uuid, vdevice_index) (hami_vgpu_memory_limit_bytes{neutree_cluster=~\"$Cluster\"})", "format": "table", "instant": true, "refId": "A"}], "title": "vGPU Allocation", "type": "table"}
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": ["neutree", "cluster", "vgpu", "embed"],
+  "templating": {"list": [
+    {"current": {"text": "Prometheus", "value": "Prometheus"}, "name": "datasource", "query": "prometheus", "type": "datasource"},
+    {"datasource": "${datasource}", "definition": "label_values(hami_build_info, neutree_cluster)", "includeAll": true, "name": "Cluster", "query": "label_values(hami_build_info, neutree_cluster)", "refresh": 1, "type": "query"}
+  ]},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "Neutree Cluster vGPU Embed",
+  "uid": "neutree-cluster-vgpu-embed",
+  "version": 1
+}

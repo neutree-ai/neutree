@@ -7,4 +7,5 @@ metadata:
     {{- include "neutree.labels" . | nindent 4 }}
 data:
 {{ (.Files.Glob "grafana-dashboards/*").AsConfig | indent 2 }}
+{{ (.Files.Glob "split-grafana-dashboards/*").AsConfig | indent 2 }}
 {{- end }}
