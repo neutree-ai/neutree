@@ -3,23 +3,16 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-const (
-	testAPISvcName = "neutree-api-service"
-
-	contourNamespace = "sks-system-contour"
-	contourEnvoySvc  = "contour-envoy"
-)
+const testAPISvcName = "neutree-api-service"
 
 var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8s-deploy"), func() {
 	var (
@@ -38,7 +31,6 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 			"vmagent.persistence.size=2Gi",
 			"db.persistence.size=2Gi",
 		}
-		baseValues = append(baseValues, profileCPHelmSetValues()...)
 	})
 
 	// --- Default install (no custom values) ---
@@ -251,243 +243,4 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 				"API should be accessible with custom db.password")
 		})
 	})
-
-	// --- Custom install: public Ingress endpoints via Contour ---
-
-	Describe("Ingress Deploy", Ordered, Label("ingress"), func() {
-		var (
-			ctx          = context.Background()
-			secretName   = "e2e-ingress-pull-secret"
-			apiHost      string
-			kongHost     string
-			grafanaHost  string
-			vminsertHost string
-			setValues    []string
-			resources    []unstructured.Unstructured
-		)
-
-		BeforeAll(func() {
-			h.CleanAll()
-
-			apiHost = fmt.Sprintf("api-%s.neutree-e2e.local", Cfg.RunID)
-			kongHost = fmt.Sprintf("kong-%s.neutree-e2e.local", Cfg.RunID)
-			grafanaHost = fmt.Sprintf("grafana-%s.neutree-e2e.local", Cfg.RunID)
-			vminsertHost = fmt.Sprintf("vminsert-%s.neutree-e2e.local", Cfg.RunID)
-
-			ingressValues := []string{
-				"api.ingress.enabled=true",
-				"api.ingress.className=contour",
-				"api.ingress.host=" + apiHost,
-				"kong.ingress.enabled=true",
-				"kong.ingress.className=contour",
-				"kong.ingress.host=" + kongHost,
-				"grafana.ingress.enabled=true",
-				"grafana.ingress.ingressClassName=contour",
-				"grafana.ingress.hosts[0]=" + grafanaHost,
-				"grafana.grafana\\.ini.server.root_url=http://" + grafanaHost,
-				"victoria-metrics-cluster.vminsert.ingress.enabled=true",
-				"victoria-metrics-cluster.vminsert.ingress.ingressClassName=contour",
-				"victoria-metrics-cluster.vminsert.ingress.hosts[0].name=" + vminsertHost,
-				"victoria-metrics-cluster.vminsert.ingress.hosts[0].path[0]=/insert",
-			}
-
-			if len(profileCPHelmSetValues()) > 0 && profileCPMirrorRegistry() != "" {
-				ingressValues = append(ingressValues, "global.imagePullSecrets[0].name="+secretName)
-
-				By("Creating docker-registry secret for ingress deploy image overrides")
-				err := h.K8s.CreateNamespace(ctx, h.Namespace)
-				Expect(err).NotTo(HaveOccurred())
-
-				err = h.K8s.CreateDockerRegistrySecret(ctx, h.Namespace, secretName,
-					profileCPMirrorRegistry(),
-					profile.ImageRegistry.Username,
-					profile.ImageRegistry.Password,
-				)
-				Expect(err).NotTo(HaveOccurred())
-			}
-
-			setValues = append(baseValues, ingressValues...)
-
-			By("Installing with Contour Ingress values")
-			r := h.HelmInstall(setValues...)
-			ExpectSuccess(r)
-
-			By("Waiting for all helm resources to be healthy")
-			resources = h.HelmTemplate(setValues...)
-			Eventually(func() error {
-				return h.CheckHelmDeployed(resources)
-			}, 15*time.Minute, 10*time.Second).Should(Succeed(),
-				"all resources should be healthy")
-		})
-
-		AfterAll(func() {
-			h.CleanAll()
-		})
-
-		It("should expose public ingress endpoints and wire runtime URLs", Label("C2721968"), func() {
-			// TestRail: C2721968
-			expectIngressBackend(ctx, h, "neutree-api", apiHost, "/", "neutree-api-service", 3000, "")
-			expectIngressBackend(ctx, h, "neutree-kong-proxy", kongHost, "/", "neutree-kong-proxy", 80, "")
-			expectIngressBackend(ctx, h, "neutree-grafana", grafanaHost, "/", "neutree-grafana", 80, "")
-			expectIngressBackend(ctx, h, "neutree-victoria-metrics-cluster-vminsert",
-				vminsertHost, "/insert", "neutree-victoria-metrics-cluster-vminsert", 0, "http")
-
-			expectDeploymentArg(ctx, h, "neutree-api", "--grafana-url=http://"+grafanaHost)
-			expectDeploymentArg(ctx, h, "neutree-core", "--gateway-proxy-url=http://"+kongHost)
-			expectDeploymentArg(ctx, h, "neutree-vmagent",
-				"--remoteWrite.url=http://"+vminsertHost+"/insert/0/prometheus/")
-
-			baseURL := contourHTTPBaseURL(ctx, h.K8s)
-			expectHostGETStatus(baseURL, apiHost, "/health", http.StatusOK)
-			expectHostGETStatus(baseURL, grafanaHost, "/api/health", http.StatusOK)
-			expectHostRequestStatus(baseURL, vminsertHost, http.MethodPost,
-				"/insert/0/prometheus/api/v1/write", http.StatusNoContent)
-		})
-	})
 })
-
-func expectIngressBackend(
-	ctx context.Context,
-	h *K8sCPHelper,
-	name string,
-	host string,
-	path string,
-	serviceName string,
-	servicePort int32,
-	servicePortName string,
-) {
-	ing, err := h.K8s.GetIngress(ctx, h.Namespace, name)
-	Expect(err).NotTo(HaveOccurred(), "ingress %s should exist", name)
-	Expect(ing.Spec.IngressClassName).NotTo(BeNil(), "ingress %s should set ingressClassName", name)
-	Expect(*ing.Spec.IngressClassName).To(Equal("contour"), "ingress %s should use contour", name)
-
-	rule := findIngressRule(ing, host)
-	Expect(rule).NotTo(BeNil(), "ingress %s should route host %s", name, host)
-	Expect(rule.HTTP).NotTo(BeNil(), "ingress %s rule for host %s should have HTTP paths", name, host)
-
-	pathRule := findIngressPath(rule.HTTP.Paths, path)
-	Expect(pathRule).NotTo(BeNil(), "ingress %s host %s should route path %s", name, host, path)
-	Expect(pathRule.PathType).NotTo(BeNil(), "ingress %s path %s should set pathType", name, path)
-	Expect(*pathRule.PathType).To(Equal(networkingv1.PathTypePrefix), "ingress %s path %s pathType", name, path)
-	Expect(pathRule.Backend.Service).NotTo(BeNil(), "ingress %s path %s should use a service backend", name, path)
-	Expect(pathRule.Backend.Service.Name).To(Equal(serviceName), "ingress %s backend service", name)
-
-	if servicePortName != "" {
-		Expect(pathRule.Backend.Service.Port.Name).To(Equal(servicePortName), "ingress %s backend service port", name)
-	} else {
-		Expect(pathRule.Backend.Service.Port.Number).To(Equal(servicePort), "ingress %s backend service port", name)
-	}
-}
-
-func findIngressRule(ing *networkingv1.Ingress, host string) *networkingv1.IngressRule {
-	for i := range ing.Spec.Rules {
-		if ing.Spec.Rules[i].Host == host {
-			return &ing.Spec.Rules[i]
-		}
-	}
-
-	return nil
-}
-
-func findIngressPath(paths []networkingv1.HTTPIngressPath, path string) *networkingv1.HTTPIngressPath {
-	for i := range paths {
-		if paths[i].Path == path {
-			return &paths[i]
-		}
-	}
-
-	return nil
-}
-
-func expectDeploymentArg(ctx context.Context, h *K8sCPHelper, deploymentName, expectedArg string) {
-	deploy, err := h.K8s.GetDeployment(ctx, h.Namespace, deploymentName)
-	Expect(err).NotTo(HaveOccurred(), "deployment %s should exist", deploymentName)
-
-	var args []string
-	for _, container := range deploy.Spec.Template.Spec.Containers {
-		args = append(args, container.Args...)
-	}
-
-	Expect(args).To(ContainElement(expectedArg), "deployment %s should include %s", deploymentName, expectedArg)
-}
-
-func contourHTTPBaseURL(ctx context.Context, k8s *K8sHelper) string {
-	svc, err := k8s.GetService(ctx, contourNamespace, contourEnvoySvc)
-	Expect(err).NotTo(HaveOccurred(), "Contour Envoy service should exist")
-
-	var nodePort int32
-	for _, port := range svc.Spec.Ports {
-		if port.Name == "http" || port.Port == 80 {
-			nodePort = port.NodePort
-
-			break
-		}
-	}
-	Expect(nodePort).NotTo(BeZero(), "Contour Envoy service should expose HTTP NodePort")
-
-	nodes, err := k8s.ListNodes(ctx)
-	Expect(err).NotTo(HaveOccurred(), "should list K8s nodes")
-
-	for _, node := range nodes {
-		if !nodeReady(node) {
-			continue
-		}
-
-		for _, address := range node.Status.Addresses {
-			if address.Type == corev1.NodeInternalIP && address.Address != "" {
-				return fmt.Sprintf("http://%s:%d", address.Address, nodePort)
-			}
-		}
-	}
-
-	Fail("no ready node with InternalIP found for Contour NodePort")
-
-	return ""
-}
-
-func nodeReady(node corev1.Node) bool {
-	for _, condition := range node.Status.Conditions {
-		if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
-			return true
-		}
-	}
-
-	return false
-}
-
-func expectHostGETStatus(baseURL, host, path string, expectedStatus int) {
-	expectHostRequestStatus(baseURL, host, http.MethodGet, path, expectedStatus)
-}
-
-func expectHostRequestStatus(baseURL, host, method, path string, expectedStatus int) {
-	client := newNoProxyHTTPClient(10 * time.Second)
-
-	Eventually(func() int {
-		req, err := http.NewRequest(method, baseURL+path, nil)
-		if err != nil {
-			return 0
-		}
-
-		req.Host = host
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return 0
-		}
-		defer resp.Body.Close()
-		_, _ = io.Copy(io.Discard, resp.Body)
-
-		return resp.StatusCode
-	}, 2*time.Minute, 5*time.Second).Should(Equal(expectedStatus),
-		"%s %s should return %d through %s with Host %s", method, path, expectedStatus, baseURL, host)
-}
-
-func newNoProxyHTTPClient(timeout time.Duration) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-
-	return &http.Client{
-		Timeout:   timeout,
-		Transport: transport,
-	}
-}

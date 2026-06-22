@@ -11,7 +11,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,7 +24,7 @@ import (
 
 // K8sHelper provides Kubernetes client operations for e2e tests.
 type K8sHelper struct {
-	clientset  kubernetes.Interface
+	clientset  *kubernetes.Clientset
 	restConfig *rest.Config
 }
 
@@ -81,11 +80,6 @@ func (h *K8sHelper) GetService(ctx context.Context, namespace, name string) (*co
 	return h.clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
-// GetIngress retrieves a specific ingress.
-func (h *K8sHelper) GetIngress(ctx context.Context, namespace, name string) (*networkingv1.Ingress, error) {
-	return h.clientset.NetworkingV1().Ingresses(namespace).Get(ctx, name, metav1.GetOptions{})
-}
-
 // GetSecret retrieves a specific secret.
 func (h *K8sHelper) GetSecret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
 	return h.clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -121,16 +115,6 @@ func (h *K8sHelper) ListServices(ctx context.Context, namespace, labelSelector s
 	list, err := h.clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return list.Items, nil
-}
-
-// ListNodes lists cluster nodes.
-func (h *K8sHelper) ListNodes(ctx context.Context) ([]corev1.Node, error) {
-	list, err := h.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -177,49 +161,33 @@ func (h *K8sHelper) ListPVCs(ctx context.Context, namespace, labelSelector strin
 // NamespaceExists checks if a namespace exists.
 // Returns false only for NotFound errors; other errors cause a test failure.
 func (h *K8sHelper) NamespaceExists(ctx context.Context, name string) bool {
-	exists, err := h.namespaceExists(ctx, name)
+	_, err := h.GetNamespace(ctx, name)
+	if err == nil {
+		return true
+	}
+
+	if apierrors.IsNotFound(err) {
+		return false
+	}
+
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "unexpected error checking namespace %s", name)
 
-	return exists
+	return false
 }
 
 // WaitForNamespaceDeleted waits until a namespace no longer exists.
 func (h *K8sHelper) WaitForNamespaceDeleted(ctx context.Context, name string, timeout time.Duration) {
-	h.waitForNamespaceDeleted(ctx, name, timeout, 5*time.Second)
-}
-
-func (h *K8sHelper) namespaceExists(ctx context.Context, name string) (bool, error) {
-	_, err := h.GetNamespace(ctx, name)
-	if err == nil {
-		return true, nil
-	}
-
-	if apierrors.IsNotFound(err) {
-		return false, nil
-	}
-
-	return false, err
-}
-
-func (h *K8sHelper) waitForNamespaceDeleted(ctx context.Context, name string, timeout, pollInterval time.Duration) {
-	if pollInterval <= 0 {
-		pollInterval = 5 * time.Second
-	}
-
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		exists, err := h.namespaceExists(ctx, name)
-		if err == nil && !exists {
+		if !h.NamespaceExists(ctx, name) {
 			return
 		}
 
-		time.Sleep(pollInterval)
+		time.Sleep(5 * time.Second)
 	}
 
-	exists, err := h.namespaceExists(ctx, name)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "unexpected error checking namespace %s", name)
-	ExpectWithOffset(1, exists).To(BeFalse(),
+	ExpectWithOffset(1, h.NamespaceExists(ctx, name)).To(BeFalse(),
 		"namespace %s should be deleted within %s", name, timeout)
 }
 
