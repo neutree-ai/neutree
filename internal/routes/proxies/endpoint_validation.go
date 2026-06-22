@@ -194,14 +194,23 @@ func validateEndpointAcceleratorVirtualizationCapacity(resources *v1.ResourceSpe
 	product := resources.GetAcceleratorProduct()
 	resourceInfo := clusterResourceInfo(cluster)
 
-	productResource := acceleratorVirtualizationProductResource(resourceInfo, product)
+	productResources, productTelemetryReady := acceleratorVirtualizationProductResources(resourceInfo)
+	if !productTelemetryReady {
+		return nil
+	}
+
+	productResource := productResources[v1.AcceleratorProduct(product)]
 	if productResource == nil || productResource.Virtualization == nil {
 		return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf("product=%s has no available accelerator virtualization capacity", product))
 	}
 
-	requestedMemoryMiB, err := requestedAcceleratorVirtualizationMemoryMiB(resources, resourceInfo, product)
+	requestedMemoryMiB, memoryTelemetryReady, err := requestedAcceleratorVirtualizationMemoryMiB(resources, resourceInfo, product)
 	if err != nil {
 		return endpointAcceleratorVirtualizationCapacityError(err.Error())
+	}
+
+	if !memoryTelemetryReady {
+		return nil
 	}
 
 	requestedCoreUnits, err := requestedAcceleratorVirtualizationCoreUnits(resources)
@@ -209,19 +218,23 @@ func validateEndpointAcceleratorVirtualizationCapacity(resources *v1.ResourceSpe
 		return endpointAcceleratorVirtualizationCapacityError(err.Error())
 	}
 
-	satisfiableDevices := countSatisfiableAcceleratorVirtualizationDevices(resourceInfo, product, requestedMemoryMiB, requestedCoreUnits)
-	if satisfiableDevices < requestedGPU {
-		return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf(
-			"product=%s requested_gpu=%d requested_memory_mib=%d requested_core_units=%d satisfiable_devices=%d",
-			product,
-			requestedGPU,
-			requestedMemoryMiB,
-			requestedCoreUnits,
-			satisfiableDevices,
-		))
+	satisfiableDevices, deviceTelemetryReady := countSatisfiableAcceleratorVirtualizationDevices(resourceInfo, product, requestedMemoryMiB, requestedCoreUnits)
+	if satisfiableDevices >= requestedGPU {
+		return nil
 	}
 
-	return nil
+	if !deviceTelemetryReady {
+		return nil
+	}
+
+	return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf(
+		"product=%s requested_gpu=%d requested_memory_mib=%d requested_core_units=%d satisfiable_devices=%d",
+		product,
+		requestedGPU,
+		requestedMemoryMiB,
+		requestedCoreUnits,
+		satisfiableDevices,
+	))
 }
 
 func clusterResourceInfo(cluster *v1.Cluster) *v1.ClusterResources {
@@ -232,58 +245,60 @@ func clusterResourceInfo(cluster *v1.Cluster) *v1.ClusterResources {
 	return cluster.Status.ResourceInfo
 }
 
-func acceleratorVirtualizationProductResource(resourceInfo *v1.ClusterResources, product string) *v1.AcceleratorProductResource {
+func acceleratorVirtualizationProductResources(resourceInfo *v1.ClusterResources) (map[v1.AcceleratorProduct]*v1.AcceleratorProductResource, bool) {
 	if resourceInfo == nil || resourceInfo.Available == nil || resourceInfo.Available.AcceleratorGroups == nil {
-		return nil
+		return nil, false
 	}
 
 	group := resourceInfo.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
 	if group == nil || group.Products == nil {
-		return nil
+		return nil, false
 	}
 
-	return group.Products[v1.AcceleratorProduct(product)]
+	return group.Products, true
 }
 
-func requestedAcceleratorVirtualizationMemoryMiB(resources *v1.ResourceSpec, resourceInfo *v1.ClusterResources, product string) (int64, error) {
+func requestedAcceleratorVirtualizationMemoryMiB(resources *v1.ResourceSpec, resourceInfo *v1.ClusterResources, product string) (int64, bool, error) {
 	if memoryMiB := resources.GetAcceleratorVirtualizationMemoryMiB(); memoryMiB != "" {
-		return parseRequiredPositiveInteger(memoryMiB, "virtualization.memory_mib")
+		parsed, err := parseRequiredPositiveInteger(memoryMiB, "virtualization.memory_mib")
+
+		return parsed, true, err
 	}
 
 	memoryPercent := resources.GetAcceleratorVirtualizationMemoryPercent()
 	if memoryPercent == "" {
-		return 0, nil
+		return 0, true, nil
 	}
 
 	percent, err := parseRequiredPositiveInteger(memoryPercent, "virtualization.memory_percent")
 	if err != nil {
-		return 0, err
+		return 0, true, err
 	}
 
-	totalMemoryMiB := productTotalMemoryMiB(resourceInfo, product)
-	if totalMemoryMiB <= 0 {
-		return 0, fmt.Errorf("product=%s missing accelerator memory metadata for virtualization.memory_percent", product)
+	totalMemoryMiB, ok := productTotalMemoryMiB(resourceInfo, product)
+	if !ok || totalMemoryMiB <= 0 {
+		return 0, false, nil
 	}
 
-	return int64(math.Ceil(totalMemoryMiB * float64(percent) / 100)), nil
+	return int64(math.Ceil(totalMemoryMiB * float64(percent) / 100)), true, nil
 }
 
-func productTotalMemoryMiB(resourceInfo *v1.ClusterResources, product string) float64 {
+func productTotalMemoryMiB(resourceInfo *v1.ClusterResources, product string) (float64, bool) {
 	if resourceInfo == nil || resourceInfo.AcceleratorMetadata == nil {
-		return 0
+		return 0, false
 	}
 
 	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU]
 	if metadata == nil || metadata.Products == nil {
-		return 0
+		return 0, false
 	}
 
 	productMetadata := metadata.Products[v1.AcceleratorProduct(product)]
 	if productMetadata == nil {
-		return 0
+		return 0, false
 	}
 
-	return productMetadata.MemoryTotalMiB
+	return productMetadata.MemoryTotalMiB, true
 }
 
 func requestedAcceleratorVirtualizationCoreUnits(resources *v1.ResourceSpec) (int64, error) {
@@ -295,12 +310,18 @@ func requestedAcceleratorVirtualizationCoreUnits(resources *v1.ResourceSpec) (in
 	return parseRequiredPositiveInteger(corePercent, "virtualization.core_percent")
 }
 
-func countSatisfiableAcceleratorVirtualizationDevices(resourceInfo *v1.ClusterResources, product string, requestedMemoryMiB int64, requestedCoreUnits int64) int64 {
-	if resourceInfo == nil {
-		return 0
+func countSatisfiableAcceleratorVirtualizationDevices(
+	resourceInfo *v1.ClusterResources,
+	product string,
+	requestedMemoryMiB int64,
+	requestedCoreUnits int64,
+) (int64, bool) {
+	if resourceInfo == nil || resourceInfo.NodeResources == nil {
+		return 0, false
 	}
 
 	var count int64
+	telemetryReady := true
 
 	for _, node := range resourceInfo.NodeResources {
 		if node == nil {
@@ -308,7 +329,12 @@ func countSatisfiableAcceleratorVirtualizationDevices(resourceInfo *v1.ClusterRe
 		}
 
 		for _, device := range node.Devices {
-			if device == nil || !device.Health || device.Product != product || device.Available == nil {
+			if device == nil || !device.Health || device.Product != product {
+				continue
+			}
+
+			if device.Available == nil {
+				telemetryReady = false
 				continue
 			}
 
@@ -324,7 +350,7 @@ func countSatisfiableAcceleratorVirtualizationDevices(resourceInfo *v1.ClusterRe
 		}
 	}
 
-	return count
+	return count, telemetryReady
 }
 
 func parsePositiveIntegerResource(value *string, field string) (int64, error) {

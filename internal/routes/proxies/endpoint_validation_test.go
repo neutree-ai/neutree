@@ -191,6 +191,36 @@ func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
 }
 
 func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
+	t.Run("skips when cluster resource info is unavailable", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := &v1.Cluster{
+			Status: &v1.ClusterStatus{},
+		}
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("skips when available accelerator telemetry is incomplete", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := &v1.Cluster{
+			Status: &v1.ClusterStatus{
+				ResourceInfo: &v1.ClusterResources{},
+			},
+		}
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.Nil(t, err)
+	})
+
 	t.Run("rejects request that exceeds per device memory availability", func(t *testing.T) {
 		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8193",
@@ -314,6 +344,37 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 		})
 		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 10001, []*v1.DeviceResource{
 			healthyDevice("gpu-0", "Tesla-T4", 5101, 100),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("skips memory percent precheck when product memory metadata is missing", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryPercentKey: "51",
+			v1.AcceleratorVirtualizationCorePercentKey:   "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 10001, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 5101, 100),
+		})
+		cluster.Status.ResourceInfo.AcceleratorMetadata = nil
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("skips when matching device availability telemetry is incomplete", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		device := healthyDevice("gpu-0", "Tesla-T4", 8192, 100)
+		device.Available = nil
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			device,
 		})
 
 		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
