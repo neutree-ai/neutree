@@ -5,6 +5,7 @@ DROP FUNCTION IF EXISTS api.get_workspace_models(TEXT);
 DROP FUNCTION IF EXISTS api.get_api_key_limits(UUID);
 DROP FUNCTION IF EXISTS api.get_api_key_remaining(UUID);
 DROP FUNCTION IF EXISTS api.api_key_period_usage(UUID, TEXT);
+DROP FUNCTION IF EXISTS api.can_read_api_key_usage(UUID);
 DROP FUNCTION IF EXISTS api.set_api_key_limits(UUID, JSONB);
 
 -- Restore create_api_key to the 019 signature/body (without p_limits).

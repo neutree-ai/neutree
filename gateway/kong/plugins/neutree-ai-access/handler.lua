@@ -4,8 +4,9 @@
 -- consumer as this plugin's config (no per-request control-plane call).
 -- Enforced from local config:
 --   * disabled        -> 403 key_disabled
---   * allowed_models  -> 403 model_not_permitted (fail-close: set but the request
---                        model is missing or not in the list -> deny)
+--   * allowed_models  -> 403 model_not_permitted (only when a non-empty list is
+--                        set and the request model is missing/not in it; empty or
+--                        unset means unrestricted)
 --   * concurrency     -> 429 concurrency_exceeded (in-flight counter)
 --   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window)
 -- The plugin is attached only when the key actually has access limits, so an
@@ -67,9 +68,11 @@ function AccessHandler:access(conf)
         return deny403("key_disabled", "This API key is disabled")
     end
 
-    -- 2) Model allowlist (fail-close): when set, the request model must be present
-    --    and in the list; otherwise deny.
-    if conf.allowed_models ~= nil then
+    -- 2) Model allowlist: only enforce when a non-empty list is configured. A
+    --    cleared field can arrive as JSON null (cjson.null) and an empty list
+    --    means "unrestricted", so guard on a non-empty table rather than non-nil.
+    --    When enforced, the request model must be present and in the list.
+    if type(conf.allowed_models) == "table" and #conf.allowed_models > 0 then
         local model = request_model()
         if not model or not list_has(conf.allowed_models, model) then
             return deny403("model_not_permitted", "Model not permitted for this API key")

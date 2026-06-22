@@ -63,13 +63,25 @@ func TestApiKeyLimits(t *testing.T) {
 		t.Fatalf("insert daily usage: %v", err)
 	}
 
-	t.Run("get_api_key_remaining = limit - period usage", func(t *testing.T) {
+	t.Run("get_api_key_remaining = limit - period usage (owner)", func(t *testing.T) {
 		var rem sql.NullInt64
-		if err := db.QueryRowContext(ctx, `SELECT api.get_api_key_remaining($1)`, apiKeyID).Scan(&rem); err != nil {
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT api.get_api_key_remaining($1)`, apiKeyID).Scan(&rem)
+		})
+		if err != nil {
 			t.Fatalf("get_api_key_remaining: %v", err)
 		}
 		if !rem.Valid || rem.Int64 != 200 {
 			t.Fatalf("expected remaining 200, got %v", rem)
+		}
+	})
+	t.Run("get_api_key_remaining rejects a non-owner without usage-read", func(t *testing.T) {
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(other.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			var rem sql.NullInt64
+			return tx.QueryRowContext(ctx, `SELECT api.get_api_key_remaining($1)`, apiKeyID).Scan(&rem)
+		})
+		if err == nil {
+			t.Fatalf("expected a permission error for non-owner get_api_key_remaining")
 		}
 	})
 

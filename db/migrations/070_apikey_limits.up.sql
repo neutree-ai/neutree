@@ -102,21 +102,52 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 5) Period-usage helper: sum the key's total_usage over the current period window (from the immutable ledger).
+-- Authorization for per-key usage/quota reads: the gateway (service_role, for
+-- enforcement), the key owner, or a holder of workspace:usage-read on the key's
+-- workspace. Guards the SECURITY DEFINER usage/remaining helpers below, which are
+-- reachable directly via PostgREST and would otherwise leak per-key usage.
+CREATE OR REPLACE FUNCTION api.can_read_api_key_usage(p_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+DECLARE
+    v_owner UUID;
+    v_ws    TEXT;
+BEGIN
+    IF current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+        RETURN TRUE;
+    END IF;
+    SELECT user_id, (metadata).workspace INTO v_owner, v_ws FROM api.api_keys WHERE id = p_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+    RETURN auth.uid() = v_owner
+        OR api.has_permission(auth.uid(), 'workspace:usage-read', v_ws);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION api.api_key_period_usage(p_id UUID, p_period TEXT)
 RETURNS BIGINT
-LANGUAGE sql STABLE SECURITY DEFINER
+LANGUAGE plpgsql STABLE SECURITY DEFINER
 AS $$
-    SELECT COALESCE(SUM((d.spec).total_usage), 0)::bigint
-    FROM api.api_daily_usage d
-    WHERE (d.spec).api_key_id = p_id
-      AND (d.spec).usage_date >= CASE p_period
-            WHEN 'daily'   THEN CURRENT_DATE
-            WHEN 'weekly'  THEN date_trunc('week',  CURRENT_DATE)::date
-            WHEN 'monthly' THEN date_trunc('month', CURRENT_DATE)::date
-            WHEN 'yearly'  THEN date_trunc('year',  CURRENT_DATE)::date
-            ELSE date_trunc('month', CURRENT_DATE)::date
-          END
-      AND (d.spec).usage_date <= CURRENT_DATE;
+BEGIN
+    IF NOT api.can_read_api_key_usage(p_id) THEN
+        RAISE EXCEPTION 'permission denied';
+    END IF;
+    RETURN COALESCE((
+        SELECT SUM((d.spec).total_usage)
+        FROM api.api_daily_usage d
+        WHERE (d.spec).api_key_id = p_id
+          AND (d.spec).usage_date >= CASE p_period
+                WHEN 'daily'   THEN CURRENT_DATE
+                WHEN 'weekly'  THEN date_trunc('week',  CURRENT_DATE)::date
+                WHEN 'monthly' THEN date_trunc('month', CURRENT_DATE)::date
+                WHEN 'yearly'  THEN date_trunc('year',  CURRENT_DATE)::date
+                ELSE date_trunc('month', CURRENT_DATE)::date
+              END
+          AND (d.spec).usage_date <= CURRENT_DATE
+    ), 0)::bigint;
+END;
 $$;
 
 -- 6) get_api_key_remaining: the "remaining token" scalar the gateway quota
@@ -131,6 +162,9 @@ DECLARE
     v_limit   BIGINT;
     v_period  TEXT;
 BEGIN
+    IF NOT api.can_read_api_key_usage(p_id) THEN
+        RAISE EXCEPTION 'permission denied';
+    END IF;
     SELECT (spec).limits INTO v_limits FROM api.api_keys WHERE id = p_id;
     IF v_limits IS NULL THEN
         RETURN NULL;
@@ -208,13 +242,13 @@ $$;
 -- 9) get_api_keys_usage_summary: batched list-page usage (each api_key's total
 -- token quota + current-period used/remaining) returned in one call to avoid
 -- N+1. Reads spec.limits.token_quota + the usage ledger. SECURITY DEFINER
--- (ledger spans keys), guarded by workspace:read.
+-- (ledger spans keys), guarded by workspace:usage-read.
 CREATE OR REPLACE FUNCTION api.get_api_keys_usage_summary(p_workspace TEXT)
 RETURNS TABLE (api_key_id UUID, period TEXT, token_limit BIGINT, used BIGINT, remaining BIGINT)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 AS $$
 BEGIN
-    IF NOT api.has_permission(auth.uid(), 'workspace:read', p_workspace) THEN
+    IF NOT api.has_permission(auth.uid(), 'workspace:usage-read', p_workspace) THEN
         RAISE EXCEPTION 'permission denied';
     END IF;
     RETURN QUERY
