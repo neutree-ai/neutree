@@ -877,7 +877,7 @@ func buildNodeAgentComponent(
 		Type:             v1.NodeComponentTypeNodeAgent,
 		Image:            staticComponentImage(cluster, defaultNodeAgentImage),
 		Args:             args,
-		DockerRunOptions: []string{"--net=host", "--pid=host"},
+		DockerRunOptions: nodeAgentDockerRunOptions(profile),
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
 		},
@@ -886,6 +886,22 @@ func buildNodeAgentComponent(
 			Port:     defaultNodeAgentPort,
 		},
 	}
+}
+
+func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
+	options := []string{"--net=host", "--pid=host"}
+	if profile == nil || profile.ClusterRuntime == nil {
+		return options
+	}
+
+	for _, option := range profile.ClusterRuntime.Options {
+		option = strings.TrimSpace(option)
+		if strings.HasPrefix(option, "--gpus") {
+			options = append(options, option)
+		}
+	}
+
+	return options
 }
 
 func attachMetricsConfigFiles(

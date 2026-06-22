@@ -162,7 +162,7 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--node-exporter-url=http://127.0.0.1:19100/metrics")
 	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-url=http://127.0.0.1:9400/dcgm/metrics")
 	assert.Contains(t, nodeAgent.Args, "--ray-dashboard-url=http://10.0.0.10:8265")
-	assert.Equal(t, []string{"--net=host", "--pid=host"}, nodeAgent.DockerRunOptions)
+	assert.Equal(t, []string{"--net=host", "--pid=host", "--gpus all"}, nodeAgent.DockerRunOptions)
 	assert.Equal(t, 19101, nodeAgent.Ports[0].Port)
 	require.NotNil(t, nodeAgent.HealthCheck)
 	assert.Equal(t, defaultHealthHTTPPath, nodeAgent.HealthCheck.HTTPPath)

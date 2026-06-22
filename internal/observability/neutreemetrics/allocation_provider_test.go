@@ -208,6 +208,131 @@ func TestRayServeAllocationProviderPrefersExactNVIDIAUUIDOverRelativeCUDAIndex(t
 	assert.Equal(t, "GPU-def", allocations[0].Devices[0].UUID)
 }
 
+func TestRayServeAllocationProviderIgnoresAmbiguousAllVisibleDevices(t *testing.T) {
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{
+				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
+			},
+			applications: &dashboard.RayServeApplicationsResponse{
+				Applications: map[string]dashboard.RayServeApplicationStatus{
+					"default_chat": {
+						Status: dashboard.ApplicationStatusRunning,
+						Deployments: map[string]dashboard.Deployment{
+							"Backend": {
+								Name: "Backend",
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "backend-actor", ReplicaID: "backend-replica"},
+								},
+							},
+							"Controller": {
+								Name: "Controller",
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "controller-actor", ReplicaID: "controller-replica"},
+								},
+							},
+						},
+					},
+				},
+			},
+			actors: map[string]dashboard.Actor{
+				"backend-actor":    {ActorID: "backend-actor", PID: 2000},
+				"controller-actor": {ActorID: "controller-actor", PID: 1000},
+			},
+		},
+		NodeIP: "10.0.0.10",
+		Node:   "head-0",
+		ProcEnv: ProcessEnvReaderFunc(func(pid int) (map[string]string, error) {
+			if pid == 1000 {
+				return map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, nil
+			}
+
+			return map[string]string{"NVIDIA_VISIBLE_DEVICES": "void"}, nil
+		}),
+	}
+	snapshot := &NodeSnapshot{
+		Accelerator: v1.StaticNodeAcceleratorStatus{
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+				{ID: "1", UUID: "GPU-def", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+	}
+
+	allocations, err := provider.Allocations(context.Background(), snapshot)
+
+	require.NoError(t, err)
+	require.Empty(t, allocations)
+}
+
+func TestRayServeAllocationProviderMapsDescendantGPUProcess(t *testing.T) {
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{
+				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
+			},
+			applications: &dashboard.RayServeApplicationsResponse{
+				Applications: map[string]dashboard.RayServeApplicationStatus{
+					"default_chat": {
+						Status: dashboard.ApplicationStatusRunning,
+						Deployments: map[string]dashboard.Deployment{
+							"Backend": {
+								Name: "Backend",
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "backend-actor", ReplicaID: "backend-replica"},
+								},
+							},
+							"Controller": {
+								Name: "Controller",
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "controller-actor", ReplicaID: "controller-replica"},
+								},
+							},
+						},
+					},
+				},
+			},
+			actors: map[string]dashboard.Actor{
+				"backend-actor":    {ActorID: "backend-actor", PID: 2000},
+				"controller-actor": {ActorID: "controller-actor", PID: 1000},
+			},
+		},
+		NodeIP: "10.0.0.10",
+		Node:   "head-0",
+		ProcEnv: ProcessEnvReaderFunc(func(pid int) (map[string]string, error) {
+			if pid == 1000 {
+				return map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, nil
+			}
+
+			return map[string]string{"NVIDIA_VISIBLE_DEVICES": "void"}, nil
+		}),
+		GPUProcesses: GPUProcessReaderFunc(func(_ context.Context) ([]GPUProcess, error) {
+			return []GPUProcess{{UUID: "GPU-abc", PID: 3000}}, nil
+		}),
+		ProcessTree: ProcessTreeReaderFunc(func(pid, ancestorPID int) (bool, error) {
+			return pid == 3000 && ancestorPID == 2000, nil
+		}),
+	}
+	snapshot := &NodeSnapshot{
+		Accelerator: v1.StaticNodeAcceleratorStatus{
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+				{ID: "1", UUID: "GPU-def", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+	}
+
+	allocations, err := provider.Allocations(context.Background(), snapshot)
+
+	require.NoError(t, err)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "backend-actor", allocations[0].InstanceID)
+	assert.Equal(t, "backend-replica", allocations[0].ReplicaID)
+	assert.Equal(t, 2000, allocations[0].PID)
+	require.Len(t, allocations[0].Devices, 1)
+	assert.Equal(t, "GPU-abc", allocations[0].Devices[0].UUID)
+}
+
 type fakeRayDashboardService struct {
 	nodes        []v1.NodeSummary
 	applications *dashboard.RayServeApplicationsResponse

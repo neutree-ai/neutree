@@ -3,6 +3,7 @@ package neutreemetrics
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -137,6 +138,8 @@ type RayServeAllocationProvider struct {
 	Node         string
 	NodeIP       string
 	ProcEnv      ProcessEnvReader
+	GPUProcesses GPUProcessReader
+	ProcessTree  ProcessTreeReader
 }
 
 func (p RayServeAllocationProvider) Allocations(
@@ -164,6 +167,13 @@ func (p RayServeAllocationProvider) Allocations(
 
 	deviceLookup := newDeviceLookup(snapshot.Accelerator.Devices)
 	envReader := p.processEnvReader()
+
+	gpuProcesses, err := p.gpuProcessReader().GPUProcesses(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	processTree := p.processTreeReader()
 	nodeLabel := firstNonEmpty(p.Node, p.NodeIP, nodeID)
 	allocations := make([]v1.StaticNodeAllocationStatus, 0)
 
@@ -184,6 +194,8 @@ func (p RayServeAllocationProvider) Allocations(
 					replica,
 					deviceLookup,
 					nodeLabel,
+					gpuProcesses,
+					processTree,
 				)
 				if err != nil {
 					return nil, err
@@ -236,6 +248,22 @@ func (p RayServeAllocationProvider) processEnvReader() ProcessEnvReader {
 	return ProcFSEnvReader{}
 }
 
+func (p RayServeAllocationProvider) gpuProcessReader() GPUProcessReader {
+	if p.GPUProcesses != nil {
+		return p.GPUProcesses
+	}
+
+	return NvidiaSMIGPUProcessReader{}
+}
+
+func (p RayServeAllocationProvider) processTreeReader() ProcessTreeReader {
+	if p.ProcessTree != nil {
+		return p.ProcessTree
+	}
+
+	return ProcFSProcessTreeReader{}
+}
+
 type ProcessEnvReader interface {
 	Env(pid int) (map[string]string, error)
 }
@@ -277,6 +305,154 @@ func (r ProcFSEnvReader) Env(pid int) (map[string]string, error) {
 	}
 
 	return env, nil
+}
+
+type GPUProcessReader interface {
+	GPUProcesses(ctx context.Context) ([]GPUProcess, error)
+}
+
+type GPUProcessReaderFunc func(ctx context.Context) ([]GPUProcess, error)
+
+func (f GPUProcessReaderFunc) GPUProcesses(ctx context.Context) ([]GPUProcess, error) {
+	return f(ctx)
+}
+
+type GPUProcess struct {
+	UUID string
+	PID  int
+}
+
+type NvidiaSMIGPUProcessReader struct {
+	Command string
+}
+
+func (r NvidiaSMIGPUProcessReader) GPUProcesses(ctx context.Context) ([]GPUProcess, error) {
+	command := r.Command
+	if command == "" {
+		command = "nvidia-smi"
+	}
+
+	out, err := exec.CommandContext(
+		ctx,
+		command,
+		"--query-compute-apps=gpu_uuid,pid",
+		"--format=csv,noheader,nounits",
+	).Output()
+	if err != nil {
+		return nil, nil
+	}
+
+	return parseNvidiaSMIComputeProcesses(string(out)), nil
+}
+
+func parseNvidiaSMIComputeProcesses(raw string) []GPUProcess {
+	processes := make([]GPUProcess, 0)
+
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Split(line, ",")
+		if len(parts) < 2 {
+			continue
+		}
+
+		uuid := strings.TrimSpace(parts[0])
+		if uuid == "" {
+			continue
+		}
+
+		pid, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil || pid <= 0 {
+			continue
+		}
+
+		processes = append(processes, GPUProcess{UUID: uuid, PID: pid})
+	}
+
+	return processes
+}
+
+type ProcessTreeReader interface {
+	IsDescendant(pid, ancestorPID int) (bool, error)
+}
+
+type ProcessTreeReaderFunc func(pid, ancestorPID int) (bool, error)
+
+func (f ProcessTreeReaderFunc) IsDescendant(pid, ancestorPID int) (bool, error) {
+	return f(pid, ancestorPID)
+}
+
+type ProcFSProcessTreeReader struct {
+	Root string
+}
+
+func (r ProcFSProcessTreeReader) IsDescendant(pid, ancestorPID int) (bool, error) {
+	if pid <= 0 || ancestorPID <= 0 {
+		return false, nil
+	}
+
+	if pid == ancestorPID {
+		return true, nil
+	}
+
+	root := r.Root
+	if root == "" {
+		root = "/proc"
+	}
+
+	seen := map[int]struct{}{}
+	currentPID := pid
+
+	for currentPID > 1 {
+		if currentPID == ancestorPID {
+			return true, nil
+		}
+
+		if _, ok := seen[currentPID]; ok {
+			return false, nil
+		}
+
+		seen[currentPID] = struct{}{}
+
+		parentPID, ok, err := processParentPID(root, currentPID)
+		if err != nil || !ok {
+			return false, err
+		}
+
+		currentPID = parentPID
+	}
+
+	return false, nil
+}
+
+func processParentPID(root string, pid int) (int, bool, error) {
+	raw, err := os.ReadFile(filepath.Join(root, strconv.Itoa(pid), "status"))
+	if os.IsNotExist(err) {
+		return 0, false, nil
+	}
+
+	if err != nil {
+		return 0, false, err
+	}
+
+	for _, line := range strings.Split(string(raw), "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || key != "PPid" {
+			continue
+		}
+
+		parentPID, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return 0, false, err
+		}
+
+		return parentPID, true, nil
+	}
+
+	return 0, false, nil
 }
 
 type acceleratorDeviceLookup struct {
@@ -322,6 +498,8 @@ func rayReplicaAllocation(
 	replica dashboard.Replica,
 	deviceLookup acceleratorDeviceLookup,
 	nodeLabel string,
+	gpuProcesses []GPUProcess,
+	processTree ProcessTreeReader,
 ) (v1.StaticNodeAllocationStatus, bool, error) {
 	actor, err := rayActorByID(ctx, service, replica.ActorID)
 	if err != nil {
@@ -338,6 +516,24 @@ func rayReplicaAllocation(
 	}
 
 	devices := allocationDevicesFromRefs(visibleDeviceRefs(env, deviceLookup), deviceLookup, nodeLabel)
+
+	if processTree != nil {
+		processDevices, err := allocationDevicesFromGPUProcesses(
+			gpuProcesses,
+			processTree,
+			actor.PID,
+			deviceLookup,
+			nodeLabel,
+		)
+		if err != nil {
+			return v1.StaticNodeAllocationStatus{}, false, err
+		}
+
+		if len(processDevices) > 0 {
+			devices = processDevices
+		}
+	}
+
 	if len(devices) == 0 {
 		return v1.StaticNodeAllocationStatus{}, false, nil
 	}
@@ -381,14 +577,14 @@ func rayActorByID(
 func visibleDeviceRefs(env map[string]string, deviceLookup acceleratorDeviceLookup) []string {
 	nvidiaVisibleDevices := strings.TrimSpace(env["NVIDIA_VISIBLE_DEVICES"])
 	if hasExactVisibleDeviceUUIDs(nvidiaVisibleDevices, deviceLookup) {
-		return parseVisibleDevices(nvidiaVisibleDevices, deviceLookup)
+		return parseVisibleDevices(nvidiaVisibleDevices)
 	}
 
 	if value := strings.TrimSpace(env["CUDA_VISIBLE_DEVICES"]); value != "" {
-		return parseVisibleDevices(value, deviceLookup)
+		return parseVisibleDevices(value)
 	}
 
-	return parseVisibleDevices(nvidiaVisibleDevices, deviceLookup)
+	return parseVisibleDevices(nvidiaVisibleDevices)
 }
 
 func hasExactVisibleDeviceUUIDs(value string, deviceLookup acceleratorDeviceLookup) bool {
@@ -416,22 +612,15 @@ func hasExactVisibleDeviceUUIDs(value string, deviceLookup acceleratorDeviceLook
 	return true
 }
 
-func parseVisibleDevices(value string, deviceLookup acceleratorDeviceLookup) []string {
+func parseVisibleDevices(value string) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil
 	}
 
 	switch strings.ToLower(value) {
-	case "none", "void", "no":
+	case "all", "none", "void", "no":
 		return nil
-	case "all":
-		refs := make([]string, 0, len(deviceLookup.all))
-		for _, device := range deviceLookup.all {
-			refs = append(refs, device.UUID)
-		}
-
-		return refs
 	}
 
 	parts := strings.Split(value, ",")
@@ -477,6 +666,29 @@ func allocationDevicesFromRefs(
 	}
 
 	return devices
+}
+
+func allocationDevicesFromGPUProcesses(
+	gpuProcesses []GPUProcess,
+	processTree ProcessTreeReader,
+	actorPID int,
+	deviceLookup acceleratorDeviceLookup,
+	nodeID string,
+) ([]v1.DeviceAllocation, error) {
+	refs := make([]string, 0, len(gpuProcesses))
+
+	for _, gpuProcess := range gpuProcesses {
+		descendant, err := processTree.IsDescendant(gpuProcess.PID, actorPID)
+		if err != nil {
+			return nil, err
+		}
+
+		if descendant {
+			refs = append(refs, gpuProcess.UUID)
+		}
+	}
+
+	return allocationDevicesFromRefs(refs, deviceLookup, nodeID), nil
 }
 
 func deviceFromRef(
