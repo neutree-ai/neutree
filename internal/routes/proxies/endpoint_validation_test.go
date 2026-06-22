@@ -1,8 +1,13 @@
 package proxies
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/assert"
@@ -236,6 +241,40 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 		assert.Contains(t, err.Hint, "requested_gpu=2")
 	})
 
+	t.Run("rejects request that exceeds per device core availability", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "51",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 8192, 50),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10220", err.Code)
+		assert.Contains(t, err.Hint, "requested_core_units=51")
+		assert.Contains(t, err.Hint, "satisfiable_devices=0")
+	})
+
+	t.Run("rejects request that needs more healthy matching devices than available", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, "10220", err.Code)
+		assert.Contains(t, err.Hint, "requested_gpu=2")
+		assert.Contains(t, err.Hint, "satisfiable_devices=1")
+	})
+
 	t.Run("ignores unhealthy matching devices", func(t *testing.T) {
 		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
@@ -283,6 +322,50 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 }
 
+func TestValidateEndpointAcceleratorVirtualizationCreateCapacitySkipsWhenClusterCannotBePrevalidated(t *testing.T) {
+	t.Run("skips when cluster storage is unavailable", func(t *testing.T) {
+		endpoint := endpointWithAcceleratorVirtualization("cluster-a", "team-a")
+
+		err := validateEndpointAcceleratorVirtualizationCreateCapacity(nil, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("skips when endpoint has no target cluster", func(t *testing.T) {
+		clusterStorage := &fakeClusterStorage{
+			listError: errors.New("unexpected lookup"),
+		}
+		endpoint := endpointWithAcceleratorVirtualization("", "team-a")
+
+		err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
+
+		assert.Nil(t, err)
+		assert.Equal(t, 0, clusterStorage.listCalls)
+	})
+
+	t.Run("skips when cluster lookup fails", func(t *testing.T) {
+		clusterStorage := &fakeClusterStorage{
+			listError: errors.New("storage unavailable"),
+		}
+		endpoint := endpointWithAcceleratorVirtualization("cluster-a", "team-a")
+
+		err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
+
+		assert.Nil(t, err)
+		assert.Equal(t, 1, clusterStorage.listCalls)
+	})
+
+	t.Run("skips when cluster is not found", func(t *testing.T) {
+		clusterStorage := &fakeClusterStorage{}
+		endpoint := endpointWithAcceleratorVirtualization("cluster-a", "team-a")
+
+		err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
+
+		assert.Nil(t, err)
+		assert.Equal(t, 1, clusterStorage.listCalls)
+	})
+}
+
 func TestValidateEndpointAcceleratorVirtualizationCreateCapacityLooksUpClusterByNameAndWorkspace(t *testing.T) {
 	resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
 		v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
@@ -312,6 +395,64 @@ func TestValidateEndpointAcceleratorVirtualizationCreateCapacityLooksUpClusterBy
 		{Column: "metadata->name", Operator: "eq", Value: `"cluster-a"`},
 		{Column: "metadata->workspace", Operator: "eq", Value: `"team-a"`},
 	}, clusterStorage.listOption.Filters)
+}
+
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareSkipsCapacityLookupOnPatch(t *testing.T) {
+	clusterStorage := &fakeClusterStorage{
+		listError: errors.New("patch must not look up cluster capacity"),
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder := runEndpointAcceleratorVirtualizationValidation(http.MethodPatch, body, clusterStorage)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.Equal(t, 0, clusterStorage.listCalls)
+}
+
+func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1.Endpoint {
+	return &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Name:      "endpoint",
+			Workspace: workspace,
+		},
+		Spec: &v1.EndpointSpec{
+			Cluster: cluster,
+			Resources: acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+				v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+				v1.AcceleratorVirtualizationCorePercentKey: "50",
+			}),
+		},
+	}
+}
+
+func runEndpointAcceleratorVirtualizationValidation(method string, body string, clusterStorage storage.ClusterStorage) *httptest.ResponseRecorder {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Handle(method, "/endpoints", validateEndpointAcceleratorVirtualization(clusterStorage), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(method, "/endpoints", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	return recorder
 }
 
 func acceleratorVirtualizationResources(gpu string, product string, virtualization map[string]string) *v1.ResourceSpec {
@@ -390,6 +531,8 @@ func unhealthyDevice(uuid string, product string, memoryMiB int64, coreUnits int
 
 type fakeClusterStorage struct {
 	clusters   []v1.Cluster
+	listCalls  int
+	listError  error
 	listOption storage.ListOption
 }
 
@@ -410,7 +553,12 @@ func (s *fakeClusterStorage) GetCluster(id string) (*v1.Cluster, error) {
 }
 
 func (s *fakeClusterStorage) ListCluster(option storage.ListOption) ([]v1.Cluster, error) {
+	s.listCalls++
 	s.listOption = option
+
+	if s.listError != nil {
+		return nil, s.listError
+	}
 
 	return s.clusters, nil
 }

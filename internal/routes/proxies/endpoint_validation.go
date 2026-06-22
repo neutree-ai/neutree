@@ -148,13 +148,15 @@ func validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage stor
 		return nil
 	}
 
+	// Capacity precheck is best effort; leave lookup/schema failures to the
+	// existing persistence and reconcile paths.
 	if clusterStorage == nil {
-		return endpointAcceleratorVirtualizationCapacityError("cluster storage is unavailable")
+		return nil
 	}
 
 	clusterName := endpoint.Spec.Cluster
 	if clusterName == "" {
-		return endpointAcceleratorVirtualizationCapacityError("spec.cluster is required for accelerator virtualization capacity validation")
+		return nil
 	}
 
 	workspace := endpoint.GetWorkspace()
@@ -169,11 +171,11 @@ func validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage stor
 		},
 	})
 	if err != nil {
-		return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf("failed to look up cluster %s in workspace %s: %v", clusterName, workspace, err))
+		return nil
 	}
 
 	if len(clusters) == 0 {
-		return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf("cluster %s not found in workspace %s", clusterName, workspace))
+		return nil
 	}
 
 	return validateEndpointAcceleratorVirtualizationCapacity(endpoint.Spec.Resources, &clusters[0])
