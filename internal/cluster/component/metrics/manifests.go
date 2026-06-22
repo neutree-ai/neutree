@@ -122,12 +122,12 @@ data:
       # Use HTTP scheme for direct node-exporter access
       scheme: http
       relabel_configs:
-      # Set the __address__ to node IP and port 9100
+      # Set the __address__ to node IP and node-exporter port.
       - source_labels: [__address__]
         action: replace
         target_label: __address__
         regex: '([^:]+)(?::\d+)?'
-        replacement: '$1:9100'
+        replacement: '$1:{{ .NodeExporterPort }}'
       # Use node name as instance label
       - source_labels: [__meta_kubernetes_node_name]
         action: replace
@@ -153,12 +153,12 @@ data:
       tls_config:
         insecure_skip_verify: true
       relabel_configs:
-      # Set the __address__ to node IP and port 9100
+      # Set the __address__ to node IP and node-exporter port.
       - source_labels: [__address__]
         action: replace
         target_label: __address__
         regex: '([^:]+)(?::\d+)?'
-        replacement: '$1:9100'
+        replacement: '$1:{{ .NodeExporterPort }}'
       # Use node name as instance label
       - source_labels: [__meta_kubernetes_node_name]
         action: replace

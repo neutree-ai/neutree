@@ -293,6 +293,12 @@ func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 		"--web.listen-address=:9100"))
 	assert.Assert(t, strings.Contains(strings.Join(nodeExporter.Spec.Template.Spec.Containers[0].Args, "\n"),
 		"--path.rootfs=/host"))
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-https'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
 }
 
 func TestBuildMetricsResourcesIncludesNeutreeNodeAgentDaemonSet(t *testing.T) {
