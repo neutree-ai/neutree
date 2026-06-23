@@ -67,6 +67,22 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			Expect(body).To(ContainSubstring("choices"))
 		})
 
+		It("should accept opaque x-request-id headers", Label("C2723107", "request-id"), func() {
+			requestIDEPName := "e2e-ep-ssh-reqid-" + Cfg.RunID
+			yamlPath := applyEndpoint(requestIDEPName, clusterName)
+			defer os.Remove(yamlPath)
+			defer deleteEndpoint(requestIDEPName)
+
+			waitEndpointRunning(requestIDEPName)
+			ep := getEndpoint(requestIDEPName)
+			code, body, err := inferChatWithHeaders(ep.Status.ServiceURL, "Hello", map[string]string{
+				"x-request-id": "bench-NEU-454-10",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(http.StatusOK), "inference failed: %s", body)
+			Expect(body).To(ContainSubstring("choices"))
+		})
+
 		It("should return error for wrong model name", Label("inference-error"), func() {
 			ep := getEndpoint(epName)
 

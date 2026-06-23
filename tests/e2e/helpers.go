@@ -1634,6 +1634,14 @@ func parseEndpointJSON(stdout string) v1.Endpoint {
 
 // doInferenceRequest sends a JSON POST to the given URL path and returns (status_code, body, error).
 func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, string, error) {
+	return doInferenceRequestWithHeaders(serviceURL, path, reqBody, nil)
+}
+
+func doInferenceRequestWithHeaders(
+	serviceURL, path string,
+	reqBody map[string]any,
+	headers map[string]string,
+) (int, string, error) {
 	payloadBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return 0, "", err
@@ -1658,6 +1666,10 @@ func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, s
 
 	req.Header.Set("Authorization", authValue)
 
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, "", err
@@ -1673,13 +1685,17 @@ func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, s
 }
 
 func inferChat(serviceURL, prompt string) (int, string, error) {
-	return doInferenceRequest(serviceURL, "/v1/chat/completions", map[string]any{
+	return inferChatWithHeaders(serviceURL, prompt, nil)
+}
+
+func inferChatWithHeaders(serviceURL, prompt string, headers map[string]string) (int, string, error) {
+	return doInferenceRequestWithHeaders(serviceURL, "/v1/chat/completions", map[string]any{
 		"model": profileModelName(),
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
 		"max_tokens": 16,
-	})
+	}, headers)
 }
 
 //nolint:unparam // input is a fixture-style literal across callers by design;
