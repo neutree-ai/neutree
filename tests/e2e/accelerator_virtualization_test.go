@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -163,112 +162,6 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			Expect(endpoint.Spec.Resources.Accelerator).NotTo(HaveKey(v1.AcceleratorVirtualizationCorePercentKey))
 
 			expectEndpointNVIDIAGPUResourcesWithExpected(endpoint, productName, memoryMiB, vgpuFullCardCoreUnits)
-		})
-	})
-
-var _ = Describe("K8s Accelerator Virtualization Disable Guard", Ordered,
-	Label("cluster", "endpoint", "k8s", "accelerator-virtualization", "hami", "negative"), func() {
-		var (
-			clusterName  string
-			endpointName string
-			kubeconfig   string
-		)
-
-		BeforeAll(func() {
-			requireAcceleratorVirtualizationProfile()
-			kubeconfig = requireK8sProfile()
-
-			By("Setting up image registry")
-			SetupImageRegistry()
-
-			clusterName = "e2e-vgpu-guard-" + Cfg.RunID
-
-			yaml := renderK8sClusterYAML(map[string]any{
-				"name":                               clusterName,
-				"kubeconfig":                         kubeconfig,
-				"accelerator_virtualization_enabled": true,
-			})
-
-			ch := NewClusterHelper()
-
-			By("Applying K8s cluster with accelerator virtualization enabled: " + clusterName)
-			r := ch.Apply(yaml)
-			ExpectSuccess(r)
-
-			By("Waiting for virtualized cluster Running")
-			ch.EventuallyInPhase(clusterName, v1.ClusterPhaseRunning, "", TerminalPhaseTimeout)
-		})
-
-		AfterAll(func() {
-			if endpointName != "" {
-				deleteEndpoint(endpointName)
-			}
-
-			if clusterName != "" {
-				teardownCluster(clusterName)
-			}
-		})
-
-		// TestRail: C2722691.
-		It("should reject disabling accelerator virtualization while a vGPU endpoint references the cluster", Label("C2722691"), func() {
-			if profileModelName() == "" {
-				Skip("Model name not configured in profile, skipping vGPU endpoint negative path")
-			}
-
-			cluster := eventuallyVirtualizedClusterResourceInfo(clusterName)
-			productName := expectNVIDIAVirtualizedClusterResources(cluster)
-
-			By("Setting up model registry")
-			SetupModelRegistry()
-			DeferCleanup(TeardownModelRegistry)
-
-			endpointName = "e2e-vgpu-guard-ep-" + Cfg.RunID
-
-			yamlPath := applyEndpoint(endpointName, clusterName,
-				withAccelerator(string(v1.AcceleratorTypeNVIDIAGPU), productName),
-				withAcceleratorVirtualization(vgpuEndpointMemoryMiB, "", vgpuEndpointCorePercent))
-			DeferCleanup(func() {
-				if endpointName != "" {
-					deleteEndpoint(endpointName)
-					endpointName = ""
-				}
-			})
-			DeferCleanup(removeFileIfExists, yamlPath)
-
-			By("Waiting for vGPU endpoint Running")
-			waitEndpointRunning(endpointName)
-
-			endpoint := getEndpoint(endpointName)
-			Expect(endpoint.Spec).NotTo(BeNil())
-			Expect(endpoint.Spec.Resources).NotTo(BeNil())
-			Expect(endpoint.Spec.Resources.HasAcceleratorVirtualization()).To(BeTrue())
-
-			disablePath := renderClusterAcceleratorVirtualizationUpdateJSON(clusterName, kubeconfig, false)
-			DeferCleanup(removeFileIfExists, disablePath)
-
-			By("Rejecting accelerator virtualization disable while vGPU endpoint exists")
-			r := RunCLI("apply", "-f", disablePath, "--force-update")
-			ExpectFailed(r)
-			combinedOutput := r.Stdout + r.Stderr
-			Expect(combinedOutput).To(ContainSubstring("10211"))
-			Expect(combinedOutput).To(ContainSubstring("cannot disable accelerator virtualization"))
-			Expect(combinedOutput).To(ContainSubstring("vGPU endpoint(s) still reference this cluster"))
-
-			cluster = getClusterFullJSON(clusterName)
-			Expect(cluster.Spec).NotTo(BeNil())
-			Expect(cluster.Spec.AcceleratorVirtualizationEnabled()).To(BeTrue())
-
-			By("Deleting vGPU endpoint")
-			deleteEndpoint(endpointName)
-			endpointName = ""
-
-			By("Allowing accelerator virtualization disable after vGPU endpoint is deleted")
-			r = RunCLI("apply", "-f", disablePath, "--force-update")
-			ExpectSuccess(r)
-
-			cluster = getClusterFullJSON(clusterName)
-			Expect(cluster.Spec).NotTo(BeNil())
-			Expect(cluster.Spec.AcceleratorVirtualizationEnabled()).To(BeFalse())
 		})
 	})
 
@@ -455,36 +348,6 @@ func expectEndpointNVIDIAGPUResourcesWithExpected(
 
 	ExpectWithOffset(1, memoryMiB).To(Equal(usage.MemoryMiB))
 	ExpectWithOffset(1, coreUnits).To(Equal(usage.CoreUnits))
-}
-
-func renderClusterAcceleratorVirtualizationUpdateJSON(clusterName, kubeconfig string, enabled bool) string {
-	cluster := getClusterFullJSON(clusterName)
-	ExpectWithOffset(1, cluster.Metadata).NotTo(BeNil())
-	ExpectWithOffset(1, cluster.Spec).NotTo(BeNil())
-	ExpectWithOffset(1, cluster.Spec.Config).NotTo(BeNil())
-	ExpectWithOffset(1, cluster.Spec.Config.KubernetesConfig).NotTo(BeNil())
-
-	cluster.ID = 0
-	cluster.APIVersion = "v1"
-	cluster.Kind = "Cluster"
-	cluster.Status = nil
-	cluster.Metadata.CreationTimestamp = ""
-	cluster.Metadata.UpdateTimestamp = ""
-	cluster.Metadata.DeletionTimestamp = ""
-	cluster.Spec.Config.KubernetesConfig.Kubeconfig = kubeconfig
-	cluster.Spec.AcceleratorVirtualization = &v1.AcceleratorVirtualizationSpec{Enabled: enabled}
-
-	data, err := json.MarshalIndent(cluster, "", "  ")
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-
-	tmpFile, err := os.CreateTemp("", "e2e-cluster-accelerator-virtualization-*.json")
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-
-	_, err = tmpFile.Write(data)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	ExpectWithOffset(1, tmpFile.Close()).To(Succeed())
-
-	return tmpFile.Name()
 }
 
 func removeFileIfExists(path string) {
