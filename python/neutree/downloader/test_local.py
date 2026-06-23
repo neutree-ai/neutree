@@ -61,6 +61,8 @@ class TestLocalDownloaderVerification(unittest.TestCase):
     def setUp(self):
         self.src_dir = tempfile.mkdtemp()
         self.dest_dir = tempfile.mkdtemp()
+        self.interactive_patcher = mock.patch("neutree.downloader.local.is_interactive", return_value=True)
+        self.interactive_patcher.start()
 
         # Create source files
         self.model_content = b"fake model weights data"
@@ -71,6 +73,7 @@ class TestLocalDownloaderVerification(unittest.TestCase):
             f.write(self.config_content)
 
     def tearDown(self):
+        self.interactive_patcher.stop()
         shutil.rmtree(self.src_dir, ignore_errors=True)
         shutil.rmtree(self.dest_dir, ignore_errors=True)
 
@@ -254,6 +257,73 @@ class TestLocalDownloaderVerification(unittest.TestCase):
 
         self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "model.bin")))
         self.assertTrue(os.path.exists(os.path.join(self.dest_dir, "config.json")))
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.local.is_interactive", return_value=False)
+    @mock.patch("neutree.downloader.local.ProgressReporter")
+    def test_non_tty_prescans_source_size_and_reports_progress(
+            self, mock_reporter, _mock_interactive, _mock_skip):
+        """Non-TTY local copies should precompute the planned copy size."""
+        reporter_context = mock_reporter.return_value
+        reporter_context.__enter__.return_value = reporter_context
+        reporter_context.__exit__.return_value = False
+
+        dl = LocalDownloader()
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": ""})
+
+        mock_reporter.assert_called_once()
+        args, kwargs = mock_reporter.call_args
+        self.assertEqual(args[0], self.dest_dir)
+        self.assertEqual(kwargs["label"], "Local download")
+        self.assertEqual(kwargs["total_size"], len(self.model_content) + len(self.config_content))
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.local.is_interactive", return_value=False)
+    @mock.patch("neutree.downloader.local.ProgressReporter")
+    def test_non_tty_planned_size_respects_filter_recursive_and_existing_files(
+            self, mock_reporter, _mock_interactive, _mock_skip):
+        """Planned size should match files that will actually be copied."""
+        reporter_context = mock_reporter.return_value
+        reporter_context.__enter__.return_value = reporter_context
+        reporter_context.__exit__.return_value = False
+
+        with open(os.path.join(self.src_dir, "model-q4_0.gguf"), "wb") as f:
+            f.write(b"q4")
+        with open(os.path.join(self.src_dir, "model-q8_0.gguf"), "wb") as f:
+            f.write(b"q8")
+        nested = os.path.join(self.src_dir, "nested")
+        os.makedirs(nested)
+        with open(os.path.join(nested, "ignored.gguf"), "wb") as f:
+            f.write(b"nested")
+        with open(os.path.join(self.dest_dir, "model-q4_0.gguf"), "wb") as f:
+            f.write(b"already")
+
+        dl = LocalDownloader()
+        dl.download(
+            self.src_dir,
+            self.dest_dir,
+            recursive=False,
+            metadata={"file": "*.gguf"})
+
+        args, kwargs = mock_reporter.call_args
+        self.assertEqual(args[0], self.dest_dir)
+        self.assertEqual(kwargs["total_size"], len(b"q8"))
+
+    @mock.patch("neutree.downloader.local.should_skip_verification", return_value=True)
+    @mock.patch("neutree.downloader.local.is_interactive", return_value=True)
+    @mock.patch("neutree.downloader.local.ProgressReporter")
+    def test_tty_skips_source_size_prescan(self, mock_reporter, _mock_interactive, _mock_skip):
+        """Interactive local copies should not pay the source pre-scan cost."""
+        reporter_context = mock_reporter.return_value
+        reporter_context.__enter__.return_value = reporter_context
+        reporter_context.__exit__.return_value = False
+
+        dl = LocalDownloader()
+        dl.download(self.src_dir, self.dest_dir, metadata={"file": ""})
+
+        args, kwargs = mock_reporter.call_args
+        self.assertEqual(args[0], self.dest_dir)
+        self.assertIsNone(kwargs["total_size"])
 
 
 if __name__ == "__main__":

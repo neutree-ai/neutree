@@ -7,6 +7,7 @@ import shutil
 import fnmatch
 
 from .base import Downloader
+from .progress import ProgressReporter, is_interactive
 from .utils import (
     ensure_dir,
     resolve_allow_pattern,
@@ -53,7 +54,31 @@ class LocalDownloader(Downloader):
         ensure_dir(dest)
 
         allow_pattern = resolve_allow_pattern(metadata)
+        interactive = is_interactive()
+        total_size = None
+        if not interactive:
+            total_size = self._planned_copy_size(
+                src,
+                dest,
+                allow_pattern=allow_pattern,
+                recursive=recursive,
+                overwrite=overwrite)
 
+        with ProgressReporter(
+                dest,
+                logger,
+                label="Local download",
+                total_size=total_size,
+                interactive=interactive):
+            self._copy_files(src, dest, allow_pattern=allow_pattern,
+                             recursive=recursive, overwrite=overwrite)
+
+            # Verify copied files against source-of-truth checksums
+            if not should_skip_verification():
+                self._verify_copied_files(dest)
+
+    def _copy_files(self, src: str, dest: str, *, allow_pattern: Optional[str],
+                    recursive: bool, overwrite: bool) -> None:
         if recursive:
             # copy all files; skip existing unless overwrite
             for root, dirs, files in os.walk(src):
@@ -85,9 +110,53 @@ class LocalDownloader(Downloader):
                         continue
                     shutil.copy2(s, t)
 
-        # Verify copied files against source-of-truth checksums
-        if not should_skip_verification():
-            self._verify_copied_files(dest)
+    def _planned_copy_size(self, src: str, dest: str, *, allow_pattern: Optional[str],
+                           recursive: bool, overwrite: bool) -> int:
+        total = 0
+
+        for source_path, _target_path in self._copy_candidates(
+                src,
+                dest,
+                allow_pattern=allow_pattern,
+                recursive=recursive,
+                overwrite=overwrite):
+            try:
+                total += os.path.getsize(source_path)
+            except OSError:
+                continue
+
+        return total
+
+    def _copy_candidates(self, src: str, dest: str, *, allow_pattern: Optional[str],
+                         recursive: bool, overwrite: bool):
+        if recursive:
+            for root, _, files in os.walk(src):
+                rel = os.path.relpath(root, src)
+                target_root = os.path.join(dest, rel) if rel != os.curdir else dest
+
+                for f in files:
+                    if allow_pattern and not rel.startswith(".neutree"):
+                        file_relpath = os.path.join(rel, f) if rel != os.curdir else f
+                        if not fnmatch.fnmatch(f, allow_pattern) and not fnmatch.fnmatch(file_relpath, allow_pattern):
+                            continue
+
+                    source_path = os.path.join(root, f)
+                    target_path = os.path.join(target_root, f)
+                    if os.path.exists(target_path) and not overwrite:
+                        continue
+                    yield source_path, target_path
+            return
+
+        for entry in os.listdir(src):
+            source_path = os.path.join(src, entry)
+            target_path = os.path.join(dest, entry)
+            if not os.path.isfile(source_path):
+                continue
+            if allow_pattern and not fnmatch.fnmatch(entry, allow_pattern):
+                continue
+            if os.path.exists(target_path) and not overwrite:
+                continue
+            yield source_path, target_path
 
     def _verify_copied_files(self, dest: str) -> None:
         """Verify copied files against .neutree/checksums/ (source of truth).

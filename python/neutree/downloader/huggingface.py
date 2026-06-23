@@ -1,10 +1,12 @@
 import os
 import time
 import logging
+from contextlib import contextmanager
 from typing import Optional, Dict, Any
 
 from .base import Downloader
 from huggingface_hub.hf_api import RepoFile
+from .progress import ProgressReporter, is_interactive
 from .utils import (
     ensure_dir,
     resolve_allow_pattern,
@@ -36,6 +38,41 @@ if not logger.handlers:
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     ))
     logger.addHandler(_handler)
+
+
+@contextmanager
+def _hf_progress_bars_disabled(hf, interactive: bool):
+    if interactive:
+        yield
+        return
+
+    hf_utils = getattr(hf, "utils", None)
+    disable_progress_bars = getattr(hf_utils, "disable_progress_bars", None)
+    if not callable(disable_progress_bars):
+        yield
+        return
+
+    are_progress_bars_disabled = getattr(hf_utils, "are_progress_bars_disabled", None)
+    enable_progress_bars = getattr(hf_utils, "enable_progress_bars", None)
+
+    was_disabled = None
+    if callable(are_progress_bars_disabled):
+        try:
+            was_disabled = bool(are_progress_bars_disabled())
+        except Exception:
+            was_disabled = None
+
+    progress_context = disable_progress_bars()
+    if hasattr(progress_context, "__enter__") and hasattr(progress_context, "__exit__"):
+        with progress_context:
+            yield
+        return
+
+    try:
+        yield
+    finally:
+        if was_disabled is False and callable(enable_progress_bars):
+            enable_progress_bars()
 
 
 class HuggingFaceDownloader(Downloader):
@@ -73,11 +110,20 @@ class HuggingFaceDownloader(Downloader):
         # Empty string would be treated as an invalid branch name
         version = metadata.get("version") or None if metadata else None
 
-        hf.snapshot_download(repo_id=repo_id, allow_patterns=allow_pattern, local_dir=dest, token=token, revision=version)
+        interactive = is_interactive()
+        with _hf_progress_bars_disabled(hf, interactive):
+            with ProgressReporter(dest, logger, label="HuggingFace download", interactive=interactive):
+                hf.snapshot_download(
+                    repo_id=repo_id,
+                    allow_patterns=allow_pattern,
+                    local_dir=dest,
+                    token=token,
+                    revision=version,
+                )
 
-        # Verify downloaded files if not skipped
-        if not should_skip_verification():
-            self._verify_downloaded_files(repo_id, dest, revision=version, token=token)
+                # Verify downloaded files if not skipped
+                if not should_skip_verification():
+                    self._verify_downloaded_files(repo_id, dest, revision=version, token=token)
 
     def _verify_downloaded_files(self, repo_id: str, dest: str, revision: Optional[str] = None, token: Optional[str] = None) -> None:
         """Verify downloaded files against HF repository checksums.

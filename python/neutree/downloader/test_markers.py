@@ -6,6 +6,7 @@ import io
 import sys
 import types
 import unittest
+from unittest import mock
 
 _fake_sha = types.ModuleType("huggingface_hub.utils.sha")
 _fake_sha.git_hash = lambda data: ""
@@ -18,6 +19,8 @@ _fake_hf_api.RepoFile = type("RepoFile", (), {})
 sys.modules.setdefault("huggingface_hub.hf_api", _fake_hf_api)
 
 from neutree.downloader import download_with_markers  # noqa: E402
+from neutree.downloader import __main__ as downloader_main  # noqa: E402
+from neutree.downloader.entity import DownloadRequest  # noqa: E402
 
 
 class FakeDownloader:
@@ -74,6 +77,40 @@ class TestDownloadMarkers(unittest.TestCase):
         self.assertEqual(
             output.getvalue().splitlines(),
             ["NEUTREE_MODEL_DOWNLOAD_START", "NEUTREE_MODEL_DOWNLOAD_FAILED"],
+        )
+
+    def test_cli_main_uses_download_with_markers(self):
+        downloader = FakeDownloader()
+        request = DownloadRequest(
+            source="source",
+            dest="/dest",
+            credentials={"token": "secret"},
+            recursive=False,
+            overwrite=True,
+            retries=2,
+            timeout=1.5,
+            metadata={"name": "model"},
+        )
+
+        with mock.patch.object(
+                downloader_main,
+                "build_request_from_model_args",
+                return_value=("local", request)), \
+                mock.patch("neutree.downloader.dispatcher.get_downloader", return_value=downloader), \
+                mock.patch.object(downloader_main, "download_with_markers") as mock_markers, \
+                contextlib.redirect_stdout(io.StringIO()):
+            downloader_main.main(["--name", "model", "--registry_type", "local"])
+
+        mock_markers.assert_called_once_with(
+            downloader,
+            "source",
+            "/dest",
+            credentials={"token": "secret"},
+            recursive=False,
+            overwrite=True,
+            retries=2,
+            timeout=1.5,
+            metadata={"name": "model"},
         )
 
 

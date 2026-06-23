@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from .utils import build_request_from_model_args
+from .utils import build_request_from_model_args, download_with_markers
 
 
 def _build_parser():
@@ -45,9 +45,9 @@ def main(argv=None):
 
     print(f"Performing download backend={backend} source={dl_req.source} dest={dl_req.dest}")
     downloader = get_downloader(backend)
-    downloader.download(dl_req.source, dl_req.dest, credentials=dl_req.credentials,
-                        recursive=dl_req.recursive, overwrite=dl_req.overwrite,
-                        retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
+    download_with_markers(downloader, dl_req.source, dl_req.dest, credentials=dl_req.credentials,
+                          recursive=dl_req.recursive, overwrite=dl_req.overwrite,
+                          retries=dl_req.retries, timeout=dl_req.timeout, metadata=dl_req.metadata)
     print("Download finished")
 
 
