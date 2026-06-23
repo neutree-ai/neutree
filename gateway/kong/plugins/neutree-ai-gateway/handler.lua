@@ -224,6 +224,7 @@ local function maybe_return_model_list(conf, suffix)
     end
 
     if is_models_path(suffix) and kong.request.get_method() == "GET" then
+        kong.ctx.plugin.skip = true
         local models = {}
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
@@ -243,6 +244,7 @@ local function maybe_return_model_list(conf, suffix)
     end
 
     if is_anthropic_models_path(suffix) and kong.request.get_method() == "GET" then
+        kong.ctx.plugin.skip = true
         local models = {}
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
