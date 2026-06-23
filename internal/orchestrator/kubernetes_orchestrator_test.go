@@ -2879,6 +2879,27 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			expectError:    false,
 		},
 		{
+			name: "return Failed when deployment rollout exceeds progress deadline",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeploymentWithCondition(
+						newEndpoint().Metadata.Name,
+						1,
+						0,
+						0,
+						string(appsv1.DeploymentProgressing),
+						k8sDeploymentReasonProgressDeadlineExceeded,
+						"ReplicaSet has timed out progressing",
+					)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: k8sDeploymentReasonProgressDeadlineExceeded,
+			expectError:    false,
+		},
+		{
 			name: "return Failed for init container in CrashLoopBackOff with high restart count",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()

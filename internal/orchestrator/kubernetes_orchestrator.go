@@ -43,6 +43,8 @@ const (
 	k8sContainerReasonPodInitializing  = "PodInitializing"
 )
 
+const k8sDeploymentReasonProgressDeadlineExceeded = "ProgressDeadlineExceeded"
+
 var _ Orchestrator = &kubernetesOrchestrator{}
 
 type kubernetesOrchestrator struct {
@@ -600,6 +602,14 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 		}, nil
 	}
 
+	if hasFailed, failedMsg := k.checkDeploymentFailures(dep); hasFailed {
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseFAILED,
+			ErrorMessage: "Endpoint failed: " + failedMsg,
+			Resources:    resources,
+		}, nil
+	}
+
 	if hasIncomplete, detail := hasIncompleteModelDownloaderInitContainer(pods); hasIncomplete {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseMODELDOWNLOADING,
@@ -771,6 +781,19 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, stri
 	}
 
 	return failed, strings.Join(errorMsg, "; ")
+}
+
+func (k *kubernetesOrchestrator) checkDeploymentFailures(dep *appsv1.Deployment) (bool, string) {
+	for _, condition := range dep.Status.Conditions {
+		if condition.Type == appsv1.DeploymentProgressing &&
+			condition.Status == corev1.ConditionFalse &&
+			condition.Reason == k8sDeploymentReasonProgressDeadlineExceeded {
+			return true, fmt.Sprintf("Deployment rollout failed: Type: %s, Reason: %s, Message: %s",
+				condition.Type, condition.Reason, condition.Message)
+		}
+	}
+
+	return false, ""
 }
 
 // buildDeploymentErrorMessage builds a descriptive error message from deployment conditions
