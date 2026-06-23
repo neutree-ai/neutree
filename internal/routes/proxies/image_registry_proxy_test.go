@@ -1,6 +1,7 @@
 package proxies
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -58,12 +59,24 @@ func TestRegisterImageRegistryRoutesForwardsValidURLOnCreate(t *testing.T) {
 		upstreamCalled.Store(true)
 		assert.Equal(t, "/image_registries", r.URL.Path)
 		assert.Equal(t, http.MethodPost, r.Method)
+
+		var payload map[string]interface{}
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		metadata := payload["metadata"].(map[string]interface{})
+		labels := metadata["labels"].(map[string]interface{})
+		assert.Equal(t, "test-user-uuid", labels["neutree.ai/credential-owner"])
+
 		w.WriteHeader(http.StatusCreated)
 	}))
 	defer upstream.Close()
 
 	router := gin.New()
-	RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
+	RegisterImageRegistryRoutes(router.Group("/api/v1"), []gin.HandlerFunc{
+		func(c *gin.Context) {
+			c.Set("user_id", "test-user-uuid")
+			c.Next()
+		},
+	}, &Dependencies{
 		StorageAccessURL: upstream.URL,
 	})
 
