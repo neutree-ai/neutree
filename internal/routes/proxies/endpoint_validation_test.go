@@ -254,6 +254,22 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 		assert.Contains(t, err.Hint, "Missing-GPU")
 	})
 
+	t.Run("skips when product exists but virtualization telemetry is missing", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
+		})
+		cluster.Status.ResourceInfo.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
+			Products[v1.AcceleratorProduct("Tesla-T4")].Virtualization = nil
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		assert.Nil(t, err)
+	})
+
 	t.Run("rejects fragmented capacity that cannot satisfy each requested virtual card", func(t *testing.T) {
 		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8193",

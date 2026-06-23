@@ -200,8 +200,12 @@ func validateEndpointAcceleratorVirtualizationCapacity(resources *v1.ResourceSpe
 	}
 
 	productResource := productResources[v1.AcceleratorProduct(product)]
-	if productResource == nil || productResource.Virtualization == nil {
+	if productResource == nil {
 		return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf("product=%s has no available accelerator virtualization capacity", product))
+	}
+
+	if productResource.Virtualization == nil {
+		return nil
 	}
 
 	requestedMemoryMiB, memoryTelemetryReady, err := requestedAcceleratorVirtualizationMemoryMiB(resources, resourceInfo, product)
