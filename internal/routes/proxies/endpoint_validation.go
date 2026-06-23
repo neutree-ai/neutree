@@ -161,7 +161,7 @@ func validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage stor
 
 	workspace := endpoint.GetWorkspace()
 	if workspace == "" {
-		workspace = defaultWorkspace
+		return nil
 	}
 
 	clusters, err := clusterStorage.ListCluster(storage.ListOption{

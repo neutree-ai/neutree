@@ -1,6 +1,7 @@
 package proxies
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -420,6 +421,21 @@ func TestValidateEndpointAcceleratorVirtualizationCreateCapacitySkipsWhenCluster
 		assert.Equal(t, 0, clusterStorage.listCalls)
 	})
 
+	t.Run("skips when endpoint workspace is missing", func(t *testing.T) {
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
+		})
+		clusterStorage := &fakeClusterStorage{
+			clusters: []v1.Cluster{*cluster},
+		}
+		endpoint := endpointWithAcceleratorVirtualization("cluster-a", "")
+
+		err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
+
+		assert.Nil(t, err)
+		assert.Equal(t, 0, clusterStorage.listCalls)
+	})
+
 	t.Run("skips when cluster lookup fails", func(t *testing.T) {
 		clusterStorage := &fakeClusterStorage{
 			listError: errors.New("storage unavailable"),
@@ -500,6 +516,38 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareSkipsCapacityLookupO
 	assert.Equal(t, 0, clusterStorage.listCalls)
 }
 
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsUnsatisfiablePost(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
+	})
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10220", response.Code)
+	assert.False(t, handlerCalled)
+}
+
 func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1.Endpoint {
 	return &v1.Endpoint{
 		Metadata: &v1.Metadata{
@@ -517,10 +565,22 @@ func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1
 }
 
 func runEndpointAcceleratorVirtualizationValidation(method string, body string, clusterStorage storage.ClusterStorage) *httptest.ResponseRecorder {
+	recorder, _ := runEndpointAcceleratorVirtualizationValidationWithHandler(method, body, clusterStorage)
+
+	return recorder
+}
+
+func runEndpointAcceleratorVirtualizationValidationWithHandler(
+	method string,
+	body string,
+	clusterStorage storage.ClusterStorage,
+) (*httptest.ResponseRecorder, bool) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
+	handlerCalled := false
 	router.Handle(method, "/endpoints", validateEndpointAcceleratorVirtualization(clusterStorage), func(c *gin.Context) {
+		handlerCalled = true
 		c.Status(http.StatusNoContent)
 	})
 
@@ -529,7 +589,7 @@ func runEndpointAcceleratorVirtualizationValidation(method string, body string, 
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	return recorder
+	return recorder, handlerCalled
 }
 
 func acceleratorVirtualizationResources(gpu string, product string, virtualization map[string]string) *v1.ResourceSpec {

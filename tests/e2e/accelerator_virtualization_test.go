@@ -89,12 +89,9 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 
 		// TestRail: C2722839
 		It("should reject a vGPU endpoint when requested memory exceeds per-device availability", Label("C2722839", "negative"), func() {
-			cluster := eventuallyVirtualizedClusterResourceInfo(clusterName)
-			if productName == "" {
-				productName = expectNVIDIAVirtualizedClusterResources(cluster)
-			}
-
-			requestedMemoryMiB := maxHealthyProductAvailableMemoryMiB(cluster, productName) + 1
+			var maxAvailableMemoryMiB int64
+			productName, maxAvailableMemoryMiB = eventuallyHealthyProductAvailableMemoryMiB(clusterName, productName)
+			requestedMemoryMiB := maxAvailableMemoryMiB + 1
 			endpointName := "e2e-vgpu-overmem-" + Cfg.RunID
 			DeferCleanup(func() {
 				endpoints, _, code := listEndpointsByName(endpointName)
@@ -338,27 +335,72 @@ func expectClusterProductDevices(nodes map[string]*v1.NodeResourceStatus, produc
 	return count
 }
 
-func maxHealthyProductAvailableMemoryMiB(cluster v1.Cluster, productName string) int64 {
-	ExpectWithOffset(1, cluster.Status).NotTo(BeNil())
-	ExpectWithOffset(1, cluster.Status.ResourceInfo).NotTo(BeNil())
+func eventuallyHealthyProductAvailableMemoryMiB(clusterName string, preferredProduct string) (string, int64) {
+	var (
+		productName  string
+		maxMemoryMiB int64
+	)
 
+	Eventually(func(g Gomega) {
+		cluster := getClusterFullJSON(clusterName)
+
+		g.Expect(cluster.Status).NotTo(BeNil())
+		g.Expect(cluster.Status.ResourceInfo).NotTo(BeNil())
+
+		resources := cluster.Status.ResourceInfo
+		productName = preferredProduct
+		if productName == "" {
+			g.Expect(resources.Allocatable).NotTo(BeNil())
+
+			group := resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+			g.Expect(group).NotTo(BeNil())
+
+			selectedProduct, productResource := firstVirtualizedProduct(group)
+			g.Expect(selectedProduct).NotTo(BeEmpty())
+			g.Expect(productResource).NotTo(BeNil())
+			g.Expect(productResource.Virtualization.MemoryMiB).To(BeNumerically(">", 0))
+			g.Expect(productResource.Virtualization.CoreUnits).To(BeNumerically(">", 0))
+			productName = selectedProduct
+		}
+
+		maxMemoryMiB = maxHealthyProductAvailableMemoryMiB(
+			resources.NodeResources,
+			productName,
+			vgpuEndpointCorePercentValue,
+		)
+		g.Expect(maxMemoryMiB).To(BeNumerically(">", 0),
+			"product %s should have healthy available devices with vGPU telemetry", productName)
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return productName, maxMemoryMiB
+}
+
+func maxHealthyProductAvailableMemoryMiB(
+	nodes map[string]*v1.NodeResourceStatus,
+	productName string,
+	minCoreUnits int64,
+) int64 {
 	var maxMemoryMiB int64
-	for nodeID, node := range cluster.Status.ResourceInfo.NodeResources {
-		ExpectWithOffset(1, node).NotTo(BeNil(), "node %s", nodeID)
+
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
 
 		for _, device := range node.Devices {
-			if device == nil || !device.Health || device.Product != productName {
+			if device == nil || !device.Health || device.Product != productName || device.Available == nil {
 				continue
 			}
 
-			ExpectWithOffset(1, device.Available).NotTo(BeNil(), "node %s device %s", nodeID, device.UUID)
+			if device.Available.CoreUnits < minCoreUnits {
+				continue
+			}
+
 			if device.Available.MemoryMiB > maxMemoryMiB {
 				maxMemoryMiB = device.Available.MemoryMiB
 			}
 		}
 	}
-
-	ExpectWithOffset(1, maxMemoryMiB).To(BeNumerically(">", 0), "product %s should have healthy available devices", productName)
 
 	return maxMemoryMiB
 }
