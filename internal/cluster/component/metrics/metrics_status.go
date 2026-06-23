@@ -22,16 +22,19 @@ type MetricsStatus struct {
 	KubeStateMetricsPodsReady       int
 	KubeStateMetricsTotalPods       int
 	Errors                          []string
+	Diagnostics                     []string
 }
 
 func (m MetricsStatus) String() string {
-	return fmt.Sprintf(
+	base := fmt.Sprintf(
 		"DeploymentReady: %v, PodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
 			"KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, Errors: %v",
 		m.DeploymentReady, m.PodsReady, m.TotalPods,
 		m.KubeStateMetricsRequired,
 		m.KubeStateMetricsDeploymentReady, m.KubeStateMetricsPodsReady, m.KubeStateMetricsTotalPods,
 		m.Errors)
+
+	return component.FormatStatusWithDiagnostics(base, m.Diagnostics)
 }
 
 func (m MetricsStatus) Ready() bool {
@@ -52,10 +55,15 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 	deploymentReady, podsReady, totalPods, err := m.checkDeploymentStatus(ctx)
 	if err != nil {
 		status.Errors = append(status.Errors, fmt.Sprintf("deployment check failed: %v", err))
+		status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
 	} else {
 		status.DeploymentReady = deploymentReady
 		status.PodsReady = podsReady
 		status.TotalPods = totalPods
+
+		if !deploymentReady {
+			status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
+		}
 	}
 
 	kubeStateMetricsRequired, err := m.supportsKubeStateMetrics()
@@ -73,15 +81,36 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 	}
 
 	kubeStateMetricsReady, kubeStateMetricsPodsReady, kubeStateMetricsTotalPods, err := m.checkKubeStateMetricsDeploymentStatus(ctx)
+	kubeStateMetricsDiagnostics := func() []string {
+		return component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "neutree-kube-state-metrics", m.kubeStateMetricsPodLabels())
+	}
+
 	if err != nil {
 		status.Errors = append(status.Errors, fmt.Sprintf("kube-state-metrics deployment check failed: %v", err))
+		status.Diagnostics = append(status.Diagnostics, kubeStateMetricsDiagnostics()...)
 	} else {
 		status.KubeStateMetricsDeploymentReady = kubeStateMetricsReady
 		status.KubeStateMetricsPodsReady = kubeStateMetricsPodsReady
 		status.KubeStateMetricsTotalPods = kubeStateMetricsTotalPods
+
+		if !kubeStateMetricsReady {
+			status.Diagnostics = append(status.Diagnostics, kubeStateMetricsDiagnostics()...)
+		}
 	}
 
 	return status, nil
+}
+
+func (m *MetricsComponent) metricsPodLabels() map[string]string {
+	return map[string]string{"app": "vmagent", "cluster": m.cluster.GetName(), "workspace": m.cluster.GetWorkspace()}
+}
+
+func (m *MetricsComponent) kubeStateMetricsPodLabels() map[string]string {
+	return map[string]string{
+		"app":       "neutree-kube-state-metrics",
+		"cluster":   m.cluster.GetName(),
+		"workspace": m.cluster.GetWorkspace(),
+	}
 }
 
 // checkDeploymentStatus checks if the deployment is ready and running the expected cluster version.
@@ -105,7 +134,7 @@ func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int
 
 	// Check that all running Pods have the expected cluster version label
 	match, err := component.AllPodsMatchVersion(ctx, m.ctrlClient, m.namespace,
-		map[string]string{"app": "vmagent", "cluster": m.cluster.GetName(), "workspace": m.cluster.GetWorkspace()},
+		m.metricsPodLabels(),
 		m.cluster.GetVersion())
 	if err != nil {
 		return false, podsReady, totalPods, err
@@ -115,12 +144,7 @@ func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int
 }
 
 func (m *MetricsComponent) checkKubeStateMetricsDeploymentStatus(ctx context.Context) (bool, int, int, error) {
-	return m.checkNamedDeploymentStatus(ctx, "neutree-kube-state-metrics",
-		map[string]string{
-			"app":       "neutree-kube-state-metrics",
-			"cluster":   m.cluster.GetName(),
-			"workspace": m.cluster.GetWorkspace(),
-		})
+	return m.checkNamedDeploymentStatus(ctx, "neutree-kube-state-metrics", m.kubeStateMetricsPodLabels())
 }
 
 func (m *MetricsComponent) checkNamedDeploymentStatus(ctx context.Context, name string, matchLabels map[string]string) (bool, int, int, error) {

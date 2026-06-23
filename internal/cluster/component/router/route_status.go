@@ -22,11 +22,13 @@ type RouteStatus struct {
 	TotalPods       int
 	LoadBalancerIP  string
 	Errors          []string
+	Diagnostics     []string
 }
 
 func (r RouteStatus) String() string {
-	return fmt.Sprintf("DeploymentReady: %v, ServiceReady: %v, PodsReady: %d/%d, LoadBalancerIP: %s, Errors: %v",
+	base := fmt.Sprintf("DeploymentReady: %v, ServiceReady: %v, PodsReady: %d/%d, LoadBalancerIP: %s, Errors: %v",
 		r.DeploymentReady, r.ServiceReady, r.PodsReady, r.TotalPods, r.LoadBalancerIP, r.Errors)
+	return component.FormatStatusWithDiagnostics(base, r.Diagnostics)
 }
 
 // CheckResourcesStatus checks the status of all route resources
@@ -39,22 +41,36 @@ func (r *RouterComponent) CheckResourcesStatus(ctx context.Context) (*RouteStatu
 	deploymentReady, podsReady, totalPods, err := r.checkDeploymentStatus(ctx)
 	if err != nil {
 		status.Errors = append(status.Errors, fmt.Sprintf("deployment check failed: %v", err))
+		status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, r.ctrlClient, r.namespace, "router", r.routerPodLabels())...)
 	} else {
 		status.DeploymentReady = deploymentReady
 		status.PodsReady = podsReady
 		status.TotalPods = totalPods
+
+		if !deploymentReady {
+			status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, r.ctrlClient, r.namespace, "router", r.routerPodLabels())...)
+		}
 	}
 
 	// Check Service status
 	serviceReady, lbIP, err := r.checkServiceStatus(ctx)
 	if err != nil {
 		status.Errors = append(status.Errors, fmt.Sprintf("service check failed: %v", err))
+		status.Diagnostics = append(status.Diagnostics, component.ServiceDiagnostics(ctx, r.ctrlClient, r.namespace, "router-service")...)
 	} else {
 		status.ServiceReady = serviceReady
 		status.LoadBalancerIP = lbIP
+
+		if !serviceReady {
+			status.Diagnostics = append(status.Diagnostics, component.ServiceDiagnostics(ctx, r.ctrlClient, r.namespace, "router-service")...)
+		}
 	}
 
 	return status, nil
+}
+
+func (r *RouterComponent) routerPodLabels() map[string]string {
+	return map[string]string{"app": "router", "cluster": r.cluster.GetName(), "workspace": r.cluster.GetWorkspace()}
 }
 
 // checkDeploymentStatus checks if the deployment is ready and running the expected version.
@@ -80,7 +96,7 @@ func (r *RouterComponent) checkDeploymentStatus(ctx context.Context) (bool, int,
 
 	// Check that all running Pods have the expected cluster version label
 	match, err := component.AllPodsMatchVersion(ctx, r.ctrlClient, r.namespace,
-		map[string]string{"app": "router", "cluster": r.cluster.GetName(), "workspace": r.cluster.GetWorkspace()},
+		r.routerPodLabels(),
 		r.cluster.GetVersion())
 	if err != nil {
 		return false, readyReplicas, curReplicas, err
