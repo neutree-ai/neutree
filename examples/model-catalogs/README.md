@@ -6,6 +6,14 @@ site (https://recipes.vllm.ai/), usable as test data. Import via the UI
 
     POST /api/v1/model_catalogs/import   { "yaml": "<file contents>", "workspace": "default" }
 
+To make them **deployable**, first create the public HuggingFace model registry
+they reference (every variant's `model.registry` is `huggingface`):
+
+    POST /api/v1/model_registries   (body = ../model-registries/huggingface.yaml as JSON)
+
+Without it the catalogs still import and render, but a deploy can't resolve the
+model source.
+
 | File | Source recipe | Shape |
 |---|---|---|
 | `qwen3.6-27b.yaml` | [Qwen3.6-27B](https://recipes.vllm.ai/Qwen/Qwen3.6-27B) | dense 27B, BF16 + FP8 variants |
