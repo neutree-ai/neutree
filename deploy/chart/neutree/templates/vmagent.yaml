@@ -26,10 +26,9 @@ spec:
           args:
             - "--promscrape.config=/etc/prometheus/prometheus.yml"
             - "--promscrape.configCheckInterval=10s"
-            {{- if index .Values "victoria-metrics-cluster" "enabled"  }}
-            - "--remoteWrite.url=http://{{ include "neutree.fullname" . }}-victoria-metrics-cluster-vminsert:8480/insert/0/prometheus/"
-            {{- else if .Values.metrics.remoteWriteUrl }}
-            - "--remoteWrite.url={{ .Values.metrics.remoteWriteUrl }}"
+            {{- $metricsRemoteWriteUrl := include "neutree.metricsRemoteWriteUrl" . }}
+            {{- if $metricsRemoteWriteUrl }}
+            - "--remoteWrite.url={{ $metricsRemoteWriteUrl }}"
             {{- end }}
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.vmagent.image.registry "repository" .Values.vmagent.image.repository "tag" .Values.vmagent.image.tag "defaultTag" .Values.vmagent.image.tag) }}
           imagePullPolicy: {{ .Values.vmagent.image.pullPolicy }}
