@@ -1,0 +1,19 @@
+# Public HuggingFace model registry.
+#
+# Prerequisite for deploying the recipe ModelCatalogs in ../model-catalogs:
+# every variant's `model.registry` is "huggingface", which is resolved by NAME
+# to this registry. At deploy time the orchestrator reads its type/url and sets
+# HF_ENDPOINT=https://huggingface.co (no token => public repos only), so the
+# engine pulls the model straight from the Hub.
+#
+# Apply once per environment, before importing the catalogs:
+#   POST /api/v1/model_registries   (JSON body of this resource)
+apiVersion: v1
+kind: ModelRegistry
+metadata:
+  name: huggingface          # must equal model.registry in the catalogs
+  workspace: default
+spec:
+  type: hugging-face         # registry type constant (hyphenated)
+  url: https://huggingface.co
+  # credentials: <HF token>  # only needed for gated / private repos
