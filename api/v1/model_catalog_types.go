@@ -51,16 +51,67 @@ type RecipeVariant struct {
 	VRAMMinimumGB *int              `json:"vram_minimum_gb,omitempty"`
 }
 
-// RecipeFeature is an independently toggleable bundle of engine_args/env.
+// RecipeFeatureType discriminates how a feature is selected and composed.
+// Empty is treated as "boolean" (the original on/off toggle).
+type RecipeFeatureType string
+
+const (
+	RecipeFeatureTypeBoolean RecipeFeatureType = "boolean"
+	RecipeFeatureTypeSelect  RecipeFeatureType = "select"
+	RecipeFeatureTypeInput   RecipeFeatureType = "input"
+)
+
+// RecipeFeature is a recipe configuration knob with three shapes selected by
+// Type:
+//   - boolean (default): an on/off bundle of engine_args/env, merged when on.
+//   - select:  pick one of Options; the chosen option's engine_args/env merge
+//     on top of the feature's shared engine_args/env.
+//   - input:   a free value substituted for the "${value}" placeholder inside
+//     the feature's engine_args/env (coerced per Input.ValueType).
+//
 // `Category` is a free-form grouping hint for the UI ("tuning" surfaces in a
 // separate "Performance tuning" section); it has no effect on composition.
 type RecipeFeature struct {
-	Description   string            `json:"description,omitempty"`
-	Default       bool              `json:"default,omitempty"`
-	Category      string            `json:"category,omitempty"`
-	EngineArgs    map[string]any    `json:"engine_args,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
-	ConflictsWith []string          `json:"conflicts_with,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	Category      string   `json:"category,omitempty"`
+	ConflictsWith []string `json:"conflicts_with,omitempty"`
+
+	// Type selects the feature shape; empty == "boolean".
+	Type RecipeFeatureType `json:"type,omitempty"`
+
+	// boolean (Type empty or "boolean")
+	Default    bool              `json:"default,omitempty"`
+	EngineArgs map[string]any    `json:"engine_args,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+
+	// select (Type "select")
+	Options       map[string]RecipeFeatureOption `json:"options,omitempty"`
+	DefaultOption string                         `json:"default_option,omitempty"`
+
+	// input (Type "input")
+	Input *RecipeFeatureInput `json:"input,omitempty"`
+}
+
+// RecipeFeatureOption is one choice of a select feature. Its engine_args/env
+// merge on top of the feature's shared engine_args/env when chosen.
+type RecipeFeatureOption struct {
+	Description string            `json:"description,omitempty"`
+	EngineArgs  map[string]any    `json:"engine_args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+}
+
+// RecipeFeatureInput describes a free-input feature. The user value replaces
+// every "${value}" placeholder inside the feature's engine_args/env; when an
+// engine_args value is exactly "${value}" it is coerced to ValueType (so e.g.
+// max_model_len comes out as a number, not a string).
+type RecipeFeatureInput struct {
+	ValueType string   `json:"value_type,omitempty"` // "string" (default) | "int" | "number" | "bool"
+	Default   string   `json:"default,omitempty"`
+	Required  bool     `json:"required,omitempty"`
+	Min       *float64 `json:"min,omitempty"`
+	Max       *float64 `json:"max,omitempty"`
+	Pattern   string   `json:"pattern,omitempty"` // regexp for string values
+	Enum      []string `json:"enum,omitempty"`    // allowed raw values
 }
 
 type ModelCatalogStatus struct {
