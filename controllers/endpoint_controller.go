@@ -370,7 +370,7 @@ func (c *EndpointController) expandCatalogRef(obj *v1.Endpoint) error {
 		return errors.Errorf("model catalog %q not found in workspace %q", obj.Spec.ModelCatalog, obj.Metadata.Workspace)
 	}
 
-	composed, err := recipe.ComposeEndpointSpec(catalogs[0].Spec, obj.Spec.Variant, obj.Spec.EnabledFeatures)
+	composed, err := recipe.ComposeEndpointSpec(catalogs[0].Spec, obj.Spec.Variant, obj.Spec.FeatureSelections)
 	if err != nil {
 		return err
 	}
@@ -396,7 +396,7 @@ func (c *EndpointController) expandCatalogRef(obj *v1.Endpoint) error {
 
 	obj.Spec.ModelCatalog = ""
 	obj.Spec.Variant = ""
-	obj.Spec.EnabledFeatures = nil
+	obj.Spec.FeatureSelections = nil
 
 	if err := c.storage.UpdateEndpoint(strconv.Itoa(obj.ID), &v1.Endpoint{Spec: obj.Spec}); err != nil {
 		return errors.Wrapf(err, "persist composed endpoint %s", obj.Metadata.WorkspaceName())

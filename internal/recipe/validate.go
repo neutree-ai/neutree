@@ -39,6 +39,53 @@ func ValidateModelCatalogSpec(spec *v1.ModelCatalogSpec) error {
 				return fmt.Errorf("model_catalog: feature %q conflicts_with unknown feature %q", name, other)
 			}
 		}
+
+		if err := validateFeatureShape(name, feat); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateFeatureShape enforces per-type invariants so misconfigured catalogs
+// fail at import time rather than at compose time.
+func validateFeatureShape(name string, feat v1.RecipeFeature) error {
+	switch featureType(feat) {
+	case v1.RecipeFeatureTypeBoolean:
+		// nothing extra; Options/Input are simply ignored for boolean.
+	case v1.RecipeFeatureTypeSelect:
+		if len(feat.Options) == 0 {
+			return fmt.Errorf("model_catalog: select feature %q must declare at least one option", name)
+		}
+
+		if feat.DefaultOption != "" {
+			if _, ok := feat.Options[feat.DefaultOption]; !ok {
+				return fmt.Errorf("model_catalog: select feature %q default_option %q is not one of its options", name, feat.DefaultOption)
+			}
+		}
+	case v1.RecipeFeatureTypeInput:
+		if feat.Input == nil {
+			return fmt.Errorf("model_catalog: input feature %q must declare an input block", name)
+		}
+
+		switch inputValueType(feat) {
+		case "string", "int", "number", "bool":
+		default:
+			return fmt.Errorf("model_catalog: input feature %q has unsupported value_type %q", name, feat.Input.ValueType)
+		}
+
+		if feat.Input.Min != nil && feat.Input.Max != nil && *feat.Input.Min > *feat.Input.Max {
+			return fmt.Errorf("model_catalog: input feature %q has min greater than max", name)
+		}
+
+		if feat.Input.Default != "" {
+			if err := validateInputValue(feat, feat.Input.Default); err != nil {
+				return fmt.Errorf("model_catalog: input feature %q default: %w", name, err)
+			}
+		}
+	default:
+		return fmt.Errorf("model_catalog: feature %q has unsupported type %q", name, feat.Type)
 	}
 
 	return nil

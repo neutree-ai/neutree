@@ -523,7 +523,7 @@ type ApiEndpointSpec struct {
 	Variables         interface{} `json:"variables"`
 	ModelCatalog      string      `json:"model_catalog"`
 	Variant           string      `json:"variant"`
-	EnabledFeatures   interface{} `json:"enabled_features"`
+	FeatureSelections interface{} `json:"feature_selections"`
 }
 
 type ApiEndpointStatus struct {

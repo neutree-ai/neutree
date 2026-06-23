@@ -1,4 +1,4 @@
-ALTER TYPE api.endpoint_spec DROP ATTRIBUTE enabled_features;
+ALTER TYPE api.endpoint_spec DROP ATTRIBUTE feature_selections;
 ALTER TYPE api.endpoint_spec DROP ATTRIBUTE variant;
 ALTER TYPE api.endpoint_spec DROP ATTRIBUTE model_catalog;
 
