@@ -214,7 +214,7 @@ func validateEndpointAcceleratorVirtualizationCapacity(resources *v1.ResourceSpe
 	}
 
 	if !memoryTelemetryReady {
-		return nil
+		requestedMemoryMiB = 0
 	}
 
 	requestedCoreUnits, err := requestedAcceleratorVirtualizationCoreUnits(resources)
@@ -222,9 +222,22 @@ func validateEndpointAcceleratorVirtualizationCapacity(resources *v1.ResourceSpe
 		return endpointAcceleratorVirtualizationCapacityError(err.Error())
 	}
 
-	satisfiableDevices, deviceTelemetryReady := countSatisfiableAcceleratorVirtualizationDevices(resourceInfo, product, requestedMemoryMiB, requestedCoreUnits)
+	satisfiableDevices, matchingDevices, matchingDeviceCountReady, deviceTelemetryReady :=
+		countSatisfiableAcceleratorVirtualizationDevices(resourceInfo, product, requestedMemoryMiB, requestedCoreUnits)
 	if satisfiableDevices >= requestedGPU {
 		return nil
+	}
+
+	if matchingDeviceCountReady && matchingDevices < requestedGPU {
+		return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf(
+			"product=%s requested_gpu=%d requested_memory_mib=%d requested_core_units=%d matching_devices=%d satisfiable_devices=%d",
+			product,
+			requestedGPU,
+			requestedMemoryMiB,
+			requestedCoreUnits,
+			matchingDevices,
+			satisfiableDevices,
+		))
 	}
 
 	if !deviceTelemetryReady {
@@ -319,12 +332,15 @@ func countSatisfiableAcceleratorVirtualizationDevices(
 	product string,
 	requestedMemoryMiB int64,
 	requestedCoreUnits int64,
-) (int64, bool) {
+) (int64, int64, bool, bool) {
 	if resourceInfo == nil || resourceInfo.NodeResources == nil {
-		return 0, false
+		return 0, 0, false, false
 	}
 
-	var count int64
+	var (
+		satisfiableDevices int64
+		matchingDevices    int64
+	)
 	telemetryReady := true
 
 	for _, node := range resourceInfo.NodeResources {
@@ -336,6 +352,8 @@ func countSatisfiableAcceleratorVirtualizationDevices(
 			if device == nil || !device.Health || device.Product != product {
 				continue
 			}
+
+			matchingDevices++
 
 			if device.Available == nil {
 				telemetryReady = false
@@ -350,11 +368,11 @@ func countSatisfiableAcceleratorVirtualizationDevices(
 				continue
 			}
 
-			count++
+			satisfiableDevices++
 		}
 	}
 
-	return count, telemetryReady
+	return satisfiableDevices, matchingDevices, true, telemetryReady
 }
 
 func parsePositiveIntegerResource(value *string, field string) (int64, error) {

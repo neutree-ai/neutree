@@ -299,10 +299,11 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 
 		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
 
-		assert.NotNil(t, err)
-		assert.Equal(t, "10220", err.Code)
-		assert.Contains(t, err.Hint, "requested_core_units=51")
-		assert.Contains(t, err.Hint, "satisfiable_devices=0")
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10220", err.Code)
+			assert.Contains(t, err.Hint, "requested_core_units=51")
+			assert.Contains(t, err.Hint, "satisfiable_devices=0")
+		}
 	})
 
 	t.Run("rejects request that needs more healthy matching devices than available", func(t *testing.T) {
@@ -383,6 +384,26 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("rejects core overuse when memory percent metadata is missing", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryPercentKey: "51",
+			v1.AcceleratorVirtualizationCorePercentKey:   "51",
+		})
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 10001, []*v1.DeviceResource{
+			healthyDevice("gpu-0", "Tesla-T4", 5101, 50),
+		})
+		cluster.Status.ResourceInfo.AcceleratorMetadata = nil
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		if err == nil {
+			t.Fatal("expected capacity error")
+		}
+		assert.Equal(t, "10220", err.Code)
+		assert.Contains(t, err.Hint, "requested_core_units=51")
+		assert.Contains(t, err.Hint, "satisfiable_devices=0")
+	})
+
 	t.Run("skips when matching device availability telemetry is incomplete", func(t *testing.T) {
 		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
@@ -397,6 +418,27 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
 
 		assert.Nil(t, err)
+	})
+
+	t.Run("rejects when matching device count is insufficient despite incomplete availability telemetry", func(t *testing.T) {
+		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+		device := healthyDevice("gpu-0", "Tesla-T4", 8192, 100)
+		device.Available = nil
+		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+			device,
+		})
+
+		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+
+		if err == nil {
+			t.Fatal("expected capacity error")
+		}
+		assert.Equal(t, "10220", err.Code)
+		assert.Contains(t, err.Hint, "requested_gpu=2")
+		assert.Contains(t, err.Hint, "matching_devices=1")
 	})
 }
 
