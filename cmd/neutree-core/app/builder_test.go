@@ -15,6 +15,12 @@ func TestNewBuilder(t *testing.T) {
 	if len(builder.controllerInits) == 0 {
 		t.Error("Expected NewBuilder to register default controllerInits")
 	}
+
+	for _, name := range []string{"static-node-cluster", "static-node"} {
+		if _, exists := builder.controllerInits[name]; !exists {
+			t.Errorf("Expected NewBuilder to register %q controller", name)
+		}
+	}
 }
 
 func TestBuilderWithConfig(t *testing.T) {

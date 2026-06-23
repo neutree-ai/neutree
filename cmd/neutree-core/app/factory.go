@@ -6,6 +6,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -259,6 +260,64 @@ func NewModelRegistryControllerFactory() ControllerFactory {
 			controllers.WithAfterReconcileHook(opts.afterHooks),
 			controllers.WithReconciler(modelRegistryController),
 			controllers.WithObject(&v1.ModelRegistry{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		)
+
+		return ctrl, nil
+	}
+}
+
+func NewStaticNodeClusterControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		staticNodeClusterController, err := controllers.NewStaticNodeClusterController(
+			&controllers.StaticNodeClusterControllerOption{
+				Store:                  storage.NewStaticNodeObjectStore(opts.storage),
+				RuntimeProfileProvider: opts.config.AcceleratorManager,
+			},
+		)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create static node cluster controller")
+		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(staticNodeClusterController),
+			controllers.WithObject(&v1.StaticNodeCluster{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		)
+
+		return ctrl, nil
+	}
+}
+
+func NewStaticNodeControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		store := storage.NewStaticNodeObjectStore(opts.storage)
+
+		staticNodeController, err := controllers.NewStaticNodeController(&controllers.StaticNodeControllerOption{
+			Store:         store,
+			RunnerFactory: controllers.NewStaticNodeSSHRunnerFactory(),
+			Reconciler: &clusterreconcile.StaticNodeReconciler{
+				AcceleratorManager: opts.config.AcceleratorManager,
+				HeadReadyChecker: &clusterreconcile.StaticNodeStoreHeadReadyChecker{
+					Reader: store,
+				},
+			},
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create static node controller")
+		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(staticNodeController),
+			controllers.WithObject(&v1.StaticNode{}),
 			controllers.WithScheme(opts.scheme),
 			controllers.WithStorage(opts.storage),
 		)

@@ -212,7 +212,7 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	// Only install metrics component when metrics remote write url is valid.
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
-		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
 	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
 		reconcileComps = append(reconcileComps, metricsComp)
 	} else {
@@ -294,7 +294,7 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
-		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
 	if err := metricsComp.Delete(); err != nil {
 		errs = append(errs, errors.Wrap(err, "failed to delete metrics component"))
 	}

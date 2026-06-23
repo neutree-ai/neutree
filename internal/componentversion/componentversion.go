@@ -15,6 +15,12 @@ const (
 // KubeStateMetrics image version.
 const KubeStateMetrics = "v2.15.0"
 
+// NodeExporter image version.
+const NodeExporter = "v1.8.2"
+
+// NeutreeNodeAgent image version.
+const NeutreeNodeAgent = "latest"
+
 // Grafana image version.
 const Grafana = "11.5.3"
 

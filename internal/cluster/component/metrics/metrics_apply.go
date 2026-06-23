@@ -26,6 +26,14 @@ func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList
 	variables.EnableHAMiMonitorScrape = m.cluster.Spec.AcceleratorVirtualizationEnabled()
 	variables.EnableKubeStateMetrics = enableKubeStateMetrics
 
+	acceleratorExporters, err := m.planAcceleratorExporters(context.Background())
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
+	}
+
+	variables.AcceleratorExporters = acceleratorExporters
+	variables.NeutreeMetricsAcceleratorExporterURLs = acceleratorExporterLocalMetricsURLs(acceleratorExporters)
+
 	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to render metrics manifest for cluster %s", m.cluster.Metadata.Name)

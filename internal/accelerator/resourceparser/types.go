@@ -7,6 +7,11 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+const (
+	NeutreeAcceleratorDevicesAnnotation     = "neutree.ai/accelerator-devices"
+	NeutreeAcceleratorAllocationsAnnotation = "neutree.ai/accelerator-allocations"
+)
+
 // ResourceParser handles the standard resource semantics for an accelerator.
 // Virtualized Kubernetes resources can extend this interface with the optional
 // KubernetesVirtualization* parser interfaces below.

@@ -31,18 +31,20 @@ func NewBuilder() *Builder {
 	}
 
 	defaultControllers := map[string]ControllerFactory{
-		"cluster":           NewClusterControllerFactory(),
-		"engine":            NewEngineControllerFactory(),
-		"endpoint":          NewEndpointControllerFactory(),
-		"role":              NewRoleControllerFactory(),
-		"role-assignment":   NewRoleAssignmentControllerFactory(),
-		"workspace":         NewWorkspaceControllerFactory(),
-		"api-key":           NewApiKeyControllerFactory(),
-		"image-registry":    NewImageRegistryControllerFactory(),
-		"model-catalog":     NewModelCatalogControllerFactory(),
-		"model-registry":    NewModelRegistryControllerFactory(),
-		"user-profile":      NewUserProfileControllerFactory(),
-		"external-endpoint": NewExternalEndpointControllerFactory(),
+		"cluster":             NewClusterControllerFactory(),
+		"engine":              NewEngineControllerFactory(),
+		"endpoint":            NewEndpointControllerFactory(),
+		"role":                NewRoleControllerFactory(),
+		"role-assignment":     NewRoleAssignmentControllerFactory(),
+		"workspace":           NewWorkspaceControllerFactory(),
+		"api-key":             NewApiKeyControllerFactory(),
+		"image-registry":      NewImageRegistryControllerFactory(),
+		"model-catalog":       NewModelCatalogControllerFactory(),
+		"model-registry":      NewModelRegistryControllerFactory(),
+		"static-node-cluster": NewStaticNodeClusterControllerFactory(),
+		"static-node":         NewStaticNodeControllerFactory(),
+		"user-profile":        NewUserProfileControllerFactory(),
+		"external-endpoint":   NewExternalEndpointControllerFactory(),
 	}
 
 	for name, factory := range defaultControllers {
