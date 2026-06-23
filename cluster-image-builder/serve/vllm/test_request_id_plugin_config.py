@@ -18,17 +18,37 @@ def _is_name(node, name):
 
 def _is_false_keyword(keyword):
     return (
-        keyword.arg == "validate"
+        keyword.arg in ("force_new_uuid", "validate")
         and isinstance(keyword.value, ast.Constant)
         and keyword.value.value is False
     )
 
 
-def _request_id_plugin_disables_validation(call):
+def _is_true_constant(node):
     return (
-        isinstance(call, ast.Call)
-        and _is_name(call.func, "RequestIdPlugin")
-        and any(_is_false_keyword(keyword) for keyword in call.keywords)
+        isinstance(node, ast.Constant)
+        and node.value is True
+    )
+
+
+def _request_id_plugin_accepts_client_ids(call):
+    if not isinstance(call, ast.Call) or not _is_name(call.func, "RequestIdPlugin"):
+        return False
+
+    if call.args and _is_true_constant(call.args[0]):
+        return False
+
+    force_new_uuid_keywords = [
+        keyword for keyword in call.keywords if keyword.arg == "force_new_uuid"
+    ]
+    if force_new_uuid_keywords and not all(
+        _is_false_keyword(keyword) for keyword in force_new_uuid_keywords
+    ):
+        return False
+
+    validate_keywords = [keyword for keyword in call.keywords if keyword.arg == "validate"]
+    return bool(validate_keywords) and all(
+        _is_false_keyword(keyword) for keyword in validate_keywords
     )
 
 
@@ -40,11 +60,11 @@ def _plugins_disable_request_id_validation(node):
         plugins = keyword.value
         if isinstance(plugins, (ast.Tuple, ast.List)):
             return any(
-                _request_id_plugin_disables_validation(element)
+                _request_id_plugin_accepts_client_ids(element)
                 for element in plugins.elts
             )
 
-        return _request_id_plugin_disables_validation(plugins)
+        return _request_id_plugin_accepts_client_ids(plugins)
 
     return False
 
