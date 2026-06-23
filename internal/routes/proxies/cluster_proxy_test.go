@@ -369,6 +369,34 @@ func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 		mockStorage.AssertExpectations(t)
 	})
 
+	t.Run("rejects mismatched patch body identity and query target", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		clusterPatch := v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "body-cluster"},
+			Spec: &v1.ClusterSpec{
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
+			},
+		}
+		query := url.Values{
+			"id": []string{"eq.1"},
+		}
+
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{
+			{Metadata: &v1.Metadata{Workspace: "default", Name: "query-cluster"}},
+		}, nil)
+
+		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, clusterPatch, query)
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10209", err.Code)
+			assert.Contains(t, err.Hint, "does not match patch target")
+		}
+		mockStorage.AssertExpectations(t)
+		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+	})
+
 	t.Run("returns validation error when endpoint lookup fails", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		cluster := v1.Cluster{

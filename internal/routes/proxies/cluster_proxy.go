@@ -202,19 +202,38 @@ func validateClusterAcceleratorVirtualizationDisable(
 func resolveClusterIdentityForAcceleratorVirtualizationDisable(
 	s storage.Storage, cluster v1.Cluster, queryParams url.Values,
 ) (string, string, *validationError) {
+	filters := queryParamsToFilters(queryParams)
+	if len(filters) > 0 {
+		workspace, name, validationErr := resolveClusterIdentityFromPatchFilters(s, filters)
+		if validationErr != nil {
+			return "", "", validationErr
+		}
+
+		if cluster.Metadata != nil &&
+			((cluster.Metadata.Workspace != "" && cluster.Metadata.Workspace != workspace) ||
+				(cluster.Metadata.Name != "" && cluster.Metadata.Name != name)) {
+			return "", "", &validationError{
+				Code:    "10209",
+				Message: "failed to validate cluster accelerator virtualization",
+				Hint:    "cluster metadata in patch body does not match patch target",
+			}
+		}
+
+		return workspace, name, nil
+	}
+
 	if cluster.Metadata != nil && cluster.Metadata.Workspace != "" && cluster.Metadata.Name != "" {
 		return cluster.Metadata.Workspace, cluster.Metadata.Name, nil
 	}
 
-	filters := queryParamsToFilters(queryParams)
-	if len(filters) == 0 {
-		return "", "", &validationError{
-			Code:    "10209",
-			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    "cluster identity is required when disabling accelerator virtualization",
-		}
+	return "", "", &validationError{
+		Code:    "10209",
+		Message: "failed to validate cluster accelerator virtualization",
+		Hint:    "cluster identity is required when disabling accelerator virtualization",
 	}
+}
 
+func resolveClusterIdentityFromPatchFilters(s storage.Storage, filters []storage.Filter) (string, string, *validationError) {
 	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
 	if err != nil {
 		return "", "", &validationError{
