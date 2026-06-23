@@ -11,9 +11,11 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-func validateEndpointAcceleratorVirtualization() gin.HandlerFunc {
+func validateEndpointAcceleratorVirtualization(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -45,6 +47,12 @@ func validateEndpointAcceleratorVirtualization() gin.HandlerFunc {
 
 			return
 		}
+		if validationErr := validateEndpointAcceleratorVirtualizationClusterReadiness(body, deps); validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+
+			return
+		}
 
 		c.Next()
 	}
@@ -69,6 +77,64 @@ func validateEndpointAcceleratorVirtualizationBody(body []byte) *validationError
 	resources := endpoint.Spec.Resources
 	if err := validateEndpointAcceleratorVirtualizationResourceShape(resources); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func validateEndpointAcceleratorVirtualizationClusterReadiness(body []byte, deps *Dependencies) *validationError {
+	if deps == nil || deps.Storage == nil {
+		return nil
+	}
+
+	var endpoint v1.Endpoint
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&endpoint); err != nil {
+		return invalidEndpointPayloadError(err)
+	}
+
+	if endpoint.GetDeletionTimestamp() != "" ||
+		endpoint.Spec == nil ||
+		endpoint.Spec.Resources == nil ||
+		!endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+		return nil
+	}
+
+	if endpoint.Spec.Cluster == "" {
+		return &validationError{
+			Code:    "10220",
+			Message: "endpoint accelerator virtualization requires deploy cluster",
+			Hint:    "Set spec.cluster to the target Kubernetes cluster",
+		}
+	}
+
+	clusters, err := deps.Storage.ListCluster(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(endpoint.Spec.Cluster)},
+			{Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote(endpoint.Metadata.Workspace)},
+		},
+	})
+	if err != nil {
+		return &validationError{
+			Code:    "10221",
+			Message: "failed to validate endpoint accelerator virtualization dependencies",
+			Hint:    err.Error(),
+		}
+	}
+
+	if len(clusters) == 0 {
+		return &validationError{
+			Code:    "10220",
+			Message: "deploy cluster not found for endpoint accelerator virtualization",
+			Hint:    fmt.Sprintf("Cluster %s was not found in workspace %s", endpoint.Spec.Cluster, endpoint.Metadata.Workspace),
+		}
+	}
+
+	if err := orchestrator.ValidateAcceleratorVirtualizationEndpointDependencies(&endpoint, &clusters[0]); err != nil {
+		return &validationError{
+			Code:    "10221",
+			Message: "endpoint accelerator virtualization dependencies are not ready",
+			Hint:    err.Error(),
+		}
 	}
 
 	return nil

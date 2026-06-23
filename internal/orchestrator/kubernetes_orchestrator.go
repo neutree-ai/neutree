@@ -135,15 +135,28 @@ func validateAcceleratorVirtualizationDependencies(ctx *OrchestratorContext) err
 		return nil
 	}
 
-	if ctx.Cluster.Spec == nil || !ctx.Cluster.Spec.AcceleratorVirtualizationEnabled() {
+	return ValidateAcceleratorVirtualizationEndpointDependencies(ctx.Endpoint, ctx.Cluster)
+}
+
+func ValidateAcceleratorVirtualizationEndpointDependencies(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
+	if endpoint == nil ||
+		endpoint.Spec == nil ||
+		endpoint.Spec.Resources == nil ||
+		!endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+		return nil
+	}
+	if cluster == nil || cluster.Metadata == nil {
+		return errors.Errorf("endpoint %s requests accelerator virtualization, but deploy cluster is not found", endpoint.Metadata.WorkspaceName())
+	}
+	if cluster.Spec == nil || !cluster.Spec.AcceleratorVirtualizationEnabled() {
 		return errors.Errorf(
 			"endpoint %s requests accelerator virtualization, but deploy cluster %s accelerator virtualization is not enabled",
-			ctx.Endpoint.Metadata.WorkspaceName(),
-			ctx.Cluster.Metadata.WorkspaceName(),
+			endpoint.Metadata.WorkspaceName(),
+			cluster.Metadata.WorkspaceName(),
 		)
 	}
 
-	acceleratorVirtualizationStatus := acceleratorVirtualizationComponentStatus(ctx.Cluster)
+	acceleratorVirtualizationStatus := acceleratorVirtualizationComponentStatus(cluster)
 	if acceleratorVirtualizationStatus == nil || acceleratorVirtualizationStatus.Phase != v1.ComponentPhaseReady {
 		statusDetails := ""
 		if acceleratorVirtualizationStatus != nil {
@@ -152,13 +165,34 @@ func validateAcceleratorVirtualizationDependencies(ctx *OrchestratorContext) err
 
 		return errors.Errorf(
 			"endpoint %s requests accelerator virtualization, but deploy cluster %s accelerator virtualization component is not ready%s",
-			ctx.Endpoint.Metadata.WorkspaceName(),
-			ctx.Cluster.Metadata.WorkspaceName(),
+			endpoint.Metadata.WorkspaceName(),
+			cluster.Metadata.WorkspaceName(),
 			statusDetails,
 		)
 	}
 
+	if !hasAvailableAcceleratorVirtualizationResource(endpoint.Spec.Resources, cluster) {
+		return errors.Errorf(
+			"endpoint %s requests accelerator virtualization, but deploy cluster %s has no available vGPU resource for %s",
+			endpoint.Metadata.WorkspaceName(),
+			cluster.Metadata.WorkspaceName(),
+			endpoint.Spec.Resources.GetAcceleratorProduct(),
+		)
+	}
+
 	return nil
+}
+
+func hasAvailableAcceleratorVirtualizationResource(resources *v1.ResourceSpec, cluster *v1.Cluster) bool {
+	if resources == nil || cluster == nil || cluster.Status == nil || cluster.Status.ResourceInfo == nil || cluster.Status.ResourceInfo.Available == nil {
+		return false
+	}
+	acceleratorGroup := cluster.Status.ResourceInfo.Available.AcceleratorGroups[v1.AcceleratorType(resources.GetAcceleratorType())]
+	if acceleratorGroup == nil || acceleratorGroup.Products == nil {
+		return false
+	}
+	productResource := acceleratorGroup.Products[v1.AcceleratorProduct(resources.GetAcceleratorProduct())]
+	return productResource != nil && productResource.Virtualization != nil && productResource.Virtualization.MemoryMiB > 0 && productResource.Virtualization.CoreUnits > 0
 }
 
 func acceleratorVirtualizationComponentStatus(cluster *v1.Cluster) *v1.ComponentStatus {
