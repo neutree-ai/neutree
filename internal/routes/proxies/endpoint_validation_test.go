@@ -357,7 +357,7 @@ func TestValidateEndpointVGPUCapacity(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("rejects when matching device count is insufficient despite incomplete availability telemetry", func(t *testing.T) {
+	t.Run("skips matching device count rejection when availability telemetry is incomplete", func(t *testing.T) {
 		resources := vgpuResources("2", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
@@ -370,12 +370,7 @@ func TestValidateEndpointVGPUCapacity(t *testing.T) {
 
 		err := validateEndpointVGPUCapacity(resources, cluster)
 
-		if err == nil {
-			t.Fatal("expected capacity error")
-		}
-		assert.Equal(t, "10220", err.Code)
-		assert.Contains(t, err.Hint, "requested_gpu=2")
-		assert.Contains(t, err.Hint, "matching_devices=1")
+		assert.Nil(t, err)
 	})
 }
 

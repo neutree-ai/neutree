@@ -474,6 +474,10 @@ func validateEndpointVGPUCapacity(resources *v1.ResourceSpec, cluster *v1.Cluste
 		return nil
 	}
 
+	if !deviceTelemetryReady {
+		return nil
+	}
+
 	if matchingDeviceCountReady && matchingDevices < requestedGPU {
 		return endpointVGPUCapacityError(fmt.Sprintf(
 			"product=%s requested_gpu=%d requested_memory_mib=%d requested_core_units=%d matching_devices=%d satisfiable_devices=%d",
@@ -484,10 +488,6 @@ func validateEndpointVGPUCapacity(resources *v1.ResourceSpec, cluster *v1.Cluste
 			matchingDevices,
 			satisfiableDevices,
 		))
-	}
-
-	if !deviceTelemetryReady {
-		return nil
 	}
 
 	return endpointVGPUCapacityError(fmt.Sprintf(
