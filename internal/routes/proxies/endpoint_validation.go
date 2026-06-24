@@ -128,11 +128,13 @@ func validateEndpointAcceleratorVirtualizationPreflight(
 	}
 
 	var existing *v1.Endpoint
+
 	if method == http.MethodPatch {
 		resolved, validationErr := resolveEndpointAcceleratorVirtualizationPatchEndpoint(store, queryParams)
 		if validationErr != nil {
 			return validationErr
 		}
+
 		existing = resolved
 		merged := mergeEndpointAcceleratorVirtualizationPatch(existing, endpoint)
 		endpoint = &merged
@@ -241,6 +243,7 @@ func mergeEndpointAcceleratorVirtualizationPatch(existing *v1.Endpoint, patch *v
 		if existing.Spec.Resources != nil {
 			spec.Resources = copyEndpointResourceSpec(existing.Spec.Resources)
 		}
+
 		merged.Spec = &spec
 	}
 
@@ -252,9 +255,11 @@ func mergeEndpointAcceleratorVirtualizationPatch(existing *v1.Endpoint, patch *v
 		if merged.Metadata == nil {
 			merged.Metadata = &v1.Metadata{}
 		}
+
 		if patch.Metadata.Name != "" {
 			merged.Metadata.Name = patch.Metadata.Name
 		}
+
 		if patch.Metadata.Workspace != "" {
 			merged.Metadata.Workspace = patch.Metadata.Workspace
 		}
@@ -264,9 +269,11 @@ func mergeEndpointAcceleratorVirtualizationPatch(existing *v1.Endpoint, patch *v
 		if merged.Spec == nil {
 			merged.Spec = &v1.EndpointSpec{}
 		}
+
 		if patch.Spec.Cluster != "" {
 			merged.Spec.Cluster = patch.Spec.Cluster
 		}
+
 		if patch.Spec.Resources != nil {
 			merged.Spec.Resources = mergeEndpointResourceSpec(merged.Spec.Resources, patch.Spec.Resources)
 		}
@@ -281,19 +288,24 @@ func mergeEndpointResourceSpec(existing *v1.ResourceSpec, patch *v1.ResourceSpec
 	}
 
 	merged := copyEndpointResourceSpec(existing)
+
 	if patch.CPU != nil {
 		merged.CPU = patch.CPU
 	}
+
 	if patch.GPU != nil {
 		merged.GPU = patch.GPU
 	}
+
 	if patch.Memory != nil {
 		merged.Memory = patch.Memory
 	}
+
 	if patch.Accelerator != nil {
 		if merged.Accelerator == nil {
 			merged.Accelerator = make(map[string]string, len(patch.Accelerator))
 		}
+
 		for key, value := range patch.Accelerator {
 			merged.Accelerator[key] = value
 		}
@@ -361,10 +373,12 @@ func endpointWorkspaceFromQuery(queryParams url.Values) string {
 
 		workspace := values[0]
 		parts := strings.SplitN(workspace, ".", 2)
+
 		if len(parts) == 2 {
 			if parts[0] != "eq" {
 				continue
 			}
+
 			workspace = parts[1]
 		}
 
@@ -424,6 +438,7 @@ func validateEndpointClusterAcceleratorVirtualizationReady(cluster *v1.Cluster) 
 		if component.Reason != "" || component.Message != "" {
 			hint = fmt.Sprintf("%s: %s %s", hint, component.Reason, component.Message)
 		}
+
 		return endpointAcceleratorVirtualizationNotReadyError(cluster, hint)
 	}
 
@@ -620,6 +635,7 @@ func addAllocationToMatchingDevice(node *v1.NodeResourceStatus, allocation v1.De
 		if device.Available == nil {
 			device.Available = &v1.DeviceResourcePool{}
 		}
+
 		device.Available.MemoryMiB += allocation.MemoryMiB
 		device.Available.CoreUnits += allocation.CoreUnits
 
@@ -636,6 +652,7 @@ func addAvailableAcceleratorVirtualizationProductResource(
 	if resourceInfo.Available == nil {
 		resourceInfo.Available = &v1.ResourceInfo{}
 	}
+
 	if resourceInfo.Available.AcceleratorGroups == nil {
 		resourceInfo.Available.AcceleratorGroups = map[v1.AcceleratorType]*v1.AcceleratorGroup{}
 	}
@@ -645,22 +662,26 @@ func addAvailableAcceleratorVirtualizationProductResource(
 		group = &v1.AcceleratorGroup{}
 		resourceInfo.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU] = group
 	}
+
 	if group.Products == nil {
 		group.Products = map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{}
 	}
 
 	product := v1.AcceleratorProduct(allocation.Product)
+
 	productResource := group.Products[product]
 	if productResource == nil {
 		productResource = &v1.AcceleratorProductResource{}
 		group.Products[product] = productResource
 	}
+
 	if productResource.Virtualization == nil {
 		productResource.Virtualization = &v1.AcceleratorVirtualizationResource{}
 	}
 
 	productResource.Virtualization.MemoryMiB += float64(allocation.MemoryMiB)
 	productResource.Virtualization.CoreUnits += float64(allocation.CoreUnits)
+
 	if productResource.Quantity < 1 {
 		productResource.Quantity = 1
 	}
