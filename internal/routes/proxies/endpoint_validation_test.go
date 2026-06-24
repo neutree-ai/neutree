@@ -442,126 +442,11 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 }
 
-func TestValidateEndpointAcceleratorVirtualizationCreateCapacitySkipsWhenClusterCannotBePrevalidated(t *testing.T) {
-	t.Run("skips when cluster storage is unavailable", func(t *testing.T) {
-		endpoint := endpointWithAcceleratorVirtualization("cluster-a", "team-a")
-
-		err := validateEndpointAcceleratorVirtualizationCreateCapacity(nil, endpoint)
-
-		assert.Nil(t, err)
-	})
-
-	t.Run("skips when endpoint has no target cluster", func(t *testing.T) {
-		clusterStorage := &fakeClusterStorage{
-			listError: errors.New("unexpected lookup"),
-		}
-		endpoint := endpointWithAcceleratorVirtualization("", "team-a")
-
-		err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
-
-		assert.Nil(t, err)
-		assert.Equal(t, 0, clusterStorage.listCalls)
-	})
-
-	t.Run("skips when endpoint workspace is missing", func(t *testing.T) {
-		cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
-			healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
-		})
-		clusterStorage := &fakeClusterStorage{
-			clusters: []v1.Cluster{*cluster},
-		}
-		endpoint := endpointWithAcceleratorVirtualization("cluster-a", "")
-
-		err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
-
-		assert.Nil(t, err)
-		assert.Equal(t, 0, clusterStorage.listCalls)
-	})
-
-	t.Run("skips when cluster lookup fails", func(t *testing.T) {
-		clusterStorage := &fakeClusterStorage{
-			listError: errors.New("storage unavailable"),
-		}
-		endpoint := endpointWithAcceleratorVirtualization("cluster-a", "team-a")
-
-		err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
-
-		assert.Nil(t, err)
-		assert.Equal(t, 1, clusterStorage.listCalls)
-	})
-
-	t.Run("skips when cluster is not found", func(t *testing.T) {
-		clusterStorage := &fakeClusterStorage{}
-		endpoint := endpointWithAcceleratorVirtualization("cluster-a", "team-a")
-
-		err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
-
-		assert.Nil(t, err)
-		assert.Equal(t, 1, clusterStorage.listCalls)
-	})
-}
-
-func TestValidateEndpointAcceleratorVirtualizationCreateCapacityLooksUpClusterByNameAndWorkspace(t *testing.T) {
-	resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
-		v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
-		v1.AcceleratorVirtualizationCorePercentKey: "50",
-	})
-	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
-		healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
-	})
-	clusterStorage := &fakeClusterStorage{
-		clusters: []v1.Cluster{*cluster},
-	}
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Name:      "endpoint",
-			Workspace: "team-a",
-		},
-		Spec: &v1.EndpointSpec{
-			Cluster:   "cluster-a",
-			Resources: resources,
-		},
-	}
-
-	err := validateEndpointAcceleratorVirtualizationCreateCapacity(clusterStorage, endpoint)
-
-	assert.Nil(t, err)
-	assert.Equal(t, []storage.Filter{
-		{Column: "metadata->name", Operator: "eq", Value: `"cluster-a"`},
-		{Column: "metadata->workspace", Operator: "eq", Value: `"team-a"`},
-	}, clusterStorage.listOption.Filters)
-}
-
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareSkipsCapacityLookupOnPatch(t *testing.T) {
-	clusterStorage := &fakeClusterStorage{
-		listError: errors.New("patch must not look up cluster capacity"),
-	}
-	body := `{
-		"metadata": {"name": "endpoint", "workspace": "team-a"},
-		"spec": {
-			"cluster": "cluster-a",
-			"resources": {
-				"gpu": "1",
-				"accelerator": {
-					"type": "nvidia_gpu",
-					"product": "Tesla-T4",
-					"virtualization.memory_mib": "4096",
-					"virtualization.core_percent": "50"
-				}
-			}
-		}
-	}`
-
-	recorder := runEndpointAcceleratorVirtualizationValidation(http.MethodPatch, body, clusterStorage)
-
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
-	assert.Equal(t, 0, clusterStorage.listCalls)
-}
-
 func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsUnsatisfiablePost(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
 	})
+	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
 	}
@@ -590,6 +475,288 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsUnsatisfiable
 	assert.False(t, handlerCalled)
 }
 
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsNoGPUClusterPost(t *testing.T) {
+	cluster := clusterWithoutNVIDIAGPUProducts()
+	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10220", response.Code)
+	assert.Contains(t, response.Hint, "product=Tesla-T4 has no available")
+	assert.False(t, handlerCalled)
+}
+
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareReturnsServiceUnavailableOnClusterLookupError(t *testing.T) {
+	clusterStorage := &fakeClusterStorage{
+		listError: errors.New("database is down"),
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	var response validationError
+	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10221", response.Code)
+	assert.Contains(t, response.Hint, "failed to look up cluster")
+	assert.NotContains(t, response.Hint, "database is down")
+	assert.False(t, handlerCalled)
+}
+
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsNotReadyPost(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
+	})
+	markClusterAcceleratorVirtualizationNotReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10222", response.Code)
+	assert.Contains(t, response.Hint, "not ready")
+	assert.False(t, handlerCalled)
+}
+
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsPatchWithoutEndpointFilters(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
+	})
+	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPatch, body, clusterStorage)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10221", response.Code)
+	assert.Contains(t, response.Hint, "endpoint lookup filters")
+	assert.False(t, handlerCalled)
+}
+
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareResolvesEndpointAndRejectsUnsatisfiablePatch(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
+	})
+	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+		endpoints: []v1.Endpoint{
+			*endpointWithAcceleratorVirtualization("cluster-a", "team-a"),
+		},
+	}
+	body := `{
+		"spec": {
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithPath(
+		http.MethodPatch,
+		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+		body,
+		clusterStorage,
+	)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10220", response.Code)
+	assert.Equal(t, 1, clusterStorage.endpointListCalls)
+	assert.False(t, handlerCalled)
+}
+
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareAddsBackCurrentPatchAllocation(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 0, 0),
+	})
+	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	endpoint := endpointWithAcceleratorVirtualization("cluster-a", "team-a")
+	endpoint.Status = &v1.EndpointStatus{
+		Resources: &v1.EndpointResourceStatus{
+			Replicas: []v1.ReplicaDeviceAllocation{
+				{
+					NodeID: "node-0",
+					Devices: []v1.DeviceAllocation{
+						{
+							UUID:      "gpu-0",
+							Product:   "Tesla-T4",
+							MemoryMiB: 4096,
+							CoreUnits: 50,
+							NodeID:    "node-0",
+						},
+					},
+				},
+			},
+		},
+	}
+	clusterStorage := &fakeClusterStorage{
+		clusters:  []v1.Cluster{*cluster},
+		endpoints: []v1.Endpoint{*endpoint},
+	}
+	body := `{
+		"spec": {
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithPath(
+		http.MethodPatch,
+		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+		body,
+		clusterStorage,
+	)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.Equal(t, 1, clusterStorage.endpointListCalls)
+	assert.True(t, handlerCalled)
+}
+
+func TestValidateEndpointAcceleratorVirtualizationMiddlewareDoesNotAddBackAllocationWhenPatchMovesCluster(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 0, 0),
+	})
+	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	endpoint := endpointWithAcceleratorVirtualization("old-cluster", "team-a")
+	endpoint.Status = &v1.EndpointStatus{
+		Resources: &v1.EndpointResourceStatus{
+			Replicas: []v1.ReplicaDeviceAllocation{
+				{
+					NodeID: "node-0",
+					Devices: []v1.DeviceAllocation{
+						{
+							UUID:      "gpu-0",
+							Product:   "Tesla-T4",
+							MemoryMiB: 4096,
+							CoreUnits: 50,
+							NodeID:    "node-0",
+						},
+					},
+				},
+			},
+		},
+	}
+	clusterStorage := &fakeClusterStorage{
+		clusters:  []v1.Cluster{*cluster},
+		endpoints: []v1.Endpoint{*endpoint},
+	}
+	body := `{
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithPath(
+		http.MethodPatch,
+		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+		body,
+		clusterStorage,
+	)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10220", response.Code)
+	assert.False(t, handlerCalled)
+}
+
 func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1.Endpoint {
 	return &v1.Endpoint{
 		Metadata: &v1.Metadata{
@@ -606,16 +773,34 @@ func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1
 	}
 }
 
-func runEndpointAcceleratorVirtualizationValidation(method string, body string, clusterStorage storage.ClusterStorage) *httptest.ResponseRecorder {
+func runEndpointAcceleratorVirtualizationValidation(method string, body string, clusterStorage endpointAcceleratorVirtualizationStorage) *httptest.ResponseRecorder {
 	recorder, _ := runEndpointAcceleratorVirtualizationValidationWithHandler(method, body, clusterStorage)
 
 	return recorder
 }
 
+func runEndpointAcceleratorVirtualizationValidationWithPath(
+	method string,
+	path string,
+	body string,
+	clusterStorage endpointAcceleratorVirtualizationStorage,
+) (*httptest.ResponseRecorder, bool) {
+	return runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(method, path, body, clusterStorage)
+}
+
 func runEndpointAcceleratorVirtualizationValidationWithHandler(
 	method string,
 	body string,
-	clusterStorage storage.ClusterStorage,
+	clusterStorage endpointAcceleratorVirtualizationStorage,
+) (*httptest.ResponseRecorder, bool) {
+	return runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(method, "/endpoints", body, clusterStorage)
+}
+
+func runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(
+	method string,
+	path string,
+	body string,
+	clusterStorage endpointAcceleratorVirtualizationStorage,
 ) (*httptest.ResponseRecorder, bool) {
 	gin.SetMode(gin.TestMode)
 
@@ -627,7 +812,7 @@ func runEndpointAcceleratorVirtualizationValidationWithHandler(
 	})
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(method, "/endpoints", strings.NewReader(body))
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
@@ -689,6 +874,52 @@ func clusterWithNVIDIAGPUProduct(product string, productMemoryMiB float64, devic
 	}
 }
 
+func clusterWithoutNVIDIAGPUProducts() *v1.Cluster {
+	return &v1.Cluster{
+		Status: &v1.ClusterStatus{
+			ResourceInfo: &v1.ClusterResources{
+				ResourceStatus: v1.ResourceStatus{
+					Available: &v1.ResourceInfo{
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{},
+					},
+				},
+				NodeResources: map[string]*v1.NodeResourceStatus{},
+			},
+		},
+	}
+}
+
+func markClusterAcceleratorVirtualizationReady(cluster *v1.Cluster, name string, workspace string) {
+	if cluster.Metadata == nil {
+		cluster.Metadata = &v1.Metadata{}
+	}
+	cluster.Metadata.Name = name
+	cluster.Metadata.Workspace = workspace
+	cluster.Spec = &v1.ClusterSpec{
+		Type: v1.KubernetesClusterType,
+		AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+			Enabled: true,
+		},
+	}
+	if cluster.Status == nil {
+		cluster.Status = &v1.ClusterStatus{}
+	}
+	cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{
+		v1.ComponentStatusAcceleratorVirtualizationKey: {
+			Phase: v1.ComponentPhaseReady,
+		},
+	}
+}
+
+func markClusterAcceleratorVirtualizationNotReady(cluster *v1.Cluster, name string, workspace string) {
+	markClusterAcceleratorVirtualizationReady(cluster, name, workspace)
+	cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey] = &v1.ComponentStatus{
+		Phase:   v1.ComponentPhaseNotReady,
+		Reason:  "HAMiNotReady",
+		Message: "HAMi device plugin is not ready",
+	}
+}
+
 func healthyDevice(uuid string, product string, memoryMiB int64, coreUnits int64) *v1.DeviceResource {
 	return &v1.DeviceResource{
 		UUID:    uuid,
@@ -709,10 +940,14 @@ func unhealthyDevice(uuid string, product string, memoryMiB int64, coreUnits int
 }
 
 type fakeClusterStorage struct {
-	clusters   []v1.Cluster
-	listCalls  int
-	listError  error
-	listOption storage.ListOption
+	clusters           []v1.Cluster
+	endpoints          []v1.Endpoint
+	listCalls          int
+	endpointListCalls  int
+	listError          error
+	endpointListError  error
+	listOption         storage.ListOption
+	endpointListOption storage.ListOption
 }
 
 func (s *fakeClusterStorage) CreateCluster(data *v1.Cluster) error {
@@ -740,4 +975,31 @@ func (s *fakeClusterStorage) ListCluster(option storage.ListOption) ([]v1.Cluste
 	}
 
 	return s.clusters, nil
+}
+
+func (s *fakeClusterStorage) CreateEndpoint(data *v1.Endpoint) error {
+	return nil
+}
+
+func (s *fakeClusterStorage) DeleteEndpoint(id string) error {
+	return nil
+}
+
+func (s *fakeClusterStorage) UpdateEndpoint(id string, data *v1.Endpoint) error {
+	return nil
+}
+
+func (s *fakeClusterStorage) GetEndpoint(id string) (*v1.Endpoint, error) {
+	return nil, nil
+}
+
+func (s *fakeClusterStorage) ListEndpoint(option storage.ListOption) ([]v1.Endpoint, error) {
+	s.endpointListCalls++
+	s.endpointListOption = option
+
+	if s.endpointListError != nil {
+		return nil, s.endpointListError
+	}
+
+	return s.endpoints, nil
 }
