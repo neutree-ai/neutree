@@ -72,6 +72,11 @@ const (
 // `Category` is a free-form grouping hint for the UI ("tuning" surfaces in a
 // separate "Performance tuning" section); it has no effect on composition.
 type RecipeFeature struct {
+	// DisplayName is an optional human-facing label for the UI (e.g. "Context
+	// window" / "上下文窗口"); when empty the feature key is shown. Lets a
+	// catalog align feature labels with product wording, independent of the
+	// technical feature key. No effect on composition.
+	DisplayName   string   `json:"display_name,omitempty"`
 	Description   string   `json:"description,omitempty"`
 	Category      string   `json:"category,omitempty"`
 	ConflictsWith []string `json:"conflicts_with,omitempty"`
@@ -112,6 +117,10 @@ type RecipeFeatureInput struct {
 	Max       *float64 `json:"max,omitempty"`
 	Pattern   string   `json:"pattern,omitempty"` // regexp for string values
 	Enum      []string `json:"enum,omitempty"`    // allowed raw values
+	// Suggestions are preset values surfaced as a dropdown next to the free
+	// input (the "pick a preset or type your own" combobox). UI hint only —
+	// the user may still enter any value that satisfies the constraints above.
+	Suggestions []string `json:"suggestions,omitempty"`
 }
 
 type ModelCatalogStatus struct {
