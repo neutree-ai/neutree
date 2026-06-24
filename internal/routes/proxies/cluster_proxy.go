@@ -351,6 +351,6 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
+	proxyGroup.POST("", acceleratorVirtualizationValidation, StampCredentialOwnerLabel(), handler)
 	proxyGroup.PATCH("", deletionValidation, acceleratorVirtualizationValidation, handler)
 }

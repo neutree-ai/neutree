@@ -43,6 +43,6 @@ func RegisterModelRegistryRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 	handler := CreateStructProxyHandler[v1.ModelRegistry](deps, storage.MODEL_REGISTRY_TABLE)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
+	proxyGroup.POST("", StampCredentialOwnerLabel(), handler)
 	proxyGroup.PATCH("", deletionValidation, handler)
 }

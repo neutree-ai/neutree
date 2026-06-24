@@ -1,6 +1,8 @@
 package credentials
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
@@ -58,6 +60,15 @@ func RegisterCredentialsRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 
 func handleResourceCredentials(deps *proxies.Dependencies, tabelName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		userID := c.GetString("user_id")
+		if userID == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+			c.Abort()
+
+			return
+		}
+
+		c.Request.URL.RawQuery = proxies.AddCredentialOwnerQuery(c.Request.URL.Query(), userID).Encode()
 		proxyHandler := proxies.CreateProxyHandler(deps.StorageAccessURL, tabelName, proxies.CreatePostgrestAuthModifier(c))
 		proxyHandler(c)
 	}
