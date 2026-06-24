@@ -17,12 +17,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-type endpointAcceleratorVirtualizationStorage interface {
-	ListCluster(option storage.ListOption) ([]v1.Cluster, error)
-	ListEndpoint(option storage.ListOption) ([]v1.Endpoint, error)
-}
-
-func validateEndpointAcceleratorVirtualization(store endpointAcceleratorVirtualizationStorage) gin.HandlerFunc {
+func validateEndpointAcceleratorVirtualization(store storage.Storage) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -66,7 +61,7 @@ func validateEndpointAcceleratorVirtualization(store endpointAcceleratorVirtuali
 }
 
 func validateEndpointAcceleratorVirtualizationRequest(
-	store endpointAcceleratorVirtualizationStorage,
+	store storage.Storage,
 	method string,
 	queryParams url.Values,
 	body []byte,
@@ -110,7 +105,7 @@ func parseEndpointAcceleratorVirtualizationBody(body []byte) (*v1.Endpoint, *val
 }
 
 func validateEndpointAcceleratorVirtualizationPreflight(
-	store endpointAcceleratorVirtualizationStorage,
+	store storage.Storage,
 	method string,
 	queryParams url.Values,
 	endpoint *v1.Endpoint,
@@ -198,7 +193,7 @@ func resolveEndpointAcceleratorVirtualizationTarget(
 }
 
 func resolveEndpointAcceleratorVirtualizationPatchEndpoint(
-	store endpointAcceleratorVirtualizationStorage,
+	store storage.Storage,
 	queryParams url.Values,
 ) (*v1.Endpoint, *validationError) {
 	filters := queryParamsToFilters(queryParams)

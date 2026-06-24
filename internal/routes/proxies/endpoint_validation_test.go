@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -773,7 +774,7 @@ func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1
 	}
 }
 
-func runEndpointAcceleratorVirtualizationValidation(method string, body string, clusterStorage endpointAcceleratorVirtualizationStorage) *httptest.ResponseRecorder {
+func runEndpointAcceleratorVirtualizationValidation(method string, body string, clusterStorage storage.Storage) *httptest.ResponseRecorder {
 	recorder, _ := runEndpointAcceleratorVirtualizationValidationWithHandler(method, body, clusterStorage)
 
 	return recorder
@@ -783,7 +784,7 @@ func runEndpointAcceleratorVirtualizationValidationWithPath(
 	method string,
 	path string,
 	body string,
-	clusterStorage endpointAcceleratorVirtualizationStorage,
+	clusterStorage storage.Storage,
 ) (*httptest.ResponseRecorder, bool) {
 	return runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(method, path, body, clusterStorage)
 }
@@ -791,7 +792,7 @@ func runEndpointAcceleratorVirtualizationValidationWithPath(
 func runEndpointAcceleratorVirtualizationValidationWithHandler(
 	method string,
 	body string,
-	clusterStorage endpointAcceleratorVirtualizationStorage,
+	clusterStorage storage.Storage,
 ) (*httptest.ResponseRecorder, bool) {
 	return runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(method, "/endpoints", body, clusterStorage)
 }
@@ -800,7 +801,7 @@ func runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(
 	method string,
 	path string,
 	body string,
-	clusterStorage endpointAcceleratorVirtualizationStorage,
+	clusterStorage storage.Storage,
 ) (*httptest.ResponseRecorder, bool) {
 	gin.SetMode(gin.TestMode)
 
@@ -940,6 +941,8 @@ func unhealthyDevice(uuid string, product string, memoryMiB int64, coreUnits int
 }
 
 type fakeClusterStorage struct {
+	*storagemocks.MockStorage
+
 	clusters           []v1.Cluster
 	endpoints          []v1.Endpoint
 	listCalls          int
