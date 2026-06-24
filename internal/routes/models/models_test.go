@@ -82,6 +82,53 @@ func setupMocks(t *testing.T) (*mocks.MockStorage, *model_registry_mocks.MockMod
 	return mockStorage, mockModelRegistry
 }
 
+func endpointModelReferenceFilterMatcher(workspace, registryName, modelName string) interface{} {
+	return mock.MatchedBy(func(option storage.ListOption) bool {
+		expected := map[string]string{
+			"metadata->workspace":    strconvQuote(workspace),
+			"spec->model->>registry": registryName,
+			"spec->model->>name":     modelName,
+		}
+
+		if len(option.Filters) != len(expected) {
+			return false
+		}
+
+		for _, filter := range option.Filters {
+			if filter.Operator != "eq" {
+				return false
+			}
+
+			value, ok := expected[filter.Column]
+			if !ok || filter.Value != value {
+				return false
+			}
+		}
+
+		return true
+	})
+}
+
+func strconvQuote(value string) string {
+	return "\"" + value + "\""
+}
+
+func setVersionQuery(c *gin.Context, version string) {
+	c.Request.URL.RawQuery = "version=" + version
+}
+
+func endpointWithModel(registryName, modelName, version string) v1.Endpoint {
+	return v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Model: &v1.ModelSpec{
+				Registry: registryName,
+				Name:     modelName,
+				Version:  version,
+			},
+		},
+	}
+}
+
 func TestListModels_Success(t *testing.T) {
 	// Setup mocks
 	mockStorage, mockModelRegistry := setupMocks(t)
@@ -386,6 +433,8 @@ func TestDeleteModel_Success(t *testing.T) {
 
 	// Configure mock behaviors
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
+	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
+		Return([]v1.Endpoint{}, nil)
 	mockModelRegistry.On("Connect").Return(nil)
 	mockModelRegistry.On("Disconnect").Return(nil)
 	mockModelRegistry.On("DeleteModel", "test-model", v1.LatestVersion).Return(nil)
@@ -398,6 +447,190 @@ func TestDeleteModel_Success(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, c.Writer.Status())
 
 	// Verify mock expectations
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestDeleteModel_BlockedWhenEndpointReferencesExactVersion(t *testing.T) {
+	mockStorage, mockModelRegistry := setupMocks(t)
+
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	c, w := createMockContext("default", "test-registry", "test-model", "")
+	setVersionQuery(c, "v1.0.0")
+
+	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
+		Return([]v1.Endpoint{endpointWithModel("test-registry", "test-model", "v1.0.0")}, nil)
+	mockModelRegistry.On("DeleteModel", "test-model", "v1.0.0").Return(nil).Maybe()
+
+	handlerFunc := deleteModel(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "10131", response["code"])
+	assert.Contains(t, response["message"], "cannot delete model 'default/test-registry/test-model:v1.0.0'")
+	assert.Contains(t, response["hint"], "1 endpoint(s) still reference this model")
+
+	mockModelRegistry.AssertNotCalled(t, "DeleteModel", "test-model", "v1.0.0")
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestDeleteModel_BlockedWhenEndpointReferencesLatestVersion(t *testing.T) {
+	testCases := []struct {
+		name            string
+		endpointVersion string
+	}{
+		{
+			name:            "latest",
+			endpointVersion: v1.LatestVersion,
+		},
+		{
+			name:            "empty",
+			endpointVersion: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockStorage, mockModelRegistry := setupMocks(t)
+
+			deps := &Dependencies{
+				Storage: mockStorage,
+				TempDirFunc: func() (string, error) {
+					return t.TempDir(), nil
+				},
+			}
+
+			c, w := createMockContext("default", "test-registry", "test-model", "")
+			setVersionQuery(c, "v1.0.0")
+
+			mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
+				Return([]v1.Endpoint{endpointWithModel("test-registry", "test-model", tc.endpointVersion)}, nil)
+			mockModelRegistry.On("DeleteModel", "test-model", "v1.0.0").Return(nil).Maybe()
+
+			handlerFunc := deleteModel(deps)
+			handlerFunc(c)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+
+			var response map[string]string
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			assert.NoError(t, err)
+			assert.Equal(t, "10131", response["code"])
+			assert.Contains(t, response["hint"], "1 endpoint(s) still reference this model")
+
+			mockModelRegistry.AssertNotCalled(t, "DeleteModel", "test-model", "v1.0.0")
+			mockStorage.AssertExpectations(t)
+			mockModelRegistry.AssertExpectations(t)
+		})
+	}
+}
+
+func TestDeleteModel_BlockedWhenDeletingLatestAndEndpointReferencesConcreteVersion(t *testing.T) {
+	mockStorage, mockModelRegistry := setupMocks(t)
+
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	c, w := createMockContext("default", "test-registry", "test-model", "")
+
+	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
+		Return([]v1.Endpoint{endpointWithModel("test-registry", "test-model", "v1.0.0")}, nil)
+	mockModelRegistry.On("DeleteModel", "test-model", v1.LatestVersion).Return(nil).Maybe()
+
+	handlerFunc := deleteModel(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "10131", response["code"])
+	assert.Contains(t, response["message"], "cannot delete model 'default/test-registry/test-model:latest'")
+	assert.Contains(t, response["hint"], "1 endpoint(s) still reference this model")
+
+	mockModelRegistry.AssertNotCalled(t, "DeleteModel", "test-model", v1.LatestVersion)
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestDeleteModel_AllowsUnrelatedEndpointVersion(t *testing.T) {
+	mockStorage, mockModelRegistry := setupMocks(t)
+
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	c, _ := createMockContext("default", "test-registry", "test-model", "")
+	setVersionQuery(c, "v1.0.0")
+
+	modelRegistry := v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: "bentoml",
+		},
+	}
+
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
+	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
+		Return([]v1.Endpoint{endpointWithModel("test-registry", "test-model", "v2.0.0")}, nil)
+	mockModelRegistry.On("Connect").Return(nil)
+	mockModelRegistry.On("Disconnect").Return(nil)
+	mockModelRegistry.On("DeleteModel", "test-model", "v1.0.0").Return(nil)
+
+	handlerFunc := deleteModel(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusNoContent, c.Writer.Status())
+
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestDeleteModel_ValidationErrorSkipsRegistryDelete(t *testing.T) {
+	mockStorage, mockModelRegistry := setupMocks(t)
+
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	c, w := createMockContext("default", "test-registry", "test-model", "")
+
+	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
+		Return([]v1.Endpoint{}, errors.New("list endpoint error"))
+	mockModelRegistry.On("DeleteModel", "test-model", v1.LatestVersion).Return(nil).Maybe()
+
+	handlerFunc := deleteModel(deps)
+	handlerFunc(c)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var response map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["message"], "Failed to validate model deletion")
+
+	mockModelRegistry.AssertNotCalled(t, "DeleteModel", "test-model", v1.LatestVersion)
 	mockStorage.AssertExpectations(t)
 	mockModelRegistry.AssertExpectations(t)
 }

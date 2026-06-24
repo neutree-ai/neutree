@@ -27,6 +27,8 @@ type Dependencies struct {
 	AuthConfig  middleware.AuthConfig
 }
 
+const modelReferencedByEndpointCode = "10131"
+
 // progressWriter implements io.Writer for progress reporting via HTTP chunked encoding
 type progressWriter struct {
 	writer    io.Writer
@@ -448,14 +450,80 @@ func downloadModel(deps *Dependencies) gin.HandlerFunc {
 	}
 }
 
+func validateModelDeletion(deps *Dependencies, workspace, registryName, modelName, version string) (int, error) {
+	endpoints, err := deps.Storage.ListEndpoint(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(workspace),
+			},
+			{
+				Column:   "spec->model->>registry",
+				Operator: "eq",
+				Value:    registryName,
+			},
+			{
+				Column:   "spec->model->>name",
+				Operator: "eq",
+				Value:    modelName,
+			},
+		},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to list endpoints: %w", err)
+	}
+
+	references := 0
+
+	for _, endpoint := range endpoints {
+		if endpoint.Spec == nil || endpoint.Spec.Model == nil {
+			continue
+		}
+
+		endpointVersion := endpoint.Spec.Model.Version
+		if endpointVersion == "" {
+			endpointVersion = v1.LatestVersion
+		}
+
+		if version == v1.LatestVersion || endpointVersion == v1.LatestVersion || endpointVersion == version {
+			references++
+		}
+	}
+
+	return references, nil
+}
+
 // deleteModel handles deleting a model
 func deleteModel(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		workspace := c.Param("workspace")
+		registryName := c.Param("registry")
 		modelName := c.Param("model")
 
 		version := c.Query("version")
 		if version == "" {
 			version = v1.LatestVersion
+		}
+
+		references, err := validateModelDeletion(deps, workspace, registryName, modelName, version)
+		if err != nil {
+			klog.Errorf("Failed to validate model deletion %s/%s/%s:%s: %v", workspace, registryName, modelName, version, err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": fmt.Sprintf("Failed to validate model deletion: %v", err),
+			})
+
+			return
+		}
+
+		if references > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    modelReferencedByEndpointCode,
+				"message": fmt.Sprintf("cannot delete model '%s/%s/%s:%s'", workspace, registryName, modelName, version),
+				"hint":    fmt.Sprintf("%d endpoint(s) still reference this model", references),
+			})
+
+			return
 		}
 
 		// Get and connect to the model registry
