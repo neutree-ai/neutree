@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestValidateEndpointAcceleratorVirtualizationResourceShape(t *testing.T) {
+func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 	t.Run("allows non vGPU endpoint resources", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", nil)
+		resources := vgpuResources("1", "Tesla-T4", nil)
 
-		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
+		err := validateEndpointVGPUResourceShape(resources)
 
 		assert.Nil(t, err)
 	})
@@ -35,41 +35,41 @@ func TestValidateEndpointAcceleratorVirtualizationResourceShape(t *testing.T) {
 			},
 		}
 
-		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
+		err := validateEndpointVGPUResourceShape(resources)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("rejects vGPU endpoint without product", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "", map[string]string{
+		resources := vgpuResources("1", "", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
 		})
 
-		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
+		err := validateEndpointVGPUResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10218", err.Code)
 	})
 
 	t.Run("rejects mutually exclusive memory fields", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:     "8192",
 			v1.AcceleratorVirtualizationMemoryPercentKey: "50",
 		})
 
-		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
+		err := validateEndpointVGPUResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10219", err.Code)
 	})
 
 	t.Run("rejects invalid vGPU numeric resources", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
 			v1.AcceleratorVirtualizationCorePercentKey: "101",
 		})
 
-		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
+		err := validateEndpointVGPUResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10216", err.Code)
@@ -77,12 +77,12 @@ func TestValidateEndpointAcceleratorVirtualizationResourceShape(t *testing.T) {
 	})
 
 	t.Run("rejects fractional vGPU memory resource", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192.5",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
 
-		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
+		err := validateEndpointVGPUResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10216", err.Code)
@@ -91,12 +91,12 @@ func TestValidateEndpointAcceleratorVirtualizationResourceShape(t *testing.T) {
 	})
 
 	t.Run("rejects fractional vGPU core resource", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
 			v1.AcceleratorVirtualizationCorePercentKey: "50.5",
 		})
 
-		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
+		err := validateEndpointVGPUResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10216", err.Code)
@@ -105,18 +105,18 @@ func TestValidateEndpointAcceleratorVirtualizationResourceShape(t *testing.T) {
 	})
 
 	t.Run("allows vGPU endpoint resource shape without cluster availability lookup", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
 
-		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
+		err := validateEndpointVGPUResourceShape(resources)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("skips patch that does not touch resources", func(t *testing.T) {
-		endpoint, err := parseEndpointAcceleratorVirtualizationBody([]byte(`{
+		endpoint, err := parseEndpointBody([]byte(`{
 			"spec": {
 				"replicas": {"num": 2}
 			}
@@ -124,13 +124,13 @@ func TestValidateEndpointAcceleratorVirtualizationResourceShape(t *testing.T) {
 
 		assert.Nil(t, err)
 		assert.NotNil(t, endpoint)
-		assert.Nil(t, validateEndpointAcceleratorVirtualizationPreflight(nil, http.MethodPatch, nil, endpoint))
+		assert.Nil(t, validateEndpointVGPUPreflight(nil, http.MethodPatch, nil, endpoint))
 	})
 }
 
-func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
+func TestValidateEndpointVGPUCapacity(t *testing.T) {
 	t.Run("skips when cluster resource info is unavailable", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -138,13 +138,13 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			Status: &v1.ClusterStatus{},
 		}
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("skips when available accelerator telemetry is incomplete", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -154,13 +154,13 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			},
 		}
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("rejects request that exceeds per device memory availability", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8193",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -168,7 +168,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10220", err.Code)
@@ -177,7 +177,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 
 	t.Run("rejects product absent from cluster resource info", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Missing-GPU", map[string]string{
+		resources := vgpuResources("1", "Missing-GPU", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -185,7 +185,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10220", err.Code)
@@ -193,7 +193,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 
 	t.Run("skips when product exists but virtualization telemetry is missing", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -203,13 +203,13 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 		cluster.Status.ResourceInfo.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 			Products[v1.AcceleratorProduct("Tesla-T4")].Virtualization = nil
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("rejects fragmented capacity that cannot satisfy each requested virtual card", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+		resources := vgpuResources("2", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8193",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -218,7 +218,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			healthyDevice("gpu-1", "Tesla-T4", 8192, 100),
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10220", err.Code)
@@ -226,7 +226,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 
 	t.Run("rejects request that exceeds per device core availability", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "51",
 		})
@@ -234,7 +234,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			healthyDevice("gpu-0", "Tesla-T4", 8192, 50),
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		if assert.NotNil(t, err) {
 			assert.Equal(t, "10220", err.Code)
@@ -244,7 +244,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 
 	t.Run("rejects request that needs more healthy matching devices than available", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+		resources := vgpuResources("2", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -252,7 +252,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10220", err.Code)
@@ -261,7 +261,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 
 	t.Run("ignores unhealthy matching devices", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+		resources := vgpuResources("2", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -270,7 +270,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			unhealthyDevice("gpu-1", "Tesla-T4", 8192, 100),
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10220", err.Code)
@@ -278,7 +278,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 
 	t.Run("allows request when enough healthy matching devices fit", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+		resources := vgpuResources("2", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -287,13 +287,13 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			healthyDevice("gpu-1", "Tesla-T4", 8192, 50),
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("derives memory from memory percent using product metadata", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryPercentKey: "51",
 			v1.AcceleratorVirtualizationCorePercentKey:   "50",
 		})
@@ -301,13 +301,13 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			healthyDevice("gpu-0", "Tesla-T4", 5101, 100),
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("skips memory percent precheck when product memory metadata is missing", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryPercentKey: "51",
 			v1.AcceleratorVirtualizationCorePercentKey:   "50",
 		})
@@ -316,13 +316,13 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 		})
 		cluster.Status.ResourceInfo.AcceleratorMetadata = nil
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("rejects core overuse when memory percent metadata is missing", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryPercentKey: "51",
 			v1.AcceleratorVirtualizationCorePercentKey:   "51",
 		})
@@ -331,7 +331,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 		})
 		cluster.Status.ResourceInfo.AcceleratorMetadata = nil
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		if err == nil {
 			t.Fatal("expected capacity error")
@@ -342,7 +342,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 
 	t.Run("skips when matching device availability telemetry is incomplete", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -352,13 +352,13 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			device,
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("rejects when matching device count is insufficient despite incomplete availability telemetry", func(t *testing.T) {
-		resources := acceleratorVirtualizationResources("2", "Tesla-T4", map[string]string{
+		resources := vgpuResources("2", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
 		})
@@ -368,7 +368,7 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 			device,
 		})
 
-		err := validateEndpointAcceleratorVirtualizationCapacity(resources, cluster)
+		err := validateEndpointVGPUCapacity(resources, cluster)
 
 		if err == nil {
 			t.Fatal("expected capacity error")
@@ -379,11 +379,11 @@ func TestValidateEndpointAcceleratorVirtualizationCapacity(t *testing.T) {
 	})
 }
 
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsUnsatisfiablePost(t *testing.T) {
+func TestEndpointVGPUValidationRejectsUnsatisfiablePost(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
 	})
-	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
 	}
@@ -403,7 +403,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsUnsatisfiable
 		}
 	}`
 
-	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPost, body, clusterStorage)
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
 
 	var response validationError
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -412,9 +412,9 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsUnsatisfiable
 	assert.False(t, handlerCalled)
 }
 
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsNoGPUClusterPost(t *testing.T) {
+func TestEndpointVGPUValidationRejectsNoGPUClusterPost(t *testing.T) {
 	cluster := clusterWithoutNVIDIAGPUProducts()
-	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
 	}
@@ -434,7 +434,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsNoGPUClusterP
 		}
 	}`
 
-	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPost, body, clusterStorage)
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
 
 	var response validationError
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -444,7 +444,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsNoGPUClusterP
 	assert.False(t, handlerCalled)
 }
 
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareReturnsServiceUnavailableOnClusterLookupError(t *testing.T) {
+func TestEndpointVGPUValidationReturnsServiceUnavailableOnClusterLookupError(t *testing.T) {
 	clusterStorage := &fakeClusterStorage{
 		listError: errors.New("database is down"),
 	}
@@ -464,7 +464,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareReturnsServiceUnavai
 		}
 	}`
 
-	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPost, body, clusterStorage)
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
 
 	var response validationError
 	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
@@ -475,11 +475,11 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareReturnsServiceUnavai
 	assert.False(t, handlerCalled)
 }
 
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsNotReadyPost(t *testing.T) {
+func TestEndpointVGPUValidationRejectsNotReadyPost(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
 	})
-	markClusterAcceleratorVirtualizationNotReady(cluster, "cluster-a", "team-a")
+	markClusterVGPUNotReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
 	}
@@ -499,7 +499,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsNotReadyPost(
 		}
 	}`
 
-	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPost, body, clusterStorage)
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
 
 	var response validationError
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -509,11 +509,11 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsNotReadyPost(
 	assert.False(t, handlerCalled)
 }
 
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsPatchWithoutEndpointFilters(t *testing.T) {
+func TestEndpointVGPUValidationRejectsPatchWithoutEndpointFilters(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
 	})
-	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
 	}
@@ -533,7 +533,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsPatchWithoutE
 		}
 	}`
 
-	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithHandler(http.MethodPatch, body, clusterStorage)
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPatch, body, clusterStorage)
 
 	var response validationError
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -543,15 +543,15 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareRejectsPatchWithoutE
 	assert.False(t, handlerCalled)
 }
 
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareResolvesEndpointAndRejectsUnsatisfiablePatch(t *testing.T) {
+func TestEndpointVGPUValidationResolvesEndpointAndRejectsUnsatisfiablePatch(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
 	})
-	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
 		endpoints: []v1.Endpoint{
-			*endpointWithAcceleratorVirtualization("cluster-a", "team-a"),
+			*endpointWithVGPU("cluster-a", "team-a"),
 		},
 	}
 	body := `{
@@ -568,7 +568,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareResolvesEndpointAndR
 		}
 	}`
 
-	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithPath(
+	recorder, handlerCalled := runEndpointVGPUValidationWithPath(
 		http.MethodPatch,
 		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
 		body,
@@ -583,12 +583,12 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareResolvesEndpointAndR
 	assert.False(t, handlerCalled)
 }
 
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareAddsBackCurrentPatchAllocation(t *testing.T) {
+func TestEndpointVGPUValidationAddsBackCurrentPatchAllocation(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 0, 0),
 	})
-	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
-	endpoint := endpointWithAcceleratorVirtualization("cluster-a", "team-a")
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	endpoint := endpointWithVGPU("cluster-a", "team-a")
 	endpoint.Status = &v1.EndpointStatus{
 		Resources: &v1.EndpointResourceStatus{
 			Replicas: []v1.ReplicaDeviceAllocation{
@@ -625,7 +625,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareAddsBackCurrentPatch
 		}
 	}`
 
-	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithPath(
+	recorder, handlerCalled := runEndpointVGPUValidationWithPath(
 		http.MethodPatch,
 		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
 		body,
@@ -637,12 +637,12 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareAddsBackCurrentPatch
 	assert.True(t, handlerCalled)
 }
 
-func TestValidateEndpointAcceleratorVirtualizationMiddlewareDoesNotAddBackAllocationWhenPatchMovesCluster(t *testing.T) {
+func TestEndpointVGPUValidationDoesNotAddBackAllocationWhenPatchMovesCluster(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 0, 0),
 	})
-	markClusterAcceleratorVirtualizationReady(cluster, "cluster-a", "team-a")
-	endpoint := endpointWithAcceleratorVirtualization("old-cluster", "team-a")
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	endpoint := endpointWithVGPU("old-cluster", "team-a")
 	endpoint.Status = &v1.EndpointStatus{
 		Resources: &v1.EndpointResourceStatus{
 			Replicas: []v1.ReplicaDeviceAllocation{
@@ -680,7 +680,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareDoesNotAddBackAlloca
 		}
 	}`
 
-	recorder, handlerCalled := runEndpointAcceleratorVirtualizationValidationWithPath(
+	recorder, handlerCalled := runEndpointVGPUValidationWithPath(
 		http.MethodPatch,
 		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
 		body,
@@ -694,7 +694,7 @@ func TestValidateEndpointAcceleratorVirtualizationMiddlewareDoesNotAddBackAlloca
 	assert.False(t, handlerCalled)
 }
 
-func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1.Endpoint {
+func endpointWithVGPU(cluster string, workspace string) *v1.Endpoint {
 	return &v1.Endpoint{
 		Metadata: &v1.Metadata{
 			Name:      "endpoint",
@@ -702,7 +702,7 @@ func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1
 		},
 		Spec: &v1.EndpointSpec{
 			Cluster: cluster,
-			Resources: acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			Resources: vgpuResources("1", "Tesla-T4", map[string]string{
 				v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 				v1.AcceleratorVirtualizationCorePercentKey: "50",
 			}),
@@ -710,30 +710,30 @@ func endpointWithAcceleratorVirtualization(cluster string, workspace string) *v1
 	}
 }
 
-func runEndpointAcceleratorVirtualizationValidation(method string, body string, clusterStorage storage.Storage) *httptest.ResponseRecorder {
-	recorder, _ := runEndpointAcceleratorVirtualizationValidationWithHandler(method, body, clusterStorage)
+func runEndpointVGPUValidation(method string, body string, clusterStorage storage.Storage) *httptest.ResponseRecorder {
+	recorder, _ := runEndpointVGPUValidationWithHandler(method, body, clusterStorage)
 
 	return recorder
 }
 
-func runEndpointAcceleratorVirtualizationValidationWithPath(
+func runEndpointVGPUValidationWithPath(
 	method string,
 	path string,
 	body string,
 	clusterStorage storage.Storage,
 ) (*httptest.ResponseRecorder, bool) {
-	return runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(method, path, body, clusterStorage)
+	return runEndpointVGPUValidationWithHandlerAndPath(method, path, body, clusterStorage)
 }
 
-func runEndpointAcceleratorVirtualizationValidationWithHandler(
+func runEndpointVGPUValidationWithHandler(
 	method string,
 	body string,
 	clusterStorage storage.Storage,
 ) (*httptest.ResponseRecorder, bool) {
-	return runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(method, "/endpoints", body, clusterStorage)
+	return runEndpointVGPUValidationWithHandlerAndPath(method, "/endpoints", body, clusterStorage)
 }
 
-func runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(
+func runEndpointVGPUValidationWithHandlerAndPath(
 	method string,
 	path string,
 	body string,
@@ -743,7 +743,7 @@ func runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(
 
 	router := gin.New()
 	handlerCalled := false
-	router.Handle(method, "/endpoints", validateEndpointAcceleratorVirtualization(clusterStorage), func(c *gin.Context) {
+	router.Handle(method, "/endpoints", validateEndpointVGPU(clusterStorage), func(c *gin.Context) {
 		handlerCalled = true
 		c.Status(http.StatusNoContent)
 	})
@@ -756,7 +756,7 @@ func runEndpointAcceleratorVirtualizationValidationWithHandlerAndPath(
 	return recorder, handlerCalled
 }
 
-func acceleratorVirtualizationResources(gpu string, product string, virtualization map[string]string) *v1.ResourceSpec {
+func vgpuResources(gpu string, product string, virtualization map[string]string) *v1.ResourceSpec {
 	accelerator := map[string]string{
 		v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
 		v1.AcceleratorProductKey: product,
@@ -826,7 +826,7 @@ func clusterWithoutNVIDIAGPUProducts() *v1.Cluster {
 	}
 }
 
-func markClusterAcceleratorVirtualizationReady(cluster *v1.Cluster, name string, workspace string) {
+func markClusterVGPUReady(cluster *v1.Cluster, name string, workspace string) {
 	if cluster.Metadata == nil {
 		cluster.Metadata = &v1.Metadata{}
 	}
@@ -848,8 +848,8 @@ func markClusterAcceleratorVirtualizationReady(cluster *v1.Cluster, name string,
 	}
 }
 
-func markClusterAcceleratorVirtualizationNotReady(cluster *v1.Cluster, name string, workspace string) {
-	markClusterAcceleratorVirtualizationReady(cluster, name, workspace)
+func markClusterVGPUNotReady(cluster *v1.Cluster, name string, workspace string) {
+	markClusterVGPUReady(cluster, name, workspace)
 	cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey] = &v1.ComponentStatus{
 		Phase:   v1.ComponentPhaseNotReady,
 		Reason:  "HAMiNotReady",

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -17,7 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-func validateEndpointAcceleratorVirtualization(store storage.Storage) gin.HandlerFunc {
+func validateEndpointVGPU(store storage.Storage) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -43,7 +42,7 @@ func validateEndpointAcceleratorVirtualization(store storage.Storage) gin.Handle
 			return
 		}
 
-		validationErr := validateEndpointAcceleratorVirtualizationRequest(
+		validationErr := validateEndpointVGPURequest(
 			store,
 			c.Request.Method,
 			c.Request.URL.Query(),
@@ -60,21 +59,21 @@ func validateEndpointAcceleratorVirtualization(store storage.Storage) gin.Handle
 	}
 }
 
-func validateEndpointAcceleratorVirtualizationRequest(
+func validateEndpointVGPURequest(
 	store storage.Storage,
 	method string,
 	queryParams url.Values,
 	body []byte,
 ) *validationError {
-	endpoint, validationErr := parseEndpointAcceleratorVirtualizationBody(body)
+	endpoint, validationErr := parseEndpointBody(body)
 	if validationErr != nil {
 		return validationErr
 	}
 
-	return validateEndpointAcceleratorVirtualizationPreflight(store, method, queryParams, endpoint)
+	return validateEndpointVGPUPreflight(store, method, queryParams, endpoint)
 }
 
-func parseEndpointAcceleratorVirtualizationBody(body []byte) (*v1.Endpoint, *validationError) {
+func parseEndpointBody(body []byte) (*v1.Endpoint, *validationError) {
 	var endpoint v1.Endpoint
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&endpoint); err != nil {
 		return nil, invalidEndpointPayloadError(err)
@@ -83,7 +82,7 @@ func parseEndpointAcceleratorVirtualizationBody(body []byte) (*v1.Endpoint, *val
 	return &endpoint, nil
 }
 
-func validateEndpointAcceleratorVirtualizationPreflight(
+func validateEndpointVGPUPreflight(
 	store storage.Storage,
 	method string,
 	queryParams url.Values,
@@ -93,36 +92,33 @@ func validateEndpointAcceleratorVirtualizationPreflight(
 		return nil
 	}
 
+	// Only validate writes that directly touch vGPU resources.
 	if endpoint.Spec == nil || endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
 		return nil
 	}
 
-	if validationErr := validateEndpointAcceleratorVirtualizationResourceShape(endpoint.Spec.Resources); validationErr != nil {
+	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
 		return validationErr
 	}
 
 	if store == nil {
-		return endpointAcceleratorVirtualizationLookupError("storage is required to validate endpoint accelerator virtualization")
+		return endpointVGPULookupError("storage is required to validate endpoint accelerator virtualization")
 	}
 
 	var existing *v1.Endpoint
 
 	if method == http.MethodPatch {
-		resolved, validationErr := resolveEndpointAcceleratorVirtualizationPatchEndpoint(store, queryParams)
+		resolved, validationErr := resolveEndpointPatch(store, queryParams)
 		if validationErr != nil {
 			return validationErr
 		}
 
 		existing = resolved
-		merged := mergeEndpointAcceleratorVirtualizationPatch(existing, endpoint)
+		merged := mergeEndpointPatch(existing, endpoint)
 		endpoint = &merged
 	}
 
-	if endpoint.Spec == nil || endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
-		return nil
-	}
-
-	target, validationErr := resolveEndpointAcceleratorVirtualizationTarget(method, queryParams, endpoint)
+	target, validationErr := resolveEndpointVGPUTarget(endpoint)
 	if validationErr != nil {
 		return validationErr
 	}
@@ -131,76 +127,82 @@ func validateEndpointAcceleratorVirtualizationPreflight(
 		Filters: endpointClusterLookupFilters(target.cluster, target.workspace),
 	})
 	if err != nil {
-		return endpointAcceleratorVirtualizationLookupError("failed to look up cluster for endpoint accelerator virtualization")
+		return endpointVGPULookupError("failed to look up cluster for endpoint accelerator virtualization")
 	}
 
 	if len(clusters) == 0 {
-		return endpointAcceleratorVirtualizationTargetError(fmt.Sprintf("cluster %s/%s not found", target.workspace, target.cluster))
+		return endpointVGPUTargetError(fmt.Sprintf("cluster %s/%s not found", target.workspace, target.cluster))
 	}
 
 	if len(clusters) > 1 {
-		return endpointAcceleratorVirtualizationTargetError(fmt.Sprintf("multiple clusters matched %s/%s", target.workspace, target.cluster))
+		return endpointVGPUTargetError(fmt.Sprintf("multiple clusters matched %s/%s", target.workspace, target.cluster))
 	}
 
 	cluster := &clusters[0]
-	if validationErr := validateEndpointClusterAcceleratorVirtualizationReady(cluster); validationErr != nil {
+	if validationErr := validateEndpointVGPUCluster(cluster); validationErr != nil {
 		return validationErr
 	}
 
-	if method == http.MethodPatch && endpointAcceleratorVirtualizationAllocationCanBeAddedBack(existing, target) {
-		cluster = clusterWithEndpointAcceleratorVirtualizationAllocationAddedBack(cluster, existing)
+	if method == http.MethodPatch && canAddBackEndpointVGPUAllocation(existing, target) {
+		cluster = clusterWithEndpointVGPUAllocationAddedBack(cluster, existing)
 	}
 
-	return validateEndpointAcceleratorVirtualizationCapacity(endpoint.Spec.Resources, cluster)
+	return validateEndpointVGPUCapacity(endpoint.Spec.Resources, cluster)
 }
 
-type endpointAcceleratorVirtualizationTarget struct {
+type endpointVGPUTarget struct {
 	cluster   string
 	workspace string
 }
 
-func resolveEndpointAcceleratorVirtualizationTarget(
-	method string,
-	queryParams url.Values,
+func resolveEndpointVGPUTarget(
 	endpoint *v1.Endpoint,
-) (endpointAcceleratorVirtualizationTarget, *validationError) {
-	target := endpointAcceleratorVirtualizationTarget{
-		workspace: endpointTargetWorkspace(method, queryParams, endpoint),
+) (endpointVGPUTarget, *validationError) {
+	target := endpointVGPUTarget{
+		workspace: endpointWorkspace(endpoint),
 	}
 
 	if endpoint.Spec != nil {
 		target.cluster = endpoint.Spec.Cluster
 	}
 
-	return validateEndpointAcceleratorVirtualizationTarget(target)
+	if target.workspace == "" {
+		target.workspace = defaultWorkspace
+	}
+
+	if target.cluster == "" {
+		return target, endpointVGPUTargetError("spec.cluster is required for endpoint accelerator virtualization")
+	}
+
+	return target, nil
 }
 
-func resolveEndpointAcceleratorVirtualizationPatchEndpoint(
+func resolveEndpointPatch(
 	store storage.Storage,
 	queryParams url.Values,
 ) (*v1.Endpoint, *validationError) {
 	filters := queryParamsToFilters(queryParams)
 	if len(filters) == 0 {
-		return nil, endpointAcceleratorVirtualizationTargetError("endpoint lookup filters are required for vGPU resource PATCH")
+		return nil, endpointVGPUTargetError("endpoint lookup filters are required for vGPU resource PATCH")
 	}
 
 	endpoints, err := store.ListEndpoint(storage.ListOption{Filters: filters})
 	if err != nil {
-		return nil, endpointAcceleratorVirtualizationLookupError("failed to look up endpoint for vGPU resource PATCH")
+		return nil, endpointVGPULookupError("failed to look up endpoint for vGPU resource PATCH")
 	}
 
 	if len(endpoints) == 0 {
-		return nil, endpointAcceleratorVirtualizationTargetError("endpoint not found for vGPU resource PATCH")
+		return nil, endpointVGPUTargetError("endpoint not found for vGPU resource PATCH")
 	}
 
 	if len(endpoints) > 1 {
-		return nil, endpointAcceleratorVirtualizationTargetError("multiple endpoints matched vGPU resource PATCH filters")
+		return nil, endpointVGPUTargetError("multiple endpoints matched vGPU resource PATCH filters")
 	}
 
 	return &endpoints[0], nil
 }
 
-func mergeEndpointAcceleratorVirtualizationPatch(existing *v1.Endpoint, patch *v1.Endpoint) v1.Endpoint {
+func mergeEndpointPatch(existing *v1.Endpoint, patch *v1.Endpoint) v1.Endpoint {
 	if existing == nil {
 		if patch == nil {
 			return v1.Endpoint{}
@@ -308,66 +310,12 @@ func copyEndpointResourceSpec(resources *v1.ResourceSpec) *v1.ResourceSpec {
 	return &copied
 }
 
-func validateEndpointAcceleratorVirtualizationTarget(
-	target endpointAcceleratorVirtualizationTarget,
-) (endpointAcceleratorVirtualizationTarget, *validationError) {
-	if target.workspace == "" {
-		target.workspace = defaultWorkspace
-	}
-
-	if target.cluster == "" {
-		return target, endpointAcceleratorVirtualizationTargetError("spec.cluster is required for endpoint accelerator virtualization")
-	}
-
-	return target, nil
-}
-
-func endpointTargetWorkspace(method string, queryParams url.Values, endpoint *v1.Endpoint) string {
-	if workspace := endpointWorkspace(endpoint); workspace != "" {
-		return workspace
-	}
-
-	if method == http.MethodPatch {
-		return endpointWorkspaceFromQuery(queryParams)
-	}
-
-	return ""
-}
-
 func endpointWorkspace(endpoint *v1.Endpoint) string {
 	if endpoint == nil || endpoint.Metadata == nil {
 		return ""
 	}
 
 	return endpoint.Metadata.Workspace
-}
-
-func endpointWorkspaceFromQuery(queryParams url.Values) string {
-	for _, key := range []string{"metadata->>workspace", "metadata->workspace"} {
-		values, ok := queryParams[key]
-		if !ok || len(values) == 0 {
-			continue
-		}
-
-		workspace := values[0]
-		parts := strings.SplitN(workspace, ".", 2)
-
-		if len(parts) == 2 {
-			if parts[0] != "eq" {
-				continue
-			}
-
-			workspace = parts[1]
-		}
-
-		if unquoted, err := strconv.Unquote(workspace); err == nil {
-			workspace = unquoted
-		}
-
-		return workspace
-	}
-
-	return ""
 }
 
 func endpointClusterLookupFilters(cluster, workspace string) []storage.Filter {
@@ -377,9 +325,9 @@ func endpointClusterLookupFilters(cluster, workspace string) []storage.Filter {
 	}
 }
 
-func endpointAcceleratorVirtualizationAllocationCanBeAddedBack(
+func canAddBackEndpointVGPUAllocation(
 	endpoint *v1.Endpoint,
-	target endpointAcceleratorVirtualizationTarget,
+	target endpointVGPUTarget,
 ) bool {
 	if endpoint == nil || endpoint.Spec == nil {
 		return false
@@ -393,22 +341,22 @@ func endpointAcceleratorVirtualizationAllocationCanBeAddedBack(
 	return endpoint.Spec.Cluster == target.cluster && workspace == target.workspace
 }
 
-func validateEndpointClusterAcceleratorVirtualizationReady(cluster *v1.Cluster) *validationError {
+func validateEndpointVGPUCluster(cluster *v1.Cluster) *validationError {
 	if cluster == nil || cluster.Spec == nil || !cluster.Spec.AcceleratorVirtualizationEnabled() {
-		return endpointAcceleratorVirtualizationNotReadyError(cluster, "cluster accelerator virtualization is not enabled")
+		return endpointVGPUNotReadyError(cluster, "cluster accelerator virtualization is not enabled")
 	}
 
 	if cluster.Spec.Type != v1.KubernetesClusterType {
-		return endpointAcceleratorVirtualizationNotReadyError(cluster, "endpoint accelerator virtualization is only supported for kubernetes clusters")
+		return endpointVGPUNotReadyError(cluster, "endpoint accelerator virtualization is only supported for kubernetes clusters")
 	}
 
 	if cluster.Status == nil || cluster.Status.ComponentStatus == nil {
-		return endpointAcceleratorVirtualizationNotReadyError(cluster, "cluster accelerator virtualization component status is missing")
+		return endpointVGPUNotReadyError(cluster, "cluster accelerator virtualization component status is missing")
 	}
 
 	component := cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
 	if component == nil {
-		return endpointAcceleratorVirtualizationNotReadyError(cluster, "cluster accelerator virtualization component status is missing")
+		return endpointVGPUNotReadyError(cluster, "cluster accelerator virtualization component status is missing")
 	}
 
 	if component.Phase != v1.ComponentPhaseReady {
@@ -417,13 +365,13 @@ func validateEndpointClusterAcceleratorVirtualizationReady(cluster *v1.Cluster) 
 			hint = fmt.Sprintf("%s: %s %s", hint, component.Reason, component.Message)
 		}
 
-		return endpointAcceleratorVirtualizationNotReadyError(cluster, hint)
+		return endpointVGPUNotReadyError(cluster, hint)
 	}
 
 	return nil
 }
 
-func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.ResourceSpec) *validationError {
+func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationError {
 	if !resources.HasAcceleratorVirtualization() {
 		return nil
 	}
@@ -471,7 +419,7 @@ func validateEndpointAcceleratorVirtualizationResourceShape(resources *v1.Resour
 	return nil
 }
 
-func validateEndpointAcceleratorVirtualizationCapacity(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
+func validateEndpointVGPUCapacity(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
 	if resources == nil || !resources.HasAcceleratorVirtualization() {
 		return nil
 	}
@@ -484,42 +432,42 @@ func validateEndpointAcceleratorVirtualizationCapacity(resources *v1.ResourceSpe
 	product := resources.GetAcceleratorProduct()
 	resourceInfo := clusterResourceInfo(cluster)
 
-	productResources, productTelemetryReady := acceleratorVirtualizationProductResources(resourceInfo)
+	productResources, productTelemetryReady := vgpuProductResources(resourceInfo)
 	if !productTelemetryReady {
 		return nil
 	}
 
 	productResource := productResources[v1.AcceleratorProduct(product)]
 	if productResource == nil {
-		return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf("product=%s has no available accelerator virtualization capacity", product))
+		return endpointVGPUCapacityError(fmt.Sprintf("product=%s has no available accelerator virtualization capacity", product))
 	}
 
 	if productResource.Virtualization == nil {
 		return nil
 	}
 
-	requestedMemoryMiB, memoryTelemetryReady, err := requestedAcceleratorVirtualizationMemoryMiB(resources, resourceInfo, product)
+	requestedMemoryMiB, memoryTelemetryReady, err := requestedVGPUMemoryMiB(resources, resourceInfo, product)
 	if err != nil {
-		return endpointAcceleratorVirtualizationCapacityError(err.Error())
+		return endpointVGPUCapacityError(err.Error())
 	}
 
 	if !memoryTelemetryReady {
 		requestedMemoryMiB = 0
 	}
 
-	requestedCoreUnits, err := requestedAcceleratorVirtualizationCoreUnits(resources)
+	requestedCoreUnits, err := requestedVGPUCoreUnits(resources)
 	if err != nil {
-		return endpointAcceleratorVirtualizationCapacityError(err.Error())
+		return endpointVGPUCapacityError(err.Error())
 	}
 
 	satisfiableDevices, matchingDevices, matchingDeviceCountReady, deviceTelemetryReady :=
-		countSatisfiableAcceleratorVirtualizationDevices(resourceInfo, product, requestedMemoryMiB, requestedCoreUnits)
+		countSatisfiableVGPUDevices(resourceInfo, product, requestedMemoryMiB, requestedCoreUnits)
 	if satisfiableDevices >= requestedGPU {
 		return nil
 	}
 
 	if matchingDeviceCountReady && matchingDevices < requestedGPU {
-		return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf(
+		return endpointVGPUCapacityError(fmt.Sprintf(
 			"product=%s requested_gpu=%d requested_memory_mib=%d requested_core_units=%d matching_devices=%d satisfiable_devices=%d",
 			product,
 			requestedGPU,
@@ -534,7 +482,7 @@ func validateEndpointAcceleratorVirtualizationCapacity(resources *v1.ResourceSpe
 		return nil
 	}
 
-	return endpointAcceleratorVirtualizationCapacityError(fmt.Sprintf(
+	return endpointVGPUCapacityError(fmt.Sprintf(
 		"product=%s requested_gpu=%d requested_memory_mib=%d requested_core_units=%d satisfiable_devices=%d",
 		product,
 		requestedGPU,
@@ -552,7 +500,7 @@ func clusterResourceInfo(cluster *v1.Cluster) *v1.ClusterResources {
 	return cluster.Status.ResourceInfo
 }
 
-func clusterWithEndpointAcceleratorVirtualizationAllocationAddedBack(cluster *v1.Cluster, endpoint *v1.Endpoint) *v1.Cluster {
+func clusterWithEndpointVGPUAllocationAddedBack(cluster *v1.Cluster, endpoint *v1.Endpoint) *v1.Cluster {
 	if cluster == nil || endpoint == nil || endpoint.Status == nil || endpoint.Status.Resources == nil {
 		return cluster
 	}
@@ -564,14 +512,14 @@ func clusterWithEndpointAcceleratorVirtualizationAllocationAddedBack(cluster *v1
 
 	for _, replica := range endpoint.Status.Resources.Replicas {
 		for _, allocation := range replica.Devices {
-			addEndpointAcceleratorVirtualizationAllocation(resourceInfo, replica, allocation)
+			addEndpointVGPUAllocation(resourceInfo, replica, allocation)
 		}
 	}
 
 	return cluster
 }
 
-func addEndpointAcceleratorVirtualizationAllocation(
+func addEndpointVGPUAllocation(
 	resourceInfo *v1.ClusterResources,
 	replica v1.ReplicaDeviceAllocation,
 	allocation v1.DeviceAllocation,
@@ -587,14 +535,14 @@ func addEndpointAcceleratorVirtualizationAllocation(
 
 	if nodeID != "" {
 		if node := resourceInfo.NodeResources[nodeID]; addAllocationToMatchingDevice(node, allocation) {
-			addAvailableAcceleratorVirtualizationProductResource(resourceInfo, allocation)
+			addAvailableVGPUProductResource(resourceInfo, allocation)
 			return
 		}
 	}
 
 	for _, node := range resourceInfo.NodeResources {
 		if addAllocationToMatchingDevice(node, allocation) {
-			addAvailableAcceleratorVirtualizationProductResource(resourceInfo, allocation)
+			addAvailableVGPUProductResource(resourceInfo, allocation)
 			return
 		}
 	}
@@ -623,7 +571,7 @@ func addAllocationToMatchingDevice(node *v1.NodeResourceStatus, allocation v1.De
 	return false
 }
 
-func addAvailableAcceleratorVirtualizationProductResource(
+func addAvailableVGPUProductResource(
 	resourceInfo *v1.ClusterResources,
 	allocation v1.DeviceAllocation,
 ) {
@@ -665,7 +613,7 @@ func addAvailableAcceleratorVirtualizationProductResource(
 	}
 }
 
-func acceleratorVirtualizationProductResources(resourceInfo *v1.ClusterResources) (map[v1.AcceleratorProduct]*v1.AcceleratorProductResource, bool) {
+func vgpuProductResources(resourceInfo *v1.ClusterResources) (map[v1.AcceleratorProduct]*v1.AcceleratorProductResource, bool) {
 	if resourceInfo == nil || resourceInfo.Available == nil || resourceInfo.Available.AcceleratorGroups == nil {
 		return nil, false
 	}
@@ -678,7 +626,7 @@ func acceleratorVirtualizationProductResources(resourceInfo *v1.ClusterResources
 	return group.Products, true
 }
 
-func requestedAcceleratorVirtualizationMemoryMiB(resources *v1.ResourceSpec, resourceInfo *v1.ClusterResources, product string) (int64, bool, error) {
+func requestedVGPUMemoryMiB(resources *v1.ResourceSpec, resourceInfo *v1.ClusterResources, product string) (int64, bool, error) {
 	if memoryMiB := resources.GetAcceleratorVirtualizationMemoryMiB(); memoryMiB != "" {
 		parsed, err := parseRequiredPositiveInteger(memoryMiB, "virtualization.memory_mib")
 
@@ -721,7 +669,7 @@ func productTotalMemoryMiB(resourceInfo *v1.ClusterResources, product string) (f
 	return productMetadata.MemoryTotalMiB, true
 }
 
-func requestedAcceleratorVirtualizationCoreUnits(resources *v1.ResourceSpec) (int64, error) {
+func requestedVGPUCoreUnits(resources *v1.ResourceSpec) (int64, error) {
 	corePercent := resources.GetAcceleratorVirtualizationCorePercent()
 	if corePercent == "" {
 		return 0, nil
@@ -730,7 +678,7 @@ func requestedAcceleratorVirtualizationCoreUnits(resources *v1.ResourceSpec) (in
 	return parseRequiredPositiveInteger(corePercent, "virtualization.core_percent")
 }
 
-func countSatisfiableAcceleratorVirtualizationDevices(
+func countSatisfiableVGPUDevices(
 	resourceInfo *v1.ClusterResources,
 	product string,
 	requestedMemoryMiB int64,
@@ -836,7 +784,7 @@ func endpointResourceValueError(err error) *validationError {
 	}
 }
 
-func endpointAcceleratorVirtualizationCapacityError(hint string) *validationError {
+func endpointVGPUCapacityError(hint string) *validationError {
 	return &validationError{
 		Code:    "10220",
 		Message: "endpoint accelerator virtualization resources exceed cluster availability",
@@ -844,7 +792,7 @@ func endpointAcceleratorVirtualizationCapacityError(hint string) *validationErro
 	}
 }
 
-func endpointAcceleratorVirtualizationTargetError(hint string) *validationError {
+func endpointVGPUTargetError(hint string) *validationError {
 	return &validationError{
 		Code:    "10221",
 		Message: "invalid endpoint accelerator virtualization target",
@@ -852,8 +800,8 @@ func endpointAcceleratorVirtualizationTargetError(hint string) *validationError 
 	}
 }
 
-func endpointAcceleratorVirtualizationLookupError(hint string) *validationError {
-	err := endpointAcceleratorVirtualizationTargetError(hint)
+func endpointVGPULookupError(hint string) *validationError {
+	err := endpointVGPUTargetError(hint)
 	err.HTTPStatus = http.StatusServiceUnavailable
 
 	return err
@@ -867,7 +815,7 @@ func validationErrStatus(err *validationError) int {
 	return http.StatusBadRequest
 }
 
-func endpointAcceleratorVirtualizationNotReadyError(cluster *v1.Cluster, hint string) *validationError {
+func endpointVGPUNotReadyError(cluster *v1.Cluster, hint string) *validationError {
 	if cluster != nil && cluster.Metadata != nil {
 		hint = fmt.Sprintf("cluster %s/%s accelerator virtualization is not ready: %s", cluster.Metadata.Workspace, cluster.Metadata.Name, hint)
 	}
