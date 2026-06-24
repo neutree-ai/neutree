@@ -2931,7 +2931,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 					WithTerminatedInitContainer(modelDownloaderInitContainerName, 1, 1)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: modelDownloaderInitContainerName + " init container has not completed",
+			expectErrorMsg: modelDownloaderInitContainerName + " init container terminated with exit code 1 after 1 restart(s), retrying model download",
 			expectError:    false,
 		},
 		{
@@ -2973,7 +2973,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 					WithWaitingInitContainer(modelDownloaderInitContainerName, k8sContainerReasonPodInitializing)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: modelDownloaderInitContainerName + " init container has not completed",
+			expectErrorMsg: modelDownloaderInitContainerName + " init container is waiting (reason=PodInitializing)",
 			expectError:    false,
 		},
 		{
