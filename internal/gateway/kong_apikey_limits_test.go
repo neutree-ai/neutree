@@ -107,7 +107,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 
 func TestGenerateAPIKeyQuotaPlugin(t *testing.T) {
 	cid := pointy.String("consumer-1")
-	withAPI := &Kong{neutreeAPIUrl: "http://neutree-api:3000", serviceToken: "tok"}
+	withAPI := &Kong{quotaAPIURL: "http://postgrest:6432", serviceToken: "tok"}
 
 	// no token quota -> no plugin
 	assert.Nil(t, withAPI.generateAPIKeyQuotaPlugin(cid, &v1.ApiKey{
@@ -126,7 +126,7 @@ func TestGenerateAPIKeyQuotaPlugin(t *testing.T) {
 	}
 	// missing api url / token -> no plugin (degrade rather than mis-enforce)
 	assert.Nil(t, (&Kong{}).generateAPIKeyQuotaPlugin(cid, apiKey))
-	assert.Nil(t, (&Kong{neutreeAPIUrl: "x"}).generateAPIKeyQuotaPlugin(cid, apiKey))
+	assert.Nil(t, (&Kong{quotaAPIURL: "x"}).generateAPIKeyQuotaPlugin(cid, apiKey))
 	assert.Nil(t, (&Kong{serviceToken: "y"}).generateAPIKeyQuotaPlugin(cid, apiKey))
 
 	p := withAPI.generateAPIKeyQuotaPlugin(cid, apiKey)
@@ -134,16 +134,16 @@ func TestGenerateAPIKeyQuotaPlugin(t *testing.T) {
 	assert.Equal(t, "neutree-ai-quota", *p.Name)
 	assert.Equal(t, "neutree-ai-quota-"+util.HashString("key-1"), *p.InstanceName)
 	assert.Equal(t, cid, p.Consumer.ID)
-	assert.Equal(t, "http://neutree-api:3000", p.Config["api_url"])
+	assert.Equal(t, "http://postgrest:6432", p.Config["api_url"])
 	assert.Equal(t, "tok", p.Config["service_token"])
 	assert.Equal(t, 5, p.Config["cache_ttl"])
 
 	// A trailing slash on the configured URL is trimmed so the plugin builds
 	// "<url>/rpc/..." rather than "<url>//rpc/...".
-	kSlash := &Kong{neutreeAPIUrl: "http://neutree-api:3000/", serviceToken: "tok"}
+	kSlash := &Kong{quotaAPIURL: "http://postgrest:6432/", serviceToken: "tok"}
 	ps := kSlash.generateAPIKeyQuotaPlugin(cid, apiKey)
 	require.NotNil(t, ps)
-	assert.Equal(t, "http://neutree-api:3000", ps.Config["api_url"])
+	assert.Equal(t, "http://postgrest:6432", ps.Config["api_url"])
 }
 
 // TestSyncAPIKeyLimitPlugins verifies the reconcile/prune path: the desired
@@ -187,7 +187,7 @@ func TestSyncAPIKeyLimitPlugins(t *testing.T) {
 
 	client, err := kong.NewClient(pointy.String(server.URL), server.Client())
 	require.NoError(t, err)
-	k := &Kong{kongClient: client, neutreeAPIUrl: "http://neutree-api:3000", serviceToken: "tok"}
+	k := &Kong{kongClient: client, quotaAPIURL: "http://postgrest:6432", serviceToken: "tok"}
 
 	err = k.syncAPIKeyLimitPlugins(pointy.String("consumer-1"), apiKey)
 	require.NoError(t, err)

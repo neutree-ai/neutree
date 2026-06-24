@@ -29,8 +29,8 @@ type Kong struct {
 
 	proxyUrl string
 
-	neutreeAPIUrl string
-	serviceToken  string
+	quotaAPIURL  string
+	serviceToken string
 }
 
 func newKong(opts GatewayOptions) (Gateway, error) {
@@ -44,7 +44,7 @@ func newKong(opts GatewayOptions) (Gateway, error) {
 		storage:           opts.Storage,
 		logRemoteWriteUrl: opts.LogRemoteWriteUrl,
 		proxyUrl:          opts.ProxyUrl,
-		neutreeAPIUrl:     opts.NeutreeAPIUrl,
+		quotaAPIURL:       opts.QuotaAPIURL,
 		serviceToken:      opts.ServiceToken,
 	}, nil
 }
@@ -251,7 +251,7 @@ func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) 
 		return nil
 	}
 
-	if k.neutreeAPIUrl == "" || k.serviceToken == "" {
+	if k.quotaAPIURL == "" || k.serviceToken == "" {
 		return nil
 	}
 
@@ -261,7 +261,7 @@ func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) 
 		Consumer:     &kong.Consumer{ID: consumerID},
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
 		Config: map[string]interface{}{
-			"api_url":       strings.TrimRight(k.neutreeAPIUrl, "/"),
+			"api_url":       strings.TrimRight(k.quotaAPIURL, "/"),
 			"service_token": k.serviceToken,
 			"cache_ttl":     5,
 		},

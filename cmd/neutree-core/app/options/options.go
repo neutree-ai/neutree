@@ -133,8 +133,10 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		AdminUrl:          o.Gateway.AdminUrl,
 		LogRemoteWriteUrl: o.Gateway.LogRemoteWriteUrl,
 		Storage:           s,
-		NeutreeAPIUrl:     o.Storage.AccessURL,
-		ServiceToken:      *gwToken,
+		// The quota plugin calls get_api_key_remaining over PostgREST, so this is
+		// the PostgREST access URL (not the neutree-api server URL).
+		QuotaAPIURL:  o.Storage.AccessURL,
+		ServiceToken: *gwToken,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init gateway")
