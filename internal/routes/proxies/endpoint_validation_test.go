@@ -583,6 +583,76 @@ func TestEndpointVGPUValidationResolvesEndpointAndRejectsUnsatisfiablePatch(t *t
 	assert.False(t, handlerCalled)
 }
 
+func TestEndpointVGPUValidationRejectsMergedPatchWhenOnlyGPUChanges(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 4096, 50),
+	})
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+		endpoints: []v1.Endpoint{
+			*endpointWithVGPU("cluster-a", "team-a"),
+		},
+	}
+	body := `{
+		"spec": {
+			"resources": {
+				"gpu": "2"
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+		http.MethodPatch,
+		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+		body,
+		clusterStorage,
+	)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10220", response.Code)
+	assert.Equal(t, 1, clusterStorage.endpointListCalls)
+	assert.False(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationRejectsMergedPatchWhenOnlyProductChanges(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
+		healthyDevice("gpu-0", "Tesla-T4", 4096, 50),
+	})
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+		endpoints: []v1.Endpoint{
+			*endpointWithVGPU("cluster-a", "team-a"),
+		},
+	}
+	body := `{
+		"spec": {
+			"resources": {
+				"accelerator": {
+					"product": "L4"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+		http.MethodPatch,
+		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+		body,
+		clusterStorage,
+	)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10220", response.Code)
+	assert.Equal(t, 1, clusterStorage.endpointListCalls)
+	assert.False(t, handlerCalled)
+}
+
 func TestEndpointVGPUValidationAddsBackCurrentPatchAllocation(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 0, 0),

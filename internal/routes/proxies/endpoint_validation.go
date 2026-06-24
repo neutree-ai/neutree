@@ -92,13 +92,13 @@ func validateEndpointVGPUPreflight(
 		return nil
 	}
 
-	// Only validate writes that directly touch vGPU resources.
-	if endpoint.Spec == nil || endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+	// Only validate writes that directly touch endpoint resources.
+	if endpoint.Spec == nil || endpoint.Spec.Resources == nil {
 		return nil
 	}
 
-	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
-		return validationErr
+	if method != http.MethodPatch && !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+		return nil
 	}
 
 	if store == nil {
@@ -116,6 +116,14 @@ func validateEndpointVGPUPreflight(
 		existing = resolved
 		merged := mergeEndpointPatch(existing, endpoint)
 		endpoint = &merged
+	}
+
+	if endpoint.Spec == nil || endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+		return nil
+	}
+
+	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
+		return validationErr
 	}
 
 	target, validationErr := resolveEndpointVGPUTarget(endpoint)
