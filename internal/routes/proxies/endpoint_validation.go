@@ -126,24 +126,29 @@ func validateEndpointVGPUPreflight(
 		return validationErr
 	}
 
-	target, validationErr := resolveEndpointVGPUTarget(endpoint)
-	if validationErr != nil {
-		return validationErr
+	clusterName := endpoint.Spec.Cluster
+	if clusterName == "" {
+		return endpointVGPUTargetError("spec.cluster is required for endpoint accelerator virtualization")
+	}
+
+	workspace := endpointWorkspace(endpoint)
+	if workspace == "" {
+		workspace = defaultWorkspace
 	}
 
 	clusters, err := store.ListCluster(storage.ListOption{
-		Filters: endpointClusterLookupFilters(target.cluster, target.workspace),
+		Filters: endpointClusterLookupFilters(clusterName, workspace),
 	})
 	if err != nil {
 		return endpointVGPULookupError("failed to look up cluster for endpoint accelerator virtualization")
 	}
 
 	if len(clusters) == 0 {
-		return endpointVGPUTargetError(fmt.Sprintf("cluster %s/%s not found", target.workspace, target.cluster))
+		return endpointVGPUTargetError(fmt.Sprintf("cluster %s/%s not found", workspace, clusterName))
 	}
 
 	if len(clusters) > 1 {
-		return endpointVGPUTargetError(fmt.Sprintf("multiple clusters matched %s/%s", target.workspace, target.cluster))
+		return endpointVGPUTargetError(fmt.Sprintf("multiple clusters matched %s/%s", workspace, clusterName))
 	}
 
 	cluster := &clusters[0]
@@ -151,38 +156,11 @@ func validateEndpointVGPUPreflight(
 		return validationErr
 	}
 
-	if method == http.MethodPatch && canAddBackEndpointVGPUAllocation(existing, target) {
+	if method == http.MethodPatch && canAddBackEndpointVGPUAllocation(existing, clusterName, workspace) {
 		cluster = clusterWithEndpointVGPUAllocationAddedBack(cluster, existing)
 	}
 
 	return validateEndpointVGPUCapacity(endpoint.Spec.Resources, cluster)
-}
-
-type endpointVGPUTarget struct {
-	cluster   string
-	workspace string
-}
-
-func resolveEndpointVGPUTarget(
-	endpoint *v1.Endpoint,
-) (endpointVGPUTarget, *validationError) {
-	target := endpointVGPUTarget{
-		workspace: endpointWorkspace(endpoint),
-	}
-
-	if endpoint.Spec != nil {
-		target.cluster = endpoint.Spec.Cluster
-	}
-
-	if target.workspace == "" {
-		target.workspace = defaultWorkspace
-	}
-
-	if target.cluster == "" {
-		return target, endpointVGPUTargetError("spec.cluster is required for endpoint accelerator virtualization")
-	}
-
-	return target, nil
 }
 
 func resolveEndpointPatch(
@@ -335,18 +313,19 @@ func endpointClusterLookupFilters(cluster, workspace string) []storage.Filter {
 
 func canAddBackEndpointVGPUAllocation(
 	endpoint *v1.Endpoint,
-	target endpointVGPUTarget,
+	cluster string,
+	targetWorkspace string,
 ) bool {
 	if endpoint == nil || endpoint.Spec == nil {
 		return false
 	}
 
-	workspace := endpointWorkspace(endpoint)
-	if workspace == "" {
-		workspace = defaultWorkspace
+	endpointWorkspace := endpointWorkspace(endpoint)
+	if endpointWorkspace == "" {
+		endpointWorkspace = defaultWorkspace
 	}
 
-	return endpoint.Spec.Cluster == target.cluster && workspace == target.workspace
+	return endpoint.Spec.Cluster == cluster && endpointWorkspace == targetWorkspace
 }
 
 func validateEndpointVGPUCluster(cluster *v1.Cluster) *validationError {
