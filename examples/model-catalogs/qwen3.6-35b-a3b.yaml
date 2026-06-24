@@ -1,7 +1,9 @@
-# Neutree ModelCatalog — converted from the vLLM recipe for Qwen3.6-35B-A3B
-# Source: https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B
-# Smaller MoE sibling of Qwen3.5 — gated delta-networks MoE, 35B total /
-# 3B activated (256 experts, 8 routed + 1 shared), native 262K context.
+# Neutree ModelCatalog — converted from the vLLM recipe for Qwen3.6-35B-A3B.
+# Sources: https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B
+#          https://huggingface.co/Qwen/Qwen3.6-35B-A3B/blob/main/config.json
+# MoE sibling (model_type qwen3_5_moe, vision+text): 35B total / ~3B active,
+# 256 experts (8 routed + 1 shared), 40 layers, GQA 16/2 heads, head_dim 256,
+# native 262144 (256K) context.
 apiVersion: v1
 kind: ModelCatalog
 metadata:
@@ -15,11 +17,10 @@ spec:
     version: v0.17.1
   base:
     engine_args:
-      max_model_len: 262144
       reasoning_parser: qwen3
   variants:
     bf16:
-      description: "BF16 base model — 2x H200 (TP2), or 8 GPU (TP8)."
+      description: "BF16 base model — 1x H200 or 2x H100 (TP2)."
       model:
         registry: huggingface
         name: Qwen/Qwen3.6-35B-A3B
@@ -36,7 +37,7 @@ spec:
           product: H200
       vram_minimum_gb: 160
     fp8:
-      description: "Official FP8 checkpoint — runs on a single H200."
+      description: "Official FP8 checkpoint — single H100/H200 (or 1x MI300X/MI325X/MI355X)."
       model:
         registry: huggingface
         name: Qwen/Qwen3.6-35B-A3B-FP8
@@ -53,7 +54,7 @@ spec:
           product: H200
       vram_minimum_gb: 80
     nvfp4:
-      description: "NVIDIA ModelOpt NVFP4 checkpoint (DGX Spark) — needs vLLM nightly / ModelOpt NVFP4 support."
+      description: "NVIDIA ModelOpt NVFP4 checkpoint — NVIDIA Blackwell (DGX Spark GB10); needs vLLM nightly / ModelOpt NVFP4 support."
       model:
         registry: huggingface
         name: nvidia/Qwen3.6-35B-A3B-NVFP4
@@ -70,28 +71,60 @@ spec:
           product: GB200
       vram_minimum_gb: 48
       engine_args:
-        quantization: modelopt
+        trust_remote_code: true
         kv_cache_dtype: fp8
+        attention_backend: flashinfer
         moe_backend: marlin
   features:
+    # --- context window: select one of several sizes (native max = 262144) ---
+    max-model-len:
+      type: select
+      description: "Context window — maximum sequence length (tokens)."
+      default_option: "262144"
+      options:
+        "8192":
+          description: "8K — smallest footprint, fits the tightest single-GPU setups."
+          engine_args: { max_model_len: 8192 }
+        "32768":
+          description: "32K — balanced throughput / memory."
+          engine_args: { max_model_len: 32768 }
+        "131072":
+          description: "128K — long-document workloads."
+          engine_args: { max_model_len: 131072 }
+        "262144":
+          description: "256K — native maximum context."
+          engine_args: { max_model_len: 262144 }
+    # --- max concurrency: free integer input (parallelism / batch width) ---
+    max-num-seqs:
+      type: input
+      category: tuning
+      description: "Max concurrent sequences (decode parallelism / batch width)."
+      input:
+        value_type: int
+        default: "256"
+        min: 1
+        max: 1024
+      engine_args:
+        max_num_seqs: "${value}"
+    # --- existing boolean toggles ---
     tool-calling:
-      description: "Function / tool calling (auto tool choice, qwen3_coder parser)."
+      description: "Function / tool calling (auto tool choice, qwen3_xml parser)."
       default: false
       engine_args:
         enable_auto_tool_choice: true
-        tool_call_parser: qwen3_coder
+        tool_call_parser: qwen3_xml
     text-only:
       description: "Text-only mode — skip the vision encoder to free memory for KV cache."
       default: false
       engine_args:
         language_model_only: true
     mtp-speculative:
-      description: "MTP speculative decoding (qwen3_next_mtp)."
+      description: "MTP speculative decoding (method=mtp, 2 speculative tokens)."
       category: tuning
       default: false
       engine_args:
         speculative_config:
-          method: qwen3_next_mtp
+          method: mtp
           num_speculative_tokens: 2
     expert-parallel:
       description: "Enable MoE expert parallelism (EP) across the engine's GPUs."

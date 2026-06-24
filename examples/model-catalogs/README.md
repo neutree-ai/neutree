@@ -21,5 +21,12 @@ model source.
 
 Each carries per-variant model display info (parameter_count / quantization /
 context_length / architecture), `vram_minimum_gb`, the
-`recipe.vllm.ai/hardware-verified` annotation, and opt-in features (some marked
-`category: tuning`). The vLLM `--flags` map to underscored `engine_args` keys.
+`recipe.vllm.ai/hardware-verified` annotation, and features of all three types:
+
+- **boolean** toggles (`text-only`, `disable-thinking`, `tool-calling`, …; some
+  marked `category: tuning`),
+- a **select** `max-model-len` (context window — one of 8K / 32K / 128K / 256K),
+- an **input** `max-num-seqs` (free integer — decode parallelism / batch width).
+
+The vLLM `--flags` map to underscored `engine_args` keys; an input feature's
+`${value}` placeholder is filled by the user value (coerced to `value_type`).
