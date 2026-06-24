@@ -182,17 +182,23 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 	// Emit a COMPLETE config with explicit empty values for "off" (not null) so an
 	// update always overwrites prior config. syncPlugin reconciles via JSON
 	// merge-patch (RFC 7386), under which an omitted key keeps the stale value;
-	// using [] / 0 / false avoids depending on null-clearing to turn a limit back
-	// off, and the handler treats an empty list / zero as "unrestricted".
+	// using 0 / false avoids depending on null-clearing to turn a limit back off,
+	// and the handler treats zero as "unrestricted".
+	//
+	// allowed_models is the exception: [] now means deny-all (not "off"), so it
+	// can't double as the cleared value. Absent (nil) => unrestricted, sent as
+	// JSON null (the handler treats null/non-array as unrestricted, and merge-patch
+	// null clears any stale list); a non-nil slice — including an explicit empty
+	// [] (deny-all) — is an active restriction the gateway must enforce.
 	cfg := map[string]interface{}{
 		"disabled":       l.Disabled,
-		"allowed_models": []string{},
+		"allowed_models": nil,
 		"concurrency":    0,
 		"rate_limits":    []map[string]interface{}{},
 	}
 	needed := l.Disabled
 
-	if len(l.AllowedModels) > 0 {
+	if l.AllowedModels != nil {
 		cfg["allowed_models"] = l.AllowedModels
 		needed = true
 	}

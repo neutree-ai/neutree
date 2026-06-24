@@ -74,11 +74,22 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	})
 	require.NotNil(t, p2)
 	assert.Equal(t, true, p2.Config["disabled"])
-	// Cleared fields are emitted as explicit empties (not nil) so updates overwrite
-	// prior config; the handler treats empty list / zero as unrestricted.
-	assert.Equal(t, []string{}, p2.Config["allowed_models"])
+	// Cleared numeric/list fields are emitted as explicit empties (not nil) so
+	// updates overwrite prior config. allowed_models is the exception: an unset
+	// allowlist is sent as nil (JSON null) so it reads as unrestricted and []
+	// stays free to mean deny-all.
+	assert.Nil(t, p2.Config["allowed_models"])
 	assert.Equal(t, 0, p2.Config["concurrency"])
 	assert.Equal(t, []map[string]interface{}{}, p2.Config["rate_limits"])
+
+	// explicit empty allowed_models [] -> deny-all: plugin present, [] forwarded
+	// (distinct from the unset case above which is nil/unrestricted).
+	p2d := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
+		ID:   "k2d",
+		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{AllowedModels: []string{}}},
+	})
+	require.NotNil(t, p2d)
+	assert.Equal(t, []string{}, p2d.Config["allowed_models"])
 
 	// RPS only -> single second-window rate limit; disabled present and false
 	p3 := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{

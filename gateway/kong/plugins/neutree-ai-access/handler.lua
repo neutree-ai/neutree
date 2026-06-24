@@ -73,11 +73,12 @@ function AccessHandler:access(conf)
         return deny403("key_disabled", "This API key is disabled")
     end
 
-    -- 2) Model allowlist: only enforce when a non-empty list is configured. A
-    --    cleared field can arrive as JSON null (cjson.null) and an empty list
-    --    means "unrestricted", so guard on a non-empty table rather than non-nil.
-    --    When enforced, the request model must be present and in the list.
-    if type(conf.allowed_models) == "table" and #conf.allowed_models > 0 then
+    -- 2) Model allowlist: an absent field (nil / JSON null = cjson.null) means
+    --    "unrestricted"; a list (any JSON array, INCLUDING an empty []) means the
+    --    request model must be present and in it. An explicit empty [] therefore
+    --    denies every model (deny-all). Guard on the value being a table so null
+    --    stays unrestricted while [] enforces.
+    if type(conf.allowed_models) == "table" then
         local model = request_model()
         if not model or not list_has(conf.allowed_models, model) then
             return deny403("model_not_permitted", "Model not permitted for this API key")
