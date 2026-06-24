@@ -162,4 +162,73 @@ func TestApiKeyLimits(t *testing.T) {
 			t.Fatalf("expected error when non-owner sets limits")
 		}
 	})
+
+	// A non-positive numeric limit must fail loudly (rather than be silently
+	// dropped to "unlimited"). Covers create_api_key and set_api_key_limits.
+	t.Run("create_api_key rejects non-positive numeric limits", func(t *testing.T) {
+		bad := []string{
+			`{"token_quota":{"limit":0,"period":"monthly"}}`,
+			`{"token_quota":{"limit":-5,"period":"monthly"}}`,
+			`{"rps":0}`,
+			`{"rpm":-1}`,
+			`{"concurrency":0}`,
+			`{"rps":1.5}`,
+		}
+		for _, b := range bad {
+			var id string
+			err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+				return tx.QueryRowContext(ctx, `
+					SELECT id FROM api.create_api_key(
+						p_workspace := 'limits-ws',
+						p_name := 'bad-key',
+						p_quota := 0,
+						p_limits := $1::jsonb
+					)`, b).Scan(&id)
+			})
+			if err == nil {
+				_, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", id)
+				t.Fatalf("expected create_api_key to reject limits %s", b)
+			}
+		}
+	})
+
+	t.Run("set_api_key_limits rejects non-positive numeric limits", func(t *testing.T) {
+		bad := []string{
+			`{"token_quota":{"limit":0,"period":"monthly"}}`,
+			`{"rps":-2}`,
+			`{"concurrency":0}`,
+		}
+		for _, b := range bad {
+			err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+				_, e := tx.ExecContext(ctx, `SELECT api.set_api_key_limits($1, $2::jsonb)`, apiKeyID, b)
+				return e
+			})
+			if err == nil {
+				t.Fatalf("expected set_api_key_limits to reject limits %s", b)
+			}
+		}
+		// The rejected updates must not have changed the stored limits: the prior
+		// subtest left token_quota.limit = 500.
+		var lim string
+		if err := db.QueryRowContext(ctx, `
+			SELECT (spec).limits #>> '{token_quota,limit}'
+			FROM api.api_keys WHERE id = $1`, apiKeyID).Scan(&lim); err != nil {
+			t.Fatalf("read limits after rejected set: %v", err)
+		}
+		if lim != "500" {
+			t.Fatalf("expected unchanged limit 500 after rejected sets, got %s", lim)
+		}
+	})
+
+	t.Run("set_api_key_limits accepts an explicit empty allowed_models (deny-all)", func(t *testing.T) {
+		// [] is a valid value (deny-all), not a non-positive numeric limit, so it
+		// must pass validation.
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			_, e := tx.ExecContext(ctx, `SELECT api.set_api_key_limits($1, '{"allowed_models":[]}'::jsonb)`, apiKeyID)
+			return e
+		})
+		if err != nil {
+			t.Fatalf("expected empty allowed_models to be accepted, got %v", err)
+		}
+	})
 }
