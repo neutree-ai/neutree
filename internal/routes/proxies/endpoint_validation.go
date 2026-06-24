@@ -131,9 +131,9 @@ func validateEndpointVGPUPreflight(
 		return endpointVGPUTargetError("spec.cluster is required for endpoint accelerator virtualization")
 	}
 
-	workspace := endpointWorkspace(endpoint)
-	if workspace == "" {
-		workspace = defaultWorkspace
+	workspace := defaultWorkspace
+	if endpoint.Metadata != nil && endpoint.Metadata.Workspace != "" {
+		workspace = endpoint.Metadata.Workspace
 	}
 
 	clusters, err := store.ListCluster(storage.ListOption{
@@ -296,14 +296,6 @@ func copyEndpointResourceSpec(resources *v1.ResourceSpec) *v1.ResourceSpec {
 	return &copied
 }
 
-func endpointWorkspace(endpoint *v1.Endpoint) string {
-	if endpoint == nil || endpoint.Metadata == nil {
-		return ""
-	}
-
-	return endpoint.Metadata.Workspace
-}
-
 func endpointClusterLookupFilters(cluster, workspace string) []storage.Filter {
 	return []storage.Filter{
 		{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(cluster)},
@@ -320,9 +312,9 @@ func canAddBackEndpointVGPUAllocation(
 		return false
 	}
 
-	endpointWorkspace := endpointWorkspace(endpoint)
-	if endpointWorkspace == "" {
-		endpointWorkspace = defaultWorkspace
+	endpointWorkspace := defaultWorkspace
+	if endpoint.Metadata != nil && endpoint.Metadata.Workspace != "" {
+		endpointWorkspace = endpoint.Metadata.Workspace
 	}
 
 	return endpoint.Spec.Cluster == cluster && endpointWorkspace == targetWorkspace
