@@ -74,31 +74,10 @@ func validateEndpointAcceleratorVirtualizationRequest(
 	return validateEndpointAcceleratorVirtualizationPreflight(store, method, queryParams, endpoint)
 }
 
-func validateEndpointAcceleratorVirtualizationBody(body []byte) *validationError {
-	_, err := parseEndpointAcceleratorVirtualizationBody(body)
-
-	return err
-}
-
 func parseEndpointAcceleratorVirtualizationBody(body []byte) (*v1.Endpoint, *validationError) {
 	var endpoint v1.Endpoint
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&endpoint); err != nil {
 		return nil, invalidEndpointPayloadError(err)
-	}
-
-	if endpoint.GetDeletionTimestamp() != "" {
-		// Soft delete PATCH reuses the same route but should not be blocked by
-		// endpoint resource validation.
-		return &endpoint, nil
-	}
-
-	if endpoint.Spec == nil || endpoint.Spec.Resources == nil {
-		return &endpoint, nil
-	}
-
-	resources := endpoint.Spec.Resources
-	if err := validateEndpointAcceleratorVirtualizationResourceShape(resources); err != nil {
-		return nil, err
 	}
 
 	return &endpoint, nil
@@ -116,6 +95,10 @@ func validateEndpointAcceleratorVirtualizationPreflight(
 
 	if endpoint.Spec == nil || endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
 		return nil
+	}
+
+	if validationErr := validateEndpointAcceleratorVirtualizationResourceShape(endpoint.Spec.Resources); validationErr != nil {
+		return validationErr
 	}
 
 	if store == nil {

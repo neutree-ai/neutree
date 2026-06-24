@@ -15,100 +15,61 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
+func TestValidateEndpointAcceleratorVirtualizationResourceShape(t *testing.T) {
 	t.Run("allows non vGPU endpoint resources", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "cluster",
-				"resources": {
-					"gpu": "1",
-					"accelerator": {
-						"type": "nvidia_gpu",
-						"product": "Tesla-T4"
-					}
-				}
-			}
-		}`))
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", nil)
+
+		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("allows raw accelerator keys without virtualization fields", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "cluster",
-				"resources": {
-					"gpu": "1",
-					"accelerator": {
-						"type": "nvidia_gpu",
-						"product": "Tesla-T4",
-						"nvidia.com/gpucores": "50"
-					}
-				}
-			}
-		}`))
+		gpu := "1"
+		resources := &v1.ResourceSpec{
+			GPU: &gpu,
+			Accelerator: map[string]string{
+				v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
+				v1.AcceleratorProductKey: "Tesla-T4",
+				"nvidia.com/gpucores":    "50",
+			},
+		}
+
+		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("rejects vGPU endpoint without product", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "cluster",
-				"resources": {
-					"gpu": "1",
-					"accelerator": {
-						"type": "nvidia_gpu",
-						"virtualization.memory_mib": "8192"
-					}
-				}
-			}
-		}`))
+		resources := acceleratorVirtualizationResources("1", "", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
+		})
+
+		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10218", err.Code)
 	})
 
 	t.Run("rejects mutually exclusive memory fields", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "cluster",
-				"resources": {
-					"gpu": "1",
-					"accelerator": {
-						"type": "nvidia_gpu",
-						"product": "Tesla-T4",
-						"virtualization.memory_mib": "8192",
-						"virtualization.memory_percent": "50"
-					}
-				}
-			}
-		}`))
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:     "8192",
+			v1.AcceleratorVirtualizationMemoryPercentKey: "50",
+		})
+
+		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10219", err.Code)
 	})
 
 	t.Run("rejects invalid vGPU numeric resources", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "cluster",
-				"resources": {
-					"gpu": "1",
-					"accelerator": {
-						"type": "nvidia_gpu",
-						"product": "Tesla-T4",
-						"virtualization.memory_mib": "8192",
-						"virtualization.core_percent": "101"
-					}
-				}
-			}
-		}`))
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
+			v1.AcceleratorVirtualizationCorePercentKey: "101",
+		})
+
+		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10216", err.Code)
@@ -116,21 +77,12 @@ func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
 	})
 
 	t.Run("rejects fractional vGPU memory resource", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "cluster",
-				"resources": {
-					"gpu": "1",
-					"accelerator": {
-						"type": "nvidia_gpu",
-						"product": "Tesla-T4",
-						"virtualization.memory_mib": "8192.5",
-						"virtualization.core_percent": "50"
-					}
-				}
-			}
-		}`))
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192.5",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+
+		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10216", err.Code)
@@ -139,21 +91,12 @@ func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
 	})
 
 	t.Run("rejects fractional vGPU core resource", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "cluster",
-				"resources": {
-					"gpu": "1",
-					"accelerator": {
-						"type": "nvidia_gpu",
-						"product": "Tesla-T4",
-						"virtualization.memory_mib": "8192",
-						"virtualization.core_percent": "50.5"
-					}
-				}
-			}
-		}`))
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
+			v1.AcceleratorVirtualizationCorePercentKey: "50.5",
+		})
+
+		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10216", err.Code)
@@ -162,33 +105,26 @@ func TestValidateEndpointAcceleratorVirtualizationBody(t *testing.T) {
 	})
 
 	t.Run("allows vGPU endpoint resource shape without cluster availability lookup", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "cluster",
-				"resources": {
-					"gpu": "1",
-					"accelerator": {
-						"type": "nvidia_gpu",
-						"product": "Tesla-T4",
-						"virtualization.memory_mib": "8192",
-						"virtualization.core_percent": "50"
-					}
-				}
-			}
-		}`))
+		resources := acceleratorVirtualizationResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+
+		err := validateEndpointAcceleratorVirtualizationResourceShape(resources)
 
 		assert.Nil(t, err)
 	})
 
 	t.Run("skips patch that does not touch resources", func(t *testing.T) {
-		err := validateEndpointAcceleratorVirtualizationBody([]byte(`{
+		endpoint, err := parseEndpointAcceleratorVirtualizationBody([]byte(`{
 			"spec": {
 				"replicas": {"num": 2}
 			}
 		}`))
 
 		assert.Nil(t, err)
+		assert.NotNil(t, endpoint)
+		assert.Nil(t, validateEndpointAcceleratorVirtualizationPreflight(nil, http.MethodPatch, nil, endpoint))
 	})
 }
 
