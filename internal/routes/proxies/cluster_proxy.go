@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 
@@ -18,10 +19,7 @@ import (
 
 func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
 	return func(workspace, name string) error {
-		count, err := s.Count(storage.ENDPOINT_TABLE, []storage.Filter{
-			{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
-			{Column: "spec->>cluster", Operator: "eq", Value: name},
-		})
+		count, err := s.Count(storage.ENDPOINT_TABLE, clusterEndpointReferenceFilters(workspace, name))
 		if err != nil {
 			return fmt.Errorf("failed to count endpoints: %w", err)
 		}
@@ -38,7 +36,7 @@ func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc
 	}
 }
 
-func validateClusterAcceleratorVirtualization() gin.HandlerFunc {
+func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -71,8 +69,198 @@ func validateClusterAcceleratorVirtualization() gin.HandlerFunc {
 			return
 		}
 
+		if c.Request.Method == http.MethodPatch {
+			disableRequested, err := clusterAcceleratorVirtualizationDisableRequested(body)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+				c.Abort()
+
+				return
+			}
+
+			if !disableRequested {
+				c.Next()
+				return
+			}
+
+			var cluster v1.Cluster
+			if err := json.Unmarshal(body, &cluster); err != nil {
+				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+				c.Abort()
+
+				return
+			}
+
+			if validationErr := validateClusterAcceleratorVirtualizationDisable(
+				s, cluster, c.Request.URL.Query()); validationErr != nil {
+				c.JSON(http.StatusBadRequest, validationErr)
+				c.Abort()
+
+				return
+			}
+		}
+
 		c.Next()
 	}
+}
+
+func clusterAcceleratorVirtualizationDisableRequested(body []byte) (bool, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false, err
+	}
+
+	specRaw, ok := payload["spec"]
+	if !ok {
+		return false, nil
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
+		return false, err
+	}
+
+	acceleratorVirtualizationRaw, ok := spec["accelerator_virtualization"]
+	if !ok {
+		return false, nil
+	}
+
+	var acceleratorVirtualization map[string]json.RawMessage
+	if err := json.Unmarshal(acceleratorVirtualizationRaw, &acceleratorVirtualization); err != nil {
+		return false, err
+	}
+
+	enabledRaw, ok := acceleratorVirtualization["enabled"]
+	if !ok {
+		// The CLI decodes YAML into Cluster and re-marshals JSON before PATCH.
+		// enabled:false is omitted by the API struct tag, yielding
+		// "accelerator_virtualization": {}, which still clears the enabled flag.
+		return true, nil
+	}
+
+	var enabled bool
+	if err := json.Unmarshal(enabledRaw, &enabled); err != nil {
+		return false, err
+	}
+
+	return !enabled, nil
+}
+
+func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {
+	return []storage.Filter{
+		{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
+		{Column: "spec->>cluster", Operator: "eq", Value: name},
+	}
+}
+
+func validateClusterAcceleratorVirtualizationDisable(
+	s storage.Storage, cluster v1.Cluster, queryParams url.Values,
+) *validationError {
+	if cluster.GetDeletionTimestamp() != "" {
+		return nil
+	}
+
+	workspace, name, validationErr := resolveClusterIdentityForAcceleratorVirtualizationDisable(
+		s, cluster, queryParams)
+	if validationErr != nil {
+		return validationErr
+	}
+
+	endpoints, err := s.ListEndpoint(storage.ListOption{Filters: clusterEndpointReferenceFilters(workspace, name)})
+	if err != nil {
+		return &validationError{
+			Code:    "10209",
+			Message: "failed to validate cluster accelerator virtualization",
+			Hint:    err.Error(),
+		}
+	}
+
+	vGPUEndpointCount := 0
+
+	for _, endpoint := range endpoints {
+		if endpoint.Spec != nil &&
+			endpoint.Spec.Resources != nil &&
+			endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+			vGPUEndpointCount++
+		}
+	}
+
+	if vGPUEndpointCount > 0 {
+		return &validationError{
+			Code:    "10211",
+			Message: fmt.Sprintf("cannot disable accelerator virtualization for cluster '%s/%s'", workspace, name),
+			Hint: fmt.Sprintf(
+				"%d vGPU endpoint(s) still reference this cluster; delete the vGPU endpoints before disabling accelerator virtualization",
+				vGPUEndpointCount,
+			),
+		}
+	}
+
+	return nil
+}
+
+func resolveClusterIdentityForAcceleratorVirtualizationDisable(
+	s storage.Storage, cluster v1.Cluster, queryParams url.Values,
+) (string, string, *validationError) {
+	filters := queryParamsToFilters(queryParams)
+	if len(filters) > 0 {
+		workspace, name, validationErr := resolveClusterIdentityFromPatchFilters(s, filters)
+		if validationErr != nil {
+			return "", "", validationErr
+		}
+
+		if cluster.Metadata != nil &&
+			((cluster.Metadata.Workspace != "" && cluster.Metadata.Workspace != workspace) ||
+				(cluster.Metadata.Name != "" && cluster.Metadata.Name != name)) {
+			return "", "", &validationError{
+				Code:    "10209",
+				Message: "failed to validate cluster accelerator virtualization",
+				Hint:    "cluster metadata in patch body does not match patch target",
+			}
+		}
+
+		return workspace, name, nil
+	}
+
+	if cluster.Metadata != nil && cluster.Metadata.Workspace != "" && cluster.Metadata.Name != "" {
+		return cluster.Metadata.Workspace, cluster.Metadata.Name, nil
+	}
+
+	return "", "", &validationError{
+		Code:    "10209",
+		Message: "failed to validate cluster accelerator virtualization",
+		Hint:    "cluster identity is required when disabling accelerator virtualization",
+	}
+}
+
+func resolveClusterIdentityFromPatchFilters(s storage.Storage, filters []storage.Filter) (string, string, *validationError) {
+	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
+	if err != nil {
+		return "", "", &validationError{
+			Code:    "10209",
+			Message: "failed to validate cluster accelerator virtualization",
+			Hint:    err.Error(),
+		}
+	}
+
+	if len(clusters) != 1 {
+		return "", "", &validationError{
+			Code:    "10209",
+			Message: "failed to validate cluster accelerator virtualization",
+			Hint:    fmt.Sprintf("expected exactly one cluster from patch filters, got %d", len(clusters)),
+		}
+	}
+
+	resolved := clusters[0]
+	if resolved.Metadata == nil || resolved.Metadata.Workspace == "" || resolved.Metadata.Name == "" {
+		return "", "", &validationError{
+			Code:    "10209",
+			Message: "failed to validate cluster accelerator virtualization",
+			Hint:    "cluster identity is required when disabling accelerator virtualization",
+		}
+	}
+
+	return resolved.Metadata.Workspace, resolved.Metadata.Name, nil
 }
 
 func validateClusterAcceleratorVirtualizationBody(body []byte) *validationError {
@@ -160,7 +348,7 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 		validateClusterDeletion(deps.Storage),
 	)
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
-	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization()
+	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
