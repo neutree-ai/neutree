@@ -1,14 +1,13 @@
-# Neutree ModelCatalog — converted from the vLLM recipe for Qwen3.6-35B-A3B.
-# Sources: https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B
+# Neutree ModelCatalog —— Qwen3.6-35B-A3B（中文版，方便中英对照）。
+# 数据来源：https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B
 #          https://huggingface.co/Qwen/Qwen3.6-35B-A3B/blob/main/config.json
-# MoE sibling (model_type qwen3_5_moe, vision+text): 35B total / ~3B active,
-# 256 experts (8 routed + 1 shared), 40 layers, GQA 16/2 heads, head_dim 256,
-# native 262144 (256K) context. Feature display_name labels align with the
-# deploy mockup (files.tos.smartx.com/exp_-cheuGh5Q8ntcNjqi1EnYA/index.html).
+# MoE 模型（qwen3_5_moe，视觉+文本）：35B 总参 / 约 3B 激活，256 专家（8 路由 + 1 共享），
+# 40 层，GQA 16/2，head_dim 256，原生 262144（256K）上下文。feature 的 display_name
+# 对齐部署效果图用语（上下文窗口 / 并发数）。
 apiVersion: v1
 kind: ModelCatalog
 metadata:
-  name: qwen3-6-35b-a3b
+  name: qwen3-6-35b-a3b-zh
   workspace: default
   annotations:
     recipe.vllm.ai/hardware-verified: "H200,H100,MI300X,MI355X"
@@ -21,7 +20,7 @@ spec:
       reasoning_parser: qwen3
   variants:
     bf16:
-      description: "BF16 base model — 1x H200 or 2x H100 (TP2)."
+      description: "BF16 基础模型 —— 1x H200 或 2x H100（TP2）。"
       model:
         registry: huggingface
         name: Qwen/Qwen3.6-35B-A3B
@@ -38,7 +37,7 @@ spec:
           product: H200
       vram_minimum_gb: 160
     fp8:
-      description: "Official FP8 checkpoint — single H100/H200 (or 1x MI300X/MI325X/MI355X)."
+      description: "官方 FP8 权重 —— 单张 H100/H200（或 1x MI300X/MI325X/MI355X）。"
       model:
         registry: huggingface
         name: Qwen/Qwen3.6-35B-A3B-FP8
@@ -55,7 +54,7 @@ spec:
           product: H200
       vram_minimum_gb: 80
     nvfp4:
-      description: "NVIDIA ModelOpt NVFP4 checkpoint — NVIDIA Blackwell (DGX Spark GB10); needs vLLM nightly / ModelOpt NVFP4 support."
+      description: "NVIDIA ModelOpt NVFP4 权重 —— NVIDIA Blackwell（DGX Spark GB10）；需 vLLM nightly / ModelOpt NVFP4 支持。"
       model:
         registry: huggingface
         name: nvidia/Qwen3.6-35B-A3B-NVFP4
@@ -77,11 +76,11 @@ spec:
         attention_backend: flashinfer
         moe_backend: marlin
   features:
-    # --- context window: pick a preset OR type a custom length (combobox) ---
+    # --- 上下文窗口：可选预设或自填（select + 自由输入 组合框）---
     max-model-len:
       type: input
-      display_name: "Context window"
-      description: "Maximum sequence length (tokens) — pick a preset or type a custom value (native max 262144)."
+      display_name: "上下文窗口"
+      description: "最大序列长度（token）—— 可选预设或自填（原生上限 262144）。"
       input:
         value_type: int
         default: "262144"
@@ -90,12 +89,12 @@ spec:
         suggestions: ["8192", "32768", "131072", "262144"]
       engine_args:
         max_model_len: "${value}"
-    # --- max concurrency: free integer input ---
+    # --- 并发数：自由整数输入 ---
     max-num-seqs:
       type: input
-      display_name: "Concurrency"
+      display_name: "并发数"
       category: tuning
-      description: "Max concurrent sequences (decode parallelism / batch width)."
+      description: "最大并发序列数（解码并行度 / 批宽）。"
       input:
         value_type: int
         default: "256"
@@ -103,23 +102,23 @@ spec:
         max: 1024
       engine_args:
         max_num_seqs: "${value}"
-    # --- boolean toggles ---
+    # --- 布尔开关 ---
     tool-calling:
-      display_name: "Tool calling"
-      description: "Function / tool calling (auto tool choice, qwen3_xml parser)."
+      display_name: "工具调用"
+      description: "函数 / 工具调用（自动工具选择，qwen3_xml 解析器）。"
       default: false
       engine_args:
         enable_auto_tool_choice: true
         tool_call_parser: qwen3_xml
     text-only:
-      display_name: "Text-only mode"
-      description: "Text-only mode — skip the vision encoder to free memory for KV cache."
+      display_name: "纯文本模式"
+      description: "纯文本模式 —— 跳过视觉编码器，为 KV 缓存释放显存。"
       default: false
       engine_args:
         language_model_only: true
     mtp-speculative:
-      display_name: "MTP speculative decoding"
-      description: "MTP speculative decoding (method=mtp, 2 speculative tokens)."
+      display_name: "MTP 推测解码"
+      description: "MTP 推测解码（method=mtp，2 个推测 token）。"
       category: tuning
       default: false
       engine_args:
@@ -127,8 +126,8 @@ spec:
           method: mtp
           num_speculative_tokens: 2
     expert-parallel:
-      display_name: "Expert parallelism"
-      description: "Enable MoE expert parallelism (EP) across the engine's GPUs."
+      display_name: "专家并行"
+      description: "开启 MoE 专家并行（EP），跨引擎 GPU 分布专家。"
       category: tuning
       default: false
       engine_args:
