@@ -272,7 +272,7 @@ class Backend:
 
 
 app = FastAPI()
-app.add_middleware(RawContextMiddleware, plugins=(RequestIdPlugin(),))
+app.add_middleware(RawContextMiddleware, plugins=(RequestIdPlugin(validate=False),))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
