@@ -24,11 +24,11 @@ func TestGetUsageByDimensionWorkspaceFilter(t *testing.T) {
 	ctx := context.Background()
 
 	const (
-		wsA          = "neu-463-ws-a"
-		wsB          = "neu-463-ws-b"
-		dimension    = "neu-463-gpt" // same dimension/endpoint name used in both workspaces
-		usageA int64 = 100
-		usageB int64 = 200
+		wsA             = "neu-463-ws-a"
+		wsB             = "neu-463-ws-b"
+		dimension       = "neu-463-gpt" // same dimension/endpoint name used in both workspaces
+		usageA    int64 = 100
+		usageB    int64 = 200
 	)
 
 	// One user owns API keys in two different workspaces.
@@ -89,7 +89,7 @@ func TestGetUsageByDimensionWorkspaceFilter(t *testing.T) {
 				'Endpoint',
 				ROW(
 					'neu-463-cluster',
-					ROW('neu-463-registry', 'neu-463-model', '', 'v1', '')::api.model_spec,
+					ROW('neu-463-registry', 'neu-463-model', '', 'v1', '', NULL)::api.model_spec,
 					ROW('vllm', 'v0.11.2')::api.endpoint_engine_spec,
 					ROW('4', '2', NULL, '16')::api.resource_spec,
 					ROW(1)::api.replica_spec,

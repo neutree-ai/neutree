@@ -1,0 +1,107 @@
+# Neutree ModelCatalog — converted from the vLLM recipe for Qwen3.6-27B.
+# Sources: https://recipes.vllm.ai/Qwen/Qwen3.6-27B
+#          https://huggingface.co/Qwen/Qwen3.6-27B/blob/main/config.json
+# Dense flagship of the Qwen3.6 family (model_type qwen3_5, vision+text,
+# 64 layers, GQA 24/4 heads, head_dim 256, native 262144 (256K) context).
+# Feature display_name labels align with the deploy mockup
+# (https://files.tos.smartx.com/exp_-cheuGh5Q8ntcNjqi1EnYA/index.html).
+apiVersion: v1
+kind: ModelCatalog
+metadata:
+  name: qwen3-6-27b
+  workspace: default
+  annotations:
+    recipe.vllm.ai/hardware-verified: "H200,H100,L40S"
+spec:
+  engine:
+    engine: vllm
+    version: v0.17.1
+  base:
+    engine_args:
+      reasoning_parser: qwen3
+  variants:
+    bf16:
+      description: "BF16 full-precision weights — 1x H200 or 2x H100 (TP2)."
+      model:
+        registry: huggingface
+        name: Qwen/Qwen3.6-27B
+        task: text-generation
+        info:
+          parameter_count: "27B"
+          quantization: bf16
+          context_length: "262K"
+          architecture: dense
+      resources:
+        gpu: "2"
+        accelerator:
+          type: nvidia
+          product: H100
+      vram_minimum_gb: 140
+    fp8:
+      description: "Official FP8 checkpoint — fits a single 40 GB GPU (H100/H200/L40S)."
+      model:
+        registry: huggingface
+        name: Qwen/Qwen3.6-27B-FP8
+        task: text-generation
+        info:
+          parameter_count: "27B"
+          quantization: fp8
+          context_length: "262K"
+          architecture: dense
+      resources:
+        gpu: "1"
+        accelerator:
+          type: nvidia
+          product: H100
+      vram_minimum_gb: 40
+  features:
+    # --- context window: pick a preset OR type a custom length (combobox) ---
+    max-model-len:
+      type: input
+      display_name: "Context window"
+      description: "Maximum sequence length (tokens) — pick a preset or type a custom value (native max 262144)."
+      input:
+        value_type: int
+        default: "262144"
+        min: 1
+        max: 262144
+        suggestions: ["8192", "32768", "131072", "262144"]
+      engine_args:
+        max_model_len: "${value}"
+    # --- max concurrency: free integer input ---
+    max-num-seqs:
+      type: input
+      display_name: "Concurrency"
+      category: tuning
+      description: "Max concurrent sequences (decode parallelism / batch width)."
+      input:
+        value_type: int
+        default: "256"
+        min: 1
+        max: 1024
+      engine_args:
+        max_num_seqs: "${value}"
+    # --- boolean toggles ---
+    text-only:
+      display_name: "Text-only mode"
+      description: "Text-only mode — skip the vision encoder to free memory for KV cache."
+      default: false
+      engine_args:
+        language_model_only: true
+        enable_prefix_caching: true
+    disable-thinking:
+      display_name: "Disable reasoning"
+      description: "Disable reasoning / thinking output."
+      default: false
+      engine_args:
+        default_chat_template_kwargs:
+          enable_thinking: false
+    mtp-speculative:
+      display_name: "MTP speculative decoding"
+      description: "MTP (multi-token prediction) speculative decoding for lower-latency decode."
+      category: tuning
+      default: false
+      engine_args:
+        speculative_config:
+          method: mtp
+          num_speculative_tokens: 1

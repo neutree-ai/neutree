@@ -16,12 +16,111 @@ const (
 )
 
 type ModelCatalogSpec struct {
-	Model             *ModelSpec             `json:"model,omitempty"`
-	Engine            *EndpointEngineSpec    `json:"engine,omitempty"`
-	Resources         *ResourceSpec          `json:"resources,omitempty"`
-	Replicas          *ReplicaSpec           `json:"replicas,omitempty"`
-	DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
-	Variables         map[string]interface{} `json:"variables,omitempty"`
+	Model             *ModelSpec          `json:"model,omitempty"`
+	Engine            *EndpointEngineSpec `json:"engine,omitempty"`
+	Resources         *ResourceSpec       `json:"resources,omitempty"`
+	Replicas          *ReplicaSpec        `json:"replicas,omitempty"`
+	DeploymentOptions map[string]any      `json:"deployment_options,omitempty"`
+	Variables         map[string]any      `json:"variables,omitempty"`
+	Env               map[string]string   `json:"env,omitempty"`
+
+	// Recipe extension: when Variants is non-empty the catalog is a recipe
+	// template; ComposeEndpointSpec selects a variant and merges enabled
+	// features on top of Base to produce a concrete endpoint kernel.
+	Base     *RecipeBase              `json:"base,omitempty"`
+	Variants map[string]RecipeVariant `json:"variants,omitempty"`
+	Features map[string]RecipeFeature `json:"features,omitempty"`
+}
+
+// RecipeBase carries config shared by every variant in a recipe MC.
+type RecipeBase struct {
+	EngineArgs map[string]any    `json:"engine_args,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+}
+
+// RecipeVariant is what differs per variant: typically the checkpoint
+// (model) and hardware footprint (resources); engine_args/env overrides are
+// allowed but optional. `VRAMMinimumGB` mirrors upstream and feeds the
+// "needs ≥ X GB" hint plus the OOM-risk badge at endpoint creation.
+type RecipeVariant struct {
+	Model         *ModelSpec        `json:"model,omitempty"`
+	Resources     *ResourceSpec     `json:"resources,omitempty"`
+	EngineArgs    map[string]any    `json:"engine_args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	VRAMMinimumGB *int              `json:"vram_minimum_gb,omitempty"`
+}
+
+// RecipeFeatureType discriminates how a feature is selected and composed.
+// Empty is treated as "boolean" (the original on/off toggle).
+type RecipeFeatureType string
+
+const (
+	RecipeFeatureTypeBoolean RecipeFeatureType = "boolean"
+	RecipeFeatureTypeSelect  RecipeFeatureType = "select"
+	RecipeFeatureTypeInput   RecipeFeatureType = "input"
+)
+
+// RecipeFeature is a recipe configuration knob with three shapes selected by
+// Type:
+//   - boolean (default): an on/off bundle of engine_args/env, merged when on.
+//   - select:  pick one of Options; the chosen option's engine_args/env merge
+//     on top of the feature's shared engine_args/env.
+//   - input:   a free value substituted for the "${value}" placeholder inside
+//     the feature's engine_args/env (coerced per Input.ValueType).
+//
+// `Category` is a free-form grouping hint for the UI ("tuning" surfaces in a
+// separate "Performance tuning" section); it has no effect on composition.
+type RecipeFeature struct {
+	// DisplayName is an optional human-facing label for the UI (e.g. "Context
+	// window" / "上下文窗口"); when empty the feature key is shown. Lets a
+	// catalog align feature labels with product wording, independent of the
+	// technical feature key. No effect on composition.
+	DisplayName   string   `json:"display_name,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	Category      string   `json:"category,omitempty"`
+	ConflictsWith []string `json:"conflicts_with,omitempty"`
+
+	// Type selects the feature shape; empty == "boolean".
+	Type RecipeFeatureType `json:"type,omitempty"`
+
+	// boolean (Type empty or "boolean")
+	Default    bool              `json:"default,omitempty"`
+	EngineArgs map[string]any    `json:"engine_args,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+
+	// select (Type "select")
+	Options       map[string]RecipeFeatureOption `json:"options,omitempty"`
+	DefaultOption string                         `json:"default_option,omitempty"`
+
+	// input (Type "input")
+	Input *RecipeFeatureInput `json:"input,omitempty"`
+}
+
+// RecipeFeatureOption is one choice of a select feature. Its engine_args/env
+// merge on top of the feature's shared engine_args/env when chosen.
+type RecipeFeatureOption struct {
+	Description string            `json:"description,omitempty"`
+	EngineArgs  map[string]any    `json:"engine_args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+}
+
+// RecipeFeatureInput describes a free-input feature. The user value replaces
+// every "${value}" placeholder inside the feature's engine_args/env; when an
+// engine_args value is exactly "${value}" it is coerced to ValueType (so e.g.
+// max_model_len comes out as a number, not a string).
+type RecipeFeatureInput struct {
+	ValueType string   `json:"value_type,omitempty"` // "string" (default) | "int" | "number" | "bool"
+	Default   string   `json:"default,omitempty"`
+	Required  bool     `json:"required,omitempty"`
+	Min       *float64 `json:"min,omitempty"`
+	Max       *float64 `json:"max,omitempty"`
+	Pattern   string   `json:"pattern,omitempty"` // regexp for string values
+	Enum      []string `json:"enum,omitempty"`    // allowed raw values
+	// Suggestions are preset values surfaced as a dropdown next to the free
+	// input (the "pick a preset or type your own" combobox). UI hint only —
+	// the user may still enter any value that satisfies the constraints above.
+	Suggestions []string `json:"suggestions,omitempty"`
 }
 
 type ModelCatalogStatus struct {
@@ -123,11 +222,11 @@ func (obj *ModelCatalog) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *ModelCatalog) GetSpec() interface{} {
+func (obj *ModelCatalog) GetSpec() any {
 	return obj.Spec
 }
 
-func (obj *ModelCatalog) GetStatus() interface{} {
+func (obj *ModelCatalog) GetStatus() any {
 	return obj.Status
 }
 
@@ -147,7 +246,7 @@ func (obj *ModelCatalog) SetID(id string) {
 	obj.ID, _ = strconv.Atoi(id)
 }
 
-func (obj *ModelCatalog) GetMetadata() interface{} {
+func (obj *ModelCatalog) GetMetadata() any {
 	return obj.Metadata
 }
 

@@ -660,10 +660,13 @@ func TestEndpointAcceleratorValidation(t *testing.T) {
 				'Endpoint',
 				ROW(
 					'test-cluster',
-					ROW('test-registry', 'test-model', '', 'v1', '')::api.model_spec,
+					ROW('test-registry', 'test-model', '', 'v1', '', NULL)::api.model_spec,
 					ROW('vllm', 'v0.11.2')::api.endpoint_engine_spec,
 					ROW('4', '2', %s, '16')::api.resource_spec,
 					ROW(1)::api.replica_spec,
+					NULL,
+					NULL,
+					NULL,
 					NULL,
 					NULL,
 					NULL
