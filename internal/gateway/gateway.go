@@ -17,6 +17,12 @@ type GatewayOptions struct {
 	AdminUrl          string
 	LogRemoteWriteUrl string
 	Storage           storage.Storage
+	// QuotaAPIURL + ServiceToken let the per-key quota plugin pull the dynamic
+	// remaining token count at request time. It is the PostgREST access URL
+	// (Storage.AccessURL) — the plugin calls the get_api_key_remaining RPC over
+	// PostgREST — NOT the neutree-api (Gin) server URL.
+	QuotaAPIURL  string
+	ServiceToken string
 }
 
 // Gateway defines the interface for API gateway operations

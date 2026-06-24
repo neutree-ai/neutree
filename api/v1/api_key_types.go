@@ -5,7 +5,25 @@ import (
 )
 
 type ApiKeySpec struct {
-	Quota int64 `json:"quota,omitempty"`
+	Quota  int64         `json:"quota,omitempty"`
+	Limits *ApiKeyLimits `json:"limits,omitempty"`
+}
+
+// ApiKeyLimits is the limit configuration carried on the API key itself. It
+// holds only configuration; usage/remaining is derived from the api_daily_usage
+// ledger, never stored here.
+type ApiKeyLimits struct {
+	TokenQuota    *ApiKeyTokenQuota `json:"token_quota,omitempty"`
+	RPS           int               `json:"rps,omitempty"`
+	RPM           int               `json:"rpm,omitempty"`
+	Concurrency   int               `json:"concurrency,omitempty"`
+	AllowedModels []string          `json:"allowed_models,omitempty"`
+	Disabled      bool              `json:"disabled,omitempty"`
+}
+
+type ApiKeyTokenQuota struct {
+	Limit  int64  `json:"limit,omitempty"`
+	Period string `json:"period,omitempty"`
 }
 
 type ApiKeyPhase string

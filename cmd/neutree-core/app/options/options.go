@@ -123,11 +123,20 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	imageService := registry.NewImageService()
 	c.ImageService = imageService
 
+	gwToken, err := storage.CreateServiceToken(o.Storage.JwtSecret)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create gateway service token")
+	}
+
 	gw, err := gateway.GetGateway(o.Gateway.Type, gateway.GatewayOptions{
 		ProxyUrl:          o.Gateway.ProxyUrl,
 		AdminUrl:          o.Gateway.AdminUrl,
 		LogRemoteWriteUrl: o.Gateway.LogRemoteWriteUrl,
 		Storage:           s,
+		// The quota plugin calls get_api_key_remaining over PostgREST, so this is
+		// the PostgREST access URL (not the neutree-api server URL).
+		QuotaAPIURL:  o.Storage.AccessURL,
+		ServiceToken: *gwToken,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init gateway")

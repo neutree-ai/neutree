@@ -28,6 +28,9 @@ type Kong struct {
 	logRemoteWriteUrl string
 
 	proxyUrl string
+
+	quotaAPIURL  string
+	serviceToken string
 }
 
 func newKong(opts GatewayOptions) (Gateway, error) {
@@ -41,6 +44,8 @@ func newKong(opts GatewayOptions) (Gateway, error) {
 		storage:           opts.Storage,
 		logRemoteWriteUrl: opts.LogRemoteWriteUrl,
 		proxyUrl:          opts.ProxyUrl,
+		quotaAPIURL:       opts.QuotaAPIURL,
+		serviceToken:      opts.ServiceToken,
 	}, nil
 }
 
@@ -92,7 +97,7 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 
 	for _, keyAuth := range keyAuthList {
 		if keyAuth.Key != nil && apiKey.Status != nil && *keyAuth.Key == apiKey.Status.SkValue {
-			return k.syncAPIKeyACLGroups(consumer.ID, apiKey)
+			return k.syncAPIKeyGatewayConfig(consumer.ID, apiKey)
 		}
 	}
 
@@ -105,7 +110,7 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 		return errors.Wrapf(err, "failed to create key auth for consumer %s", *consumer.CustomID)
 	}
 
-	return k.syncAPIKeyACLGroups(consumer.ID, apiKey)
+	return k.syncAPIKeyGatewayConfig(consumer.ID, apiKey)
 }
 
 func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error {
@@ -116,7 +121,7 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 
 	currentGroups, _, err := k.kongClient.ACLs.ListForConsumer(context.Background(), consumerID, nil)
 	if err != nil {
-		return errors.Wrapf(err, "failed to list ACL groups for consumer %s", apiKey.ID)
+		return errors.Wrapf(err, "failed to list ACL groups for api key %s", apiKey.ID)
 	}
 
 	toCreate, toDelete := diffNeutreeACLGroups(currentGroups, desiredGroups)
@@ -125,7 +130,7 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 			Group: pointy.String(group),
 		})
 		if err != nil {
-			return errors.Wrapf(err, "failed to add ACL group %s to consumer %s", group, apiKey.ID)
+			return errors.Wrapf(err, "failed to add ACL group %s to api key %s", group, apiKey.ID)
 		}
 	}
 
@@ -136,7 +141,165 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 
 		err = k.kongClient.ACLs.Delete(context.Background(), consumerID, group.Group)
 		if err != nil {
-			return errors.Wrapf(err, "failed to delete ACL group %s from consumer %s", *group.Group, apiKey.ID)
+			return errors.Wrapf(err, "failed to delete ACL group %s from api key %s", *group.Group, apiKey.ID)
+		}
+	}
+
+	return nil
+}
+
+// syncAPIKeyGatewayConfig reconciles everything we push to the gateway for an
+// API key: its ACL groups (authorization) and its limit plugins (quota/access).
+func (k *Kong) syncAPIKeyGatewayConfig(consumerID *string, apiKey *v1.ApiKey) error {
+	if err := k.syncAPIKeyACLGroups(consumerID, apiKey); err != nil {
+		return err
+	}
+
+	return k.syncAPIKeyLimitPlugins(consumerID, apiKey)
+}
+
+// isManagedAPIKeyLimitPlugin reports whether a consumer plugin is one this
+// controller manages from api_key.spec.limits (so stale ones can be pruned).
+func isManagedAPIKeyLimitPlugin(p *kong.Plugin) bool {
+	if p == nil || p.InstanceName == nil {
+		return false
+	}
+
+	return strings.HasPrefix(*p.InstanceName, "neutree-ai-access-") ||
+		strings.HasPrefix(*p.InstanceName, "neutree-ai-quota-")
+}
+
+// generateAPIKeyAccessPlugin builds the per-consumer neutree-ai-access plugin
+// from the key's static access limits (disabled / allowed models / concurrency /
+// RPS+RPM). Returns nil when the key has no access limits (so the plugin is
+// absent and the key is unrestricted on the access dimension).
+func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {
+	if apiKey.Spec == nil || apiKey.Spec.Limits == nil {
+		return nil
+	}
+
+	l := apiKey.Spec.Limits
+	// Emit a COMPLETE config with explicit empty values for "off" (not null) so an
+	// update always overwrites prior config. syncPlugin reconciles via JSON
+	// merge-patch (RFC 7386), under which an omitted key keeps the stale value;
+	// using 0 / false avoids depending on null-clearing to turn a limit back off,
+	// and the handler treats zero as "unrestricted".
+	//
+	// allowed_models is the exception: [] now means deny-all (not "off"), so it
+	// can't double as the cleared value. Absent (nil) => unrestricted, sent as
+	// JSON null (the handler treats null/non-array as unrestricted, and merge-patch
+	// null clears any stale list); a non-nil slice — including an explicit empty
+	// [] (deny-all) — is an active restriction the gateway must enforce.
+	cfg := map[string]interface{}{
+		"disabled":       l.Disabled,
+		"allowed_models": nil,
+		"concurrency":    0,
+		"rate_limits":    []map[string]interface{}{},
+	}
+	needed := l.Disabled
+
+	if l.AllowedModels != nil {
+		cfg["allowed_models"] = l.AllowedModels
+		needed = true
+	}
+
+	if l.Concurrency > 0 {
+		cfg["concurrency"] = l.Concurrency
+		needed = true
+	}
+
+	rateLimits := make([]map[string]interface{}, 0, 2)
+	if l.RPS > 0 {
+		rateLimits = append(rateLimits, map[string]interface{}{"limit": l.RPS, "window": "second"})
+	}
+
+	if l.RPM > 0 {
+		rateLimits = append(rateLimits, map[string]interface{}{"limit": l.RPM, "window": "minute"})
+	}
+
+	if len(rateLimits) > 0 {
+		cfg["rate_limits"] = rateLimits
+		needed = true
+	}
+
+	// No active limit -> no plugin (syncAPIKeyLimitPlugins deletes any stale one),
+	// so an unconfigured key stays unrestricted (by design).
+	if !needed {
+		return nil
+	}
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-access"),
+		InstanceName: pointy.String("neutree-ai-access-" + util.HashString(apiKey.ID)),
+		Consumer:     &kong.Consumer{ID: consumerID},
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config:       cfg,
+	}
+}
+
+// generateAPIKeyQuotaPlugin builds the per-consumer neutree-ai-quota plugin when
+// the key has a token quota. The plugin pulls the dynamic remaining count from
+// neutree-api at request time. Returns nil when there is no token quota, or
+// when the neutree-api URL / service token are not configured (degrade to "no
+// quota enforcement" rather than mis-enforce).
+func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {
+	if apiKey.Spec == nil || apiKey.Spec.Limits == nil || apiKey.Spec.Limits.TokenQuota == nil {
+		return nil
+	}
+
+	if apiKey.Spec.Limits.TokenQuota.Limit <= 0 {
+		return nil
+	}
+
+	if k.quotaAPIURL == "" || k.serviceToken == "" {
+		return nil
+	}
+
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-quota"),
+		InstanceName: pointy.String("neutree-ai-quota-" + util.HashString(apiKey.ID)),
+		Consumer:     &kong.Consumer{ID: consumerID},
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config: map[string]interface{}{
+			"api_url":       strings.TrimRight(k.quotaAPIURL, "/"),
+			"service_token": k.serviceToken,
+			"cache_ttl":     5,
+		},
+	}
+}
+
+// syncAPIKeyLimitPlugins reconciles the key's per-consumer limit plugins: upsert
+// the desired ones and prune managed plugins that are no longer desired.
+func (k *Kong) syncAPIKeyLimitPlugins(consumerID *string, apiKey *v1.ApiKey) error {
+	desired := make(map[string]*kong.Plugin)
+	if p := k.generateAPIKeyAccessPlugin(consumerID, apiKey); p != nil {
+		desired[*p.InstanceName] = p
+	}
+
+	if p := k.generateAPIKeyQuotaPlugin(consumerID, apiKey); p != nil {
+		desired[*p.InstanceName] = p
+	}
+
+	for _, p := range desired {
+		if err := k.syncPlugin(p); err != nil {
+			return err
+		}
+	}
+
+	curPlugins, err := k.kongClient.Plugins.ListAllForConsumer(context.Background(), consumerID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list plugins for api key %s", apiKey.ID)
+	}
+
+	for _, cur := range curPlugins {
+		if !isManagedAPIKeyLimitPlugin(cur) {
+			continue
+		}
+
+		if _, ok := desired[*cur.InstanceName]; !ok {
+			if err = k.kongClient.Plugins.Delete(context.Background(), cur.ID); err != nil {
+				return errors.Wrapf(err, "failed to delete plugin %s for api key %s", *cur.InstanceName, apiKey.ID)
+			}
 		}
 	}
 

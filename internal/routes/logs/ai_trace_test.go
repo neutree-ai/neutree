@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,8 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -491,9 +494,10 @@ func TestAITraceHandlers_StoreNotConfigured(t *testing.T) {
 	deps := &Dependencies{}
 
 	handlers := map[string]gin.HandlerFunc{
-		"list":  handleListAITraces(deps),
-		"stats": handleAITraceStats(deps),
-		"get":   handleGetAITrace(deps),
+		"list":      handleListAITraces(deps),
+		"stats":     handleAITraceStats(deps),
+		"get":       handleGetAITrace(deps),
+		"key-stats": handleAITraceKeyStats(deps),
 	}
 
 	for name, h := range handlers {
@@ -502,4 +506,35 @@ func TestAITraceHandlers_StoreNotConfigured(t *testing.T) {
 		assert.Equalf(t, http.StatusServiceUnavailable, w.Code, "handler %s", name)
 		assert.Containsf(t, w.Body.String(), "not configured", "handler %s", name)
 	}
+}
+
+func TestHandleAITraceKeyStats_DecodesNDJSON(t *testing.T) {
+	// VictoriaLogs returns one NDJSON row per api_key_id (all values as strings),
+	// plus an untagged row (empty api_key_id) that must be dropped.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(
+			`{"api_key_id":"k1","requests":"3010","tokens":"1240000","avg_duration_ms":"8591.27","success":"3005"}` + "\n" +
+				`{"api_key_id":"k2","requests":"52","tokens":"36805","avg_duration_ms":"2308.1","success":"49"}` + "\n" +
+				`{"api_key_id":"","requests":"7","tokens":"100","avg_duration_ms":"1","success":"7"}` + "\n"))
+	}))
+	defer server.Close()
+
+	deps := &Dependencies{AITraceStoreURL: server.URL, HTTPClient: &util.DefaultHTTPClient{}}
+	c, w := traceCtx("user-1", "ws1")
+
+	handleAITraceKeyStats(deps)(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp AITraceKeyStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 24, resp.WindowHours) // default window
+	require.Len(t, resp.Keys, 2)          // untagged row dropped
+	assert.Equal(t, "k1", resp.Keys[0].APIKeyID)
+	assert.Equal(t, int64(3010), resp.Keys[0].Requests)
+	assert.Equal(t, int64(1240000), resp.Keys[0].Tokens)
+	assert.Equal(t, int64(3005), resp.Keys[0].Success)
+	assert.InDelta(t, 8591.27, resp.Keys[0].AvgDurationMs, 0.01)
+	assert.Equal(t, "k2", resp.Keys[1].APIKeyID)
+	assert.Equal(t, int64(52), resp.Keys[1].Requests)
 }

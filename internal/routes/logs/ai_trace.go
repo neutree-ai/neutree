@@ -83,6 +83,7 @@ func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 
 	traces.GET("", handleListAITraces(deps))
 	traces.GET("/stats", handleAITraceStats(deps))
+	traces.GET("/key-stats", handleAITraceKeyStats(deps))
 	traces.GET("/:request_id", handleGetAITrace(deps))
 }
 
@@ -651,6 +652,172 @@ func queryAITraceDayCounts(deps *Dependencies, query string, params url.Values) 
 	}
 
 	return counts, nil
+}
+
+// AITraceKeyStat is one API key's aggregated traffic over the requested window.
+// Powers the API-key list ranking overview and the detail "request performance"
+// card. SuccessRate is derived client-side as Success/Requests.
+type AITraceKeyStat struct {
+	APIKeyID      string  `json:"api_key_id"`
+	Requests      int64   `json:"requests"`
+	Tokens        int64   `json:"tokens"`
+	Success       int64   `json:"success"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+}
+
+// AITraceKeyStatsResponse is the wire format for
+// GET /api/v1/ai-traces/:workspace/key-stats — per-API-key request count, token
+// total, success count and average latency over a trailing window (default 24h).
+type AITraceKeyStatsResponse struct {
+	WindowHours int              `json:"window_hours"`
+	Keys        []AITraceKeyStat `json:"keys"`
+}
+
+// maxKeyStatsWindowHours bounds the trailing window the key-stats endpoint will
+// aggregate over (30 days), keeping a single LogsQL scan bounded.
+const maxKeyStatsWindowHours = 720
+
+// handleAITraceKeyStats returns per-API-key aggregates (request count, tokens,
+// success count, average latency) over a trailing window — default 24h. A single
+// `stats by (api_key_id)` LogsQL scan covers every key the caller may read, so
+// both the list ranking overview and a single key's detail card are served by
+// one call (the detail view picks its key out of the result).
+func handleAITraceKeyStats(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.AITraceStoreURL == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "ai trace store is not configured",
+			})
+
+			return
+		}
+
+		windowHours := 24
+
+		if v := c.Query("window_hours"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= maxKeyStatsWindowHours {
+				windowHours = n
+			}
+		}
+
+		// Success = 2xx/3xx response_status (regex match, robust to the field being
+		// stored as a string); tokens sums total_tokens (missing => 0); avg latency
+		// over duration_ms. Empty api_key_id rows (untagged traffic) are dropped by
+		// the parser.
+		query := fmt.Sprintf(
+			"%s | stats by (api_key_id) count() requests, "+
+				"sum(total_tokens) tokens, avg(duration_ms) avg_duration_ms, "+
+				"count() if (response_status:~\"^[23]\") success",
+			traceScopeClause(c),
+		)
+
+		params := url.Values{}
+		params.Set("start", time.Now().UTC().Add(-time.Duration(windowHours)*time.Hour).Format(time.RFC3339))
+
+		keys, err := queryAITraceKeyStats(deps, query, params)
+		if err != nil {
+			klog.Errorf("ai-trace: key-stats: %v", err)
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": "failed to query trace store",
+			})
+
+			return
+		}
+
+		c.JSON(http.StatusOK, AITraceKeyStatsResponse{
+			WindowHours: windowHours,
+			Keys:        keys,
+		})
+	}
+}
+
+// queryAITraceKeyStats runs the per-key `stats by (api_key_id)` aggregation and
+// decodes the NDJSON result rows (all values arrive as strings from VL).
+func queryAITraceKeyStats(deps *Dependencies, query string, params url.Values) ([]AITraceKeyStat, error) {
+	params.Set("query", query)
+	reqURL := strings.TrimRight(deps.AITraceStoreURL, "/") + "/select/logsql/query?" + params.Encode()
+
+	resp, err := deps.HTTPClient.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("query victorialogs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("victorialogs returned status %d", resp.StatusCode)
+	}
+
+	out := make([]AITraceKeyStat, 0, 16)
+	scanner := bufio.NewScanner(resp.Body)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var r struct {
+			APIKeyID      string `json:"api_key_id"`
+			Requests      string `json:"requests"`
+			Tokens        string `json:"tokens"`
+			AvgDurationMs string `json:"avg_duration_ms"`
+			Success       string `json:"success"`
+		}
+
+		if err := json.Unmarshal(line, &r); err != nil {
+			continue
+		}
+
+		// Drop the untagged bucket (requests with no api_key_id): it cannot be
+		// attributed to any key in the ranking.
+		if strings.TrimSpace(r.APIKeyID) == "" {
+			continue
+		}
+
+		// VL may format count()/sum() results as plain ints or floats
+		// ("1240000" or "1.24e6"); parse as float and truncate for robustness.
+		stat := AITraceKeyStat{
+			APIKeyID:      r.APIKeyID,
+			Requests:      parseIntLoose(r.Requests),
+			Tokens:        parseIntLoose(r.Tokens),
+			Success:       parseIntLoose(r.Success),
+			AvgDurationMs: parseFloatLoose(r.AvgDurationMs),
+		}
+
+		out = append(out, stat)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan victorialogs response: %w", err)
+	}
+
+	return out, nil
+}
+
+// parseIntLoose parses a VL numeric result (which may be int- or float-
+// formatted) into an int64, truncating any fractional part. Returns 0 on error.
+// Integer-formatted values parse as base-10 int64 first so large counts
+// (>= 2^53) keep full precision; only float/scientific forms fall back to float.
+func parseIntLoose(s string) int64 {
+	s = strings.TrimSpace(s)
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n
+	}
+
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return int64(f)
+	}
+
+	return 0
+}
+
+// parseFloatLoose parses a VL numeric result into a float64, returning 0 on error.
+func parseFloatLoose(s string) float64 {
+	if f, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil {
+		return f
+	}
+
+	return 0
 }
 
 // queryAITraces runs a LogsQL query against VictoriaLogs and decodes the
