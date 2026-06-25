@@ -2,6 +2,7 @@ package resource
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -162,6 +163,18 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, opts ListNodesOptions
 			node.Status.Devices = devices
 		}
 
+		neutreeDevices, err := transformKubernetesNeutreeNodeDevices(
+			nodeInfo.annotations,
+			nodeInfo.pods,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform Neutree accelerator devices for node %s: %w", nodeID, err)
+		}
+
+		if node.Status != nil && len(neutreeDevices) > 0 {
+			node.Status.Devices = neutreeDevices
+		}
+
 		mergeAcceleratorMetadata(node.AcceleratorMetadata, metadata)
 
 		nodes = append(nodes, node)
@@ -192,10 +205,6 @@ func (c *K8sResourceClient) ListEndpointInstances(
 
 	if len(selectorLabels) == 0 {
 		return nil, fmt.Errorf("endpoint selector labels are empty")
-	}
-
-	if !opts.AcceleratorVirtualizationEnabled {
-		return nil, nil
 	}
 
 	podList := &corev1.PodList{}
@@ -239,6 +248,16 @@ func (c *K8sResourceClient) ListEndpointInstances(
 		Pods:         pods,
 		Nodes:        nodes,
 	}
+	if instances, ok, err := transformKubernetesNeutreeEndpointResources(input); ok || err != nil {
+		if err != nil {
+			return nil, err
+		}
+
+		sortEndpointInstanceResources(instances)
+
+		return instances, nil
+	}
+
 	if instances, ok, err := transformKubernetesVirtualizationEndpointResources(input, c.parsers); ok || err != nil {
 		if err != nil {
 			return nil, err
@@ -470,6 +489,241 @@ func mergeKubernetesStandardAccelerators(
 	}
 
 	return nil
+}
+
+type neutreeAcceleratorDeviceAnnotation struct {
+	ID           string `json:"id,omitempty"`
+	UUID         string `json:"uuid,omitempty"`
+	ProductName  string `json:"product_name,omitempty"`
+	ProductModel string `json:"product_model,omitempty"`
+	MinorNumber  int    `json:"minor_number,omitempty"`
+	MemoryMiB    int64  `json:"memory_mib,omitempty"`
+	Healthy      bool   `json:"healthy,omitempty"`
+}
+
+type neutreeAcceleratorAllocationAnnotation struct {
+	UUID      string `json:"uuid,omitempty"`
+	Product   string `json:"product,omitempty"`
+	NodeID    string `json:"node_id,omitempty"`
+	MemoryMiB int64  `json:"memory_mib,omitempty"`
+	CoreUnits int64  `json:"core_units,omitempty"`
+}
+
+func transformKubernetesNeutreeNodeDevices(
+	annotations map[string]string,
+	pods []resourceparser.KubernetesPodResourceContext,
+) ([]*v1.DeviceResource, error) {
+	devices, err := parseNeutreeAcceleratorDevices(annotations)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(devices) == 0 {
+		return nil, nil
+	}
+
+	usageByUUID := make(map[string]v1.DeviceResourcePool)
+
+	for _, pod := range pods {
+		allocations, err := parseNeutreeAcceleratorAllocations(pod.Annotations)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse Pod %s/%s accelerator allocations: %w", pod.Namespace, pod.Name, err)
+		}
+
+		for _, allocation := range allocations {
+			if allocation.UUID == "" {
+				continue
+			}
+
+			usage := usageByUUID[allocation.UUID]
+			usage.MemoryMiB += allocation.MemoryMiB
+			usage.CoreUnits += allocation.CoreUnits
+			usageByUUID[allocation.UUID] = usage
+		}
+	}
+
+	result := make([]*v1.DeviceResource, 0, len(devices))
+
+	for _, device := range devices {
+		if device.UUID == "" {
+			continue
+		}
+
+		allocatable := &v1.DeviceResourcePool{
+			MemoryMiB: device.MemoryMiB,
+			CoreUnits: nonZeroInt64(deviceCoreUnits(device), 100),
+		}
+		usage := usageByUUID[device.UUID]
+
+		result = append(result, &v1.DeviceResource{
+			UUID:        device.UUID,
+			Product:     neutreeDeviceProduct(device),
+			Health:      device.Healthy,
+			Allocatable: allocatable,
+			Available: &v1.DeviceResourcePool{
+				MemoryMiB: nonNegativeInt64(allocatable.MemoryMiB - usage.MemoryMiB),
+				CoreUnits: nonNegativeInt64(allocatable.CoreUnits - usage.CoreUnits),
+			},
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].UUID < result[j].UUID
+	})
+
+	return result, nil
+}
+
+func transformKubernetesNeutreeEndpointResources(
+	input resourceparser.KubernetesEndpointResourceContext,
+) ([]EndpointInstanceResource, bool, error) {
+	devicesByNode := make(map[string]map[string]neutreeAcceleratorDeviceAnnotation)
+
+	for nodeName, node := range input.Nodes {
+		devices, err := parseNeutreeAcceleratorDevices(node.Annotations)
+		if err != nil {
+			return nil, true, fmt.Errorf("failed to parse node %s accelerator devices: %w", nodeName, err)
+		}
+
+		if len(devices) == 0 {
+			continue
+		}
+
+		devicesByNode[nodeName] = make(map[string]neutreeAcceleratorDeviceAnnotation, len(devices))
+
+		for _, device := range devices {
+			if device.UUID == "" {
+				continue
+			}
+
+			devicesByNode[nodeName][device.UUID] = device
+		}
+	}
+
+	var instances []EndpointInstanceResource
+	matched := false
+
+	for _, pod := range input.Pods {
+		allocations, err := parseNeutreeAcceleratorAllocations(pod.Annotations)
+		if err != nil {
+			return nil, true, fmt.Errorf("failed to parse Pod %s/%s accelerator allocations: %w", pod.Namespace, pod.Name, err)
+		}
+
+		if len(allocations) == 0 {
+			continue
+		}
+
+		matched = true
+		instance := EndpointInstanceResource{
+			InstanceID: pod.Name,
+			ReplicaID:  pod.Name,
+			NodeID:     pod.NodeName,
+			Devices:    make([]v1.DeviceAllocation, 0, len(allocations)),
+		}
+		nodeDevices := devicesByNode[pod.NodeName]
+
+		for _, allocation := range allocations {
+			if allocation.UUID == "" {
+				continue
+			}
+
+			detail := nodeDevices[allocation.UUID]
+
+			nodeID := allocation.NodeID
+			if nodeID == "" {
+				nodeID = pod.NodeName
+			}
+
+			instance.Devices = append(instance.Devices, v1.DeviceAllocation{
+				UUID:      allocation.UUID,
+				Product:   neutreeAllocationProduct(allocation, detail),
+				MemoryMiB: nonZeroInt64(allocation.MemoryMiB, detail.MemoryMiB),
+				CoreUnits: nonZeroInt64(allocation.CoreUnits, 100),
+				NodeID:    nodeID,
+			})
+		}
+
+		if len(instance.Devices) > 0 {
+			instances = append(instances, instance)
+		}
+	}
+
+	return instances, matched, nil
+}
+
+func parseNeutreeAcceleratorDevices(
+	annotations map[string]string,
+) ([]neutreeAcceleratorDeviceAnnotation, error) {
+	raw := annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation]
+	if raw == "" {
+		return nil, nil
+	}
+
+	var devices []neutreeAcceleratorDeviceAnnotation
+	if err := json.Unmarshal([]byte(raw), &devices); err != nil {
+		return nil, fmt.Errorf("invalid %s annotation: %w", resourceparser.NeutreeAcceleratorDevicesAnnotation, err)
+	}
+
+	return devices, nil
+}
+
+func parseNeutreeAcceleratorAllocations(
+	annotations map[string]string,
+) ([]neutreeAcceleratorAllocationAnnotation, error) {
+	raw := annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation]
+	if raw == "" {
+		return nil, nil
+	}
+
+	var allocations []neutreeAcceleratorAllocationAnnotation
+	if err := json.Unmarshal([]byte(raw), &allocations); err != nil {
+		return nil, fmt.Errorf("invalid %s annotation: %w", resourceparser.NeutreeAcceleratorAllocationsAnnotation, err)
+	}
+
+	return allocations, nil
+}
+
+func neutreeDeviceProduct(device neutreeAcceleratorDeviceAnnotation) string {
+	if device.ProductModel != "" {
+		return device.ProductModel
+	}
+
+	if device.ProductName != "" {
+		return device.ProductName
+	}
+
+	return "unknown"
+}
+
+func neutreeAllocationProduct(
+	allocation neutreeAcceleratorAllocationAnnotation,
+	device neutreeAcceleratorDeviceAnnotation,
+) string {
+	if allocation.Product != "" {
+		return allocation.Product
+	}
+
+	return neutreeDeviceProduct(device)
+}
+
+func deviceCoreUnits(_ neutreeAcceleratorDeviceAnnotation) int64 {
+	return 100
+}
+
+func nonZeroInt64(value, fallback int64) int64 {
+	if value != 0 {
+		return value
+	}
+
+	return fallback
+}
+
+func nonNegativeInt64(value int64) int64 {
+	if value < 0 {
+		return 0
+	}
+
+	return value
 }
 
 func transformKubernetesVirtualizationEndpointResources(

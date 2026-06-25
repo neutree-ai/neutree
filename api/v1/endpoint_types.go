@@ -76,11 +76,12 @@ type ReplicaDeviceAllocation struct {
 }
 
 type DeviceAllocation struct {
-	UUID      string `json:"uuid"`
-	Product   string `json:"product"`
-	MemoryMiB int64  `json:"memory_mib"`
-	CoreUnits int64  `json:"core_units"`
-	NodeID    string `json:"node_id"`
+	UUID          string `json:"uuid"`
+	Product       string `json:"product"`
+	MemoryMiB     int64  `json:"memory_mib"`
+	CoreUnits     int64  `json:"core_units"`
+	NodeID        string `json:"node_id"`
+	UsedMemoryMiB int64  `json:"used_memory_mib,omitempty"`
 }
 
 type EndpointResourceSummary struct {
