@@ -314,6 +314,13 @@ var _ = Describe("Model", Ordered, func() {
 			ExpectFailed(r)
 			Expect(r.Stdout + r.Stderr).To(ContainSubstring("latest"))
 		})
+
+		It("should reject model names that BentoML would lowercase", Label("C2723761", "validation"), func() {
+			r := pushModel("Invalid_Name", "v1.0", 64)
+			ExpectFailed(r)
+			Expect(r.Stdout + r.Stderr).To(ContainSubstring("invalid model name"))
+			Expect(r.Stdout + r.Stderr).To(ContainSubstring("model name must be lowercase"))
+		})
 	})
 
 	// --- Delete ---

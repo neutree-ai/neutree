@@ -297,7 +297,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 			switch part.FormName() {
 			case "name":
 				value, _ := io.ReadAll(part)
-				name = strings.TrimSpace(string(value))
+				name = string(value)
 			case "version":
 				value, _ := io.ReadAll(part)
 				version = strings.TrimSpace(string(value))
@@ -319,6 +319,14 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		if name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "Model name is required",
+			})
+
+			return
+		}
+
+		if err := v1.ValidateModelName(name); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": fmt.Sprintf("Invalid model name: %v", err),
 			})
 
 			return
