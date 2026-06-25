@@ -64,6 +64,24 @@ func createMockContext(workspace, registryName, modelName, searchQuery string) (
 	return c, w
 }
 
+func createFinalizeContext(workspace, registryName, modelName, body string) (*gin.Context, *httptest.ResponseRecorder) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+workspace+"/model_registries/"+registryName+"/models/"+modelName+"/finalize",
+		bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = []gin.Param{
+		{Key: "workspace", Value: workspace},
+		{Key: "registry", Value: registryName},
+		{Key: "model", Value: modelName},
+	}
+
+	return c, w
+}
+
 // setupMocks creates and configures mocks for testing
 func setupMocks(t *testing.T) (*mocks.MockStorage, *model_registry_mocks.MockModelRegistry) {
 	// Create mocks
@@ -637,6 +655,34 @@ func TestDeleteModel_ValidationErrorSkipsRegistryDelete(t *testing.T) {
 	mockModelRegistry.AssertExpectations(t)
 }
 
+func TestFinalizeModel_Success(t *testing.T) {
+	mockStorage, mockModelRegistry := setupMocks(t)
+	deps := &Dependencies{Storage: mockStorage}
+	c, w := createFinalizeContext("default", "test-registry", "test-model", `{"version":"v1"}`)
+
+	modelRegistry := v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType},
+	}
+	modelVersion := &v1.ModelVersion{Name: "v1", Size: "1MB"}
+
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
+	mockModelRegistry.On("Connect").Return(nil)
+	mockModelRegistry.On("Disconnect").Return(nil)
+	mockModelRegistry.On("GetModelVersion", "test-model", "v1").Return(modelVersion, nil)
+
+	finalizeModel(deps)(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response v1.ModelVersion
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "v1", response.Name)
+
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
+}
+
 func TestUploadModel_InvalidName(t *testing.T) {
 	mockStorage, mockModelRegistry := setupMocks(t)
 	deps := &Dependencies{
@@ -678,4 +724,14 @@ func TestUploadModel_InvalidName(t *testing.T) {
 
 	mockStorage.AssertNotCalled(t, "ListModelRegistry", mock.Anything)
 	mockModelRegistry.AssertNotCalled(t, "ImportModel", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestFinalizeModel_RejectsMissingVersion(t *testing.T) {
+	deps := &Dependencies{}
+	c, w := createFinalizeContext("default", "test-registry", "test-model", `{}`)
+
+	finalizeModel(deps)(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Version is required")
 }

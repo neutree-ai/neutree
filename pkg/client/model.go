@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,43 @@ import (
 // ModelsService handles communication with the model related endpoints
 type ModelsService struct {
 	client *Client
+}
+
+type finalizePushRequest struct {
+	Version string `json:"version"`
+}
+
+func (s *ModelsService) FinalizePush(workspace, registry, modelName, version string) (*v1.ModelVersion, error) {
+	body, err := json.Marshal(finalizePushRequest{Version: version})
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s/finalize", s.client.baseURL, workspace, registry, modelName)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.client.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var modelVersion v1.ModelVersion
+	if err := json.NewDecoder(resp.Body).Decode(&modelVersion); err != nil {
+		return nil, err
+	}
+
+	return &modelVersion, nil
 }
 
 // NewModelsService creates a new models service
