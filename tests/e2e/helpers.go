@@ -50,6 +50,7 @@ type EngineArg struct {
 
 // cliBinary holds the path to the compiled neutree-cli binary.
 var cliBinary string
+var cleanupCLIBinary bool
 
 // Cluster phase timeouts shared across E2E tests.
 //
@@ -69,21 +70,48 @@ const (
 
 // BuildCLI compiles the neutree-cli binary to a temp directory.
 func BuildCLI() {
-	tmpDir, err := os.MkdirTemp("", "neutree-e2e-*")
+	resolved, cleanup, err := resolveCLIBinary()
 	Expect(err).NotTo(HaveOccurred())
 
-	cliBinary = filepath.Join(tmpDir, "neutree-cli")
+	cliBinary = resolved
+	cleanupCLIBinary = cleanup
+
+	if !cleanup {
+		return
+	}
+}
+
+func resolveCLIBinary() (string, bool, error) {
+	if cliPath := os.Getenv("E2E_CLI_BINARY"); cliPath != "" {
+		if _, err := os.Stat(cliPath); err != nil {
+			return "", false, err
+		}
+
+		return cliPath, false, nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "neutree-e2e-*")
+	if err != nil {
+		return "", false, err
+	}
+
+	binary := filepath.Join(tmpDir, "neutree-cli")
 	projectRoot := filepath.Join(".", "..", "..")
-	buildCmd := exec.Command("go", "build", "-o", cliBinary, "./cmd/neutree-cli/")
+	buildCmd := exec.Command("go", "build", "-o", binary, "./cmd/neutree-cli/")
 	buildCmd.Dir = projectRoot
 	buildCmd.Stdout = GinkgoWriter
 	buildCmd.Stderr = GinkgoWriter
-	Expect(buildCmd.Run()).To(Succeed(), "failed to build neutree-cli")
+
+	if err := buildCmd.Run(); err != nil {
+		return "", false, err
+	}
+
+	return binary, true, nil
 }
 
 // CleanupCLI removes the compiled binary and its temp directory.
 func CleanupCLI() {
-	if cliBinary != "" {
+	if cliBinary != "" && cleanupCLIBinary {
 		os.RemoveAll(filepath.Dir(cliBinary))
 	}
 }
