@@ -121,7 +121,7 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 
 				// Finalize a direct model push after the client writes to shared storage
 				models.POST("/:model/finalize",
-					middleware.RequirePermission("model:push", permissionDeps),
+					middleware.RequireWorkspacePermission("model:push", permissionDeps),
 					finalizeModel(deps))
 
 				// Download a model
@@ -139,12 +139,15 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 }
 
 type finalizeModelRequest struct {
-	Version string `json:"version"`
+	Version      string `json:"version"`
+	CreationTime string `json:"creation_time,omitempty"`
+	Size         string `json:"size,omitempty"`
+	Module       string `json:"module,omitempty"`
 }
 
 func finalizeModel(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		modelName := c.Param("model")
+		modelName := strings.ToLower(c.Param("model"))
 
 		var req finalizeModelRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -155,6 +158,7 @@ func finalizeModel(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		req.Version = strings.TrimSpace(req.Version)
 		if req.Version == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "Version is required",
@@ -163,7 +167,8 @@ func finalizeModel(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if req.Version == v1.LatestVersion {
+		version := strings.ToLower(req.Version)
+		if version == v1.LatestVersion {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "Cannot use 'latest' as version, please specify a concrete version",
 			})
@@ -182,18 +187,45 @@ func finalizeModel(deps *Dependencies) gin.HandlerFunc {
 		}
 		defer (*modelRegistry).Disconnect() //nolint:errcheck
 
-		modelVersion, err := (*modelRegistry).GetModelVersion(modelName, req.Version)
+		modelVersion, err := (*modelRegistry).GetModelVersion(modelName, version)
 		if err != nil {
-			klog.Errorf("Failed to finalize model %s:%s: %v", modelName, req.Version, err)
+			klog.Errorf("Failed to finalize model %s:%s: %v", modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": fmt.Sprintf("Failed to finalize model %s:%s: %v", modelName, req.Version, err),
+				"message": fmt.Sprintf("Failed to finalize model %s:%s: %v", modelName, version, err),
 			})
 
 			return
 		}
 
-		c.JSON(http.StatusOK, modelVersion)
+		if err := validateFinalizedModelVersion(req, modelVersion); err != nil {
+			c.JSON(http.StatusConflict, gin.H{
+				"message": err.Error(),
+			})
+
+			return
+		}
+
+		c.Status(http.StatusNoContent)
+		c.Writer.WriteHeaderNow()
 	}
+}
+
+func validateFinalizedModelVersion(req finalizeModelRequest, modelVersion *v1.ModelVersion) error {
+	if modelVersion == nil {
+		return fmt.Errorf("model version is missing after direct push")
+	}
+
+	if req.CreationTime != "" && modelVersion.CreationTime != req.CreationTime {
+		return fmt.Errorf("direct push creation_time does not match registry metadata")
+	}
+	if req.Size != "" && modelVersion.Size != req.Size {
+		return fmt.Errorf("direct push size does not match registry metadata")
+	}
+	if req.Module != "" && modelVersion.Module != req.Module {
+		return fmt.Errorf("direct push module does not match registry metadata")
+	}
+
+	return nil
 }
 
 // getModelRegistry retrieves and connects to a model registry

@@ -21,40 +21,47 @@ type ModelsService struct {
 }
 
 type finalizePushRequest struct {
-	Version string `json:"version"`
+	Version      string `json:"version"`
+	CreationTime string `json:"creation_time,omitempty"`
+	Size         string `json:"size,omitempty"`
+	Module       string `json:"module,omitempty"`
 }
 
-func (s *ModelsService) FinalizePush(workspace, registry, modelName, version string) (*v1.ModelVersion, error) {
-	body, err := json.Marshal(finalizePushRequest{Version: version})
+func (s *ModelsService) FinalizePush(workspace, registry, modelName string, modelVersion *v1.ModelVersion) error {
+	if modelVersion == nil {
+		return fmt.Errorf("model version is required")
+	}
+
+	body, err := json.Marshal(finalizePushRequest{
+		Version:      modelVersion.Name,
+		CreationTime: modelVersion.CreationTime,
+		Size:         modelVersion.Size,
+		Module:       modelVersion.Module,
+	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s/finalize", s.client.baseURL, workspace, registry, modelName)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.client.do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusNoContent {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("server returned non-204 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var modelVersion v1.ModelVersion
-	if err := json.NewDecoder(resp.Body).Decode(&modelVersion); err != nil {
-		return nil, err
-	}
-
-	return &modelVersion, nil
+	return nil
 }
 
 // NewModelsService creates a new models service

@@ -658,12 +658,12 @@ func TestDeleteModel_ValidationErrorSkipsRegistryDelete(t *testing.T) {
 func TestFinalizeModel_Success(t *testing.T) {
 	mockStorage, mockModelRegistry := setupMocks(t)
 	deps := &Dependencies{Storage: mockStorage}
-	c, w := createFinalizeContext("default", "test-registry", "test-model", `{"version":"v1"}`)
+	c, w := createFinalizeContext("default", "test-registry", "Test-Model", `{"version":"V1","creation_time":"2026-06-25T00:00:00Z","size":"1MB"}`)
 
 	modelRegistry := v1.ModelRegistry{
 		Spec: &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType},
 	}
-	modelVersion := &v1.ModelVersion{Name: "v1", Size: "1MB"}
+	modelVersion := &v1.ModelVersion{Name: "V1", Size: "1MB", CreationTime: "2026-06-25T00:00:00Z"}
 
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
 	mockModelRegistry.On("Connect").Return(nil)
@@ -672,12 +672,8 @@ func TestFinalizeModel_Success(t *testing.T) {
 
 	finalizeModel(deps)(c)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var response v1.ModelVersion
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
-	assert.Equal(t, "v1", response.Name)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Empty(t, w.Body.String())
 
 	mockStorage.AssertExpectations(t)
 	mockModelRegistry.AssertExpectations(t)
@@ -734,4 +730,28 @@ func TestFinalizeModel_RejectsMissingVersion(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "Version is required")
+}
+
+func TestFinalizeModel_RejectsMismatchedMetadata(t *testing.T) {
+	mockStorage, mockModelRegistry := setupMocks(t)
+	deps := &Dependencies{Storage: mockStorage}
+	c, w := createFinalizeContext("default", "test-registry", "test-model", `{"version":"v1","creation_time":"local","size":"1MB"}`)
+
+	modelRegistry := v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType},
+	}
+	modelVersion := &v1.ModelVersion{Name: "v1", Size: "1MB", CreationTime: "server"}
+
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
+	mockModelRegistry.On("Connect").Return(nil)
+	mockModelRegistry.On("Disconnect").Return(nil)
+	mockModelRegistry.On("GetModelVersion", "test-model", "v1").Return(modelVersion, nil)
+
+	finalizeModel(deps)(c)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "does not match")
+
+	mockStorage.AssertExpectations(t)
+	mockModelRegistry.AssertExpectations(t)
 }
