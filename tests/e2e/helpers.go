@@ -72,8 +72,10 @@ const (
 func BuildCLI() {
 	resolved, cleanup, err := resolveCLIBinary()
 	Expect(err).NotTo(HaveOccurred())
+
 	cliBinary = resolved
 	cleanupCLIBinary = cleanup
+
 	if !cleanup {
 		return
 	}
@@ -99,6 +101,7 @@ func resolveCLIBinary() (string, bool, error) {
 	buildCmd.Dir = projectRoot
 	buildCmd.Stdout = GinkgoWriter
 	buildCmd.Stderr = GinkgoWriter
+
 	if err := buildCmd.Run(); err != nil {
 		return "", false, err
 	}

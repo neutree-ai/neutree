@@ -216,9 +216,11 @@ func validateFinalizedModelVersion(req finalizeModelRequest, modelVersion *v1.Mo
 	if req.CreationTime != "" && modelVersion.CreationTime != req.CreationTime {
 		return fmt.Errorf("direct push creation_time does not match registry metadata")
 	}
+
 	if req.Size != "" && modelVersion.Size != req.Size {
 		return fmt.Errorf("direct push size does not match registry metadata")
 	}
+
 	if req.Module != "" && modelVersion.Module != req.Module {
 		return fmt.Errorf("direct push module does not match registry metadata")
 	}

@@ -48,6 +48,7 @@ func (s *ModelsService) FinalizePush(workspace, registry, modelName string, mode
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.client.do(req)
