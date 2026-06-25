@@ -35,7 +35,7 @@ func TestPreflightRejectsWhenNodesAlreadyLabeledByAnotherCluster(t *testing.T) {
 
 	err := component.Preflight(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "another Neutree cluster already manages")
+	assert.Contains(t, err.Error(), "accelerator virtualization is already active")
 }
 
 func TestPreflightAllowsRestartWhenNodesAlreadyLabeledBySelf(t *testing.T) {
@@ -79,14 +79,8 @@ func TestPreflightAllowsFirstDeployWhenNoExistingLabels(t *testing.T) {
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, ctrlClient)
 
-	// Without unmanaged HAMi resources, the only blocking factor is the
-	// virtualization label check. We expect it to pass.
 	err := component.Preflight(context.Background())
-	// This may fail because there are no managed HAMi resources rendered;
-	// we only care that it does NOT fail with the duplicate-owner message.
-	if err != nil {
-		assert.NotContains(t, err.Error(), "already manages")
-	}
+	require.NoError(t, err)
 }
 
 // hasHAMiStatus returns true when the cluster already carries a HAMi

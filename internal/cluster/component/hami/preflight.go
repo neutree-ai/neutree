@@ -120,25 +120,27 @@ func objectKind(obj client.Object) string {
 	return "Object"
 }
 
-// validateNoExistingVirtualization checks whether another Neutree cluster
-// already manages accelerator virtualization on the underlying Kubernetes
-// cluster. The check only runs on the initial deploy; restarts (where the
-// cluster already has a HAMi component status) are allowed through.
+// validateNoExistingVirtualization checks whether accelerator virtualization
+// is already active on the underlying Kubernetes cluster. The check only runs
+// on the initial deploy; restarts (where the cluster already has a HAMi
+// component status) are allowed through.
 func (h *HAMiComponent) validateNoExistingVirtualization(ctx context.Context) error {
 	if h.hasStatus() {
 		return nil
 	}
 
 	nodeList := &corev1.NodeList{}
-	if err := h.ctrlClient.List(ctx, nodeList); err != nil {
+	if err := h.ctrlClient.List(ctx, nodeList,
+		client.MatchingLabels{plugin.NvidiaGPUVirtualizationLabelKey: "true"},
+	); err != nil {
 		return errors.Wrap(err, "failed to list nodes for virtualization conflict check")
 	}
 
-	for _, node := range nodeList.Items {
-		if node.Labels[plugin.NvidiaGPUVirtualizationLabelKey] == "true" {
-			return errors.New(
-				"another Neutree cluster already manages accelerator virtualization on this Kubernetes cluster")
-		}
+	if len(nodeList.Items) > 0 {
+		return errors.New(
+			"accelerator virtualization is already active on the " +
+				"underlying Kubernetes cluster; remove existing vGPU node " +
+				"labels before re-creating the Neutree cluster")
 	}
 
 	return nil
