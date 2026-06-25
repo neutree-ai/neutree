@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
@@ -378,10 +379,10 @@ func (ev *EngineVersion) GetImageForK8sAccelerator(acceleratorType string) *Engi
 	return ev.GetImageForAccelerator(acceleratorType)
 }
 
-// GetSupportedAccelerators returns a list of supported accelerator keys
-// derived from the Images map. All keys are included — plain, ssh_-prefixed,
-// and k8s_-prefixed — so callers can see which specific image variants are
-// registered.
+// GetSupportedAccelerators returns a list of supported accelerator types.
+// The list is derived from the keys of the Images map, excluding prefixed
+// keys ("ssh_<accel>" and "k8s_<accel>") which are internal variants, not
+// distinct accelerator types.
 func (ev *EngineVersion) GetSupportedAccelerators() []string {
 	if ev.Images == nil {
 		return []string{}
@@ -390,6 +391,10 @@ func (ev *EngineVersion) GetSupportedAccelerators() []string {
 	accelerators := make([]string, 0, len(ev.Images))
 
 	for acceleratorType := range ev.Images {
+		if strings.HasPrefix(acceleratorType, SSHImageKeyPrefix) || strings.HasPrefix(acceleratorType, K8sImageKeyPrefix) {
+			continue
+		}
+
 		accelerators = append(accelerators, acceleratorType)
 	}
 

@@ -261,7 +261,7 @@ func TestEngineVersion_GetSupportedAccelerators(t *testing.T) {
 			contains:      []string{},
 		},
 		{
-			name: "all keys including prefixed variants are returned",
+			name: "ssh_ prefixed keys are excluded",
 			engineVersion: &EngineVersion{
 				Version: "v0.11.2",
 				Images: map[string]*EngineImage{
@@ -271,8 +271,8 @@ func TestEngineVersion_GetSupportedAccelerators(t *testing.T) {
 					SSHImageKeyPrefix + "cpu":        {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
 				},
 			},
-			expectedCount: 4,
-			contains:      []string{"nvidia_gpu", "cpu", SSHImageKeyPrefix + "nvidia_gpu", SSHImageKeyPrefix + "cpu"},
+			expectedCount: 2,
+			contains:      []string{"nvidia_gpu", "cpu"},
 		},
 	}
 
