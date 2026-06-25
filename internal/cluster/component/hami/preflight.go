@@ -4,13 +4,12 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 )
 
@@ -30,10 +29,6 @@ func (h *HAMiComponent) Preflight(ctx context.Context) error {
 	}
 
 	if err := h.validateUnmanagedHAMi(ctx); err != nil {
-		return err
-	}
-
-	if err := h.validateNoExistingVirtualization(ctx); err != nil {
 		return err
 	}
 
@@ -109,6 +104,19 @@ func (h *HAMiComponent) validateManagedObject(ctx context.Context, obj client.Ob
 		return errors.Errorf("found existing unmanaged HAMi resource %s/%s", kind, key.Name)
 	}
 
+	// The HAMi webhook is cluster-scoped and can only be owned by one
+	// Neutree cluster. If it already carries the managed label but belongs
+	// to a different Neutree cluster, reject to prevent duplicate HAMi
+	// deployments on the same underlying Kubernetes cluster.
+	if kind == "MutatingWebhookConfiguration" && key.Name == WebhookName {
+		labels := obj.GetLabels()
+		if labels[v1.NeutreeClusterWorkspaceLabelKey] != h.cluster.Metadata.Workspace ||
+			labels[v1.NeutreeClusterLabelKey] != h.cluster.Metadata.Name {
+			return errors.New(
+				"found existing HAMi webhook managed by another Neutree cluster")
+		}
+	}
+
 	return nil
 }
 
@@ -118,32 +126,6 @@ func objectKind(obj client.Object) string {
 	}
 
 	return "Object"
-}
-
-// validateNoExistingVirtualization checks whether accelerator virtualization
-// is already active on the underlying Kubernetes cluster. The check only runs
-// on the initial deploy; restarts (where the cluster already has a HAMi
-// component status) are allowed through.
-func (h *HAMiComponent) validateNoExistingVirtualization(ctx context.Context) error {
-	if h.hasStatus() {
-		return nil
-	}
-
-	nodeList := &corev1.NodeList{}
-	if err := h.ctrlClient.List(ctx, nodeList,
-		client.MatchingLabels{plugin.NvidiaGPUVirtualizationLabelKey: "true"},
-	); err != nil {
-		return errors.Wrap(err, "failed to list nodes for virtualization conflict check")
-	}
-
-	if len(nodeList.Items) > 0 {
-		return errors.New(
-			"accelerator virtualization is already active on the " +
-				"underlying Kubernetes cluster; remove existing vGPU node " +
-				"labels before re-creating the Neutree cluster")
-	}
-
-	return nil
 }
 
 func clientIgnoreNotFound(err error) error {
