@@ -437,6 +437,7 @@ func clusterPhaseOverrideFromError(err error) (v1.ClusterPhase, bool) {
 	var phaseErr interface {
 		ClusterPhase() v1.ClusterPhase
 	}
+
 	if !errors.As(err, &phaseErr) {
 		return "", false
 	}
@@ -829,6 +830,7 @@ func enrichStaticNodeClusterAcceleratorMetadata(
 		}
 
 		product := v1.AcceleratorProduct(device.Product)
+
 		productMetadata := metadata.Products[product]
 		if productMetadata == nil {
 			metadata.Products[product] = &v1.AcceleratorProductMetadata{

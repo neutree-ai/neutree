@@ -60,6 +60,7 @@ type CGroupFSUsageReader struct {
 func (r CGroupFSUsageReader) UsageForPID(pid int) (ContainerRuntimeUsage, bool, error) {
 	procRoot := firstNonEmpty(r.ProcFSRoot, defaultProcFSRoot)
 	cgroupRoot := firstNonEmpty(r.CGroupFSRoot, defaultCGroupFSRoot)
+
 	raw, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "cgroup"))
 	if err != nil {
 		return ContainerRuntimeUsage{}, false, err
@@ -118,6 +119,7 @@ func parseProcessCGroupPaths(raw string) processCGroupPaths {
 
 func (r CGroupFSUsageReader) readCGroupV2(root string, cgroupPath string) (ContainerRuntimeUsage, bool, error) {
 	dir := cgroupPathJoin(root, cgroupPath)
+
 	cpuUsage, ok, err := readKeyedFloat(filepath.Join(dir, "cpu.stat"), "usage_usec")
 	if err != nil || !ok {
 		return ContainerRuntimeUsage{}, false, err
@@ -136,6 +138,7 @@ func (r CGroupFSUsageReader) readCGroupV2(root string, cgroupPath string) (Conta
 	if hasMemoryUsage {
 		usage.MemoryUsageBytes = float64Ptr(memoryUsage)
 		usage.MemoryWorkingSetBytes = float64Ptr(memoryUsage)
+
 		if inactive, ok, err := readKeyedFloat(filepath.Join(dir, "memory.stat"), "inactive_file"); err != nil {
 			return ContainerRuntimeUsage{}, false, err
 		} else if ok {
@@ -179,13 +182,16 @@ func (r CGroupFSUsageReader) readCGroupV1(
 
 	if paths.memory != "" {
 		memoryDir := cgroupPathJoin(filepath.Join(root, "memory"), paths.memory)
+
 		memoryUsage, hasMemoryUsage, err := readSingleFloat(filepath.Join(memoryDir, "memory.usage_in_bytes"))
 		if err != nil {
 			return ContainerRuntimeUsage{}, false, err
 		}
+
 		if hasMemoryUsage {
 			usage.MemoryUsageBytes = float64Ptr(memoryUsage)
 			usage.MemoryWorkingSetBytes = float64Ptr(memoryUsage)
+
 			if inactive, ok, err := readKeyedFloat(
 				filepath.Join(memoryDir, "memory.stat"),
 				"total_inactive_file",
@@ -227,6 +233,7 @@ func (p RayServeRuntimeUsageProvider) Usages(ctx context.Context) ([]EndpointRep
 		Node:         p.Node,
 		NodeIP:       p.NodeIP,
 	}
+
 	service := allocationProvider.dashboardService()
 	if service == nil || p.NodeIP == "" {
 		return nil, nil
@@ -267,6 +274,7 @@ func (p RayServeRuntimeUsageProvider) Usages(ctx context.Context) ([]EndpointRep
 				if err != nil {
 					return nil, err
 				}
+
 				if ok {
 					usages = append(usages, usage)
 				}
@@ -356,6 +364,7 @@ func (p KubernetesCAdvisorRuntimeUsageProvider) Usages(ctx context.Context) ([]E
 	if err != nil {
 		return nil, err
 	}
+
 	if len(pods) == 0 {
 		return nil, nil
 	}
@@ -380,6 +389,7 @@ func (p KubernetesCAdvisorRuntimeUsageProvider) endpointPodsByMetricKey(
 	}
 
 	result := map[podContainerMetricKey]kubernetesEndpointContainer{}
+
 	for i := range podList.Items {
 		pod := podList.Items[i]
 		if pod.Spec.NodeName != p.NodeName || !isRunningEndpointPod(pod) {
@@ -488,6 +498,7 @@ func cAdvisorPodContainerMetricKey(metric sample) (podContainerMetricKey, bool) 
 
 	namespace := firstNonEmpty(metric.labels["namespace"], metric.labels["pod_namespace"])
 	pod := firstNonEmpty(metric.labels["pod"], metric.labels["pod_name"])
+
 	if namespace == "" || pod == "" {
 		return podContainerMetricKey{}, false
 	}
@@ -580,10 +591,12 @@ func readCGroupV2CPULimit(path string) (float64, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
+
 	period, err := strconv.ParseFloat(fields[1], 64)
 	if err != nil {
 		return 0, false, err
 	}
+
 	if quota <= 0 || period <= 0 {
 		return 0, false, nil
 	}
@@ -675,12 +688,15 @@ func sortEndpointReplicaRuntimeUsages(usages []EndpointReplicaRuntimeUsage) {
 		if usages[i].Workspace != usages[j].Workspace {
 			return usages[i].Workspace < usages[j].Workspace
 		}
+
 		if usages[i].Endpoint != usages[j].Endpoint {
 			return usages[i].Endpoint < usages[j].Endpoint
 		}
+
 		if usages[i].ReplicaID != usages[j].ReplicaID {
 			return usages[i].ReplicaID < usages[j].ReplicaID
 		}
+
 		if usages[i].Container != usages[j].Container {
 			return usages[i].Container < usages[j].Container
 		}

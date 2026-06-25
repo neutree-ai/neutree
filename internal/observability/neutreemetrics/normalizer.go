@@ -89,6 +89,7 @@ func (n *Normalizer) Normalize(req NormalizeRequest) string {
 
 	samples = append(samples, nodeReadySample(req.Labels))
 	samples = append(samples, scrapeUpSample(req.Labels, TargetNodeExporter, req.NodeExporter.Up))
+
 	if req.NodeExporter.Up {
 		samples = append(samples, normalizeNodeSamples(req.Labels, req.NodeExporter.Body)...)
 	}
@@ -115,6 +116,7 @@ func (n *Normalizer) Normalize(req NormalizeRequest) string {
 			req.GPUHardwareInfos,
 		)...)
 	}
+
 	samples = append(samples, normalizeEndpointReplicaRuntimeUsageSamples(
 		req.Labels,
 		req.EndpointReplicaRuntimeUsages,
@@ -151,6 +153,7 @@ func normalizeNodeSamples(labels CanonicalLabels, raw string) []canonicalSample 
 		if cpu := s.labels["cpu"]; cpu != "" {
 			metricLabels["cpu"] = cpu
 		}
+
 		if mode := s.labels["mode"]; mode != "" {
 			metricLabels["mode"] = mode
 		}
@@ -228,7 +231,7 @@ func normalizeAcceleratorSamples(labels CanonicalLabels, raw string) []canonical
 				labels: metricLabels,
 				value:  s.value * 1024 * 1024,
 			})
-		case "DCGM_FI_DEV_FB_TOTAL":
+		case dcgmFBTotalMetric:
 			result = append(result, canonicalSample{
 				name:   "neutree_gpu_memory_total_bytes",
 				labels: metricLabels,
@@ -275,6 +278,7 @@ func normalizeNodeGPUSamples(
 
 		metricLabels := nodeGPULabels(labels, product)
 		metricLabels["gpu_uuid"] = device.UUID
+
 		if device.ID != "" {
 			metricLabels["gpu_index"] = device.ID
 		}
@@ -290,6 +294,7 @@ func normalizeNodeGPUSamples(
 	for product := range totalByProduct {
 		products = append(products, product)
 	}
+
 	sort.Strings(products)
 
 	for _, product := range products {
@@ -387,6 +392,7 @@ func normalizeEndpointAllocationSamples(
 					value:  mibToBytes(device.MemoryMiB),
 				})
 			}
+
 			if device.UsedMemoryMiB > 0 {
 				result = append(result, canonicalSample{
 					name:   "neutree_endpoint_replica_gpu_memory_used_bytes",
@@ -410,6 +416,7 @@ func normalizeEndpointAllocationSamples(
 					value:  mibToBytes(device.MemoryMiB),
 				})
 			}
+
 			if device.UsedMemoryMiB > 0 {
 				result = append(result, canonicalSample{
 					name:   "neutree_node_gpu_allocation_memory_used_bytes",
@@ -519,6 +526,7 @@ type gpuMemorySnapshot struct {
 
 func gpuMemorySnapshotByUUID(samples []sample) map[string]gpuMemorySnapshot {
 	result := map[string]gpuMemorySnapshot{}
+
 	for _, s := range samples {
 		uuid := firstNonEmpty(s.labels["UUID"], s.labels["uuid"])
 		if uuid == "" {
@@ -526,12 +534,14 @@ func gpuMemorySnapshotByUUID(samples []sample) map[string]gpuMemorySnapshot {
 		}
 
 		snapshot := result[uuid]
+
 		switch s.name {
 		case "DCGM_FI_DEV_FB_USED":
 			snapshot.usedBytes = s.value * 1024 * 1024
 		case "DCGM_FI_DEV_FB_TOTAL":
 			snapshot.totalBytes = s.value * 1024 * 1024
 		}
+
 		result[uuid] = snapshot
 	}
 
@@ -540,10 +550,12 @@ func gpuMemorySnapshotByUUID(samples []sample) map[string]gpuMemorySnapshot {
 
 func gpuHardwareInfoByUUID(infos []GPUHardwareInfo) map[string]GPUHardwareInfo {
 	result := map[string]GPUHardwareInfo{}
+
 	for _, info := range infos {
 		if info.UUID == "" {
 			continue
 		}
+
 		result[info.UUID] = info
 	}
 
@@ -557,11 +569,13 @@ type endpointDeviceAllocation struct {
 
 func endpointAllocationsByGPUUUID(allocations []EndpointAllocation) map[string][]endpointDeviceAllocation {
 	result := map[string][]endpointDeviceAllocation{}
+
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
 			if device.UUID == "" {
 				continue
 			}
+
 			result[device.UUID] = append(result[device.UUID], endpointDeviceAllocation{
 				allocation: allocation,
 				device:     device,
@@ -609,6 +623,7 @@ func bytesDisplay(value float64) string {
 	}
 
 	const gib = 1024 * 1024 * 1024
+
 	return fmt.Sprintf("%.1f GiB", value/gib)
 }
 
@@ -620,22 +635,14 @@ func endpointReplicaDisplay(endpoint, replica string) string {
 	return endpoint + " / " + replica
 }
 
-func joinedDisplayValue(left, right string) string {
-	left = nonEmptyOrDash(left)
-	right = nonEmptyOrDash(right)
-	if left == "-" && right == "-" {
-		return "-"
-	}
-
-	return left + " / " + right
-}
-
 func nodeGPUDisplay(node, gpuIndex string) string {
 	node = nonEmptyOrDash(node)
 	gpuIndex = nonEmptyOrDash(gpuIndex)
+
 	if node == "-" && gpuIndex == "-" {
 		return "-"
 	}
+
 	if gpuIndex == "-" {
 		return node + " / GPU -"
 	}
@@ -760,6 +767,7 @@ func nodeGPULabels(labels CanonicalLabels, product string) map[string]string {
 
 func allocatedDeviceUUIDs(allocations []EndpointAllocation) map[string]struct{} {
 	result := map[string]struct{}{}
+
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
 			if device.UUID == "" {

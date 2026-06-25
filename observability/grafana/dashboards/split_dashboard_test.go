@@ -863,10 +863,28 @@ func TestSplitDashboardsArePackagedInHelmChart(t *testing.T) {
 			source, err := os.ReadFile(filepath.Clean(file))
 			require.NoError(t, err)
 
-			chart, err := os.ReadFile(filepath.Join("../../../deploy/chart/neutree/split-grafana-dashboards", file))
+			chart, err := os.ReadFile(chartSplitDashboardPath(t, file))
 			require.NoError(t, err)
 			assert.Equal(t, string(source), string(chart))
 		})
+	}
+}
+
+func chartSplitDashboardPath(t *testing.T, file string) string {
+	t.Helper()
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	for {
+		candidate := filepath.Join(wd, "deploy", "chart", "neutree", "split-grafana-dashboards", file)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+
+		parent := filepath.Dir(wd)
+		require.NotEqual(t, wd, parent, "failed to find chart split dashboard directory")
+		wd = parent
 	}
 }
 

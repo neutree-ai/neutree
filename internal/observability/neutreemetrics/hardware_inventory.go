@@ -13,7 +13,10 @@ import (
 	"strings"
 )
 
-const unknownHardwareValue = "unknown"
+const (
+	dcgmFBTotalMetric    = "DCGM_FI_DEV_FB_TOTAL"
+	unknownHardwareValue = "unknown"
+)
 
 var (
 	nvidiaSMIFullHardwareFields = []string{
@@ -79,19 +82,23 @@ func (p NvidiaSMIGPUHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) 
 	if err != nil {
 		infos, err = p.queryGPUHardwareInfos(ctx, command, nvidiaSMIMinimalHardwareFields)
 	}
+
 	if err != nil {
 		return nil, nil
 	}
 
 	cudaDriverVersion := p.cudaDriverVersion(ctx, command)
 	architecturesByUUID := p.productArchitectures(ctx, command)
+
 	for i := range infos {
 		if infos[i].Architecture == "" {
 			infos[i].Architecture = architecturesByUUID[infos[i].UUID]
 		}
+
 		if infos[i].CUDADriverVersion == "" {
 			infos[i].CUDADriverVersion = cudaDriverVersion
 		}
+
 		if infos[i].NUMANode == "" {
 			infos[i].NUMANode = numaNodeFromSysFS(p.SysFSRoot, infos[i].PCIEBusID)
 		}
@@ -152,9 +159,11 @@ func parseNvidiaSMIProductArchitecturesXML(raw string) map[string]string {
 	}
 
 	architecturesByUUID := make(map[string]string, len(query.GPUs))
+
 	for _, gpu := range query.GPUs {
 		uuid := cleanHardwareValue(gpu.UUID)
 		architecture := cleanHardwareValue(gpu.ProductArchitecture)
+
 		if uuid == "" || isUnknownHardwareLiteral(uuid) || isUnknownHardwareLiteral(architecture) {
 			continue
 		}
@@ -175,6 +184,7 @@ func parseNvidiaSMIGPUHardwareCSV(raw string, fields []string) []GPUHardwareInfo
 	}
 
 	infos := make([]GPUHardwareInfo, 0, len(records))
+
 	for _, record := range records {
 		info := GPUHardwareInfo{}
 
@@ -255,6 +265,7 @@ func gpuHardwareInfosFromAcceleratorMetrics(raw string) []GPUHardwareInfo {
 		if gpuIndex := firstNonEmpty(s.labels["gpu"], s.labels["GPU_I_ID"]); gpuIndex != "" {
 			info.Index = gpuIndex
 		}
+
 		if model := firstNonEmpty(s.labels["modelName"], s.labels["model"]); model != "" {
 			info.Product = model
 		}
@@ -273,7 +284,7 @@ func gpuHardwareInfosFromAcceleratorMetrics(raw string) []GPUHardwareInfo {
 
 func applyDCGMHardwareSample(info *GPUHardwareInfo, s sample) {
 	switch s.name {
-	case "DCGM_FI_DEV_FB_TOTAL":
+	case dcgmFBTotalMetric:
 		info.MemoryTotalMiB = formatFloat(s.value)
 	case "DCGM_FI_DRIVER_VERSION", "DCGM_FI_SYSTEM_DRIVER_VERSION":
 		info.DriverVersion = firstKnownHardwareValue(
@@ -392,6 +403,7 @@ func mergeGPUHardwareInfos(primary, fallback []GPUHardwareInfo) []GPUHardwareInf
 	}
 
 	result := make([]GPUHardwareInfo, 0, len(order))
+
 	seen := map[string]struct{}{}
 	for _, uuid := range order {
 		if _, ok := seen[uuid]; ok {
@@ -399,6 +411,7 @@ func mergeGPUHardwareInfos(primary, fallback []GPUHardwareInfo) []GPUHardwareInf
 		}
 
 		seen[uuid] = struct{}{}
+
 		result = append(result, merged[uuid])
 	}
 
@@ -446,6 +459,7 @@ func firstKnownHardwareValue(values ...string) string {
 func maxKnownHardwareNumber(values ...string) string {
 	maxValue := ""
 	maxNumber := 0.0
+
 	for _, value := range values {
 		value = cleanHardwareValue(value)
 		if isUnknownHardwareLiteral(value) {
@@ -456,6 +470,7 @@ func maxKnownHardwareNumber(values ...string) string {
 		if err != nil {
 			return firstKnownHardwareValue(values...)
 		}
+
 		if maxValue == "" || number > maxNumber {
 			maxValue = value
 			maxNumber = number
@@ -523,6 +538,7 @@ func formatCUDADriverVersion(value float64) string {
 
 	major := version / 1000
 	minor := (version % 1000) / 10
+
 	if major <= 0 {
 		return ""
 	}
@@ -546,6 +562,7 @@ func formatCUDAComputeCapability(value float64) string {
 	if raw > 1<<16 {
 		major := (raw >> 16) & 0xffff
 		minor := raw & 0xffff
+
 		if major > 0 {
 			return fmt.Sprintf("%d.%d", major, minor)
 		}

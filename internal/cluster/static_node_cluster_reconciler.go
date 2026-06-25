@@ -39,6 +39,11 @@ const (
 	defaultNodeExporterImage         = "quay.io/prometheus/node-exporter:v1.8.2"
 	defaultNodeAgentImage            = "neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent
 	defaultVMAgentImage              = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
+	vmagentRayLabelDropRegex         = "cache_dtype|calculate_kv_scales|cpu_kvcache_space_bytes|" +
+		"cpu_offload_gb|cpu_offload_params|enable_prefix_caching|gpu_memory_utilization|" +
+		"is_attention_free|kv_cache_memory_bytes|kv_offloading_backend|kv_offloading_size|" +
+		"kv_sharing_fast_prefill|mamba_.*|num_cpu_blocks|num_gpu_blocks_override|" +
+		"prefix_caching_hash_algo|sliding_window|swap_space"
 )
 
 type StaticNodeClusterReconciler struct {
@@ -465,6 +470,7 @@ func staticNodeClusterNodeStatusMessages(
 
 	for _, nodeName := range nodeNames {
 		node := nodesByName[nodeName]
+
 		message := staticNodeStatusMessage(nodeName, node)
 		if message == "" {
 			continue
@@ -543,6 +549,7 @@ func staticNodeClusterDesiredNodeNameList(cluster *v1.StaticNodeCluster) []strin
 		}
 
 		seen[node.Name] = struct{}{}
+
 		nodeNames = append(nodeNames, node.Name)
 	}
 
@@ -1110,7 +1117,9 @@ func writeVMAgentRayMetricRelabelConfigs(builder *strings.Builder) {
 	builder.WriteString("      target_label: __name__\n")
 	builder.WriteString("      replacement: 'sglang_$1'\n")
 	builder.WriteString("    - action: labeldrop\n")
-	builder.WriteString("      regex: 'cache_dtype|calculate_kv_scales|cpu_kvcache_space_bytes|cpu_offload_gb|cpu_offload_params|enable_prefix_caching|gpu_memory_utilization|is_attention_free|kv_cache_memory_bytes|kv_offloading_backend|kv_offloading_size|kv_sharing_fast_prefill|mamba_.*|num_cpu_blocks|num_gpu_blocks_override|prefix_caching_hash_algo|sliding_window|swap_space'\n")
+	builder.WriteString("      regex: '")
+	builder.WriteString(vmagentRayLabelDropRegex)
+	builder.WriteString("'\n")
 }
 
 func renderVMAgentFileSDConfigFiles(

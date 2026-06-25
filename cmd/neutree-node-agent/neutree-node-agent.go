@@ -138,10 +138,12 @@ func (o *options) config() (neutreemetrics.Config, error) {
 
 	config.KubernetesWriter = writer
 	config.AllocationProvider = o.allocationProvider(writer)
+
 	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
 	if err != nil {
 		return neutreemetrics.Config{}, err
 	}
+
 	config.RuntimeUsageProvider = runtimeUsageProvider
 
 	return config, nil

@@ -371,6 +371,7 @@ func parseNvidiaSMIComputeProcesses(raw string) []GPUProcess {
 		}
 
 		process := GPUProcess{UUID: uuid, PID: pid}
+
 		if len(parts) >= 3 {
 			if usedMemoryMiB, ok := parseFirstInt64(parts[2]); ok {
 				process.UsedMemoryMiB = usedMemoryMiB
