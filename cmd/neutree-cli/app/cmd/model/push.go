@@ -117,7 +117,12 @@ func NewPushCmd() *cobra.Command {
 					return err
 				}
 
-				if _, err := c.Models.FinalizePush(workspace, registry, modelName, version); err != nil {
+				modelVersion, err := cliModel.ReadImportedModelVersion(localNFSPath, modelName, version)
+				if err != nil {
+					return err
+				}
+
+				if err := c.Models.FinalizePush(workspace, registry, modelName, modelVersion); err != nil {
 					return fmt.Errorf("failed to finalize direct model push: %w", err)
 				}
 
