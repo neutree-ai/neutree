@@ -135,10 +135,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	runtimeUsages, runtimeUp, runtimeConfigured := s.endpointReplicaRuntimeUsages(r.Context())
 	normalizeReq := NormalizeRequest{
 		Labels:                       s.config.Labels,
 		NodeExporter:                 s.scrape(r.Context(), TargetNodeExporter, s.config.NodeExporterURL),
-		EndpointReplicaRuntimeUsages: s.endpointReplicaRuntimeUsages(r.Context()),
+		EndpointReplicaRuntimeUsages: runtimeUsages,
+	}
+
+	if runtimeConfigured {
+		normalizeReq.RuntimeUsage = &ScrapeResult{Target: TargetRuntimeUsage, Up: runtimeUp}
 	}
 
 	if acceleratorExporter := s.scrapeAcceleratorExporters(r.Context()); acceleratorExporter != nil {
@@ -152,9 +157,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(s.normalizer.Normalize(normalizeReq)))
 }
 
-func (s *Server) endpointReplicaRuntimeUsages(ctx context.Context) []EndpointReplicaRuntimeUsage {
+func (s *Server) endpointReplicaRuntimeUsages(ctx context.Context) ([]EndpointReplicaRuntimeUsage, bool, bool) {
 	if s.config.RuntimeUsageProvider == nil {
-		return nil
+		return nil, false, false
 	}
 
 	usageCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
@@ -162,10 +167,10 @@ func (s *Server) endpointReplicaRuntimeUsages(ctx context.Context) []EndpointRep
 
 	usages, err := s.config.RuntimeUsageProvider.Usages(usageCtx)
 	if err != nil {
-		return nil
+		return nil, false, true
 	}
 
-	return usages
+	return usages, true, true
 }
 
 func (s *Server) handleNodeSnapshot(w http.ResponseWriter, r *http.Request) {

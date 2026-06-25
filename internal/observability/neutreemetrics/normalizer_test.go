@@ -108,14 +108,14 @@ DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",model
 	assert.Contains(t, output, `neutree_node_gpu_free{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 	assert.Contains(t, output, `neutree_node_gpu_info{accelerator_type="nvidia_gpu",cluster_type="ray",gpu_index="0",gpu_uuid="GPU-abc",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 	assert.Contains(t, output, `neutree_node_gpu_hardware_info{accelerator_type="nvidia_gpu",architecture="unknown",cluster_type="ray",cuda_capability="unknown",cuda_driver_version="unknown",driver_version="unknown",gpu_index="0",gpu_uuid="GPU-abc",memory_total_mib="unknown",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",numa_node="1",nvlink="unknown",nvswitch="unknown",pcie_bus_id="00000000:3B:00.0",pcie_generation="unknown",pcie_width="unknown",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
-	assert.Contains(t, output, `neutree_endpoint_replica_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
-	assert.Contains(t, output, `neutree_endpoint_replica_gpu_memory_allocated_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 85899345920`)
-	assert.Contains(t, output, `neutree_endpoint_replica_gpu_memory_used_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 4294967296`)
-	assert.Contains(t, output, `neutree_node_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
-	assert.Contains(t, output, `neutree_node_gpu_allocation_info{accelerator_type="nvidia_gpu",cluster_type="ray",endpoint="chat",endpoint_replica="chat / replica-a",gpu_index="0",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_gpu="head-0 / GPU 0",node_ip="10.0.0.10",node_role="head",physical_vram="1.0 GiB / 80.0 GiB",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",vram="4.0 GiB / 80.0 GiB",workspace="default"} 1`)
-	assert.Contains(t, output, `neutree_node_gpu_allocation_info{accelerator_type="nvidia_gpu",cluster_type="ray",endpoint="-",endpoint_replica="-",gpu_index="1",gpu_uuid="GPU-def",instance_id="-",neutree_cluster="static-a",node="head-0",node_gpu="head-0 / GPU 1",node_ip="10.0.0.10",node_role="head",physical_vram="2.0 GiB / 80.0 GiB",product="A100",replica="-",replica_id="-",source="neutree-node-agent",static_node_cluster="static-a",vram="-",workspace="default"} 1`)
-	assert.Contains(t, output, `neutree_node_gpu_allocation_memory_allocated_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 85899345920`)
-	assert.Contains(t, output, `neutree_node_gpu_allocation_memory_used_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 4294967296`)
+	assert.Contains(t, output, `neutree_endpoint_replica_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_endpoint_replica_gpu_memory_allocated_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 85899345920`)
+	assert.Contains(t, output, `neutree_endpoint_replica_gpu_memory_used_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 4294967296`)
+	assert.Contains(t, output, `neutree_node_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_node_gpu_allocation_info{accelerator_type="nvidia_gpu",cluster_type="ray",endpoint="chat",endpoint_replica="chat / replica-a",gpu_index="0",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_gpu="head-0 / GPU 0",node_ip="10.0.0.10",node_role="head",physical_vram="1.0 GiB / 80.0 GiB",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",vram="4.0 GiB / 80.0 GiB",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_node_gpu_allocation_info{accelerator_type="nvidia_gpu",cluster_type="ray",endpoint="-",endpoint_replica="-",gpu_index="1",gpu_uuid="GPU-def",instance_id="-",neutree_cluster="static-a",node="head-0",node_gpu="head-0 / GPU 1",node_ip="10.0.0.10",node_role="head",physical_vram="2.0 GiB / 80.0 GiB",product="A100",replica="-",replica_id="-",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",vram="-",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_node_gpu_allocation_memory_allocated_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 85899345920`)
+	assert.Contains(t, output, `neutree_node_gpu_allocation_memory_used_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="chat-replica-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 4294967296`)
 	assert.NotContains(t, output, "neutree_metrics_mapping_supported")
 }
 
@@ -163,6 +163,62 @@ func TestNormalizerNormalizesEndpointReplicaRuntimeUsage(t *testing.T) {
 	assert.Contains(t, output, `neutree_endpoint_replica_memory_working_set_bytes{`+commonLabels+`} 768`)
 	assert.Contains(t, output, `neutree_endpoint_replica_cpu_limit_cores{`+commonLabels+`} 2.5`)
 	assert.Contains(t, output, `neutree_endpoint_replica_memory_limit_bytes{`+commonLabels+`} 2048`)
+}
+
+func TestNormalizerMarksRuntimeUsageScrapeState(t *testing.T) {
+	output := (&Normalizer{}).Normalize(NormalizeRequest{
+		Labels: testLabels(),
+		NodeExporter: ScrapeResult{
+			Target: TargetNodeExporter,
+			Up:     true,
+		},
+		RuntimeUsage: &ScrapeResult{
+			Target: TargetRuntimeUsage,
+			Up:     false,
+		},
+	})
+
+	assert.Contains(t, output, `neutree_metrics_scrape_up{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="neutree-node-agent",static_node_cluster="static-a",target="runtime-usage",workspace="default"} 0`)
+}
+
+func TestNormalizerPreservesHAMiVGPUResourceMode(t *testing.T) {
+	output := (&Normalizer{}).Normalize(NormalizeRequest{
+		Labels: testLabels(),
+		NodeExporter: ScrapeResult{
+			Target: TargetNodeExporter,
+			Up:     true,
+		},
+		AcceleratorExporter: &ScrapeResult{
+			Target: TargetAcceleratorExporter,
+			Up:     true,
+			Body: `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 87
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 15360
+`,
+		},
+		EndpointAllocations: []EndpointAllocation{
+			{
+				Workspace:  "default",
+				Cluster:    "static-a",
+				Endpoint:   "chat",
+				InstanceID: "pod-a",
+				ReplicaID:  "pod-a",
+				NodeID:     "head-0",
+				Devices: []v1.DeviceAllocation{
+					{
+						UUID:         "GPU-abc",
+						Product:      "Tesla-T4",
+						MemoryMiB:    7680,
+						CoreUnits:    50,
+						NodeID:       "head-0",
+						ResourceMode: v1.DeviceAllocationResourceModeHAMiVGPU,
+					},
+				},
+			},
+		},
+	})
+
+	assert.Contains(t, output, `neutree_node_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="pod-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="Tesla-T4",replica="pod-a",replica_id="pod-a",resource_mode="hami_vgpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, output, `neutree_node_gpu_allocation_info{accelerator_type="nvidia_gpu",cluster_type="ray",endpoint="chat",endpoint_replica="chat / pod-a",gpu_index="0",gpu_uuid="GPU-abc",instance_id="pod-a",neutree_cluster="static-a",node="head-0",node_gpu="head-0 / GPU 0",node_ip="10.0.0.10",node_role="head",physical_vram="- / 15.0 GiB",product="Tesla-T4",replica="pod-a",replica_id="pod-a",resource_mode="hami_vgpu",source="neutree-node-agent",static_node_cluster="static-a",vram="- / 7.5 GiB",workspace="default"} 1`)
 }
 
 func TestGPUHardwareInfosFromAcceleratorMetrics(t *testing.T) {

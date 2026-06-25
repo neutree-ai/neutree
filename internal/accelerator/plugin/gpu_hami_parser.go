@@ -136,11 +136,12 @@ func parseHAMiNvidiaEndpointResources(
 			}
 
 			instance.Devices = append(instance.Devices, v1.DeviceAllocation{
-				UUID:      allocation.DeviceID,
-				Product:   product,
-				MemoryMiB: allocation.MemoryMiB,
-				CoreUnits: allocation.CoreUnits,
-				NodeID:    pod.NodeName,
+				UUID:         allocation.DeviceID,
+				Product:      product,
+				MemoryMiB:    allocation.MemoryMiB,
+				CoreUnits:    allocation.CoreUnits,
+				NodeID:       pod.NodeName,
+				ResourceMode: v1.DeviceAllocationResourceModeHAMiVGPU,
 			})
 		}
 

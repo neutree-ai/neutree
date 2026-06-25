@@ -206,9 +206,11 @@ func TestGPUResourceParser_ParseKubernetesVirtualizationEndpoint(t *testing.T) {
 	require.Equal(t, int64(15360), instances[0].Devices[0].MemoryMiB)
 	require.Equal(t, int64(100), instances[0].Devices[0].CoreUnits)
 	require.Equal(t, "gpu-node", instances[0].Devices[0].NodeID)
+	require.Equal(t, v1.DeviceAllocationResourceModeHAMiVGPU, instances[0].Devices[0].ResourceMode)
 	require.Equal(t, "GPU-2", instances[0].Devices[1].UUID)
 	require.Equal(t, int64(7680), instances[0].Devices[1].MemoryMiB)
 	require.Equal(t, int64(50), instances[0].Devices[1].CoreUnits)
+	require.Equal(t, v1.DeviceAllocationResourceModeHAMiVGPU, instances[0].Devices[1].ResourceMode)
 }
 
 func TestGPUResourceParser_ParseKubernetesVirtualizationEndpointWithColonSeparatedAllocations(t *testing.T) {

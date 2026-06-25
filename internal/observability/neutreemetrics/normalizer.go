@@ -13,6 +13,7 @@ import (
 const (
 	TargetNodeExporter        = "node-exporter"
 	TargetAcceleratorExporter = "accelerator-exporter"
+	TargetRuntimeUsage        = "runtime-usage"
 )
 
 type CanonicalLabels struct {
@@ -36,6 +37,7 @@ type NormalizeRequest struct {
 	Labels                       CanonicalLabels
 	NodeExporter                 ScrapeResult
 	AcceleratorExporter          *ScrapeResult
+	RuntimeUsage                 *ScrapeResult
 	EndpointAllocations          []EndpointAllocation
 	GPUHardwareInfos             []GPUHardwareInfo
 	EndpointReplicaRuntimeUsages []EndpointReplicaRuntimeUsage
@@ -121,6 +123,9 @@ func (n *Normalizer) Normalize(req NormalizeRequest) string {
 		req.Labels,
 		req.EndpointReplicaRuntimeUsages,
 	)...)
+	if req.RuntimeUsage != nil {
+		samples = append(samples, scrapeUpSample(req.Labels, TargetRuntimeUsage, req.RuntimeUsage.Up))
+	}
 
 	sort.SliceStable(samples, func(i, j int) bool {
 		if samples[i].name == samples[j].name {
@@ -379,6 +384,7 @@ func normalizeEndpointAllocationSamples(
 			metricLabels["node"] = firstNonEmpty(allocation.NodeID, device.NodeID, labels.Node)
 			metricLabels["gpu_uuid"] = device.UUID
 			metricLabels["product"] = device.Product
+			metricLabels["resource_mode"] = deviceAllocationResourceMode(device)
 
 			result = append(result, canonicalSample{
 				name:   "neutree_endpoint_replica_gpu_allocation",
@@ -474,6 +480,7 @@ func normalizeNodeGPUAllocationInfoSamples(
 			unallocatedLabels["endpoint_replica"] = "-"
 			unallocatedLabels["instance_id"] = "-"
 			unallocatedLabels["vram"] = "-"
+			unallocatedLabels["resource_mode"] = v1.DeviceAllocationResourceModePhysicalGPU
 
 			result = append(result, canonicalSample{
 				name:   "neutree_node_gpu_allocation_info",
@@ -499,6 +506,7 @@ func normalizeNodeGPUAllocationInfoSamples(
 			allocationLabels["node"] = firstNonEmpty(allocation.allocation.NodeID, allocation.device.NodeID, labels.Node)
 			allocationLabels["node_gpu"] = nodeGPUDisplay(allocationLabels["node"], deviceLabels["gpu_index"])
 			allocationLabels["product"] = firstNonEmpty(allocation.device.Product, product)
+			allocationLabels["resource_mode"] = deviceAllocationResourceMode(allocation.device)
 			allocationLabels["endpoint_replica"] = endpointReplicaDisplay(
 				allocationLabels["endpoint"],
 				allocationLabels["replica"],
@@ -517,6 +525,14 @@ func normalizeNodeGPUAllocationInfoSamples(
 	}
 
 	return result
+}
+
+func deviceAllocationResourceMode(device v1.DeviceAllocation) string {
+	if device.ResourceMode != "" {
+		return device.ResourceMode
+	}
+
+	return v1.DeviceAllocationResourceModePhysicalGPU
 }
 
 type gpuMemorySnapshot struct {

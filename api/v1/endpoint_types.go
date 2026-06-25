@@ -75,6 +75,11 @@ type ReplicaDeviceAllocation struct {
 	Devices    []DeviceAllocation `json:"devices,omitempty"`
 }
 
+const (
+	DeviceAllocationResourceModePhysicalGPU = "physical_gpu"
+	DeviceAllocationResourceModeHAMiVGPU    = "hami_vgpu"
+)
+
 type DeviceAllocation struct {
 	UUID          string `json:"uuid"`
 	Product       string `json:"product"`
@@ -82,6 +87,7 @@ type DeviceAllocation struct {
 	CoreUnits     int64  `json:"core_units"`
 	NodeID        string `json:"node_id"`
 	UsedMemoryMiB int64  `json:"used_memory_mib,omitempty"`
+	ResourceMode  string `json:"resource_mode,omitempty"`
 }
 
 type EndpointResourceSummary struct {

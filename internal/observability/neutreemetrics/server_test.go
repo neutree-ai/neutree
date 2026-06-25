@@ -3,6 +3,7 @@ package neutreemetrics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -139,12 +140,12 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Contains(t, body, `neutree_node_gpu_total{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 	assert.Contains(t, body, `neutree_node_gpu_allocated{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
 	assert.Contains(t, body, `neutree_node_gpu_free{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="A100",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 0`)
-	assert.Contains(t, body, `neutree_endpoint_replica_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
-	assert.Contains(t, body, `neutree_endpoint_replica_gpu_memory_allocated_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 85899345920`)
-	assert.Contains(t, body, `neutree_endpoint_replica_gpu_memory_used_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 4294967296`)
-	assert.Contains(t, body, `neutree_node_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
-	assert.Contains(t, body, `neutree_node_gpu_allocation_memory_allocated_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 85899345920`)
-	assert.Contains(t, body, `neutree_node_gpu_allocation_memory_used_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 4294967296`)
+	assert.Contains(t, body, `neutree_endpoint_replica_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_endpoint_replica_gpu_memory_allocated_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 85899345920`)
+	assert.Contains(t, body, `neutree_endpoint_replica_gpu_memory_used_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 4294967296`)
+	assert.Contains(t, body, `neutree_node_gpu_allocation{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_node_gpu_allocation_memory_allocated_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 85899345920`)
+	assert.Contains(t, body, `neutree_node_gpu_allocation_memory_used_bytes{cluster_type="ray",endpoint="chat",gpu_uuid="GPU-abc",instance_id="actor-a",neutree_cluster="static-a",node="head-0",node_ip="10.0.0.10",node_role="head",product="NVIDIA_A100",replica="replica-a",replica_id="replica-a",resource_mode="physical_gpu",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"} 4294967296`)
 }
 
 func TestServerMetricsIncludesDiscoveredEndpointReplicaRuntimeUsage(t *testing.T) {
@@ -203,6 +204,46 @@ node_memory_MemAvailable_bytes 6442450944
 		`replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"`
 	assert.Contains(t, body, `neutree_endpoint_replica_cpu_usage_seconds_total{`+runtimeLabels+`} 12.5`)
 	assert.Contains(t, body, `neutree_endpoint_replica_memory_working_set_bytes{`+runtimeLabels+`} 512`)
+	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="neutree-node-agent",static_node_cluster="static-a",target="runtime-usage",workspace="default"} 1`)
+}
+
+func TestServerMetricsMarksRuntimeUsageUnavailable(t *testing.T) {
+	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184
+node_memory_MemAvailable_bytes 6442450944
+`))
+	}))
+	t.Cleanup(nodeExporter.Close)
+
+	server, err := NewServer(Config{
+		Labels: CanonicalLabels{
+			Workspace:         "default",
+			NeutreeCluster:    "static-a",
+			StaticNodeCluster: "static-a",
+			ClusterType:       "ray",
+			Node:              "head-0",
+			NodeIP:            "10.0.0.10",
+			NodeRole:          "head",
+		},
+		NodeExporterURL: nodeExporter.URL + "/metrics",
+		HTTPClient:      nodeExporter.Client(),
+		RuntimeUsageProvider: RuntimeUsageProviderFunc(func(_ context.Context) ([]EndpointReplicaRuntimeUsage, error) {
+			return nil, errors.New("runtime usage unavailable")
+		}),
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
+
+	body := readResponseBody(t, metricsResp)
+	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="neutree-node-agent",static_node_cluster="static-a",target="runtime-usage",workspace="default"} 0`)
+	assert.NotContains(t, body, "neutree_endpoint_replica_cpu_usage_seconds_total")
 }
 
 func TestServerMetricsDoesNotBlockOnSlowAllocationProvider(t *testing.T) {
