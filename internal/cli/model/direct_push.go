@@ -36,6 +36,7 @@ func ValidateDirectPushTarget(registry *v1.ModelRegistry, localNFSPath string) e
 	if err != nil {
 		return fmt.Errorf("local NFS path %s is not available: %w", localNFSPath, err)
 	}
+
 	if !info.IsDir() {
 		return fmt.Errorf("local NFS path %s is not a directory", localNFSPath)
 	}
@@ -44,11 +45,14 @@ func ValidateDirectPushTarget(registry *v1.ModelRegistry, localNFSPath string) e
 	if err != nil {
 		return fmt.Errorf("local NFS path %s is not writable: %w", localNFSPath, err)
 	}
+
 	probePath := probe.Name()
+
 	if err := probe.Close(); err != nil {
 		_ = os.Remove(probePath)
 		return fmt.Errorf("failed to close write check file under %s: %w", localNFSPath, err)
 	}
+
 	if err := os.Remove(probePath); err != nil {
 		return fmt.Errorf("failed to remove write check file under %s: %w", localNFSPath, err)
 	}
@@ -57,9 +61,11 @@ func ValidateDirectPushTarget(registry *v1.ModelRegistry, localNFSPath string) e
 	if err != nil {
 		return fmt.Errorf("failed to inspect local NFS mount for %s: %w", localNFSPath, err)
 	}
+
 	if !mounted {
 		return fmt.Errorf("local NFS path %s is not an NFS mount point", localNFSPath)
 	}
+
 	if normalizeNFSSource(mountSource) != expectedSource {
 		return fmt.Errorf("local NFS path %s is not mounted from %s", localNFSPath, expectedSource)
 	}
@@ -100,6 +106,7 @@ func defaultGetMountSource(localPath string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+
 	absPath = filepath.Clean(absPath)
 
 	switch runtime.GOOS {
@@ -130,6 +137,7 @@ func getLinuxMountSource(absPath string) (string, bool, error) {
 
 		leftFields := strings.Fields(left)
 		rightFields := strings.Fields(right)
+
 		if len(leftFields) < 5 || len(rightFields) < 2 {
 			continue
 		}
