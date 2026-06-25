@@ -1,0 +1,242 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(last_over_time(vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m])) or sum(last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "title": "Running",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(last_over_time(vllm:num_requests_waiting{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m])) or sum(last_over_time(sglang_num_queue_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "title": "Waiting",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(vllm:num_preemptions_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or vector(0)) + (sum(rate(sglang_num_retracted_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or vector(0))",
+          "refId": "A"
+        }
+      ],
+      "title": "Preemptions / Retractions",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "title": "Queue time P95",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum by (replica) (vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or sum by (replica) (sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or vector(0)",
+          "refId": "A",
+          "legendFormat": "{{replica}} running"
+        },
+        {
+          "expr": "sum by (replica) (vllm:num_requests_waiting{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or sum by (replica) (sglang_num_queue_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or vector(0)",
+          "refId": "B",
+          "legendFormat": "{{replica}} waiting"
+        },
+        {
+          "expr": "sum by (replica) (rate(vllm:num_preemptions_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
+          "refId": "C",
+          "legendFormat": "{{replica}} preemptions/s"
+        },
+        {
+          "expr": "sum by (replica) (rate(sglang_num_retracted_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
+          "refId": "D",
+          "legendFormat": "{{replica}} retractions/s"
+        }
+      ],
+      "title": "Queue status trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.5, sum by (le) (rate(sglang_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or vector(0)",
+          "refId": "A",
+          "legendFormat": "P50"
+        },
+        {
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.9, sum by (le) (rate(sglang_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or vector(0)",
+          "refId": "B",
+          "legendFormat": "P90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or vector(0)",
+          "refId": "C",
+          "legendFormat": "P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or vector(0)",
+          "refId": "D",
+          "legendFormat": "P99"
+        }
+      ],
+      "title": "Queue time trend",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": [
+    "neutree",
+    "endpoint",
+    "queue",
+    "embed"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "neutree-cluster",
+          "value": "neutree-cluster"
+        },
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "datasource": "${datasource}",
+        "definition": "label_values(neutree_node_ready, neutree_cluster)",
+        "includeAll": true,
+        "name": "Cluster",
+        "query": "label_values(neutree_node_ready, neutree_cluster)",
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "datasource": "${datasource}",
+        "definition": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "includeAll": true,
+        "name": "Endpoint",
+        "query": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Neutree Endpoint Queue Embed",
+  "uid": "neutree-endpoint-queue-embed",
+  "version": 1
+}
