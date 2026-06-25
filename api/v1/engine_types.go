@@ -401,44 +401,6 @@ func (ev *EngineVersion) GetSupportedAccelerators() []string {
 	return accelerators
 }
 
-// GetSupportedClusterTypes derives the supported cluster types for a given
-// accelerator from the Images map without requiring a separate enumeration field.
-//
-// Derivation rules:
-//   - plain <accel> key present → both "kubernetes" and "ssh" are supported
-//     (the Neutree-produced Ray-wrapped image works on either runtime)
-//   - k8s_<accel> key present → "kubernetes" is supported
-//   - ssh_<accel> key present → "ssh" is supported
-//
-// Returns an empty slice (not nil) when no image is registered for the
-// accelerator or when Images is nil, for JSON-serialization consistency
-// with GetSupportedAccelerators.
-func (ev *EngineVersion) GetSupportedClusterTypes(acceleratorType string) []string {
-	if ev.Images == nil {
-		return []string{}
-	}
-
-	_, hasPlain := ev.Images[acceleratorType]
-	_, hasK8s := ev.Images[K8sImageKeyPrefix+acceleratorType]
-	_, hasSSH := ev.Images[SSHImageKeyPrefix+acceleratorType]
-
-	if !hasPlain && !hasK8s && !hasSSH {
-		return []string{}
-	}
-
-	var types []string
-
-	if hasPlain || hasK8s {
-		types = append(types, "kubernetes")
-	}
-
-	if hasPlain || hasSSH {
-		types = append(types, "ssh")
-	}
-
-	return types
-}
-
 // SupportsAccelerator checks if the engine version supports a specific accelerator type
 func (ev *EngineVersion) SupportsAccelerator(acceleratorType string) bool {
 	if ev.Images == nil {
