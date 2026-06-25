@@ -61,9 +61,10 @@ type Profile struct {
 	} `yaml:"image_registry"`
 
 	ModelRegistry struct {
-		Type        string `yaml:"type"`
-		URL         string `yaml:"url"`
-		Credentials string `yaml:"credentials"`
+		Type         string `yaml:"type"`
+		URL          string `yaml:"url"`
+		Credentials  string `yaml:"credentials"`
+		LocalNFSPath string `yaml:"local_nfs_path"`
 	} `yaml:"model_registry"`
 
 	Workspace string `yaml:"workspace"`

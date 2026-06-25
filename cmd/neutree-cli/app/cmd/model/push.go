@@ -12,6 +12,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
+	cliModel "github.com/neutree-ai/neutree/internal/cli/model"
 	"github.com/neutree-ai/neutree/internal/model_registry/bentoml"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
@@ -21,6 +22,7 @@ func NewPushCmd() *cobra.Command {
 	var version string
 	var description string
 	var labelsFlag []string
+	var localNFSPath string
 
 	cmd := &cobra.Command{
 		Use:          "push [local_model_path]",
@@ -100,9 +102,28 @@ func NewPushCmd() *cobra.Command {
 
 			// Create client
 			c := client.NewClient(global.ServerURL, clientOptions...)
-			_, err = c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
+			modelRegistry, err := c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
 			if err != nil {
 				return fmt.Errorf("failed to get model registry %s: %w", registry, err)
+			}
+
+			if localNFSPath != "" {
+				if err := cliModel.ValidateDirectPushTarget(modelRegistry, localNFSPath); err != nil {
+					return err
+				}
+
+				fmt.Println("Importing model...")
+				if err := cliModel.ImportArchiveToLocalNFS(localNFSPath, modelPath, modelName, version, nil); err != nil {
+					return err
+				}
+
+				if _, err := c.Models.FinalizePush(workspace, registry, modelName, version); err != nil {
+					return fmt.Errorf("failed to finalize direct model push: %w", err)
+				}
+
+				fmt.Println("Model pushed successfully!")
+
+				return nil
 			}
 
 			// Get file size for progress bar
@@ -143,6 +164,7 @@ func NewPushCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&version, "version", "v", "", "Version of the model, (default: auto‑generated)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Description of the model")
 	cmd.Flags().StringSliceVarP(&labelsFlag, "label", "l", nil, "Labels in the format key=value")
+	cmd.Flags().StringVar(&localNFSPath, "local-nfs-path", "", "Path to a pre-mounted NFS ModelRegistry root for direct local import")
 
 	if err := cmd.MarkFlagRequired("name"); err != nil {
 		panic(fmt.Sprintf("Failed to mark flag 'name' as required: %v", err))

@@ -30,6 +30,9 @@ model_registry:
   type: hugging-face
   url: https://huggingface.co
   credentials: ""
+  # Pre-mounted BentoML NFS registry root for direct local model push tests.
+  # Required only for tests labeled nfs-direct.
+  local_nfs_path: ""
 
 workspace: default
 

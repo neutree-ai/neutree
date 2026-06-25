@@ -117,6 +117,11 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 					middleware.RequirePermission("model:push", permissionDeps),
 					uploadModel(deps))
 
+				// Finalize a direct model push after the client writes to shared storage
+				models.POST("/:model/finalize",
+					middleware.RequirePermission("model:push", permissionDeps),
+					finalizeModel(deps))
+
 				// Download a model
 				models.GET("/:model/download",
 					middleware.RequirePermission("model:pull", permissionDeps),
@@ -128,6 +133,64 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 					deleteModel(deps))
 			}
 		}
+	}
+}
+
+type finalizeModelRequest struct {
+	Version string `json:"version"`
+}
+
+func finalizeModel(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		modelName := c.Param("model")
+
+		var req finalizeModelRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": "Invalid finalize request",
+			})
+
+			return
+		}
+
+		if req.Version == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": "Version is required",
+			})
+
+			return
+		}
+
+		if req.Version == v1.LatestVersion {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": "Cannot use 'latest' as version, please specify a concrete version",
+			})
+
+			return
+		}
+
+		modelRegistry, err := getModelRegistry(c, deps)
+		if err != nil {
+			klog.Errorf("Failed to get model registry: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": err.Error(),
+			})
+
+			return
+		}
+		defer (*modelRegistry).Disconnect() //nolint:errcheck
+
+		modelVersion, err := (*modelRegistry).GetModelVersion(modelName, req.Version)
+		if err != nil {
+			klog.Errorf("Failed to finalize model %s:%s: %v", modelName, req.Version, err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": fmt.Sprintf("Failed to finalize model %s:%s: %v", modelName, req.Version, err),
+			})
+
+			return
+		}
+
+		c.JSON(http.StatusOK, modelVersion)
 	}
 }
 
