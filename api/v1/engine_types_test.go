@@ -336,6 +336,16 @@ func TestEngineVersion_GetImageForK8sAccelerator(t *testing.T) {
 			expected:        nil,
 		},
 		{
+			name: "only k8s_ key exists, no plain fallback",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					K8sImageKeyPrefix + "nvidia_gpu": k8sImage,
+				},
+			},
+			acceleratorType: "nvidia_gpu",
+			expected:        k8sImage,
+		},
+		{
 			name: "nil Images map, returns nil",
 			engineVersion: &EngineVersion{
 				Version: "v0.5.0",
@@ -428,15 +438,15 @@ func TestEngineVersion_GetSupportedClusterTypes(t *testing.T) {
 				},
 			},
 			acceleratorType: "amd_gpu",
-			expectedTypes:   nil,
+			expectedTypes:   []string{},
 		},
 		{
-			name: "nil Images map, returns nil",
+			name: "nil Images map, returns empty slice",
 			engineVersion: &EngineVersion{
 				Version: "v0.5.0",
 			},
 			acceleratorType: "nvidia_gpu",
-			expectedTypes:   nil,
+			expectedTypes:   []string{},
 		},
 	}
 

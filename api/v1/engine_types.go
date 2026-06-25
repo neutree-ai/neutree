@@ -410,10 +410,12 @@ func (ev *EngineVersion) GetSupportedAccelerators() []string {
 //   - k8s_<accel> key present → "kubernetes" is supported
 //   - ssh_<accel> key present → "ssh" is supported
 //
-// Returns nil when no image is registered for the accelerator.
+// Returns an empty slice (not nil) when no image is registered for the
+// accelerator or when Images is nil, for JSON-serialization consistency
+// with GetSupportedAccelerators.
 func (ev *EngineVersion) GetSupportedClusterTypes(acceleratorType string) []string {
 	if ev.Images == nil {
-		return nil
+		return []string{}
 	}
 
 	_, hasPlain := ev.Images[acceleratorType]
@@ -421,7 +423,7 @@ func (ev *EngineVersion) GetSupportedClusterTypes(acceleratorType string) []stri
 	_, hasSSH := ev.Images[SSHImageKeyPrefix+acceleratorType]
 
 	if !hasPlain && !hasK8s && !hasSSH {
-		return nil
+		return []string{}
 	}
 
 	var types []string
