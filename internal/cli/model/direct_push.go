@@ -5,9 +5,7 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -109,14 +107,7 @@ func defaultGetMountSource(localPath string) (string, bool, error) {
 
 	absPath = filepath.Clean(absPath)
 
-	switch runtime.GOOS {
-	case "linux":
-		return getLinuxMountSource(absPath)
-	case "darwin":
-		return getDarwinMountSource(absPath)
-	default:
-		return "", false, fmt.Errorf("unsupported platform %s", runtime.GOOS)
-	}
+	return getLinuxMountSource(absPath)
 }
 
 func getLinuxMountSource(absPath string) (string, bool, error) {
@@ -150,31 +141,6 @@ func getLinuxMountSource(absPath string) (string, bool, error) {
 		mountPoint := filepath.Clean(unescapeMountInfoField(leftFields[4]))
 		if mountPoint == absPath {
 			return rightFields[1], true, nil
-		}
-	}
-
-	return "", false, nil
-}
-
-func getDarwinMountSource(absPath string) (string, bool, error) {
-	output, err := exec.Command("mount").Output()
-	if err != nil {
-		return "", false, err
-	}
-
-	for _, line := range strings.Split(string(output), "\n") {
-		source, rest, found := strings.Cut(line, " on ")
-		if !found {
-			continue
-		}
-
-		mountPoint, attrs, found := strings.Cut(rest, " (")
-		if !found || !strings.Contains(attrs, "nfs") {
-			continue
-		}
-
-		if filepath.Clean(mountPoint) == absPath {
-			return source, true, nil
 		}
 	}
 
