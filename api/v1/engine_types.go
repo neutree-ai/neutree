@@ -427,9 +427,11 @@ func (ev *EngineVersion) GetSupportedClusterTypes(acceleratorType string) []stri
 	}
 
 	var types []string
+
 	if hasPlain || hasK8s {
 		types = append(types, "kubernetes")
 	}
+
 	if hasPlain || hasSSH {
 		types = append(types, "ssh")
 	}
