@@ -39,6 +39,16 @@ type ClusterSpec struct {
 	Version string `json:"version"`
 }
 
+type ClusterUpgradeStrategy struct {
+	Type ClusterUpgradeStrategyType `json:"type,omitempty" yaml:"type,omitempty"`
+}
+
+type ClusterUpgradeStrategyType string
+
+const (
+	ClusterUpgradeStrategyTypeRecreate ClusterUpgradeStrategyType = "Recreate"
+)
+
 type AcceleratorVirtualizationSpec struct {
 	Enabled     bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	ConfigPatch map[string]interface{} `json:"config_patch,omitempty" yaml:"config_patch,omitempty"`
@@ -235,6 +245,14 @@ func (obj *Cluster) GetVersion() string {
 	}
 
 	return obj.Spec.Version
+}
+
+func DefaultClusterUpgradeStrategy() *ClusterUpgradeStrategy {
+	return &ClusterUpgradeStrategy{Type: ClusterUpgradeStrategyTypeRecreate}
+}
+
+func IsSupportedClusterUpgradeStrategyType(strategyType ClusterUpgradeStrategyType) bool {
+	return strategyType == ClusterUpgradeStrategyTypeRecreate
 }
 
 func (obj *Cluster) GetName() string {

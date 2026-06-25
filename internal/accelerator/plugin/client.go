@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,20 @@ import (
 type acceleratorPluginClient struct {
 	client  *http.Client
 	baseURL string
+}
+
+type pluginHTTPError struct {
+	StatusCode int
+	Content    string
+}
+
+func (e *pluginHTTPError) Error() string {
+	return fmt.Sprintf("accelerator plugin request failed, status code: %d, content: %s", e.StatusCode, e.Content)
+}
+
+func IsHTTPStatus(err error, statusCode int) bool {
+	var httpErr *pluginHTTPError
+	return stderrors.As(err, &httpErr) && httpErr.StatusCode == statusCode
 }
 
 func newAcceleratorPluginClient(baseUrl string) AcceleratorPluginHandle {
@@ -79,6 +94,17 @@ func (u *acceleratorPluginClient) GetContainerRuntimeConfig() (v1.RuntimeConfig,
 	}
 
 	return response.RuntimeConfig, nil
+}
+
+func (u *acceleratorPluginClient) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+	response := &v1.GetAcceleratorProfileResponse{}
+
+	err := u.doGet(ctx, v1.GetAcceleratorProfilePath, response)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get accelerator profile from accelerator plugin")
+	}
+
+	return &response.Profile, nil
 }
 
 func (u *acceleratorPluginClient) GetResourceConverter() ResourceConverter {
@@ -151,7 +177,10 @@ func parsePluginResponse(resp *http.Response, result interface{}) error {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("get node accelerator failed, status code: %d, content: %s", resp.StatusCode, string(content))
+		return &pluginHTTPError{
+			StatusCode: resp.StatusCode,
+			Content:    string(content),
+		}
 	}
 
 	err = json.Unmarshal(content, result)
