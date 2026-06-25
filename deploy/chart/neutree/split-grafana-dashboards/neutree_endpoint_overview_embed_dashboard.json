@@ -1,28 +1,593 @@
 {
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "graphTooltip": 0,
   "panels": [
-    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0}, "id": 1, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "count(count by (replica) (neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"})) or count(count by (replica) (vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"})) or count(count by (replica) (sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}))", "refId": "A"}], "title": "Replicas", "type": "stat"},
-    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0}, "id": 2, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_endpoint_pending_replicas{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}) or vector(0)", "refId": "A"}], "title": "Pending Replicas", "type": "stat"},
-    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0}, "id": 3, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(neutree_endpoint_failed_replicas{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}) or vector(0)", "refId": "A"}], "title": "Failed Replicas", "type": "stat"},
-    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0}, "id": 4, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or sum(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or vector(0)", "refId": "A"}], "title": "Running Requests", "type": "stat"},
-    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0}, "id": 5, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "sum(vllm:num_requests_waiting{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or sum(sglang_num_queue_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or vector(0)", "refId": "A"}], "title": "Waiting Requests", "type": "stat"},
-    {"datasource": "${datasource}", "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0}, "id": 6, "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}, "targets": [{"expr": "count(count by (endpoint, replica, gpu_uuid) (neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}))", "refId": "A"}], "title": "Replicas with Devices", "type": "stat"},
-    {"datasource": "${datasource}", "gridPos": {"h": 7, "w": 12, "x": 0, "y": 4}, "id": 7, "targets": [{"expr": "count by (application, deployment) (vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}) or count by (application, deployment) (sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"})", "format": "table", "instant": true, "refId": "A"}], "title": "Runtime", "type": "table"},
-    {"datasource": "${datasource}", "gridPos": {"h": 7, "w": 12, "x": 12, "y": 4}, "id": 8, "targets": [{"expr": "max by (endpoint, replica, node, gpu_uuid, product) (neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"})", "format": "table", "instant": true, "refId": "A"}], "title": "Replicas with Devices", "type": "table"}
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (product) (last_over_time(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) or on() vector(0)",
+          "refId": "A",
+          "legendFormat": "{{product}}"
+        }
+      ],
+      "title": "Consumed GPUs",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 5,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(max by (node, gpu_uuid) (last_over_time(neutree_gpu_memory_used_bytes{neutree_cluster=~\"$Cluster\"}[30m])) * on (node, gpu_uuid) group_left() max by (node, gpu_uuid) (last_over_time(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "title": "VRAM used",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 6,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(neutree_endpoint_replica_cpu_usage_seconds_total{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[$__rate_interval])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU cores",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 7,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(last_over_time(neutree_endpoint_replica_memory_working_set_bytes{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory working set",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "max by (node, gpu_uuid) (last_over_time(neutree_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\"}[30m])) * on (node, gpu_uuid) group_left(replica, gpu_index) max by (node, gpu_uuid, replica, gpu_index) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
+          "refId": "A",
+          "legendFormat": "replica-{{replica}}-node-{{node}}-gpu-{{gpu_index}}"
+        }
+      ],
+      "title": "GPU utilization trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "(max by (node, gpu_uuid) (last_over_time(neutree_gpu_memory_used_bytes{neutree_cluster=~\"$Cluster\"}[30m])) / clamp_min(max by (node, gpu_uuid) (last_over_time(neutree_gpu_memory_total_bytes{neutree_cluster=~\"$Cluster\"}[30m])), 1)) * on (node, gpu_uuid) group_left(replica, gpu_index) max by (node, gpu_uuid, replica, gpu_index) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
+          "refId": "A",
+          "legendFormat": "replica-{{replica}}-node-{{node}}-gpu-{{gpu_index}}"
+        }
+      ],
+      "title": "VRAM utilization trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "sum by (replica, deployment) (rate(neutree_endpoint_replica_cpu_usage_seconds_total{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "{{replica}} {{deployment}}"
+        }
+      ],
+      "title": "CPU usage trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum by (replica, deployment) (neutree_endpoint_replica_memory_working_set_bytes{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"})",
+          "refId": "A",
+          "legendFormat": "{{replica}} {{deployment}}"
+        }
+      ],
+      "title": "Memory usage trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 1,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$Datasource"
+          },
+          "editorMode": "code",
+          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "allocation info",
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$Datasource"
+          },
+          "editorMode": "code",
+          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, gpu_uuid) group_left(architecture, cuda_capability, driver_version, cuda_driver_version, nvlink, nvswitch, pcie_bus_id, pcie_generation, pcie_width, numa_node) max by (node, gpu_uuid, architecture, cuda_capability, driver_version, cuda_driver_version, nvlink, nvswitch, pcie_bus_id, pcie_generation, pcie_width, numa_node) (neutree_node_gpu_hardware_info{neutree_cluster=~\"$Cluster\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "hardware",
+          "range": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$Datasource"
+          },
+          "editorMode": "code",
+          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, gpu_uuid) group_left() max by (node, gpu_uuid) (last_over_time(neutree_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\"}[30m]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "gpu util",
+          "range": false,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$Datasource"
+          },
+          "editorMode": "code",
+          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, gpu_uuid) group_left() max by (node, gpu_uuid) (last_over_time(neutree_gpu_temperature_celsius{neutree_cluster=~\"$Cluster\"}[30m]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "temperature",
+          "range": false,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$Datasource"
+          },
+          "editorMode": "code",
+          "expr": "max by (endpoint, replica, node, gpu_uuid, model_replica, model_name) ((label_join((max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (replica) group_left(model_name) (max by (replica, model_name) (last_over_time(vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:request_success_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:engine_sleep_state{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang_num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m])) or label_replace(max by (replica, served_model_name) (last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m]) or last_over_time(sglang_num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m])), \"model_name\", \"$1\", \"served_model_name\", \"(.*)\"))), \"model_replica\", \" / \", \"model_name\", \"replica\")) or (label_join(label_set(max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])), \"model_name\", \"-\"), \"model_replica\", \" / \", \"model_name\", \"replica\") unless on (replica) (max by (replica, model_name) (last_over_time(vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:request_success_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:engine_sleep_state{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang_num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m])) or label_replace(max by (replica, served_model_name) (last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m]) or last_over_time(sglang_num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m])), \"model_name\", \"$1\", \"served_model_name\", \"(.*)\"))))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "model",
+          "range": false,
+          "refId": "F"
+        }
+      ],
+      "title": "GPU allocation details",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "Value #A": true,
+              "Value #B": true,
+              "gpu_uuid": true,
+              "gpu_index": true,
+              "endpoint": true,
+              "replica": true,
+              "model_name": true
+            },
+            "indexByName": {
+              "model_replica": 0,
+              "node_gpu": 1,
+              "physical_vram": 2,
+              "vram": 3,
+              "Value #C": 4,
+              "product": 5,
+              "architecture": 6,
+              "cuda_capability": 7,
+              "driver_version": 8,
+              "cuda_driver_version": 9,
+              "Value #D": 10,
+              "nvlink": 11,
+              "nvswitch": 12,
+              "pcie_bus_id": 13,
+              "pcie_generation": 14,
+              "pcie_width": 15,
+              "numa_node": 16
+            },
+            "renameByName": {
+              "model_replica": "Model / Replica",
+              "node_gpu": "Node / GPU",
+              "physical_vram": "Physical VRAM Used / Total",
+              "vram": "VRAM Used / Allocated",
+              "Value #C": "GPU Util",
+              "product": "Product",
+              "architecture": "Architecture",
+              "cuda_capability": "CUDA Capability",
+              "driver_version": "Driver",
+              "cuda_driver_version": "CUDA Driver",
+              "Value #D": "Temperature",
+              "nvlink": "NVLink",
+              "nvswitch": "NVSwitch",
+              "pcie_bus_id": "PCIe Bus",
+              "pcie_generation": "PCIe Gen",
+              "pcie_width": "PCIe Width",
+              "numa_node": "NUMA"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GPU Util"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Temperature"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "NVLink"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "unknown": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "NVSwitch"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "unknown": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Model / Replica"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              },
+              {
+                "id": "custom.wrapText",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Node / GPU"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "custom.wrapText",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Physical VRAM Used / Total"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              },
+              {
+                "id": "custom.wrapText",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VRAM Used / Allocated"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              },
+              {
+                "id": "custom.wrapText",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCIe Bus"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              },
+              {
+                "id": "custom.wrapText",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "id": "Model / Replica",
+            "displayName": "Model / Replica",
+            "desc": false
+          }
+        ]
+      }
+    }
   ],
   "refresh": "10s",
   "schemaVersion": 40,
-  "tags": ["neutree", "endpoint", "overview", "embed"],
-  "templating": {"list": [
-    {"current": {"text": "Prometheus", "value": "Prometheus"}, "name": "datasource", "query": "prometheus", "type": "datasource"},
-    {"datasource": "${datasource}", "definition": "label_values(neutree_node_ready, neutree_cluster)", "includeAll": true, "name": "Cluster", "query": "label_values(neutree_node_ready, neutree_cluster)", "refresh": 1, "type": "query"},
-    {"datasource": "${datasource}", "definition": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)", "includeAll": true, "name": "Endpoint", "query": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)", "refresh": 1, "type": "query"}
-  ]},
-  "time": {"from": "now-1h", "to": "now"},
+  "tags": [
+    "neutree",
+    "endpoint",
+    "overview",
+    "embed"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "neutree-cluster",
+          "value": "neutree-cluster"
+        },
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "datasource": "${datasource}",
+        "definition": "label_values(neutree_node_ready, neutree_cluster)",
+        "includeAll": true,
+        "name": "Cluster",
+        "query": "label_values(neutree_node_ready, neutree_cluster)",
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "datasource": "${datasource}",
+        "definition": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "includeAll": true,
+        "name": "Endpoint",
+        "query": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timezone": "browser",
   "title": "Neutree Endpoint Overview Embed",
   "uid": "neutree-endpoint-overview-embed",
-  "version": 1
+  "version": 2
 }

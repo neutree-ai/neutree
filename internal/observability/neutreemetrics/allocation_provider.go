@@ -318,8 +318,9 @@ func (f GPUProcessReaderFunc) GPUProcesses(ctx context.Context) ([]GPUProcess, e
 }
 
 type GPUProcess struct {
-	UUID string
-	PID  int
+	UUID          string
+	PID           int
+	UsedMemoryMiB int64
 }
 
 type NvidiaSMIGPUProcessReader struct {
@@ -335,7 +336,7 @@ func (r NvidiaSMIGPUProcessReader) GPUProcesses(ctx context.Context) ([]GPUProce
 	out, err := exec.CommandContext(
 		ctx,
 		command,
-		"--query-compute-apps=gpu_uuid,pid",
+		"--query-compute-apps=gpu_uuid,pid,used_memory",
 		"--format=csv,noheader,nounits",
 	).Output()
 	if err != nil {
@@ -369,10 +370,31 @@ func parseNvidiaSMIComputeProcesses(raw string) []GPUProcess {
 			continue
 		}
 
-		processes = append(processes, GPUProcess{UUID: uuid, PID: pid})
+		process := GPUProcess{UUID: uuid, PID: pid}
+		if len(parts) >= 3 {
+			if usedMemoryMiB, ok := parseFirstInt64(parts[2]); ok {
+				process.UsedMemoryMiB = usedMemoryMiB
+			}
+		}
+
+		processes = append(processes, process)
 	}
 
 	return processes
+}
+
+func parseFirstInt64(value string) (int64, bool) {
+	fields := strings.Fields(strings.TrimSpace(value))
+	if len(fields) == 0 {
+		return 0, false
+	}
+
+	parsed, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return parsed, true
 }
 
 type ProcessTreeReader interface {
@@ -641,6 +663,15 @@ func allocationDevicesFromRefs(
 	deviceLookup acceleratorDeviceLookup,
 	nodeID string,
 ) []v1.DeviceAllocation {
+	return allocationDevicesFromRefsWithUsage(refs, deviceLookup, nodeID, nil)
+}
+
+func allocationDevicesFromRefsWithUsage(
+	refs []string,
+	deviceLookup acceleratorDeviceLookup,
+	nodeID string,
+	usedMemoryMiBByUUID map[string]int64,
+) []v1.DeviceAllocation {
 	devices := make([]v1.DeviceAllocation, 0, len(refs))
 	seen := map[string]struct{}{}
 
@@ -656,13 +687,18 @@ func allocationDevicesFromRefs(
 
 		seen[device.UUID] = struct{}{}
 
-		devices = append(devices, v1.DeviceAllocation{
+		allocation := v1.DeviceAllocation{
 			UUID:      device.UUID,
 			Product:   firstNonEmpty(device.ProductModel, device.ProductName),
 			MemoryMiB: device.MemoryMiB,
 			CoreUnits: 100,
 			NodeID:    nodeID,
-		})
+		}
+		if usedMemoryMiBByUUID != nil {
+			allocation.UsedMemoryMiB = usedMemoryMiBByUUID[device.UUID]
+		}
+
+		devices = append(devices, allocation)
 	}
 
 	return devices
@@ -676,6 +712,7 @@ func allocationDevicesFromGPUProcesses(
 	nodeID string,
 ) ([]v1.DeviceAllocation, error) {
 	refs := make([]string, 0, len(gpuProcesses))
+	usedMemoryMiBByUUID := map[string]int64{}
 
 	for _, gpuProcess := range gpuProcesses {
 		descendant, err := processTree.IsDescendant(gpuProcess.PID, actorPID)
@@ -685,10 +722,11 @@ func allocationDevicesFromGPUProcesses(
 
 		if descendant {
 			refs = append(refs, gpuProcess.UUID)
+			usedMemoryMiBByUUID[gpuProcess.UUID] += gpuProcess.UsedMemoryMiB
 		}
 	}
 
-	return allocationDevicesFromRefs(refs, deviceLookup, nodeID), nil
+	return allocationDevicesFromRefsWithUsage(refs, deviceLookup, nodeID, usedMemoryMiBByUUID), nil
 }
 
 func deviceFromRef(

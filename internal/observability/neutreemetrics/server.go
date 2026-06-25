@@ -23,6 +23,8 @@ type Config struct {
 	SnapshotToken           string
 	SnapshotProvider        SnapshotProvider
 	AllocationProvider      AllocationProvider
+	RuntimeUsageProvider    RuntimeUsageProvider
+	GPUHardwareProvider     GPUHardwareInfoProvider
 	AllocationTimeout       time.Duration
 	KubernetesWriter        *KubernetesAnnotationWriter
 	AnnotationSyncInterval  time.Duration
@@ -134,18 +136,36 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	normalizeReq := NormalizeRequest{
-		Labels:       s.config.Labels,
-		NodeExporter: s.scrape(r.Context(), TargetNodeExporter, s.config.NodeExporterURL),
+		Labels:                       s.config.Labels,
+		NodeExporter:                 s.scrape(r.Context(), TargetNodeExporter, s.config.NodeExporterURL),
+		EndpointReplicaRuntimeUsages: s.endpointReplicaRuntimeUsages(r.Context()),
 	}
 
 	if acceleratorExporter := s.scrapeAcceleratorExporters(r.Context()); acceleratorExporter != nil {
 		normalizeReq.AcceleratorExporter = acceleratorExporter
 		normalizeReq.EndpointAllocations = s.endpointAllocationsFromScrape(r.Context(), acceleratorExporter)
+		normalizeReq.GPUHardwareInfos = s.gpuHardwareInfosFromScrape(r.Context(), acceleratorExporter)
 	}
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(s.normalizer.Normalize(normalizeReq)))
+}
+
+func (s *Server) endpointReplicaRuntimeUsages(ctx context.Context) []EndpointReplicaRuntimeUsage {
+	if s.config.RuntimeUsageProvider == nil {
+		return nil
+	}
+
+	usageCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
+	defer cancel()
+
+	usages, err := s.config.RuntimeUsageProvider.Usages(usageCtx)
+	if err != nil {
+		return nil
+	}
+
+	return usages
 }
 
 func (s *Server) handleNodeSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +245,32 @@ func (s *Server) endpointAllocationsFromScrape(
 	}
 
 	return endpointAllocationsFromStaticNodeAllocations(s.config.Labels, snapshot.Allocations)
+}
+
+func (s *Server) gpuHardwareInfosFromScrape(
+	ctx context.Context,
+	acceleratorExporter *ScrapeResult,
+) []GPUHardwareInfo {
+	if acceleratorExporter == nil || !acceleratorExporter.Up {
+		return nil
+	}
+
+	infos := gpuHardwareInfosFromAcceleratorMetrics(acceleratorExporter.Body)
+
+	provider := s.config.GPUHardwareProvider
+	if provider == nil {
+		provider = NvidiaSMIGPUHardwareInfoProvider{}
+	}
+
+	hardwareCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
+	defer cancel()
+
+	providerInfos, err := provider.GPUHardwareInfos(hardwareCtx)
+	if err != nil {
+		return infos
+	}
+
+	return mergeGPUHardwareInfos(infos, providerInfos)
 }
 
 func (s *Server) allocationTimeout() time.Duration {

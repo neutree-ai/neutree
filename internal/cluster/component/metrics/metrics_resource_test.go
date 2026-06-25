@@ -13,6 +13,7 @@ import (
 	"gotest.tools/v3/assert"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -348,12 +349,45 @@ func TestBuildMetricsResourcesIncludesNeutreeNodeAgentDaemonSet(t *testing.T) {
 	assert.Equal(t, "NODE_IP", envs[1].Name)
 	assert.Equal(t, "status.hostIP", envs[1].ValueFrom.FieldRef.FieldPath)
 	requireVolumeMount(t, nodeAgent, "kubelet-pod-resources", "/var/lib/kubelet/pod-resources")
+	requireClusterRoleResource(t, objs, "neutree-node-agent-", "nodes/proxy")
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'neutree-node-agent'"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=neutree-node-agent"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19101"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: $1:9101"))
+}
+
+func requireClusterRoleResource(t *testing.T, objs *unstructured.UnstructuredList, namePrefix, resource string) {
+	t.Helper()
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() != "ClusterRole" || !strings.HasPrefix(obj.GetName(), namePrefix) {
+			continue
+		}
+
+		objContent, err := json.Marshal(obj.Object)
+		if err != nil {
+			t.Fatalf("failed to marshal cluster role: %v", err)
+		}
+
+		clusterRole := &rbacv1.ClusterRole{}
+		if err := json.Unmarshal(objContent, clusterRole); err != nil {
+			t.Fatalf("failed to unmarshal cluster role: %v", err)
+		}
+
+		for _, rule := range clusterRole.Rules {
+			for _, got := range rule.Resources {
+				if got == resource {
+					return
+				}
+			}
+		}
+
+		t.Fatalf("expected cluster role %s to include resource %s", obj.GetName(), resource)
+	}
+
+	t.Fatalf("expected cluster role with prefix %s", namePrefix)
 }
 
 func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) {
@@ -409,17 +443,37 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	collectors := config.Data["default-counters.csv"]
 	for _, metric := range []string{
 		"DCGM_FI_DEV_GPU_UTIL",
+		"DCGM_FI_DEV_NAME",
+		"DCGM_FI_DEV_BRAND",
+		"DCGM_FI_DEV_PCI_BUSID",
+		"DCGM_FI_CUDA_DRIVER_VERSION",
+		"DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY",
+		"DCGM_FI_DEV_PCIE_LINK_GEN",
+		"DCGM_FI_DEV_PCIE_LINK_WIDTH",
 		"DCGM_FI_DEV_FB_USED_PERCENT",
 		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL",
 		"DCGM_FI_DEV_RETIRED_PENDING",
 		"DCGM_FI_DEV_PCIE_REPLAY_COUNTER",
+		"DCGM_FI_PROF_GR_ENGINE_ACTIVE",
+		"DCGM_FI_PROF_SM_ACTIVE",
+		"DCGM_FI_PROF_SM_OCCUPANCY",
+		"DCGM_FI_PROF_PIPE_TENSOR_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP64_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP32_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP16_ACTIVE",
+		"DCGM_FI_PROF_DRAM_ACTIVE",
+		"DCGM_FI_PROF_PCIE_TX_BYTES",
+		"DCGM_FI_PROF_PCIE_RX_BYTES",
+		"DCGM_FI_PROF_NVLINK_RX_BYTES",
+		"DCGM_FI_PROF_NVLINK_TX_BYTES",
 		"DCGM_FI_DEV_POWER_VIOLATION",
 		"DCGM_FI_DEV_THERMAL_VIOLATION",
 	} {
 		assert.Assert(t, strings.Contains(collectors, metric))
 	}
-	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_PROF_"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_CUSTOM_"))
 	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_CLOCKS_EVENT_REASONS"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_P2P_NVLINK_STATUS"))
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))

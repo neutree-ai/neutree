@@ -712,6 +712,64 @@ func TestStaticNodeReconcilerReconcileComponentsStopsRemovedComponent(t *testing
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
+func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testing.T) {
+	node := &v1.StaticNode{
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			Components: []v1.NodeComponentSpec{
+				{
+					Name: vmagentComponentName,
+					Type: v1.NodeComponentTypeMetricsAgent,
+					ConfigFiles: []v1.NodeComponentConfigFile{
+						{
+							Path: vmagentConfigPath,
+							Sudo: true,
+						},
+					},
+				},
+			},
+		},
+		Status: &v1.StaticNodeStatus{
+			Components: []v1.NodeComponentStatus{
+				{
+					Name:  vmagentComponentName,
+					Type:  v1.NodeComponentTypeMetricsAgent,
+					Ready: true,
+					Phase: v1.NodeComponentPhaseRunning,
+				},
+				{
+					Name:  "ray-head",
+					Type:  v1.NodeComponentTypeRayHead,
+					Ready: true,
+					Phase: v1.NodeComponentPhaseRunning,
+				},
+			},
+		},
+	}
+	fileClient := &fakeStaticNodeFileClient{}
+	runner := &fakeStaticNodeRunner{
+		fileClient: fileClient,
+		responses: []fakeStaticNodeResponse{
+			{
+				command: "docker rm -f 'neutree-static-a-vmagent' >/dev/null 2>&1 || true",
+			},
+			{
+				command: "docker rm -f 'neutree-static-a-ray-head' >/dev/null 2>&1 || true",
+			},
+			{
+				command: "containers=$(docker ps -aq --filter label='neutree.ai/static-node-cluster=static-a'); " +
+					"if [ -n \"$containers\" ]; then docker rm -f $containers >/dev/null 2>&1; fi",
+			},
+		},
+	}
+
+	err := (&StaticNodeReconciler{}).Delete(context.Background(), node, runner)
+
+	require.NoError(t, err)
+	assert.Equal(t, len(runner.responses), runner.calls)
+	assert.Equal(t, []string{vmagentConfigPath}, fileClient.removedPaths)
+}
+
 func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerWithDashboardAPI(t *testing.T) {
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
@@ -1154,10 +1212,11 @@ func (f *fakeStaticNodeRunner) Files() commandrunner.FileClient {
 }
 
 type fakeStaticNodeFileClient struct {
-	changed bool
-	path    string
-	content []byte
-	calls   int
+	changed      bool
+	path         string
+	content      []byte
+	removedPaths []string
+	calls        int
 }
 
 func (f *fakeStaticNodeFileClient) WriteFileIfChanged(
@@ -1204,8 +1263,10 @@ func (f *fakeStaticNodeFileClient) Stat(
 
 func (f *fakeStaticNodeFileClient) Remove(
 	_ context.Context,
-	_ string,
+	remotePath string,
 	_ commandrunner.RemoveFileOptions,
 ) error {
+	f.removedPaths = append(f.removedPaths, remotePath)
+
 	return nil
 }

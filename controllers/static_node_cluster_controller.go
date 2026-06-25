@@ -91,6 +91,14 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		desiredByName[node.Metadata.Name] = node
 
 		if err := c.store.UpsertStaticNode(ctx, node); err != nil {
+			if updateErr := c.store.UpdateStaticNodeClusterStatus(
+				ctx,
+				cluster,
+				staticNodeClusterFailedStatus(plan.Status, err),
+			); updateErr != nil {
+				return errors.Wrap(updateErr, "failed to update static node cluster status")
+			}
+
 			return errors.Wrapf(err, "failed to upsert static node %s", node.Metadata.Name)
 		}
 	}
@@ -156,4 +164,22 @@ func staticNodeName(node *v1.StaticNode) string {
 	}
 
 	return node.Metadata.Name
+}
+
+func staticNodeClusterFailedStatus(
+	status v1.StaticNodeClusterStatus,
+	err error,
+) v1.StaticNodeClusterStatus {
+	status.Phase = v1.StaticNodeClusterPhaseFailed
+	if err == nil {
+		return status
+	}
+
+	if status.ErrorMessage == "" {
+		status.ErrorMessage = err.Error()
+	} else {
+		status.ErrorMessage += "; " + err.Error()
+	}
+
+	return status
 }

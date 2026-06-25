@@ -33,10 +33,12 @@ type ScrapeResult struct {
 }
 
 type NormalizeRequest struct {
-	Labels              CanonicalLabels
-	NodeExporter        ScrapeResult
-	AcceleratorExporter *ScrapeResult
-	EndpointAllocations []EndpointAllocation
+	Labels                       CanonicalLabels
+	NodeExporter                 ScrapeResult
+	AcceleratorExporter          *ScrapeResult
+	EndpointAllocations          []EndpointAllocation
+	GPUHardwareInfos             []GPUHardwareInfo
+	EndpointReplicaRuntimeUsages []EndpointReplicaRuntimeUsage
 }
 
 type EndpointAllocation struct {
@@ -47,6 +49,25 @@ type EndpointAllocation struct {
 	ReplicaID  string
 	NodeID     string
 	Devices    []v1.DeviceAllocation
+}
+
+type EndpointReplicaRuntimeUsage struct {
+	Workspace             string
+	Cluster               string
+	Endpoint              string
+	InstanceID            string
+	ReplicaID             string
+	NodeID                string
+	Deployment            string
+	Container             string
+	ContainerID           string
+	Engine                string
+	EngineVersion         string
+	CPUUsageSeconds       float64
+	MemoryUsageBytes      *float64
+	MemoryWorkingSetBytes *float64
+	CPULimitCores         *float64
+	MemoryLimitBytes      *float64
 }
 
 type Normalizer struct{}
@@ -81,10 +102,23 @@ func (n *Normalizer) Normalize(req NormalizeRequest) string {
 				req.AcceleratorExporter.Body,
 				req.EndpointAllocations,
 			)...)
+			samples = append(samples, normalizeGPUHardwareInfoSamples(req.Labels, req.GPUHardwareInfos)...)
 		}
 	}
 
 	samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations)...)
+	if req.AcceleratorExporter != nil && req.AcceleratorExporter.Up {
+		samples = append(samples, normalizeNodeGPUAllocationInfoSamples(
+			req.Labels,
+			req.AcceleratorExporter.Body,
+			req.EndpointAllocations,
+			req.GPUHardwareInfos,
+		)...)
+	}
+	samples = append(samples, normalizeEndpointReplicaRuntimeUsageSamples(
+		req.Labels,
+		req.EndpointReplicaRuntimeUsages,
+	)...)
 
 	sort.SliceStable(samples, func(i, j int) bool {
 		if samples[i].name == samples[j].name {
@@ -104,8 +138,29 @@ func (n *Normalizer) Normalize(req NormalizeRequest) string {
 }
 
 func normalizeNodeSamples(labels CanonicalLabels, raw string) []canonicalSample {
-	parsed := indexFirstSampleByName(parsePrometheusText(raw))
+	samples := parsePrometheusText(raw)
+	parsed := indexFirstSampleByName(samples)
 	var result []canonicalSample
+
+	for _, s := range samples {
+		if s.name != "node_cpu_seconds_total" {
+			continue
+		}
+
+		metricLabels := baseLabels(labels, TargetNodeExporter)
+		if cpu := s.labels["cpu"]; cpu != "" {
+			metricLabels["cpu"] = cpu
+		}
+		if mode := s.labels["mode"]; mode != "" {
+			metricLabels["mode"] = mode
+		}
+
+		result = append(result, canonicalSample{
+			name:   "neutree_node_cpu_seconds_total",
+			labels: metricLabels,
+			value:  s.value,
+		})
+	}
 
 	if total, ok := parsed["node_memory_MemTotal_bytes"]; ok {
 		result = append(result, canonicalSample{
@@ -178,6 +233,12 @@ func normalizeAcceleratorSamples(labels CanonicalLabels, raw string) []canonical
 				name:   "neutree_gpu_memory_total_bytes",
 				labels: metricLabels,
 				value:  s.value * 1024 * 1024,
+			})
+		case "DCGM_FI_DEV_GPU_TEMP":
+			result = append(result, canonicalSample{
+				name:   "neutree_gpu_temperature_celsius",
+				labels: metricLabels,
+				value:  s.value,
 			})
 		}
 	}
@@ -259,6 +320,39 @@ func normalizeNodeGPUSamples(
 	return result
 }
 
+func normalizeGPUHardwareInfoSamples(labels CanonicalLabels, infos []GPUHardwareInfo) []canonicalSample {
+	result := make([]canonicalSample, 0, len(infos))
+
+	for _, info := range infos {
+		if info.UUID == "" {
+			continue
+		}
+
+		metricLabels := nodeGPULabels(labels, hardwareInfoLabelValue(info.Product))
+		metricLabels["gpu_uuid"] = info.UUID
+		metricLabels["gpu_index"] = hardwareInfoLabelValue(info.Index)
+		metricLabels["architecture"] = hardwareInfoLabelValue(info.Architecture)
+		metricLabels["cuda_capability"] = hardwareInfoLabelValue(info.CUDACapability)
+		metricLabels["driver_version"] = hardwareInfoLabelValue(info.DriverVersion)
+		metricLabels["cuda_driver_version"] = hardwareInfoLabelValue(info.CUDADriverVersion)
+		metricLabels["memory_total_mib"] = hardwareInfoLabelValue(info.MemoryTotalMiB)
+		metricLabels["nvlink"] = hardwareInfoLabelValue(info.NVLink)
+		metricLabels["nvswitch"] = hardwareInfoLabelValue(info.NVSwitch)
+		metricLabels["pcie_bus_id"] = hardwareInfoLabelValue(info.PCIEBusID)
+		metricLabels["pcie_generation"] = hardwareInfoLabelValue(info.PCIEGeneration)
+		metricLabels["pcie_width"] = hardwareInfoLabelValue(info.PCIEWidth)
+		metricLabels["numa_node"] = hardwareInfoLabelValue(info.NUMANode)
+
+		result = append(result, canonicalSample{
+			name:   "neutree_node_gpu_hardware_info",
+			labels: metricLabels,
+			value:  1,
+		})
+	}
+
+	return result
+}
+
 func normalizeEndpointAllocationSamples(
 	labels CanonicalLabels,
 	allocations []EndpointAllocation,
@@ -286,6 +380,20 @@ func normalizeEndpointAllocationSamples(
 				labels: metricLabels,
 				value:  1,
 			})
+			if device.MemoryMiB > 0 {
+				result = append(result, canonicalSample{
+					name:   "neutree_endpoint_replica_gpu_memory_allocated_bytes",
+					labels: metricLabels,
+					value:  mibToBytes(device.MemoryMiB),
+				})
+			}
+			if device.UsedMemoryMiB > 0 {
+				result = append(result, canonicalSample{
+					name:   "neutree_endpoint_replica_gpu_memory_used_bytes",
+					labels: metricLabels,
+					value:  mibToBytes(device.UsedMemoryMiB),
+				})
+			}
 
 			nodeGPUMetricLabels := cloneLabels(metricLabels)
 			nodeGPUMetricLabels["replica"] = allocation.ReplicaID
@@ -295,10 +403,323 @@ func normalizeEndpointAllocationSamples(
 				labels: nodeGPUMetricLabels,
 				value:  1,
 			})
+			if device.MemoryMiB > 0 {
+				result = append(result, canonicalSample{
+					name:   "neutree_node_gpu_allocation_memory_allocated_bytes",
+					labels: nodeGPUMetricLabels,
+					value:  mibToBytes(device.MemoryMiB),
+				})
+			}
+			if device.UsedMemoryMiB > 0 {
+				result = append(result, canonicalSample{
+					name:   "neutree_node_gpu_allocation_memory_used_bytes",
+					labels: nodeGPUMetricLabels,
+					value:  mibToBytes(device.UsedMemoryMiB),
+				})
+			}
 		}
 	}
 
 	return result
+}
+
+func normalizeNodeGPUAllocationInfoSamples(
+	labels CanonicalLabels,
+	raw string,
+	allocations []EndpointAllocation,
+	hardwareInfos []GPUHardwareInfo,
+) []canonicalSample {
+	devices := acceleratorDevicesFromMetrics(raw)
+	if len(devices) == 0 {
+		return nil
+	}
+
+	memoryByUUID := gpuMemorySnapshotByUUID(parsePrometheusText(raw))
+	hardwareByUUID := gpuHardwareInfoByUUID(hardwareInfos)
+	allocationsByUUID := endpointAllocationsByGPUUUID(allocations)
+	result := make([]canonicalSample, 0, len(devices))
+
+	for _, device := range devices {
+		if device.UUID == "" {
+			continue
+		}
+
+		product := firstNonEmpty(device.ProductModel, device.ProductName, v1.AcceleratorTypeNVIDIAGPU.String())
+		deviceLabels := nodeGPULabels(labels, product)
+		deviceLabels["gpu_uuid"] = device.UUID
+		deviceLabels["gpu_index"] = firstNonEmpty(device.ID, hardwareByUUID[device.UUID].Index, "-")
+		deviceLabels["node_gpu"] = nodeGPUDisplay(deviceLabels["node"], deviceLabels["gpu_index"])
+
+		physicalUsed := memoryByUUID[device.UUID].usedBytes
+		physicalTotal := firstPositiveFloat(
+			memoryByUUID[device.UUID].totalBytes,
+			mibStringToBytes(hardwareByUUID[device.UUID].MemoryTotalMiB),
+			mibToBytes(device.MemoryMiB),
+		)
+		deviceLabels["physical_vram"] = bytesPairDisplay(physicalUsed, physicalTotal)
+
+		deviceAllocations := allocationsByUUID[device.UUID]
+		if len(deviceAllocations) == 0 {
+			unallocatedLabels := cloneLabels(deviceLabels)
+			unallocatedLabels["endpoint"] = "-"
+			unallocatedLabels["replica"] = "-"
+			unallocatedLabels["replica_id"] = "-"
+			unallocatedLabels["endpoint_replica"] = "-"
+			unallocatedLabels["instance_id"] = "-"
+			unallocatedLabels["vram"] = "-"
+
+			result = append(result, canonicalSample{
+				name:   "neutree_node_gpu_allocation_info",
+				labels: unallocatedLabels,
+				value:  1,
+			})
+
+			continue
+		}
+
+		for _, allocation := range deviceAllocations {
+			allocationLabels := cloneLabels(deviceLabels)
+			allocationLabels["workspace"] = firstNonEmpty(allocation.allocation.Workspace, labels.Workspace)
+			allocationLabels["neutree_cluster"] = firstNonEmpty(
+				allocation.allocation.Cluster,
+				labels.NeutreeCluster,
+				labels.StaticNodeCluster,
+			)
+			allocationLabels["endpoint"] = nonEmptyOrDash(allocation.allocation.Endpoint)
+			allocationLabels["replica"] = nonEmptyOrDash(allocation.allocation.ReplicaID)
+			allocationLabels["replica_id"] = nonEmptyOrDash(allocation.allocation.ReplicaID)
+			allocationLabels["instance_id"] = nonEmptyOrDash(allocation.allocation.InstanceID)
+			allocationLabels["node"] = firstNonEmpty(allocation.allocation.NodeID, allocation.device.NodeID, labels.Node)
+			allocationLabels["node_gpu"] = nodeGPUDisplay(allocationLabels["node"], deviceLabels["gpu_index"])
+			allocationLabels["product"] = firstNonEmpty(allocation.device.Product, product)
+			allocationLabels["endpoint_replica"] = endpointReplicaDisplay(
+				allocationLabels["endpoint"],
+				allocationLabels["replica"],
+			)
+			allocationLabels["vram"] = bytesPairDisplay(
+				mibToBytes(allocation.device.UsedMemoryMiB),
+				mibToBytes(allocation.device.MemoryMiB),
+			)
+
+			result = append(result, canonicalSample{
+				name:   "neutree_node_gpu_allocation_info",
+				labels: allocationLabels,
+				value:  1,
+			})
+		}
+	}
+
+	return result
+}
+
+type gpuMemorySnapshot struct {
+	usedBytes  float64
+	totalBytes float64
+}
+
+func gpuMemorySnapshotByUUID(samples []sample) map[string]gpuMemorySnapshot {
+	result := map[string]gpuMemorySnapshot{}
+	for _, s := range samples {
+		uuid := firstNonEmpty(s.labels["UUID"], s.labels["uuid"])
+		if uuid == "" {
+			continue
+		}
+
+		snapshot := result[uuid]
+		switch s.name {
+		case "DCGM_FI_DEV_FB_USED":
+			snapshot.usedBytes = s.value * 1024 * 1024
+		case "DCGM_FI_DEV_FB_TOTAL":
+			snapshot.totalBytes = s.value * 1024 * 1024
+		}
+		result[uuid] = snapshot
+	}
+
+	return result
+}
+
+func gpuHardwareInfoByUUID(infos []GPUHardwareInfo) map[string]GPUHardwareInfo {
+	result := map[string]GPUHardwareInfo{}
+	for _, info := range infos {
+		if info.UUID == "" {
+			continue
+		}
+		result[info.UUID] = info
+	}
+
+	return result
+}
+
+type endpointDeviceAllocation struct {
+	allocation EndpointAllocation
+	device     v1.DeviceAllocation
+}
+
+func endpointAllocationsByGPUUUID(allocations []EndpointAllocation) map[string][]endpointDeviceAllocation {
+	result := map[string][]endpointDeviceAllocation{}
+	for _, allocation := range allocations {
+		for _, device := range allocation.Devices {
+			if device.UUID == "" {
+				continue
+			}
+			result[device.UUID] = append(result[device.UUID], endpointDeviceAllocation{
+				allocation: allocation,
+				device:     device,
+			})
+		}
+	}
+
+	return result
+}
+
+func mibToBytes(value int64) float64 {
+	return float64(value) * 1024 * 1024
+}
+
+func mibStringToBytes(value string) float64 {
+	mib, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0
+	}
+
+	return mib * 1024 * 1024
+}
+
+func firstPositiveFloat(values ...float64) float64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+
+	return 0
+}
+
+func bytesPairDisplay(usedBytes, totalBytes float64) string {
+	if usedBytes <= 0 && totalBytes <= 0 {
+		return "-"
+	}
+
+	return fmt.Sprintf("%s / %s", bytesDisplay(usedBytes), bytesDisplay(totalBytes))
+}
+
+func bytesDisplay(value float64) string {
+	if value <= 0 {
+		return "-"
+	}
+
+	const gib = 1024 * 1024 * 1024
+	return fmt.Sprintf("%.1f GiB", value/gib)
+}
+
+func endpointReplicaDisplay(endpoint, replica string) string {
+	if endpoint == "" || endpoint == "-" || replica == "" || replica == "-" {
+		return "-"
+	}
+
+	return endpoint + " / " + replica
+}
+
+func joinedDisplayValue(left, right string) string {
+	left = nonEmptyOrDash(left)
+	right = nonEmptyOrDash(right)
+	if left == "-" && right == "-" {
+		return "-"
+	}
+
+	return left + " / " + right
+}
+
+func nodeGPUDisplay(node, gpuIndex string) string {
+	node = nonEmptyOrDash(node)
+	gpuIndex = nonEmptyOrDash(gpuIndex)
+	if node == "-" && gpuIndex == "-" {
+		return "-"
+	}
+	if gpuIndex == "-" {
+		return node + " / GPU -"
+	}
+
+	return node + " / GPU " + gpuIndex
+}
+
+func nonEmptyOrDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+
+	return value
+}
+
+func normalizeEndpointReplicaRuntimeUsageSamples(
+	labels CanonicalLabels,
+	usages []EndpointReplicaRuntimeUsage,
+) []canonicalSample {
+	result := make([]canonicalSample, 0, len(usages)*5)
+
+	for _, usage := range usages {
+		metricLabels := endpointReplicaRuntimeUsageLabels(labels, usage)
+		result = append(result, canonicalSample{
+			name:   "neutree_endpoint_replica_cpu_usage_seconds_total",
+			labels: metricLabels,
+			value:  usage.CPUUsageSeconds,
+		})
+
+		if usage.MemoryUsageBytes != nil {
+			result = append(result, canonicalSample{
+				name:   "neutree_endpoint_replica_memory_usage_bytes",
+				labels: metricLabels,
+				value:  *usage.MemoryUsageBytes,
+			})
+		}
+
+		if usage.MemoryWorkingSetBytes != nil {
+			result = append(result, canonicalSample{
+				name:   "neutree_endpoint_replica_memory_working_set_bytes",
+				labels: metricLabels,
+				value:  *usage.MemoryWorkingSetBytes,
+			})
+		}
+
+		if usage.CPULimitCores != nil {
+			result = append(result, canonicalSample{
+				name:   "neutree_endpoint_replica_cpu_limit_cores",
+				labels: metricLabels,
+				value:  *usage.CPULimitCores,
+			})
+		}
+
+		if usage.MemoryLimitBytes != nil {
+			result = append(result, canonicalSample{
+				name:   "neutree_endpoint_replica_memory_limit_bytes",
+				labels: metricLabels,
+				value:  *usage.MemoryLimitBytes,
+			})
+		}
+	}
+
+	return result
+}
+
+func endpointReplicaRuntimeUsageLabels(
+	labels CanonicalLabels,
+	usage EndpointReplicaRuntimeUsage,
+) map[string]string {
+	metricLabels := baseLabels(labels, SourceNodeAgent)
+	metricLabels["workspace"] = firstNonEmpty(usage.Workspace, labels.Workspace)
+	metricLabels["neutree_cluster"] = firstNonEmpty(usage.Cluster, labels.NeutreeCluster, labels.StaticNodeCluster)
+	metricLabels["endpoint"] = usage.Endpoint
+	metricLabels["instance_id"] = usage.InstanceID
+	metricLabels["replica_id"] = usage.ReplicaID
+	metricLabels["replica"] = usage.ReplicaID
+	metricLabels["node"] = firstNonEmpty(usage.NodeID, labels.Node)
+	metricLabels["deployment"] = usage.Deployment
+	metricLabels["container"] = usage.Container
+	metricLabels["container_id"] = usage.ContainerID
+	metricLabels["engine"] = usage.Engine
+	metricLabels["engine_version"] = usage.EngineVersion
+
+	return metricLabels
 }
 
 func nodeReadySample(labels CanonicalLabels) canonicalSample {

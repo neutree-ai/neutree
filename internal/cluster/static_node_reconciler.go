@@ -357,7 +357,7 @@ func (r *StaticNodeReconciler) Delete(
 
 	errs := []error{}
 
-	for _, component := range node.Spec.Components {
+	for _, component := range staticNodeDeleteComponents(node) {
 		containerName := componentContainerName(node, component)
 		if _, err := runner.Run(ctx, "docker rm -f "+shellArg(containerName)+" >/dev/null 2>&1 || true"); err != nil {
 			errs = append(errs, errors.Wrapf(err, "failed to remove component container %s", containerName))
@@ -368,7 +368,73 @@ func (r *StaticNodeReconciler) Delete(
 		}
 	}
 
+	if command := removeClusterLabeledComponentContainersCommand(node); command != "" {
+		if _, err := runner.Run(ctx, command); err != nil {
+			errs = append(errs, errors.Wrapf(err, "failed to remove static node cluster containers %s", node.Spec.Cluster))
+		}
+	}
+
 	return apierrors.NewAggregate(errs)
+}
+
+func removeClusterLabeledComponentContainersCommand(node *v1.StaticNode) string {
+	if node == nil || node.Spec == nil || node.Spec.Cluster == "" {
+		return ""
+	}
+
+	return "containers=$(docker ps -aq --filter label=" + shellArg(clusterNameLabel+"="+node.Spec.Cluster) +
+		"); if [ -n \"$containers\" ]; then docker rm -f $containers >/dev/null 2>&1; fi"
+}
+
+func staticNodeDeleteComponents(node *v1.StaticNode) []v1.NodeComponentSpec {
+	if node == nil {
+		return nil
+	}
+
+	components := []v1.NodeComponentSpec{}
+	seen := map[string]struct{}{}
+
+	if node.Spec != nil {
+		for _, component := range node.Spec.Components {
+			components = appendStaticNodeDeleteComponent(components, seen, component)
+		}
+	}
+
+	if node.Status != nil {
+		for _, status := range node.Status.Components {
+			if status.Name == "" {
+				continue
+			}
+
+			components = appendStaticNodeDeleteComponent(components, seen, v1.NodeComponentSpec{
+				Name: status.Name,
+				Type: status.Type,
+			})
+		}
+	}
+
+	return components
+}
+
+func appendStaticNodeDeleteComponent(
+	components []v1.NodeComponentSpec,
+	seen map[string]struct{},
+	component v1.NodeComponentSpec,
+) []v1.NodeComponentSpec {
+	key := component.Name
+	if key == "" {
+		key = string(component.Type)
+	}
+
+	if key != "" {
+		if _, ok := seen[key]; ok {
+			return components
+		}
+
+		seen[key] = struct{}{}
+	}
+
+	return append(components, component)
 }
 
 func removeComponentConfigFiles(

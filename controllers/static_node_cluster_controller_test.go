@@ -41,6 +41,47 @@ func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to assert obj to *v1.StaticNodeCluster")
 }
 
+func TestStaticNodeClusterControllerReconcileRecordsNodeOwnerConflict(t *testing.T) {
+	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{
+		nodes: []v1.StaticNode{
+			{
+				ID: 11,
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "head-0",
+				},
+				Spec: &v1.StaticNodeSpec{
+					Cluster: "static-a",
+				},
+			},
+		},
+	}
+	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
+		Store: storage.NewStaticNodeObjectStore(objectStorage),
+	})
+	require.NoError(t, err)
+
+	cluster := controllerStaticNodeCluster()
+	cluster.Metadata.Name = "static-b"
+	cluster.Spec.Nodes = []v1.StaticNodeClusterNodeSpec{
+		{
+			Name: "head-0",
+			IP:   "10.0.0.10",
+			Role: v1.StaticNodeRoleHead,
+		},
+	}
+
+	err = controller.Reconcile(cluster)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already owned by static node cluster static-a")
+	status, ok := objectStorage.updatedStatus["7"].(*v1.StaticNodeCluster)
+	require.True(t, ok)
+	require.NotNil(t, status.Status)
+	assert.Equal(t, v1.StaticNodeClusterPhaseFailed, status.Status.Phase)
+	assert.Contains(t, status.Status.ErrorMessage, "already owned by static node cluster static-a")
+}
+
 type fakeControllerStaticNodeClusterObjectStorage struct {
 	nodes         []v1.StaticNode
 	created       []scheme.Object

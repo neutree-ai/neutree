@@ -232,6 +232,9 @@ func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcil
 	}
 
 	phase := cluster.DetermineClusterPhase(reconcileErr == nil, c)
+	if overridePhase, ok := clusterPhaseOverrideFromError(reconcileErr); ok {
+		phase = overridePhase
+	}
 
 	// Set ObservedSpecHash when Running
 	if phase == v1.ClusterPhaseRunning {

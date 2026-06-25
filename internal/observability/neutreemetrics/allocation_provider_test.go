@@ -307,7 +307,7 @@ func TestRayServeAllocationProviderMapsDescendantGPUProcess(t *testing.T) {
 			return map[string]string{"NVIDIA_VISIBLE_DEVICES": "void"}, nil
 		}),
 		GPUProcesses: GPUProcessReaderFunc(func(_ context.Context) ([]GPUProcess, error) {
-			return []GPUProcess{{UUID: "GPU-abc", PID: 3000}}, nil
+			return []GPUProcess{{UUID: "GPU-abc", PID: 3000, UsedMemoryMiB: 4096}}, nil
 		}),
 		ProcessTree: ProcessTreeReaderFunc(func(pid, ancestorPID int) (bool, error) {
 			return pid == 3000 && ancestorPID == 2000, nil
@@ -331,6 +331,18 @@ func TestRayServeAllocationProviderMapsDescendantGPUProcess(t *testing.T) {
 	assert.Equal(t, 2000, allocations[0].PID)
 	require.Len(t, allocations[0].Devices, 1)
 	assert.Equal(t, "GPU-abc", allocations[0].Devices[0].UUID)
+	assert.Equal(t, int64(4096), allocations[0].Devices[0].UsedMemoryMiB)
+}
+
+func TestParseNvidiaSMIComputeProcessesIncludesUsedMemory(t *testing.T) {
+	processes := parseNvidiaSMIComputeProcesses(`GPU-abc, 3000, 4096
+GPU-def, 4000, 512 MiB
+GPU-skip, not-a-pid, 128
+`)
+
+	require.Len(t, processes, 2)
+	assert.Equal(t, GPUProcess{UUID: "GPU-abc", PID: 3000, UsedMemoryMiB: 4096}, processes[0])
+	assert.Equal(t, GPUProcess{UUID: "GPU-def", PID: 4000, UsedMemoryMiB: 512}, processes[1])
 }
 
 type fakeRayDashboardService struct {

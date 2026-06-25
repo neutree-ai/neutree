@@ -446,7 +446,109 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 		status.Version = cluster.Spec.Version
 	}
 
+	if status.Phase != v1.StaticNodeClusterPhaseReady {
+		status.ErrorMessage = joinStatusMessages(
+			status.ErrorMessage,
+			staticNodeClusterNodeStatusMessages(cluster, staticNodeByName(nodes))...,
+		)
+	}
+
 	return status
+}
+
+func staticNodeClusterNodeStatusMessages(
+	cluster *v1.StaticNodeCluster,
+	nodesByName map[string]*v1.StaticNode,
+) []string {
+	nodeNames := staticNodeClusterDesiredNodeNameList(cluster)
+	messages := make([]string, 0, len(nodeNames))
+
+	for _, nodeName := range nodeNames {
+		node := nodesByName[nodeName]
+		message := staticNodeStatusMessage(nodeName, node)
+		if message == "" {
+			continue
+		}
+
+		messages = append(messages, message)
+	}
+
+	return messages
+}
+
+func staticNodeStatusMessage(nodeName string, node *v1.StaticNode) string {
+	if nodeName == "" {
+		return ""
+	}
+
+	if node == nil {
+		return "static node " + nodeName + " is missing"
+	}
+
+	if node.Status == nil {
+		return "static node " + nodeName + " status is empty"
+	}
+
+	if node.Status.ErrorMessage != "" {
+		return fmt.Sprintf("static node %s phase=%s: %s", nodeName, node.Status.Phase, node.Status.ErrorMessage)
+	}
+
+	if node.Status.Phase != v1.StaticNodePhaseReady {
+		return fmt.Sprintf("static node %s phase=%s", nodeName, node.Status.Phase)
+	}
+
+	if node.Status.Warm == nil || !node.Status.Warm.Ready {
+		return staticNodeWarmStatusMessage(nodeName, node.Status.Warm)
+	}
+
+	if !nodeMetricsReady(node) {
+		return "static node " + nodeName + " metrics not ready"
+	}
+
+	return ""
+}
+
+func staticNodeWarmStatusMessage(nodeName string, status *v1.WarmStatus) string {
+	message := "static node " + nodeName + " warm not ready"
+	if status == nil {
+		return message
+	}
+
+	if status.Message != "" {
+		return message + ": " + status.Message
+	}
+
+	if status.Reason != "" {
+		return message + ": " + status.Reason
+	}
+
+	return message
+}
+
+func staticNodeClusterDesiredNodeNameList(cluster *v1.StaticNodeCluster) []string {
+	if cluster == nil || cluster.Spec == nil {
+		return nil
+	}
+
+	nodeNames := make([]string, 0, len(cluster.Spec.Nodes))
+	seen := map[string]struct{}{}
+
+	for _, node := range cluster.Spec.Nodes {
+		if node.Name == "" {
+			continue
+		}
+
+		if _, ok := seen[node.Name]; ok {
+			continue
+		}
+
+		seen[node.Name] = struct{}{}
+		nodeNames = append(nodeNames, node.Name)
+	}
+
+	sort.Strings(nodeNames)
+
+	return nodeNames
 }
 
 func staticNodeClusterDesiredNodeNames(cluster *v1.StaticNodeCluster) (map[string]struct{}, string) {
@@ -842,6 +944,8 @@ func buildNodeAgentComponent(
 		"--cluster-type=ray",
 		fmt.Sprintf("--node-exporter-url=http://127.0.0.1:%d%s", defaultNodeExporterPort, defaultPrometheusHTTPPath),
 		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), defaultRayDashboardPort),
+		"--procfs-root=/host/proc",
+		"--cgroupfs-root=/host/sys/fs/cgroup",
 	}
 
 	if cluster != nil && cluster.Metadata != nil {
@@ -881,6 +985,10 @@ func buildNodeAgentComponent(
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
 		},
+		Volumes: []v1.NodeComponentVolume{
+			{Name: "host-proc", HostPath: "/proc", MountPath: "/host/proc", ReadOnly: true},
+			{Name: "host-cgroup", HostPath: "/sys/fs/cgroup", MountPath: "/host/sys/fs/cgroup", ReadOnly: true},
+		},
 		HealthCheck: &v1.NodeComponentHealthCheck{
 			HTTPPath: defaultHealthHTTPPath,
 			Port:     defaultNodeAgentPort,
@@ -889,7 +997,7 @@ func buildNodeAgentComponent(
 }
 
 func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
-	options := []string{"--net=host", "--pid=host"}
+	options := []string{"--net=host", "--pid=host", "--cgroupns=host"}
 	if profile == nil || profile.ClusterRuntime == nil {
 		return options
 	}
@@ -950,10 +1058,12 @@ func renderVMAgentConfig(plans []staticNodeDesiredPlan) string {
 	writeVMAgentFileSDConfig(&builder, vmagentNodeExporterFileSDPath)
 
 	builder.WriteString("- job_name: static-node-node-agent\n")
+	builder.WriteString("  honor_labels: true\n")
 	writeVMAgentFileSDConfig(&builder, vmagentNodeAgentFileSDPath)
 
 	builder.WriteString("- job_name: static-node-ray\n")
 	writeVMAgentFileSDConfig(&builder, vmagentRayFileSDPath)
+	writeVMAgentRayMetricRelabelConfigs(&builder)
 
 	groups := acceleratorExporterTargetGroups(plans)
 	for i, group := range groups {
@@ -979,6 +1089,28 @@ func writeVMAgentFileSDConfig(builder *strings.Builder, path string) {
 	builder.WriteString("    - ")
 	builder.WriteString(strconv.Quote(path))
 	builder.WriteString("\n")
+}
+
+func writeVMAgentRayMetricRelabelConfigs(builder *strings.Builder) {
+	builder.WriteString("  metric_relabel_configs:\n")
+	builder.WriteString("    - source_labels: [application]\n")
+	builder.WriteString("      target_label: application_original\n")
+	builder.WriteString("      regex: '(.+)'\n")
+	builder.WriteString("      replacement: '$1'\n")
+	builder.WriteString("    - source_labels: [application]\n")
+	builder.WriteString("      regex: '([^_]+)_(.+)'\n")
+	builder.WriteString("      target_label: application\n")
+	builder.WriteString("      replacement: '$2'\n")
+	builder.WriteString("    - source_labels: [__name__]\n")
+	builder.WriteString("      regex: 'ray_vllm[:_](.+)'\n")
+	builder.WriteString("      target_label: __name__\n")
+	builder.WriteString("      replacement: 'vllm:$1'\n")
+	builder.WriteString("    - source_labels: [__name__]\n")
+	builder.WriteString("      regex: 'ray_sglang[:_](.+)'\n")
+	builder.WriteString("      target_label: __name__\n")
+	builder.WriteString("      replacement: 'sglang_$1'\n")
+	builder.WriteString("    - action: labeldrop\n")
+	builder.WriteString("      regex: 'cache_dtype|calculate_kv_scales|cpu_kvcache_space_bytes|cpu_offload_gb|cpu_offload_params|enable_prefix_caching|gpu_memory_utilization|is_attention_free|kv_cache_memory_bytes|kv_offloading_backend|kv_offloading_size|kv_sharing_fast_prefill|mamba_.*|num_cpu_blocks|num_gpu_blocks_override|prefix_caching_hash_algo|sliding_window|swap_space'\n")
 }
 
 func renderVMAgentFileSDConfigFiles(

@@ -44,7 +44,26 @@ DCGM_FI_DEV_BAR1_FREE, gauge, BAR1 memory free (in MB).
 DCGM_FI_DEV_BAR1_USED, gauge, BAR1 memory used (in MB).
 DCGM_FI_DEV_BAR1_TOTAL, gauge, Total BAR1 memory (in MB).
 DCGM_FI_DEV_MEMORY_TEMP, gauge, Memory temperature (in C).
+DCGM_FI_DEV_NAME, label, Name of the GPU device.
+DCGM_FI_DEV_BRAND, label, Device brand.
+DCGM_FI_DEV_PCI_BUSID, label, PCI attributes for the device.
+DCGM_FI_CUDA_DRIVER_VERSION, gauge, CUDA driver version.
+DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, gauge, CUDA compute capability for the device.
+DCGM_FI_DEV_PCIE_LINK_GEN, gauge, PCIe current link generation.
+DCGM_FI_DEV_PCIE_LINK_WIDTH, gauge, PCIe current link width.
 DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL, counter, Total NVLink bandwidth counter.
+DCGM_FI_PROF_GR_ENGINE_ACTIVE, gauge, Ratio of time the graphics or compute engine is active.
+DCGM_FI_PROF_SM_ACTIVE, gauge, Ratio of cycles an SM has at least one active warp.
+DCGM_FI_PROF_SM_OCCUPANCY, gauge, Ratio of resident warps on an SM.
+DCGM_FI_PROF_PIPE_TENSOR_ACTIVE, gauge, Ratio of cycles the tensor pipe is active.
+DCGM_FI_PROF_PIPE_FP64_ACTIVE, gauge, Ratio of cycles the FP64 pipe is active.
+DCGM_FI_PROF_PIPE_FP32_ACTIVE, gauge, Ratio of cycles the FP32 pipe is active.
+DCGM_FI_PROF_PIPE_FP16_ACTIVE, gauge, Ratio of cycles the FP16 pipe is active.
+DCGM_FI_PROF_DRAM_ACTIVE, gauge, Ratio of cycles the device memory interface is active.
+DCGM_FI_PROF_PCIE_TX_BYTES, counter, Total number of bytes transmitted through PCIe TX via NVML.
+DCGM_FI_PROF_PCIE_RX_BYTES, counter, Total number of bytes received through PCIe RX via NVML.
+DCGM_FI_PROF_NVLINK_RX_BYTES, counter, Total number of bytes received through NVLink.
+DCGM_FI_PROF_NVLINK_TX_BYTES, counter, Total number of bytes transmitted through NVLink.
 DCGM_FI_DEV_XID_ERRORS, gauge, Value of the last XID error encountered.
 DCGM_FI_DEV_ECC_SBE_VOL_TOTAL, counter, Volatile single-bit ECC errors.
 DCGM_FI_DEV_ECC_DBE_VOL_TOTAL, counter, Volatile double-bit ECC errors.

@@ -76,6 +76,10 @@ func (s *StaticNodeObjectStore) UpsertStaticNode(_ context.Context, node *v1.Sta
 		return s.objectStorage.Create(node)
 	}
 
+	if err := validateStaticNodeOwner(existing, node); err != nil {
+		return err
+	}
+
 	node.ID = existing.ID
 	id := existing.GetID()
 
@@ -88,6 +92,27 @@ func (s *StaticNodeObjectStore) UpsertStaticNode(_ context.Context, node *v1.Sta
 	}
 
 	return s.objectStorage.UpdateSpec(id, node)
+}
+
+func validateStaticNodeOwner(existing *v1.StaticNode, desired *v1.StaticNode) error {
+	if existing == nil || desired == nil || existing.Spec == nil || desired.Spec == nil {
+		return nil
+	}
+
+	if existing.Metadata != nil && existing.Metadata.DeletionTimestamp != "" {
+		return nil
+	}
+
+	if existing.Spec.Cluster == "" || desired.Spec.Cluster == "" || existing.Spec.Cluster == desired.Spec.Cluster {
+		return nil
+	}
+
+	name := ""
+	if desired.Metadata != nil {
+		name = desired.Metadata.Name
+	}
+
+	return errors.Errorf("static node %s is already owned by static node cluster %s", name, existing.Spec.Cluster)
 }
 
 func (s *StaticNodeObjectStore) DeleteStaticNode(_ context.Context, node *v1.StaticNode) error {

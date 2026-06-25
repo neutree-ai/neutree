@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -71,6 +72,7 @@ type options struct {
 	kubeletPodResourcesSock string
 	rayDashboardURL         string
 	procFSRoot              string
+	cgroupFSRoot            string
 	snapshotToken           string
 	enableKubernetesWriter  bool
 }
@@ -81,6 +83,7 @@ func newOptions() *options {
 		clusterType:     clusterTypeKubernetes,
 		nodeExporterURL: "http://127.0.0.1:9100/metrics",
 		procFSRoot:      "/proc",
+		cgroupFSRoot:    "/sys/fs/cgroup",
 	}
 }
 
@@ -103,6 +106,8 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 		"Ray dashboard URL used to discover Ray Serve replica accelerator allocations")
 	fs.StringVar(&o.procFSRoot, "procfs-root", o.procFSRoot,
 		"procfs root used to read Ray actor process environments")
+	fs.StringVar(&o.cgroupFSRoot, "cgroupfs-root", o.cgroupFSRoot,
+		"cgroupfs root used to read Ray actor container CPU and memory usage")
 	fs.StringVar(&o.snapshotToken, "snapshot-token", o.snapshotToken,
 		"Optional bearer token required by /v1/node/snapshot when configured")
 	fs.BoolVar(&o.enableKubernetesWriter, "enable-kubernetes-annotation-writer", o.enableKubernetesWriter,
@@ -133,6 +138,11 @@ func (o *options) config() (neutreemetrics.Config, error) {
 
 	config.KubernetesWriter = writer
 	config.AllocationProvider = o.allocationProvider(writer)
+	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
+	if err != nil {
+		return neutreemetrics.Config{}, err
+	}
+	config.RuntimeUsageProvider = runtimeUsageProvider
 
 	return config, nil
 }
@@ -166,6 +176,52 @@ func (o *options) allocationProvider(
 		}
 	default:
 		return nil
+	}
+}
+
+func (o *options) runtimeUsageProvider(
+	writer *neutreemetrics.KubernetesAnnotationWriter,
+) (neutreemetrics.RuntimeUsageProvider, error) {
+	switch o.clusterType {
+	case clusterTypeKubernetes:
+		if writer == nil {
+			return nil, nil
+		}
+
+		restConfig, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, err
+		}
+
+		clientset, err := kubernetes.NewForConfig(restConfig)
+		if err != nil {
+			return nil, err
+		}
+
+		return neutreemetrics.KubernetesCAdvisorRuntimeUsageProvider{
+			Client:   writer.Client,
+			NodeName: writer.NodeName,
+			Scraper: neutreemetrics.KubernetesNodeProxyCAdvisorScraper{
+				RESTClient: clientset.CoreV1().RESTClient(),
+				NodeName:   writer.NodeName,
+			},
+		}, nil
+	case clusterTypeRay:
+		if o.rayDashboardURL == "" {
+			return nil, nil
+		}
+
+		return neutreemetrics.RayServeRuntimeUsageProvider{
+			DashboardURL: o.rayDashboardURL,
+			Node:         o.node,
+			NodeIP:       o.nodeIP,
+			CGroupUsage: neutreemetrics.CGroupFSUsageReader{
+				ProcFSRoot:   o.procFSRoot,
+				CGroupFSRoot: o.cgroupFSRoot,
+			},
+		}, nil
+	default:
+		return nil, nil
 	}
 }
 

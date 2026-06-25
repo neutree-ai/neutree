@@ -504,6 +504,9 @@ rules:
   resources: ["nodes"]
   verbs: ["get", "list", "watch", "patch"]
 - apiGroups: [""]
+  resources: ["nodes/proxy"]
+  verbs: ["get"]
+- apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "list", "watch", "patch"]
 ---

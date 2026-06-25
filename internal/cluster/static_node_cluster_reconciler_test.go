@@ -162,7 +162,21 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--node-exporter-url=http://127.0.0.1:19100/metrics")
 	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-url=http://127.0.0.1:9400/dcgm/metrics")
 	assert.Contains(t, nodeAgent.Args, "--ray-dashboard-url=http://10.0.0.10:8265")
-	assert.Equal(t, []string{"--net=host", "--pid=host", "--gpus all"}, nodeAgent.DockerRunOptions)
+	assert.Contains(t, nodeAgent.Args, "--procfs-root=/host/proc")
+	assert.Contains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
+	assert.Equal(t, []string{"--net=host", "--pid=host", "--cgroupns=host", "--gpus all"}, nodeAgent.DockerRunOptions)
+	assert.Contains(t, nodeAgent.Volumes, v1.NodeComponentVolume{
+		Name:      "host-proc",
+		HostPath:  "/proc",
+		MountPath: "/host/proc",
+		ReadOnly:  true,
+	})
+	assert.Contains(t, nodeAgent.Volumes, v1.NodeComponentVolume{
+		Name:      "host-cgroup",
+		HostPath:  "/sys/fs/cgroup",
+		MountPath: "/host/sys/fs/cgroup",
+		ReadOnly:  true,
+	})
 	assert.Equal(t, 19101, nodeAgent.Ports[0].Port)
 	require.NotNil(t, nodeAgent.HealthCheck)
 	assert.Equal(t, defaultHealthHTTPPath, nodeAgent.HealthCheck.HTTPPath)
@@ -181,11 +195,20 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.10:19100"`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:19100"`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-agent`)
+	assert.Contains(t, vmagentConfig.Content, "job_name: static-node-node-agent\n  honor_labels: true\n")
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-agent.json`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.10:9101"`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:9101"`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-ray`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/ray.json`)
+	assert.Contains(t, vmagentConfig.Content, `metric_relabel_configs:`)
+	assert.Contains(t, vmagentConfig.Content, `regex: 'ray_vllm[:_](.+)'`)
+	assert.Contains(t, vmagentConfig.Content, `replacement: 'vllm:$1'`)
+	assert.Contains(t, vmagentConfig.Content, `regex: 'ray_sglang[:_](.+)'`)
+	assert.Contains(t, vmagentConfig.Content, `replacement: 'sglang_$1'`)
+	assert.Contains(t, vmagentConfig.Content, `action: labeldrop`)
+	assert.Contains(t, vmagentConfig.Content, `cache_dtype`)
+	assert.Contains(t, vmagentConfig.Content, `num_gpu_blocks_override`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter-dcgm-metrics`)
 	assert.Contains(t, vmagentConfig.Content, `metrics_path: "/dcgm/metrics"`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/accelerator-exporter-dcgm-metrics.json`)
@@ -667,6 +690,7 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				HeadReady:    true,
 				MetricsReady: false,
 				WarmReady:    false,
+				ErrorMessage: "static node worker-0 phase=Reconciling",
 			},
 		},
 		{
@@ -681,6 +705,25 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				HeadReady:    false,
 				MetricsReady: false,
 				WarmReady:    false,
+				ErrorMessage: "static node head-0 phase=Failed; static node worker-0 is missing",
+			},
+		},
+		{
+			name: "failed node error message is aggregated",
+			nodes: []*v1.StaticNode{
+				staticNodeStatusWithError("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseFailed, "ssh connection failed"),
+				staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, []v1.NodeComponentStatus{
+					readyComponent(nodeExporterComponentName),
+				}),
+			},
+			wantStatus: v1.StaticNodeClusterStatus{
+				Phase:        v1.StaticNodeClusterPhaseFailed,
+				DesiredNodes: 2,
+				ReadyNodes:   1,
+				HeadReady:    false,
+				MetricsReady: false,
+				WarmReady:    false,
+				ErrorMessage: "static node head-0 phase=Failed: ssh connection failed",
 			},
 		},
 		{
@@ -700,6 +743,7 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				HeadReady:    false,
 				MetricsReady: false,
 				WarmReady:    false,
+				ErrorMessage: "static node head-0 is missing",
 			},
 		},
 	}
@@ -779,6 +823,18 @@ func staticNodeStatus(
 			Components: components,
 		},
 	}
+}
+
+func staticNodeStatusWithError(
+	name string,
+	role v1.StaticNodeRole,
+	phase v1.StaticNodePhase,
+	message string,
+) *v1.StaticNode {
+	node := staticNodeStatus(name, role, phase, false, nil)
+	node.Status.ErrorMessage = message
+
+	return node
 }
 
 func staticNodeStatusWithAccelerator(

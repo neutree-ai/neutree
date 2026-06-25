@@ -62,7 +62,10 @@ func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) e
 
 		controller.copyStaticNodeClusterStatus(c, desired, nil)
 
-		return errors.Errorf("static node cluster %s is provisioning", c.Metadata.Name)
+		return withClusterPhaseOverride(
+			errors.Errorf("static node cluster %s is provisioning", c.Metadata.Name),
+			staticNodeClusterProgressPhase(c, nil),
+		)
 	}
 
 	desired.ID = current.ID
@@ -73,7 +76,10 @@ func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) e
 	controller.copyStaticNodeClusterStatus(c, desired, current.Status)
 
 	if current.Status == nil || current.Status.Phase != v1.StaticNodeClusterPhaseReady {
-		return staticNodeClusterNotReadyError(current)
+		return withClusterPhaseOverride(
+			staticNodeClusterNotReadyError(current),
+			staticNodeClusterProgressPhase(c, current.Status),
+		)
 	}
 
 	return nil
@@ -396,6 +402,99 @@ func (controller *ClusterController) copyStaticNodeClusterStatus(
 			c.Status.ResourceInfo = resources
 		}
 	}
+}
+
+type clusterPhaseOverrideError struct {
+	err   error
+	phase v1.ClusterPhase
+}
+
+func (e *clusterPhaseOverrideError) Error() string {
+	return e.err.Error()
+}
+
+func (e *clusterPhaseOverrideError) Unwrap() error {
+	return e.err
+}
+
+func (e *clusterPhaseOverrideError) ClusterPhase() v1.ClusterPhase {
+	return e.phase
+}
+
+func withClusterPhaseOverride(err error, phase v1.ClusterPhase) error {
+	if err == nil || !isClusterProgressPhase(phase) {
+		return err
+	}
+
+	return &clusterPhaseOverrideError{err: err, phase: phase}
+}
+
+func clusterPhaseOverrideFromError(err error) (v1.ClusterPhase, bool) {
+	if err == nil {
+		return "", false
+	}
+
+	var phaseErr interface {
+		ClusterPhase() v1.ClusterPhase
+	}
+	if !errors.As(err, &phaseErr) {
+		return "", false
+	}
+
+	phase := phaseErr.ClusterPhase()
+	if !isClusterProgressPhase(phase) {
+		return "", false
+	}
+
+	return phase, true
+}
+
+func isClusterProgressPhase(phase v1.ClusterPhase) bool {
+	switch phase {
+	case v1.ClusterPhaseInitializing, v1.ClusterPhaseUpdating, v1.ClusterPhaseUpgrading:
+		return true
+	default:
+		return false
+	}
+}
+
+func staticNodeClusterProgressPhase(
+	c *v1.Cluster,
+	status *v1.StaticNodeClusterStatus,
+) v1.ClusterPhase {
+	if c == nil || !c.IsInitialized() {
+		return v1.ClusterPhaseInitializing
+	}
+
+	if staticNodeClusterStatusIsUpgrade(c, status) {
+		return v1.ClusterPhaseUpgrading
+	}
+
+	return v1.ClusterPhaseUpdating
+}
+
+func staticNodeClusterStatusIsUpgrade(
+	c *v1.Cluster,
+	status *v1.StaticNodeClusterStatus,
+) bool {
+	if c == nil {
+		return false
+	}
+
+	desiredVersion := c.GetVersion()
+	if desiredVersion == "" {
+		return false
+	}
+
+	if c.Status != nil && c.Status.Version != "" && c.Status.Version != desiredVersion {
+		return true
+	}
+
+	if status == nil {
+		return false
+	}
+
+	return status.UpgradeStep != "" || status.Version != "" && status.Version != desiredVersion
 }
 
 func (controller *ClusterController) calculateStaticNodeClusterResources(
