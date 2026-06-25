@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/stretchr/testify/assert"
 	"go.openly.dev/pointy"
 	appsv1 "k8s.io/api/apps/v1"
@@ -148,6 +150,21 @@ func TestCheckResourcesStatusIncludesMetricsDiagnostics(t *testing.T) {
 	assert.NotContains(t, message, "TOP_SECRET_VALUE")
 }
 
+func readyMetricsDaemonSet(name string, desired int32) *appsv1.DaemonSet {
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Status: appsv1.DaemonSetStatus{
+			DesiredNumberScheduled: desired,
+			NumberReady:            desired,
+			UpdatedNumberScheduled: desired,
+			NumberAvailable:        desired,
+		},
+	}
+}
+
 func Test_checkDeploymentStatus(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -267,6 +284,8 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 		WithObjects(
 			readyMetricsDeployment("vmagent"),
 			readyMetricsDeployment("neutree-kube-state-metrics"),
+			readyMetricsDaemonSet("neutree-node-exporter", 2),
+			readyMetricsDaemonSet("neutree-node-agent", 2),
 		).
 		Build()
 
@@ -286,13 +305,19 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 	assert.True(t, status.DeploymentReady)
 	assert.True(t, status.KubeStateMetricsRequired)
 	assert.True(t, status.KubeStateMetricsDeploymentReady)
+	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeMetricsDaemonSetReady)
 	assert.Equal(t, 1, status.PodsReady)
 	assert.Equal(t, 1, status.KubeStateMetricsPodsReady)
 }
 
 func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().
-		WithObjects(readyMetricsDeployment("vmagent")).
+		WithObjects(
+			readyMetricsDeployment("vmagent"),
+			readyMetricsDaemonSet("neutree-node-exporter", 2),
+			readyMetricsDaemonSet("neutree-node-agent", 2),
+		).
 		Build()
 
 	metricsCmpt := &MetricsComponent{
@@ -311,6 +336,40 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	assert.True(t, status.DeploymentReady)
 	assert.False(t, status.KubeStateMetricsRequired)
 	assert.False(t, status.KubeStateMetricsDeploymentReady)
+	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeMetricsDaemonSetReady)
+}
+
+func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fakeClient := fake.NewClientBuilder().
+		WithObjects(
+			readyMetricsDeployment("vmagent"),
+			readyMetricsDeployment("neutree-kube-state-metrics"),
+			readyMetricsDaemonSet("neutree-node-exporter", 1),
+			readyMetricsDaemonSet("neutree-node-agent", 1),
+			readyMetricsDaemonSet("nvidia-dcgm-exporter", 1),
+		).
+		Build()
+
+	metricsCmpt := &MetricsComponent{
+		ctrlClient:     fakeClient,
+		namespace:      "default",
+		acceleratorMgr: accelerator.NewManager(gin.New()),
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+	}
+
+	status, err := metricsCmpt.CheckResourcesStatus(context.Background())
+
+	assert.NoError(t, err)
+	assert.True(t, status.Ready())
+	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeMetricsDaemonSetReady)
+	assert.True(t, status.AcceleratorExporterRequired)
+	assert.True(t, status.AcceleratorExporterDaemonSetsReady)
 }
 
 func TestSupportsKubeStateMetricsClusterVersion(t *testing.T) {
