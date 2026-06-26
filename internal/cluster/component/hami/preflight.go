@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 )
 
@@ -101,6 +102,19 @@ func (h *HAMiComponent) validateManagedObject(ctx context.Context, obj client.Ob
 		}
 
 		return errors.Errorf("found existing unmanaged HAMi resource %s/%s", kind, key.Name)
+	}
+
+	// The HAMi webhook is cluster-scoped and can only be owned by one
+	// Neutree cluster. If it already carries the managed label but belongs
+	// to a different Neutree cluster, reject to prevent duplicate HAMi
+	// deployments on the same underlying Kubernetes cluster.
+	if kind == "MutatingWebhookConfiguration" && key.Name == WebhookName {
+		labels := obj.GetLabels()
+		if labels[v1.NeutreeClusterWorkspaceLabelKey] != h.cluster.Metadata.Workspace ||
+			labels[v1.NeutreeClusterLabelKey] != h.cluster.Metadata.Name {
+			return errors.New(
+				"found existing HAMi webhook managed by another Neutree cluster")
+		}
 	}
 
 	return nil
