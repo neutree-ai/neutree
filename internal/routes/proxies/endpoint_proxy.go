@@ -19,10 +19,10 @@ func RegisterEndpointRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFun
 	proxyGroup.Use(middlewares...)
 
 	handler := CreateStructProxyHandler[v1.Endpoint](deps, storage.ENDPOINT_TABLE)
-	acceleratorVirtualizationValidation := validateEndpointAcceleratorVirtualization()
+	vgpuValidation := validateEndpointVGPU(deps.Storage)
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
-	proxyGroup.PATCH("", acceleratorVirtualizationValidation, handler)
+	proxyGroup.POST("", vgpuValidation, handler)
+	proxyGroup.PATCH("", vgpuValidation, handler)
 }
