@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -153,7 +154,75 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 
 	// Prepare engine arg values for YAML double-quoted template rendering.
 	// Handles native maps, unescaped JSON strings, and pre-escaped strings.
-	escapeEngineArgsForTemplate(data.EngineArgs)
+	prepareEngineArgsForTemplate(data.EngineArgs, engine.Metadata.Name)
+}
+
+func prepareEngineArgsForTemplate(args map[string]interface{}, engineName string) {
+	if engineName != v1.EngineNameVLLM {
+		escapeEngineArgsForTemplate(args)
+		return
+	}
+
+	for k, v := range args {
+		if list, ok := toInterfaceSlice(v); ok {
+			args[k] = list
+			continue
+		}
+
+		if val, ok := v.(string); ok {
+			var parsed interface{}
+			if err := json.Unmarshal([]byte(val), &parsed); err == nil {
+				if list, ok := toInterfaceSlice(parsed); ok {
+					args[k] = list
+					continue
+				}
+			}
+		}
+
+		args[k] = prepareEngineArgValueForDoubleQuote(v)
+	}
+}
+
+func prepareEngineArgValueForDoubleQuote(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}, []interface{}:
+		b, err := json.Marshal(v)
+		if err == nil {
+			return escapeForYAMLDoubleQuote(string(b))
+		}
+	case string:
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(val), &parsed); err == nil {
+			switch parsed.(type) {
+			case map[string]interface{}, []interface{}:
+				return escapeForYAMLDoubleQuote(val)
+			}
+		}
+	}
+
+	return v
+}
+
+func toInterfaceSlice(v interface{}) ([]interface{}, bool) {
+	if s, ok := v.([]interface{}); ok {
+		return s, true
+	}
+
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() || (rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array) {
+		return nil, false
+	}
+
+	if rv.Type().Elem().Kind() == reflect.Uint8 {
+		return nil, false
+	}
+
+	out := make([]interface{}, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		out[i] = rv.Index(i).Interface()
+	}
+
+	return out, true
 }
 
 // escapeEngineArgsForTemplate prepares engine arg values for use in YAML

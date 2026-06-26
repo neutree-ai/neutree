@@ -1697,6 +1697,34 @@ func TestEscapeEngineArgsForTemplate(t *testing.T) {
 	}
 }
 
+func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
+	args := map[string]interface{}{
+		"served_model_name":          []interface{}{"base-model", "neu-vllm-list-alias"},
+		"logits_processors":          `["a.Processor","b.Processor"]`,
+		"override_generation_config": map[string]interface{}{"temperature": 0.8},
+		"gpu_memory_utilization":     "0.85",
+		"enable_prefix_caching":      "false",
+	}
+
+	prepareEngineArgsForTemplate(args, v1.EngineNameVLLM)
+
+	assert.Equal(t, []interface{}{"base-model", "neu-vllm-list-alias"}, args["served_model_name"])
+	assert.Equal(t, []interface{}{"a.Processor", "b.Processor"}, args["logits_processors"])
+	assert.Equal(t, `{\"temperature\":0.8}`, args["override_generation_config"])
+	assert.Equal(t, "0.85", args["gpu_memory_utilization"])
+	assert.Equal(t, "false", args["enable_prefix_caching"])
+}
+
+func TestPrepareEngineArgsForTemplate_NonVLLMListCompatibility(t *testing.T) {
+	args := map[string]interface{}{
+		"cuda_graph_bs": []interface{}{1, 2},
+	}
+
+	prepareEngineArgsForTemplate(args, v1.EngineNameSGLang)
+
+	assert.Equal(t, `[1,2]`, args["cuda_graph_bs"])
+}
+
 func TestKubernetesOrchestrator_setEnvironmentVariables(t *testing.T) {
 	k := &kubernetesOrchestrator{}
 
@@ -3199,6 +3227,70 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 	}
 }
 
+func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
+	cases := []struct {
+		name        string
+		templateKey string
+	}{
+		{
+			name:        "vllm-v0.11.2",
+			templateKey: "vllm-v0.11.2",
+		},
+		{
+			name:        "vllm-v0.17.1",
+			templateKey: "vllm-v0.17.1",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpl := realEmbeddedTemplate(t, tc.templateKey)
+
+			data := DeploymentManifestVariables{
+				NeutreeVersion:  "v0.1.0",
+				ClusterName:     "test-cluster",
+				Workspace:       "test-workspace",
+				Namespace:       "default",
+				ImagePrefix:     "registry.example.com",
+				ImageRepo:       "myrepo",
+				ImageTag:        "v1.0.0",
+				ImagePullSecret: "my-secret",
+				EngineName:      v1.EngineNameVLLM,
+				EngineVersion:   "v1.0.0",
+				EndpointName:    "test-endpoint",
+				ModelArgs: map[string]interface{}{
+					"name":          "gpt-4",
+					"task":          "text-generation",
+					"path":          "/mnt/models/gpt-4",
+					"registry_type": "bentoml",
+					"registry_path": "/mnt/registry/gpt-4-model",
+					"serve_name":    "gpt-4-serve",
+				},
+				EngineArgs: map[string]interface{}{
+					"served_model_name": []interface{}{"gpt-4", "neu-vllm-list-alias"},
+					"logits_processors": []interface{}{"a.Processor", "b.Processor"},
+				},
+				Resources: map[string]string{
+					"cpu":    "500m",
+					"memory": "1Gi",
+				},
+				RoutingLogic: "roundrobin",
+				Replicas:     1,
+			}
+
+			objs, err := buildDeploymentObjects(tmpl, data)
+			require.NoError(t, err, "template render must succeed")
+
+			tokens := extractEngineCLITokens(t, objs)
+
+			assertFlagWithValues(t, tokens, "--served_model_name", "gpt-4", "neu-vllm-list-alias")
+			assertFlagWithValues(t, tokens, "--logits_processors", "a.Processor", "b.Processor")
+			assert.NotContains(t, tokens, `["gpt-4","neu-vllm-list-alias"]`)
+			assert.NotContains(t, tokens, `["a.Processor","b.Processor"]`)
+		})
+	}
+}
+
 // makePauseTestCtx builds a minimal OrchestratorContext for pause/delete tests:
 // only fields that pauseEndpoint / deleteEndpoint actually read.
 func makePauseTestCtx(ctrlClient client.Client, name string) *OrchestratorContext {
@@ -3416,6 +3508,20 @@ func assertFlagWithValue(t *testing.T, tokens []string, flag, value string) {
 	require.Less(t, idx+1, len(tokens), "flag %q should have a following value token", flag)
 	assert.Equal(t, value, tokens[idx+1],
 		"flag %q should be followed by %q; got %q", flag, value, tokens[idx+1])
+}
+
+func assertFlagWithValues(t *testing.T, tokens []string, flag string, values ...string) {
+	t.Helper()
+
+	idx := indexOf(tokens, flag)
+	require.NotEqual(t, -1, idx, "expected flag %q in tokens %v", flag, tokens)
+	require.LessOrEqual(t, idx+len(values), len(tokens)-1,
+		"flag %q should have %d following value token(s)", flag, len(values))
+
+	for i, value := range values {
+		assert.Equal(t, value, tokens[idx+1+i],
+			"flag %q value token %d should be %q; got %q", flag, i, value, tokens[idx+1+i])
+	}
 }
 
 func indexOf(tokens []string, target string) int {

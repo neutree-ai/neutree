@@ -180,6 +180,22 @@ class TestCoerceArgsPEP604:
         coerce_args(args, FakeEngineV017)
         assert args["allowed_media_domains"] == ["a.com", "b.com"]
 
+    def test_pep604_optional_list_plain_string_wrapped(self):
+        args = {"allowed_media_domains": "a.com"}
+        coerce_args(args, FakeEngineV017)
+        assert args["allowed_media_domains"] == ["a.com"]
+
+    def test_pep604_optional_list_json_object_string_wrapped(self):
+        raw = '{"domain":"a.com"}'
+        args = {"allowed_media_domains": raw}
+        coerce_args(args, FakeEngineV017)
+        assert args["allowed_media_domains"] == [raw]
+
+    def test_pep604_list_elements_validated(self):
+        args = {"plain_list": '["1", "2", "3"]'}
+        coerce_args(args, SampleModel)
+        assert args["plain_list"] == [1, 2, 3]
+
     def test_pep604_bare_dict_coerced(self):
         args = {"bare_dict": '{"k":"v"}'}
         coerce_args(args, FakeEngineV017)
@@ -257,11 +273,12 @@ class TestCoerceArgsDataclassHydration:
         type objects. _is_dataclass_like / _wants_dict_or_list must short-
         circuit on str — annotation is not a type, no hydration attempted,
         original string preserved."""
-        from serve._utils.coerce import _is_dataclass_like, _wants_dict_or_list
+        from serve._utils.coerce import _is_dataclass_like, _wants_dict, _wants_list
 
         # Both predicates safely return False on raw annotation strings.
         assert _is_dataclass_like("FakeAttentionConfig") is False
-        assert _wants_dict_or_list("dict[str, Any] | None") is False
+        assert _wants_dict("dict[str, Any] | None") is False
+        assert _wants_list("list[str] | None") is False
 
 
 # ---------------------------------------------------------------------------

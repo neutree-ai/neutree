@@ -1541,6 +1541,7 @@ func allSchemaTypesEngineArgs() []EngineArg {
 		{Key: "enforce_eager", Value: "true"},
 		{Key: "enable_prefix_caching", Value: "false"},
 		{Key: "seed", Value: "42"},
+		{Key: "served_model_name", Value: fmt.Sprintf(`["%s","neu-vllm-list-alias"]`, profileModelName())},
 		{Key: "override_generation_config", Value: `'{"temperature": 0.8}'`},
 	}
 }

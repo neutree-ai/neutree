@@ -118,11 +118,18 @@ def _unwrap_optional(annotation: Any) -> Any:
     return annotation
 
 
-def _wants_dict_or_list(annotation: Any) -> bool:
-    """Return True if the annotation expects a dict or list type."""
+def _wants_dict(annotation: Any) -> bool:
+    """Return True if the annotation expects a dict type."""
     target = _unwrap_optional(annotation)
     origin = typing.get_origin(target)
-    return origin in (dict, list) or target in (dict, list)
+    return origin is dict or target is dict
+
+
+def _wants_list(annotation: Any) -> bool:
+    """Return True if the annotation expects a list type."""
+    target = _unwrap_optional(annotation)
+    origin = typing.get_origin(target)
+    return origin is list or target is list
 
 
 def _is_dataclass_like(tp: Any) -> bool:
@@ -132,6 +139,19 @@ def _is_dataclass_like(tp: Any) -> bool:
     if issubclass(tp, BaseModel):
         return True
     return dataclasses.is_dataclass(tp)
+
+
+def _validate_annotation_value(annotation: Any, value: Any) -> Any:
+    """Best-effort validation/conversion for values already parsed from JSON."""
+    target = _unwrap_optional(annotation)
+    try:
+        return TypeAdapter(target).validate_python(value)
+    except Exception as e:
+        logger.warning(
+            "coerce_args: TypeAdapter validate_python failed for target=%s: %s",
+            getattr(target, "__name__", target), e,
+        )
+        return value
 
 
 def coerce_args(args: Dict[str, Any], model_class: type) -> None:
@@ -163,13 +183,23 @@ def coerce_args(args: Dict[str, Any], model_class: type) -> None:
             continue
         raw = args[field_name]
 
-        if _wants_dict_or_list(annotation):
+        if _wants_list(annotation):
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                parsed = raw
+
+            candidate = parsed if isinstance(parsed, list) else [raw]
+            args[field_name] = _validate_annotation_value(annotation, candidate)
+            continue
+
+        if _wants_dict(annotation):
             try:
                 parsed = json.loads(raw)
             except (json.JSONDecodeError, TypeError):
                 continue
-            if isinstance(parsed, (dict, list)):
-                args[field_name] = parsed
+            if isinstance(parsed, dict):
+                args[field_name] = _validate_annotation_value(annotation, parsed)
             continue
 
         target = _unwrap_optional(annotation)
