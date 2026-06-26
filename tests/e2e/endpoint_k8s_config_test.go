@@ -503,7 +503,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 			}
 		})
 
-		It("should deploy with all schema data types", Label("C2642246"), func() {
+		It("should deploy with all schema data types", Label("C2642246", "C2724892"), func() {
 			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgs()))
 			defer os.Remove(yamlPath)
 
@@ -535,6 +535,20 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--seed"), "integer")
 				Expect(argsStr).To(ContainSubstring("--override_generation_config"), "object/JSON")
 
+				listFlagIdx := -1
+				for i, tok := range allArgs {
+					if tok == "--served_model_name" {
+						listFlagIdx = i
+						break
+					}
+				}
+				Expect(listFlagIdx).NotTo(Equal(-1), "list arg flag")
+				Expect(len(allArgs)).To(BeNumerically(">", listFlagIdx+2), "list arg values")
+				Expect(allArgs[listFlagIdx+1]).To(Equal(profileModelName()), "first list value")
+				Expect(allArgs[listFlagIdx+2]).To(Equal("neu-vllm-list-alias"), "second list value")
+				Expect(argsStr).NotTo(ContainSubstring(fmt.Sprintf(`["%s","neu-vllm-list-alias"]`, profileModelName())),
+					"list arg must not remain a single JSON array token")
+
 				// Boolean false engine_args must drop the flag entirely. vLLM
 				// argparse rejects `--flag false` (store_true is nargs=0), so
 				// the template skips both `--<flag>` and `"false"` when the
@@ -559,6 +573,10 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 			code, body, err := inferChat(ep.Status.ServiceURL, "Hello schema types")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(200), "inference failed: %s", body)
+
+			code, body, err = inferChatWithModel(ep.Status.ServiceURL, "neu-vllm-list-alias", "Hello schema alias")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(200), "alias inference failed: %s", body)
 		})
 	})
 
