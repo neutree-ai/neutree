@@ -1,8 +1,10 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -633,4 +635,47 @@ func TestDeleteModel_ValidationErrorSkipsRegistryDelete(t *testing.T) {
 	mockModelRegistry.AssertNotCalled(t, "DeleteModel", "test-model", v1.LatestVersion)
 	mockStorage.AssertExpectations(t)
 	mockModelRegistry.AssertExpectations(t)
+}
+
+func TestUploadModel_InvalidName(t *testing.T) {
+	mockStorage, mockModelRegistry := setupMocks(t)
+	deps := &Dependencies{
+		Storage: mockStorage,
+		TempDirFunc: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	assert.NoError(t, writer.WriteField("name", "Invalid_Name"))
+	assert.NoError(t, writer.WriteField("version", "v1.0"))
+	part, err := writer.CreateFormFile("model", "model.bentomodel")
+	assert.NoError(t, err)
+	_, err = part.Write([]byte("model data"))
+	assert.NoError(t, err)
+	assert.NoError(t, writer.Close())
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/default/model_registries/test-registry/models", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	c.Params = []gin.Param{
+		{Key: "workspace", Value: "default"},
+		{Key: "registry", Value: "test-registry"},
+	}
+
+	uploadModel(deps)(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]string
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["message"], "Invalid model name")
+	assert.Contains(t, response["message"], "model name must be lowercase")
+
+	mockStorage.AssertNotCalled(t, "ListModelRegistry", mock.Anything)
+	mockModelRegistry.AssertNotCalled(t, "ImportModel", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }

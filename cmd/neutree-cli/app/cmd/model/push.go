@@ -42,6 +42,10 @@ func NewPushCmd() *cobra.Command {
 				modelName = filepath.Base(modelPath)
 			}
 
+			if err := v1.ValidateModelName(modelName); err != nil {
+				return fmt.Errorf("invalid model name: %w", err)
+			}
+
 			if version == v1.LatestVersion {
 				return fmt.Errorf("cannot use 'latest' as version, please specify a concrete version or leave it empty for auto-generation")
 			}
