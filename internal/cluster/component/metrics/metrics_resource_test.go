@@ -94,6 +94,41 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 	t.Fatalf("vmagent config map not found in resources")
 }
 
+func TestBuildVMAgentConfigNormalizesSGLangMetricNames(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources()
+	if err != nil {
+		t.Fatalf("Failed to build vmagent resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
+			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
+			assert.Assert(t, strings.Contains(config, "job_name: 'neutree-inference'"))
+			assert.Assert(t, strings.Contains(config, "metric_relabel_configs:"))
+			assert.Assert(t, strings.Contains(config, "source_labels: [__name__]"))
+			assert.Assert(t, strings.Contains(config, "regex: 'sglang[:_](.+)'"))
+			assert.Assert(t, strings.Contains(config, "target_label: __name__"))
+			assert.Assert(t, strings.Contains(config, "replacement: 'sglang_$1'"))
+			return
+		}
+	}
+
+	t.Fatalf("vmagent config map not found in resources")
+}
+
 func TestBuildMetricsResourcesSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{

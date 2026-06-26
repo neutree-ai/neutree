@@ -105,6 +105,21 @@ func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVa
 	}
 }
 
+func setDefaultSGLangEnableMetrics(engineName string, engineArgs map[string]interface{}) {
+	if engineName != v1.EngineNameSGLang {
+		return
+	}
+
+	if _, ok := engineArgs["enable_metrics"]; ok {
+		return
+	}
+	if _, ok := engineArgs["enable-metrics"]; ok {
+		return
+	}
+
+	engineArgs["enable_metrics"] = true
+}
+
 // setEngineTensorParallelDefault auto-sets the engine's tensor-parallel-size
 // arg = GPU count when GPU > 1 and is a whole number. Must be called after
 // user engine_args are merged, because users may provide the key in either
@@ -145,6 +160,8 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 			maps.Copy(data.EngineArgs, v)
 		}
 	}
+
+	setDefaultSGLangEnableMetrics(engine.Metadata.Name, data.EngineArgs)
 
 	// Auto-set tensor-parallel-size after user args are merged, so we can
 	// detect user-provided values in either key format. Applies to engines

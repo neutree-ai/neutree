@@ -936,6 +936,8 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
+	setDefaultSGLangEnableMetricsForApplication(endpoint, &app)
+
 	setDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
 
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
@@ -986,6 +988,27 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	}
 
 	return app, nil
+}
+
+func setDefaultSGLangEnableMetricsForApplication(endpoint *v1.Endpoint, app *dashboard.RayServeApplication) {
+	if endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != v1.EngineNameSGLang {
+		return
+	}
+
+	engineArgs, ok := app.Args["engine_args"].(map[string]interface{})
+	if !ok {
+		engineArgs = make(map[string]interface{})
+	}
+
+	if v, hasDash := engineArgs["enable-metrics"]; hasDash {
+		if _, hasUnderscore := engineArgs["enable_metrics"]; !hasUnderscore {
+			engineArgs["enable_metrics"] = v
+		}
+		delete(engineArgs, "enable-metrics")
+	}
+
+	setDefaultSGLangEnableMetrics(endpoint.Spec.Engine.Engine, engineArgs)
+	app.Args["engine_args"] = engineArgs
 }
 
 // setDefaultTensorParallelSize auto-sets the tensor-parallel field in

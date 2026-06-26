@@ -2075,6 +2075,104 @@ func TestEndpointToApplication_TensorParallelSize(t *testing.T) {
 	}
 }
 
+func TestEndpointToApplication_SGLangEnableMetricsDefault(t *testing.T) {
+	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
+
+	modelRegistry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.HuggingFaceModelRegistryType,
+		},
+	}
+	deployedCluster := &v1.Cluster{}
+
+	makeEndpoint := func(engineName string, variables map[string]interface{}) *v1.Endpoint {
+		ep := &v1.Endpoint{
+			Metadata: &v1.Metadata{
+				Workspace: "test",
+				Name:      "test-endpoint",
+			},
+			Spec: &v1.EndpointSpec{
+				Engine: &v1.EndpointEngineSpec{
+					Engine:  engineName,
+					Version: "v0.5.10",
+				},
+				Resources: &v1.ResourceSpec{
+					GPU: pointy.String("1"),
+				},
+				Replicas: v1.ReplicaSpec{
+					Num: pointy.Int(1),
+				},
+				Variables: variables,
+				Model: &v1.ModelSpec{
+					Name: "test-model",
+				},
+			},
+		}
+		ep.Spec.Resources.SetAcceleratorType(nvidiaGPU)
+
+		return ep
+	}
+
+	tests := []struct {
+		name         string
+		engineName   string
+		variables    map[string]interface{}
+		expectedArgs map[string]interface{}
+	}{
+		{
+			name:       "sglang defaults enable_metrics",
+			engineName: v1.EngineNameSGLang,
+			expectedArgs: map[string]interface{}{
+				"enable_metrics": true,
+			},
+		},
+		{
+			name:       "sglang user-provided enable_metrics prevents default",
+			engineName: v1.EngineNameSGLang,
+			variables: map[string]interface{}{
+				"engine_args": map[string]interface{}{
+					"enable_metrics": false,
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"enable_metrics": false,
+			},
+		},
+		{
+			name:       "sglang user-provided kebab enable-metrics prevents default",
+			engineName: v1.EngineNameSGLang,
+			variables: map[string]interface{}{
+				"engine_args": map[string]interface{}{
+					"enable-metrics": false,
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"enable_metrics": false,
+			},
+		},
+		{
+			name:         "vllm does not default enable_metrics",
+			engineName:   v1.EngineNameVLLM,
+			expectedArgs: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := acceleratormocks.NewMockManager(t)
+			mgr.EXPECT().GetConverter(nvidiaGPU).
+				Return(plugin.NewGPUConverter(), true)
+
+			app, err := EndpointToApplication(makeEndpoint(tt.engineName, tt.variables),
+				deployedCluster, modelRegistry, nil, nil, mgr)
+			assert.NoError(t, err)
+
+			engineArgs, _ := app.Args["engine_args"].(map[string]interface{})
+			assert.Equal(t, tt.expectedArgs, engineArgs)
+		})
+	}
+}
+
 func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 	tests := []struct {
 		name            string
