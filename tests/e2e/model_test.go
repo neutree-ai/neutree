@@ -117,6 +117,35 @@ func pushModel(name, version string, fileSize int, extraArgs ...string) CLIResul
 	return Model.Push(modelDir, name, version, extraArgs...)
 }
 
+func applyPausedEndpointReferencingModel(endpointName, modelName, modelVersion string) {
+	endpointYAML := fmt.Sprintf(`apiVersion: v1
+kind: Endpoint
+metadata:
+  name: %s
+  workspace: %s
+spec:
+  cluster: e2e-missing-cluster-%s
+  engine:
+    engine: %s
+    version: %s
+  model:
+    registry: %s
+    name: %s
+    version: %s
+    task: %s
+  resources:
+    gpu: "0"
+  replicas:
+    num: 0
+`, endpointName, profileWorkspace(), Cfg.RunID, profileEngineName(), profileEngineVersion(), testRegistry(), modelName, modelVersion, profileModelTask())
+
+	yamlPath := filepath.Join(GinkgoT().TempDir(), endpointName+".yaml")
+	Expect(os.WriteFile(yamlPath, []byte(endpointYAML), 0644)).To(Succeed())
+
+	r := RunCLI("apply", "-f", yamlPath)
+	ExpectSuccess(r)
+}
+
 // --- Tests ---
 
 var _ = Describe("Model", Ordered, func() {
@@ -344,6 +373,39 @@ var _ = Describe("Model", Ordered, func() {
 			r = Model.List()
 			ExpectSuccess(r)
 			Expect(ParseTable(r.Stdout)).NotTo(ContainElement(HaveKeyWithValue("NAME", name)))
+		})
+
+		// TestRail: C2723579
+		It("should reject deleting a model referenced by an endpoint", Label("C2723579"), func() {
+			name := "e2e-delete-ref-" + Cfg.RunID
+			version := "v1.0"
+			endpointName := "e2e-model-ref-" + Cfg.RunID
+
+			DeferCleanup(func() {
+				deleteEndpoint(endpointName)
+				Model.EnsureDeleted(name, version)
+			})
+
+			r := pushModel(name, version, 64)
+			ExpectSuccess(r)
+
+			applyPausedEndpointReferencingModel(endpointName, name, version)
+
+			r = Model.Delete(name)
+			ExpectFailed(r)
+			Expect(r.Stdout + r.Stderr).To(ContainSubstring("10131"))
+			Expect(r.Stdout + r.Stderr).To(ContainSubstring("still reference this model"))
+
+			r = Model.Delete(name + ":" + version)
+			ExpectFailed(r)
+			Expect(r.Stdout + r.Stderr).To(ContainSubstring("10131"))
+			Expect(r.Stdout + r.Stderr).To(ContainSubstring("still reference this model"))
+
+			deleteEndpoint(endpointName)
+
+			r = Model.Delete(name + ":" + version)
+			ExpectSuccess(r)
+			ExpectStdoutContains(r, "deleted successfully")
 		})
 	})
 
