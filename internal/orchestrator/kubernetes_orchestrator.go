@@ -670,7 +670,27 @@ func hasIncompleteModelDownloaderInitContainer(pods []corev1.Pod) (bool, string)
 				return true, modelDownloaderInitContainerName + " init container is running"
 			}
 
-			return true, modelDownloaderInitContainerName + " init container has not completed"
+			if initStatus.State.Waiting != nil {
+				message := fmt.Sprintf("%s init container is waiting (reason=%s)",
+					modelDownloaderInitContainerName, initStatus.State.Waiting.Reason)
+				if initStatus.State.Waiting.Message != "" {
+					message += ": " + initStatus.State.Waiting.Message
+				}
+
+				return true, message
+			}
+
+			if initStatus.State.Terminated != nil {
+				message := fmt.Sprintf("%s init container terminated with exit code %d after %d restart(s), retrying model download",
+					modelDownloaderInitContainerName, initStatus.State.Terminated.ExitCode, initStatus.RestartCount)
+				if initStatus.State.Terminated.Message != "" {
+					message += ": " + initStatus.State.Terminated.Message
+				}
+
+				return true, message
+			}
+
+			return true, modelDownloaderInitContainerName + " init container has not started; waiting for model download to start"
 		}
 	}
 
