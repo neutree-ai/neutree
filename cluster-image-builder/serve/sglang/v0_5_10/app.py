@@ -34,6 +34,7 @@ from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
 from downloader import build_request_from_model_args, download_with_markers, get_downloader
+from serve._metrics.prometheus_multiproc import install_stable_prometheus_multiproc_dir
 from serve._metrics.sglang_ray_bridge import PromToRayBridge
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
@@ -259,16 +260,29 @@ class Backend:
         coerce_args(args, ServerArgs)
         filter_engine_args(args, ServerArgs)
 
-        from sglang.srt.entrypoints.engine import Engine
+        from sglang.srt.entrypoints import engine as sglang_engine
+
+        if args.get("enable_metrics"):
+            from sglang.srt.utils import common as sglang_common
+
+            metrics_dir = install_stable_prometheus_multiproc_dir(
+                sglang_common,
+                sglang_engine,
+                namespace="sglang",
+            )
+            logger.info(
+                "[Backend] Using stable PROMETHEUS_MULTIPROC_DIR for SGLang: %s",
+                metrics_dir,
+            )
 
         logger.info(
             f"[Backend] Initializing SGLang Engine with args: {sorted(args.keys())}"
         )
         # Engine.__init__ launches scheduler/detokenizer subprocesses and
-        # blocks until all are ready before returning. By this point
-        # PROMETHEUS_MULTIPROC_DIR is set in our env, so the bridge below
-        # can construct an identical CollectorRegistry.
-        self.engine = Engine(**args)
+        # blocks until all are ready before returning. When metrics are
+        # enabled, PROMETHEUS_MULTIPROC_DIR is already set in our env, so the
+        # bridge below can construct an identical CollectorRegistry.
+        self.engine = sglang_engine.Engine(**args)
         logger.info("[Backend] SGLang Engine initialized.")
 
         # Lazy-init OpenAI serving handlers — created on first request.
@@ -276,12 +290,13 @@ class Backend:
         self._completion = None
         self._embedding = None
 
-        # Spin up the SGLang prometheus -> Ray prometheus bridge. The bridge
-        # task survives until __del__ cancels it on actor preemption.
-        self._metrics_bridge = PromToRayBridge()
-        self._metrics_task = asyncio.get_event_loop().create_task(
-            self._metrics_bridge.run()
-        )
+        if args.get("enable_metrics"):
+            # Spin up the SGLang prometheus -> Ray prometheus bridge. The bridge
+            # task survives until __del__ cancels it on actor preemption.
+            self._metrics_bridge = PromToRayBridge()
+            self._metrics_task = asyncio.get_event_loop().create_task(
+                self._metrics_bridge.run()
+            )
 
     def __del__(self):
         # Belt-and-braces cleanup: Engine registers its own atexit handler,
