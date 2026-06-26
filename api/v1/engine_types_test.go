@@ -288,6 +288,81 @@ func TestEngineVersion_GetSupportedAccelerators(t *testing.T) {
 	}
 }
 
+func TestEngineVersion_GetImageForK8sAccelerator(t *testing.T) {
+	k8sImage := &EngineImage{
+		ImageName: "vllm/vllm-openai",
+		Tag:       "v0.11.2",
+	}
+	genericImage := &EngineImage{
+		ImageName: "neutree/engine-vllm",
+		Tag:       "v0.11.2-ray2.53.0",
+	}
+
+	tests := []struct {
+		name            string
+		engineVersion   *EngineVersion
+		acceleratorType string
+		expected        *EngineImage
+	}{
+		{
+			name: "k8s-specific image exists, returns k8s image",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					"nvidia_gpu":                    genericImage,
+					K8sImageKeyPrefix + "nvidia_gpu": k8sImage,
+				},
+			},
+			acceleratorType: "nvidia_gpu",
+			expected:        k8sImage,
+		},
+		{
+			name: "k8s-specific image missing, falls back to generic",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					"nvidia_gpu": genericImage,
+				},
+			},
+			acceleratorType: "nvidia_gpu",
+			expected:        genericImage,
+		},
+		{
+			name: "neither k8s nor generic found, returns nil",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					"nvidia_gpu": genericImage,
+				},
+			},
+			acceleratorType: "amd_gpu",
+			expected:        nil,
+		},
+		{
+			name: "only k8s_ key exists, no plain fallback",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					K8sImageKeyPrefix + "nvidia_gpu": k8sImage,
+				},
+			},
+			acceleratorType: "nvidia_gpu",
+			expected:        k8sImage,
+		},
+		{
+			name: "nil Images map, returns nil",
+			engineVersion: &EngineVersion{
+				Version: "v0.5.0",
+			},
+			acceleratorType: "nvidia_gpu",
+			expected:        nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.engineVersion.GetImageForK8sAccelerator(tt.acceleratorType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestEngineVersion_SupportsAccelerator(t *testing.T) {
 	ev := &EngineVersion{
 		Version: "v0.5.0",

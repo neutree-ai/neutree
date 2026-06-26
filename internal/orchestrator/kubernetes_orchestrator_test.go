@@ -926,7 +926,7 @@ func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {
 			version:         "v0.5.0",
 			acceleratorType: "intel-gpu",
 			expectError:     true,
-			errorContains:   "no image configured for accelerator type intel-gpu",
+			errorContains:   `no kubernetes image for accelerator "intel-gpu"`,
 		},
 		{
 			name: "version not found",
