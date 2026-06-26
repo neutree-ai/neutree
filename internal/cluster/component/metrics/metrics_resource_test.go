@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -92,6 +94,53 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 	}
 
 	t.Fatalf("vmagent config map not found in resources")
+}
+
+func TestBuildVMAgentConfigNormalizesSGLangMetricNames(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources()
+	if err != nil {
+		t.Fatalf("Failed to build vmagent resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
+			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
+			assert.Assert(t, strings.Contains(config, "job_name: 'neutree-inference'"))
+			assert.Assert(t, strings.Contains(config, "metric_relabel_configs:"))
+			assert.Assert(t, strings.Contains(config, "source_labels: [__name__]"))
+			assert.Assert(t, strings.Contains(config, "regex: 'sglang[:_](.+)'"))
+			assert.Assert(t, strings.Contains(config, "target_label: __name__"))
+			assert.Assert(t, strings.Contains(config, "replacement: 'sglang:$1'"))
+			return
+		}
+	}
+
+	t.Fatalf("vmagent config map not found in resources")
+}
+
+func TestStaticRayVMAgentConfigNormalizesSGLangMetricNames(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "observability", "vmagent", "prometheus.yml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Failed to read static vmagent config: %v", err)
+	}
+
+	config := string(data)
+	assert.Assert(t, strings.Contains(config, "regex: 'ray_sglang[:_](.+)'"))
+	assert.Assert(t, strings.Contains(config, "replacement: 'sglang:$1'"))
 }
 
 func TestBuildMetricsResourcesSkipsKubeStateMetricsBeforeV110(t *testing.T) {

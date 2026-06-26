@@ -115,6 +115,11 @@ data:
       - source_labels: [__meta_kubernetes_pod_label_engine_version]
         action: replace
         target_label: engine_version
+      metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'sglang[:_](.+)'
+        target_label: __name__
+        replacement: 'sglang:$1'
     # Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
     - job_name: 'node-exporter-http'
       kubernetes_sd_configs:

@@ -50,9 +50,9 @@ def _sanitize_metric_name(name: str) -> str:
 
     SGLang emits ``sglang:cache_config_info`` (colon-separated namespace), but
     ``ray.util.metrics`` rejects ``:`` since the move to OpenTelemetry naming.
-    Replace with underscore so the Ray-exported name is ``sglang_<suffix>`` —
-    aligned with the vmagent relabel rule (``ray_sglang[:_]<name>`` →
-    ``sglang_<name>``) and with the Grafana dashboard filters.
+    Replace with underscore so Ray can export the metric as
+    ``ray_sglang_<suffix>``. vmagent converts that temporary Ray-safe name back
+    to the canonical upstream ``sglang:<suffix>`` form for storage and queries.
     """
     return name.replace(":", "_")
 

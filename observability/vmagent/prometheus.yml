@@ -27,13 +27,10 @@ scrape_configs:
       regex: 'ray_vllm[:_](.+)'
       target_label: __name__
       replacement: 'vllm:$1'
-  # Strip Ray's auto-prepended ray_ from SGLang metrics so dashboard panels
-  # query the names SGLang upstream uses natively (e.g.
-  # sglang_e2e_request_latency_seconds_bucket). Symmetric to the vLLM rule
-  # above but with sglang_ output (not sglang:) — SGLang upstream uses an
-  # underscore separator throughout, including in their reference Grafana
-  # dashboard, so preserving that lets us reuse upstream queries verbatim.
+  # Convert Ray-exported SGLang metrics back to the canonical upstream
+  # colon-separated form. PromToRayBridge has to use an underscore internally
+  # because Ray rejects ":" in metric names; dashboards should query sglang:*.
     - source_labels: [__name__]
       regex: 'ray_sglang[:_](.+)'
       target_label: __name__
-      replacement: 'sglang_$1'
+      replacement: 'sglang:$1'
