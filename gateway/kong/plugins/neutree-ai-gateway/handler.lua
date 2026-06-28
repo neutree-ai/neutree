@@ -1206,6 +1206,10 @@ function AIGatewayHandler:access(conf)
         local openai_req = convert_request(anthropic_req)
         kong.ctx.plugin.anthropic_mode = true
         kong.ctx.plugin.request_model = anthropic_req.model
+        -- Expose the client-facing model to later consumer plugins (e.g.
+        -- neutree-ai-access allowlist) BEFORE the request body is rewritten for
+        -- model mapping, since they cannot reliably re-read the body afterwards.
+        kong.ctx.shared.neutree_request_model = anthropic_req.model
         kong.ctx.plugin.response_model = nil
         kong.ctx.plugin.is_stream = anthropic_req.stream == true
         kong.ctx.plugin.route_type = "/v1/chat/completions"
@@ -1314,6 +1318,10 @@ function AIGatewayHandler:access(conf)
     end
 
     kong.ctx.plugin.request_model = ai_request.model
+    -- Expose the client-facing model to later consumer plugins (e.g.
+    -- neutree-ai-access allowlist) BEFORE the request body is rewritten for
+    -- model mapping, since they cannot reliably re-read the body afterwards.
+    kong.ctx.shared.neutree_request_model = ai_request.model
     kong.ctx.plugin.is_stream = ai_request.stream == true
 
     if conf.upstreams then
