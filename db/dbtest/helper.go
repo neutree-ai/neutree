@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	_ "github.com/lib/pq"
@@ -14,6 +15,37 @@ import (
 
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+// grantGlobalPermissions creates a role carrying the given permissions and
+// assigns it globally to an existing user. In the community edition
+// api.has_permission ignores the workspace argument and degrades to a global
+// check, so a global assignment is what exercises the permission.
+func grantGlobalPermissions(t *testing.T, db *sql.DB, userID string, permissions []string) {
+	t.Helper()
+	ctx := context.Background()
+	roleName := "perms-" + userID
+	permsArray := "ARRAY['" + strings.Join(permissions, "','") + "']::api.permission_action[]"
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO api.roles (api_version, kind, metadata, spec)
+		VALUES ('v1', 'Role',
+			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW(NULL, `+permsArray+`)::api.role_spec)`, roleName); err != nil {
+		t.Fatalf("failed to create role: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
+		VALUES ('v1', 'RoleAssignment',
+			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW($2::uuid, NULL, TRUE, $3)::api.role_assignment_spec)`,
+		"assign-"+userID, userID, roleName); err != nil {
+		t.Fatalf("failed to create role assignment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, `DELETE FROM api.role_assignments WHERE (metadata).name = $1`, "assign-"+userID)
+		_, _ = db.ExecContext(ctx, `DELETE FROM api.roles WHERE (metadata).name = $1`, roleName)
+	})
+}
 
 // GetTestDB returns a connection to the test database
 // The database is pre-migrated by docker-compose

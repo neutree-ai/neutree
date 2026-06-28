@@ -17,6 +17,9 @@ func TestApiKeyLimits(t *testing.T) {
 
 	user := CreateTestUser(t, "limitsuser", "limits@example.com", "testpassword")
 	other := CreateTestUser(t, "limitsother", "limitsother@example.com", "testpassword")
+	// Reading/writing a key's limits now requires api_key:read / api_key:update
+	// (on top of ownership); grant them to the owner.
+	grantGlobalPermissions(t, db, user.ID, []string{"api_key:read", "api_key:update"})
 
 	const limits = `{"token_quota":{"limit":300,"period":"monthly"},"rps":10,"rpm":600,"concurrency":8,"allowed_models":["gpt-4"],"disabled":false}`
 
@@ -229,6 +232,66 @@ func TestApiKeyLimits(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("expected empty allowed_models to be accepted, got %v", err)
+		}
+	})
+
+	// Limit read/write are governed by api_key:read / api_key:update (on top of
+	// ownership): an owner reduced to read-only can view limits but not change
+	// them; an owner with neither cannot even read.
+	t.Run("limit RPCs enforce api_key:read / api_key:update", func(t *testing.T) {
+		// Owner with only api_key:read.
+		readOnly := CreateTestUser(t, "limitsro", "limitsro@example.com", "testpassword")
+		grantGlobalPermissions(t, db, readOnly.ID, []string{"api_key:read"})
+		var roKeyID string
+		if err := execWithContext(t, db, []SetContextFunc{setUserContext(readOnly.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `
+				SELECT id FROM api.create_api_key(
+					p_workspace := 'limits-ws', p_name := 'ro-key', p_quota := 0,
+					p_limits := '{"token_quota":{"limit":1000,"period":"daily"}}'::jsonb)`).Scan(&roKeyID)
+		}); err != nil {
+			t.Fatalf("read-only owner create key: %v", err)
+		}
+		t.Cleanup(func() { _, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", roKeyID) })
+
+		// read: allowed (returns its own limits).
+		var got sql.NullString
+		if err := execWithContext(t, db, []SetContextFunc{setUserContext(readOnly.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT api.get_api_key_limits($1)::text`, roKeyID).Scan(&got)
+		}); err != nil {
+			t.Fatalf("read-only owner get_api_key_limits: %v", err)
+		}
+		if !got.Valid {
+			t.Fatalf("expected read-only owner to read own limits, got NULL")
+		}
+		// write: denied (no api_key:update).
+		if err := execWithContext(t, db, []SetContextFunc{setUserContext(readOnly.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			_, e := tx.ExecContext(ctx, `SELECT api.set_api_key_limits($1, '{"rps":1}'::jsonb)`, roKeyID)
+			return e
+		}); err == nil {
+			t.Fatalf("expected api_key:update to be required for set_api_key_limits")
+		}
+
+		// Owner with no api_key permissions: cannot even read own limits.
+		noPerm := CreateTestUser(t, "limitsnp", "limitsnp@example.com", "testpassword")
+		var npKeyID string
+		if err := execWithContext(t, db, []SetContextFunc{setUserContext(noPerm.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `
+				SELECT id FROM api.create_api_key(
+					p_workspace := 'limits-ws', p_name := 'np-key', p_quota := 0,
+					p_limits := '{"token_quota":{"limit":1000,"period":"daily"}}'::jsonb)`).Scan(&npKeyID)
+		}); err != nil {
+			t.Fatalf("no-perm owner create key: %v", err)
+		}
+		t.Cleanup(func() { _, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", npKeyID) })
+
+		var npGot sql.NullString
+		if err := execWithContext(t, db, []SetContextFunc{setUserContext(noPerm.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT api.get_api_key_limits($1)::text`, npKeyID).Scan(&npGot)
+		}); err != nil {
+			t.Fatalf("no-perm owner get_api_key_limits: %v", err)
+		}
+		if npGot.Valid {
+			t.Fatalf("expected NULL for owner without api_key:read, got %q", npGot.String)
 		}
 	})
 }
