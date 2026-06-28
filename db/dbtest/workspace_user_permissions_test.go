@@ -47,6 +47,8 @@ func TestWorkspaceUserPermissions_HasExpectedPermissions(t *testing.T) {
 		"external_endpoint:delete",
 		"endpoint:trace-read",
 		"external_endpoint:trace-read",
+		"api_key:read",
+		"api_key:update",
 	}
 
 	var permissions []string

@@ -57,6 +57,8 @@ BEGIN
         'external_endpoint:create',
         'external_endpoint:update',
         'external_endpoint:delete',
+        'endpoint:trace-read',
+        'external_endpoint:trace-read',
         'api_key:read',
         'api_key:update'
     ]::api.permission_action[];

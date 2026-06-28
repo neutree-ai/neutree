@@ -100,7 +100,9 @@ BEGIN
         'external_endpoint:read',
         'external_endpoint:create',
         'external_endpoint:update',
-        'external_endpoint:delete'
+        'external_endpoint:delete',
+        'endpoint:trace-read',
+        'external_endpoint:trace-read'
     ]::api.permission_action[];
 
     UPDATE api.roles
