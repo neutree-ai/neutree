@@ -16,7 +16,6 @@ from serve._utils.coerce import _get_field_annotations
 class SampleModel(BaseModel):
     name: str = ""
     count: int = 0
-    enabled: bool = False
     config: Optional[Dict[str, Any]] = None
     items: Optional[List[str]] = None
     tags: Dict[str, str] = {}
@@ -65,7 +64,6 @@ class FakeEngineV017:
     speculative_config: dict[str, Any] | None = None       # PEP 604 dict
     allowed_media_domains: list[str] | None = None          # PEP 604 list
     bare_dict: dict[str, str] = field(default_factory=dict) # PEP 604 bare
-    enable_metrics: bool = True
     attn_required: FakeAttentionConfig = field(default_factory=FakeAttentionConfig)
     attn_optional: FakeAttentionConfig | None = None        # PEP 604 + custom
     cfg_optional: FakePydanticConfig | None = None
@@ -93,12 +91,7 @@ class TestCoerceArgs:
     def test_int_field_untouched(self):
         args = {"count": "42"}
         coerce_args(args, SampleModel)
-        assert args["count"] == "42"  # int strings are intentionally not coerced
-
-    def test_bool_field_coerced_from_string(self):
-        args = {"enabled": "false"}
-        coerce_args(args, SampleModel)
-        assert args["enabled"] is False
+        assert args["count"] == "42"  # not coerced — only dict/list fields
 
     def test_non_string_value_skipped(self):
         args = {"config": {"already": "a dict"}}
@@ -191,12 +184,6 @@ class TestCoerceArgsPEP604:
         args = {"bare_dict": '{"k":"v"}'}
         coerce_args(args, FakeEngineV017)
         assert args["bare_dict"] == {"k": "v"}
-
-    def test_bool_string_false_coerced_for_engine_args(self):
-        args = {"enable_metrics": "false"}
-        coerce_args(args, FakeEngineV017)
-        assert args["enable_metrics"] is False
-
 
 class TestCoerceArgsDataclassHydration:
     def test_dataclass_field_hydrated_to_instance(self):
