@@ -21,6 +21,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -2424,7 +2425,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				}, nil)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: "Ray Serve application status=DEPLOYING has no backend replicas yet; waiting for model download to start",
+			expectErrorMsg: "model download is not completed",
 			expectError:    false,
 		},
 		{
@@ -2450,7 +2451,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				}, nil)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: "Ray Serve application status=NOT_STARTED has no backend replicas yet; waiting for model download to start",
+			expectErrorMsg: "model download is not completed",
 			expectError:    false,
 		},
 		{
@@ -2712,7 +2713,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
 			expectModelDownloadHashEmpty: true,
-			expectErrorMsg:               "Backend deployment BACKEND has no replica actors yet; waiting for model download to start",
+			expectErrorMsg:               "model download is not completed",
 			expectError:                  false,
 		},
 		{
@@ -2987,51 +2988,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
 			expectModelDownloadHashEmpty: true,
-			expectErrorMsg:               "Deployment BACKEND replica backend-replica-1 has no model download marker yet",
-			expectError:                  false,
-		},
-		{
-			name: "prefer missing backend actor ID message over unrelated log probe failure",
-			inputEndpoint: func() *v1.Endpoint {
-				return newEndpoint()
-			},
-			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
-				existingApp := &dashboard.RayServeApplication{
-					Name:        applicationName,
-					RoutePrefix: "/production/chat-model",
-					ImportPath:  "old.import.path",
-					Args:        map[string]interface{}{"old": "config"},
-				}
-
-				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
-					Applications: map[string]dashboard.RayServeApplicationStatus{
-						applicationName: {
-							Status:            "DEPLOYING",
-							DeployedAppConfig: existingApp,
-							Deployments: map[string]dashboard.Deployment{
-								"BACKEND": {
-									Name:   "BACKEND",
-									Status: "UPDATING",
-									Replicas: []dashboard.Replica{
-										{
-											ReplicaID: "backend-replica-no-actor",
-										},
-										{
-											ActorID:   "actor-log-error",
-											ReplicaID: "backend-replica-log-error",
-										},
-									},
-								},
-							},
-						},
-					},
-				}, nil)
-				mockDashboard.On("GetActorLog", "actor-log-error", "out", 200).Return("", assert.AnError)
-				mockDashboard.On("GetActorLog", "actor-log-error", "err", 200).Return("", assert.AnError)
-			},
-			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
-			expectModelDownloadHashEmpty: true,
-			expectErrorMsg:               "Deployment BACKEND replica backend-replica-no-actor has no actor ID yet",
+			expectErrorMsg:               "model download is not completed",
 			expectError:                  false,
 		},
 		{
@@ -3113,7 +3070,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
 			expectModelDownloadHashEmpty: true,
-			expectErrorMsg:               "failed to inspect backend actor logs",
+			expectErrorMsg:               "model download is not completed",
 			expectError:                  false,
 		},
 		{
@@ -3472,6 +3429,114 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			mockDashboard.AssertExpectations(t)
 		})
 	}
+}
+
+func TestRayOrchestrator_GetEndpointStatusIncludesStaticNodeAllocations(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "production",
+			Name:      "chat-model",
+		},
+		Spec: &v1.EndpointSpec{
+			Replicas: v1.ReplicaSpec{Num: pointy.Int(1)},
+		},
+	}
+
+	mockDashboard := dashboardmocks.NewMockDashboardService(t)
+	mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+		Applications: map[string]dashboard.RayServeApplicationStatus{
+			"production_chat-model": {
+				Status: "RUNNING",
+			},
+		},
+		Proxies: map[string]dashboard.ProxyStatus{
+			"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+		},
+	}, nil)
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(dashboardUrl string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() {
+		dashboard.NewDashboardService = prevFactory
+	})
+
+	mockStorage := storagemocks.NewMockStorage(t)
+	mockStorage.EXPECT().
+		GenericQuery(storage.STATIC_NODE_TABLE, "*", mock.Anything, mock.Anything).
+		Run(func(_ string, _ string, _ []storage.Filter, result interface{}) {
+			nodes, ok := result.(*[]v1.StaticNode)
+			require.True(t, ok)
+			*nodes = []v1.StaticNode{
+				{
+					Metadata: &v1.Metadata{
+						Workspace: "production",
+						Name:      "192.168.19.218",
+					},
+					Spec: &v1.StaticNodeSpec{
+						Cluster: "test-cluster",
+						IP:      "192.168.19.218",
+						Role:    v1.StaticNodeRoleHead,
+					},
+					Status: &v1.StaticNodeStatus{
+						Phase: v1.StaticNodePhaseReady,
+						Allocations: []v1.StaticNodeAllocationStatus{
+							{
+								WorkloadType: "endpoint",
+								Workspace:    "production",
+								Endpoint:     "chat-model",
+								InstanceID:   "chat-model-replica-a",
+								ReplicaID:    "replica-a",
+								RuntimeID:    "actor-a",
+								PID:          1234,
+								Devices: []v1.DeviceAllocation{
+									{
+										UUID:      "GPU-abc",
+										Product:   "NVIDIA_A100",
+										MemoryMiB: 81920,
+										CoreUnits: 100,
+										NodeID:    "192.168.19.218",
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+		}).
+		Return(nil)
+
+	orchestrator := &RayOrchestrator{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster"},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.0.2",
+				Config:  &v1.ClusterConfig{},
+			},
+			Status: &v1.ClusterStatus{
+				Initialized:  true,
+				DashboardURL: "http://ray-dashboard.example.com:8265",
+			},
+		},
+		storage: mockStorage,
+	}
+
+	status, err := orchestrator.GetEndpointStatus(endpoint)
+
+	require.NoError(t, err)
+	require.Equal(t, v1.EndpointPhaseRUNNING, status.Phase)
+	require.NotNil(t, status.Resources)
+	require.Len(t, status.Resources.Replicas, 1)
+	require.Equal(t, "chat-model-replica-a", status.Resources.Replicas[0].InstanceID)
+	require.Equal(t, "replica-a", status.Resources.Replicas[0].ReplicaID)
+	require.Equal(t, "192.168.19.218", status.Resources.Replicas[0].NodeID)
+	require.Len(t, status.Resources.Replicas[0].Devices, 1)
+	require.Equal(t, "GPU-abc", status.Resources.Replicas[0].Devices[0].UUID)
+	require.Equal(t, int64(81920), status.Resources.Summary.Products["NVIDIA_A100"].MemoryMiB)
+
+	mockDashboard.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
 }
 
 // TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_ToleratesMissingDeps

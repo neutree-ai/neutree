@@ -15,18 +15,20 @@ var (
 )
 
 const (
-	ENDPOINT_TABLE          = "endpoints"
-	ENGINE_TABLE            = "engines"
-	IMAGE_REGISTRY_TABLE    = "image_registries"
-	CLUSTERS_TABLE          = "clusters"
-	MODEL_REGISTRY_TABLE    = "model_registries"
-	MODEL_CATALOG_TABLE     = "model_catalogs"
-	ROLE_TABLE              = "roles"
-	ROLE_ASSIGNMENT_TABLE   = "role_assignments"
-	WORKSPACE_TABLE         = "workspaces"
-	API_KEY_TABLE           = "api_keys"
-	USER_PROFILE_TABLE      = "user_profiles"
-	EXTERNAL_ENDPOINT_TABLE = "external_endpoints"
+	ENDPOINT_TABLE            = "endpoints"
+	ENGINE_TABLE              = "engines"
+	IMAGE_REGISTRY_TABLE      = "image_registries"
+	CLUSTERS_TABLE            = "clusters"
+	MODEL_REGISTRY_TABLE      = "model_registries"
+	MODEL_CATALOG_TABLE       = "model_catalogs"
+	ROLE_TABLE                = "roles"
+	ROLE_ASSIGNMENT_TABLE     = "role_assignments"
+	WORKSPACE_TABLE           = "workspaces"
+	API_KEY_TABLE             = "api_keys"
+	USER_PROFILE_TABLE        = "user_profiles"
+	EXTERNAL_ENDPOINT_TABLE   = "external_endpoints"
+	STATIC_NODE_CLUSTER_TABLE = "static_node_clusters"
+	STATIC_NODE_TABLE         = "static_nodes"
 )
 
 type ImageRegistryStorage interface {
@@ -185,6 +187,13 @@ type ExternalEndpointStorage interface {
 	ListExternalEndpoint(option ListOption) ([]v1.ExternalEndpoint, error)
 }
 
+type StaticNodeClusterStorage interface {
+	CreateStaticNodeCluster(data *v1.StaticNodeCluster) error
+	DeleteStaticNodeCluster(id string) error
+	UpdateStaticNodeCluster(id string, data *v1.StaticNodeCluster) error
+	ListStaticNodeCluster(option ListOption) ([]v1.StaticNodeCluster, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -198,6 +207,7 @@ type Storage interface {
 	ModelCatalogStorage
 	UserProfileStorage
 	ExternalEndpointStorage
+	StaticNodeClusterStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error
@@ -268,6 +278,12 @@ type Patcher interface {
 	UpdateStatus(id string, data scheme.Object) error
 }
 
+type Writer interface {
+	Create(data scheme.Object) error
+	Update(id string, data scheme.Object) error
+	Delete(id string, data scheme.Object) error
+}
+
 type Reader interface {
 	Get(id string, obj scheme.Object) error
 	List(obj scheme.ObjectList, option ListOption) error
@@ -275,6 +291,7 @@ type Reader interface {
 
 type ObjectStorage interface {
 	Patcher
+	Writer
 	Reader
 }
 

@@ -22,6 +22,99 @@ func (_m *MockObjectStorage) EXPECT() *MockObjectStorage_Expecter {
 	return &MockObjectStorage_Expecter{mock: &_m.Mock}
 }
 
+// Create provides a mock function with given fields: data
+func (_m *MockObjectStorage) Create(data scheme.Object) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Create")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(scheme.Object) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockObjectStorage_Create_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Create'
+type MockObjectStorage_Create_Call struct {
+	*mock.Call
+}
+
+// Create is a helper method to define mock.On call
+//   - data scheme.Object
+func (_e *MockObjectStorage_Expecter) Create(data interface{}) *MockObjectStorage_Create_Call {
+	return &MockObjectStorage_Create_Call{Call: _e.mock.On("Create", data)}
+}
+
+func (_c *MockObjectStorage_Create_Call) Run(run func(data scheme.Object)) *MockObjectStorage_Create_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(scheme.Object))
+	})
+	return _c
+}
+
+func (_c *MockObjectStorage_Create_Call) Return(_a0 error) *MockObjectStorage_Create_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockObjectStorage_Create_Call) RunAndReturn(run func(scheme.Object) error) *MockObjectStorage_Create_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Delete provides a mock function with given fields: id, data
+func (_m *MockObjectStorage) Delete(id string, data scheme.Object) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Delete")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, scheme.Object) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockObjectStorage_Delete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Delete'
+type MockObjectStorage_Delete_Call struct {
+	*mock.Call
+}
+
+// Delete is a helper method to define mock.On call
+//   - id string
+//   - data scheme.Object
+func (_e *MockObjectStorage_Expecter) Delete(id interface{}, data interface{}) *MockObjectStorage_Delete_Call {
+	return &MockObjectStorage_Delete_Call{Call: _e.mock.On("Delete", id, data)}
+}
+
+func (_c *MockObjectStorage_Delete_Call) Run(run func(id string, data scheme.Object)) *MockObjectStorage_Delete_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(scheme.Object))
+	})
+	return _c
+}
+
+func (_c *MockObjectStorage_Delete_Call) Return(_a0 error) *MockObjectStorage_Delete_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockObjectStorage_Delete_Call) RunAndReturn(run func(string, scheme.Object) error) *MockObjectStorage_Delete_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Get provides a mock function with given fields: id, obj
 func (_m *MockObjectStorage) Get(id string, obj scheme.Object) error {
 	ret := _m.Called(id, obj)
@@ -112,6 +205,53 @@ func (_c *MockObjectStorage_List_Call) Return(_a0 error) *MockObjectStorage_List
 }
 
 func (_c *MockObjectStorage_List_Call) RunAndReturn(run func(scheme.ObjectList, storage.ListOption) error) *MockObjectStorage_List_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Update provides a mock function with given fields: id, data
+func (_m *MockObjectStorage) Update(id string, data scheme.Object) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Update")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, scheme.Object) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockObjectStorage_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
+type MockObjectStorage_Update_Call struct {
+	*mock.Call
+}
+
+// Update is a helper method to define mock.On call
+//   - id string
+//   - data scheme.Object
+func (_e *MockObjectStorage_Expecter) Update(id interface{}, data interface{}) *MockObjectStorage_Update_Call {
+	return &MockObjectStorage_Update_Call{Call: _e.mock.On("Update", id, data)}
+}
+
+func (_c *MockObjectStorage_Update_Call) Run(run func(id string, data scheme.Object)) *MockObjectStorage_Update_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(scheme.Object))
+	})
+	return _c
+}
+
+func (_c *MockObjectStorage_Update_Call) Return(_a0 error) *MockObjectStorage_Update_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockObjectStorage_Update_Call) RunAndReturn(run func(string, scheme.Object) error) *MockObjectStorage_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }

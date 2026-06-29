@@ -327,6 +327,31 @@ func (s *postgrestStorage) GetRole(id string) (*v1.Role, error) {
 	return &response[0], nil
 }
 
+func (s *postgrestStorage) ListStaticNodeCluster(option ListOption) ([]v1.StaticNodeCluster, error) {
+	var response []v1.StaticNodeCluster
+	err := s.genericList(STATIC_NODE_CLUSTER_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateStaticNodeCluster(data *v1.StaticNodeCluster) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_CLUSTER_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateStaticNodeCluster(id string, data *v1.StaticNodeCluster) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_CLUSTER_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteStaticNodeCluster(id string) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_CLUSTER_TABLE).Delete("", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
 func (s *postgrestStorage) ListRole(option ListOption) ([]v1.Role, error) {
 	var response []v1.Role
 	err := s.genericList(ROLE_TABLE, &response, option)
@@ -749,6 +774,39 @@ func (s *postgrestStorage) ListModelCatalog(option ListOption) ([]v1.ModelCatalo
 type postgrestObjectStorage struct {
 	postgrestClient *postgrest.Client
 	scheme          *scheme.Scheme
+}
+
+func (s *postgrestObjectStorage) Create(data scheme.Object) error {
+	table, ok := s.scheme.KindToTable(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+
+	_, _, err := s.postgrestClient.From(table).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestObjectStorage) Update(id string, data scheme.Object) error {
+	table, ok := s.scheme.KindToTable(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+
+	_, _, err := s.postgrestClient.From(table).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestObjectStorage) Delete(id string, data scheme.Object) error {
+	table, ok := s.scheme.KindToTable(data.GetKind())
+	if !ok {
+		return errors.Errorf("unregistered type: %s", data.GetKind())
+	}
+
+	_, _, err := s.postgrestClient.From(table).Delete("", "").Filter("id", "eq", id).Execute()
+
+	return err
 }
 
 func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {

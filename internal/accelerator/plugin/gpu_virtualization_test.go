@@ -69,31 +69,6 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 	assert.Contains(t, config.BlockingReasons[0], "NVIDIA GPU Operator devicePlugin is enabled")
 }
 
-func TestNVIDIAGPU_ResolveVirtualizationConfigWithNoGPUNodes(t *testing.T) {
-	gpuPlugin := &GPUAcceleratorPlugin{}
-
-	config, err := gpuPlugin.ResolveVirtualizationConfig(context.Background(), VirtualizationConfigInput{
-		Nodes: []corev1.Node{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cpu-only-1",
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cpu-only-2",
-				},
-			},
-		},
-	})
-
-	require.NoError(t, err)
-	assert.True(t, config.Supported)
-	assert.Empty(t, config.CandidateNodes)
-	assert.NotEmpty(t, config.BlockingReasons, "expected blocking reason when no GPU nodes are available")
-	assert.Contains(t, config.BlockingReasons[0], "No NVIDIA GPU")
-}
-
 func TestNVIDIAGPU_ResolveVirtualizationConfigIgnoresGlobalMIGStrategy(t *testing.T) {
 	gpuPlugin := &GPUAcceleratorPlugin{}
 

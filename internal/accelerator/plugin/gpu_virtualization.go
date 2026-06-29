@@ -72,16 +72,10 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 		}
 	}
 
-	candidateNodes := NvidiaVirtualizationCandidateNodes(input.Nodes)
-	if len(candidateNodes) == 0 {
-		blockingReasons = append(blockingReasons,
-			"No NVIDIA GPU nodes available for vGPU virtualization")
-	}
-
 	return &VirtualizationConfig{
 		Supported:       true,
 		BlockingReasons: blockingReasons,
-		CandidateNodes:  candidateNodes,
+		CandidateNodes:  NvidiaVirtualizationCandidateNodes(input.Nodes),
 		NodeScopeLabel: VirtualizationNodeScopeLabel{
 			Key:           NvidiaGPUVirtualizationLabelKey,
 			EnabledValue:  "true",

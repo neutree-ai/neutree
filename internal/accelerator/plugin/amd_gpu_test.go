@@ -11,6 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -48,6 +49,61 @@ func TestAMDGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	assert.Equal(t, string(v1.AcceleratorTypeAMDGPU), p.Resource())
 	assert.Equal(t, p, p.Handle())
 	assert.Equal(t, InternalPluginType, p.Type())
+}
+
+func TestAMDGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
+	runner := &staticNodeTestRunner{output: testLspciOuput}
+	p := &AMDGPUAcceleratorPlugin{}
+
+	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.NotNil(t, status)
+	assert.Equal(t, v1.AcceleratorTypeAMDGPU.String(), status.Type)
+	assert.Equal(t, "amd", status.Vendor)
+	assert.Equal(t, "AMD GPU", status.ProductName)
+	assert.Equal(t, "amd_gpu", status.ProductModel)
+	require.Len(t, status.Devices, 1)
+	assert.Equal(t, "0", status.Devices[0].ID)
+	assert.True(t, status.Devices[0].Healthy)
+	assert.Equal(t, 1, runner.calls)
+}
+
+func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T) {
+	runner := &staticNodeTestRunner{output: "{}"}
+	p := &AMDGPUAcceleratorPlugin{}
+
+	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+
+	require.NoError(t, err)
+	assert.False(t, matched)
+	assert.Nil(t, status)
+}
+
+func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsRunnerError(t *testing.T) {
+	runner := &staticNodeTestRunner{err: errors.New("lspci failed")}
+	p := &AMDGPUAcceleratorPlugin{}
+
+	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+
+	require.Error(t, err)
+	assert.False(t, matched)
+	assert.Nil(t, status)
+}
+
+func TestAMDGPUAcceleratorPluginRuntimeProfile(t *testing.T) {
+	p := &AMDGPUAcceleratorPlugin{}
+
+	profile, supported, err := p.RuntimeProfile(context.Background(), v1.StaticNodeAcceleratorStatus{
+		Type:         v1.AcceleratorTypeAMDGPU.String(),
+		ProductModel: "amd-mi300x",
+	})
+
+	require.NoError(t, err)
+	assert.True(t, supported)
+	require.NotNil(t, profile)
+	assert.Equal(t, v1.AcceleratorTypeAMDGPU.String(), profile.AcceleratorType)
 }
 
 func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
@@ -221,4 +277,22 @@ func TestAMDGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 			assert.Equal(t, tt.expectRuntimeConfig, runtimeConfig.RuntimeConfig)
 		})
 	}
+}
+
+func TestAMDGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
+	p := &AMDGPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.ClusterRuntime)
+	require.NotNil(t, profile.EndpointRuntime)
+	require.NotNil(t, profile.ResourceDefaults)
+	assert.Equal(t, string(v1.AcceleratorTypeAMDGPU), profile.AcceleratorType)
+	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
+	assert.Equal(t, "amd", profile.ClusterRuntime.Runtime)
+	assert.Equal(t, "amd", profile.EndpointRuntime.Runtime)
+	assert.Equal(t, "GPU", profile.ResourceDefaults.RayResourceName)
+	assert.Equal(t, string(AMDGPUKubernetesResource), profile.ResourceDefaults.KubernetesResourceName)
 }
