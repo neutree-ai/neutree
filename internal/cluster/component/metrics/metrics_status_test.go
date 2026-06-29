@@ -180,6 +180,7 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 			readyMetricsDeployment("vmagent"),
 			readyMetricsDeployment("neutree-kube-state-metrics"),
 			readyMetricsDaemonSet("neutree-node-exporter", 2),
+			readyMetricsDaemonSet("neutree-node-agent", 2),
 		).
 		Build()
 
@@ -200,6 +201,7 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 	assert.True(t, status.KubeStateMetricsRequired)
 	assert.True(t, status.KubeStateMetricsDeploymentReady)
 	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeMetricsDaemonSetReady)
 	assert.Equal(t, 1, status.PodsReady)
 	assert.Equal(t, 1, status.KubeStateMetricsPodsReady)
 }
@@ -209,6 +211,7 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 		WithObjects(
 			readyMetricsDeployment("vmagent"),
 			readyMetricsDaemonSet("neutree-node-exporter", 2),
+			readyMetricsDaemonSet("neutree-node-agent", 2),
 		).
 		Build()
 
@@ -229,6 +232,7 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	assert.False(t, status.KubeStateMetricsRequired)
 	assert.False(t, status.KubeStateMetricsDeploymentReady)
 	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeMetricsDaemonSetReady)
 }
 
 func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) {
@@ -238,6 +242,7 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 			readyMetricsDeployment("vmagent"),
 			readyMetricsDeployment("neutree-kube-state-metrics"),
 			readyMetricsDaemonSet("neutree-node-exporter", 1),
+			readyMetricsDaemonSet("neutree-node-agent", 1),
 			readyMetricsDaemonSet("nvidia-dcgm-exporter", 1),
 		).
 		Build()
@@ -257,6 +262,7 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 	assert.NoError(t, err)
 	assert.True(t, status.Ready())
 	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeMetricsDaemonSetReady)
 	assert.True(t, status.AcceleratorExporterRequired)
 	assert.True(t, status.AcceleratorExporterDaemonSetsReady)
 }

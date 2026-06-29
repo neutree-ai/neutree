@@ -16,6 +16,7 @@ import (
 type MetricsStatus struct {
 	DeploymentReady                    bool
 	NodeExporterDaemonSetReady         bool
+	NeutreeMetricsDaemonSetReady       bool
 	KubeStateMetricsRequired           bool
 	KubeStateMetricsDeploymentReady    bool
 	AcceleratorExporterRequired        bool
@@ -24,6 +25,8 @@ type MetricsStatus struct {
 	TotalPods                          int
 	NodeExporterPodsReady              int
 	NodeExporterTotalPods              int
+	NeutreeMetricsPodsReady            int
+	NeutreeMetricsTotalPods            int
 	KubeStateMetricsPodsReady          int
 	KubeStateMetricsTotalPods          int
 	AcceleratorExporterPodsReady       int
@@ -35,12 +38,14 @@ type MetricsStatus struct {
 func (m MetricsStatus) String() string {
 	base := fmt.Sprintf(
 		"DeploymentReady: %v, PodsReady: %d/%d, NodeExporterDaemonSetReady: %v, "+
-			"NodeExporterPodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
+			"NodeExporterPodsReady: %d/%d, NeutreeMetricsDaemonSetReady: %v, "+
+			"NeutreeMetricsPodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
 			"KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, "+
 			"AcceleratorExporterRequired: %v, AcceleratorExporterDaemonSetsReady: %v, "+
 			"AcceleratorExporterPodsReady: %d/%d, Errors: %v",
 		m.DeploymentReady, m.PodsReady, m.TotalPods,
 		m.NodeExporterDaemonSetReady, m.NodeExporterPodsReady, m.NodeExporterTotalPods,
+		m.NeutreeMetricsDaemonSetReady, m.NeutreeMetricsPodsReady, m.NeutreeMetricsTotalPods,
 		m.KubeStateMetricsRequired,
 		m.KubeStateMetricsDeploymentReady, m.KubeStateMetricsPodsReady, m.KubeStateMetricsTotalPods,
 		m.AcceleratorExporterRequired, m.AcceleratorExporterDaemonSetsReady,
@@ -57,6 +62,7 @@ func (m MetricsStatus) Ready() bool {
 
 	return m.DeploymentReady &&
 		m.NodeExporterDaemonSetReady &&
+		m.NeutreeMetricsDaemonSetReady &&
 		(!m.KubeStateMetricsRequired || m.KubeStateMetricsDeploymentReady) &&
 		(!m.AcceleratorExporterRequired || m.AcceleratorExporterDaemonSetsReady)
 }
@@ -89,6 +95,15 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		status.NodeExporterDaemonSetReady = nodeExporterReady
 		status.NodeExporterPodsReady = nodeExporterPodsReady
 		status.NodeExporterTotalPods = nodeExporterTotalPods
+	}
+
+	neutreeMetricsReady, neutreeMetricsPodsReady, neutreeMetricsTotalPods, err := m.checkDaemonSetStatus(ctx, neutreeMetricsName)
+	if err != nil {
+		status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeMetricsName, err))
+	} else {
+		status.NeutreeMetricsDaemonSetReady = neutreeMetricsReady
+		status.NeutreeMetricsPodsReady = neutreeMetricsPodsReady
+		status.NeutreeMetricsTotalPods = neutreeMetricsTotalPods
 	}
 
 	acceleratorExporters, err := m.planAcceleratorExporters(ctx)

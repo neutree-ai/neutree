@@ -18,17 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	testNodeExporterComponentName     = "node-exporter"
-	testVMAgentComponentName          = "vmagent"
-	testDefaultNodeExporterImage      = "quay.io/prometheus/node-exporter:v1.8.2"
-	testDefaultVMAgentImage           = "victoriametrics/vmagent:v1.115.0"
-	testDefaultPrometheusHTTPPath     = "/metrics"
-	testDefaultHealthHTTPPath         = "/health"
-	testVMAgentConfigPath             = "/etc/neutree/vmagent/config.yaml"
-	testVMAgentNodeExporterFileSDPath = "/etc/neutree/vmagent/file_sd/node-exporter.json"
-)
-
 func TestStaticNodeReconcilerReconcileWarmImages(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -207,6 +196,135 @@ func TestBuildStaticNodeStatusClearsPreviousErrorOnSuccess(t *testing.T) {
 	assert.Empty(t, status.ErrorMessage)
 }
 
+func TestBuildStaticNodeStatusWritesNodeSnapshotAllocations(t *testing.T) {
+	result := &StaticNodeReconcileResult{
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+			Vendor:       "nvidia",
+			ProductModel: "nvidia_gpu",
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+		Allocations: []v1.StaticNodeAllocationStatus{
+			{
+				WorkloadType: "endpoint",
+				Workspace:    "default",
+				Endpoint:     "chat",
+				ReplicaID:    "replica-a",
+				Devices: []v1.DeviceAllocation{
+					{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920},
+				},
+			},
+		},
+		Warm:       &v1.WarmStatus{Ready: true},
+		Components: []v1.NodeComponentStatus{},
+	}
+
+	status := buildStaticNodeStatus(&v1.StaticNode{}, result, nil)
+
+	require.NotNil(t, status.Accelerator)
+	require.Len(t, status.Accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", status.Accelerator.Devices[0].UUID)
+	require.Len(t, status.Allocations, 1)
+	assert.Equal(t, "chat", status.Allocations[0].Endpoint)
+}
+
+func TestStaticNodeReconcilerReconcileNodeSnapshotUsesAgentForDetails(t *testing.T) {
+	node := &v1.StaticNode{
+		Metadata: &v1.Metadata{Name: "head-0"},
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.10",
+		},
+	}
+	reconciler := &StaticNodeReconciler{
+		NodeSnapshotClient: fakeStaticNodeSnapshotClient{
+			snapshot: &StaticNodeSnapshot{
+				Accelerator: v1.StaticNodeAcceleratorStatus{
+					Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+					Vendor:       "nvidia",
+					ProductModel: "nvidia_gpu",
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+					},
+				},
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						WorkloadType: "endpoint",
+						Workspace:    "default",
+						Endpoint:     "chat",
+						ReplicaID:    "replica-a",
+						Devices: []v1.DeviceAllocation{
+							{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920},
+						},
+					},
+				},
+			},
+		},
+	}
+	coarse := &v1.StaticNodeAcceleratorStatus{
+		Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+		Vendor:       "nvidia",
+		ProductModel: "nvidia_gpu",
+	}
+
+	accelerator, allocations, err := reconciler.ReconcileNodeSnapshot(context.Background(), node, coarse)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelerator.Type)
+	require.Len(t, accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", accelerator.Devices[0].UUID)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+}
+
+func TestStaticNodeReconcilerReconcileNodeSnapshotDoesNotDowngradeDetectedGPUToCPU(t *testing.T) {
+	node := &v1.StaticNode{
+		Metadata: &v1.Metadata{Name: "head-0"},
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.10",
+		},
+	}
+	cpuSnapshot := v1.CPUStaticNodeAcceleratorStatus()
+	reconciler := &StaticNodeReconciler{
+		NodeSnapshotClient: fakeStaticNodeSnapshotClient{
+			snapshot: &StaticNodeSnapshot{
+				Accelerator: cpuSnapshot,
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						WorkloadType: "endpoint",
+						Workspace:    "default",
+						Endpoint:     "chat",
+						ReplicaID:    "replica-a",
+					},
+				},
+			},
+		},
+	}
+	coarse := &v1.StaticNodeAcceleratorStatus{
+		Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+		Vendor:       "nvidia",
+		ProductModel: "nvidia_gpu",
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+			{ID: "0", ProductName: "NVIDIA GPU", Healthy: true},
+		},
+	}
+
+	accelerator, allocations, err := reconciler.ReconcileNodeSnapshot(context.Background(), node, coarse)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelerator.Type)
+	assert.Equal(t, "nvidia", accelerator.Vendor)
+	require.Len(t, accelerator.Devices, 1)
+	assert.Equal(t, "0", accelerator.Devices[0].ID)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+}
+
 func TestInspectDockerImageIgnoresSSHWarning(t *testing.T) {
 	runner := &fakeStaticNodeRunner{
 		responses: []fakeStaticNodeResponse{
@@ -240,23 +358,23 @@ func TestComponentContainerMatchesIgnoresSSHWarning(t *testing.T) {
 }
 
 func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
-	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultPrometheusHTTPPath, `ok`)
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:       testNodeExporterComponentName,
+					Name:       nodeExporterComponentName,
 					Type:       v1.NodeComponentTypeNodeExporter,
-					Image:      testDefaultNodeExporterImage,
+					Image:      defaultNodeExporterImage,
 					Args:       []string{"--path.rootfs=/host"},
 					ConfigHash: "hash-node-exporter",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
 					HealthCheck: &v1.NodeComponentHealthCheck{
-						HTTPPath: testDefaultPrometheusHTTPPath,
+						HTTPPath: defaultPrometheusHTTPPath,
 						Port:     healthPort,
 					},
 				},
@@ -300,7 +418,7 @@ func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 }
 
 func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure(t *testing.T) {
-	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultPrometheusHTTPPath, `ok`)
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
@@ -313,15 +431,15 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 					ConfigHash: "hash-ray",
 				},
 				{
-					Name:       testNodeExporterComponentName,
+					Name:       nodeExporterComponentName,
 					Type:       v1.NodeComponentTypeNodeExporter,
-					Image:      testDefaultNodeExporterImage,
+					Image:      defaultNodeExporterImage,
 					ConfigHash: "hash-node-exporter",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
 					HealthCheck: &v1.NodeComponentHealthCheck{
-						HTTPPath: testDefaultPrometheusHTTPPath,
+						HTTPPath: defaultPrometheusHTTPPath,
 						Port:     healthPort,
 					},
 				},
@@ -374,19 +492,19 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 }
 
 func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *testing.T) {
-	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultPrometheusHTTPPath, `ok`)
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:       testNodeExporterComponentName,
+					Name:       nodeExporterComponentName,
 					Type:       v1.NodeComponentTypeNodeExporter,
-					Image:      testDefaultNodeExporterImage,
+					Image:      defaultNodeExporterImage,
 					ConfigHash: "hash-node-exporter",
 					HealthCheck: &v1.NodeComponentHealthCheck{
-						HTTPPath: testDefaultPrometheusHTTPPath,
+						HTTPPath: defaultPrometheusHTTPPath,
 						Port:     healthPort,
 					},
 				},
@@ -429,23 +547,23 @@ func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *t
 }
 
 func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
-	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultHealthHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:       testVMAgentComponentName,
+					Name:       vmagentComponentName,
 					Type:       v1.NodeComponentTypeMetricsAgent,
-					Image:      testDefaultVMAgentImage,
+					Image:      defaultVMAgentImage,
 					ConfigHash: "hash-vmagent",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
 					ConfigFiles: []v1.NodeComponentConfigFile{
 						{
-							Path:         testVMAgentConfigPath,
+							Path:         vmagentConfigPath,
 							Content:      "scrape_configs: []\n",
 							Mode:         "0644",
 							Sudo:         true,
@@ -455,13 +573,13 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 					},
 					Volumes: []v1.NodeComponentVolume{
 						{
-							HostPath:  testVMAgentConfigPath,
-							MountPath: testVMAgentConfigPath,
+							HostPath:  vmagentConfigPath,
+							MountPath: vmagentConfigPath,
 							ReadOnly:  true,
 						},
 					},
 					HealthCheck: &v1.NodeComponentHealthCheck{
-						HTTPPath: testDefaultHealthHTTPPath,
+						HTTPPath: defaultHealthHTTPPath,
 						Port:     healthPort,
 					},
 				},
@@ -499,29 +617,29 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 	require.Len(t, statuses, 1)
 	assert.True(t, statuses[0].Ready)
 	assert.Equal(t, 1, fileClient.calls)
-	assert.Equal(t, testVMAgentConfigPath, fileClient.path)
+	assert.Equal(t, vmagentConfigPath, fileClient.path)
 	assert.Equal(t, []byte("scrape_configs: []\n"), fileClient.content)
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
 func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestartConfigChanged(t *testing.T) {
-	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
+	healthHost, healthPort := newStaticNodeHealthServer(t, defaultHealthHTTPPath, `ok`)
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:       testVMAgentComponentName,
+					Name:       vmagentComponentName,
 					Type:       v1.NodeComponentTypeMetricsAgent,
-					Image:      testDefaultVMAgentImage,
+					Image:      defaultVMAgentImage,
 					ConfigHash: "hash-vmagent",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
 					ConfigFiles: []v1.NodeComponentConfigFile{
 						{
-							Path:                testVMAgentNodeExporterFileSDPath,
+							Path:                vmagentNodeExporterFileSDPath,
 							Content:             `[{"targets":["10.0.0.10:19100"]}]`,
 							Mode:                "0644",
 							Sudo:                true,
@@ -531,7 +649,7 @@ func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestar
 						},
 					},
 					HealthCheck: &v1.NodeComponentHealthCheck{
-						HTTPPath: testDefaultHealthHTTPPath,
+						HTTPPath: defaultHealthHTTPPath,
 						Port:     healthPort,
 					},
 				},
@@ -555,7 +673,7 @@ func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestar
 	require.Len(t, statuses, 1)
 	assert.True(t, statuses[0].Ready)
 	assert.Equal(t, 1, fileClient.calls)
-	assert.Equal(t, testVMAgentNodeExporterFileSDPath, fileClient.path)
+	assert.Equal(t, vmagentNodeExporterFileSDPath, fileClient.path)
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
@@ -600,11 +718,11 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 			Cluster: "static-a",
 			Components: []v1.NodeComponentSpec{
 				{
-					Name: testVMAgentComponentName,
+					Name: vmagentComponentName,
 					Type: v1.NodeComponentTypeMetricsAgent,
 					ConfigFiles: []v1.NodeComponentConfigFile{
 						{
-							Path: testVMAgentConfigPath,
+							Path: vmagentConfigPath,
 							Sudo: true,
 						},
 					},
@@ -614,7 +732,7 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 		Status: &v1.StaticNodeStatus{
 			Components: []v1.NodeComponentStatus{
 				{
-					Name:  testVMAgentComponentName,
+					Name:  vmagentComponentName,
 					Type:  v1.NodeComponentTypeMetricsAgent,
 					Ready: true,
 					Phase: v1.NodeComponentPhaseRunning,
@@ -649,7 +767,7 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 
 	require.NoError(t, err)
 	assert.Equal(t, len(runner.responses), runner.calls)
-	assert.Equal(t, []string{testVMAgentConfigPath}, fileClient.removedPaths)
+	assert.Equal(t, []string{vmagentConfigPath}, fileClient.removedPaths)
 }
 
 func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerWithDashboardAPI(t *testing.T) {
@@ -1033,6 +1151,18 @@ func (f *fakeStaticNodeHeadReadyReader) ListStaticNodes(
 	f.clusterName = clusterName
 
 	return f.nodes, f.err
+}
+
+type fakeStaticNodeSnapshotClient struct {
+	snapshot *StaticNodeSnapshot
+	err      error
+}
+
+func (f fakeStaticNodeSnapshotClient) Snapshot(
+	_ context.Context,
+	_ *v1.StaticNode,
+) (*StaticNodeSnapshot, error) {
+	return f.snapshot, f.err
 }
 
 func (f *fakeStaticNodeDashboardService) ListActors(

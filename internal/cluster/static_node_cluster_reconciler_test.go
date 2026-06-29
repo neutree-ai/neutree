@@ -118,12 +118,14 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
+		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:latest",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 	assertNodeComponentTypes(t, head.Spec.Components, []v1.NodeComponentType{
 		v1.NodeComponentTypeRayHead,
 		v1.NodeComponentTypeNodeExporter,
 		v1.NodeComponentTypeAcceleratorExporter,
+		v1.NodeComponentTypeNodeAgent,
 		v1.NodeComponentTypeMetricsAgent,
 	})
 	nodeExporter := findComponent(head.Spec.Components, nodeExporterComponentName)
@@ -144,6 +146,42 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	require.NotNil(t, exporter.HealthCheck)
 	assert.Equal(t, "/dcgm/metrics", exporter.HealthCheck.HTTPPath)
 
+	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	assert.Equal(t, v1.NodeComponentTypeNodeAgent, nodeAgent.Type)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:latest", nodeAgent.Image)
+	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
+	assert.Contains(t, nodeAgent.Args, "--workspace=default")
+	assert.Contains(t, nodeAgent.Args, "--cluster=static-a")
+	assert.Contains(t, nodeAgent.Args, "--static-node-cluster=static-a")
+	assert.Contains(t, nodeAgent.Args, "--node=head-0")
+	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
+	assert.Contains(t, nodeAgent.Args, "--node-role=head")
+	assert.Contains(t, nodeAgent.Args, "--listen-address=:19101")
+	assert.NotContains(t, nodeAgent.Args, "--listen-address=:9101")
+	assert.Contains(t, nodeAgent.Args, "--node-exporter-url=http://127.0.0.1:19100/metrics")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-url=http://127.0.0.1:9400/dcgm/metrics")
+	assert.Contains(t, nodeAgent.Args, "--ray-dashboard-url=http://10.0.0.10:8265")
+	assert.Contains(t, nodeAgent.Args, "--procfs-root=/host/proc")
+	assert.Contains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
+	assert.Equal(t, []string{"--net=host", "--pid=host", "--cgroupns=host", "--gpus all"}, nodeAgent.DockerRunOptions)
+	assert.Contains(t, nodeAgent.Volumes, v1.NodeComponentVolume{
+		Name:      "host-proc",
+		HostPath:  "/proc",
+		MountPath: "/host/proc",
+		ReadOnly:  true,
+	})
+	assert.Contains(t, nodeAgent.Volumes, v1.NodeComponentVolume{
+		Name:      "host-cgroup",
+		HostPath:  "/sys/fs/cgroup",
+		MountPath: "/host/sys/fs/cgroup",
+		ReadOnly:  true,
+	})
+	assert.Equal(t, 19101, nodeAgent.Ports[0].Port)
+	require.NotNil(t, nodeAgent.HealthCheck)
+	assert.Equal(t, defaultHealthHTTPPath, nodeAgent.HealthCheck.HTTPPath)
+	assert.Equal(t, 19101, nodeAgent.HealthCheck.Port)
+
 	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
 	require.NotNil(t, vmagentComponent)
 	assert.Equal(t, "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0", vmagentComponent.Image)
@@ -156,8 +194,11 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-exporter.json`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.10:19100"`)
 	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:19100"`)
-	assert.NotContains(t, vmagentConfig.Content, `job_name: static-node-node-agent`)
-	assert.NotContains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-agent.json`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-agent`)
+	assert.Contains(t, vmagentConfig.Content, "job_name: static-node-node-agent\n  honor_labels: true\n")
+	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-agent.json`)
+	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.10:9101"`)
+	assert.NotContains(t, vmagentConfig.Content, `"10.0.0.11:9101"`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-ray`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/ray.json`)
 	assert.Contains(t, vmagentConfig.Content, `metric_relabel_configs:`)
@@ -182,6 +223,14 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeTargets.Content, `"10.0.0.11:19100"`)
 	assert.Contains(t, nodeTargets.Content, `"neutree_cluster": "static-a"`)
 	assert.Contains(t, nodeTargets.Content, `"static_node_cluster": "static-a"`)
+	nodeAgentTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/node-agent.json")
+	require.NotNil(t, nodeAgentTargets)
+	assert.True(t, nodeAgentTargets.SkipRestartOnChange)
+	assert.Contains(t, nodeAgentTargets.Content, `"10.0.0.10:19101"`)
+	assert.Contains(t, nodeAgentTargets.Content, `"10.0.0.11:19101"`)
+	assert.NotContains(t, nodeAgentTargets.Content, `"10.0.0.10:9101"`)
+	assert.NotContains(t, nodeAgentTargets.Content, `"10.0.0.11:9101"`)
+	assert.Contains(t, nodeAgentTargets.Content, `"source": "neutree-node-agent"`)
 	rayTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/ray.json")
 	require.NotNil(t, rayTargets)
 	assert.True(t, rayTargets.SkipRestartOnChange)
@@ -226,10 +275,12 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assertNodeComponentTypes(t, worker.Spec.Components, []v1.NodeComponentType{
 		v1.NodeComponentTypeRayWorker,
 		v1.NodeComponentTypeNodeExporter,
+		v1.NodeComponentTypeNodeAgent,
 	})
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:latest",
 	})
 
 	cluster.Spec.Version = "mutated"

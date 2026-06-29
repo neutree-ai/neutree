@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -14,6 +15,8 @@ import (
 const (
 	nodeExporterDaemonSetName = "neutree-node-exporter"
 	nodeExporterPort          = 19100
+	neutreeMetricsName        = "neutree-node-agent"
+	neutreeMetricsPort        = 19101
 
 	defaultNodeExporterImage = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
 	defaultMetricsPath       = "/metrics"
@@ -151,6 +154,25 @@ func exporterMetricsPath(metricsPath string) string {
 	}
 
 	return metricsPath
+}
+
+func acceleratorExporterLocalMetricsURLs(exporters []metricsAcceleratorExporter) []string {
+	urls := make([]string, 0, len(exporters))
+
+	for _, exporter := range exporters {
+		if !exporter.HostNetwork || exporter.Port <= 0 {
+			continue
+		}
+
+		metricsPath := exporterMetricsPath(exporter.MetricsPath)
+		if !strings.HasPrefix(metricsPath, "/") {
+			metricsPath = "/" + metricsPath
+		}
+
+		urls = append(urls, "http://127.0.0.1:"+strconv.Itoa(exporter.Port)+metricsPath)
+	}
+
+	return urls
 }
 
 func buildExporterEnv(env map[string]string) []corev1.EnvVar {

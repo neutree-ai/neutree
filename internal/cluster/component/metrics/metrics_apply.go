@@ -32,6 +32,7 @@ func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList
 	}
 
 	variables.AcceleratorExporters = acceleratorExporters
+	variables.NeutreeMetricsAcceleratorExporterURLs = acceleratorExporterLocalMetricsURLs(acceleratorExporters)
 
 	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)
 	if err != nil {

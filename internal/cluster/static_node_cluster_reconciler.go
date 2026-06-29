@@ -22,18 +22,22 @@ const (
 	staticNodeRoleLabelKey    = "neutree.ai/static-node-role"
 
 	nodeExporterComponentName        = "node-exporter"
+	nodeAgentComponentName           = "neutree-node-agent"
 	vmagentComponentName             = "vmagent"
 	acceleratorExporterComponentName = "accelerator-exporter"
 	defaultVMAgentPort               = 8429
 	defaultNodeExporterPort          = 19100
+	defaultNodeAgentPort             = 19101
 	defaultRayDashboardPort          = 8265
 	defaultPrometheusHTTPPath        = "/metrics"
 	defaultHealthHTTPPath            = "/health"
 	vmagentConfigPath                = "/etc/neutree/vmagent/config.yaml"
 	vmagentFileSDDir                 = "/etc/neutree/vmagent/file_sd"
 	vmagentNodeExporterFileSDPath    = vmagentFileSDDir + "/node-exporter.json"
+	vmagentNodeAgentFileSDPath       = vmagentFileSDDir + "/node-agent.json"
 	vmagentRayFileSDPath             = vmagentFileSDDir + "/ray.json"
 	defaultNodeExporterImage         = "quay.io/prometheus/node-exporter:v1.8.2"
+	defaultNodeAgentImage            = "neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent
 	defaultVMAgentImage              = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
 )
 
@@ -917,6 +921,8 @@ func buildNodeComponents(
 		})
 	}
 
+	components = append(components, buildNodeAgentComponent(cluster, node, profile))
+
 	if role == v1.StaticNodeRoleHead {
 		vmagentArgs := []string{
 			"-promscrape.config=" + vmagentConfigPath,
@@ -959,6 +965,84 @@ func acceleratorExporterComponentType(exporter *v1.AcceleratorExporterProfile) v
 	}
 
 	return v1.NodeComponentTypeAcceleratorExporter
+}
+
+func buildNodeAgentComponent(
+	cluster *v1.StaticNodeCluster,
+	node *v1.StaticNode,
+	profile *v1.AcceleratorProfile,
+) v1.NodeComponentSpec {
+	args := []string{
+		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
+		"--cluster-type=ray",
+		fmt.Sprintf("--node-exporter-url=http://127.0.0.1:%d%s", defaultNodeExporterPort, defaultPrometheusHTTPPath),
+		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), defaultRayDashboardPort),
+		"--procfs-root=/host/proc",
+		"--cgroupfs-root=/host/sys/fs/cgroup",
+	}
+
+	if cluster != nil && cluster.Metadata != nil {
+		args = append(args,
+			"--workspace="+cluster.Metadata.Workspace,
+			"--cluster="+cluster.Metadata.Name,
+			"--static-node-cluster="+cluster.Metadata.Name,
+		)
+	}
+
+	if node != nil && node.Metadata != nil {
+		args = append(args, "--node="+node.Metadata.Name)
+	}
+
+	if node != nil && node.Spec != nil {
+		args = append(args,
+			"--node-ip="+node.Spec.IP,
+			"--node-role="+string(node.Spec.Role),
+		)
+	}
+
+	if profile != nil && profile.Metrics != nil && profile.Metrics.Exporter != nil {
+		exporter := profile.Metrics.Exporter
+		args = append(args, fmt.Sprintf(
+			"--accelerator-exporter-url=http://127.0.0.1:%d%s",
+			exporter.Port,
+			exporterMetricsPath(exporter),
+		))
+	}
+
+	return v1.NodeComponentSpec{
+		Name:             nodeAgentComponentName,
+		Type:             v1.NodeComponentTypeNodeAgent,
+		Image:            staticComponentImage(cluster, defaultNodeAgentImage),
+		Args:             args,
+		DockerRunOptions: nodeAgentDockerRunOptions(profile),
+		Ports: []v1.NodeComponentPort{
+			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
+		},
+		Volumes: []v1.NodeComponentVolume{
+			{Name: "host-proc", HostPath: "/proc", MountPath: "/host/proc", ReadOnly: true},
+			{Name: "host-cgroup", HostPath: "/sys/fs/cgroup", MountPath: "/host/sys/fs/cgroup", ReadOnly: true},
+		},
+		HealthCheck: &v1.NodeComponentHealthCheck{
+			HTTPPath: defaultHealthHTTPPath,
+			Port:     defaultNodeAgentPort,
+		},
+	}
+}
+
+func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
+	options := []string{"--net=host", "--pid=host", "--cgroupns=host"}
+	if profile == nil || profile.ClusterRuntime == nil {
+		return options
+	}
+
+	for _, option := range profile.ClusterRuntime.Options {
+		option = strings.TrimSpace(option)
+		if strings.HasPrefix(option, "--gpus") {
+			options = append(options, option)
+		}
+	}
+
+	return options
 }
 
 func attachMetricsConfigFiles(
@@ -1005,6 +1089,10 @@ func renderVMAgentConfig(plans []staticNodeDesiredPlan) string {
 
 	builder.WriteString("- job_name: static-node-node-exporter\n")
 	writeVMAgentFileSDConfig(&builder, vmagentNodeExporterFileSDPath)
+
+	builder.WriteString("- job_name: static-node-node-agent\n")
+	builder.WriteString("  honor_labels: true\n")
+	writeVMAgentFileSDConfig(&builder, vmagentNodeAgentFileSDPath)
 
 	builder.WriteString("- job_name: static-node-ray\n")
 	writeVMAgentFileSDConfig(&builder, vmagentRayFileSDPath)
@@ -1068,6 +1156,10 @@ func renderVMAgentFileSDConfigFiles(
 			renderVMAgentNodeExporterFileSDTargets(cluster, plans),
 		),
 		vmagentFileSDConfigFile(
+			vmagentNodeAgentFileSDPath,
+			renderVMAgentNodeAgentFileSDTargets(cluster, plans),
+		),
+		vmagentFileSDConfigFile(
 			vmagentRayFileSDPath,
 			renderVMAgentRayFileSDTargets(cluster, plans),
 		),
@@ -1122,6 +1214,26 @@ func renderVMAgentNodeExporterFileSDTargets(
 	return mustMarshalVMAgentFileSDTargets(targets)
 }
 
+func renderVMAgentNodeAgentFileSDTargets(
+	cluster *v1.StaticNodeCluster,
+	plans []staticNodeDesiredPlan,
+) string {
+	targets := make([]vmagentFileSDTarget, 0, len(plans))
+
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Spec == nil || !staticNodeHasNodeAgentComponent(plan.Node) {
+			continue
+		}
+
+		targets = append(targets, vmagentFileSDTarget{
+			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, defaultNodeAgentPort)},
+			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeAgentComponentName),
+		})
+	}
+
+	return mustMarshalVMAgentFileSDTargets(targets)
+}
+
 func renderVMAgentRayFileSDTargets(
 	cluster *v1.StaticNodeCluster,
 	plans []staticNodeDesiredPlan,
@@ -1150,6 +1262,20 @@ func staticNodeHasRayComponent(node *v1.StaticNode) bool {
 	for _, component := range node.Spec.Components {
 		switch component.Type {
 		case v1.NodeComponentTypeRayHead, v1.NodeComponentTypeRayWorker:
+			return true
+		}
+	}
+
+	return false
+}
+
+func staticNodeHasNodeAgentComponent(node *v1.StaticNode) bool {
+	if node == nil || node.Spec == nil {
+		return false
+	}
+
+	for _, component := range node.Spec.Components {
+		if component.Name == nodeAgentComponentName || component.Type == v1.NodeComponentTypeNodeAgent {
 			return true
 		}
 	}
