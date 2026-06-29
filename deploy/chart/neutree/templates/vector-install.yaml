@@ -234,6 +234,7 @@ spec:
           args:
             - --config-dir
             - /etc/vector/
+            - --watch-config
           env:
             - name: VECTOR_LOG
               value: "info"

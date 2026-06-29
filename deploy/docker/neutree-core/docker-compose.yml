@@ -339,6 +339,7 @@ services:
     command:
       - --config-dir
       - /etc/vector/
+      - --watch-config
     volumes:
       - {{ .NeutreeCoreWorkDir }}/vector:/etc/vector
       - {{ .NeutreeCoreWorkDir }}/vector-trace:/var/log/vector
