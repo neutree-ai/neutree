@@ -33,6 +33,16 @@ local function consumer_id()
 end
 
 local function request_model()
+    -- Prefer the client-facing model stashed by neutree-ai-gateway (priority
+    -- 1100) before it rewrites the request body for model mapping. This plugin
+    -- (895) runs after that rewrite, so re-reading the raw body here is
+    -- unreliable (it can come back nil) — which would make any key with an
+    -- allowed_models list reject every request. Fall back to the body for routes
+    -- without the gateway plugin.
+    local stashed = kong.ctx.shared and kong.ctx.shared.neutree_request_model
+    if type(stashed) == "string" and stashed ~= "" then
+        return stashed
+    end
     local raw = kong.request.get_raw_body()
     if raw and raw ~= "" then
         local decoded = cjson.decode(raw)
