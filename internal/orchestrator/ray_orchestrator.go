@@ -594,6 +594,7 @@ func pendingRayModelDownloadMessage(
 }
 
 func currentModelDownloadHashMatches(endpoint *v1.Endpoint, currentModelHash string) bool {
+	// The hash is extension metadata, not node- or replica-level completion evidence.
 	if currentModelHash == "" || endpoint == nil || endpoint.Status == nil {
 		return false
 	}
@@ -623,37 +624,24 @@ func resolveRayStartupModelDownloadStatus(
 		return phase, modelDownloadCompleted, false, nil
 	}
 
-	var errorMessages []string
-	modelDownloadIncomplete := false
-
 	markerState, markerMsg, markerErr := inspectRayModelDownloadLogs(svc, appStatus)
 	if markerErr != nil {
 		klog.V(4).Info("failed to inspect Ray actor model download logs", "error", markerErr)
 	}
 
 	switch markerState {
-	case modelDownloadMarkerFailed:
-		phase = v1.EndpointPhaseFAILED
-		modelDownloadIncomplete = true
-
-		errorMessages = append(errorMessages, markerMsg)
 	case modelDownloadMarkerDone:
-		modelDownloadCompleted = true
+		return phase, true, false, nil
+	case modelDownloadMarkerFailed:
+		return v1.EndpointPhaseFAILED, false, true, []string{markerMsg}
 	case modelDownloadMarkerInProgress:
-		phase = v1.EndpointPhaseMODELDOWNLOADING
-		modelDownloadIncomplete = true
-
-		errorMessages = append(errorMessages, markerMsg)
+		return v1.EndpointPhaseMODELDOWNLOADING, false, true, []string{markerMsg}
 	case modelDownloadMarkerNone:
-		if !modelDownloadCompleted {
-			phase = v1.EndpointPhaseMODELDOWNLOADING
-			modelDownloadIncomplete = true
-
-			errorMessages = append(errorMessages, pendingRayModelDownloadMessage(appStatus, markerMsg, markerErr))
-		}
+		return v1.EndpointPhaseMODELDOWNLOADING, false, true,
+			[]string{pendingRayModelDownloadMessage(appStatus, markerMsg, markerErr)}
 	}
 
-	return phase, modelDownloadCompleted, modelDownloadIncomplete, errorMessages
+	return phase, modelDownloadCompleted, false, nil
 }
 
 // GetEndpointStatus retrieves the status of a specific endpoint from Ray Serve.

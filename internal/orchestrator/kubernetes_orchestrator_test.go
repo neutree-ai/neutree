@@ -450,6 +450,69 @@ func (f *FakeK8sClient) WithRunningInitContainer(containerName string) *FakeK8sC
 	return f
 }
 
+func (f *FakeK8sClient) WithCompletedAndRunningInitContainers(containerName string) *FakeK8sClient {
+	completedPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-init-completed",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  containerName,
+					Ready: true,
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 0,
+							Reason:   "Completed",
+							Message:  "Init container completed successfully",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	runningPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-init-running",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  containerName,
+					Ready: false,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{
+							StartedAt: metav1.Now(),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, pod := range []*corev1.Pod{completedPod, runningPod} {
+		err := f.Client.Create(context.Background(), pod)
+		if err != nil {
+			f.t.Fatalf("failed to create pod: %v", err)
+		}
+	}
+
+	return f
+}
+
 func (f *FakeK8sClient) WithWaitingInitContainer(containerName, reason string) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2957,6 +3020,20 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
 					WithRunningInitContainer(modelDownloaderInitContainerName)
+			},
+			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
+			expectErrorMsg: modelDownloaderInitContainerName + " init container is running",
+			expectError:    false,
+		},
+		{
+			name: "return ModelDownloading when one model-downloader init container is complete and another is running",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 2, 1, 1).
+					WithCompletedAndRunningInitContainers(modelDownloaderInitContainerName)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
 			expectErrorMsg: modelDownloaderInitContainerName + " init container is running",
