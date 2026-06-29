@@ -1727,6 +1727,23 @@ func TestPrepareEngineArgsForTemplate_NonVLLMListCompatibility(t *testing.T) {
 	assert.Equal(t, `[1,2]`, args["cuda_graph_bs"])
 }
 
+func TestPrepareEngineArgsForTemplate_SGLangJSONListSemantics(t *testing.T) {
+	args := map[string]interface{}{
+		"forward_hooks": []interface{}{
+			map[string]interface{}{
+				"name": "trace",
+				"path": "hooks.TraceHook",
+			},
+		},
+		"remote_instance_weight_loader_send_weights_group_ports": []int{29500, 29501},
+	}
+
+	prepareEngineArgsForTemplate(args, v1.EngineNameSGLang)
+
+	assert.Equal(t, `[{\"name\":\"trace\",\"path\":\"hooks.TraceHook\"}]`, args["forward_hooks"])
+	assert.Equal(t, `[29500,29501]`, args["remote_instance_weight_loader_send_weights_group_ports"])
+}
+
 func TestKubernetesOrchestrator_setEnvironmentVariables(t *testing.T) {
 	k := &kubernetesOrchestrator{}
 
@@ -3291,6 +3308,63 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 			assert.NotContains(t, tokens, `["a.Processor","b.Processor"]`)
 		})
 	}
+}
+
+func TestBuildDeployment_SGLangJSONListEngineArgs(t *testing.T) {
+	tmpl := realEmbeddedTemplate(t, "sglang-v0.5.10")
+
+	data := DeploymentManifestVariables{
+		NeutreeVersion:  "v0.1.0",
+		ClusterName:     "test-cluster",
+		Workspace:       "test-workspace",
+		Namespace:       "default",
+		ImagePrefix:     "registry.example.com",
+		ImageRepo:       "myrepo",
+		ImageTag:        "v1.0.0",
+		ImagePullSecret: "my-secret",
+		EngineName:      v1.EngineNameSGLang,
+		EngineVersion:   "v1.0.0",
+		EndpointName:    "test-endpoint",
+		ModelArgs: map[string]interface{}{
+			"name":          "qwen",
+			"task":          "text-generation",
+			"path":          "/mnt/models/qwen",
+			"registry_type": "bentoml",
+			"registry_path": "/mnt/registry/qwen",
+			"serve_name":    "qwen",
+		},
+		EngineArgs: map[string]interface{}{
+			"forward_hooks": []interface{}{
+				map[string]interface{}{
+					"name": "trace",
+					"path": "hooks.TraceHook",
+				},
+			},
+			"remote_instance_weight_loader_send_weights_group_ports": []int{29500, 29501},
+		},
+		Resources: map[string]string{
+			"cpu":    "500m",
+			"memory": "1Gi",
+		},
+		RoutingLogic: "roundrobin",
+		Replicas:     1,
+	}
+
+	prepareEngineArgsForTemplate(data.EngineArgs, v1.EngineNameSGLang)
+
+	objs, err := buildDeploymentObjects(tmpl, data)
+	require.NoError(t, err, "template render must succeed")
+
+	tokens := extractEngineCLITokens(t, objs)
+
+	assertFlagWithValue(t, tokens, "--forward-hooks", `[{"name":"trace","path":"hooks.TraceHook"}]`)
+	assertFlagWithValue(t, tokens, "--remote-instance-weight-loader-send-weights-group-ports", `[29500,29501]`)
+	assert.NotContains(t, tokens, `{"name":"trace","path":"hooks.TraceHook"}`,
+		"SGLang json_list_type expects one JSON array token, not expanded list items")
+	assert.NotContains(t, tokens, "29500",
+		"SGLang json_list_type expects one JSON array token, not expanded list items")
+	assert.NotContains(t, tokens, "29501",
+		"SGLang json_list_type expects one JSON array token, not expanded list items")
 }
 
 // makePauseTestCtx builds a minimal OrchestratorContext for pause/delete tests:

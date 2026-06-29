@@ -249,6 +249,13 @@ func escapeEngineArgsForTemplate(args map[string]interface{}) {
 					args[k] = escapeForYAMLDoubleQuote(val)
 				}
 			}
+		default:
+			if list, ok := toInterfaceSlice(val); ok {
+				b, err := json.Marshal(list)
+				if err == nil {
+					args[k] = escapeForYAMLDoubleQuote(string(b))
+				}
+			}
 		}
 	}
 }
