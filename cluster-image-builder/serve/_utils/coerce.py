@@ -125,6 +125,11 @@ def _wants_dict_or_list(annotation: Any) -> bool:
     return origin in (dict, list) or target in (dict, list)
 
 
+def _wants_bool(annotation: Any) -> bool:
+    """Return True if the annotation expects a boolean type."""
+    return _unwrap_optional(annotation) is bool
+
+
 def _is_dataclass_like(tp: Any) -> bool:
     """True if *tp* is a class hydratable from JSON (Pydantic model or dataclass)."""
     if not isinstance(tp, type):
@@ -144,8 +149,9 @@ def coerce_args(args: Dict[str, Any], model_class: type) -> None:
     values through as-is.
 
     This function inspects each field's type annotation and converts JSON strings
-    for dict/list fields and for custom dataclass/Pydantic-model fields (via
-    TypeAdapter), leaving all other values untouched.
+    for dict/list fields, bool-like strings for bool fields, and JSON strings
+    for custom dataclass/Pydantic-model fields (via TypeAdapter), leaving all
+    other values untouched.
 
     Supports both Pydantic models/dataclasses and standard Python dataclasses.
 
@@ -170,6 +176,14 @@ def coerce_args(args: Dict[str, Any], model_class: type) -> None:
                 continue
             if isinstance(parsed, (dict, list)):
                 args[field_name] = parsed
+            continue
+
+        if _wants_bool(annotation):
+            value = raw.strip().lower()
+            if value == "true":
+                args[field_name] = True
+            elif value == "false":
+                args[field_name] = False
             continue
 
         target = _unwrap_optional(annotation)
