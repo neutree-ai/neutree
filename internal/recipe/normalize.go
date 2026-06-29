@@ -31,7 +31,7 @@ func NormalizeModelCatalogSpec(spec *v1.ModelCatalogSpec) NormalizedRecipe {
 	}
 
 	out.Engine = spec.Engine
-	out.Features = spec.Features
+	out.Features = featuresByName(spec.Features)
 
 	if len(spec.Variants) > 0 {
 		out.Variants = spec.Variants
@@ -53,6 +53,23 @@ func NormalizeModelCatalogSpec(spec *v1.ModelCatalogSpec) NormalizedRecipe {
 	out.Base = v1.RecipeBase{
 		EngineArgs: extractEngineArgs(spec.Variables),
 		Env:        spec.Env,
+	}
+
+	return out
+}
+
+// featuresByName indexes the ordered feature list by Name for the lookups
+// compose/validate do. Order is irrelevant here — it is carried by the list in
+// spec.Features and consumed by the UI; compose order comes from the (ordered)
+// FeatureSelection slice the endpoint submits.
+func featuresByName(features []v1.RecipeFeature) map[string]v1.RecipeFeature {
+	if len(features) == 0 {
+		return nil
+	}
+
+	out := make(map[string]v1.RecipeFeature, len(features))
+	for _, f := range features {
+		out[f.Name] = f
 	}
 
 	return out

@@ -76,9 +76,14 @@ spec:
         kv_cache_dtype: fp8
         attention_backend: flashinfer
         moe_backend: marlin
+  # features is an ordered list: list order = UI display order; `group` defines
+  # sections (sections appear in first-seen group order, items keep list order).
+  # Aligned with the deploy mockup: core params (context window / concurrency)
+  # on top, the rest split into Inference / Performance tuning.
   features:
-    # --- context window: pick a preset OR type a custom length (combobox) ---
-    max-model-len:
+    # === Core (the promoted top-form fields in the mockup) ===
+    - name: max-model-len
+      group: Core
       type: input
       display_name: "Context window"
       description: "Maximum sequence length (tokens) — pick a preset or type a custom value (native max 262144)."
@@ -87,14 +92,17 @@ spec:
         default: "262144"
         min: 1
         max: 262144
-        suggestions: ["8192", "32768", "131072", "262144"]
+        suggestions:
+          - { value: "8192",   label: "8K" }
+          - { value: "32768",  label: "32K" }
+          - { value: "131072", label: "128K" }
+          - { value: "262144", label: "256K" }
       engine_args:
         max_model_len: "${value}"
-    # --- max concurrency: free integer input ---
-    max-num-seqs:
+    - name: max-num-seqs
+      group: Core
       type: input
       display_name: "Concurrency"
-      category: tuning
       description: "Max concurrent sequences (decode parallelism / batch width)."
       input:
         value_type: int
@@ -103,33 +111,36 @@ spec:
         max: 1024
       engine_args:
         max_num_seqs: "${value}"
-    # --- boolean toggles ---
-    tool-calling:
+    # === Inference (boolean toggles) ===
+    - name: tool-calling
+      group: Inference
       display_name: "Tool calling"
       description: "Function / tool calling (auto tool choice, qwen3_xml parser)."
       default: false
       engine_args:
         enable_auto_tool_choice: true
         tool_call_parser: qwen3_xml
-    text-only:
+    - name: text-only
+      group: Inference
       display_name: "Text-only mode"
       description: "Text-only mode — skip the vision encoder to free memory for KV cache."
       default: false
       engine_args:
         language_model_only: true
-    mtp-speculative:
+    # === Performance tuning ===
+    - name: mtp-speculative
+      group: Performance tuning
       display_name: "MTP speculative decoding"
       description: "MTP speculative decoding (method=mtp, 2 speculative tokens)."
-      category: tuning
       default: false
       engine_args:
         speculative_config:
           method: mtp
           num_speculative_tokens: 2
-    expert-parallel:
+    - name: expert-parallel
+      group: Performance tuning
       display_name: "Expert parallelism"
       description: "Enable MoE expert parallelism (EP) across the engine's GPUs."
-      category: tuning
       default: false
       engine_args:
         enable_expert_parallel: true

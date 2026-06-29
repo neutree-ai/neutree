@@ -24,9 +24,9 @@ func TestValidateModelCatalogSpec(t *testing.T) {
 			name: "recipe MC ok",
 			in: &v1.ModelCatalogSpec{
 				Variants: map[string]v1.RecipeVariant{"a": {}},
-				Features: map[string]v1.RecipeFeature{
-					"yarn":      {ConflictsWith: []string{"short-ctx"}},
-					"short-ctx": {},
+				Features: []v1.RecipeFeature{
+					{Name: "yarn", ConflictsWith: []string{"short-ctx"}},
+					{Name: "short-ctx"},
 				},
 			},
 		},
@@ -49,8 +49,8 @@ func TestValidateModelCatalogSpec(t *testing.T) {
 		{
 			name: "feature conflicts_with unknown",
 			in: &v1.ModelCatalogSpec{
-				Features: map[string]v1.RecipeFeature{
-					"a": {ConflictsWith: []string{"ghost"}},
+				Features: []v1.RecipeFeature{
+					{Name: "a", ConflictsWith: []string{"ghost"}},
 				},
 			},
 			wantErr: "unknown feature",
@@ -58,8 +58,8 @@ func TestValidateModelCatalogSpec(t *testing.T) {
 		{
 			name: "feature conflicts_with self",
 			in: &v1.ModelCatalogSpec{
-				Features: map[string]v1.RecipeFeature{
-					"a": {ConflictsWith: []string{"a"}},
+				Features: []v1.RecipeFeature{
+					{Name: "a", ConflictsWith: []string{"a"}},
 				},
 			},
 			wantErr: "lists itself",

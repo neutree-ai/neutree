@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -29,7 +30,11 @@ type ModelCatalogSpec struct {
 	// features on top of Base to produce a concrete endpoint kernel.
 	Base     *RecipeBase              `json:"base,omitempty"`
 	Variants map[string]RecipeVariant `json:"variants,omitempty"`
-	Features map[string]RecipeFeature `json:"features,omitempty"`
+	// Features is an ordered list: list position is the UI display order, and
+	// items are grouped into sections by RecipeFeature.Group. (A map cannot
+	// carry order — Go marshals map keys sorted, and the catalog reconcile
+	// re-serializes spec, so any insertion order would be lost.)
+	Features []RecipeFeature `json:"features,omitempty"`
 }
 
 // RecipeBase carries config shared by every variant in a recipe MC.
@@ -69,16 +74,26 @@ const (
 //   - input:   a free value substituted for the "${value}" placeholder inside
 //     the feature's engine_args/env (coerced per Input.ValueType).
 //
-// `Category` is a free-form grouping hint for the UI ("tuning" surfaces in a
-// separate "Performance tuning" section); it has no effect on composition.
+// Features live in spec.Features as an ordered list; the list position is the
+// authoritative display order (a map would lose it — Go marshals map keys
+// sorted, which the reconcile re-serialize would impose). `Group` names the UI
+// section a feature belongs to; sections render in first-seen order, features
+// within a section keep list order. Neither Name nor Group affect composition.
 type RecipeFeature struct {
+	// Name is the feature's stable identifier (referenced by FeatureSelection
+	// and ConflictsWith). It was the map key before features became a list.
+	Name string `json:"name"`
+	// Group is the UI section label this feature renders under (e.g. "核心参数"
+	// / "Performance tuning"); empty means the default section. Features sharing
+	// a Group render together; sections appear in first-seen order. No effect on
+	// composition. Supersedes the former free-form `category` hint.
+	Group string `json:"group,omitempty"`
 	// DisplayName is an optional human-facing label for the UI (e.g. "Context
-	// window" / "上下文窗口"); when empty the feature key is shown. Lets a
+	// window" / "上下文窗口"); when empty the feature Name is shown. Lets a
 	// catalog align feature labels with product wording, independent of the
-	// technical feature key. No effect on composition.
+	// technical feature name. No effect on composition.
 	DisplayName   string   `json:"display_name,omitempty"`
 	Description   string   `json:"description,omitempty"`
-	Category      string   `json:"category,omitempty"`
 	ConflictsWith []string `json:"conflicts_with,omitempty"`
 
 	// Type selects the feature shape; empty == "boolean".
@@ -120,7 +135,40 @@ type RecipeFeatureInput struct {
 	// Suggestions are preset values surfaced as a dropdown next to the free
 	// input (the "pick a preset or type your own" combobox). UI hint only —
 	// the user may still enter any value that satisfies the constraints above.
-	Suggestions []string `json:"suggestions,omitempty"`
+	// Each entry may carry an optional display Label (e.g. show "8K" for value
+	// "8192"); the composed value is always the raw Value, never the label.
+	Suggestions []RecipeFeatureSuggestion `json:"suggestions,omitempty"`
+}
+
+// RecipeFeatureSuggestion is one preset in an input feature's combobox. It
+// accepts two JSON shapes for back-compat: a bare string (the value, no label)
+// or an object {value, label}. The composed/validated value is always Value;
+// Label is purely a display hint (e.g. "8K" for "8192"). To keep reconcile
+// re-serialization stable, it marshals back to a bare string when Label is
+// empty.
+type RecipeFeatureSuggestion struct {
+	Value string `json:"value"`
+	Label string `json:"label,omitempty"`
+}
+
+func (s *RecipeFeatureSuggestion) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		return json.Unmarshal(b, &s.Value)
+	}
+
+	type alias RecipeFeatureSuggestion
+
+	return json.Unmarshal(b, (*alias)(s))
+}
+
+func (s RecipeFeatureSuggestion) MarshalJSON() ([]byte, error) {
+	if s.Label == "" {
+		return json.Marshal(s.Value)
+	}
+
+	type alias RecipeFeatureSuggestion
+
+	return json.Marshal(alias(s))
 }
 
 type ModelCatalogStatus struct {

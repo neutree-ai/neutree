@@ -75,9 +75,13 @@ spec:
         kv_cache_dtype: fp8
         attention_backend: flashinfer
         moe_backend: marlin
+  # features 为有序列表：列表顺序 = UI 显示顺序；group 决定分区（区按 group
+  # 首次出现的顺序排列，区内保持列表顺序）。对齐部署效果图：核心参数（上下文窗口 /
+  # 并发数）置顶，其余按推理优化 / 性能调优分区。
   features:
-    # --- 上下文窗口：可选预设或自填（select + 自由输入 组合框）---
-    max-model-len:
+    # === 核心参数（demo 顶部主表单字段）===
+    - name: max-model-len
+      group: 核心参数
       type: input
       display_name: "上下文窗口"
       description: "最大序列长度（token）—— 可选预设或自填（原生上限 262144）。"
@@ -86,14 +90,17 @@ spec:
         default: "262144"
         min: 1
         max: 262144
-        suggestions: ["8192", "32768", "131072", "262144"]
+        suggestions:
+          - { value: "8192",   label: "8K" }
+          - { value: "32768",  label: "32K" }
+          - { value: "131072", label: "128K" }
+          - { value: "262144", label: "256K" }
       engine_args:
         max_model_len: "${value}"
-    # --- 并发数：自由整数输入 ---
-    max-num-seqs:
+    - name: max-num-seqs
+      group: 核心参数
       type: input
       display_name: "并发数"
-      category: tuning
       description: "最大并发序列数（解码并行度 / 批宽）。"
       input:
         value_type: int
@@ -102,33 +109,36 @@ spec:
         max: 1024
       engine_args:
         max_num_seqs: "${value}"
-    # --- 布尔开关 ---
-    tool-calling:
+    # === 推理优化（布尔开关）===
+    - name: tool-calling
+      group: 推理优化
       display_name: "工具调用"
       description: "函数 / 工具调用（自动工具选择，qwen3_xml 解析器）。"
       default: false
       engine_args:
         enable_auto_tool_choice: true
         tool_call_parser: qwen3_xml
-    text-only:
+    - name: text-only
+      group: 推理优化
       display_name: "纯文本模式"
       description: "纯文本模式 —— 跳过视觉编码器，为 KV 缓存释放显存。"
       default: false
       engine_args:
         language_model_only: true
-    mtp-speculative:
+    # === 性能调优 ===
+    - name: mtp-speculative
+      group: 性能调优
       display_name: "MTP 推测解码"
       description: "MTP 推测解码（method=mtp，2 个推测 token）。"
-      category: tuning
       default: false
       engine_args:
         speculative_config:
           method: mtp
           num_speculative_tokens: 2
-    expert-parallel:
+    - name: expert-parallel
+      group: 性能调优
       display_name: "专家并行"
       description: "开启 MoE 专家并行（EP），跨引擎 GPU 分布专家。"
-      category: tuning
       default: false
       engine_args:
         enable_expert_parallel: true

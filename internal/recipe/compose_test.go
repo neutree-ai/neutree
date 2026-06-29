@@ -48,16 +48,19 @@ func TestComposeEndpointSpec(t *testing.T) {
 				EngineArgs: map[string]interface{}{"quantization": "fp8"},
 			},
 		},
-		Features: map[string]v1.RecipeFeature{
-			"yarn": {
+		Features: []v1.RecipeFeature{
+			{
+				Name:       "yarn",
 				Default:    true,
 				EngineArgs: map[string]interface{}{"max-model-len": 131072, "rope-scaling": "yarn"},
 				Env:        map[string]string{"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"},
 			},
-			"reasoning": {
+			{
+				Name:       "reasoning",
 				EngineArgs: map[string]interface{}{"enable-reasoning": true},
 			},
-			"short-ctx": {
+			{
+				Name:          "short-ctx",
 				EngineArgs:    map[string]interface{}{"max-model-len": 8192},
 				ConflictsWith: []string{"yarn"},
 			},
@@ -191,8 +194,9 @@ func TestComposeEndpointSpecFeatureTypes(t *testing.T) {
 	mc := &v1.ModelCatalogSpec{
 		Engine:   &v1.EndpointEngineSpec{Engine: "vllm"},
 		Variants: map[string]v1.RecipeVariant{"default": {Model: &v1.ModelSpec{Name: "m"}}},
-		Features: map[string]v1.RecipeFeature{
-			"attention-backend": {
+		Features: []v1.RecipeFeature{
+			{
+				Name: "attention-backend",
 				Type: v1.RecipeFeatureTypeSelect,
 				Options: map[string]v1.RecipeFeatureOption{
 					"flash_attn": {EngineArgs: map[string]any{"attention_backend": "FLASH_ATTN"}},
@@ -200,7 +204,8 @@ func TestComposeEndpointSpecFeatureTypes(t *testing.T) {
 				},
 				DefaultOption: "flash_attn",
 			},
-			"max-model-len": {
+			{
+				Name: "max-model-len",
 				Type: v1.RecipeFeatureTypeInput,
 				Input: &v1.RecipeFeatureInput{
 					ValueType: "int",
@@ -210,7 +215,8 @@ func TestComposeEndpointSpecFeatureTypes(t *testing.T) {
 				},
 				EngineArgs: map[string]any{"max_model_len": "${value}"},
 			},
-			"served-name": {
+			{
+				Name:       "served-name",
 				Type:       v1.RecipeFeatureTypeInput,
 				Input:      &v1.RecipeFeatureInput{ValueType: "string"},
 				EngineArgs: map[string]any{"served_model_name": "prefix-${value}"},

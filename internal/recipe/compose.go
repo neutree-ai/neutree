@@ -14,6 +14,15 @@ import (
 // mark where the user-supplied value is substituted.
 const placeholder = "${value}"
 
+// Recognized input value types (see RecipeFeatureInput.ValueType). The empty
+// value defaults to valueTypeString.
+const (
+	valueTypeString = "string"
+	valueTypeInt    = "int"
+	valueTypeNumber = "number"
+	valueTypeBool   = "bool"
+)
+
 // ComposedSpec is the materialized kernel of an endpoint — what the
 // controller writes back into the legacy EndpointSpec fields so downstream
 // code never has to know about recipes.
@@ -125,7 +134,7 @@ func featureType(f v1.RecipeFeature) v1.RecipeFeatureType {
 
 func inputValueType(f v1.RecipeFeature) string {
 	if f.Input == nil || f.Input.ValueType == "" {
-		return "string"
+		return valueTypeString
 	}
 
 	return f.Input.ValueType
@@ -209,21 +218,21 @@ func validateInputValue(f v1.RecipeFeature, val string) error {
 	}
 
 	switch inputValueType(f) {
-	case "int":
+	case valueTypeInt:
 		n, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
 			return fmt.Errorf("value %q is not an integer", val)
 		}
 
 		return checkRange(f, float64(n))
-	case "number":
+	case valueTypeNumber:
 		n, err := strconv.ParseFloat(val, 64)
 		if err != nil {
 			return fmt.Errorf("value %q is not a number", val)
 		}
 
 		return checkRange(f, n)
-	case "bool":
+	case valueTypeBool:
 		if _, err := strconv.ParseBool(val); err != nil {
 			return fmt.Errorf("value %q is not a boolean", val)
 		}
@@ -308,15 +317,15 @@ func substituteEnv(src map[string]string, val string) map[string]string {
 
 func coerce(val, valueType string) any {
 	switch valueType {
-	case "int":
+	case valueTypeInt:
 		if n, err := strconv.ParseInt(val, 10, 64); err == nil {
 			return n
 		}
-	case "number":
+	case valueTypeNumber:
 		if n, err := strconv.ParseFloat(val, 64); err == nil {
 			return n
 		}
-	case "bool":
+	case valueTypeBool:
 		if b, err := strconv.ParseBool(val); err == nil {
 			return b
 		}

@@ -29,18 +29,32 @@ func ValidateModelCatalogSpec(spec *v1.ModelCatalogSpec) error {
 		}
 	}
 
-	for name, feat := range spec.Features {
+	known := make(map[string]struct{}, len(spec.Features))
+
+	for _, feat := range spec.Features {
+		if feat.Name == "" {
+			return fmt.Errorf("model_catalog: every feature must declare a name")
+		}
+
+		if _, dup := known[feat.Name]; dup {
+			return fmt.Errorf("model_catalog: duplicate feature name %q", feat.Name)
+		}
+
+		known[feat.Name] = struct{}{}
+	}
+
+	for _, feat := range spec.Features {
 		for _, other := range feat.ConflictsWith {
-			if other == name {
-				return fmt.Errorf("model_catalog: feature %q lists itself in conflicts_with", name)
+			if other == feat.Name {
+				return fmt.Errorf("model_catalog: feature %q lists itself in conflicts_with", feat.Name)
 			}
 
-			if _, ok := spec.Features[other]; !ok {
-				return fmt.Errorf("model_catalog: feature %q conflicts_with unknown feature %q", name, other)
+			if _, ok := known[other]; !ok {
+				return fmt.Errorf("model_catalog: feature %q conflicts_with unknown feature %q", feat.Name, other)
 			}
 		}
 
-		if err := validateFeatureShape(name, feat); err != nil {
+		if err := validateFeatureShape(feat.Name, feat); err != nil {
 			return err
 		}
 	}
