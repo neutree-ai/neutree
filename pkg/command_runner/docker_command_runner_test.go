@@ -340,6 +340,44 @@ func TestRunInit(t *testing.T) {
 	}
 }
 
+func TestRunInitWithRunOptions_UsesRoleSpecificOptions(t *testing.T) {
+	mockExecutor := new(commandmocks.MockExecutor)
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
+		return strings.Contains(strings.Join(args, " "), "uptime")
+	})).Return([]byte("success"), nil).Times(4)
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
+		return strings.Contains(strings.Join(args, " "), "command -v docker")
+	})).Return([]byte("docker"), nil).Once()
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
+		return strings.Contains(strings.Join(args, " "), "docker pull test-image")
+	})).Return([]byte(""), nil).Once()
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
+		return strings.Contains(strings.Join(args, " "), "docker inspect -f")
+	})).Return([]byte("false"), nil).Once()
+	mockExecutor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
+		joined := strings.Join(args, " ")
+		return strings.Contains(joined, "docker run") &&
+			strings.Contains(joined, "--base-option") &&
+			strings.Contains(joined, "--head-option") &&
+			!strings.Contains(joined, "--worker-option")
+	})).Return([]byte(""), nil).Once()
+
+	runner := newDockerCommandRunner(&v1.Docker{
+		ContainerName:    "test-container",
+		Image:            "test-image",
+		PullBeforeRun:    true,
+		RunOptions:       []string{"--base-option", "--shm-size=1g"},
+		HeadRunOptions:   []string{"--head-option"},
+		WorkerRunOptions: []string{"--worker-option"},
+	}, mockExecutor)
+
+	succeed, err := runner.RunInitWithRunOptions(context.Background(), runner.dockerConfig.HeadRunOptions)
+
+	assert.NoError(t, err)
+	assert.True(t, succeed)
+	mockExecutor.AssertExpectations(t)
+}
+
 func TestWithDockerExec(t *testing.T) {
 	cmds := []string{"echo hello", "ls -l"}
 	result := WithDockerExec(cmds, "test-container", "docker", nil, false)

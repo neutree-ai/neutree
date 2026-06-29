@@ -22,6 +22,15 @@ func TestNewBuilder(t *testing.T) {
 	if len(builder.routesToMiddlewares) == 0 {
 		t.Error("Expected NewBuilder to register default routesToMiddlewares")
 	}
+
+	for _, name := range []string{"rest/static-node-clusters", "rest/static-nodes"} {
+		if _, exists := builder.routeInits[name]; !exists {
+			t.Errorf("Expected NewBuilder to register %q route", name)
+		}
+		if middlewares, exists := builder.routesToMiddlewares[name]; !exists || len(middlewares) == 0 {
+			t.Errorf("Expected NewBuilder to register auth middleware for %q", name)
+		}
+	}
 }
 
 func TestBuilderWithConfig(t *testing.T) {

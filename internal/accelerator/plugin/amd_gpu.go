@@ -85,6 +85,38 @@ func (p *AMDGPUAcceleratorPlugin) GetNodeRuntimeConfig(ctx context.Context,
 	}, nil
 }
 
+func (p *AMDGPUAcceleratorPlugin) DetectStaticNodeAccelerator(
+	ctx context.Context,
+	runner NodeCommandRunner,
+) (*v1.StaticNodeAcceleratorStatus, bool, error) {
+	return detectPCIStaticNodeAccelerator(ctx, runner, pciStaticNodeAcceleratorDetector{
+		acceleratorType: v1.AcceleratorTypeAMDGPU.String(),
+		vendor:          "amd",
+		productName:     "AMD GPU",
+		productModel:    "amd_gpu",
+		match: func(line string) bool {
+			return (strings.Contains(line, "1002:") || strings.Contains(line, "advanced micro devices")) &&
+				(strings.Contains(line, "processing accelerators") || strings.Contains(line, "vga compatible controller"))
+		},
+	})
+}
+
+func (p *AMDGPUAcceleratorPlugin) RuntimeProfile(
+	ctx context.Context,
+	accelerator v1.StaticNodeAcceleratorStatus,
+) (*v1.AcceleratorProfile, bool, error) {
+	if accelerator.Type != p.Resource() {
+		return nil, false, nil
+	}
+
+	profile, err := p.GetAcceleratorProfile(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return profile, profile != nil, nil
+}
+
 func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {
 	decodedKey, err := base64.StdEncoding.DecodeString(auth.SSHPrivateKey)
 	if err != nil {
@@ -161,6 +193,31 @@ func (p *AMDGPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig,
 		},
 	}, nil
 }
+
+func (p *AMDGPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+	return &v1.AcceleratorProfile{
+		AcceleratorType: string(v1.AcceleratorTypeAMDGPU),
+		ClusterRuntime: &v1.RuntimeConfig{
+			ImageSuffix: "rocm",
+			Runtime:     "amd",
+			Env: map[string]string{
+				"ACCELERATOR_TYPE":    "amd_gpu",
+				"AMD_VISIBLE_DEVICES": "all",
+			},
+		},
+		EndpointRuntime: &v1.RuntimeConfig{
+			Runtime: "amd",
+			Env: map[string]string{
+				"AMD_VISIBLE_DEVICES": "all",
+			},
+		},
+		ResourceDefaults: &v1.AcceleratorResourceDefaults{
+			RayResourceName:        "GPU",
+			KubernetesResourceName: string(AMDGPUKubernetesResource),
+		},
+	}, nil
+}
+
 func (p *AMDGPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
 }

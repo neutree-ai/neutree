@@ -10,6 +10,7 @@ const (
 	GetNodeRuntimeConfigPath      = "/v1/node/runtime-config"
 	GetContainerAcceleratorPath   = "/v1/container/accelerator"
 	GetContainerRuntimeConfigPath = "/v1/container/runtime-config"
+	GetAcceleratorProfilePath     = "/v1/profile"
 	GetSupportEnginesPath         = "/v1/support-engines"
 	GetClusterResourcesPath       = "/v1/cluster/resources"
 	PingPath                      = "/v1/ping"
@@ -87,11 +88,27 @@ type GetContainerRuntimeConfigResponse struct {
 	RuntimeConfig RuntimeConfig `json:"runtime_config"`
 }
 
+type GetAcceleratorProfileResponse struct {
+	Profile AcceleratorProfile `json:"profile"`
+}
+
 type RuntimeConfig struct {
 	ImageSuffix string            `json:"image_suffix"`
 	Env         map[string]string `json:"env"`
 	Runtime     string            `json:"runtime"`
 	Options     []string          `json:"options"`
+}
+
+type AcceleratorProfile struct {
+	AcceleratorType  string                       `json:"accelerator_type"`
+	ClusterRuntime   *RuntimeConfig               `json:"cluster_runtime,omitempty"`
+	EndpointRuntime  *RuntimeConfig               `json:"endpoint_runtime,omitempty"`
+	ResourceDefaults *AcceleratorResourceDefaults `json:"resource_defaults,omitempty"`
+}
+
+type AcceleratorResourceDefaults struct {
+	RayResourceName        string `json:"ray_resource_name,omitempty"`
+	KubernetesResourceName string `json:"kubernetes_resource_name,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {

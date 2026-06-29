@@ -21,6 +21,9 @@ type Manager interface {
 	plugin.AcceleratorPluginProvider
 
 	Start(ctx context.Context)
+	DetectAccelerator(ctx context.Context, runner NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)
+	RuntimeProfile(ctx context.Context, accelerator v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)
+	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, bool, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
 
@@ -46,6 +49,8 @@ type Manager interface {
 	// the accelerator type is not registered.
 	GetImageSuffix(acceleratorType string) string
 }
+
+type NodeCommandRunner = plugin.NodeCommandRunner
 
 type registerPlugin struct {
 	resource         string
@@ -178,6 +183,102 @@ func (a *manager) Start(ctx context.Context) {
 	}, time.Minute)
 }
 
+func (a *manager) DetectAccelerator(
+	ctx context.Context,
+	runner NodeCommandRunner,
+) (*v1.StaticNodeAcceleratorStatus, error) {
+	if runner == nil {
+		return nil, errors.New("node command runner is required")
+	}
+
+	var detected *v1.StaticNodeAcceleratorStatus
+
+	a.acceleratorsMap.Range(func(key, value any) bool {
+		p, ok := value.(registerPlugin)
+		if !ok {
+			klog.Warning("assert register plugin type failed")
+			return true
+		}
+
+		detector, ok := staticNodeAcceleratorDetector(p.plugin)
+		if !ok {
+			return true
+		}
+
+		status, matched, err := detector.DetectStaticNodeAccelerator(ctx, runner)
+		if err != nil {
+			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, err.Error())
+			return true
+		}
+
+		if matched && status != nil {
+			detected = status
+			return false
+		}
+
+		return true
+	})
+
+	if detected != nil {
+		return detected, nil
+	}
+
+	cpu := v1.CPUStaticNodeAcceleratorStatus()
+
+	return &cpu, nil
+}
+
+func (a *manager) RuntimeProfile(
+	ctx context.Context,
+	accelerator v1.StaticNodeAcceleratorStatus,
+) (*v1.AcceleratorProfile, bool, error) {
+	if accelerator.Type == "" || accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
+		return nil, false, nil
+	}
+
+	p, ok := a.GetPlugin(accelerator.Type)
+	if !ok {
+		return nil, false, nil
+	}
+
+	provider, ok := staticNodeRuntimeProfileProvider(p)
+	if ok {
+		profile, supported, err := provider.RuntimeProfile(ctx, accelerator)
+		if err != nil {
+			return nil, false, errors.Wrapf(err, "get runtime profile from plugin %s failed", p.Resource())
+		}
+
+		return profile, supported, nil
+	}
+
+	profile, supported, err := a.getAcceleratorProfile(ctx, accelerator.Type, false)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return profile, supported, nil
+}
+
+func staticNodeAcceleratorDetector(p plugin.AcceleratorPlugin) (plugin.StaticNodeAcceleratorDetector, bool) {
+	if detector, ok := p.(plugin.StaticNodeAcceleratorDetector); ok {
+		return detector, true
+	}
+
+	detector, ok := p.Handle().(plugin.StaticNodeAcceleratorDetector)
+
+	return detector, ok
+}
+
+func staticNodeRuntimeProfileProvider(p plugin.AcceleratorPlugin) (plugin.StaticNodeRuntimeProfileProvider, bool) {
+	if provider, ok := p.(plugin.StaticNodeRuntimeProfileProvider); ok {
+		return provider, true
+	}
+
+	provider, ok := p.Handle().(plugin.StaticNodeRuntimeProfileProvider)
+
+	return provider, ok
+}
+
 func (a *manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {
 	var (
 		err                  error
@@ -246,6 +347,58 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 	}
 
 	return runtimeConfigResp.RuntimeConfig, nil
+}
+
+func (a *manager) GetAcceleratorProfile(
+	ctx context.Context,
+	acceleratorType string,
+) (*v1.AcceleratorProfile, bool, error) {
+	return a.getAcceleratorProfile(ctx, acceleratorType, true)
+}
+
+func (a *manager) getAcceleratorProfile(
+	ctx context.Context,
+	acceleratorType string,
+	errorOnMissingPlugin bool,
+) (*v1.AcceleratorProfile, bool, error) {
+	if acceleratorType == "" {
+		return nil, false, nil
+	}
+
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		if !errorOnMissingPlugin {
+			return nil, false, nil
+		}
+
+		return nil, false, errors.Errorf("accelerator plugin %s not found", acceleratorType)
+	}
+
+	provider, ok := p.Handle().(plugin.AcceleratorProfileProvider)
+	if !ok {
+		return nil, false, nil
+	}
+
+	profile, err := provider.GetAcceleratorProfile(ctx)
+	if plugin.IsHTTPStatus(err, http.StatusNotFound) {
+		return nil, false, nil
+	}
+
+	if err != nil {
+		return nil, false, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
+	}
+
+	if profile == nil {
+		return nil, false, nil
+	}
+
+	if profile.AcceleratorType == "" {
+		copied := *profile
+		copied.AcceleratorType = acceleratorType
+		profile = &copied
+	}
+
+	return profile, true, nil
 }
 
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {

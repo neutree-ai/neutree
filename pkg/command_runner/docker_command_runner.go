@@ -19,13 +19,18 @@ type DockerCommandRunner struct {
 
 func NewDockerCommandRunner(dockerConfig *v1.Docker, sshCommandConfig *CommonArgs) *DockerCommandRunner {
 	sshCommandRunner := NewSSHCommandRunner(sshCommandConfig.NodeID, sshCommandConfig.SshIP,
-		sshCommandConfig.AuthConfig, "", sshCommandConfig.ProcessExecute)
+		sshCommandConfig.AuthConfig, sshCommandConfig.SSHControlPath, sshCommandConfig.ProcessExecute)
 
 	return &DockerCommandRunner{
 		sshCommandRunner: sshCommandRunner,
 		dockerConfig:     dockerConfig,
 		dockerCmd:        "docker",
 	}
+}
+
+// HostFiles returns a host-level file client backed by the runner's SSH connection.
+func (d *DockerCommandRunner) HostFiles() FileClient {
+	return d.sshCommandRunner.Files()
 }
 
 // Run runs a command inside the Docker container.
@@ -138,6 +143,11 @@ func (d *DockerCommandRunner) dockerExpandUser(ctx context.Context, s string, an
 
 // RunInit initializes the Docker container.
 func (d *DockerCommandRunner) RunInit(ctx context.Context) (bool, error) {
+	return d.RunInitWithRunOptions(ctx, d.dockerConfig.WorkerRunOptions)
+}
+
+// RunInitWithRunOptions initializes the Docker container with role-specific run options.
+func (d *DockerCommandRunner) RunInitWithRunOptions(ctx context.Context, roleRunOptions []string) (bool, error) {
 	clusterImage := d.dockerConfig.Image
 
 	installed, err := d.CheckDockerInstalled(ctx)
@@ -174,7 +184,7 @@ func (d *DockerCommandRunner) RunInit(ctx context.Context) (bool, error) {
 	if !containerRunning {
 		var userDockerRunOptions []string
 		userDockerRunOptions = append(userDockerRunOptions, d.dockerConfig.RunOptions...)
-		userDockerRunOptions = append(userDockerRunOptions, d.dockerConfig.WorkerRunOptions...)
+		userDockerRunOptions = append(userDockerRunOptions, roleRunOptions...)
 
 		userDockerRunOptions, err = d.autoConfigureShm(ctx, userDockerRunOptions)
 		if err != nil {
