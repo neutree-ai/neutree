@@ -34,6 +34,7 @@ from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
 from downloader import build_request_from_model_args, download_with_markers, get_downloader
+from serve._metrics.prometheus_multiproc import install_stable_prometheus_multiproc_dir
 from serve._metrics.sglang_ray_bridge import PromToRayBridge
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
@@ -240,9 +241,9 @@ class Backend:
             engine_kwargs.setdefault("is_embedding", True)
 
         # Force Prometheus multiprocess mode on so the bridge below can read
-        # SGLang's metric .db files via PROMETHEUS_MULTIPROC_DIR. SGLang's
-        # set_prometheus_multiproc_dir() is gated on enable_metrics, and the
-        # bridge silently sees an empty registry if this flag is left off.
+        # SGLang's metric .db files via PROMETHEUS_MULTIPROC_DIR. The embedded
+        # Engine path does not mount SGLang's HTTP /metrics route, so Neutree
+        # initializes the multiprocess directory explicitly before Engine starts.
         engine_kwargs.setdefault("enable_metrics", True)
 
         # Build ServerArgs kwargs with model identity injected.
@@ -259,7 +260,17 @@ class Backend:
         coerce_args(args, ServerArgs)
         filter_engine_args(args, ServerArgs)
 
-        from sglang.srt.entrypoints.engine import Engine
+        from sglang.srt.entrypoints import engine as sglang_engine
+        if args.get("enable_metrics"):
+            from sglang.srt.utils import common as sglang_common
+
+            metrics_dir = install_stable_prometheus_multiproc_dir(
+                common_module=sglang_common,
+                engine_module=sglang_engine,
+                namespace="sglang",
+            )
+            logger.info("[Backend] SGLang metrics multiprocess dir: %s", metrics_dir)
+        Engine = sglang_engine.Engine
 
         logger.info(
             f"[Backend] Initializing SGLang Engine with args: {sorted(args.keys())}"
