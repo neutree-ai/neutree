@@ -20,8 +20,11 @@ func TestAcceleratorPluginClientGetAcceleratorProfile(t *testing.T) {
 		err := json.NewEncoder(w).Encode(v1.GetAcceleratorProfileResponse{
 			Profile: v1.AcceleratorProfile{
 				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-				ClusterRuntime: &v1.RuntimeConfig{
-					Runtime: "nvidia",
+				Metrics: &v1.AcceleratorMetricsProfile{
+					Exporter: &v1.AcceleratorExporterProfile{
+						Kind: "dcgm-exporter",
+						Port: 9400,
+					},
 				},
 			},
 		})
@@ -38,8 +41,10 @@ func TestAcceleratorPluginClientGetAcceleratorProfile(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, profile)
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), profile.AcceleratorType)
-	require.NotNil(t, profile.ClusterRuntime)
-	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
+	require.NotNil(t, profile.Metrics)
+	require.NotNil(t, profile.Metrics.Exporter)
+	assert.Equal(t, "dcgm-exporter", profile.Metrics.Exporter.Kind)
+	assert.Equal(t, 9400, profile.Metrics.Exporter.Port)
 }
 
 func TestAcceleratorPluginClientGetAcceleratorProfileNotFound(t *testing.T) {

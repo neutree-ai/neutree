@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 )
 
 type MetricsComponent struct {
@@ -17,6 +18,7 @@ type MetricsComponent struct {
 	imagePrefix           string
 	metricsRemoteWriteURL string
 	imagePullSecret       string
+	acceleratorMgr        accelerator.Manager
 
 	config     v1.KubernetesClusterConfig
 	ctrlClient client.Client
@@ -24,7 +26,8 @@ type MetricsComponent struct {
 }
 
 func NewMetricsComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret, metricsRemoteWriteURL string,
-	config v1.KubernetesClusterConfig, ctrlClient client.Client) *MetricsComponent {
+	config v1.KubernetesClusterConfig, ctrlClient client.Client,
+	acceleratorMgr accelerator.Manager) *MetricsComponent {
 	logger := klog.LoggerWithValues(klog.Background(),
 		"cluster", cluster.Metadata.WorkspaceName(),
 		"component", "metrics",
@@ -36,6 +39,7 @@ func NewMetricsComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullS
 		imagePrefix:           imagePrefix,
 		metricsRemoteWriteURL: metricsRemoteWriteURL,
 		imagePullSecret:       imagePullSecret,
+		acceleratorMgr:        acceleratorMgr,
 		config:                config,
 		ctrlClient:            ctrlClient,
 		logger:                logger,

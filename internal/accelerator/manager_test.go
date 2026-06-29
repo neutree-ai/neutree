@@ -29,8 +29,9 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 	assert.True(t, supported)
 	require.NotNil(t, profile)
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), profile.AcceleratorType)
-	require.NotNil(t, profile.ClusterRuntime)
-	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
+	require.NotNil(t, profile.Metrics)
+	require.NotNil(t, profile.Metrics.Exporter)
+	assert.Equal(t, "dcgm-exporter", profile.Metrics.Exporter.Kind)
 }
 
 func TestManagerGetAcceleratorProfileNotFoundIsUnsupported(t *testing.T) {

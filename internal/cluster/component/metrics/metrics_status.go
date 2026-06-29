@@ -14,24 +14,37 @@ import (
 
 // MetricsStatus represents the status of metrics component resources
 type MetricsStatus struct {
-	DeploymentReady                 bool
-	KubeStateMetricsRequired        bool
-	KubeStateMetricsDeploymentReady bool
-	PodsReady                       int
-	TotalPods                       int
-	KubeStateMetricsPodsReady       int
-	KubeStateMetricsTotalPods       int
-	Errors                          []string
-	Diagnostics                     []string
+	DeploymentReady                    bool
+	NodeExporterDaemonSetReady         bool
+	KubeStateMetricsRequired           bool
+	KubeStateMetricsDeploymentReady    bool
+	AcceleratorExporterRequired        bool
+	AcceleratorExporterDaemonSetsReady bool
+	PodsReady                          int
+	TotalPods                          int
+	NodeExporterPodsReady              int
+	NodeExporterTotalPods              int
+	KubeStateMetricsPodsReady          int
+	KubeStateMetricsTotalPods          int
+	AcceleratorExporterPodsReady       int
+	AcceleratorExporterTotalPods       int
+	Errors                             []string
+	Diagnostics                        []string
 }
 
 func (m MetricsStatus) String() string {
 	base := fmt.Sprintf(
-		"DeploymentReady: %v, PodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
-			"KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, Errors: %v",
+		"DeploymentReady: %v, PodsReady: %d/%d, NodeExporterDaemonSetReady: %v, "+
+			"NodeExporterPodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
+			"KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, "+
+			"AcceleratorExporterRequired: %v, AcceleratorExporterDaemonSetsReady: %v, "+
+			"AcceleratorExporterPodsReady: %d/%d, Errors: %v",
 		m.DeploymentReady, m.PodsReady, m.TotalPods,
+		m.NodeExporterDaemonSetReady, m.NodeExporterPodsReady, m.NodeExporterTotalPods,
 		m.KubeStateMetricsRequired,
 		m.KubeStateMetricsDeploymentReady, m.KubeStateMetricsPodsReady, m.KubeStateMetricsTotalPods,
+		m.AcceleratorExporterRequired, m.AcceleratorExporterDaemonSetsReady,
+		m.AcceleratorExporterPodsReady, m.AcceleratorExporterTotalPods,
 		m.Errors)
 
 	return component.FormatStatusWithDiagnostics(base, m.Diagnostics)
@@ -42,7 +55,10 @@ func (m MetricsStatus) Ready() bool {
 		return false
 	}
 
-	return m.DeploymentReady && (!m.KubeStateMetricsRequired || m.KubeStateMetricsDeploymentReady)
+	return m.DeploymentReady &&
+		m.NodeExporterDaemonSetReady &&
+		(!m.KubeStateMetricsRequired || m.KubeStateMetricsDeploymentReady) &&
+		(!m.AcceleratorExporterRequired || m.AcceleratorExporterDaemonSetsReady)
 }
 
 // CheckResourcesStatus checks the status of all metrics resources
@@ -66,6 +82,41 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		}
 	}
 
+	nodeExporterReady, nodeExporterPodsReady, nodeExporterTotalPods, err := m.checkDaemonSetStatus(ctx, nodeExporterDaemonSetName)
+	if err != nil {
+		status.Errors = append(status.Errors, fmt.Sprintf("node-exporter daemonset check failed: %v", err))
+	} else {
+		status.NodeExporterDaemonSetReady = nodeExporterReady
+		status.NodeExporterPodsReady = nodeExporterPodsReady
+		status.NodeExporterTotalPods = nodeExporterTotalPods
+	}
+
+	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
+	if err != nil {
+		status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))
+	} else if len(acceleratorExporters) > 0 {
+		status.AcceleratorExporterRequired = true
+		status.AcceleratorExporterDaemonSetsReady = true
+
+		for _, exporter := range acceleratorExporters {
+			exporterReady, exporterPodsReady, exporterTotalPods, checkErr := m.checkDaemonSetStatus(ctx, exporter.Name)
+			if checkErr != nil {
+				status.AcceleratorExporterDaemonSetsReady = false
+				status.Errors = append(status.Errors,
+					fmt.Sprintf("accelerator-exporter daemonset %s check failed: %v", exporter.Name, checkErr))
+
+				continue
+			}
+
+			if !exporterReady {
+				status.AcceleratorExporterDaemonSetsReady = false
+			}
+
+			status.AcceleratorExporterPodsReady += exporterPodsReady
+			status.AcceleratorExporterTotalPods += exporterTotalPods
+		}
+	}
+
 	kubeStateMetricsRequired, err := m.supportsKubeStateMetrics()
 	if err != nil {
 		status.Errors = append(status.Errors, fmt.Sprintf("kube-state-metrics support check failed: %v", err))
@@ -74,27 +125,23 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 
 	status.KubeStateMetricsRequired = kubeStateMetricsRequired
 
-	if !kubeStateMetricsRequired {
-		// Older cluster releases do not render the extra kube-state-metrics
-		// deployment, so vmagent readiness is the complete metrics status.
-		return status, nil
-	}
+	if kubeStateMetricsRequired {
+		kubeStateMetricsReady, kubeStateMetricsPodsReady, kubeStateMetricsTotalPods, err := m.checkKubeStateMetricsDeploymentStatus(ctx)
+		kubeStateMetricsDiagnostics := func() []string {
+			return component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "neutree-kube-state-metrics", m.kubeStateMetricsPodLabels())
+		}
 
-	kubeStateMetricsReady, kubeStateMetricsPodsReady, kubeStateMetricsTotalPods, err := m.checkKubeStateMetricsDeploymentStatus(ctx)
-	kubeStateMetricsDiagnostics := func() []string {
-		return component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "neutree-kube-state-metrics", m.kubeStateMetricsPodLabels())
-	}
-
-	if err != nil {
-		status.Errors = append(status.Errors, fmt.Sprintf("kube-state-metrics deployment check failed: %v", err))
-		status.Diagnostics = append(status.Diagnostics, kubeStateMetricsDiagnostics()...)
-	} else {
-		status.KubeStateMetricsDeploymentReady = kubeStateMetricsReady
-		status.KubeStateMetricsPodsReady = kubeStateMetricsPodsReady
-		status.KubeStateMetricsTotalPods = kubeStateMetricsTotalPods
-
-		if !kubeStateMetricsReady {
+		if err != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("kube-state-metrics deployment check failed: %v", err))
 			status.Diagnostics = append(status.Diagnostics, kubeStateMetricsDiagnostics()...)
+		} else {
+			status.KubeStateMetricsDeploymentReady = kubeStateMetricsReady
+			status.KubeStateMetricsPodsReady = kubeStateMetricsPodsReady
+			status.KubeStateMetricsTotalPods = kubeStateMetricsTotalPods
+
+			if !kubeStateMetricsReady {
+				status.Diagnostics = append(status.Diagnostics, kubeStateMetricsDiagnostics()...)
+			}
 		}
 	}
 
@@ -145,6 +192,28 @@ func (m *MetricsComponent) checkDeploymentStatus(ctx context.Context) (bool, int
 
 func (m *MetricsComponent) checkKubeStateMetricsDeploymentStatus(ctx context.Context) (bool, int, int, error) {
 	return m.checkNamedDeploymentStatus(ctx, "neutree-kube-state-metrics", m.kubeStateMetricsPodLabels())
+}
+
+func (m *MetricsComponent) checkDaemonSetStatus(ctx context.Context, name string) (bool, int, int, error) {
+	daemonSet := &appsv1.DaemonSet{}
+
+	err := m.ctrlClient.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: m.namespace,
+	}, daemonSet)
+	if err != nil {
+		return false, 0, 0, errors.Wrapf(err, "failed to get daemonset %s", name)
+	}
+
+	desired := daemonSet.Status.DesiredNumberScheduled
+	readyScheduled := desired == daemonSet.Status.NumberReady
+	updatedScheduled := desired == daemonSet.Status.UpdatedNumberScheduled
+	availableScheduled := desired == daemonSet.Status.NumberAvailable
+
+	return readyScheduled && updatedScheduled && availableScheduled,
+		int(daemonSet.Status.NumberReady),
+		int(daemonSet.Status.DesiredNumberScheduled),
+		nil
 }
 
 func (m *MetricsComponent) checkNamedDeploymentStatus(ctx context.Context, name string, matchLabels map[string]string) (bool, int, int, error) {

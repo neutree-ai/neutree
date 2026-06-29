@@ -505,7 +505,23 @@ func stopStaleComponents(
 }
 
 func implicitComponentDependencies(component v1.NodeComponentSpec, desiredComponents []v1.NodeComponentSpec) []string {
-	return nil
+	if component.Type != v1.NodeComponentTypeMetricsAgent {
+		return nil
+	}
+
+	dependencies := []string{}
+	for _, desired := range desiredComponents {
+		if desired.Name == "" || desired.Name == component.Name {
+			continue
+		}
+
+		switch desired.Type {
+		case v1.NodeComponentTypeNodeExporter, v1.NodeComponentTypeAcceleratorExporter:
+			dependencies = append(dependencies, desired.Name)
+		}
+	}
+
+	return dependencies
 }
 
 func (r *StaticNodeReconciler) shouldWaitForHead(
