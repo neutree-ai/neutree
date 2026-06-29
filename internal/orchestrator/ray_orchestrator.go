@@ -1000,14 +1000,6 @@ func setDefaultSGLangEnableMetricsForApplication(endpoint *v1.Endpoint, app *das
 		engineArgs = make(map[string]interface{})
 	}
 
-	if v, hasDash := engineArgs["enable-metrics"]; hasDash {
-		if _, hasUnderscore := engineArgs["enable_metrics"]; !hasUnderscore {
-			engineArgs["enable_metrics"] = v
-		}
-
-		delete(engineArgs, "enable-metrics")
-	}
-
 	setDefaultSGLangEnableMetrics(endpoint.Spec.Engine.Engine, engineArgs)
 	app.Args["engine_args"] = engineArgs
 }

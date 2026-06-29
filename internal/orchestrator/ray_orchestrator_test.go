@@ -2139,18 +2139,6 @@ func TestEndpointToApplication_SGLangEnableMetricsDefault(t *testing.T) {
 			},
 		},
 		{
-			name:       "sglang user-provided kebab enable-metrics prevents default",
-			engineName: v1.EngineNameSGLang,
-			variables: map[string]interface{}{
-				"engine_args": map[string]interface{}{
-					"enable-metrics": false,
-				},
-			},
-			expectedArgs: map[string]interface{}{
-				"enable_metrics": false,
-			},
-		},
-		{
 			name:         "vllm does not default enable_metrics",
 			engineName:   v1.EngineNameVLLM,
 			expectedArgs: nil,
