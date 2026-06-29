@@ -241,9 +241,9 @@ class Backend:
             engine_kwargs.setdefault("is_embedding", True)
 
         # Force Prometheus multiprocess mode on so the bridge below can read
-        # SGLang's metric .db files via PROMETHEUS_MULTIPROC_DIR. SGLang's
-        # set_prometheus_multiproc_dir() is gated on enable_metrics, and the
-        # bridge silently sees an empty registry if this flag is left off.
+        # SGLang's metric .db files via PROMETHEUS_MULTIPROC_DIR. The embedded
+        # Engine path does not mount SGLang's HTTP /metrics route, so Neutree
+        # initializes the multiprocess directory explicitly before Engine starts.
         engine_kwargs.setdefault("enable_metrics", True)
 
         # Build ServerArgs kwargs with model identity injected.

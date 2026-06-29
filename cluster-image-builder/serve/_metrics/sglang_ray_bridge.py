@@ -12,11 +12,10 @@ SGLang ``python/sglang/srt/utils/common.py:add_prometheus_middleware``::
 
 When we run SGLang via :class:`sglang.srt.entrypoints.engine.Engine` inside a
 Ray Serve actor we do not get that route, but we **do** inherit the same
-``PROMETHEUS_MULTIPROC_DIR`` environment variable (``Engine.__init__`` calls
-``set_prometheus_multiproc_dir()`` when ``enable_metrics=True``). Constructing
-an identical registry from the same shared dir gives us byte-for-byte
-identical aggregated samples to what SGLang would have served externally —
-no SGLang internal API is involved.
+``PROMETHEUS_MULTIPROC_DIR`` environment variable initialized by the SGLang
+Ray Serve app before ``Engine`` starts. Constructing an identical registry from
+the same shared dir gives us byte-for-byte identical aggregated samples to what
+SGLang would have served externally — no SGLang internal API is involved.
 
 Ray Serve LLM has an upstream ``stat_loggers``-based SGLang metrics bridge in
 progress, but that path depends on SGLang's pluggable metrics backend hooks
@@ -41,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Dict, Tuple
 
 from ray import serve
@@ -72,6 +72,8 @@ def _replica_tags() -> Dict[str, str]:
             "deployment": ctx.deployment,
             "replica": ctx.replica_tag,
             "application": getattr(ctx, "app_name", ""),
+            "engine": os.environ.get("ENGINE_NAME", "unknown"),
+            "engine_version": os.environ.get("ENGINE_VERSION", "unknown"),
         }
     except RuntimeError:
         # Ran outside a Serve replica (unit tests, REPL); skip context labels.
