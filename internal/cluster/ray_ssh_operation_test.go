@@ -422,75 +422,6 @@ func TestStartNode(t *testing.T) {
 	}
 }
 
-func TestStartHeadNode_UsesHeadCommandsAndRunOptions(t *testing.T) {
-	mockCmdExecutor := &commandmocks.MockExecutor{}
-	mockAccelManager := &acceleratormocks.MockManager{}
-	mockAccelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(v1.RuntimeConfig{}, nil).
-		Once()
-
-	mockCmdExecutor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
-		return strings.Contains(strings.Join(args, " "), "uptime")
-	})).Return([]byte("success"), nil).Times(6)
-	mockCmdExecutor.On("Execute", mock.Anything, "ssh", sshArgsContaining("echo init-head")).
-		Return([]byte(""), nil).
-		Once()
-	mockCmdExecutor.On("Execute", mock.Anything, "ssh", sshArgsContaining("command -v docker")).
-		Return([]byte("docker"), nil).
-		Once()
-	mockCmdExecutor.On("Execute", mock.Anything, "ssh", sshArgsContaining("docker pull test-image")).
-		Return([]byte(""), nil).
-		Once()
-	mockCmdExecutor.On("Execute", mock.Anything, "ssh", sshArgsContaining("docker inspect -f")).
-		Return([]byte("false"), nil).
-		Once()
-	mockCmdExecutor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
-		joined := strings.Join(args, " ")
-		return strings.Contains(joined, "docker run") &&
-			strings.Contains(joined, "--head-run-option") &&
-			!strings.Contains(joined, "--worker-run-option")
-	})).Return([]byte(""), nil).Once()
-	mockCmdExecutor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
-		joined := strings.Join(args, " ")
-		return strings.Contains(joined, "docker exec") &&
-			strings.Contains(joined, "echo head-start")
-	})).Return([]byte(""), nil).Once()
-
-	sshRayClusterReconciler := &sshRayClusterReconciler{
-		executor:           mockCmdExecutor,
-		acceleratorManager: mockAccelManager,
-	}
-
-	headIP, err := sshRayClusterReconciler.startHeadNode(&ReconcileContext{
-		sshRayClusterConfig: &v1.RayClusterConfig{
-			Docker: v1.Docker{
-				Image:            "test-image",
-				ContainerName:    "ray_container",
-				PullBeforeRun:    true,
-				RunOptions:       []string{"--shm-size=1g"},
-				HeadRunOptions:   []string{"--head-run-option"},
-				WorkerRunOptions: []string{"--worker-run-option"},
-			},
-			InitializationCommands: []string{"echo init-head"},
-			HeadStartRayCommands:   []string{"echo head-start"},
-		},
-		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-			Provider: v1.Provider{HeadIP: "192.168.1.10"},
-		},
-		sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
-		Cluster: &v1.Cluster{
-			Status: &v1.ClusterStatus{
-				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
-			},
-		},
-	})
-
-	assert.NoError(t, err)
-	assert.Equal(t, "192.168.1.10", headIP)
-	mockCmdExecutor.AssertExpectations(t)
-	mockAccelManager.AssertExpectations(t)
-}
-
 func TestDrainNode(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -903,7 +834,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			HeadStartRayCommands: []string{
 				"ray stop",
 				strings.Join([]string{
-					`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --dashboard-host=0.0.0.0`,
+					`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
 					commonArgs,
 					"--dashboard-grpc-port=8079",
 					"--dashboard-port=8265",
@@ -1143,7 +1074,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 						"docker login registry.example.com -u 'user' -p 'pass'",
 						"ray stop",
 						strings.Join([]string{
-							`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --dashboard-host=0.0.0.0`,
+							`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
 							newCommonArgs,
 							"--dashboard-port=8265",
 							"--ray-client-server-port=10001",
@@ -1241,7 +1172,7 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 					HeadStartRayCommands: []string{
 						"ray stop",
 						strings.Join([]string{
-							`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --dashboard-host=0.0.0.0`,
+							`ulimit -n 65536; python /home/ray/start.py --head --port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --dashboard-host=0.0.0.0`,
 							newCommonArgs,
 							"--dashboard-port=8265",
 							"--ray-client-server-port=10001",

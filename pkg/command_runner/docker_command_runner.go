@@ -143,11 +143,6 @@ func (d *DockerCommandRunner) dockerExpandUser(ctx context.Context, s string, an
 
 // RunInit initializes the Docker container.
 func (d *DockerCommandRunner) RunInit(ctx context.Context) (bool, error) {
-	return d.RunInitWithRunOptions(ctx, d.dockerConfig.WorkerRunOptions)
-}
-
-// RunInitWithRunOptions initializes the Docker container with role-specific run options.
-func (d *DockerCommandRunner) RunInitWithRunOptions(ctx context.Context, roleRunOptions []string) (bool, error) {
 	clusterImage := d.dockerConfig.Image
 
 	installed, err := d.CheckDockerInstalled(ctx)
@@ -184,7 +179,7 @@ func (d *DockerCommandRunner) RunInitWithRunOptions(ctx context.Context, roleRun
 	if !containerRunning {
 		var userDockerRunOptions []string
 		userDockerRunOptions = append(userDockerRunOptions, d.dockerConfig.RunOptions...)
-		userDockerRunOptions = append(userDockerRunOptions, roleRunOptions...)
+		userDockerRunOptions = append(userDockerRunOptions, d.dockerConfig.WorkerRunOptions...)
 
 		userDockerRunOptions, err = d.autoConfigureShm(ctx, userDockerRunOptions)
 		if err != nil {

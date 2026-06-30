@@ -195,14 +195,6 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 			},
 			Options: []string{"--gpus all"},
 		},
-		EndpointRuntime: &v1.RuntimeConfig{
-			Runtime: "nvidia",
-			Options: []string{"--gpus all"},
-		},
-		ResourceDefaults: &v1.AcceleratorResourceDefaults{
-			RayResourceName:        "GPU",
-			KubernetesResourceName: string(NvidiaGPUKubernetesResource),
-		},
 	}, nil
 }
 

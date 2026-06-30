@@ -409,7 +409,7 @@ func expectStaticHeadStart(acceleratorManager *acceleratormocks.MockManager, e *
 	acceleratorManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(v1.RuntimeConfig{}, nil).
 		Once()
-	e.On("Execute", mock.Anything, "ssh", mock.Anything).Return([]byte("docker"), nil).Maybe()
+	e.On("Execute", mock.Anything, "bash", mock.Anything).Return([]byte(""), nil).Once()
 }
 
 func staticHeadTestRayConfig() *v1.RayClusterConfig {
@@ -527,8 +527,8 @@ func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 	}
 }
 
-// TestInitHeadNode_DashboardVerifyFailureHint asserts that when static head
-// start exits 0 but the post-start GetClusterMetadata probe fails, the wrapped
+// TestInitHeadNode_DashboardVerifyFailureHint asserts that when ray up exits 0
+// but the post-up GetClusterMetadata probe fails, the wrapped
 // error mentions port 8265 so users learn the most likely cause.
 func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 	acceleratorManager := &acceleratormocks.MockManager{}
@@ -562,13 +562,13 @@ func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
 			},
 		},
-	})
+	}, false)
 
 	require.Error(t, err)
 	msg := err.Error()
-	assert.Contains(t, msg, "port 8265", "post-start verify failure must hint at port 8265 (got: %q)", msg)
-	assert.Contains(t, msg, "192.168.1.10", "post-start verify failure must mention the head IP (got: %q)", msg)
-	assert.Contains(t, msg, "connection refused", "post-start verify failure must preserve underlying error (got: %q)", msg)
+	assert.Contains(t, msg, "port 8265", "post-up verify failure must hint at port 8265 (got: %q)", msg)
+	assert.Contains(t, msg, "192.168.1.10", "post-up verify failure must mention the head IP (got: %q)", msg)
+	assert.Contains(t, msg, "connection refused", "post-up verify failure must preserve underlying error (got: %q)", msg)
 }
 
 // TestCheckHeadNodeHealth_UnhealthyErrorContract pins the contract between

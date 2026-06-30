@@ -62,10 +62,6 @@ func (b *resourceViewBuilder) BuildEndpointResources(
 	return buildEndpointResourcesFromEndpointInstances(instances), nil
 }
 
-func BuildEndpointResourcesFromEndpointInstances(instances []EndpointInstanceResource) *v1.EndpointResourceStatus {
-	return buildEndpointResourcesFromEndpointInstances(instances)
-}
-
 func buildClusterResourcesFromResourceNodes(nodes []ResourceNode) *v1.ClusterResources {
 	result := &v1.ClusterResources{
 		ResourceStatus: v1.ResourceStatus{

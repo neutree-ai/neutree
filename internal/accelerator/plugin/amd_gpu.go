@@ -205,16 +205,6 @@ func (p *AMDGPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v
 				"AMD_VISIBLE_DEVICES": "all",
 			},
 		},
-		EndpointRuntime: &v1.RuntimeConfig{
-			Runtime: "amd",
-			Env: map[string]string{
-				"AMD_VISIBLE_DEVICES": "all",
-			},
-		},
-		ResourceDefaults: &v1.AcceleratorResourceDefaults{
-			RayResourceName:        "GPU",
-			KubernetesResourceName: string(AMDGPUKubernetesResource),
-		},
 	}, nil
 }
 

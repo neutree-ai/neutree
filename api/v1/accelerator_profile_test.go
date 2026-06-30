@@ -13,33 +13,25 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 		AcceleratorType: string(AcceleratorTypeNVIDIAGPU),
 		ClusterRuntime: &RuntimeConfig{
 			ImageSuffix: "cuda",
-		},
-		EndpointRuntime: &RuntimeConfig{
-			Runtime: "nvidia",
-			Options: []string{"--gpus all"},
+			Runtime:     "nvidia",
 			Env: map[string]string{
 				"ACCELERATOR_TYPE": "gpu",
 			},
-		},
-		ResourceDefaults: &AcceleratorResourceDefaults{
-			RayResourceName:        "GPU",
-			KubernetesResourceName: "nvidia.com/gpu",
+			Options: []string{"--gpus all"},
 		},
 	}
 
 	data, err := json.Marshal(profile)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `"ray_resource_name":"GPU"`)
+	assert.Contains(t, string(data), `"cluster_runtime"`)
 
 	decoded := AcceleratorProfile{}
 	require.NoError(t, json.Unmarshal(data, &decoded))
 	assert.Equal(t, string(AcceleratorTypeNVIDIAGPU), decoded.AcceleratorType)
 	require.NotNil(t, decoded.ClusterRuntime)
 	assert.Equal(t, "cuda", decoded.ClusterRuntime.ImageSuffix)
-	require.NotNil(t, decoded.EndpointRuntime)
-	assert.Equal(t, "nvidia", decoded.EndpointRuntime.Runtime)
-	require.NotNil(t, decoded.ResourceDefaults)
-	assert.Equal(t, "nvidia.com/gpu", decoded.ResourceDefaults.KubernetesResourceName)
+	assert.Equal(t, "nvidia", decoded.ClusterRuntime.Runtime)
+	assert.Equal(t, []string{"--gpus all"}, decoded.ClusterRuntime.Options)
 }
 
 func TestGetAcceleratorProfileResponse(t *testing.T) {

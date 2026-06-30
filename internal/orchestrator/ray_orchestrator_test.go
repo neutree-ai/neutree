@@ -2424,7 +2424,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				}, nil)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: "model download is not completed",
+			expectErrorMsg: "Ray Serve application status=DEPLOYING has no backend replicas yet; waiting for model download to start",
 			expectError:    false,
 		},
 		{
@@ -2450,7 +2450,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				}, nil)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: "model download is not completed",
+			expectErrorMsg: "Ray Serve application status=NOT_STARTED has no backend replicas yet; waiting for model download to start",
 			expectError:    false,
 		},
 		{
@@ -2712,7 +2712,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
 			expectModelDownloadHashEmpty: true,
-			expectErrorMsg:               "model download is not completed",
+			expectErrorMsg:               "Backend deployment BACKEND has no replica actors yet; waiting for model download to start",
 			expectError:                  false,
 		},
 		{
@@ -2987,7 +2987,51 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
 			expectModelDownloadHashEmpty: true,
-			expectErrorMsg:               "model download is not completed",
+			expectErrorMsg:               "Deployment BACKEND replica backend-replica-1 has no model download marker yet",
+			expectError:                  false,
+		},
+		{
+			name: "prefer missing backend actor ID message over unrelated log probe failure",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            "DEPLOYING",
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {
+									Name:   "BACKEND",
+									Status: "UPDATING",
+									Replicas: []dashboard.Replica{
+										{
+											ReplicaID: "backend-replica-no-actor",
+										},
+										{
+											ActorID:   "actor-log-error",
+											ReplicaID: "backend-replica-log-error",
+										},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+				mockDashboard.On("GetActorLog", "actor-log-error", "out", 200).Return("", assert.AnError)
+				mockDashboard.On("GetActorLog", "actor-log-error", "err", 200).Return("", assert.AnError)
+			},
+			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
+			expectModelDownloadHashEmpty: true,
+			expectErrorMsg:               "Deployment BACKEND replica backend-replica-no-actor has no actor ID yet",
 			expectError:                  false,
 		},
 		{
@@ -3069,7 +3113,7 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			},
 			expectedPhase:                v1.EndpointPhaseMODELDOWNLOADING,
 			expectModelDownloadHashEmpty: true,
-			expectErrorMsg:               "model download is not completed",
+			expectErrorMsg:               "failed to inspect backend actor logs",
 			expectError:                  false,
 		},
 		{

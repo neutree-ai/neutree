@@ -287,12 +287,7 @@ func TestAMDGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, profile)
 	require.NotNil(t, profile.ClusterRuntime)
-	require.NotNil(t, profile.EndpointRuntime)
-	require.NotNil(t, profile.ResourceDefaults)
 	assert.Equal(t, string(v1.AcceleratorTypeAMDGPU), profile.AcceleratorType)
 	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
 	assert.Equal(t, "amd", profile.ClusterRuntime.Runtime)
-	assert.Equal(t, "amd", profile.EndpointRuntime.Runtime)
-	assert.Equal(t, "GPU", profile.ResourceDefaults.RayResourceName)
-	assert.Equal(t, string(AMDGPUKubernetesResource), profile.ResourceDefaults.KubernetesResourceName)
 }

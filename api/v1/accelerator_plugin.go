@@ -100,15 +100,8 @@ type RuntimeConfig struct {
 }
 
 type AcceleratorProfile struct {
-	AcceleratorType  string                       `json:"accelerator_type"`
-	ClusterRuntime   *RuntimeConfig               `json:"cluster_runtime,omitempty"`
-	EndpointRuntime  *RuntimeConfig               `json:"endpoint_runtime,omitempty"`
-	ResourceDefaults *AcceleratorResourceDefaults `json:"resource_defaults,omitempty"`
-}
-
-type AcceleratorResourceDefaults struct {
-	RayResourceName        string `json:"ray_resource_name,omitempty"`
-	KubernetesResourceName string `json:"kubernetes_resource_name,omitempty"`
+	AcceleratorType string         `json:"accelerator_type"`
+	ClusterRuntime  *RuntimeConfig `json:"cluster_runtime,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {

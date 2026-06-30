@@ -472,7 +472,9 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 		firstErr         error
 		doneDetail       string
 		inProgressDetail string
+		noReplicaDetail  string
 		unknownActorSeen bool
+		unknownActorMsg  string
 	)
 
 	for deploymentKey, deployment := range appStatus.Deployments {
@@ -485,8 +487,24 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 			continue
 		}
 
+		if len(deployment.Replicas) == 0 {
+			noReplicaDetail = fmt.Sprintf("Backend deployment %s has no replica actors yet; waiting for model download to start", deploymentName)
+			continue
+		}
+
 		for _, replica := range deployment.Replicas {
 			if replica.ActorID == "" {
+				unknownActorSeen = true
+
+				if unknownActorMsg == "" {
+					replicaID := replica.ReplicaID
+					if replicaID == "" {
+						replicaID = "unknown"
+					}
+
+					unknownActorMsg = fmt.Sprintf("Deployment %s replica %s has no actor ID yet; waiting for model download logs", deploymentName, replicaID)
+				}
+
 				continue
 			}
 
@@ -528,6 +546,10 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 				inProgressDetail = fmt.Sprintf("Deployment %s replica %s model download in progress", deploymentName, replicaID)
 			case modelDownloadMarkerNone:
 				unknownActorSeen = true
+
+				if unknownActorMsg == "" {
+					unknownActorMsg = fmt.Sprintf("Deployment %s replica %s has no model download marker yet", deploymentName, replicaID)
+				}
 			}
 		}
 	}
@@ -537,7 +559,11 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 	}
 
 	if unknownActorSeen {
-		return modelDownloadMarkerNone, "", firstErr
+		return modelDownloadMarkerNone, unknownActorMsg, firstErr
+	}
+
+	if noReplicaDetail != "" {
+		return modelDownloadMarkerNone, noReplicaDetail, firstErr
 	}
 
 	if doneDetail != "" {
@@ -545,6 +571,26 @@ func inspectRayModelDownloadLogs(svc dashboard.DashboardService, appStatus dashb
 	}
 
 	return modelDownloadMarkerNone, "", firstErr
+}
+
+func pendingRayModelDownloadMessage(
+	appStatus dashboard.RayServeApplicationStatus,
+	markerMsg string,
+	markerErr error,
+) string {
+	if markerMsg != "" {
+		if markerErr != nil {
+			return markerMsg + "; failed to inspect backend actor logs: " + markerErr.Error()
+		}
+
+		return markerMsg
+	}
+
+	if markerErr != nil {
+		return "failed to inspect backend actor logs: " + markerErr.Error()
+	}
+
+	return fmt.Sprintf("Ray Serve application status=%s has no backend replicas yet; waiting for model download to start", appStatus.Status)
 }
 
 func currentModelDownloadHashMatches(endpoint *v1.Endpoint, currentModelHash string) bool {
@@ -603,7 +649,7 @@ func resolveRayStartupModelDownloadStatus(
 			phase = v1.EndpointPhaseMODELDOWNLOADING
 			modelDownloadIncomplete = true
 
-			errorMessages = append(errorMessages, "current model download is not completed")
+			errorMessages = append(errorMessages, pendingRayModelDownloadMessage(appStatus, markerMsg, markerErr))
 		}
 	}
 
@@ -707,7 +753,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 			setModelDownloadStatus(endpointStatus, true, currentModelHash)
 		}
 
-		return o.withStaticNodeEndpointResources(endpoint, endpointStatus)
+		return endpointStatus, nil
 	}
 
 	var modelDownloadMessages []string
@@ -759,36 +805,6 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	}
 
 	return endpointStatus, nil
-}
-
-func (o *RayOrchestrator) withStaticNodeEndpointResources(
-	endpoint *v1.Endpoint,
-	status *v1.EndpointStatus,
-) (*v1.EndpointStatus, error) {
-	resources, err := o.buildEndpointResourceStatusFromStaticNodes(endpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	status.Resources = resources
-
-	return status, nil
-}
-
-func (o *RayOrchestrator) buildEndpointResourceStatusFromStaticNodes(
-	endpoint *v1.Endpoint,
-) (*v1.EndpointResourceStatus, error) {
-	return nil, nil
-}
-
-func (o *RayOrchestrator) usesStaticNodeEndpointResources() bool {
-	if o.cluster == nil || o.cluster.Spec == nil || o.cluster.Spec.Version == "" {
-		return false
-	}
-
-	enabled, err := semver.LessThan("v1.0.1", o.cluster.Spec.Version)
-
-	return err == nil && enabled
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
