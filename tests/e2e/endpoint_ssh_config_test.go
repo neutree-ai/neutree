@@ -285,7 +285,14 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 
 		It("should serve inference with all-types config", func() {
 			ep := getEndpoint(schemaEpName)
-			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with all schema types")
+
+			code, modelIDs, body, err := listOpenAIModelIDs(ep.Status.ServiceURL)
+			Expect(err).NotTo(HaveOccurred(), "list models failed: %s", body)
+			Expect(code).To(Equal(200), "list models failed: %s", body)
+			Expect(modelIDs).To(ContainElement(profileModelName()))
+			Expect(modelIDs).To(ContainElement("neu-vllm-list-alias"))
+
+			code, body, err = inferChat(ep.Status.ServiceURL, "Hello with all schema types")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(200), "inference failed: %s", body)
 

@@ -96,6 +96,7 @@ class Backend:
         print(f"[Backend] Model download completed.")
 
         self.model_id = model_serve_name
+        self.model_path = model_path
         self.model_task = model_task
 
         # Extract FrontendArgs BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors.
@@ -219,10 +220,16 @@ class Backend:
     async def _ensure_models(self):
         if self.openai_serving_models is None:
             self._ensure_model_config()
+            served_model_names = self.engine.model_config.served_model_name
+            if isinstance(served_model_names, str):
+                served_model_names = [served_model_names]
+
             self.openai_serving_models = OpenAIServingModels(
                 self.engine,
-                [BaseModelPath(name=self.engine.model_config.served_model_name,
-                               model_path=self.engine.model_config.served_model_name)]
+                [
+                    BaseModelPath(name=name, model_path=self.model_path)
+                    for name in served_model_names
+                ]
             )
         return self.openai_serving_models
 
