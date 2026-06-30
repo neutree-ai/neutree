@@ -192,6 +192,10 @@ class Backend:
         # params that were read but not popped) to prevent TypeError on init.
         filter_engine_args(args, AsyncEngineArgs)
 
+        self.served_model_names = args.get("served_model_name", self.model_id)
+        if isinstance(self.served_model_names, str):
+            self.served_model_names = [self.served_model_names]
+
         self.request_logger = RequestLogger(max_log_len=self.max_log_len) if args.get("enable_log_requests") else None
         set_default_fingerprint_mode(self.fingerprint_mode, self.fingerprint_value)
 
@@ -220,15 +224,12 @@ class Backend:
     async def _ensure_models(self):
         if self.openai_serving_models is None:
             self._ensure_model_config()
-            served_model_names = self.engine.model_config.served_model_name
-            if isinstance(served_model_names, str):
-                served_model_names = [served_model_names]
 
             self.openai_serving_models = OpenAIServingModels(
                 self.engine,
                 [
                     BaseModelPath(name=name, model_path=self.model_path)
-                    for name in served_model_names
+                    for name in self.served_model_names
                 ]
             )
         return self.openai_serving_models
