@@ -9,18 +9,17 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	staticclient "github.com/neutree-ai/neutree/internal/client"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
-	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type StaticNodeClusterController struct {
-	store      *storage.StaticNodeObjectStore
 	nodes      *staticclient.StaticNodeClient
 	clusters   *staticclient.StaticNodeClusterClient
 	reconciler *clusterreconcile.StaticNodeClusterReconciler
 }
 
 type StaticNodeClusterControllerOption struct {
-	Store                      *storage.StaticNodeObjectStore
+	Nodes                      *staticclient.StaticNodeClient
+	Clusters                   *staticclient.StaticNodeClusterClient
 	Reconciler                 *clusterreconcile.StaticNodeClusterReconciler
 	AcceleratorProfileProvider clusterreconcile.AcceleratorProfileProvider
 }
@@ -38,9 +37,8 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 	}
 
 	return &StaticNodeClusterController{
-		store:      option.Store,
-		nodes:      staticclient.NewStaticNodeClient(option.Store),
-		clusters:   staticclient.NewStaticNodeClusterClient(option.Store),
+		nodes:      option.Nodes,
+		clusters:   option.Clusters,
 		reconciler: reconciler,
 	}, nil
 }
@@ -63,8 +61,8 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		return errors.New("static node cluster metadata is required")
 	}
 
-	if c.store == nil {
-		return errors.New("static node cluster store is required")
+	if c.nodes == nil || c.clusters == nil {
+		return errors.New("static node cluster clients are required")
 	}
 
 	reconciler := c.reconciler

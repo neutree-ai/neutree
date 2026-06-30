@@ -19,9 +19,8 @@ func TestStaticNodeDockerRuntimePullImageReturnsDockerReason(t *testing.T) {
 		},
 	}
 
-	err := (StaticNodeDockerRuntime{}).PullImage(
+	err := NewStaticNodeDockerRuntime(runner).PullImage(
 		context.Background(),
-		runner,
 		"registry.example.com/neutree/serve:v1.2.0",
 	)
 

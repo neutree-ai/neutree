@@ -2,6 +2,7 @@ package accelerator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,44 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), profile.AcceleratorType)
 	require.NotNil(t, profile.ClusterRuntime)
 	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
+}
+
+func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, v1.GetAcceleratorProfilePath, r.URL.Path)
+
+		err := json.NewEncoder(w).Encode(v1.GetAcceleratorProfileResponse{
+			Profile: v1.AcceleratorProfile{
+				ClusterRuntime: &v1.RuntimeConfig{
+					Runtime: "custom-cluster",
+				},
+				EngineRuntime: &v1.RuntimeConfig{
+					Runtime: "custom-engine",
+				},
+			},
+		})
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	m := &manager{}
+	m.acceleratorsMap.Store("external_gpu", registerPlugin{
+		resource:         "external_gpu",
+		plugin:           plugin.NewAcceleratorRestPlugin("external_gpu", server.URL),
+		lastRegisterTime: time.Now(),
+	})
+
+	profile, supported, err := m.GetAcceleratorProfile(context.Background(), "external_gpu")
+
+	require.NoError(t, err)
+	assert.True(t, supported)
+	require.NotNil(t, profile)
+	assert.Equal(t, "external_gpu", profile.AcceleratorType)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, "custom-cluster", profile.ClusterRuntime.Runtime)
+	require.NotNil(t, profile.EngineRuntime)
+	assert.Equal(t, "custom-engine", profile.EngineRuntime.Runtime)
 }
 
 func TestManagerGetAcceleratorProfileRejectsMismatchedProfileType(t *testing.T) {
@@ -140,12 +179,17 @@ func TestManagerDetectAcceleratorDelegatesToPluginDetector(t *testing.T) {
 		lastRegisterTime: time.Now(),
 	})
 
-	status, err := m.DetectAccelerator(context.Background(), fakeNodeCommandRunner{})
+	status, err := m.DetectAccelerator(context.Background(), "10.0.0.10", v1.Auth{
+		SSHUser:       "root",
+		SSHPrivateKey: "key",
+	})
 
 	require.NoError(t, err)
 	require.Equal(t, expected, status)
 	assert.Empty(t, status.Devices, "type discovery must not report detailed device data")
 	assert.Equal(t, 1, detector.detectCalls)
+	assert.Equal(t, "10.0.0.10", detector.detectRequest.NodeIp)
+	assert.Equal(t, "root", detector.detectRequest.SSHAuth.SSHUser)
 }
 
 func TestManagerDetectAcceleratorFallsBackToCPUWhenDetectorDoesNotMatch(t *testing.T) {
@@ -157,7 +201,10 @@ func TestManagerDetectAcceleratorFallsBackToCPUWhenDetectorDoesNotMatch(t *testi
 		lastRegisterTime: time.Now(),
 	})
 
-	status, err := m.DetectAccelerator(context.Background(), fakeNodeCommandRunner{})
+	status, err := m.DetectAccelerator(context.Background(), "10.0.0.10", v1.Auth{
+		SSHUser:       "root",
+		SSHPrivateKey: "key",
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, status)
@@ -174,7 +221,10 @@ func TestManagerDetectAcceleratorTreatsDetectorErrorAsCPUFallback(t *testing.T) 
 		lastRegisterTime: time.Now(),
 	})
 
-	status, err := m.DetectAccelerator(context.Background(), fakeNodeCommandRunner{})
+	status, err := m.DetectAccelerator(context.Background(), "10.0.0.10", v1.Auth{
+		SSHUser:       "root",
+		SSHPrivateKey: "key",
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, status)
@@ -182,18 +232,13 @@ func TestManagerDetectAcceleratorTreatsDetectorErrorAsCPUFallback(t *testing.T) 
 	assert.Equal(t, 1, detector.detectCalls)
 }
 
-type fakeNodeCommandRunner struct{}
-
-func (fakeNodeCommandRunner) Run(ctx context.Context, command string) (string, error) {
-	return "", nil
-}
-
 type fakeStaticNodeAcceleratorPlugin struct {
 	detected *v1.StaticNodeAcceleratorStatus
 	matched  bool
 
-	detectErr   error
-	detectCalls int
+	detectErr     error
+	detectCalls   int
+	detectRequest *v1.DetectStaticNodeAcceleratorRequest
 
 	acceleratorProfile *v1.AcceleratorProfile
 }
@@ -212,11 +257,15 @@ func (p *fakeStaticNodeAcceleratorPlugin) Handle() plugin.AcceleratorPluginHandl
 
 func (p *fakeStaticNodeAcceleratorPlugin) DetectStaticNodeAccelerator(
 	ctx context.Context,
-	runner plugin.NodeCommandRunner,
-) (*v1.StaticNodeAcceleratorStatus, bool, error) {
+	request *v1.DetectStaticNodeAcceleratorRequest,
+) (*v1.DetectStaticNodeAcceleratorResponse, error) {
 	p.detectCalls++
+	p.detectRequest = request
 
-	return p.detected, p.matched, p.detectErr
+	return &v1.DetectStaticNodeAcceleratorResponse{
+		Accelerator: p.detected,
+		Matched:     p.matched,
+	}, p.detectErr
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) GetNodeAccelerator(

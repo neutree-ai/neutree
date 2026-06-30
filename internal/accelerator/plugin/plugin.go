@@ -56,15 +56,11 @@ type AcceleratorProfileProvider interface {
 	GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error)
 }
 
-type NodeCommandRunner interface {
-	Run(ctx context.Context, command string) (string, error)
-}
-
 type StaticNodeAcceleratorDetector interface {
 	DetectStaticNodeAccelerator(
 		ctx context.Context,
-		runner NodeCommandRunner,
-	) (*v1.StaticNodeAcceleratorStatus, bool, error)
+		request *v1.DetectStaticNodeAcceleratorRequest,
+	) (*v1.DetectStaticNodeAcceleratorResponse, error)
 }
 
 // ResourceConverter is the interface for resource converters

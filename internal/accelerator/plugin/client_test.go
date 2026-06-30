@@ -55,3 +55,60 @@ func TestAcceleratorPluginClientGetAcceleratorProfileNotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, IsHTTPStatus(err, http.StatusNotFound))
 }
+
+func TestAcceleratorPluginClientDetectStaticNodeAccelerator(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, v1.DetectStaticNodeAcceleratorPath, r.URL.Path)
+
+		request := &v1.DetectStaticNodeAcceleratorRequest{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(request))
+		assert.Equal(t, "10.0.0.10", request.NodeIp)
+		assert.Equal(t, "root", request.SSHAuth.SSHUser)
+
+		err := json.NewEncoder(w).Encode(v1.DetectStaticNodeAcceleratorResponse{
+			Matched: true,
+			Accelerator: &v1.StaticNodeAcceleratorStatus{
+				Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			},
+		})
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	client := newAcceleratorPluginClient(server.URL)
+	detector, ok := client.(StaticNodeAcceleratorDetector)
+	require.True(t, ok)
+
+	response, err := detector.DetectStaticNodeAccelerator(context.Background(), &v1.DetectStaticNodeAcceleratorRequest{
+		NodeIp: "10.0.0.10",
+		SSHAuth: v1.Auth{
+			SSHUser:       "root",
+			SSHPrivateKey: "key",
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	assert.True(t, response.Matched)
+	require.NotNil(t, response.Accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), response.Accelerator.Type)
+}
+
+func TestAcceleratorPluginClientDetectStaticNodeAcceleratorNotFoundIsNoMatch(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	client := newAcceleratorPluginClient(server.URL)
+	detector, ok := client.(StaticNodeAcceleratorDetector)
+	require.True(t, ok)
+
+	response, err := detector.DetectStaticNodeAccelerator(context.Background(), &v1.DetectStaticNodeAcceleratorRequest{
+		NodeIp: "10.0.0.10",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	assert.False(t, response.Matched)
+	assert.Nil(t, response.Accelerator)
+}

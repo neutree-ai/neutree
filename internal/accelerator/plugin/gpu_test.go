@@ -29,18 +29,6 @@ var (
 			01:00.1 Audio device [0403]: NVIDIA Corporation GP107GL High Definition Audio Controller [10de:0fb9] (rev a1)`
 )
 
-type staticNodeTestRunner struct {
-	output string
-	err    error
-	calls  int
-}
-
-func (r *staticNodeTestRunner) Run(ctx context.Context, command string) (string, error) {
-	r.calls++
-
-	return r.output, r.err
-}
-
 func TestGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	plugin := &GPUAcceleratorPlugin{}
 
@@ -52,13 +40,16 @@ func TestGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 }
 
 func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
-	runner := &staticNodeTestRunner{output: testNvidiaLspciOutput}
-	p := &GPUAcceleratorPlugin{}
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, testNvidiaLspciOutput, nil)
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
 
-	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
 	require.NoError(t, err)
-	require.True(t, matched)
+	require.NotNil(t, response)
+	require.True(t, response.Matched)
+	status := response.Accelerator
 	require.NotNil(t, status)
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), status.Type)
 	assert.Equal(t, "nvidia", status.Vendor)
@@ -67,29 +58,61 @@ func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 	require.Len(t, status.Devices, 2)
 	assert.Equal(t, "0", status.Devices[0].ID)
 	assert.True(t, status.Devices[0].Healthy)
-	assert.Equal(t, 1, runner.calls)
+	mockExecutor.AssertExpectations(t)
 }
 
 func TestGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T) {
-	runner := &staticNodeTestRunner{output: "{}"}
-	p := &GPUAcceleratorPlugin{}
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, "{}", nil)
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
 
-	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
 	require.NoError(t, err)
-	assert.False(t, matched)
-	assert.Nil(t, status)
+	require.NotNil(t, response)
+	assert.False(t, response.Matched)
+	assert.Nil(t, response.Accelerator)
+	mockExecutor.AssertExpectations(t)
 }
 
-func TestGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsRunnerError(t *testing.T) {
-	runner := &staticNodeTestRunner{err: errors.New("lspci failed")}
-	p := &GPUAcceleratorPlugin{}
+func TestGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsPluginError(t *testing.T) {
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, "lspci failed", errors.New("lspci failed"))
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
 
-	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
 	require.Error(t, err)
-	assert.False(t, matched)
-	assert.Nil(t, status)
+	assert.Nil(t, response)
+	mockExecutor.AssertExpectations(t)
+}
+
+func staticNodeAcceleratorTestRequest() *v1.DetectStaticNodeAcceleratorRequest {
+	return &v1.DetectStaticNodeAcceleratorRequest{
+		NodeIp: "127.0.0.1",
+		SSHAuth: v1.Auth{
+			SSHUser:       "root",
+			SSHPrivateKey: "MTIzCg==",
+		},
+	}
+}
+
+func mockNodeAcceleratorCommands(
+	t *testing.T,
+	mockExecutor *commandmocks.MockExecutor,
+	lspciOutput string,
+	lspciErr error,
+) {
+	t.Helper()
+
+	mockExecutor.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		cmds := args.Get(2).([]string)
+		assert.True(t, strings.Contains(strings.Join(cmds, " "), "uptime"))
+	}).Return([]byte("{}"), nil).Once()
+	mockExecutor.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		cmds := args.Get(2).([]string)
+		assert.True(t, strings.Contains(strings.Join(cmds, " "), "lspci -nn"))
+	}).Return([]byte(lspciOutput), lspciErr).Once()
 }
 
 func TestGPUAcceleratorPluginGetAcceleratorProfile(t *testing.T) {

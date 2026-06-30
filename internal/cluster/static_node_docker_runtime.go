@@ -15,11 +15,17 @@ const (
 	componentReasonRemoveFailed    = "ContainerRemoveFailed"
 )
 
-// StaticNodeDockerRuntime is the low-level Docker boundary for static nodes.
+// StaticNodeDockerRuntime is the low-level Docker boundary for one static node.
 // It owns Docker command construction, execution, and Docker-specific failure
-// reasons. It deliberately does not build NodeComponentStatus or decide
-// reconciliation phases; callers map these typed failures into status.
-type StaticNodeDockerRuntime struct{}
+// reasons. The runner is injected by the caller; this boundary does not create
+// SSH sessions or own runner cleanup.
+type StaticNodeDockerRuntime struct {
+	runner StaticNodeCommandRunner
+}
+
+func NewStaticNodeDockerRuntime(runner StaticNodeCommandRunner) StaticNodeDockerRuntime {
+	return StaticNodeDockerRuntime{runner: runner}
+}
 
 type StaticNodeDockerError struct {
 	Reason  string
@@ -64,12 +70,11 @@ func staticNodeDockerError(reason, message string, err error) error {
 	}
 }
 
-func (StaticNodeDockerRuntime) InspectImageDigest(
+func (r StaticNodeDockerRuntime) InspectImageDigest(
 	ctx context.Context,
-	runner StaticNodeCommandRunner,
 	imageRef string,
 ) (string, error) {
-	output, err := runner.Run(ctx, "docker image inspect --format='{{index .RepoDigests 0}}' "+shellArg(imageRef))
+	output, err := r.runner.Run(ctx, "docker image inspect --format='{{index .RepoDigests 0}}' "+shellArg(imageRef))
 	if err != nil {
 		return "", staticNodeDockerError(
 			warmReasonImageInspectFailed,
@@ -81,12 +86,11 @@ func (StaticNodeDockerRuntime) InspectImageDigest(
 	return lastNonEmptyLine(output), nil
 }
 
-func (StaticNodeDockerRuntime) PullImage(
+func (r StaticNodeDockerRuntime) PullImage(
 	ctx context.Context,
-	runner StaticNodeCommandRunner,
 	image string,
 ) error {
-	if _, err := runner.Run(ctx, "docker pull "+shellArg(image)); err != nil {
+	if _, err := r.runner.Run(ctx, "docker pull "+shellArg(image)); err != nil {
 		return staticNodeDockerError(
 			componentReasonImagePullFailed,
 			fmt.Sprintf("failed to pull image %s", image),
@@ -97,12 +101,11 @@ func (StaticNodeDockerRuntime) PullImage(
 	return nil
 }
 
-func (StaticNodeDockerRuntime) InspectLocalImage(
+func (r StaticNodeDockerRuntime) InspectLocalImage(
 	ctx context.Context,
-	runner StaticNodeCommandRunner,
 	image string,
 ) error {
-	if _, err := runner.Run(ctx, "docker image inspect "+shellArg(image)+" >/dev/null"); err != nil {
+	if _, err := r.runner.Run(ctx, "docker image inspect "+shellArg(image)+" >/dev/null"); err != nil {
 		return staticNodeDockerError(
 			warmReasonImageInspectFailed,
 			fmt.Sprintf("failed to inspect image %s", image),
@@ -115,28 +118,26 @@ func (StaticNodeDockerRuntime) InspectLocalImage(
 
 func (r StaticNodeDockerRuntime) EnsureImage(
 	ctx context.Context,
-	runner StaticNodeCommandRunner,
 	image string,
 ) error {
-	pullErr := r.PullImage(ctx, runner, image)
+	pullErr := r.PullImage(ctx, image)
 	if pullErr == nil {
 		return nil
 	}
 
-	if inspectErr := r.InspectLocalImage(ctx, runner, image); inspectErr != nil {
+	if inspectErr := r.InspectLocalImage(ctx, image); inspectErr != nil {
 		return pullErr
 	}
 
 	return nil
 }
 
-func (StaticNodeDockerRuntime) ComponentContainerMatches(
+func (r StaticNodeDockerRuntime) ComponentContainerMatches(
 	ctx context.Context,
-	runner StaticNodeCommandRunner,
 	containerName string,
 	componentHash string,
 ) (bool, error) {
-	output, err := runner.Run(ctx, "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' "+shellArg(containerName))
+	output, err := r.runner.Run(ctx, "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' "+shellArg(containerName))
 	if err != nil {
 		return false, staticNodeDockerError(
 			componentReasonInspectFailed,
@@ -155,21 +156,20 @@ func (StaticNodeDockerRuntime) ComponentContainerMatches(
 
 func (r StaticNodeDockerRuntime) RestartComponentContainer(
 	ctx context.Context,
-	runner StaticNodeCommandRunner,
 	node *v1.StaticNode,
 	component v1.NodeComponentSpec,
 	componentHash string,
 ) error {
-	if err := r.EnsureImage(ctx, runner, component.Image); err != nil {
+	if err := r.EnsureImage(ctx, component.Image); err != nil {
 		return err
 	}
 
 	containerName := componentContainerName(node, component)
-	if err := r.RemoveContainer(ctx, runner, containerName); err != nil {
+	if err := r.RemoveContainer(ctx, containerName); err != nil {
 		return err
 	}
 
-	if _, err := runner.Run(ctx, buildDockerRunCommand(node, component, componentHash)); err != nil {
+	if _, err := r.runner.Run(ctx, buildDockerRunCommand(node, component, componentHash)); err != nil {
 		return staticNodeDockerError(
 			componentReasonRunFailed,
 			fmt.Sprintf("failed to run component container %s", containerName),
@@ -180,12 +180,11 @@ func (r StaticNodeDockerRuntime) RestartComponentContainer(
 	return nil
 }
 
-func (StaticNodeDockerRuntime) RemoveContainer(
+func (r StaticNodeDockerRuntime) RemoveContainer(
 	ctx context.Context,
-	runner StaticNodeCommandRunner,
 	containerName string,
 ) error {
-	if _, err := runner.Run(ctx, "docker rm -f "+shellArg(containerName)+" >/dev/null 2>&1 || true"); err != nil {
+	if _, err := r.runner.Run(ctx, "docker rm -f "+shellArg(containerName)+" >/dev/null 2>&1 || true"); err != nil {
 		return staticNodeDockerError(
 			componentReasonRemoveFailed,
 			fmt.Sprintf("failed to remove component container %s", containerName),
@@ -195,6 +194,7 @@ func (StaticNodeDockerRuntime) RemoveContainer(
 
 	return nil
 }
+
 func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, componentHash string) string {
 	parts := []string{
 		"docker", "run", "-d",

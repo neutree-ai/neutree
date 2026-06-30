@@ -107,6 +107,24 @@ func (u *acceleratorPluginClient) GetAcceleratorProfile(ctx context.Context) (*v
 	return &response.Profile, nil
 }
 
+func (u *acceleratorPluginClient) DetectStaticNodeAccelerator(
+	ctx context.Context,
+	request *v1.DetectStaticNodeAcceleratorRequest,
+) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	response := &v1.DetectStaticNodeAcceleratorResponse{}
+
+	err := u.doPost(ctx, v1.DetectStaticNodeAcceleratorPath, request, response)
+	if IsHTTPStatus(err, http.StatusNotFound) {
+		return response, nil
+	}
+
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to detect static node accelerator from accelerator plugin")
+	}
+
+	return response, nil
+}
+
 func (u *acceleratorPluginClient) GetResourceConverter() ResourceConverter {
 	return u
 }

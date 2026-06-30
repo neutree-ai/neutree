@@ -9,11 +9,9 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	staticclient "github.com/neutree-ai/neutree/internal/client"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
-	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type StaticNodeController struct {
-	store         *storage.StaticNodeObjectStore
 	nodes         *staticclient.StaticNodeClient
 	runnerFactory *clusterreconcile.StaticNodeSSHRunnerFactory
 	reconciler    *clusterreconcile.StaticNodeReconciler
@@ -21,7 +19,7 @@ type StaticNodeController struct {
 }
 
 type StaticNodeControllerOption struct {
-	Store         *storage.StaticNodeObjectStore
+	Nodes         *staticclient.StaticNodeClient
 	RunnerFactory *clusterreconcile.StaticNodeSSHRunnerFactory
 	Reconciler    *clusterreconcile.StaticNodeReconciler
 }
@@ -37,8 +35,7 @@ func NewStaticNodeController(option *StaticNodeControllerOption) (*StaticNodeCon
 	}
 
 	c := &StaticNodeController{
-		store:         option.Store,
-		nodes:         staticclient.NewStaticNodeClient(option.Store),
+		nodes:         option.Nodes,
 		runnerFactory: runnerFactory,
 		reconciler:    option.Reconciler,
 	}
@@ -65,8 +62,8 @@ func (c *StaticNodeController) sync(ctx context.Context, node *v1.StaticNode) er
 		return errors.New("static node is required")
 	}
 
-	if c.store == nil {
-		return errors.New("static node store is required")
+	if c.nodes == nil {
+		return errors.New("static node client is required")
 	}
 
 	reconciler := c.reconciler

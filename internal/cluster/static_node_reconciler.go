@@ -13,7 +13,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
@@ -57,7 +56,7 @@ type StaticNodeReconcileResult struct {
 }
 
 type StaticNodeAcceleratorManager interface {
-	DetectAccelerator(ctx context.Context, runner accelerator.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)
+	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
 }
 
 type StaticNodeHeadReadyChecker interface {
@@ -150,11 +149,15 @@ func (r *StaticNodeReconciler) ReconcileAccelerator(
 		return &cpu, nil
 	}
 
-	if runner == nil {
-		return nil, errors.New("static node command runner is required for accelerator discovery")
+	if node == nil || node.Spec == nil {
+		return nil, errors.New("static node spec is required for accelerator discovery")
 	}
 
-	return r.AcceleratorManager.DetectAccelerator(ctx, runner)
+	if node.Spec.SSHAuth == nil {
+		return nil, errors.New("static node spec.ssh_auth is required for accelerator discovery")
+	}
+
+	return r.AcceleratorManager.DetectAccelerator(ctx, node.Spec.IP, *node.Spec.SSHAuth)
 }
 
 func (r *StaticNodeReconciler) ReconcileWarmImages(
@@ -407,14 +410,19 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		return status, err
 	}
 
-	running, err := componentContainerMatches(ctx, runner, componentContainerName(node, component), status.ObservedHash)
+	dockerRuntime := NewStaticNodeDockerRuntime(runner)
+	running, err := dockerRuntime.ComponentContainerMatches(
+		ctx,
+		componentContainerName(node, component),
+		status.ObservedHash,
+	)
 	if err != nil {
 		status.Phase = v1.NodeComponentPhaseStarting
 		status.Reason = staticNodeDockerReason(err, componentReasonInspectFailed)
 	}
 
 	if configChanged || !running {
-		if err := restartComponentContainer(ctx, runner, node, component, status.ObservedHash); err != nil {
+		if err := dockerRuntime.RestartComponentContainer(ctx, node, component, status.ObservedHash); err != nil {
 			status.Phase = v1.NodeComponentPhaseFailed
 			status.Reason = staticNodeDockerReason(err, componentReasonRunFailed)
 			status.Message = err.Error()
@@ -472,7 +480,7 @@ func stopStaleComponents(
 		}
 		component := v1.NodeComponentSpec{Name: current.Name, Type: current.Type}
 
-		if err := stopComponentContainer(ctx, runner, componentContainerName(node, component)); err != nil {
+		if err := NewStaticNodeDockerRuntime(runner).RemoveContainer(ctx, componentContainerName(node, component)); err != nil {
 			status.Phase = v1.NodeComponentPhaseFailed
 			status.Reason = staticNodeDockerReason(err, componentReasonRunFailed)
 			status.Message = err.Error()
@@ -555,37 +563,6 @@ func writeComponentConfigFiles(
 	}
 
 	return changed, nil
-}
-
-func componentContainerMatches(
-	ctx context.Context,
-	runner StaticNodeCommandRunner,
-	containerName string,
-	componentHash string,
-) (bool, error) {
-	return (StaticNodeDockerRuntime{}).ComponentContainerMatches(ctx, runner, containerName, componentHash)
-}
-
-func restartComponentContainer(
-	ctx context.Context,
-	runner StaticNodeCommandRunner,
-	node *v1.StaticNode,
-	component v1.NodeComponentSpec,
-	componentHash string,
-) error {
-	return (StaticNodeDockerRuntime{}).RestartComponentContainer(ctx, runner, node, component, componentHash)
-}
-
-func stopComponentContainer(
-	ctx context.Context,
-	runner StaticNodeCommandRunner,
-	containerName string,
-) error {
-	return (StaticNodeDockerRuntime{}).RemoveContainer(ctx, runner, containerName)
-}
-
-func ensureComponentImage(ctx context.Context, runner StaticNodeCommandRunner, image string) error {
-	return (StaticNodeDockerRuntime{}).EnsureImage(ctx, runner, image)
 }
 
 func (r *StaticNodeReconciler) checkComponentHealth(
@@ -711,7 +688,9 @@ func (r *StaticNodeReconciler) reconcileWarmImage(
 		return status, errors.New(status.Message)
 	}
 
-	digest, err := inspectDockerImage(ctx, runner, image.Ref)
+	dockerRuntime := NewStaticNodeDockerRuntime(runner)
+
+	digest, err := dockerRuntime.InspectImageDigest(ctx, image.Ref)
 	if err == nil && digest != "" {
 		status.Ready = true
 		status.Digest = digest
@@ -730,7 +709,7 @@ func (r *StaticNodeReconciler) reconcileWarmImage(
 		return status, pullErr
 	}
 
-	digest, err = inspectDockerImage(ctx, runner, image.Ref)
+	digest, err = dockerRuntime.InspectImageDigest(ctx, image.Ref)
 	if err != nil || digest == "" {
 		status.Phase = v1.WarmPhaseFailed
 		status.Reason = warmReasonImageInspectFailed
@@ -749,10 +728,6 @@ func (r *StaticNodeReconciler) reconcileWarmImage(
 	status.Reason = warmReasonImagePulled
 
 	return status, nil
-}
-
-func inspectDockerImage(ctx context.Context, runner StaticNodeCommandRunner, imageRef string) (string, error) {
-	return (StaticNodeDockerRuntime{}).InspectImageDigest(ctx, runner, imageRef)
 }
 
 func lastNonEmptyLine(output string) string {

@@ -226,7 +226,10 @@ func TestInspectDockerImageIgnoresSSHWarning(t *testing.T) {
 		},
 	}
 
-	digest, err := inspectDockerImage(context.Background(), runner, "registry.example.com/neutree/serve:v1.2.0")
+	digest, err := NewStaticNodeDockerRuntime(runner).InspectImageDigest(
+		context.Background(),
+		"registry.example.com/neutree/serve:v1.2.0",
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "registry.example.com/neutree/serve@sha256:ready", digest)
@@ -242,7 +245,11 @@ func TestComponentContainerMatchesIgnoresSSHWarning(t *testing.T) {
 		},
 	}
 
-	matches, err := componentContainerMatches(context.Background(), runner, "neutree-static-a-ray-head", "hash-ray")
+	matches, err := NewStaticNodeDockerRuntime(runner).ComponentContainerMatches(
+		context.Background(),
+		"neutree-static-a-ray-head",
+		"hash-ray",
+	)
 
 	require.NoError(t, err)
 	assert.True(t, matches)

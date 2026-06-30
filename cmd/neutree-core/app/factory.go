@@ -6,6 +6,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	staticclient "github.com/neutree-ai/neutree/internal/client"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -270,9 +271,12 @@ func NewModelRegistryControllerFactory() ControllerFactory {
 
 func NewStaticNodeClusterControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		store := storage.NewStaticNodeObjectStore(opts.storage)
+
 		staticNodeClusterController, err := controllers.NewStaticNodeClusterController(
 			&controllers.StaticNodeClusterControllerOption{
-				Store:                      storage.NewStaticNodeObjectStore(opts.storage),
+				Nodes:                      staticclient.NewStaticNodeClient(store),
+				Clusters:                   staticclient.NewStaticNodeClusterClient(store),
 				AcceleratorProfileProvider: opts.config.AcceleratorManager,
 			},
 		)
@@ -299,7 +303,7 @@ func NewStaticNodeControllerFactory() ControllerFactory {
 		store := storage.NewStaticNodeObjectStore(opts.storage)
 
 		staticNodeController, err := controllers.NewStaticNodeController(&controllers.StaticNodeControllerOption{
-			Store:         store,
+			Nodes:         staticclient.NewStaticNodeClient(store),
 			RunnerFactory: clusterreconcile.NewStaticNodeSSHRunnerFactory(),
 			Reconciler: &clusterreconcile.StaticNodeReconciler{
 				AcceleratorManager: opts.config.AcceleratorManager,

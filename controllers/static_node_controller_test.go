@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	staticclient "github.com/neutree-ai/neutree/internal/client"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -24,7 +25,7 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 		},
 	}
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Store: storage.NewStaticNodeObjectStore(objectStorage),
+		Nodes: newTestStaticNodeClient(objectStorage),
 	})
 	require.NoError(t, err)
 	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
@@ -45,7 +46,7 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 
 func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Store: storage.NewStaticNodeObjectStore(&fakeControllerStaticNodeObjectStorage{}),
+		Nodes: newTestStaticNodeClient(&fakeControllerStaticNodeObjectStorage{}),
 	})
 	require.NoError(t, err)
 
@@ -63,7 +64,7 @@ func TestStaticNodeControllerForceDeleteHardDeletesAfterBestEffortCleanup(t *tes
 		"neutree.ai/force-delete": "true",
 	}
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Store: storage.NewStaticNodeObjectStore(objectStorage),
+		Nodes: newTestStaticNodeClient(objectStorage),
 	})
 	require.NoError(t, err)
 	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
@@ -87,7 +88,7 @@ func TestStaticNodeControllerReconcileAlwaysCreatesRunner(t *testing.T) {
 	node.Spec.Warm = nil
 	node.Spec.Components = nil
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Store: storage.NewStaticNodeObjectStore(objectStorage),
+		Nodes: newTestStaticNodeClient(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -106,6 +107,10 @@ func TestStaticNodeControllerReconcileAlwaysCreatesRunner(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, statusObj.Status)
 	assert.Equal(t, v1.StaticNodePhaseReconciling, statusObj.Status.Phase)
+}
+
+func newTestStaticNodeClient(objectStorage storage.ObjectStorage) *staticclient.StaticNodeClient {
+	return staticclient.NewStaticNodeClient(storage.NewStaticNodeObjectStore(objectStorage))
 }
 
 type fakeControllerStaticNodeObjectStorage struct {

@@ -21,7 +21,7 @@ type Manager interface {
 	plugin.AcceleratorPluginProvider
 
 	Start(ctx context.Context)
-	DetectAccelerator(ctx context.Context, runner NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)
+	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, bool, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
@@ -49,8 +49,6 @@ type Manager interface {
 	// the accelerator type is not registered.
 	GetImageSuffix(acceleratorType string) string
 }
-
-type NodeCommandRunner = plugin.NodeCommandRunner
 
 type registerPlugin struct {
 	resource         string
@@ -185,12 +183,21 @@ func (a *manager) Start(ctx context.Context) {
 
 func (a *manager) DetectAccelerator(
 	ctx context.Context,
-	runner NodeCommandRunner,
+	nodeIP string,
+	sshAuth v1.Auth,
 ) (*v1.StaticNodeAcceleratorStatus, error) {
-	if runner == nil {
-		return nil, errors.New("node command runner is required")
+	if nodeIP == "" {
+		return nil, errors.New("node ip is required")
 	}
 
+	if sshAuth.SSHUser == "" || sshAuth.SSHPrivateKey == "" {
+		return nil, errors.New("node ssh auth is required")
+	}
+
+	request := &v1.DetectStaticNodeAcceleratorRequest{
+		NodeIp:  nodeIP,
+		SSHAuth: sshAuth,
+	}
 	var detected *v1.StaticNodeAcceleratorStatus
 
 	a.acceleratorsMap.Range(func(key, value any) bool {
@@ -205,14 +212,14 @@ func (a *manager) DetectAccelerator(
 			return true
 		}
 
-		status, matched, err := detector.DetectStaticNodeAccelerator(ctx, runner)
+		response, err := detector.DetectStaticNodeAccelerator(ctx, request)
 		if err != nil {
 			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, err.Error())
 			return true
 		}
 
-		if matched && status != nil {
-			detected = status
+		if response != nil && response.Matched && response.Accelerator != nil {
+			detected = response.Accelerator
 			return false
 		}
 

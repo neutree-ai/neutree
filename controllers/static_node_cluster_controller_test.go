@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	staticclient "github.com/neutree-ai/neutree/internal/client"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/assert"
@@ -13,7 +14,8 @@ import (
 func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Store: storage.NewStaticNodeObjectStore(objectStorage),
+		Nodes:    newTestStaticNodeClusterNodeClient(objectStorage),
+		Clusters: newTestStaticNodeClusterClient(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -31,7 +33,8 @@ func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 
 func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Store: storage.NewStaticNodeObjectStore(&fakeControllerStaticNodeClusterObjectStorage{}),
+		Nodes:    newTestStaticNodeClusterNodeClient(&fakeControllerStaticNodeClusterObjectStorage{}),
+		Clusters: newTestStaticNodeClusterClient(&fakeControllerStaticNodeClusterObjectStorage{}),
 	})
 	require.NoError(t, err)
 
@@ -57,7 +60,8 @@ func TestStaticNodeClusterControllerReconcileRecordsNodeOwnerConflict(t *testing
 		},
 	}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Store: storage.NewStaticNodeObjectStore(objectStorage),
+		Nodes:    newTestStaticNodeClusterNodeClient(objectStorage),
+		Clusters: newTestStaticNodeClusterClient(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -91,7 +95,8 @@ func TestStaticNodeClusterControllerReconcileWaitsForStaleNodeDeletion(t *testin
 		},
 	}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Store: storage.NewStaticNodeObjectStore(objectStorage),
+		Nodes:    newTestStaticNodeClusterNodeClient(objectStorage),
+		Clusters: newTestStaticNodeClusterClient(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -119,7 +124,8 @@ func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testin
 		},
 	}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Store: storage.NewStaticNodeObjectStore(objectStorage),
+		Nodes:    newTestStaticNodeClusterNodeClient(objectStorage),
+		Clusters: newTestStaticNodeClusterClient(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -137,6 +143,14 @@ func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testin
 		assert.True(t, v1.IsForceDelete(updated.Metadata.Annotations))
 		assert.NotEmpty(t, updated.Metadata.DeletionTimestamp)
 	}
+}
+
+func newTestStaticNodeClusterNodeClient(objectStorage storage.ObjectStorage) *staticclient.StaticNodeClient {
+	return staticclient.NewStaticNodeClient(storage.NewStaticNodeObjectStore(objectStorage))
+}
+
+func newTestStaticNodeClusterClient(objectStorage storage.ObjectStorage) *staticclient.StaticNodeClusterClient {
+	return staticclient.NewStaticNodeClusterClient(storage.NewStaticNodeObjectStore(objectStorage))
 }
 
 type fakeControllerStaticNodeClusterObjectStorage struct {

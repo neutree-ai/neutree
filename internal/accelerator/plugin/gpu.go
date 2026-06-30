@@ -89,18 +89,23 @@ func (p *GPUAcceleratorPlugin) GetNodeRuntimeConfig(ctx context.Context,
 
 func (p *GPUAcceleratorPlugin) DetectStaticNodeAccelerator(
 	ctx context.Context,
-	runner NodeCommandRunner,
-) (*v1.StaticNodeAcceleratorStatus, bool, error) {
-	return detectPCIStaticNodeAccelerator(ctx, runner, pciStaticNodeAcceleratorDetector{
+	request *v1.DetectStaticNodeAcceleratorRequest,
+) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	if request == nil {
+		return &v1.DetectStaticNodeAcceleratorResponse{}, nil
+	}
+
+	accelerators, err := p.getNodeAcceleratorInfo(ctx, request.NodeIp, request.SSHAuth)
+	if err != nil {
+		return nil, err
+	}
+
+	return staticNodeAcceleratorResponseFromAccelerators(accelerators, staticNodeAcceleratorInfo{
 		acceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 		vendor:          "nvidia",
 		productName:     "NVIDIA GPU",
 		productModel:    "nvidia_gpu",
-		match: func(line string) bool {
-			return strings.Contains(line, "10de:") &&
-				(strings.Contains(line, "3d controller") || strings.Contains(line, "vga compatible controller"))
-		},
-	})
+	}), nil
 }
 
 func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {

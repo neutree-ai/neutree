@@ -26,9 +26,9 @@ func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
 }
 
-// DetectAccelerator provides a mock function with given fields: ctx, runner
-func (_m *MockManager) DetectAccelerator(ctx context.Context, runner plugin.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error) {
-	ret := _m.Called(ctx, runner)
+// DetectAccelerator provides a mock function with given fields: ctx, nodeIP, sshAuth
+func (_m *MockManager) DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error) {
+	ret := _m.Called(ctx, nodeIP, sshAuth)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DetectAccelerator")
@@ -36,19 +36,19 @@ func (_m *MockManager) DetectAccelerator(ctx context.Context, runner plugin.Node
 
 	var r0 *v1.StaticNodeAcceleratorStatus
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, plugin.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)); ok {
-		return rf(ctx, runner)
+	if rf, ok := ret.Get(0).(func(context.Context, string, v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)); ok {
+		return rf(ctx, nodeIP, sshAuth)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, plugin.NodeCommandRunner) *v1.StaticNodeAcceleratorStatus); ok {
-		r0 = rf(ctx, runner)
+	if rf, ok := ret.Get(0).(func(context.Context, string, v1.Auth) *v1.StaticNodeAcceleratorStatus); ok {
+		r0 = rf(ctx, nodeIP, sshAuth)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*v1.StaticNodeAcceleratorStatus)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, plugin.NodeCommandRunner) error); ok {
-		r1 = rf(ctx, runner)
+	if rf, ok := ret.Get(1).(func(context.Context, string, v1.Auth) error); ok {
+		r1 = rf(ctx, nodeIP, sshAuth)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -63,14 +63,15 @@ type MockManager_DetectAccelerator_Call struct {
 
 // DetectAccelerator is a helper method to define mock.On call
 //   - ctx context.Context
-//   - runner plugin.NodeCommandRunner
-func (_e *MockManager_Expecter) DetectAccelerator(ctx interface{}, runner interface{}) *MockManager_DetectAccelerator_Call {
-	return &MockManager_DetectAccelerator_Call{Call: _e.mock.On("DetectAccelerator", ctx, runner)}
+//   - nodeIP string
+//   - sshAuth v1.Auth
+func (_e *MockManager_Expecter) DetectAccelerator(ctx interface{}, nodeIP interface{}, sshAuth interface{}) *MockManager_DetectAccelerator_Call {
+	return &MockManager_DetectAccelerator_Call{Call: _e.mock.On("DetectAccelerator", ctx, nodeIP, sshAuth)}
 }
 
-func (_c *MockManager_DetectAccelerator_Call) Run(run func(ctx context.Context, runner plugin.NodeCommandRunner)) *MockManager_DetectAccelerator_Call {
+func (_c *MockManager_DetectAccelerator_Call) Run(run func(ctx context.Context, nodeIP string, sshAuth v1.Auth)) *MockManager_DetectAccelerator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(plugin.NodeCommandRunner))
+		run(args[0].(context.Context), args[1].(string), args[2].(v1.Auth))
 	})
 	return _c
 }
@@ -80,7 +81,7 @@ func (_c *MockManager_DetectAccelerator_Call) Return(_a0 *v1.StaticNodeAccelerat
 	return _c
 }
 
-func (_c *MockManager_DetectAccelerator_Call) RunAndReturn(run func(context.Context, plugin.NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)) *MockManager_DetectAccelerator_Call {
+func (_c *MockManager_DetectAccelerator_Call) RunAndReturn(run func(context.Context, string, v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)) *MockManager_DetectAccelerator_Call {
 	_c.Call.Return(run)
 	return _c
 }

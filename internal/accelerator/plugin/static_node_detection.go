@@ -1,55 +1,49 @@
 package plugin
 
 import (
-	"context"
 	"strconv"
-	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-type pciStaticNodeAcceleratorDetector struct {
+type staticNodeAcceleratorInfo struct {
 	acceleratorType string
 	vendor          string
 	productName     string
 	productModel    string
-	match           func(string) bool
 }
 
-func detectPCIStaticNodeAccelerator(
-	ctx context.Context,
-	runner NodeCommandRunner,
-	detector pciStaticNodeAcceleratorDetector,
-) (*v1.StaticNodeAcceleratorStatus, bool, error) {
-	output, err := runner.Run(ctx, "lspci -nn")
-	if err != nil {
-		return nil, false, err
+func staticNodeAcceleratorResponseFromAccelerators(
+	accelerators []v1.Accelerator,
+	info staticNodeAcceleratorInfo,
+) *v1.DetectStaticNodeAcceleratorResponse {
+	if len(accelerators) == 0 {
+		return &v1.DetectStaticNodeAcceleratorResponse{}
 	}
 
-	devices := []v1.StaticNodeAcceleratorDeviceStatus{}
-
-	for _, rawLine := range strings.Split(output, "\n") {
-		line := strings.ToLower(rawLine)
-		if !detector.match(line) {
-			continue
+	devices := make([]v1.StaticNodeAcceleratorDeviceStatus, 0, len(accelerators))
+	for index, accelerator := range accelerators {
+		id := accelerator.ID
+		if id == "" {
+			id = strconv.Itoa(index)
 		}
 
 		devices = append(devices, v1.StaticNodeAcceleratorDeviceStatus{
-			ID:          strconv.Itoa(len(devices)),
-			ProductName: detector.productName,
-			Healthy:     true,
+			ID:           id,
+			ProductName:  info.productName,
+			ProductModel: info.productModel,
+			Healthy:      true,
 		})
 	}
 
-	if len(devices) == 0 {
-		return nil, false, nil
+	return &v1.DetectStaticNodeAcceleratorResponse{
+		Matched: true,
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type:         info.acceleratorType,
+			Vendor:       info.vendor,
+			ProductName:  info.productName,
+			ProductModel: info.productModel,
+			Devices:      devices,
+		},
 	}
-
-	return &v1.StaticNodeAcceleratorStatus{
-		Type:         detector.acceleratorType,
-		Vendor:       detector.vendor,
-		ProductName:  detector.productName,
-		ProductModel: detector.productModel,
-		Devices:      devices,
-	}, true, nil
 }

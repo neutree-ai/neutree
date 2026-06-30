@@ -52,13 +52,16 @@ func TestAMDGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 }
 
 func TestAMDGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
-	runner := &staticNodeTestRunner{output: testLspciOuput}
-	p := &AMDGPUAcceleratorPlugin{}
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, testLspciOuput, nil)
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
 
-	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
 	require.NoError(t, err)
-	require.True(t, matched)
+	require.NotNil(t, response)
+	require.True(t, response.Matched)
+	status := response.Accelerator
 	require.NotNil(t, status)
 	assert.Equal(t, v1.AcceleratorTypeAMDGPU.String(), status.Type)
 	assert.Equal(t, "amd", status.Vendor)
@@ -67,29 +70,33 @@ func TestAMDGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 	require.Len(t, status.Devices, 1)
 	assert.Equal(t, "0", status.Devices[0].ID)
 	assert.True(t, status.Devices[0].Healthy)
-	assert.Equal(t, 1, runner.calls)
+	mockExecutor.AssertExpectations(t)
 }
 
 func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T) {
-	runner := &staticNodeTestRunner{output: "{}"}
-	p := &AMDGPUAcceleratorPlugin{}
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, "{}", nil)
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
 
-	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
 	require.NoError(t, err)
-	assert.False(t, matched)
-	assert.Nil(t, status)
+	require.NotNil(t, response)
+	assert.False(t, response.Matched)
+	assert.Nil(t, response.Accelerator)
+	mockExecutor.AssertExpectations(t)
 }
 
-func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsRunnerError(t *testing.T) {
-	runner := &staticNodeTestRunner{err: errors.New("lspci failed")}
-	p := &AMDGPUAcceleratorPlugin{}
+func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsPluginError(t *testing.T) {
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, "lspci failed", errors.New("lspci failed"))
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
 
-	status, matched, err := p.DetectStaticNodeAccelerator(context.Background(), runner)
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
 	require.Error(t, err)
-	assert.False(t, matched)
-	assert.Nil(t, status)
+	assert.Nil(t, response)
+	mockExecutor.AssertExpectations(t)
 }
 
 func TestAMDGPUAcceleratorPluginGetAcceleratorProfile(t *testing.T) {
