@@ -1508,7 +1508,62 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"tp_size": 4,
+				"enable_metrics": true,
+				"tp_size":        4,
+			},
+		},
+		{
+			name: "sglang engine defaults enable_metrics",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{},
+			},
+			expectedArgs: map[string]interface{}{
+				"enable_metrics": true,
+			},
+		},
+		{
+			name: "sglang engine user-provided enable_metrics prevents default",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"enable_metrics": false,
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"enable_metrics": false,
+			},
+		},
+		{
+			name: "sglang engine user-provided kebab enable-metrics prevents default",
+			engine: &v1.Engine{
+				Metadata: &v1.Metadata{
+					Name: "sglang",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Variables: map[string]interface{}{
+						"engine_args": map[string]interface{}{
+							"enable-metrics": false,
+						},
+					},
+				},
+			},
+			expectedArgs: map[string]interface{}{
+				"enable-metrics": false,
 			},
 		},
 		{
@@ -1525,7 +1580,9 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 					},
 				},
 			},
-			expectedArgs: map[string]interface{}{},
+			expectedArgs: map[string]interface{}{
+				"enable_metrics": true,
+			},
 		},
 		{
 			name: "sglang engine fractional GPU should not set tp_size",
@@ -1541,7 +1598,9 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 					},
 				},
 			},
-			expectedArgs: map[string]interface{}{},
+			expectedArgs: map[string]interface{}{
+				"enable_metrics": true,
+			},
 		},
 		{
 			name: "sglang engine user-provided kebab tp-size prevents default",
@@ -1563,7 +1622,8 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"tp-size": "2",
+				"enable_metrics": true,
+				"tp-size":        "2",
 			},
 		},
 		{
@@ -1586,7 +1646,8 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"tp_size": "1",
+				"enable_metrics": true,
+				"tp_size":        "1",
 			},
 		},
 		{
@@ -1599,7 +1660,9 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 			endpoint: &v1.Endpoint{
 				Spec: &v1.EndpointSpec{},
 			},
-			expectedArgs: map[string]interface{}{},
+			expectedArgs: map[string]interface{}{
+				"enable_metrics": true,
+			},
 		},
 	}
 

@@ -18,6 +18,13 @@ an identical registry from the same shared dir gives us byte-for-byte
 identical aggregated samples to what SGLang would have served externally —
 no SGLang internal API is involved.
 
+Ray Serve LLM has an upstream ``stat_loggers``-based SGLang metrics bridge in
+progress, but that path depends on SGLang's pluggable metrics backend hooks
+(``ServerArgs.stat_loggers`` and ``STAT_LOGGER_ROLE_*``), which first shipped in
+SGLang v0.5.13. Neutree's current SGLang v0.5.10 image has
+``metrics_collector.py`` but not those injection hooks, so the multiprocess
+registry remains the compatible bridge point for this engine version.
+
 This module polls that registry on a fixed cadence and re-emits each sample
 through ``ray.util.metrics`` so Ray's prometheus exporter (already scraped by
 vmagent's ``file_sd_configs``) sees SGLang metrics under the canonical
@@ -50,9 +57,9 @@ def _sanitize_metric_name(name: str) -> str:
 
     SGLang emits ``sglang:cache_config_info`` (colon-separated namespace), but
     ``ray.util.metrics`` rejects ``:`` since the move to OpenTelemetry naming.
-    Replace with underscore so the Ray-exported name is ``sglang_<suffix>`` —
-    aligned with the vmagent relabel rule (``ray_sglang[:_]<name>`` →
-    ``sglang_<name>``) and with the Grafana dashboard filters.
+    Replace with underscore so Ray can export the metric as
+    ``ray_sglang_<suffix>``. vmagent converts that temporary Ray-safe name back
+    to the canonical upstream ``sglang:<suffix>`` form for storage and queries.
     """
     return name.replace(":", "_")
 

@@ -185,7 +185,6 @@ class TestCoerceArgsPEP604:
         coerce_args(args, FakeEngineV017)
         assert args["bare_dict"] == {"k": "v"}
 
-
 class TestCoerceArgsDataclassHydration:
     def test_dataclass_field_hydrated_to_instance(self):
         args = {"attn_required": '{"backend":"FLASH"}'}

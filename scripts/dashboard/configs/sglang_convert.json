@@ -15,9 +15,16 @@
       "is_regex": true
     },
     {
+      "name": "normalize_sglang_metric_namespace",
+      "description": "Store SGLang metric names in the canonical upstream namespace form used by Neutree vmagent relabeling: sglang:<metric>.",
+      "pattern": "\\bsglang_([a-zA-Z0-9_]+)\\b",
+      "replacement": "sglang:\\1",
+      "is_regex": true
+    },
+    {
       "name": "inject_neutree_filters",
-      "description": "Append Neutree multi-tenant filters to every sglang_<name>(_<word>)* metric reference. Matches both unfiltered and filter-stripped forms; the look-ahead guards against double-injection on metrics that are already followed by an opening brace.",
-      "pattern": "(sglang_[a-zA-Z0-9_]+)(?!\\{)",
+      "description": "Append Neutree multi-tenant filters to every sglang:<name>(_<word>)* metric reference. Matches both unfiltered and filter-stripped forms; the look-ahead guards against double-injection on metrics that are already followed by an opening brace.",
+      "pattern": "(sglang:[a-zA-Z0-9_]+)(?!\\{)",
       "replacement": "\\1{application=~\"$Application\",deployment=~\"$Deployment\",replica=~\"$Replica\",neutree_cluster=~\"$Cluster\"}",
       "is_regex": true
     }
