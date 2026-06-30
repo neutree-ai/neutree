@@ -225,12 +225,29 @@ Priority:
 {{- end -}}
 
 {{/*
+Grafana is provided by a dependency chart. Its Service name is derived from
+the subchart's release context, not this parent chart's fullname.
+*/}}
+{{- define "neutree.grafana.serviceName" -}}
+{{- $grafana := .Values.grafana -}}
+{{- if $grafana.fullnameOverride -}}
+{{- tpl $grafana.fullnameOverride . | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default "grafana" $grafana.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Choose the Grafana URL exposed by the API system-info endpoint.
 Priority:
 1. system.grafana.url explicit override
 2. grafana.grafana.ini.server.root_url
-No in-cluster fallback is used because this URL is consumed as a user-facing
-external address.
+3. in-cluster Grafana Service URL when the dependency is enabled
 */}}
 {{- define "neutree.grafana.url" -}}
 {{- $url := .Values.system.grafana.url -}}
@@ -238,6 +255,9 @@ external address.
 {{- $grafanaRootURL := dig "grafana.ini" "server" "root_url" "" .Values.grafana -}}
 {{- if $grafanaRootURL -}}
 {{- $url = tpl (toString $grafanaRootURL) . -}}
+{{- else if .Values.grafana.service.enabled -}}
+{{- $port := .Values.grafana.service.port | default 80 -}}
+{{- $url = printf "http://%s:%v" (include "neutree.grafana.serviceName" .) $port -}}
 {{- end -}}
 {{- end -}}
 {{- $url -}}
