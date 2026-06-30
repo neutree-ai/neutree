@@ -2,13 +2,17 @@ import logging
 import os
 
 from ray import serve
-from vllm.v1.metrics.ray_wrappers import (
-    RayPrometheusStatLogger,
-    RaySpecDecodingProm,
-    RayKVConnectorPrometheus,
-    RayGaugeWrapper,
-    RayCounterWrapper,
-    RayHistogramWrapper,
+from vllm.v1.metrics import ray_wrappers as _ray_wrappers
+
+RayPrometheusStatLogger = _ray_wrappers.RayPrometheusStatLogger
+RaySpecDecodingProm = _ray_wrappers.RaySpecDecodingProm
+RayGaugeWrapper = _ray_wrappers.RayGaugeWrapper
+RayCounterWrapper = _ray_wrappers.RayCounterWrapper
+RayHistogramWrapper = _ray_wrappers.RayHistogramWrapper
+RayKVConnectorProm = getattr(
+    _ray_wrappers,
+    "RayKVConnectorPrometheus",
+    getattr(_ray_wrappers, "RayKVConnectorProm", None),
 )
 
 logger = logging.getLogger("ray.serve")
@@ -43,7 +47,7 @@ def _make_extended_spec_decoding_cls(base_cls, extra_labels):
 
 
 def _make_extended_kv_connector_cls(base_cls, extra_labels):
-    """Extend KVConnectorPrometheus with custom labels via its _cls vars."""
+    """Extend KV connector metrics with custom labels via its _cls vars."""
 
     class Extended(base_cls):
         _gauge_cls = _make_extended_metric_cls(RayGaugeWrapper, extra_labels)
@@ -87,8 +91,9 @@ class NeutreeRayStatLogger(RayPrometheusStatLogger):
                 RayHistogramWrapper, extra_labels)
             self._spec_decoding_cls = _make_extended_spec_decoding_cls(
                 RaySpecDecodingProm, extra_labels)
-            self._kv_connector_cls = _make_extended_kv_connector_cls(
-                RayKVConnectorPrometheus, extra_labels)
+            if RayKVConnectorProm is not None:
+                self._kv_connector_cls = _make_extended_kv_connector_cls(
+                    RayKVConnectorProm, extra_labels)
 
         super().__init__(vllm_config, engine_indexes)
 
