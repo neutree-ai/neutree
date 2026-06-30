@@ -56,25 +56,6 @@ type EndpointSpec struct {
 	DeploymentOptions map[string]any      `json:"deployment_options,omitempty"`
 	Variables         map[string]any      `json:"variables,omitempty"`
 	Env               map[string]string   `json:"env,omitempty"`
-
-	// Recipe reference: when ModelCatalog is set and Model is nil the
-	// endpoint controller resolves the catalog, composes the kernel, writes
-	// the result into the legacy fields above, and clears these refs as a
-	// "already expanded" marker so downstream controllers stay untouched.
-	ModelCatalog      string             `json:"model_catalog,omitempty"`
-	Variant           string             `json:"variant,omitempty"`
-	FeatureSelections []FeatureSelection `json:"feature_selections,omitempty"`
-}
-
-// FeatureSelection is one entry in an endpoint's ordered recipe feature
-// selection. The list order is the override order (later wins). Value
-// semantics depend on the referenced feature's Type:
-//   - boolean: presence enables the feature; Value is ignored.
-//   - select:  Value is the chosen option key.
-//   - input:   Value is the raw user input (coerced per the feature's value_type).
-type FeatureSelection struct {
-	Name  string `json:"name"`
-	Value string `json:"value,omitempty"`
 }
 
 type EndpointPhase string

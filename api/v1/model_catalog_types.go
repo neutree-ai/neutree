@@ -26,8 +26,8 @@ type ModelCatalogSpec struct {
 	Env               map[string]string   `json:"env,omitempty"`
 
 	// Recipe extension: when Variants is non-empty the catalog is a recipe
-	// template; ComposeEndpointSpec selects a variant and merges enabled
-	// features on top of Base to produce a concrete endpoint kernel.
+	// template; the client selects a variant and merges enabled features on
+	// top of Base to produce a concrete endpoint spec at deploy time.
 	Base     *RecipeBase              `json:"base,omitempty"`
 	Variants map[string]RecipeVariant `json:"variants,omitempty"`
 	// Features is an ordered list: list position is the UI display order, and
@@ -80,8 +80,8 @@ const (
 // section a feature belongs to; sections render in first-seen order, features
 // within a section keep list order. Neither Name nor Group affect composition.
 type RecipeFeature struct {
-	// Name is the feature's stable identifier (referenced by FeatureSelection
-	// and ConflictsWith). It was the map key before features became a list.
+	// Name is the feature's stable identifier (referenced by a feature
+	// selection and ConflictsWith). It was the map key before features became a list.
 	Name string `json:"name"`
 	// Group is the UI section label this feature renders under (e.g. "Core
 	// parameters" / "Performance tuning"); empty means the default section.
