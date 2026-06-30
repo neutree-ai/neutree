@@ -95,6 +95,9 @@ func TestGetUsageByDimensionWorkspaceFilter(t *testing.T) {
 					ROW(1)::api.replica_spec,
 					NULL,
 					NULL,
+					NULL,
+					NULL,
+					NULL,
 					NULL
 				)::api.endpoint_spec,
 				ROW($1::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata
