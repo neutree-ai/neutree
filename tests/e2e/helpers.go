@@ -1569,6 +1569,7 @@ func allSchemaTypesEngineArgs() []EngineArg {
 		{Key: "enforce_eager", Value: "true"},
 		{Key: "enable_prefix_caching", Value: "false"},
 		{Key: "seed", Value: "42"},
+		{Key: "served_model_name", Value: fmt.Sprintf(`["%s","neu-vllm-list-alias"]`, profileModelName())},
 		{Key: "override_generation_config", Value: `'{"temperature": 0.8}'`},
 	}
 }
@@ -1701,8 +1702,12 @@ func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, s
 }
 
 func inferChat(serviceURL, prompt string) (int, string, error) {
+	return inferChatWithModel(serviceURL, profileModelName(), prompt)
+}
+
+func inferChatWithModel(serviceURL, model, prompt string) (int, string, error) {
 	return doInferenceRequest(serviceURL, "/v1/chat/completions", map[string]any{
-		"model": profileModelName(),
+		"model": model,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},

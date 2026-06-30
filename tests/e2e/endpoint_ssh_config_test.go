@@ -248,7 +248,7 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 			}
 		})
 
-		It("should deploy with all schema data types in engine_args", Label("C2642245", "C2644062"), func() {
+		It("should deploy with all schema data types in engine_args", Label("C2642245", "C2644062", "C2724893"), func() {
 			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgs()))
 			defer os.Remove(yamlPath)
 
@@ -277,6 +277,10 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 			Expect(eaMap).To(HaveKeyWithValue("dtype", "half"))
 			Expect(eaMap).To(HaveKey("seed"))
 			Expect(eaMap["seed"]).To(BeNumerically("==", 42))
+			Expect(eaMap).To(HaveKey("served_model_name"))
+			servedModelNames, ok := eaMap["served_model_name"].([]interface{})
+			Expect(ok).To(BeTrue(), "served_model_name should remain a list")
+			Expect(servedModelNames).To(Equal([]interface{}{profileModelName(), "neu-vllm-list-alias"}))
 		})
 
 		It("should serve inference with all-types config", func() {
@@ -284,6 +288,10 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 			code, body, err := inferChat(ep.Status.ServiceURL, "Hello with all schema types")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(200), "inference failed: %s", body)
+
+			code, body, err = inferChatWithModel(ep.Status.ServiceURL, "neu-vllm-list-alias", "Hello with schema alias")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(200), "alias inference failed: %s", body)
 		})
 	})
 
