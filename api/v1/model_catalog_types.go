@@ -83,13 +83,14 @@ type RecipeFeature struct {
 	// Name is the feature's stable identifier (referenced by FeatureSelection
 	// and ConflictsWith). It was the map key before features became a list.
 	Name string `json:"name"`
-	// Group is the UI section label this feature renders under (e.g. "核心参数"
-	// / "Performance tuning"); empty means the default section. Features sharing
-	// a Group render together; sections appear in first-seen order. No effect on
-	// composition. Supersedes the former free-form `category` hint.
+	// Group is the UI section label this feature renders under (e.g. "Core
+	// parameters" / "Performance tuning"); empty means the default section.
+	// Features sharing a Group render together; sections appear in first-seen
+	// order. No effect on composition. Supersedes the former free-form
+	// `category` hint.
 	Group string `json:"group,omitempty"`
 	// DisplayName is an optional human-facing label for the UI (e.g. "Context
-	// window" / "上下文窗口"); when empty the feature Name is shown. Lets a
+	// window"); when empty the feature Name is shown. Lets a
 	// catalog align feature labels with product wording, independent of the
 	// technical feature name. No effect on composition.
 	DisplayName   string   `json:"display_name,omitempty"`
