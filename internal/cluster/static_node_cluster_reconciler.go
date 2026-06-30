@@ -163,12 +163,11 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 				Annotations: copyStringMap(cluster.Metadata.Annotations),
 			},
 			Spec: &v1.StaticNodeSpec{
-				Cluster:    cluster.Metadata.Name,
-				IP:         nodeSpec.IP,
-				Role:       role,
-				SSHAuthRef: nodeSpec.SSHAuthRef,
-				SSHAuth:    copyAuth(nodeSpec.SSHAuth),
-				Warm:       &v1.WarmSpec{},
+				Cluster: cluster.Metadata.Name,
+				IP:      nodeSpec.IP,
+				Role:    role,
+				SSHAuth: copyAuth(nodeSpec.SSHAuth),
+				Warm:    &v1.WarmSpec{},
 			},
 		}
 
@@ -402,7 +401,6 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 
 	seenDesiredNodes := map[string]struct{}{}
 	warmReady := true
-	metricsReady := true
 	anyNodeFailed := false
 
 	for _, node := range nodes {
@@ -441,14 +439,13 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 	}
 
 	status.WarmReady = warmReady
-	status.MetricsReady = metricsReady
 
 	switch {
 	case status.Phase == v1.StaticNodeClusterPhaseUpgrading:
 		status.Phase = v1.StaticNodeClusterPhaseUpgrading
 	case anyNodeFailed:
 		status.Phase = v1.StaticNodeClusterPhaseFailed
-	case status.ReadyNodes == status.DesiredNodes && status.HeadReady && status.WarmReady && status.MetricsReady:
+	case status.ReadyNodes == status.DesiredNodes && status.HeadReady && status.WarmReady:
 		status.Phase = v1.StaticNodeClusterPhaseReady
 	case status.HeadReady && status.ReadyNodes > 0:
 		status.Phase = v1.StaticNodeClusterPhaseDegraded
@@ -621,8 +618,7 @@ func advanceStaticNodeClusterUpgradeStatus(
 		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes) &&
 			status.ReadyNodes == status.DesiredNodes &&
 			status.HeadReady &&
-			status.WarmReady &&
-			status.MetricsReady {
+			status.WarmReady {
 			status.Version = cluster.Spec.Version
 			status.Phase = v1.StaticNodeClusterPhaseReady
 			status.ErrorMessage = ""

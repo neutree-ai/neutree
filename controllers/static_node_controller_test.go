@@ -55,7 +55,7 @@ func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to assert obj to *v1.StaticNode")
 }
 
-func TestStaticNodeControllerForceDeleteHardDeletesWithoutRunner(t *testing.T) {
+func TestStaticNodeControllerForceDeleteHardDeletesAfterBestEffortCleanup(t *testing.T) {
 	objectStorage := &fakeControllerStaticNodeObjectStorage{}
 	node := controllerStaticNode()
 	node.Metadata.DeletionTimestamp = "2026-06-15T16:47:17Z"
@@ -67,7 +67,11 @@ func TestStaticNodeControllerForceDeleteHardDeletesWithoutRunner(t *testing.T) {
 	})
 	require.NoError(t, err)
 	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
-		return nil, errors.New("runner should not be created for force delete")
+		return &fakeControllerStaticNodeRunner{
+			responses: []fakeControllerStaticNodeRunnerResponse{
+				{err: errors.New("remote cleanup failed")},
+			},
+		}, nil
 	}
 
 	err = controller.Reconcile(node)

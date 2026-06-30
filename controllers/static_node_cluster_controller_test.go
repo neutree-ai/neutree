@@ -82,10 +82,68 @@ func TestStaticNodeClusterControllerReconcileRecordsNodeOwnerConflict(t *testing
 	assert.Contains(t, status.Status.ErrorMessage, "already owned by static node cluster static-a")
 }
 
+func TestStaticNodeClusterControllerReconcileWaitsForStaleNodeDeletion(t *testing.T) {
+	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{
+		nodes: []v1.StaticNode{
+			controllerStaticClusterNode("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady),
+			controllerStaticClusterNode("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady),
+			controllerStaticClusterNode("worker-stale", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady),
+		},
+	}
+	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
+		Store: storage.NewStaticNodeObjectStore(objectStorage),
+	})
+	require.NoError(t, err)
+
+	err = controller.Reconcile(controllerStaticNodeCluster())
+
+	require.NoError(t, err)
+	status, ok := objectStorage.updatedStatus["7"].(*v1.StaticNodeCluster)
+	require.True(t, ok)
+	require.NotNil(t, status.Status)
+	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
+	assert.Equal(t, "Deleting stale static nodes", status.Status.ErrorMessage)
+	assert.Contains(t, objectStorage.updatedMetadata, "13")
+}
+
+func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testing.T) {
+	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{
+		nodes: []v1.StaticNode{
+			controllerStaticClusterNode("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady),
+			func() v1.StaticNode {
+				node := controllerStaticClusterNode("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady)
+				node.Metadata.DeletionTimestamp = "2026-06-30T00:00:00Z"
+
+				return node
+			}(),
+		},
+	}
+	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
+		Store: storage.NewStaticNodeObjectStore(objectStorage),
+	})
+	require.NoError(t, err)
+
+	cluster := controllerStaticNodeCluster()
+	cluster.Metadata.DeletionTimestamp = "2026-06-30T00:00:00Z"
+	cluster.Metadata.Annotations = map[string]string{"neutree.ai/force-delete": "true"}
+
+	err = controller.Reconcile(cluster)
+
+	require.NoError(t, err)
+	for _, id := range []string{"11", "12"} {
+		updated, ok := objectStorage.updatedMetadata[id].(*v1.StaticNode)
+		require.True(t, ok)
+		require.NotNil(t, updated.Metadata)
+		assert.True(t, v1.IsForceDelete(updated.Metadata.Annotations))
+		assert.NotEmpty(t, updated.Metadata.DeletionTimestamp)
+	}
+}
+
 type fakeControllerStaticNodeClusterObjectStorage struct {
-	nodes         []v1.StaticNode
-	created       []scheme.Object
-	updatedStatus map[string]scheme.Object
+	nodes           []v1.StaticNode
+	created         []scheme.Object
+	updatedMetadata map[string]scheme.Object
+	updatedStatus   map[string]scheme.Object
 }
 
 func (f *fakeControllerStaticNodeClusterObjectStorage) Create(data scheme.Object) error {
@@ -118,7 +176,13 @@ func (f *fakeControllerStaticNodeClusterObjectStorage) List(obj scheme.ObjectLis
 	return nil
 }
 
-func (f *fakeControllerStaticNodeClusterObjectStorage) UpdateMetadata(_ string, _ scheme.Object) error {
+func (f *fakeControllerStaticNodeClusterObjectStorage) UpdateMetadata(id string, data scheme.Object) error {
+	if f.updatedMetadata == nil {
+		f.updatedMetadata = map[string]scheme.Object{}
+	}
+
+	f.updatedMetadata[id] = data
+
 	return nil
 }
 
@@ -158,6 +222,33 @@ func controllerStaticNodeCluster() *v1.StaticNodeCluster {
 					Role: v1.StaticNodeRoleWorker,
 				},
 			},
+		},
+	}
+}
+
+func controllerStaticClusterNode(name string, role v1.StaticNodeRole, phase v1.StaticNodePhase) v1.StaticNode {
+	id := 11
+	switch name {
+	case "worker-0":
+		id = 12
+	case "worker-stale":
+		id = 13
+	}
+
+	return v1.StaticNode{
+		ID: id,
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      name,
+		},
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			IP:      "10.0.0.10",
+			Role:    role,
+		},
+		Status: &v1.StaticNodeStatus{
+			Phase: phase,
+			Warm:  &v1.WarmStatus{Ready: true},
 		},
 	}
 }

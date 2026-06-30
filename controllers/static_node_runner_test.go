@@ -17,14 +17,12 @@ func TestStaticNodeSSHRunnerFactoryRequiresDirectAuth(t *testing.T) {
 
 	_, err := factory.NewStaticNodeRunner(context.Background(), &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{
-			IP:         "10.0.0.10",
-			SSHAuthRef: "ssh-ref",
+			IP: "10.0.0.10",
 		},
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ssh_auth_ref")
-	assert.Contains(t, err.Error(), "set spec.ssh_auth")
+	assert.Contains(t, err.Error(), "spec.ssh_auth is required")
 }
 
 func TestStaticNodeSSHRunnerFactoryWrapsSSHRunner(t *testing.T) {

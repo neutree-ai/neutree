@@ -19,14 +19,13 @@ import (
 )
 
 const (
-	testNodeExporterComponentName     = "node-exporter"
-	testVMAgentComponentName          = "vmagent"
-	testDefaultNodeExporterImage      = "quay.io/prometheus/node-exporter:v1.8.2"
-	testDefaultVMAgentImage           = "victoriametrics/vmagent:v1.115.0"
-	testDefaultPrometheusHTTPPath     = "/metrics"
-	testDefaultHealthHTTPPath         = "/health"
-	testVMAgentConfigPath             = "/etc/neutree/vmagent/config.yaml"
-	testVMAgentNodeExporterFileSDPath = "/etc/neutree/vmagent/file_sd/node-exporter.json"
+	testAuxRayComponentName       = "ray-worker"
+	testConfigRayComponentName    = "ray-head"
+	testDefaultRayImage           = "registry.example.com/neutree/neutree-serve:v1.2.0"
+	testDefaultPrometheusHTTPPath = "/metrics"
+	testDefaultHealthHTTPPath     = "/health"
+	testRayConfigPath             = "/etc/neutree/ray/config.yaml"
+	testRayFileSDPath             = "/etc/neutree/ray/file_sd/ray.json"
 )
 
 func TestStaticNodeReconcilerReconcileWarmImages(t *testing.T) {
@@ -247,11 +246,11 @@ func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:       testNodeExporterComponentName,
-					Type:       v1.NodeComponentTypeNodeExporter,
-					Image:      testDefaultNodeExporterImage,
-					Args:       []string{"--path.rootfs=/host"},
-					ConfigHash: "hash-node-exporter",
+					Name:       testAuxRayComponentName,
+					Type:       v1.NodeComponentTypeRayWorker,
+					Image:      testDefaultRayImage,
+					Args:       []string{"--block"},
+					ConfigHash: "hash-ray-worker",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
@@ -266,36 +265,36 @@ func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 	runner := &fakeStaticNodeRunner{
 		responses: []fakeStaticNodeResponse{
 			{
-				contains: []string{"docker inspect", "'neutree-static-a-node-exporter'"},
+				contains: []string{"docker inspect", "'neutree-static-a-ray-worker'"},
 				err:      errors.New("not found"),
 			},
 			{
-				command: "docker pull 'quay.io/prometheus/node-exporter:v1.8.2'",
+				command: "docker pull 'registry.example.com/neutree/neutree-serve:v1.2.0'",
 			},
 			{
-				command: "docker rm -f 'neutree-static-a-node-exporter' >/dev/null 2>&1 || true",
+				command: "docker rm -f 'neutree-static-a-ray-worker' >/dev/null 2>&1 || true",
 			},
 			{
 				contains: []string{
 					"docker run -d",
-					"--name 'neutree-static-a-node-exporter'",
-					"--label 'neutree.ai/component-hash=hash-node-exporter'",
+					"--name 'neutree-static-a-ray-worker'",
+					"--label 'neutree.ai/component-hash=hash-ray-worker'",
 					"--restart unless-stopped",
 					"--net=host",
-					"'quay.io/prometheus/node-exporter:v1.8.2'",
-					"'--path.rootfs=/host'",
+					"'registry.example.com/neutree/neutree-serve:v1.2.0'",
+					"'--block'",
 				},
 			},
 		},
 	}
 
-	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+	statuses, err := staticNodeReconcilerWithHealthyRayNode(healthHost).ReconcileComponents(context.Background(), node, runner)
 
 	require.NoError(t, err)
 	require.Len(t, statuses, 1)
 	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
 	assert.True(t, statuses[0].Ready)
-	assert.Equal(t, "hash-node-exporter", statuses[0].ObservedHash)
+	assert.Equal(t, "hash-ray-worker", statuses[0].ObservedHash)
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
@@ -313,10 +312,10 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 					ConfigHash: "hash-ray",
 				},
 				{
-					Name:       testNodeExporterComponentName,
-					Type:       v1.NodeComponentTypeNodeExporter,
-					Image:      testDefaultNodeExporterImage,
-					ConfigHash: "hash-node-exporter",
+					Name:       testAuxRayComponentName,
+					Type:       v1.NodeComponentTypeRayWorker,
+					Image:      testDefaultRayImage,
+					ConfigHash: "hash-ray-worker",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
@@ -343,26 +342,26 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 				err:     errors.New("not found"),
 			},
 			{
-				contains: []string{"docker inspect", "'neutree-static-a-node-exporter'"},
+				contains: []string{"docker inspect", "'neutree-static-a-ray-worker'"},
 				err:      errors.New("not found"),
 			},
 			{
-				command: "docker pull 'quay.io/prometheus/node-exporter:v1.8.2'",
+				command: "docker pull 'registry.example.com/neutree/neutree-serve:v1.2.0'",
 			},
 			{
-				command: "docker rm -f 'neutree-static-a-node-exporter' >/dev/null 2>&1 || true",
+				command: "docker rm -f 'neutree-static-a-ray-worker' >/dev/null 2>&1 || true",
 			},
 			{
 				contains: []string{
 					"docker run -d",
-					"--name 'neutree-static-a-node-exporter'",
-					"'quay.io/prometheus/node-exporter:v1.8.2'",
+					"--name 'neutree-static-a-ray-worker'",
+					"'registry.example.com/neutree/neutree-serve:v1.2.0'",
 				},
 			},
 		},
 	}
 
-	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+	statuses, err := staticNodeReconcilerWithHealthyRayNode(healthHost).ReconcileComponents(context.Background(), node, runner)
 
 	require.Error(t, err)
 	require.Len(t, statuses, 2)
@@ -381,10 +380,10 @@ func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *t
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:       testNodeExporterComponentName,
-					Type:       v1.NodeComponentTypeNodeExporter,
-					Image:      testDefaultNodeExporterImage,
-					ConfigHash: "hash-node-exporter",
+					Name:       testAuxRayComponentName,
+					Type:       v1.NodeComponentTypeRayWorker,
+					Image:      testDefaultRayImage,
+					ConfigHash: "hash-ray-worker",
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: testDefaultPrometheusHTTPPath,
 						Port:     healthPort,
@@ -396,30 +395,30 @@ func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *t
 	runner := &fakeStaticNodeRunner{
 		responses: []fakeStaticNodeResponse{
 			{
-				contains: []string{"docker inspect", "'neutree-static-a-node-exporter'"},
+				contains: []string{"docker inspect", "'neutree-static-a-ray-worker'"},
 				err:      errors.New("not found"),
 			},
 			{
-				command: "docker pull 'quay.io/prometheus/node-exporter:v1.8.2'",
+				command: "docker pull 'registry.example.com/neutree/neutree-serve:v1.2.0'",
 				err:     errors.New("quay unavailable"),
 			},
 			{
-				command: "docker image inspect 'quay.io/prometheus/node-exporter:v1.8.2' >/dev/null",
+				command: "docker image inspect 'registry.example.com/neutree/neutree-serve:v1.2.0' >/dev/null",
 			},
 			{
-				command: "docker rm -f 'neutree-static-a-node-exporter' >/dev/null 2>&1 || true",
+				command: "docker rm -f 'neutree-static-a-ray-worker' >/dev/null 2>&1 || true",
 			},
 			{
 				contains: []string{
 					"docker run -d",
-					"--name 'neutree-static-a-node-exporter'",
-					"'quay.io/prometheus/node-exporter:v1.8.2'",
+					"--name 'neutree-static-a-ray-worker'",
+					"'registry.example.com/neutree/neutree-serve:v1.2.0'",
 				},
 			},
 		},
 	}
 
-	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
+	statuses, err := staticNodeReconcilerWithHealthyRayNode(healthHost).ReconcileComponents(context.Background(), node, runner)
 
 	require.NoError(t, err)
 	require.Len(t, statuses, 1)
@@ -436,16 +435,16 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:       testVMAgentComponentName,
-					Type:       v1.NodeComponentTypeMetricsAgent,
-					Image:      testDefaultVMAgentImage,
-					ConfigHash: "hash-vmagent",
+					Name:       testConfigRayComponentName,
+					Type:       v1.NodeComponentTypeRayHead,
+					Image:      testDefaultRayImage,
+					ConfigHash: "hash-ray-head",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
 					ConfigFiles: []v1.NodeComponentConfigFile{
 						{
-							Path:         testVMAgentConfigPath,
+							Path:         testRayConfigPath,
 							Content:      "scrape_configs: []\n",
 							Mode:         "0644",
 							Sudo:         true,
@@ -455,8 +454,8 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 					},
 					Volumes: []v1.NodeComponentVolume{
 						{
-							HostPath:  testVMAgentConfigPath,
-							MountPath: testVMAgentConfigPath,
+							HostPath:  testRayConfigPath,
+							MountPath: testRayConfigPath,
 							ReadOnly:  true,
 						},
 					},
@@ -473,21 +472,21 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 		fileClient: fileClient,
 		responses: []fakeStaticNodeResponse{
 			{
-				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-vmagent'",
-				output:  "hash-vmagent true\n",
+				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-ray-head'",
+				output:  "hash-ray-head true\n",
 			},
 			{
-				command: "docker pull 'victoriametrics/vmagent:v1.115.0'",
+				command: "docker pull 'registry.example.com/neutree/neutree-serve:v1.2.0'",
 			},
 			{
-				command: "docker rm -f 'neutree-static-a-vmagent' >/dev/null 2>&1 || true",
+				command: "docker rm -f 'neutree-static-a-ray-head' >/dev/null 2>&1 || true",
 			},
 			{
 				contains: []string{
 					"docker run -d",
-					"--name 'neutree-static-a-vmagent'",
-					"-v '/etc/neutree/vmagent/config.yaml:/etc/neutree/vmagent/config.yaml:ro'",
-					"'victoriametrics/vmagent:v1.115.0'",
+					"--name 'neutree-static-a-ray-head'",
+					"-v '/etc/neutree/ray/config.yaml:/etc/neutree/ray/config.yaml:ro'",
+					"'registry.example.com/neutree/neutree-serve:v1.2.0'",
 				},
 			},
 		},
@@ -499,7 +498,7 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 	require.Len(t, statuses, 1)
 	assert.True(t, statuses[0].Ready)
 	assert.Equal(t, 1, fileClient.calls)
-	assert.Equal(t, testVMAgentConfigPath, fileClient.path)
+	assert.Equal(t, testRayConfigPath, fileClient.path)
 	assert.Equal(t, []byte("scrape_configs: []\n"), fileClient.content)
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
@@ -512,16 +511,16 @@ func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestar
 			IP:      healthHost,
 			Components: []v1.NodeComponentSpec{
 				{
-					Name:       testVMAgentComponentName,
-					Type:       v1.NodeComponentTypeMetricsAgent,
-					Image:      testDefaultVMAgentImage,
-					ConfigHash: "hash-vmagent",
+					Name:       testConfigRayComponentName,
+					Type:       v1.NodeComponentTypeRayHead,
+					Image:      testDefaultRayImage,
+					ConfigHash: "hash-ray-head",
 					DockerRunOptions: []string{
 						"--net=host",
 					},
 					ConfigFiles: []v1.NodeComponentConfigFile{
 						{
-							Path:                testVMAgentNodeExporterFileSDPath,
+							Path:                testRayFileSDPath,
 							Content:             `[{"targets":["10.0.0.10:19100"]}]`,
 							Mode:                "0644",
 							Sudo:                true,
@@ -543,8 +542,8 @@ func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestar
 		fileClient: fileClient,
 		responses: []fakeStaticNodeResponse{
 			{
-				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-vmagent'",
-				output:  "hash-vmagent true\n",
+				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-ray-head'",
+				output:  "hash-ray-head true\n",
 			},
 		},
 	}
@@ -555,7 +554,7 @@ func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestar
 	require.Len(t, statuses, 1)
 	assert.True(t, statuses[0].Ready)
 	assert.Equal(t, 1, fileClient.calls)
-	assert.Equal(t, testVMAgentNodeExporterFileSDPath, fileClient.path)
+	assert.Equal(t, testRayFileSDPath, fileClient.path)
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
@@ -600,11 +599,11 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 			Cluster: "static-a",
 			Components: []v1.NodeComponentSpec{
 				{
-					Name: testVMAgentComponentName,
-					Type: v1.NodeComponentTypeMetricsAgent,
+					Name: testConfigRayComponentName,
+					Type: v1.NodeComponentTypeRayHead,
 					ConfigFiles: []v1.NodeComponentConfigFile{
 						{
-							Path: testVMAgentConfigPath,
+							Path: testRayConfigPath,
 							Sudo: true,
 						},
 					},
@@ -614,8 +613,8 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 		Status: &v1.StaticNodeStatus{
 			Components: []v1.NodeComponentStatus{
 				{
-					Name:  testVMAgentComponentName,
-					Type:  v1.NodeComponentTypeMetricsAgent,
+					Name:  testConfigRayComponentName,
+					Type:  v1.NodeComponentTypeRayHead,
 					Ready: true,
 					Phase: v1.NodeComponentPhaseRunning,
 				},
@@ -633,9 +632,6 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 		fileClient: fileClient,
 		responses: []fakeStaticNodeResponse{
 			{
-				command: "docker rm -f 'neutree-static-a-vmagent' >/dev/null 2>&1 || true",
-			},
-			{
 				command: "docker rm -f 'neutree-static-a-ray-head' >/dev/null 2>&1 || true",
 			},
 			{
@@ -649,7 +645,7 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 
 	require.NoError(t, err)
 	assert.Equal(t, len(runner.responses), runner.calls)
-	assert.Equal(t, []string{testVMAgentConfigPath}, fileClient.removedPaths)
+	assert.Equal(t, []string{testRayConfigPath}, fileClient.removedPaths)
 }
 
 func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerWithDashboardAPI(t *testing.T) {
@@ -982,6 +978,23 @@ func newStaticNodeHealthServer(t *testing.T, path string, body string) (string, 
 
 type fakeStaticNodeDashboardService struct {
 	nodes []v1.NodeSummary
+}
+
+func staticNodeReconcilerWithHealthyRayNode(ip string) *StaticNodeReconciler {
+	return &StaticNodeReconciler{
+		NewDashboardService: func(string) dashboard.DashboardService {
+			return &fakeStaticNodeDashboardService{
+				nodes: []v1.NodeSummary{
+					{
+						IP: ip,
+						Raylet: v1.Raylet{
+							State: v1.AliveNodeState,
+						},
+					},
+				},
+			}
+		},
+	}
 }
 
 func (f *fakeStaticNodeDashboardService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {

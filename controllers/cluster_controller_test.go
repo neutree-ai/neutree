@@ -480,6 +480,43 @@ func TestClusterControllerStaticNodeToLegacyFlowDeletesStaticNodeClusterBeforeLe
 	mockStorage.AssertExpectations(t)
 }
 
+func TestClusterControllerStaticNodeClusterDeletePropagatesForceDelete(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{storage: mockStorage}
+	input := &v1.Cluster{
+		Metadata: &v1.Metadata{
+			Name:      "static-force",
+			Workspace: "default",
+			Annotations: map[string]string{
+				"neutree.ai/force-delete": "true",
+			},
+		},
+	}
+
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
+		{
+			ID: 45,
+			Metadata: &v1.Metadata{
+				Name:      "static-force",
+				Workspace: "default",
+			},
+		},
+	}, nil).Once()
+	mockStorage.On("UpdateStaticNodeCluster", "45", mock.MatchedBy(func(updated *v1.StaticNodeCluster) bool {
+		require.NotNil(t, updated.Metadata)
+		assert.True(t, v1.IsForceDelete(updated.Metadata.Annotations))
+		assert.NotEmpty(t, updated.Metadata.DeletionTimestamp)
+
+		return true
+	})).Return(nil).Once()
+
+	err := controller.reconcileStaticNodeClusterDelete(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-force is deleting")
+	mockStorage.AssertExpectations(t)
+}
+
 func TestClusterControllerRejectsInitializedStaticNodeHeadChange(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
 	controller := &ClusterController{storage: mockStorage}
@@ -580,7 +617,6 @@ func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testin
 		assert.Equal(t, "default", created.Metadata.Workspace)
 		assert.Equal(t, "v1.0.2", created.Spec.Version)
 		assert.Equal(t, "registry.example.com/neutree", created.Spec.ImageRegistry)
-		assert.Equal(t, "http://vmagent:8428/api/v1/write", created.Spec.MetricsRemoteWriteURL)
 		require.NotNil(t, created.Spec.UpgradeStrategy)
 		assert.Equal(t, v1.ClusterUpgradeStrategyTypeRecreate, created.Spec.UpgradeStrategy.Type)
 		require.Len(t, created.Spec.Nodes, 2)
@@ -823,21 +859,6 @@ func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticN
 								},
 							},
 						},
-						Allocations: []v1.StaticNodeAllocationStatus{
-							{
-								Endpoint:   "demo-ep",
-								InstanceID: "actor-a",
-								Devices: []v1.DeviceAllocation{
-									{
-										UUID:      "GPU-0",
-										Product:   "Tesla T4",
-										MemoryMiB: 15360,
-										CoreUnits: 100,
-										NodeID:    "192.168.19.218",
-									},
-								},
-							},
-						},
 					},
 				},
 			}
@@ -872,8 +893,8 @@ func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticN
 	require.Contains(t, resources.NodeResources, "192.168.19.218")
 	require.Len(t, resources.NodeResources["192.168.19.218"].Devices, 2)
 	assert.Equal(t, "NVIDIA_Tesla_T4", resources.NodeResources["192.168.19.218"].Devices[0].Product)
-	assert.Equal(t, int64(0), resources.NodeResources["192.168.19.218"].Devices[0].Available.MemoryMiB)
-	assert.Equal(t, int64(15360), resources.NodeResources["192.168.19.218"].Devices[1].Available.MemoryMiB)
+	assert.Nil(t, resources.NodeResources["192.168.19.218"].Devices[0].Available)
+	assert.Nil(t, resources.NodeResources["192.168.19.218"].Devices[1].Available)
 
 	mockDashboard.AssertExpectations(t)
 	mockAcceleratorManager.AssertExpectations(t)

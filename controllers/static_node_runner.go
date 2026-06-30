@@ -99,13 +99,6 @@ func staticNodeSSHAuth(node *v1.StaticNode) (v1.Auth, error) {
 		return auth, nil
 	}
 
-	if node.Spec.SSHAuthRef != "" {
-		return v1.Auth{}, errors.Errorf(
-			"static node spec.ssh_auth_ref %q is not resolved yet; set spec.ssh_auth for static node reconcile",
-			node.Spec.SSHAuthRef,
-		)
-	}
-
 	return v1.Auth{}, errors.New("static node spec.ssh_auth is required")
 }
 

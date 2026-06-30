@@ -16,19 +16,17 @@ type StaticNodeCluster struct {
 }
 
 type StaticNodeClusterSpec struct {
-	Version               string                      `json:"version,omitempty"`
-	ImageRegistry         string                      `json:"image_registry,omitempty"`
-	MetricsRemoteWriteURL string                      `json:"metrics_remote_write_url,omitempty"`
-	Nodes                 []StaticNodeClusterNodeSpec `json:"nodes,omitempty"`
-	UpgradeStrategy       *ClusterUpgradeStrategy     `json:"upgrade_strategy,omitempty"`
+	Version         string                      `json:"version,omitempty"`
+	ImageRegistry   string                      `json:"image_registry,omitempty"`
+	Nodes           []StaticNodeClusterNodeSpec `json:"nodes,omitempty"`
+	UpgradeStrategy *ClusterUpgradeStrategy     `json:"upgrade_strategy,omitempty"`
 }
 
 type StaticNodeClusterNodeSpec struct {
-	Name       string         `json:"name,omitempty"`
-	IP         string         `json:"ip,omitempty"`
-	Role       StaticNodeRole `json:"role,omitempty"`
-	SSHAuthRef string         `json:"ssh_auth_ref,omitempty"`
-	SSHAuth    *Auth          `json:"ssh_auth,omitempty" api:"-"`
+	Name    string         `json:"name,omitempty"`
+	IP      string         `json:"ip,omitempty"`
+	Role    StaticNodeRole `json:"role,omitempty"`
+	SSHAuth *Auth          `json:"ssh_auth,omitempty" api:"-"`
 }
 
 type StaticNodeClusterStatus struct {
@@ -36,7 +34,6 @@ type StaticNodeClusterStatus struct {
 	DesiredNodes       int                    `json:"desired_nodes,omitempty"`
 	ReadyNodes         int                    `json:"ready_nodes,omitempty"`
 	HeadReady          bool                   `json:"head_ready,omitempty"`
-	MetricsReady       bool                   `json:"metrics_ready,omitempty"`
 	WarmReady          bool                   `json:"warm_ready,omitempty"`
 	Version            string                 `json:"version,omitempty"`
 	LastTransitionTime string                 `json:"last_transition_time,omitempty"`
@@ -66,7 +63,6 @@ type StaticNodeSpec struct {
 	Cluster    string              `json:"cluster,omitempty"`
 	IP         string              `json:"ip,omitempty"`
 	Role       StaticNodeRole      `json:"role,omitempty"`
-	SSHAuthRef string              `json:"ssh_auth_ref,omitempty"`
 	SSHAuth    *Auth               `json:"ssh_auth,omitempty" api:"-"`
 	Warm       *WarmSpec           `json:"warm,omitempty"`
 	Components []NodeComponentSpec `json:"components,omitempty"`
@@ -82,7 +78,6 @@ const (
 type StaticNodeStatus struct {
 	Phase              StaticNodePhase              `json:"phase,omitempty"`
 	Accelerator        *StaticNodeAcceleratorStatus `json:"accelerator,omitempty"`
-	Allocations        []StaticNodeAllocationStatus `json:"allocations,omitempty"`
 	Warm               *WarmStatus                  `json:"warm,omitempty"`
 	Components         []NodeComponentStatus        `json:"components,omitempty"`
 	LastTransitionTime string                       `json:"last_transition_time,omitempty"`
@@ -107,17 +102,6 @@ type StaticNodeAcceleratorDeviceStatus struct {
 	MinorNumber  int    `json:"minor_number,omitempty"`
 	MemoryMiB    int64  `json:"memory_mib,omitempty"`
 	Healthy      bool   `json:"healthy,omitempty"`
-}
-
-type StaticNodeAllocationStatus struct {
-	WorkloadType string             `json:"workload_type,omitempty"`
-	Workspace    string             `json:"workspace,omitempty"`
-	Endpoint     string             `json:"endpoint,omitempty"`
-	InstanceID   string             `json:"instance_id,omitempty"`
-	ReplicaID    string             `json:"replica_id,omitempty"`
-	RuntimeID    string             `json:"runtime_id,omitempty"`
-	PID          int                `json:"pid,omitempty"`
-	Devices      []DeviceAllocation `json:"devices,omitempty"`
 }
 
 func CPUStaticNodeAcceleratorStatus() StaticNodeAcceleratorStatus {
@@ -159,12 +143,8 @@ type NodeComponentSpec struct {
 type NodeComponentType string
 
 const (
-	NodeComponentTypeRayHead             NodeComponentType = "ray-head"
-	NodeComponentTypeRayWorker           NodeComponentType = "ray-worker"
-	NodeComponentTypeNodeExporter        NodeComponentType = "node-exporter"
-	NodeComponentTypeAcceleratorExporter NodeComponentType = "accelerator-exporter"
-	NodeComponentTypeNodeAgent           NodeComponentType = "node-agent"
-	NodeComponentTypeMetricsAgent        NodeComponentType = "metrics-agent"
+	NodeComponentTypeRayHead   NodeComponentType = "ray-head"
+	NodeComponentTypeRayWorker NodeComponentType = "ray-worker"
 )
 
 type NodeComponentPort struct {

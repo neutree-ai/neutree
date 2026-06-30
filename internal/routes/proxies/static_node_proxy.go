@@ -9,7 +9,7 @@ import (
 
 // RegisterStaticNodeClusterRoutes registers static node cluster routes.
 //
-// Allowed methods: GET, POST, PATCH
+// Allowed methods: GET
 func RegisterStaticNodeClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	proxyGroup := group.Group("/static_node_clusters")
 	proxyGroup.Use(middlewares...)
@@ -17,13 +17,11 @@ func RegisterStaticNodeClusterRoutes(group *gin.RouterGroup, middlewares []gin.H
 	handler := CreateStructProxyHandler[v1.StaticNodeCluster](deps, storage.STATIC_NODE_CLUSTER_TABLE)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", handler)
 }
 
 // RegisterStaticNodeRoutes registers static node routes.
 //
-// Allowed methods: GET, POST, PATCH
+// Allowed methods: GET
 func RegisterStaticNodeRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	proxyGroup := group.Group("/static_nodes")
 	proxyGroup.Use(middlewares...)
@@ -31,6 +29,4 @@ func RegisterStaticNodeRoutes(group *gin.RouterGroup, middlewares []gin.HandlerF
 	handler := CreateStructProxyHandler[v1.StaticNode](deps, storage.STATIC_NODE_TABLE)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", handler)
 }

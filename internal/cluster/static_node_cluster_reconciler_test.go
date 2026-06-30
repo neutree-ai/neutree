@@ -60,7 +60,6 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Equal(t, "static-a", head.Spec.Cluster)
 	assert.Equal(t, v1.StaticNodeRoleHead, head.Spec.Role)
 	assert.Equal(t, "10.0.0.10", head.Spec.IP)
-	assert.Equal(t, "ssh-ref", head.Spec.SSHAuthRef)
 	require.NotNil(t, head.Spec.SSHAuth)
 	assert.Equal(t, "ray", head.Spec.SSHAuth.SSHUser)
 	assert.Equal(t, map[string]string{
@@ -144,23 +143,23 @@ func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
 	}{
 		{
 			name:  "strips source registry",
-			image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-			want:  "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
+			image: "nvcr.io/nvidia/ray-runtime:test",
+			want:  "registry.example.com/neutree/nvidia/ray-runtime:test",
 		},
 		{
 			name:  "keeps docker hub repository path",
-			image: "victoriametrics/vmagent:v1.115.0",
-			want:  "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
+			image: "library/ray-runtime:v1.2.0",
+			want:  "registry.example.com/neutree/library/ray-runtime:v1.2.0",
 		},
 		{
 			name:  "strips localhost registry",
-			image: "localhost:5000/custom/exporter:v1",
-			want:  "registry.example.com/neutree/custom/exporter:v1",
+			image: "localhost:5000/custom/ray-runtime:v1",
+			want:  "registry.example.com/neutree/custom/ray-runtime:v1",
 		},
 		{
 			name:  "keeps digest",
-			image: "quay.io/prometheus/node-exporter@sha256:abc",
-			want:  "registry.example.com/neutree/prometheus/node-exporter@sha256:abc",
+			image: "quay.io/neutree/ray-runtime@sha256:abc",
+			want:  "registry.example.com/neutree/neutree/ray-runtime@sha256:abc",
 		},
 	}
 
@@ -257,7 +256,6 @@ func TestStaticNodeClusterReconcilerBuildsDiscoverySafeNodesBeforeAcceleratorSta
 		require.NotNil(t, node.Spec)
 		assert.Equal(t, "static-a", node.Spec.Cluster)
 		assert.NotEmpty(t, node.Spec.IP)
-		assert.NotEmpty(t, node.Spec.SSHAuthRef)
 		assert.Empty(t, node.Spec.Components)
 		if assert.NotNil(t, node.Spec.Warm) {
 			assert.Empty(t, node.Spec.Warm.Images)
@@ -507,7 +505,6 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				DesiredNodes: 2,
 				ReadyNodes:   2,
 				HeadReady:    true,
-				MetricsReady: true,
 				WarmReady:    true,
 				Version:      "v1.2.0",
 			},
@@ -523,7 +520,6 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				DesiredNodes: 2,
 				ReadyNodes:   1,
 				HeadReady:    true,
-				MetricsReady: true,
 				WarmReady:    false,
 				ErrorMessage: "static node worker-0 phase=Reconciling",
 			},
@@ -538,7 +534,6 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				DesiredNodes: 2,
 				ReadyNodes:   0,
 				HeadReady:    false,
-				MetricsReady: true,
 				WarmReady:    false,
 				ErrorMessage: "static node head-0 phase=Failed; static node worker-0 is missing",
 			},
@@ -554,7 +549,6 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				DesiredNodes: 2,
 				ReadyNodes:   1,
 				HeadReady:    false,
-				MetricsReady: true,
 				WarmReady:    false,
 				ErrorMessage: "static node head-0 phase=Failed: ssh connection failed",
 			},
@@ -570,7 +564,6 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 				DesiredNodes: 2,
 				ReadyNodes:   1,
 				HeadReady:    false,
-				MetricsReady: true,
 				WarmReady:    false,
 				ErrorMessage: "static node head-0 is missing",
 			},
@@ -612,21 +605,18 @@ func testStaticNodeCluster() *v1.StaticNodeCluster {
 			ImageRegistry: "registry.example.com/neutree",
 			Nodes: []v1.StaticNodeClusterNodeSpec{
 				{
-					Name:       "worker-0",
-					IP:         "10.0.0.11",
-					Role:       v1.StaticNodeRoleWorker,
-					SSHAuthRef: "ssh-ref",
-					SSHAuth:    &v1.Auth{SSHUser: "ray", SSHPrivateKey: "/tmp/key"},
+					Name:    "worker-0",
+					IP:      "10.0.0.11",
+					Role:    v1.StaticNodeRoleWorker,
+					SSHAuth: &v1.Auth{SSHUser: "ray", SSHPrivateKey: "/tmp/key"},
 				},
 				{
-					Name:       "head-0",
-					IP:         "10.0.0.10",
-					Role:       v1.StaticNodeRoleHead,
-					SSHAuthRef: "ssh-ref",
-					SSHAuth:    &v1.Auth{SSHUser: "ray", SSHPrivateKey: "/tmp/key"},
+					Name:    "head-0",
+					IP:      "10.0.0.10",
+					Role:    v1.StaticNodeRoleHead,
+					SSHAuth: &v1.Auth{SSHUser: "ray", SSHPrivateKey: "/tmp/key"},
 				},
 			},
-			MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
 		},
 	}
 }

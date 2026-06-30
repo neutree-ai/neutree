@@ -81,7 +81,7 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 					Env:              map[string]string{"RAY_TMPDIR": "/tmp/ray"},
 					DockerRunOptions: []string{"--net=host"},
 					ConfigFiles: []NodeComponentConfigFile{
-						{Path: "/etc/neutree/vmagent.yaml", Content: "scrape_configs: []", Mode: "0644", Atomic: true},
+						{Path: "/etc/neutree/ray.yaml", Content: "ray: {}", Mode: "0644", Atomic: true},
 					},
 					HealthCheck: &NodeComponentHealthCheck{HTTPPath: "/api/version", Port: 8265},
 					ConfigHash:  "hash-a",
@@ -104,26 +104,6 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 						MinorNumber:  0,
 						MemoryMiB:    81920,
 						Healthy:      true,
-					},
-				},
-			},
-			Allocations: []StaticNodeAllocationStatus{
-				{
-					WorkloadType: "endpoint",
-					Workspace:    "default",
-					Endpoint:     "chat",
-					InstanceID:   "chat-replica-a",
-					ReplicaID:    "replica-a",
-					RuntimeID:    "actor-a",
-					PID:          1234,
-					Devices: []DeviceAllocation{
-						{
-							UUID:      "GPU-abc",
-							Product:   "NVIDIA_A100",
-							MemoryMiB: 81920,
-							CoreUnits: 100,
-							NodeID:    "head-0",
-						},
 					},
 				},
 			},
@@ -163,10 +143,6 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "GPU-abc", decoded.Status.Accelerator.Devices[0].UUID)
 	assert.Equal(t, "NVIDIA_A100", decoded.Status.Accelerator.Devices[0].ProductModel)
 	assert.Equal(t, int64(81920), decoded.Status.Accelerator.Devices[0].MemoryMiB)
-	require.Len(t, decoded.Status.Allocations, 1)
-	assert.Equal(t, "endpoint", decoded.Status.Allocations[0].WorkloadType)
-	assert.Equal(t, "replica-a", decoded.Status.Allocations[0].ReplicaID)
-	assert.Equal(t, "GPU-abc", decoded.Status.Allocations[0].Devices[0].UUID)
 	require.Len(t, decoded.Status.Components, 1)
 	assert.Equal(t, NodeComponentPhaseRunning, decoded.Status.Components[0].Phase)
 }
@@ -187,6 +163,16 @@ func TestStaticNodeAPIShapeOmitsInternalOrDerivedFields(t *testing.T) {
 	assert.True(t, hasVersion, "StaticNodeCluster.status.version is required")
 	_, hasUpgradeStep := staticNodeClusterStatusType.FieldByName("UpgradeStep")
 	assert.False(t, hasUpgradeStep, "StaticNodeCluster.status must not expose upgrade_step; Recreate progress belongs in error_message")
+	_, hasMetricsReady := staticNodeClusterStatusType.FieldByName("MetricsReady")
+	assert.False(t, hasMetricsReady, "StaticNodeCluster.status must not expose metrics readiness in static Ray scope")
+
+	staticNodeSpecType := reflect.TypeOf(StaticNodeSpec{})
+	_, hasSSHAuthRef := staticNodeSpecType.FieldByName("SSHAuthRef")
+	assert.False(t, hasSSHAuthRef, "StaticNode.spec must not expose unresolved ssh_auth_ref")
+
+	staticNodeStatusType := reflect.TypeOf(StaticNodeStatus{})
+	_, hasAllocations := staticNodeStatusType.FieldByName("Allocations")
+	assert.False(t, hasAllocations, "StaticNode.status must not expose allocation state in static Ray scope")
 
 	acceleratorStatusType := reflect.TypeOf(StaticNodeAcceleratorStatus{})
 	_, hasRuntimeProfile := acceleratorStatusType.FieldByName("RuntimeProfile")

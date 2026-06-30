@@ -56,7 +56,6 @@ type StaticNodeReconciler struct {
 
 type StaticNodeReconcileResult struct {
 	Accelerator *v1.StaticNodeAcceleratorStatus
-	Allocations []v1.StaticNodeAllocationStatus
 	Warm        *v1.WarmStatus
 	Components  []v1.NodeComponentStatus
 }

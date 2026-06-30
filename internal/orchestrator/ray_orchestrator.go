@@ -6,7 +6,6 @@ import (
 	"math"
 	"net/url"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -780,33 +778,7 @@ func (o *RayOrchestrator) withStaticNodeEndpointResources(
 func (o *RayOrchestrator) buildEndpointResourceStatusFromStaticNodes(
 	endpoint *v1.Endpoint,
 ) (*v1.EndpointResourceStatus, error) {
-	if o.storage == nil || o.cluster == nil || o.cluster.Metadata == nil || endpoint == nil || endpoint.Metadata == nil {
-		return nil, nil
-	}
-
-	if !o.usesStaticNodeEndpointResources() {
-		return nil, nil
-	}
-
-	filters := []storage.Filter{
-		{Column: "spec->>cluster", Operator: "eq", Value: o.cluster.Metadata.Name},
-	}
-	if endpoint.GetWorkspace() != "" {
-		filters = append(filters, storage.Filter{
-			Column:   "metadata->>workspace",
-			Operator: "eq",
-			Value:    endpoint.GetWorkspace(),
-		})
-	}
-
-	nodes := []v1.StaticNode{}
-	if err := o.storage.GenericQuery(storage.STATIC_NODE_TABLE, "*", filters, &nodes); err != nil {
-		return nil, errors.Wrapf(err, "failed to query static nodes for endpoint %s resources", endpoint.Metadata.WorkspaceName())
-	}
-
-	instances := staticNodeEndpointInstances(nodes, endpoint)
-
-	return resourceview.BuildEndpointResourcesFromEndpointInstances(instances), nil
+	return nil, nil
 }
 
 func (o *RayOrchestrator) usesStaticNodeEndpointResources() bool {
@@ -817,124 +789,6 @@ func (o *RayOrchestrator) usesStaticNodeEndpointResources() bool {
 	enabled, err := semver.LessThan("v1.0.1", o.cluster.Spec.Version)
 
 	return err == nil && enabled
-}
-
-func staticNodeEndpointInstances(
-	nodes []v1.StaticNode,
-	endpoint *v1.Endpoint,
-) []resourceview.EndpointInstanceResource {
-	instances := make([]resourceview.EndpointInstanceResource, 0)
-
-	for _, node := range nodes {
-		if node.Status == nil {
-			continue
-		}
-
-		for _, allocation := range node.Status.Allocations {
-			if !staticNodeAllocationMatchesEndpoint(allocation, endpoint) {
-				continue
-			}
-
-			nodeID := staticNodeAllocationNodeID(node, allocation)
-			devices := staticNodeAllocationDevices(nodeID, allocation.Devices)
-
-			if len(devices) == 0 {
-				continue
-			}
-
-			instances = append(instances, resourceview.EndpointInstanceResource{
-				InstanceID: staticNodeAllocationInstanceID(nodeID, allocation),
-				ReplicaID:  allocation.ReplicaID,
-				NodeID:     nodeID,
-				Devices:    devices,
-			})
-		}
-	}
-
-	sort.Slice(instances, func(i, j int) bool {
-		if instances[i].NodeID != instances[j].NodeID {
-			return instances[i].NodeID < instances[j].NodeID
-		}
-
-		if instances[i].InstanceID != instances[j].InstanceID {
-			return instances[i].InstanceID < instances[j].InstanceID
-		}
-
-		return instances[i].ReplicaID < instances[j].ReplicaID
-	})
-
-	return instances
-}
-
-func staticNodeAllocationMatchesEndpoint(
-	allocation v1.StaticNodeAllocationStatus,
-	endpoint *v1.Endpoint,
-) bool {
-	if endpoint == nil || endpoint.Metadata == nil {
-		return false
-	}
-
-	if allocation.WorkloadType != "" && allocation.WorkloadType != "endpoint" {
-		return false
-	}
-
-	if allocation.Workspace != "" && allocation.Workspace != endpoint.GetWorkspace() {
-		return false
-	}
-
-	return allocation.Endpoint == endpoint.GetName()
-}
-
-func staticNodeAllocationNodeID(node v1.StaticNode, allocation v1.StaticNodeAllocationStatus) string {
-	for _, device := range allocation.Devices {
-		if device.NodeID != "" {
-			return device.NodeID
-		}
-	}
-
-	if node.Metadata != nil && node.Metadata.Name != "" {
-		return node.Metadata.Name
-	}
-
-	if node.Spec != nil {
-		return node.Spec.IP
-	}
-
-	return ""
-}
-
-func staticNodeAllocationDevices(nodeID string, devices []v1.DeviceAllocation) []v1.DeviceAllocation {
-	result := make([]v1.DeviceAllocation, 0, len(devices))
-
-	for _, device := range devices {
-		if device.UUID == "" {
-			continue
-		}
-
-		if device.NodeID == "" {
-			device.NodeID = nodeID
-		}
-
-		result = append(result, device)
-	}
-
-	return result
-}
-
-func staticNodeAllocationInstanceID(nodeID string, allocation v1.StaticNodeAllocationStatus) string {
-	if allocation.InstanceID != "" {
-		return allocation.InstanceID
-	}
-
-	if allocation.RuntimeID != "" {
-		return allocation.RuntimeID
-	}
-
-	if allocation.ReplicaID != "" {
-		return allocation.ReplicaID
-	}
-
-	return nodeID
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.

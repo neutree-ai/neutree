@@ -86,6 +86,50 @@ func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) e
 }
 
 func validateStaticNodeClusterSpec(c *v1.Cluster) error {
+	if c == nil || c.Metadata == nil {
+		return errors.New("cluster metadata is required")
+	}
+
+	if c.Spec == nil {
+		return errors.New("cluster spec is required")
+	}
+
+	if c.Spec.Version == "" {
+		return errors.New("cluster spec.version is required")
+	}
+
+	sshConfig, err := util.ParseSSHClusterConfig(c)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse ssh cluster config")
+	}
+
+	if sshConfig.Provider.HeadIP == "" {
+		return errors.New("head IP can not be empty")
+	}
+
+	nodeIPs := map[string]struct{}{
+		sshConfig.Provider.HeadIP: {},
+	}
+	for _, workerIP := range sshConfig.Provider.WorkerIPs {
+		if workerIP == "" {
+			continue
+		}
+
+		if _, exists := nodeIPs[workerIP]; exists {
+			return errors.Errorf("duplicate static node IP %s", workerIP)
+		}
+
+		nodeIPs[workerIP] = struct{}{}
+	}
+
+	if sshConfig.Auth.SSHUser == "" {
+		return errors.New("ssh_user is required")
+	}
+
+	if sshConfig.Auth.SSHPrivateKey == "" {
+		return errors.New("ssh_private_key is required")
+	}
+
 	return nil
 }
 
@@ -103,14 +147,35 @@ func (controller *ClusterController) reconcileStaticNodeClusterDelete(c *v1.Clus
 		current.Metadata = &v1.Metadata{}
 	}
 
+	metadataChanged := false
+	if v1.IsForceDelete(c.Metadata.Annotations) && !v1.IsForceDelete(current.Metadata.Annotations) {
+		current.Metadata.Annotations = withForceDeleteAnnotation(current.Metadata.Annotations)
+		metadataChanged = true
+	}
+
 	if current.Metadata.DeletionTimestamp == "" {
 		current.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
+		metadataChanged = true
+	}
+
+	if metadataChanged {
 		if err := controller.storage.UpdateStaticNodeCluster(strconv.Itoa(current.ID), current); err != nil {
 			return errors.Wrap(err, "failed to mark static node cluster deleting")
 		}
 	}
 
 	return errors.Errorf("static node cluster %s is deleting", current.Metadata.Name)
+}
+
+func withForceDeleteAnnotation(annotations map[string]string) map[string]string {
+	next := make(map[string]string, len(annotations)+1)
+	for key, value := range annotations {
+		next[key] = value
+	}
+
+	next["neutree.ai/force-delete"] = "true"
+
+	return next
 }
 
 func (controller *ClusterController) shouldUseStaticNodeClusterDeleteFlow(c *v1.Cluster) (bool, error) {
@@ -336,11 +401,10 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 			Annotations: copyStaticClusterStringMap(c.Metadata.Annotations),
 		},
 		Spec: &v1.StaticNodeClusterSpec{
-			Version:               c.Spec.Version,
-			ImageRegistry:         imagePrefix,
-			MetricsRemoteWriteURL: controller.metricsRemoteWriteURL,
-			Nodes:                 nodes,
-			UpgradeStrategy:       v1.DefaultClusterUpgradeStrategy(),
+			Version:         c.Spec.Version,
+			ImageRegistry:   imagePrefix,
+			Nodes:           nodes,
+			UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
 		},
 	}, nil
 }
@@ -422,7 +486,7 @@ func (e *clusterPhaseOverrideError) ClusterPhase() v1.ClusterPhase {
 }
 
 func withClusterPhaseOverride(err error, phase v1.ClusterPhase) error {
-	if err == nil || !isClusterProgressPhase(phase) {
+	if err == nil || !isClusterOverridePhase(phase) {
 		return err
 	}
 
@@ -442,16 +506,16 @@ func clusterPhaseOverrideFromError(err error) (v1.ClusterPhase, bool) {
 	}
 
 	phase := phaseErr.ClusterPhase()
-	if !isClusterProgressPhase(phase) {
+	if !isClusterOverridePhase(phase) {
 		return "", false
 	}
 
 	return phase, true
 }
 
-func isClusterProgressPhase(phase v1.ClusterPhase) bool {
+func isClusterOverridePhase(phase v1.ClusterPhase) bool {
 	switch phase {
-	case v1.ClusterPhaseInitializing, v1.ClusterPhaseUpdating, v1.ClusterPhaseUpgrading:
+	case v1.ClusterPhaseInitializing, v1.ClusterPhaseUpdating, v1.ClusterPhaseUpgrading, v1.ClusterPhaseFailed:
 		return true
 	default:
 		return false
@@ -464,6 +528,10 @@ func staticNodeClusterProgressPhase(
 ) v1.ClusterPhase {
 	if c == nil || !c.IsInitialized() {
 		return v1.ClusterPhaseInitializing
+	}
+
+	if status != nil && (status.Phase == v1.StaticNodeClusterPhaseFailed || status.Phase == v1.StaticNodeClusterPhaseDegraded) {
+		return v1.ClusterPhaseFailed
 	}
 
 	if staticNodeClusterStatusIsUpgrade(c, status) {
@@ -645,7 +713,7 @@ func enrichStaticNodeClusterDeviceResources(
 			resources.NodeResources[nodeID] = nodeResource
 		}
 
-		devices := staticNodeClusterDeviceResources(nodeResource, *node.Status.Accelerator, node.Status.Allocations)
+		devices := staticNodeClusterDeviceResources(nodeResource, *node.Status.Accelerator)
 		if len(devices) == 0 {
 			continue
 		}
@@ -670,9 +738,7 @@ func staticNodeResourceID(node v1.StaticNode) string {
 func staticNodeClusterDeviceResources(
 	nodeResource *v1.NodeResourceStatus,
 	accelerator v1.StaticNodeAcceleratorStatus,
-	allocations []v1.StaticNodeAllocationStatus,
 ) []*v1.DeviceResource {
-	usageByUUID := staticNodeDeviceUsageByUUID(allocations)
 	acceleratorType := v1.AcceleratorType(accelerator.Type)
 	devices := make([]*v1.DeviceResource, 0, len(accelerator.Devices))
 
@@ -685,8 +751,6 @@ func staticNodeClusterDeviceResources(
 			MemoryMiB: device.MemoryMiB,
 			CoreUnits: 100,
 		}
-		usage := usageByUUID[device.UUID]
-
 		devices = append(devices, &v1.DeviceResource{
 			UUID:    device.UUID,
 			Product: staticNodeDeviceProduct(nodeResource, acceleratorType, accelerator, device),
@@ -694,10 +758,6 @@ func staticNodeClusterDeviceResources(
 			Allocatable: &v1.DeviceResourcePool{
 				MemoryMiB: allocatable.MemoryMiB,
 				CoreUnits: allocatable.CoreUnits,
-			},
-			Available: &v1.DeviceResourcePool{
-				MemoryMiB: nonNegativeStaticNodeResourceInt64(allocatable.MemoryMiB - usage.MemoryMiB),
-				CoreUnits: nonNegativeStaticNodeResourceInt64(allocatable.CoreUnits - usage.CoreUnits),
 			},
 		})
 	}
@@ -707,27 +767,6 @@ func staticNodeClusterDeviceResources(
 	})
 
 	return devices
-}
-
-func staticNodeDeviceUsageByUUID(
-	allocations []v1.StaticNodeAllocationStatus,
-) map[string]v1.DeviceResourcePool {
-	usageByUUID := make(map[string]v1.DeviceResourcePool)
-
-	for _, allocation := range allocations {
-		for _, device := range allocation.Devices {
-			if device.UUID == "" {
-				continue
-			}
-
-			usage := usageByUUID[device.UUID]
-			usage.MemoryMiB += device.MemoryMiB
-			usage.CoreUnits += device.CoreUnits
-			usageByUUID[device.UUID] = usage
-		}
-	}
-
-	return usageByUUID
 }
 
 func staticNodeDeviceProduct(
