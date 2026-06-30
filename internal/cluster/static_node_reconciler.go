@@ -825,7 +825,7 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 
 	parts = append(parts, "--restart", "unless-stopped")
 
-	parts = append(parts, component.DockerRunOptions...)
+	parts = append(parts, dockerRunOptionArgs(component.DockerRunOptions)...)
 
 	if !usesHostNetwork(component.DockerRunOptions) {
 		for _, port := range component.Ports {
@@ -870,12 +870,30 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 
 func usesHostNetwork(options []string) bool {
 	for _, option := range options {
-		if option == "--net=host" || option == "--network=host" {
+		fields := strings.Fields(option)
+		if len(fields) == 0 {
+			continue
+		}
+
+		if fields[0] == "--net=host" || fields[0] == "--network=host" {
+			return true
+		}
+
+		if len(fields) > 1 && (fields[0] == "--net" || fields[0] == "--network") && fields[1] == "host" {
 			return true
 		}
 	}
 
 	return false
+}
+
+func dockerRunOptionArgs(options []string) []string {
+	result := []string{}
+	for _, option := range options {
+		result = append(result, shellArgs(strings.Fields(option))...)
+	}
+
+	return result
 }
 
 func componentContainerName(node *v1.StaticNode, component v1.NodeComponentSpec) string {

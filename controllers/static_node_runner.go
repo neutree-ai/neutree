@@ -3,6 +3,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -44,6 +46,8 @@ func (f *StaticNodeSSHRunnerFactory) NewStaticNodeRunner(
 		return nil, err
 	}
 
+	cleanupDir := ""
+
 	if auth.SSHPrivateKey != "" {
 		sshKeyPath, err := util.GenerateTmpSSHKeyFile(auth.SSHPrivateKey)
 		if err != nil {
@@ -51,6 +55,7 @@ func (f *StaticNodeSSHRunnerFactory) NewStaticNodeRunner(
 		}
 
 		auth.SSHPrivateKey = sshKeyPath
+		cleanupDir = filepath.Dir(sshKeyPath)
 	}
 
 	var processExecute commandrunner.ProcessExecute
@@ -74,11 +79,13 @@ func (f *StaticNodeSSHRunnerFactory) NewStaticNodeRunner(
 			sshControlPath,
 			processExecute,
 		),
+		cleanupDir: cleanupDir,
 	}, nil
 }
 
 type staticNodeSSHRunner struct {
-	runner *commandrunner.SSHCommandRunner
+	runner     *commandrunner.SSHCommandRunner
+	cleanupDir string
 }
 
 func (r *staticNodeSSHRunner) Run(ctx context.Context, command string) (string, error) {
@@ -87,6 +94,14 @@ func (r *staticNodeSSHRunner) Run(ctx context.Context, command string) (string, 
 
 func (r *staticNodeSSHRunner) Files() commandrunner.FileClient {
 	return r.runner.Files()
+}
+
+func (r *staticNodeSSHRunner) Close() error {
+	if r == nil || r.cleanupDir == "" {
+		return nil
+	}
+
+	return os.RemoveAll(r.cleanupDir)
 }
 
 func staticNodeSSHAuth(node *v1.StaticNode) (v1.Auth, error) {

@@ -2,10 +2,13 @@ package proxies
 
 import (
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func TestStaticNodeRoutesAreReadOnly(t *testing.T) {
@@ -29,4 +32,12 @@ func TestStaticNodeRoutesAreReadOnly(t *testing.T) {
 		assert.NotContains(t, routes[path], http.MethodPost)
 		assert.NotContains(t, routes[path], http.MethodPatch)
 	}
+}
+
+func TestStaticNodeProxyExcludesSSHAuthFields(t *testing.T) {
+	clusterExcludeFields := extractExcludeFieldsFromTag(reflect.TypeOf(v1.StaticNodeCluster{}))
+	nodeExcludeFields := extractExcludeFieldsFromTag(reflect.TypeOf(v1.StaticNode{}))
+
+	assert.Contains(t, clusterExcludeFields, "spec.nodes.ssh_auth")
+	assert.Contains(t, nodeExcludeFields, "spec.ssh_auth")
 }

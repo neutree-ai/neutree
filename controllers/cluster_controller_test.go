@@ -778,6 +778,76 @@ func TestClusterControllerSyncMapsStaticNodeClusterWarmingToUpgrading(t *testing
 	mockStorage.AssertExpectations(t)
 }
 
+func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButSpecChanged(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{
+		storage:               mockStorage,
+		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+	}
+	input := &v1.Cluster{
+		ID: 12,
+		Metadata: &v1.Metadata{
+			Name:      "static-upgrade-ready-stale",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.3",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{
+			Initialized:  true,
+			Version:      "v1.0.2",
+			DashboardURL: "http://10.0.0.10:8265",
+		},
+	}
+
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
+		{
+			ID: 57,
+			Metadata: &v1.Metadata{
+				Name:      "static-upgrade-ready-stale",
+				Workspace: "default",
+			},
+			Spec: &v1.StaticNodeClusterSpec{
+				Version:       "v1.0.2",
+				ImageRegistry: "registry.example.com/neutree",
+				Nodes: []v1.StaticNodeClusterNodeSpec{
+					{Name: "10.0.0.10", IP: "10.0.0.10", Role: v1.StaticNodeRoleHead},
+				},
+			},
+			Status: &v1.StaticNodeClusterStatus{
+				Phase:        v1.StaticNodeClusterPhaseReady,
+				Version:      "v1.0.2",
+				ReadyNodes:   1,
+				DesiredNodes: 1,
+			},
+		},
+	}, nil).Once()
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedImageRegistry()}, nil).Once()
+	mockStorage.On("UpdateStaticNodeCluster", "57", mock.Anything).Return(nil).Once()
+	mockStorage.On("UpdateCluster", "12", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseUpgrading, updated.Status.Phase)
+		assert.Equal(t, "v1.0.2", updated.Status.Version)
+		assert.NotEqual(t, cluster.ComputeClusterSpecHash(input.Spec), updated.Status.ObservedSpecHash)
+
+		return true
+	})).Return(nil).Once()
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is applying desired spec")
+	mockStorage.AssertExpectations(t)
+}
+
 func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticNodeDevices(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
 	mockDashboard := &dashboardmocks.MockDashboardService{}

@@ -99,10 +99,6 @@ func validateStaticNodeOwner(existing *v1.StaticNode, desired *v1.StaticNode) er
 		return nil
 	}
 
-	if existing.Metadata != nil && existing.Metadata.DeletionTimestamp != "" {
-		return nil
-	}
-
 	if existing.Spec.Cluster == "" || desired.Spec.Cluster == "" || existing.Spec.Cluster == desired.Spec.Cluster {
 		return nil
 	}

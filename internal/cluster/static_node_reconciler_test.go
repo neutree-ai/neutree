@@ -238,6 +238,26 @@ func TestComponentContainerMatchesIgnoresSSHWarning(t *testing.T) {
 	assert.True(t, matches)
 }
 
+func TestBuildDockerRunCommandQuotesDockerRunOptions(t *testing.T) {
+	command := buildDockerRunCommand(
+		&v1.StaticNode{Spec: &v1.StaticNodeSpec{Cluster: "static-a"}},
+		v1.NodeComponentSpec{
+			Name:  "ray-head",
+			Image: testDefaultRayImage,
+			DockerRunOptions: []string{
+				"--net host",
+				"--volume /data:/data; touch /tmp/pwned",
+			},
+		},
+		"hash-ray",
+	)
+
+	assert.Contains(t, command, "'--net' 'host'")
+	assert.Contains(t, command, "'--volume' '/data:/data;' 'touch' '/tmp/pwned'")
+	assert.NotContains(t, command, "--volume /data:/data; touch /tmp/pwned")
+	assert.NotContains(t, command, " -p ")
+}
+
 func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{

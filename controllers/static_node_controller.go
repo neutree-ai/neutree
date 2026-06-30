@@ -97,6 +97,7 @@ func (c *StaticNodeController) sync(ctx context.Context, node *v1.StaticNode) er
 		}
 
 		runner = nodeRunner
+		defer closeStaticNodeRunner(nodeRunner)
 	}
 
 	if isDeleting {
@@ -125,4 +126,17 @@ func (c *StaticNodeController) sync(ctx context.Context, node *v1.StaticNode) er
 	}
 
 	return err
+}
+
+func closeStaticNodeRunner(runner clusterreconcile.StaticNodeCommandRunner) {
+	closer, ok := runner.(interface {
+		Close() error
+	})
+	if !ok {
+		return
+	}
+
+	if err := closer.Close(); err != nil {
+		klog.Warningf("failed to clean up static node runner: %v", err)
+	}
 }

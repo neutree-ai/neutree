@@ -109,6 +109,32 @@ func TestStaticNodeObjectStoreUpsertStaticNodeRejectsClusterConflict(t *testing.
 	assert.Empty(t, objectStorage.updatedSpecIDs)
 }
 
+func TestStaticNodeObjectStoreUpsertStaticNodeRejectsDeletingClusterConflict(t *testing.T) {
+	deletingNode := testStorageStaticNode(11, "default", "172.20.172.120", "static-a")
+	deletingNode.Metadata.DeletionTimestamp = "2026-06-30T00:00:00Z"
+	objectStorage := &fakeStaticNodeObjectStorage{
+		nodes: []v1.StaticNode{deletingNode},
+	}
+	store := NewStaticNodeObjectStore(objectStorage)
+
+	err := store.UpsertStaticNode(context.Background(), &v1.StaticNode{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "172.20.172.120",
+		},
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-b",
+			IP:      "172.20.172.120",
+		},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already owned by static node cluster static-a")
+	assert.Empty(t, objectStorage.created)
+	assert.Empty(t, objectStorage.updatedMetadataIDs)
+	assert.Empty(t, objectStorage.updatedSpecIDs)
+}
+
 func TestStaticNodeObjectStoreDeleteStaticNodeSoftDeletes(t *testing.T) {
 	objectStorage := &fakeStaticNodeObjectStorage{}
 	store := NewStaticNodeObjectStore(objectStorage)

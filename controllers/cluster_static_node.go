@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"time"
@@ -62,7 +63,7 @@ func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) e
 			return errors.Wrap(err, "failed to create static node cluster")
 		}
 
-		controller.copyStaticNodeClusterStatus(c, desired, nil)
+		controller.copyStaticNodeClusterStatus(c, desired, nil, false)
 
 		return withClusterPhaseOverride(
 			errors.Errorf("static node cluster %s is provisioning", c.Metadata.Name),
@@ -71,15 +72,25 @@ func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) e
 	}
 
 	desired.ID = current.ID
+
+	specObserved := staticNodeClusterSpecObserved(current, desired)
+
 	if err := controller.storage.UpdateStaticNodeCluster(strconv.Itoa(current.ID), desired); err != nil {
 		return errors.Wrap(err, "failed to update static node cluster")
 	}
 
-	controller.copyStaticNodeClusterStatus(c, desired, current.Status)
+	controller.copyStaticNodeClusterStatus(c, desired, current.Status, specObserved)
 
 	if current.Status == nil || current.Status.Phase != v1.StaticNodeClusterPhaseReady {
 		return withClusterPhaseOverride(
 			staticNodeClusterNotReadyError(current),
+			staticNodeClusterProgressPhase(c, current.Status),
+		)
+	}
+
+	if !specObserved {
+		return withClusterPhaseOverride(
+			errors.Errorf("static node cluster %s is applying desired spec", c.Metadata.Name),
 			staticNodeClusterProgressPhase(c, current.Status),
 		)
 	}
@@ -444,6 +455,7 @@ func (controller *ClusterController) copyStaticNodeClusterStatus(
 	c *v1.Cluster,
 	desired *v1.StaticNodeCluster,
 	status *v1.StaticNodeClusterStatus,
+	observed bool,
 ) {
 	if c.Status == nil {
 		c.Status = &v1.ClusterStatus{}
@@ -459,9 +471,15 @@ func (controller *ClusterController) copyStaticNodeClusterStatus(
 		}
 	}
 
-	if status != nil && status.Phase == v1.StaticNodeClusterPhaseReady {
+	if status != nil && status.Version != "" {
+		c.Status.Version = status.Version
+	}
+
+	if status != nil && status.Phase == v1.StaticNodeClusterPhaseReady && observed {
 		c.Status.Initialized = true
-		c.Status.Version = c.GetVersion()
+		if c.Status.Version == "" {
+			c.Status.Version = c.GetVersion()
+		}
 
 		resources, err := controller.calculateStaticNodeClusterResources(desired)
 		if err != nil {
@@ -470,6 +488,14 @@ func (controller *ClusterController) copyStaticNodeClusterStatus(
 			c.Status.ResourceInfo = resources
 		}
 	}
+}
+
+func staticNodeClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool {
+	if current == nil || desired == nil {
+		return false
+	}
+
+	return reflect.DeepEqual(current.Spec, desired.Spec)
 }
 
 type clusterPhaseOverrideError struct {
