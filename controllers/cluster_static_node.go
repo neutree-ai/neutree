@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
-	"sort"
 	"strconv"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	staticclient "github.com/neutree-ai/neutree/internal/client"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/semver"
@@ -25,8 +25,6 @@ import (
 const (
 	staticNodeClusterFlowVersionGate = "v1.0.1"
 	staticNodeClusterDashboardPort   = 8265
-	staticForceDeleteAnnotationKey   = "neutree.ai/force-delete"
-	staticForceDeleteAnnotationValue = "true"
 )
 
 func shouldUseStaticNodeClusterFlow(c *v1.Cluster) (bool, error) {
@@ -164,7 +162,7 @@ func (controller *ClusterController) reconcileStaticNodeClusterDelete(c *v1.Clus
 	metadataChanged := false
 
 	if v1.IsForceDelete(c.Metadata.Annotations) && !v1.IsForceDelete(current.Metadata.Annotations) {
-		current.Metadata.Annotations = withForceDeleteAnnotation(current.Metadata.Annotations)
+		current.Metadata.Annotations = v1.WithForceDeleteAnnotation(current.Metadata.Annotations)
 		metadataChanged = true
 	}
 
@@ -180,17 +178,6 @@ func (controller *ClusterController) reconcileStaticNodeClusterDelete(c *v1.Clus
 	}
 
 	return errors.Errorf("static node cluster %s is deleting", current.Metadata.Name)
-}
-
-func withForceDeleteAnnotation(annotations map[string]string) map[string]string {
-	next := make(map[string]string, len(annotations)+1)
-	for key, value := range annotations {
-		next[key] = value
-	}
-
-	next[staticForceDeleteAnnotationKey] = staticForceDeleteAnnotationValue
-
-	return next
 }
 
 func (controller *ClusterController) shouldUseStaticNodeClusterDeleteFlow(c *v1.Cluster) (bool, error) {
@@ -242,23 +229,12 @@ func (controller *ClusterController) cleanupLegacyRuntimeBeforeStaticNodeFlow(c 
 		return nil
 	}
 
-	if controller.cleanupLegacyStaticRuntime != nil {
-		return controller.cleanupLegacyStaticRuntime(c)
-	}
-
 	reconciler, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 	if err != nil {
 		return errors.Wrap(err, "failed to create legacy static runtime cleaner")
 	}
 
-	cleaner, ok := reconciler.(interface {
-		CleanupLegacyRuntime(ctx context.Context, cluster *v1.Cluster) error
-	})
-	if !ok {
-		return errors.New("legacy static runtime cleaner is not supported")
-	}
-
-	if err := cleaner.CleanupLegacyRuntime(context.Background(), c); err != nil {
+	if err := reconciler.ReconcileDelete(context.Background(), c); err != nil {
 		return errors.Wrap(err, "failed to cleanup legacy static runtime")
 	}
 
@@ -615,314 +591,17 @@ func (controller *ClusterController) calculateStaticNodeClusterResources(
 		return nil, err
 	}
 
-	if err := controller.enrichStaticNodeClusterResources(staticCluster, resources); err != nil {
-		return nil, err
+	if controller.storage != nil && staticCluster != nil && staticCluster.Metadata != nil {
+		nodes, err := staticclient.NewStaticNodeResourceClient(controller.storage).
+			ListByCluster(context.Background(), staticCluster.Metadata.Workspace, staticCluster.Metadata.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		resourceview.EnrichStaticNodeClusterResources(resources, nodes)
 	}
 
 	return resources, nil
-}
-
-func (controller *ClusterController) enrichStaticNodeClusterResources(
-	staticCluster *v1.StaticNodeCluster,
-	resources *v1.ClusterResources,
-) error {
-	normalizeStaticNodeClusterResourceProducts(resources)
-
-	if controller.storage == nil || staticCluster == nil || staticCluster.Metadata == nil {
-		return nil
-	}
-
-	nodes, err := controller.listStaticNodesForResourceInfo(staticCluster)
-	if err != nil {
-		return err
-	}
-
-	enrichStaticNodeClusterDeviceResources(resources, nodes)
-	normalizeStaticNodeClusterResourceProducts(resources)
-
-	return nil
-}
-
-func (controller *ClusterController) listStaticNodesForResourceInfo(
-	staticCluster *v1.StaticNodeCluster,
-) ([]v1.StaticNode, error) {
-	filters := []storage.Filter{
-		{Column: "spec->>cluster", Operator: "eq", Value: staticCluster.Metadata.Name},
-	}
-	if staticCluster.Metadata.Workspace != "" {
-		filters = append(filters, storage.Filter{
-			Column:   "metadata->>workspace",
-			Operator: "eq",
-			Value:    staticCluster.Metadata.Workspace,
-		})
-	}
-
-	nodes := []v1.StaticNode{}
-	if err := controller.storage.GenericQuery(storage.STATIC_NODE_TABLE, "*", filters, &nodes); err != nil {
-		return nil, errors.Wrapf(err, "failed to query static nodes for cluster %s resources", staticCluster.Metadata.WorkspaceName())
-	}
-
-	return nodes, nil
-}
-
-func normalizeStaticNodeClusterResourceProducts(resources *v1.ClusterResources) {
-	if resources == nil {
-		return
-	}
-
-	normalizeStaticNodeResourceInfoProducts(resources.Allocatable)
-	normalizeStaticNodeResourceInfoProducts(resources.Available)
-
-	for _, nodeResource := range resources.NodeResources {
-		if nodeResource == nil {
-			continue
-		}
-
-		normalizeStaticNodeResourceInfoProducts(nodeResource.Allocatable)
-		normalizeStaticNodeResourceInfoProducts(nodeResource.Available)
-	}
-}
-
-func normalizeStaticNodeResourceInfoProducts(info *v1.ResourceInfo) {
-	if info == nil {
-		return
-	}
-
-	for _, group := range info.AcceleratorGroups {
-		if group == nil || len(group.ProductGroups) == 0 {
-			continue
-		}
-
-		if group.Products == nil {
-			group.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource)
-		}
-
-		for product, quantity := range group.ProductGroups {
-			productResource := group.Products[product]
-			if productResource == nil {
-				productResource = &v1.AcceleratorProductResource{}
-				group.Products[product] = productResource
-			}
-
-			if productResource.Quantity == 0 {
-				productResource.Quantity = quantity
-			}
-		}
-	}
-}
-
-func enrichStaticNodeClusterDeviceResources(
-	resources *v1.ClusterResources,
-	nodes []v1.StaticNode,
-) {
-	if resources == nil {
-		return
-	}
-
-	for _, node := range nodes {
-		if node.Status == nil || node.Status.Accelerator == nil || len(node.Status.Accelerator.Devices) == 0 {
-			continue
-		}
-
-		acceleratorType := v1.AcceleratorType(node.Status.Accelerator.Type)
-		if acceleratorType == "" || node.Status.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
-			continue
-		}
-
-		nodeID := staticNodeResourceID(node)
-		if nodeID == "" {
-			continue
-		}
-
-		if resources.NodeResources == nil {
-			resources.NodeResources = make(map[string]*v1.NodeResourceStatus)
-		}
-
-		nodeResource := resources.NodeResources[nodeID]
-		if nodeResource == nil {
-			nodeResource = &v1.NodeResourceStatus{}
-			resources.NodeResources[nodeID] = nodeResource
-		}
-
-		devices := staticNodeClusterDeviceResources(nodeResource, *node.Status.Accelerator)
-		if len(devices) == 0 {
-			continue
-		}
-
-		nodeResource.Devices = devices
-		enrichStaticNodeClusterAcceleratorMetadata(resources, acceleratorType, devices)
-	}
-}
-
-func staticNodeResourceID(node v1.StaticNode) string {
-	if node.Spec != nil && node.Spec.IP != "" {
-		return node.Spec.IP
-	}
-
-	if node.Metadata != nil {
-		return node.Metadata.Name
-	}
-
-	return ""
-}
-
-func staticNodeClusterDeviceResources(
-	nodeResource *v1.NodeResourceStatus,
-	accelerator v1.StaticNodeAcceleratorStatus,
-) []*v1.DeviceResource {
-	acceleratorType := v1.AcceleratorType(accelerator.Type)
-	devices := make([]*v1.DeviceResource, 0, len(accelerator.Devices))
-
-	for _, device := range accelerator.Devices {
-		if device.UUID == "" {
-			continue
-		}
-
-		allocatable := &v1.DeviceResourcePool{
-			MemoryMiB: device.MemoryMiB,
-			CoreUnits: 100,
-		}
-		devices = append(devices, &v1.DeviceResource{
-			UUID:    device.UUID,
-			Product: staticNodeDeviceProduct(nodeResource, acceleratorType, accelerator, device),
-			Health:  device.Healthy,
-			Allocatable: &v1.DeviceResourcePool{
-				MemoryMiB: allocatable.MemoryMiB,
-				CoreUnits: allocatable.CoreUnits,
-			},
-		})
-	}
-
-	sort.Slice(devices, func(i, j int) bool {
-		return devices[i].UUID < devices[j].UUID
-	})
-
-	return devices
-}
-
-func staticNodeDeviceProduct(
-	nodeResource *v1.NodeResourceStatus,
-	acceleratorType v1.AcceleratorType,
-	accelerator v1.StaticNodeAcceleratorStatus,
-	device v1.StaticNodeAcceleratorDeviceStatus,
-) string {
-	deviceProduct := firstNonEmptyString(device.ProductModel, device.ProductName, accelerator.ProductModel, accelerator.ProductName)
-	if product := staticNodeResourceProduct(nodeResource, acceleratorType, deviceProduct); product != "" {
-		return string(product)
-	}
-
-	if deviceProduct != "" {
-		return deviceProduct
-	}
-
-	return "unknown"
-}
-
-func staticNodeResourceProduct(
-	nodeResource *v1.NodeResourceStatus,
-	acceleratorType v1.AcceleratorType,
-	fallbackProduct string,
-) v1.AcceleratorProduct {
-	if nodeResource == nil {
-		return ""
-	}
-
-	if product := staticNodeResourceInfoProduct(nodeResource.Allocatable, acceleratorType, fallbackProduct); product != "" {
-		return product
-	}
-
-	return staticNodeResourceInfoProduct(nodeResource.Available, acceleratorType, fallbackProduct)
-}
-
-func staticNodeResourceInfoProduct(
-	info *v1.ResourceInfo,
-	acceleratorType v1.AcceleratorType,
-	fallbackProduct string,
-) v1.AcceleratorProduct {
-	if info == nil || info.AcceleratorGroups == nil {
-		return ""
-	}
-
-	group := info.AcceleratorGroups[acceleratorType]
-	if group == nil {
-		return ""
-	}
-
-	fallback := v1.AcceleratorProduct(fallbackProduct)
-	if fallbackProduct != "" {
-		if _, ok := group.ProductGroups[fallback]; ok {
-			return fallback
-		}
-
-		if _, ok := group.Products[fallback]; ok {
-			return fallback
-		}
-	}
-
-	if len(group.ProductGroups) == 1 {
-		for product := range group.ProductGroups {
-			return product
-		}
-	}
-
-	if len(group.Products) == 1 {
-		for product := range group.Products {
-			return product
-		}
-	}
-
-	return ""
-}
-
-func enrichStaticNodeClusterAcceleratorMetadata(
-	resources *v1.ClusterResources,
-	acceleratorType v1.AcceleratorType,
-	devices []*v1.DeviceResource,
-) {
-	if resources.AcceleratorMetadata == nil {
-		resources.AcceleratorMetadata = make(map[v1.AcceleratorType]*v1.AcceleratorMetadata)
-	}
-
-	metadata := resources.AcceleratorMetadata[acceleratorType]
-	if metadata == nil {
-		metadata = &v1.AcceleratorMetadata{Products: make(map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata)}
-		resources.AcceleratorMetadata[acceleratorType] = metadata
-	}
-
-	if metadata.Products == nil {
-		metadata.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata)
-	}
-
-	for _, device := range devices {
-		if device == nil || device.Product == "" || device.Allocatable == nil || device.Allocatable.MemoryMiB <= 0 {
-			continue
-		}
-
-		product := v1.AcceleratorProduct(device.Product)
-
-		productMetadata := metadata.Products[product]
-		if productMetadata == nil {
-			metadata.Products[product] = &v1.AcceleratorProductMetadata{
-				MemoryTotalMiB: float64(device.Allocatable.MemoryMiB),
-			}
-
-			continue
-		}
-
-		if productMetadata.MemoryTotalMiB == 0 {
-			productMetadata.MemoryTotalMiB = float64(device.Allocatable.MemoryMiB)
-		}
-	}
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-
-	return ""
 }
 
 func (controller *ClusterController) getUsedImageRegistry(c *v1.Cluster) (*v1.ImageRegistry, error) {

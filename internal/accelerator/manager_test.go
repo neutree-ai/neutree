@@ -33,6 +33,69 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
 }
 
+func TestManagerGetAcceleratorProfileRejectsMismatchedProfileType(t *testing.T) {
+	provider := &fakeStaticNodeAcceleratorPlugin{
+		acceleratorProfile: &v1.AcceleratorProfile{AcceleratorType: "other_gpu"},
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
+		resource:         "custom_gpu",
+		plugin:           provider,
+		lastRegisterTime: time.Now(),
+	})
+
+	profile, supported, err := m.GetAcceleratorProfile(context.Background(), "custom_gpu")
+
+	require.Error(t, err)
+	assert.False(t, supported)
+	assert.Nil(t, profile)
+	assert.Contains(t, err.Error(), "profile accelerator type other_gpu does not match requested type custom_gpu")
+}
+
+func TestManagerGetEngineRuntimeConfigUsesProfileEngineRuntime(t *testing.T) {
+	expected := &v1.RuntimeConfig{
+		ImageSuffix: "cuda-engine",
+		Runtime:     "nvidia",
+		Options:     []string{"--gpus", "all"},
+	}
+	provider := &fakeStaticNodeAcceleratorPlugin{
+		acceleratorProfile: &v1.AcceleratorProfile{
+			AcceleratorType: "custom_gpu",
+			EngineRuntime:   expected,
+		},
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
+		resource:         "custom_gpu",
+		plugin:           provider,
+		lastRegisterTime: time.Now(),
+	})
+
+	runtimeConfig, supported, err := m.GetEngineRuntimeConfig(context.Background(), "custom_gpu")
+
+	require.NoError(t, err)
+	assert.True(t, supported)
+	assert.Equal(t, *expected, runtimeConfig)
+}
+
+func TestManagerGetEngineRuntimeConfigNilEngineRuntimeIsEmptyConfig(t *testing.T) {
+	provider := &fakeStaticNodeAcceleratorPlugin{
+		acceleratorProfile: &v1.AcceleratorProfile{AcceleratorType: "custom_gpu"},
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
+		resource:         "custom_gpu",
+		plugin:           provider,
+		lastRegisterTime: time.Now(),
+	})
+
+	runtimeConfig, supported, err := m.GetEngineRuntimeConfig(context.Background(), "custom_gpu")
+
+	require.NoError(t, err)
+	assert.True(t, supported)
+	assert.Equal(t, v1.RuntimeConfig{}, runtimeConfig)
+}
+
 func TestManagerGetAcceleratorProfileNotFoundIsUnsupported(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
@@ -119,42 +182,6 @@ func TestManagerDetectAcceleratorTreatsDetectorErrorAsCPUFallback(t *testing.T) 
 	assert.Equal(t, 1, detector.detectCalls)
 }
 
-func TestManagerRuntimeProfileDelegatesToPluginProvider(t *testing.T) {
-	expected := &v1.AcceleratorProfile{AcceleratorType: "custom_gpu"}
-	provider := &fakeStaticNodeAcceleratorPlugin{
-		runtimeProfile:      expected,
-		runtimeProfileFound: true,
-	}
-	m := &manager{}
-	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
-		resource:         "custom_gpu",
-		plugin:           provider,
-		lastRegisterTime: time.Now(),
-	})
-	accelerator := v1.StaticNodeAcceleratorStatus{
-		Type:         "custom_gpu",
-		ProductModel: "custom-gpu-special",
-	}
-
-	profile, supported, err := m.RuntimeProfile(context.Background(), accelerator)
-
-	require.NoError(t, err)
-	assert.True(t, supported)
-	require.Equal(t, expected, profile)
-	assert.Equal(t, 1, provider.runtimeProfileCalls)
-	assert.Equal(t, accelerator, provider.runtimeProfileAccelerator)
-}
-
-func TestManagerRuntimeProfileCPUIsUnsupported(t *testing.T) {
-	m := &manager{}
-
-	profile, supported, err := m.RuntimeProfile(context.Background(), v1.CPUStaticNodeAcceleratorStatus())
-
-	require.NoError(t, err)
-	assert.False(t, supported)
-	assert.Nil(t, profile)
-}
-
 type fakeNodeCommandRunner struct{}
 
 func (fakeNodeCommandRunner) Run(ctx context.Context, command string) (string, error) {
@@ -168,10 +195,7 @@ type fakeStaticNodeAcceleratorPlugin struct {
 	detectErr   error
 	detectCalls int
 
-	runtimeProfile            *v1.AcceleratorProfile
-	runtimeProfileFound       bool
-	runtimeProfileAccelerator v1.StaticNodeAcceleratorStatus
-	runtimeProfileCalls       int
+	acceleratorProfile *v1.AcceleratorProfile
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) Resource() string {
@@ -193,16 +217,6 @@ func (p *fakeStaticNodeAcceleratorPlugin) DetectStaticNodeAccelerator(
 	p.detectCalls++
 
 	return p.detected, p.matched, p.detectErr
-}
-
-func (p *fakeStaticNodeAcceleratorPlugin) RuntimeProfile(
-	ctx context.Context,
-	accelerator v1.StaticNodeAcceleratorStatus,
-) (*v1.AcceleratorProfile, bool, error) {
-	p.runtimeProfileCalls++
-	p.runtimeProfileAccelerator = accelerator
-
-	return p.runtimeProfile, p.runtimeProfileFound, nil
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) GetNodeAccelerator(
@@ -233,4 +247,8 @@ func (p *fakeStaticNodeAcceleratorPlugin) GetResourceParser() resourceparser.Res
 
 func (p *fakeStaticNodeAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
 	return v1.RuntimeConfig{}, nil
+}
+
+func (p *fakeStaticNodeAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+	return p.acceleratorProfile, nil
 }

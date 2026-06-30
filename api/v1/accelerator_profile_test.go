@@ -19,11 +19,17 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 			},
 			Options: []string{"--gpus all"},
 		},
+		EngineRuntime: &RuntimeConfig{
+			ImageSuffix: "cuda-engine",
+			Runtime:     "nvidia",
+			Options:     []string{"--gpus", "all"},
+		},
 	}
 
 	data, err := json.Marshal(profile)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"cluster_runtime"`)
+	assert.Contains(t, string(data), `"engine_runtime"`)
 
 	decoded := AcceleratorProfile{}
 	require.NoError(t, json.Unmarshal(data, &decoded))
@@ -32,6 +38,10 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "cuda", decoded.ClusterRuntime.ImageSuffix)
 	assert.Equal(t, "nvidia", decoded.ClusterRuntime.Runtime)
 	assert.Equal(t, []string{"--gpus all"}, decoded.ClusterRuntime.Options)
+	require.NotNil(t, decoded.EngineRuntime)
+	assert.Equal(t, "cuda-engine", decoded.EngineRuntime.ImageSuffix)
+	assert.Equal(t, "nvidia", decoded.EngineRuntime.Runtime)
+	assert.Equal(t, []string{"--gpus", "all"}, decoded.EngineRuntime.Options)
 }
 
 func TestGetAcceleratorProfileResponse(t *testing.T) {

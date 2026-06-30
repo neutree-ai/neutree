@@ -272,8 +272,8 @@ func NewStaticNodeClusterControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		staticNodeClusterController, err := controllers.NewStaticNodeClusterController(
 			&controllers.StaticNodeClusterControllerOption{
-				Store:                  storage.NewStaticNodeObjectStore(opts.storage),
-				RuntimeProfileProvider: opts.config.AcceleratorManager,
+				Store:                      storage.NewStaticNodeObjectStore(opts.storage),
+				AcceleratorProfileProvider: opts.config.AcceleratorManager,
 			},
 		)
 		if err != nil {
@@ -300,7 +300,7 @@ func NewStaticNodeControllerFactory() ControllerFactory {
 
 		staticNodeController, err := controllers.NewStaticNodeController(&controllers.StaticNodeControllerOption{
 			Store:         store,
-			RunnerFactory: controllers.NewStaticNodeSSHRunnerFactory(),
+			RunnerFactory: clusterreconcile.NewStaticNodeSSHRunnerFactory(),
 			Reconciler: &clusterreconcile.StaticNodeReconciler{
 				AcceleratorManager: opts.config.AcceleratorManager,
 				HeadReadyChecker: &clusterreconcile.StaticNodeStoreHeadReadyChecker{

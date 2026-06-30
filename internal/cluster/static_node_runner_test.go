@@ -1,4 +1,4 @@
-package controllers
+package cluster
 
 import (
 	"context"

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +14,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
@@ -26,10 +24,9 @@ const (
 	warmReasonImageReady         = "ImageReady"
 
 	componentReasonConfigWriteFailed = "ConfigWriteFailed"
-	componentReasonDependencyPending = "DependencyPending"
-	componentReasonExternallyManaged = "ExternallyManaged"
 	componentReasonHeadPending       = "HeadNodePending"
 	componentReasonHealthCheckFailed = "HealthCheckFailed"
+	componentReasonImageMissing      = "ImageMissing"
 	componentReasonInspectFailed     = "ContainerInspectFailed"
 	componentReasonRunFailed         = "ContainerRunFailed"
 	componentReasonRunning           = "Running"
@@ -49,9 +46,8 @@ type staticNodeFileRunner interface {
 }
 
 type StaticNodeReconciler struct {
-	AcceleratorManager  StaticNodeAcceleratorManager
-	HeadReadyChecker    StaticNodeHeadReadyChecker
-	NewDashboardService dashboard.NewDashboardServiceFunc
+	AcceleratorManager StaticNodeAcceleratorManager
+	HeadReadyChecker   StaticNodeHeadReadyChecker
 }
 
 type StaticNodeReconcileResult struct {
@@ -342,7 +338,6 @@ func (r *StaticNodeReconciler) ReconcileComponents(
 	}
 
 	statuses := make([]v1.NodeComponentStatus, 0, len(node.Spec.Components)+existingComponentStatusCount(node))
-	readyByName := map[string]bool{}
 	errs := []error{}
 
 	staleStatuses, staleErrs := stopStaleComponents(ctx, node, runner)
@@ -350,9 +345,8 @@ func (r *StaticNodeReconciler) ReconcileComponents(
 	errs = append(errs, staleErrs...)
 
 	for _, component := range node.Spec.Components {
-		status, err := r.reconcileComponent(ctx, node, component, node.Spec.Components, readyByName, runner)
+		status, err := r.reconcileComponent(ctx, node, component, runner)
 		statuses = append(statuses, status)
-		readyByName[component.Name] = status.Ready
 
 		if err != nil {
 			errs = append(errs, err)
@@ -374,8 +368,6 @@ func (r *StaticNodeReconciler) reconcileComponent(
 	ctx context.Context,
 	node *v1.StaticNode,
 	component v1.NodeComponentSpec,
-	desiredComponents []v1.NodeComponentSpec,
-	readyByName map[string]bool,
 	runner StaticNodeCommandRunner,
 ) (v1.NodeComponentStatus, error) {
 	status := v1.NodeComponentStatus{
@@ -398,22 +390,12 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		return status, nil
 	}
 
-	for _, dependency := range implicitComponentDependencies(component, desiredComponents) {
-		if !readyByName[dependency] {
-			status.Phase = v1.NodeComponentPhasePending
-			status.Reason = componentReasonDependencyPending
-			status.Message = fmt.Sprintf("dependency %s is not ready", dependency)
-
-			return status, nil
-		}
-	}
-
 	if component.Image == "" {
-		status.Ready = true
-		status.Phase = v1.NodeComponentPhaseRunning
-		status.Reason = componentReasonExternallyManaged
+		status.Phase = v1.NodeComponentPhaseFailed
+		status.Reason = componentReasonImageMissing
+		status.Message = "component image is required"
 
-		return status, nil
+		return status, errors.New(status.Message)
 	}
 
 	configChanged, err := writeComponentConfigFiles(ctx, runner, component)
@@ -428,13 +410,13 @@ func (r *StaticNodeReconciler) reconcileComponent(
 	running, err := componentContainerMatches(ctx, runner, componentContainerName(node, component), status.ObservedHash)
 	if err != nil {
 		status.Phase = v1.NodeComponentPhaseStarting
-		status.Reason = componentReasonInspectFailed
+		status.Reason = staticNodeDockerReason(err, componentReasonInspectFailed)
 	}
 
 	if configChanged || !running {
 		if err := restartComponentContainer(ctx, runner, node, component, status.ObservedHash); err != nil {
 			status.Phase = v1.NodeComponentPhaseFailed
-			status.Reason = componentReasonRunFailed
+			status.Reason = staticNodeDockerReason(err, componentReasonRunFailed)
 			status.Message = err.Error()
 
 			return status, err
@@ -492,7 +474,7 @@ func stopStaleComponents(
 
 		if err := stopComponentContainer(ctx, runner, componentContainerName(node, component)); err != nil {
 			status.Phase = v1.NodeComponentPhaseFailed
-			status.Reason = componentReasonRunFailed
+			status.Reason = staticNodeDockerReason(err, componentReasonRunFailed)
 			status.Message = err.Error()
 			errs = append(errs, err)
 		}
@@ -501,10 +483,6 @@ func stopStaleComponents(
 	}
 
 	return statuses, errs
-}
-
-func implicitComponentDependencies(component v1.NodeComponentSpec, desiredComponents []v1.NodeComponentSpec) []string {
-	return nil
 }
 
 func (r *StaticNodeReconciler) shouldWaitForHead(
@@ -585,17 +563,7 @@ func componentContainerMatches(
 	containerName string,
 	componentHash string,
 ) (bool, error) {
-	output, err := runner.Run(ctx, "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' "+shellArg(containerName))
-	if err != nil {
-		return false, err
-	}
-
-	fields := strings.Fields(lastNonEmptyLine(output))
-	if len(fields) != 2 {
-		return false, nil
-	}
-
-	return fields[0] == componentHash && fields[1] == "true", nil
+	return (StaticNodeDockerRuntime{}).ComponentContainerMatches(ctx, runner, containerName, componentHash)
 }
 
 func restartComponentContainer(
@@ -605,20 +573,7 @@ func restartComponentContainer(
 	component v1.NodeComponentSpec,
 	componentHash string,
 ) error {
-	if err := ensureComponentImage(ctx, runner, component.Image); err != nil {
-		return errors.Wrapf(err, "failed to pull component image %s", component.Image)
-	}
-
-	containerName := componentContainerName(node, component)
-	if _, err := runner.Run(ctx, "docker rm -f "+shellArg(containerName)+" >/dev/null 2>&1 || true"); err != nil {
-		return errors.Wrapf(err, "failed to remove component container %s", containerName)
-	}
-
-	if _, err := runner.Run(ctx, buildDockerRunCommand(node, component, componentHash)); err != nil {
-		return errors.Wrapf(err, "failed to run component container %s", containerName)
-	}
-
-	return nil
+	return (StaticNodeDockerRuntime{}).RestartComponentContainer(ctx, runner, node, component, componentHash)
 }
 
 func stopComponentContainer(
@@ -626,21 +581,11 @@ func stopComponentContainer(
 	runner StaticNodeCommandRunner,
 	containerName string,
 ) error {
-	if _, err := runner.Run(ctx, "docker rm -f "+shellArg(containerName)+" >/dev/null 2>&1 || true"); err != nil {
-		return errors.Wrapf(err, "failed to remove component container %s", containerName)
-	}
-
-	return nil
+	return (StaticNodeDockerRuntime{}).RemoveContainer(ctx, runner, containerName)
 }
 
 func ensureComponentImage(ctx context.Context, runner StaticNodeCommandRunner, image string) error {
-	if _, err := runner.Run(ctx, "docker pull "+shellArg(image)); err == nil {
-		return nil
-	} else if _, inspectErr := runner.Run(ctx, "docker image inspect "+shellArg(image)+" >/dev/null"); inspectErr != nil {
-		return err
-	}
-
-	return nil
+	return (StaticNodeDockerRuntime{}).EnsureImage(ctx, runner, image)
 }
 
 func (r *StaticNodeReconciler) checkComponentHealth(
@@ -666,15 +611,6 @@ func (r *StaticNodeReconciler) checkComponentHealth(
 	timeout := component.HealthCheck.TimeoutSec
 	if timeout <= 0 {
 		timeout = 5
-	}
-
-	dashboardURL := componentHealthBaseURL(node, component.HealthCheck)
-
-	switch component.Type {
-	case v1.NodeComponentTypeRayHead:
-		return r.checkRayHeadDashboardHealth(dashboardURL, staticNodeHealthHost(node), component.HealthCheck.RayNodeLabels)
-	case v1.NodeComponentTypeRayWorker:
-		return r.checkRayWorkerDashboardHealth(dashboardURL, staticNodeHealthHost(node), component.HealthCheck.RayNodeLabels)
 	}
 
 	if component.HealthCheck.HTTPPath == "" {
@@ -737,195 +673,6 @@ func doHealthHTTPGet(ctx context.Context, url string, timeoutSec int) (*http.Res
 	}
 
 	return client.Do(request)
-}
-
-func (r *StaticNodeReconciler) checkRayHeadDashboardHealth(
-	dashboardURL string,
-	nodeIP string,
-	expectedLabels map[string]string,
-) error {
-	if len(expectedLabels) == 0 {
-		_, err := r.dashboardService(dashboardURL).GetClusterMetadata()
-
-		return err
-	}
-
-	return r.checkRayDashboardNodeHealth(dashboardURL, nodeIP, expectedLabels)
-}
-
-func (r *StaticNodeReconciler) checkRayWorkerDashboardHealth(
-	dashboardURL string,
-	nodeIP string,
-	expectedLabels map[string]string,
-) error {
-	return r.checkRayDashboardNodeHealth(dashboardURL, nodeIP, expectedLabels)
-}
-
-func (r *StaticNodeReconciler) checkRayDashboardNodeHealth(
-	dashboardURL string,
-	nodeIP string,
-	expectedLabels map[string]string,
-) error {
-	nodes, err := r.dashboardService(dashboardURL).ListNodes()
-	if err != nil {
-		return errors.Wrap(err, "failed to list ray dashboard nodes")
-	}
-
-	for _, node := range nodes {
-		if node.IP != nodeIP || node.Raylet.State != v1.AliveNodeState {
-			continue
-		}
-
-		if err := validateRayNodeLabels(node.Raylet.Labels, expectedLabels); err != nil {
-			return fmt.Errorf("ray node %s %w", nodeIP, err)
-		}
-
-		return nil
-	}
-
-	return fmt.Errorf("ray node %s is not alive in dashboard", nodeIP)
-}
-
-func validateRayNodeLabels(actual map[string]string, expected map[string]string) error {
-	keys := make([]string, 0, len(expected))
-	for key := range expected {
-		keys = append(keys, key)
-	}
-
-	sort.Strings(keys)
-
-	for _, key := range keys {
-		if actual[key] != expected[key] {
-			return fmt.Errorf("label %s mismatch: expected %q, got %q", key, expected[key], actual[key])
-		}
-	}
-
-	return nil
-}
-
-func (r *StaticNodeReconciler) dashboardService(dashboardURL string) dashboard.DashboardService {
-	if r != nil && r.NewDashboardService != nil {
-		return r.NewDashboardService(dashboardURL)
-	}
-
-	return dashboard.NewDashboardService(dashboardURL)
-}
-
-func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, componentHash string) string {
-	parts := []string{
-		"docker", "run", "-d",
-		"--name", shellArg(componentContainerName(node, component)),
-		"--label", shellArg(componentHashLabel + "=" + componentHash),
-		"--label", shellArg(componentNameLabel + "=" + component.Name),
-	}
-
-	if node != nil && node.Spec != nil && node.Spec.Cluster != "" {
-		parts = append(parts, "--label", shellArg(clusterNameLabel+"="+node.Spec.Cluster))
-	}
-
-	parts = append(parts, "--restart", "unless-stopped")
-
-	parts = append(parts, dockerRunOptionArgs(component.DockerRunOptions)...)
-
-	if !usesHostNetwork(component.DockerRunOptions) {
-		for _, port := range component.Ports {
-			if port.Port == 0 {
-				continue
-			}
-
-			parts = append(parts, "-p", fmt.Sprintf("%d:%d", port.Port, port.Port))
-		}
-	}
-
-	envKeys := make([]string, 0, len(component.Env))
-	for key := range component.Env {
-		envKeys = append(envKeys, key)
-	}
-
-	sort.Strings(envKeys)
-
-	for _, key := range envKeys {
-		parts = append(parts, "-e", shellArg(key+"="+component.Env[key]))
-	}
-
-	for _, volume := range component.Volumes {
-		if volume.HostPath == "" || volume.MountPath == "" {
-			continue
-		}
-
-		value := volume.HostPath + ":" + volume.MountPath
-		if volume.ReadOnly {
-			value += ":ro"
-		}
-
-		parts = append(parts, "-v", shellArg(value))
-	}
-
-	parts = append(parts, shellArg(component.Image))
-	parts = append(parts, shellArgs(component.Command)...)
-	parts = append(parts, shellArgs(component.Args)...)
-
-	return strings.Join(parts, " ")
-}
-
-func usesHostNetwork(options []string) bool {
-	for _, option := range options {
-		fields := strings.Fields(option)
-		if len(fields) == 0 {
-			continue
-		}
-
-		if fields[0] == "--net=host" || fields[0] == "--network=host" {
-			return true
-		}
-
-		if len(fields) > 1 && (fields[0] == "--net" || fields[0] == "--network") && fields[1] == "host" {
-			return true
-		}
-	}
-
-	return false
-}
-
-func dockerRunOptionArgs(options []string) []string {
-	result := []string{}
-	for _, option := range options {
-		result = append(result, shellArgs(strings.Fields(option))...)
-	}
-
-	return result
-}
-
-func componentContainerName(node *v1.StaticNode, component v1.NodeComponentSpec) string {
-	prefix := "neutree"
-	if node != nil && node.Spec != nil && node.Spec.Cluster != "" {
-		prefix += "-" + node.Spec.Cluster
-	}
-
-	return sanitizeContainerName(prefix + "-" + component.Name)
-}
-
-func sanitizeContainerName(value string) string {
-	var builder strings.Builder
-	lastDash := false
-
-	for _, r := range strings.ToLower(value) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			builder.WriteRune(r)
-
-			lastDash = false
-
-			continue
-		}
-
-		if !lastDash {
-			builder.WriteByte('-')
-
-			lastDash = true
-		}
-	}
-
-	return strings.Trim(builder.String(), "-")
 }
 
 func componentHash(component v1.NodeComponentSpec) string {
@@ -1005,12 +752,7 @@ func (r *StaticNodeReconciler) reconcileWarmImage(
 }
 
 func inspectDockerImage(ctx context.Context, runner StaticNodeCommandRunner, imageRef string) (string, error) {
-	output, err := runner.Run(ctx, "docker image inspect --format='{{index .RepoDigests 0}}' "+shellArg(imageRef))
-	if err != nil {
-		return "", err
-	}
-
-	return lastNonEmptyLine(output), nil
+	return (StaticNodeDockerRuntime{}).InspectImageDigest(ctx, runner, imageRef)
 }
 
 func lastNonEmptyLine(output string) string {

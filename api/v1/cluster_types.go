@@ -199,12 +199,28 @@ func (c Cluster) IsInitialized() bool {
 	return c.Status.Initialized
 }
 
+const (
+	ForceDeleteAnnotationKey   = "neutree.ai/force-delete"
+	ForceDeleteAnnotationValue = "true"
+)
+
 func IsForceDelete(annotations map[string]string) bool {
 	if annotations == nil {
 		return false
 	}
 
-	return annotations["neutree.ai/force-delete"] == "true"
+	return annotations[ForceDeleteAnnotationKey] == ForceDeleteAnnotationValue
+}
+
+func WithForceDeleteAnnotation(annotations map[string]string) map[string]string {
+	next := make(map[string]string, len(annotations)+1)
+	for key, value := range annotations {
+		next[key] = value
+	}
+
+	next[ForceDeleteAnnotationKey] = ForceDeleteAnnotationValue
+
+	return next
 }
 
 type ClusterPhase string

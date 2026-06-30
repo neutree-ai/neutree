@@ -67,13 +67,6 @@ type StaticNodeAcceleratorDetector interface {
 	) (*v1.StaticNodeAcceleratorStatus, bool, error)
 }
 
-type StaticNodeRuntimeProfileProvider interface {
-	RuntimeProfile(
-		ctx context.Context,
-		accelerator v1.StaticNodeAcceleratorStatus,
-	) (*v1.AcceleratorProfile, bool, error)
-}
-
 // ResourceConverter is the interface for resource converters
 // Converts Neutree's unified resource specifications to resource configurations for different cluster types (Ray, Kubernetes)
 type ResourceConverter interface {

@@ -7,20 +7,22 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	staticclient "github.com/neutree-ai/neutree/internal/client"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type StaticNodeController struct {
 	store         *storage.StaticNodeObjectStore
-	runnerFactory *StaticNodeSSHRunnerFactory
+	nodes         *staticclient.StaticNodeClient
+	runnerFactory *clusterreconcile.StaticNodeSSHRunnerFactory
 	reconciler    *clusterreconcile.StaticNodeReconciler
 	newRunner     func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error)
 }
 
 type StaticNodeControllerOption struct {
 	Store         *storage.StaticNodeObjectStore
-	RunnerFactory *StaticNodeSSHRunnerFactory
+	RunnerFactory *clusterreconcile.StaticNodeSSHRunnerFactory
 	Reconciler    *clusterreconcile.StaticNodeReconciler
 }
 
@@ -31,11 +33,12 @@ func NewStaticNodeController(option *StaticNodeControllerOption) (*StaticNodeCon
 
 	runnerFactory := option.RunnerFactory
 	if runnerFactory == nil {
-		runnerFactory = NewStaticNodeSSHRunnerFactory()
+		runnerFactory = clusterreconcile.NewStaticNodeSSHRunnerFactory()
 	}
 
 	c := &StaticNodeController{
 		store:         option.Store,
+		nodes:         staticclient.NewStaticNodeClient(option.Store),
 		runnerFactory: runnerFactory,
 		reconciler:    option.Reconciler,
 	}
@@ -76,52 +79,50 @@ func (c *StaticNodeController) sync(ctx context.Context, node *v1.StaticNode) er
 
 	var runner clusterreconcile.StaticNodeCommandRunner
 
-	if clusterreconcile.NeedsStaticNodeRunner(node, reconciler) {
-		if c.newRunner == nil {
-			if isForceDelete {
-				klog.Warning("static node runner factory is required; force deleting static node without remote cleanup")
-				return c.store.HardDeleteStaticNode(ctx, node)
-			}
-
-			return errors.New("static node runner factory is required")
+	if c.newRunner == nil {
+		if isForceDelete {
+			klog.Warning("static node runner factory is required; force deleting static node without remote cleanup")
+			return c.nodes.HardDelete(ctx, node)
 		}
 
-		nodeRunner, err := c.newRunner(ctx, node)
-		if err != nil {
-			if isForceDelete {
-				klog.Warningf("failed to create static node runner during force delete: %v", err)
-				return c.store.HardDeleteStaticNode(ctx, node)
-			}
-
-			return errors.Wrap(err, "failed to create static node runner")
-		}
-
-		runner = nodeRunner
-		defer closeStaticNodeRunner(nodeRunner)
+		return errors.New("static node runner factory is required")
 	}
+
+	nodeRunner, err := c.newRunner(ctx, node)
+	if err != nil {
+		if isForceDelete {
+			klog.Warningf("failed to create static node runner during force delete: %v", err)
+			return c.nodes.HardDelete(ctx, node)
+		}
+
+		return errors.Wrap(err, "failed to create static node runner")
+	}
+
+	runner = nodeRunner
+	defer closeStaticNodeRunner(nodeRunner)
 
 	if isDeleting {
 		if err := reconciler.Delete(ctx, node, runner); err != nil {
 			if isForceDelete {
 				klog.Warningf("static node remote cleanup failed during force delete: %v", err)
-				return c.store.HardDeleteStaticNode(ctx, node)
+				return c.nodes.HardDelete(ctx, node)
 			}
 
 			status := clusterreconcile.BuildStaticNodeStatus(node, nil, err)
-			if updateErr := c.store.UpdateStaticNodeStatus(ctx, node, status); updateErr != nil {
+			if updateErr := c.nodes.UpdateStatus(ctx, node, status); updateErr != nil {
 				return errors.Wrap(updateErr, "failed to update static node status")
 			}
 
 			return err
 		}
 
-		return c.store.HardDeleteStaticNode(ctx, node)
+		return c.nodes.HardDelete(ctx, node)
 	}
 
 	result, err := reconciler.Reconcile(ctx, node, runner)
 	status := clusterreconcile.BuildStaticNodeStatus(node, result, err)
 
-	if updateErr := c.store.UpdateStaticNodeStatus(ctx, node, status); updateErr != nil {
+	if updateErr := c.nodes.UpdateStatus(ctx, node, status); updateErr != nil {
 		return errors.Wrap(updateErr, "failed to update static node status")
 	}
 

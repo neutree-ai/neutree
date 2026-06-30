@@ -370,14 +370,13 @@ func TestClusterControllerSyncRejectsInvalidStaticClusterVersion(t *testing.T) {
 
 func TestClusterControllerLegacyToStaticNodeFlowCleansLegacyRuntimeBeforeCreate(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
+	legacyReconcile := clustermocks.NewMockClusterReconcile(t)
 	cleanupCalled := false
 	controller := &ClusterController{
 		storage:               mockStorage,
 		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
-		cleanupLegacyStaticRuntime: func(_ *v1.Cluster) error {
-			cleanupCalled = true
-
-			return nil
+		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
+			return legacyReconcile, nil
 		},
 	}
 	input := &v1.Cluster{
@@ -414,6 +413,9 @@ func TestClusterControllerLegacyToStaticNodeFlowCleansLegacyRuntimeBeforeCreate(
 		},
 	}, nil).Once()
 	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil).Once()
+	legacyReconcile.On("ReconcileDelete", mock.Anything, input).Run(func(_ mock.Arguments) {
+		cleanupCalled = true
+	}).Return(nil).Once()
 	mockStorage.On("CreateStaticNodeCluster", mock.MatchedBy(func(_ *v1.StaticNodeCluster) bool {
 		assert.True(t, cleanupCalled, "legacy cleanup must finish before creating StaticNodeCluster")
 

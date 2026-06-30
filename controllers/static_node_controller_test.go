@@ -37,7 +37,7 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 	statusObj, ok := objectStorage.updatedStatus["8"].(*v1.StaticNode)
 	require.True(t, ok)
 	require.NotNil(t, statusObj.Status)
-	assert.Equal(t, v1.StaticNodePhaseReady, statusObj.Status.Phase)
+	assert.Equal(t, v1.StaticNodePhaseReconciling, statusObj.Status.Phase)
 	require.NotNil(t, statusObj.Status.Warm)
 	assert.True(t, statusObj.Status.Warm.Ready)
 	assert.Equal(t, 1, runner.calls)
@@ -79,6 +79,33 @@ func TestStaticNodeControllerForceDeleteHardDeletesAfterBestEffortCleanup(t *tes
 	require.NoError(t, err)
 	assert.Equal(t, []string{"8"}, objectStorage.deletedIDs)
 	assert.Empty(t, objectStorage.updatedStatus)
+}
+
+func TestStaticNodeControllerReconcileAlwaysCreatesRunner(t *testing.T) {
+	objectStorage := &fakeControllerStaticNodeObjectStorage{}
+	node := controllerStaticNode()
+	node.Spec.Warm = nil
+	node.Spec.Components = nil
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
+		Store: storage.NewStaticNodeObjectStore(objectStorage),
+	})
+	require.NoError(t, err)
+
+	runnerCreated := false
+	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
+		runnerCreated = true
+
+		return &fakeControllerStaticNodeRunner{}, nil
+	}
+
+	err = controller.Reconcile(node)
+
+	require.NoError(t, err)
+	assert.True(t, runnerCreated)
+	statusObj, ok := objectStorage.updatedStatus["8"].(*v1.StaticNode)
+	require.True(t, ok)
+	require.NotNil(t, statusObj.Status)
+	assert.Equal(t, v1.StaticNodePhaseReconciling, statusObj.Status.Phase)
 }
 
 type fakeControllerStaticNodeObjectStorage struct {

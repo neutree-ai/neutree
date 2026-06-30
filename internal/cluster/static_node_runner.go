@@ -1,4 +1,4 @@
-package controllers
+package cluster
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command"
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
@@ -32,7 +31,7 @@ func NewStaticNodeSSHRunnerFactory() *StaticNodeSSHRunnerFactory {
 func (f *StaticNodeSSHRunnerFactory) NewStaticNodeRunner(
 	_ context.Context,
 	node *v1.StaticNode,
-) (clusterreconcile.StaticNodeCommandRunner, error) {
+) (StaticNodeCommandRunner, error) {
 	if node == nil || node.Spec == nil {
 		return nil, errors.New("static node spec is required")
 	}

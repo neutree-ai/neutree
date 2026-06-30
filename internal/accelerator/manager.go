@@ -22,10 +22,10 @@ type Manager interface {
 
 	Start(ctx context.Context)
 	DetectAccelerator(ctx context.Context, runner NodeCommandRunner) (*v1.StaticNodeAcceleratorStatus, error)
-	RuntimeProfile(ctx context.Context, accelerator v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, bool, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
+	GetEngineRuntimeConfig(ctx context.Context, acceleratorType string) (v1.RuntimeConfig, bool, error)
 
 	// GetAllConverters returns all registered resource converters
 	GetAllConverters() map[string]plugin.ResourceConverter
@@ -228,37 +228,6 @@ func (a *manager) DetectAccelerator(
 	return &cpu, nil
 }
 
-func (a *manager) RuntimeProfile(
-	ctx context.Context,
-	accelerator v1.StaticNodeAcceleratorStatus,
-) (*v1.AcceleratorProfile, bool, error) {
-	if accelerator.Type == "" || accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
-		return nil, false, nil
-	}
-
-	p, ok := a.GetPlugin(accelerator.Type)
-	if !ok {
-		return nil, false, nil
-	}
-
-	provider, ok := staticNodeRuntimeProfileProvider(p)
-	if ok {
-		profile, supported, err := provider.RuntimeProfile(ctx, accelerator)
-		if err != nil {
-			return nil, false, errors.Wrapf(err, "get runtime profile from plugin %s failed", p.Resource())
-		}
-
-		return profile, supported, nil
-	}
-
-	profile, supported, err := a.getAcceleratorProfile(ctx, accelerator.Type, false)
-	if err != nil {
-		return nil, false, err
-	}
-
-	return profile, supported, nil
-}
-
 func staticNodeAcceleratorDetector(p plugin.AcceleratorPlugin) (plugin.StaticNodeAcceleratorDetector, bool) {
 	if detector, ok := p.(plugin.StaticNodeAcceleratorDetector); ok {
 		return detector, true
@@ -267,16 +236,6 @@ func staticNodeAcceleratorDetector(p plugin.AcceleratorPlugin) (plugin.StaticNod
 	detector, ok := p.Handle().(plugin.StaticNodeAcceleratorDetector)
 
 	return detector, ok
-}
-
-func staticNodeRuntimeProfileProvider(p plugin.AcceleratorPlugin) (plugin.StaticNodeRuntimeProfileProvider, bool) {
-	if provider, ok := p.(plugin.StaticNodeRuntimeProfileProvider); ok {
-		return provider, true
-	}
-
-	provider, ok := p.Handle().(plugin.StaticNodeRuntimeProfileProvider)
-
-	return provider, ok
 }
 
 func (a *manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {
@@ -396,9 +355,31 @@ func (a *manager) getAcceleratorProfile(
 		copied := *profile
 		copied.AcceleratorType = acceleratorType
 		profile = &copied
+	} else if profile.AcceleratorType != acceleratorType {
+		return nil, false, errors.Errorf(
+			"profile accelerator type %s does not match requested type %s",
+			profile.AcceleratorType,
+			acceleratorType,
+		)
 	}
 
 	return profile, true, nil
+}
+
+func (a *manager) GetEngineRuntimeConfig(
+	ctx context.Context,
+	acceleratorType string,
+) (v1.RuntimeConfig, bool, error) {
+	profile, supported, err := a.GetAcceleratorProfile(ctx, acceleratorType)
+	if err != nil || !supported {
+		return v1.RuntimeConfig{}, supported, err
+	}
+
+	if profile == nil || profile.EngineRuntime == nil {
+		return v1.RuntimeConfig{}, true, nil
+	}
+
+	return *profile.EngineRuntime, true, nil
 }
 
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {

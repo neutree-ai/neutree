@@ -358,6 +358,70 @@ func (_c *MockManager_GetEngineContainerRunOptions_Call) RunAndReturn(run func(s
 	return _c
 }
 
+// GetEngineRuntimeConfig provides a mock function with given fields: ctx, acceleratorType
+func (_m *MockManager) GetEngineRuntimeConfig(ctx context.Context, acceleratorType string) (v1.RuntimeConfig, bool, error) {
+	ret := _m.Called(ctx, acceleratorType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEngineRuntimeConfig")
+	}
+
+	var r0 v1.RuntimeConfig
+	var r1 bool
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (v1.RuntimeConfig, bool, error)); ok {
+		return rf(ctx, acceleratorType)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) v1.RuntimeConfig); ok {
+		r0 = rf(ctx, acceleratorType)
+	} else {
+		r0 = ret.Get(0).(v1.RuntimeConfig)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) bool); ok {
+		r1 = rf(ctx, acceleratorType)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, string) error); ok {
+		r2 = rf(ctx, acceleratorType)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockManager_GetEngineRuntimeConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEngineRuntimeConfig'
+type MockManager_GetEngineRuntimeConfig_Call struct {
+	*mock.Call
+}
+
+// GetEngineRuntimeConfig is a helper method to define mock.On call
+//   - ctx context.Context
+//   - acceleratorType string
+func (_e *MockManager_Expecter) GetEngineRuntimeConfig(ctx interface{}, acceleratorType interface{}) *MockManager_GetEngineRuntimeConfig_Call {
+	return &MockManager_GetEngineRuntimeConfig_Call{Call: _e.mock.On("GetEngineRuntimeConfig", ctx, acceleratorType)}
+}
+
+func (_c *MockManager_GetEngineRuntimeConfig_Call) Run(run func(ctx context.Context, acceleratorType string)) *MockManager_GetEngineRuntimeConfig_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockManager_GetEngineRuntimeConfig_Call) Return(_a0 v1.RuntimeConfig, _a1 bool, _a2 error) *MockManager_GetEngineRuntimeConfig_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockManager_GetEngineRuntimeConfig_Call) RunAndReturn(run func(context.Context, string) (v1.RuntimeConfig, bool, error)) *MockManager_GetEngineRuntimeConfig_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetImageSuffix provides a mock function with given fields: acceleratorType
 func (_m *MockManager) GetImageSuffix(acceleratorType string) string {
 	ret := _m.Called(acceleratorType)
@@ -633,72 +697,6 @@ func (_c *MockManager_GetPlugin_Call) Return(_a0 plugin.AcceleratorPlugin, _a1 b
 }
 
 func (_c *MockManager_GetPlugin_Call) RunAndReturn(run func(string) (plugin.AcceleratorPlugin, bool)) *MockManager_GetPlugin_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RuntimeProfile provides a mock function with given fields: ctx, _a1
-func (_m *MockManager) RuntimeProfile(ctx context.Context, _a1 v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error) {
-	ret := _m.Called(ctx, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RuntimeProfile")
-	}
-
-	var r0 *v1.AcceleratorProfile
-	var r1 bool
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)); ok {
-		return rf(ctx, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, v1.StaticNodeAcceleratorStatus) *v1.AcceleratorProfile); ok {
-		r0 = rf(ctx, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*v1.AcceleratorProfile)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, v1.StaticNodeAcceleratorStatus) bool); ok {
-		r1 = rf(ctx, _a1)
-	} else {
-		r1 = ret.Get(1).(bool)
-	}
-
-	if rf, ok := ret.Get(2).(func(context.Context, v1.StaticNodeAcceleratorStatus) error); ok {
-		r2 = rf(ctx, _a1)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
-}
-
-// MockManager_RuntimeProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RuntimeProfile'
-type MockManager_RuntimeProfile_Call struct {
-	*mock.Call
-}
-
-// RuntimeProfile is a helper method to define mock.On call
-//   - ctx context.Context
-//   - _a1 v1.StaticNodeAcceleratorStatus
-func (_e *MockManager_Expecter) RuntimeProfile(ctx interface{}, _a1 interface{}) *MockManager_RuntimeProfile_Call {
-	return &MockManager_RuntimeProfile_Call{Call: _e.mock.On("RuntimeProfile", ctx, _a1)}
-}
-
-func (_c *MockManager_RuntimeProfile_Call) Run(run func(ctx context.Context, _a1 v1.StaticNodeAcceleratorStatus)) *MockManager_RuntimeProfile_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(v1.StaticNodeAcceleratorStatus))
-	})
-	return _c
-}
-
-func (_c *MockManager_RuntimeProfile_Call) Return(_a0 *v1.AcceleratorProfile, _a1 bool, _a2 error) *MockManager_RuntimeProfile_Call {
-	_c.Call.Return(_a0, _a1, _a2)
-	return _c
-}
-
-func (_c *MockManager_RuntimeProfile_Call) RunAndReturn(run func(context.Context, v1.StaticNodeAcceleratorStatus) (*v1.AcceleratorProfile, bool, error)) *MockManager_RuntimeProfile_Call {
 	_c.Call.Return(run)
 	return _c
 }

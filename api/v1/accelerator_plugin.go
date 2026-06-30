@@ -102,6 +102,7 @@ type RuntimeConfig struct {
 type AcceleratorProfile struct {
 	AcceleratorType string         `json:"accelerator_type"`
 	ClusterRuntime  *RuntimeConfig `json:"cluster_runtime,omitempty"`
+	EngineRuntime   *RuntimeConfig `json:"engine_runtime,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {

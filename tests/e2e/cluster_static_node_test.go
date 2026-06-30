@@ -55,7 +55,7 @@ var _ = Describe("Static Node Cluster Lifecycle", Ordered, Label("cluster", "ssh
 		}
 	})
 
-	It("should reject direct StaticNodeCluster writes", Label("E2E-SRC-API-READONLY"), func() {
+	It("should reject direct StaticNodeCluster writes", Label("read-only"), func() {
 		yaml := writeTempE2EYAML("static-node-cluster-*.yaml", fmt.Sprintf(`apiVersion: v1
 kind: StaticNodeCluster
 metadata:
@@ -70,7 +70,7 @@ spec:
 		Expect(r.ExitCode).NotTo(Equal(0), "direct StaticNodeCluster apply should be rejected")
 	})
 
-	It("should create a new-version SSH cluster and derive static resources", Label("E2E-SRC-CREATE"), func() {
+	It("should create a new-version SSH cluster and derive static resources", Label("create"), func() {
 		yaml := renderSSHClusterYAML(map[string]any{
 			"name":            clusterName,
 			"version":         profileClusterVersion(),
@@ -88,7 +88,7 @@ spec:
 		eventuallyStaticNodeClusterReady(clusterName, 1+len(workerIPs), TerminalPhaseTimeout)
 	})
 
-	It("should update worker list only after stale nodes are cleaned", Label("E2E-SRC-UPDATE"), func() {
+	It("should update worker list only after stale nodes are cleaned", Label("update"), func() {
 		r := ClusterH.Get(clusterName)
 		ExpectSuccess(r)
 		oldHash := parseClusterJSON(r.Stdout).Status.ObservedSpecHash
@@ -112,7 +112,7 @@ spec:
 		assertStaticNodesForCluster(clusterName, []string{headIP})
 	})
 
-	It("should delete static resources with cluster deletion", Label("E2E-SRC-DELETE"), func() {
+	It("should delete static resources with cluster deletion", Label("delete"), func() {
 		r := ClusterH.DeleteAsync(clusterName)
 		ExpectSuccess(r)
 
@@ -125,7 +125,7 @@ spec:
 		assertStaticNodesForCluster(clusterName, nil)
 	})
 
-	It("should keep legacy version on legacy flow then recreate into static flow on upgrade", Label("E2E-SRC-UPGRADE"), func() {
+	It("should keep legacy version on legacy flow then recreate into static flow on upgrade", Label("upgrade"), func() {
 		yaml := renderSSHClusterYAML(map[string]any{
 			"name":            legacyName,
 			"version":         profile.Cluster.OldVersion,

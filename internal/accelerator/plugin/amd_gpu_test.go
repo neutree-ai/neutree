@@ -92,18 +92,18 @@ func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsRunnerError(t 
 	assert.Nil(t, status)
 }
 
-func TestAMDGPUAcceleratorPluginRuntimeProfile(t *testing.T) {
+func TestAMDGPUAcceleratorPluginGetAcceleratorProfile(t *testing.T) {
 	p := &AMDGPUAcceleratorPlugin{}
 
-	profile, supported, err := p.RuntimeProfile(context.Background(), v1.StaticNodeAcceleratorStatus{
-		Type:         v1.AcceleratorTypeAMDGPU.String(),
-		ProductModel: "amd-mi300x",
-	})
+	profile, err := p.GetAcceleratorProfile(context.Background())
 
 	require.NoError(t, err)
-	assert.True(t, supported)
 	require.NotNil(t, profile)
 	assert.Equal(t, v1.AcceleratorTypeAMDGPU.String(), profile.AcceleratorType)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
+	require.NotNil(t, profile.EngineRuntime)
+	assert.Equal(t, "rocm", profile.EngineRuntime.ImageSuffix)
 }
 
 func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {

@@ -103,22 +103,6 @@ func (p *GPUAcceleratorPlugin) DetectStaticNodeAccelerator(
 	})
 }
 
-func (p *GPUAcceleratorPlugin) RuntimeProfile(
-	ctx context.Context,
-	accelerator v1.StaticNodeAcceleratorStatus,
-) (*v1.AcceleratorProfile, bool, error) {
-	if accelerator.Type != p.Resource() {
-		return nil, false, nil
-	}
-
-	profile, err := p.GetAcceleratorProfile(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-
-	return profile, profile != nil, nil
-}
-
 func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {
 	decodedKey, err := base64.StdEncoding.DecodeString(auth.SSHPrivateKey)
 	if err != nil {
@@ -194,6 +178,12 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				"ACCELERATOR_TYPE": "gpu",
 			},
 			Options: []string{"--gpus all"},
+		},
+		EngineRuntime: &v1.RuntimeConfig{
+			Runtime: "nvidia",
+			Options: []string{
+				"--gpus all",
+			},
 		},
 	}, nil
 }

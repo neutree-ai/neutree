@@ -6,26 +6,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func NeedsStaticNodeRunner(node *v1.StaticNode, reconciler *StaticNodeReconciler) bool {
-	if node == nil || node.Spec == nil {
-		return false
-	}
-
-	if node.Metadata != nil && node.Metadata.DeletionTimestamp != "" {
-		return true
-	}
-
-	if reconciler != nil && reconciler.AcceleratorManager != nil {
-		return true
-	}
-
-	if node.Spec.Warm != nil && len(node.Spec.Warm.Images) > 0 {
-		return true
-	}
-
-	return len(node.Spec.Components) > 0
-}
-
 func BuildStaticNodeStatus(
 	node *v1.StaticNode,
 	result *StaticNodeReconcileResult,
@@ -53,6 +33,12 @@ func BuildStaticNodeStatus(
 
 	if status.Warm != nil && !status.Warm.Ready {
 		status.Phase = v1.StaticNodePhaseWarming
+
+		return status
+	}
+
+	if len(status.Components) == 0 {
+		status.Phase = v1.StaticNodePhaseReconciling
 
 		return status
 	}

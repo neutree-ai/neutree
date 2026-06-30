@@ -30,8 +30,6 @@ type ClusterController struct {
 
 	acceleratorManager  accelerator.Manager
 	newClusterReconcile func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
-
-	cleanupLegacyStaticRuntime func(*v1.Cluster) error
 }
 
 type ClusterControllerOption struct {

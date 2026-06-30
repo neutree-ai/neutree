@@ -44,7 +44,7 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 		),
 	}
 	reconciler := &StaticNodeClusterReconciler{
-		RuntimeProfileProvider: fakeRuntimeProfileProvider{profiles: profiles},
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: profiles},
 	}
 
 	nodes, err := reconciler.BuildDesiredNodes(context.Background(), cluster, currentNodes)
@@ -285,7 +285,7 @@ func TestStaticNodeClusterReconcilerPlanWaitsForDesiredComponents(t *testing.T) 
 	}
 
 	plan, err := (&StaticNodeClusterReconciler{
-		RuntimeProfileProvider: fakeRuntimeProfileProvider{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
 			profiles: map[string]*v1.AcceleratorProfile{
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
@@ -504,7 +504,7 @@ func TestStaticNodeClusterReconcilerKeepsReadyWhenObservedVersionMatchesSpec(t *
 	assert.Empty(t, plan.Status.ErrorMessage)
 }
 
-func TestStaticNodeClusterReconcilerFallsBackToCPURuntimeWhenRuntimeProfileUnsupported(t *testing.T) {
+func TestStaticNodeClusterReconcilerFallsBackToCPURuntimeWhenAcceleratorProfileUnsupported(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	currentNodes := []*v1.StaticNode{
 		staticNodeWithAcceleratorStatus("head-0", v1.StaticNodeRoleHead, unsupportedNvidiaAcceleratorStatus()),
@@ -512,7 +512,7 @@ func TestStaticNodeClusterReconcilerFallsBackToCPURuntimeWhenRuntimeProfileUnsup
 	}
 
 	plan, err := (&StaticNodeClusterReconciler{
-		RuntimeProfileProvider: fakeRuntimeProfileProvider{profiles: map[string]*v1.AcceleratorProfile{}},
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: map[string]*v1.AcceleratorProfile{}},
 	}).Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
@@ -613,7 +613,7 @@ func TestStaticNodeClusterReconcilerAggregateStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status := (&StaticNodeClusterReconciler{}).AggregateStatus(testStaticNodeCluster(), tt.nodes)
+			status := (&StaticNodeClusterReconciler{}).AggregateStatus(testStaticNodeCluster(), tt.nodes, nil)
 
 			assert.Equal(t, tt.wantStatus, status)
 		})
@@ -627,7 +627,7 @@ func TestStaticNodeClusterReconcilerAggregateStatusRecordsObservedVersionWhenRea
 		staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, nil),
 	}
 
-	status := (&StaticNodeClusterReconciler{}).AggregateStatus(cluster, nodes)
+	status := (&StaticNodeClusterReconciler{}).AggregateStatus(cluster, nodes, nil)
 
 	assert.Equal(t, v1.StaticNodeClusterPhaseReady, status.Phase)
 	assert.Equal(t, "v1.2.0", status.Version)
@@ -746,20 +746,15 @@ func staticNodeWithAcceleratorStatus(
 	}
 }
 
-type fakeRuntimeProfileProvider struct {
+type fakeAcceleratorProfileProvider struct {
 	profiles map[string]*v1.AcceleratorProfile
 }
 
-func (f fakeRuntimeProfileProvider) RuntimeProfile(
+func (f fakeAcceleratorProfileProvider) GetAcceleratorProfile(
 	_ context.Context,
-	accelerator v1.StaticNodeAcceleratorStatus,
+	acceleratorType string,
 ) (*v1.AcceleratorProfile, bool, error) {
-	key := accelerator.ProductModel
-	if key == "" {
-		key = accelerator.Type
-	}
-
-	profile, ok := f.profiles[key]
+	profile, ok := f.profiles[acceleratorType]
 
 	return profile, ok, nil
 }

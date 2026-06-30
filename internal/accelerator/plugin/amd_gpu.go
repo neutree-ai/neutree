@@ -101,22 +101,6 @@ func (p *AMDGPUAcceleratorPlugin) DetectStaticNodeAccelerator(
 	})
 }
 
-func (p *AMDGPUAcceleratorPlugin) RuntimeProfile(
-	ctx context.Context,
-	accelerator v1.StaticNodeAcceleratorStatus,
-) (*v1.AcceleratorProfile, bool, error) {
-	if accelerator.Type != p.Resource() {
-		return nil, false, nil
-	}
-
-	profile, err := p.GetAcceleratorProfile(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-
-	return profile, profile != nil, nil
-}
-
 func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {
 	decodedKey, err := base64.StdEncoding.DecodeString(auth.SSHPrivateKey)
 	if err != nil {
@@ -198,6 +182,14 @@ func (p *AMDGPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v
 	return &v1.AcceleratorProfile{
 		AcceleratorType: string(v1.AcceleratorTypeAMDGPU),
 		ClusterRuntime: &v1.RuntimeConfig{
+			ImageSuffix: "rocm",
+			Runtime:     "amd",
+			Env: map[string]string{
+				"ACCELERATOR_TYPE":    "amd_gpu",
+				"AMD_VISIBLE_DEVICES": "all",
+			},
+		},
+		EngineRuntime: &v1.RuntimeConfig{
 			ImageSuffix: "rocm",
 			Runtime:     "amd",
 			Env: map[string]string{
