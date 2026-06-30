@@ -336,6 +336,13 @@ func (in *EngineList) SetItems(objs []scheme.Object) {
 // It defines a naming convention only and does not prescribe specific image contents.
 const SSHImageKeyPrefix = "ssh_"
 
+// K8sImageKeyPrefix is the key prefix used to select K8s-only engine images
+// in the Images map (e.g., "k8s_nvidia_gpu" for an upstream-native image that
+// only works on Kubernetes). The K8s orchestrator looks up k8s_<accel> first,
+// then falls back to the plain <accel> key. SSH/Ray orchestrators never consult
+// k8s_ keys, keeping the two runtime paths isolated.
+const K8sImageKeyPrefix = "k8s_"
+
 // GetImageForAccelerator returns the image information for a specific accelerator type
 // If the accelerator type is not found, it returns nil
 func (ev *EngineVersion) GetImageForAccelerator(acceleratorType string) *EngineImage {
@@ -359,9 +366,23 @@ func (ev *EngineVersion) GetImageForSSHAccelerator(acceleratorType string) *Engi
 	return ev.GetImageForAccelerator(acceleratorType)
 }
 
+// GetImageForK8sAccelerator returns the engine image for K8s clusters.
+// It first looks for a K8s-specific image (e.g., "k8s_nvidia_gpu"), then
+// falls back to the generic accelerator key (e.g., "nvidia_gpu").
+// This allows users to register upstream-native images for K8s without
+// affecting SSH/Ray deployments, which never consult the k8s_ prefix.
+func (ev *EngineVersion) GetImageForK8sAccelerator(acceleratorType string) *EngineImage {
+	if img := ev.GetImageForAccelerator(K8sImageKeyPrefix + acceleratorType); img != nil {
+		return img
+	}
+
+	return ev.GetImageForAccelerator(acceleratorType)
+}
+
 // GetSupportedAccelerators returns a list of supported accelerator types.
-// The list is derived from the keys of the Images map, excluding SSH-prefixed
-// keys (e.g., "ssh_nvidia_gpu") which are internal variants, not distinct accelerator types.
+// The list is derived from the keys of the Images map, excluding prefixed
+// keys ("ssh_<accel>" and "k8s_<accel>") which are internal variants, not
+// distinct accelerator types.
 func (ev *EngineVersion) GetSupportedAccelerators() []string {
 	if ev.Images == nil {
 		return []string{}
@@ -370,7 +391,7 @@ func (ev *EngineVersion) GetSupportedAccelerators() []string {
 	accelerators := make([]string, 0, len(ev.Images))
 
 	for acceleratorType := range ev.Images {
-		if strings.HasPrefix(acceleratorType, SSHImageKeyPrefix) {
+		if strings.HasPrefix(acceleratorType, SSHImageKeyPrefix) || strings.HasPrefix(acceleratorType, K8sImageKeyPrefix) {
 			continue
 		}
 

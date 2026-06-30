@@ -488,12 +488,12 @@ func (k *kubernetesOrchestrator) getImageForAccelerator(engine *v1.Engine, versi
 	}
 
 	// Get image for the specific accelerator type
-	engineImage := targetVersion.GetImageForAccelerator(acceleratorType)
+	engineImage := targetVersion.GetImageForK8sAccelerator(acceleratorType)
 	if engineImage == nil {
 		supportedAccelerators := targetVersion.GetSupportedAccelerators()
 
 		return "", "", errors.Errorf(
-			"no image configured for accelerator type %s in engine %s version %s. Supported accelerators: %v",
+			"no kubernetes image for accelerator %q in engine %s version %s; declare a default or k8s_<accel> key. Supported accelerators: %v",
 			acceleratorType, engine.Metadata.Name, version, supportedAccelerators,
 		)
 	}
