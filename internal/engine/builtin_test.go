@@ -51,7 +51,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 						if got, want := img.ImageName, "neutree/engine-vllm"; got != want {
 							t.Errorf("vllm %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
 						}
-						if got, want := img.Tag, "v0.24.0-ray2.53.0"; got != want {
+						if got, want := img.Tag, "v0.24.0-neutree1-ray2.53.0"; got != want {
 							t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
 						}
 					}

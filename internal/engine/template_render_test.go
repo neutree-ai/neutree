@@ -124,6 +124,23 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 	}
 }
 
+func TestVLLMTemplatePreservesListEngineArgs(t *testing.T) {
+	vars := newTestVLLMVars("v0.24.0", "text-generation")
+	vars["EngineArgs"] = map[string]any{
+		"served_model_name": []any{"test-model", "neu-vllm-list-alias"},
+	}
+
+	objs, err := util.RenderKubernetesManifest(vllmV0_24_0DeployTemplate, vars)
+	require.NoError(t, err)
+
+	deploy := mustFindRenderedObject(t, objs.Items, "Deployment", "ep-test")
+	cmd := mustExtractContainerCommand(t, deploy.Object, "vllm-engine")
+
+	assert.Equal(t, "test-model", flagValue(cmd, "--served_model_name"), "full cmd=%v", cmd)
+	assert.Contains(t, cmd, "neu-vllm-list-alias", "full cmd=%v", cmd)
+	assert.NotContains(t, cmd, `["test-model","neu-vllm-list-alias"]`, "full cmd=%v", cmd)
+}
+
 // newTestVLLMVars returns the minimum render variables the current vLLM
 // templates require. We mirror the shape produced by setModelArgs in the
 // kubernetes orchestrator without taking a dependency on that package.

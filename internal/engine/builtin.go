@@ -126,7 +126,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						Images: map[string]*v1.EngineImage{
 							"nvidia_gpu": {
 								ImageName: "neutree/engine-vllm",
-								Tag:       "v0.24.0-ray2.53.0",
+								Tag:       "v0.24.0-neutree1-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{
