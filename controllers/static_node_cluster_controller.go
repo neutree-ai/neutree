@@ -104,6 +104,7 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 	}
 
 	hasStaleNodes := false
+
 	for _, node := range currentNodes {
 		if node == nil || node.Metadata == nil {
 			continue
@@ -114,6 +115,7 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		}
 
 		hasStaleNodes = true
+
 		if err := c.store.DeleteStaticNode(ctx, node); err != nil {
 			return errors.Wrapf(err, "failed to delete stale static node %s", node.Metadata.Name)
 		}
@@ -141,6 +143,7 @@ func (c *StaticNodeClusterController) reconcileDelete(
 	}
 
 	isForceDelete := v1.IsForceDelete(cluster.Metadata.Annotations)
+
 	for _, node := range currentNodes {
 		if node == nil {
 			continue
@@ -153,6 +156,7 @@ func (c *StaticNodeClusterController) reconcileDelete(
 
 			if !v1.IsForceDelete(node.Metadata.Annotations) {
 				node.Metadata.Annotations = withForceDeleteAnnotation(node.Metadata.Annotations)
+
 				if err := c.store.DeleteStaticNode(ctx, node); err != nil {
 					return errors.Wrapf(err, "failed to mark static node %s force deleting", staticNodeName(node))
 				}

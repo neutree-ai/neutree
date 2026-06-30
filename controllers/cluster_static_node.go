@@ -24,6 +24,8 @@ import (
 const (
 	staticNodeClusterFlowVersionGate = "v1.0.1"
 	staticNodeClusterDashboardPort   = 8265
+	staticForceDeleteAnnotationKey   = "neutree.ai/force-delete"
+	staticForceDeleteAnnotationValue = "true"
 )
 
 func shouldUseStaticNodeClusterFlow(c *v1.Cluster) (bool, error) {
@@ -110,6 +112,7 @@ func validateStaticNodeClusterSpec(c *v1.Cluster) error {
 	nodeIPs := map[string]struct{}{
 		sshConfig.Provider.HeadIP: {},
 	}
+
 	for _, workerIP := range sshConfig.Provider.WorkerIPs {
 		if workerIP == "" {
 			continue
@@ -148,6 +151,7 @@ func (controller *ClusterController) reconcileStaticNodeClusterDelete(c *v1.Clus
 	}
 
 	metadataChanged := false
+
 	if v1.IsForceDelete(c.Metadata.Annotations) && !v1.IsForceDelete(current.Metadata.Annotations) {
 		current.Metadata.Annotations = withForceDeleteAnnotation(current.Metadata.Annotations)
 		metadataChanged = true
@@ -173,7 +177,7 @@ func withForceDeleteAnnotation(annotations map[string]string) map[string]string 
 		next[key] = value
 	}
 
-	next["neutree.ai/force-delete"] = "true"
+	next[staticForceDeleteAnnotationKey] = staticForceDeleteAnnotationValue
 
 	return next
 }
@@ -501,6 +505,7 @@ func clusterPhaseOverrideFromError(err error) (v1.ClusterPhase, bool) {
 	var phaseErr interface {
 		ClusterPhase() v1.ClusterPhase
 	}
+
 	if !errors.As(err, &phaseErr) {
 		return "", false
 	}
@@ -868,6 +873,7 @@ func enrichStaticNodeClusterAcceleratorMetadata(
 		}
 
 		product := v1.AcceleratorProduct(device.Product)
+
 		productMetadata := metadata.Products[product]
 		if productMetadata == nil {
 			metadata.Products[product] = &v1.AcceleratorProductMetadata{
@@ -881,14 +887,6 @@ func enrichStaticNodeClusterAcceleratorMetadata(
 			productMetadata.MemoryTotalMiB = float64(device.Allocatable.MemoryMiB)
 		}
 	}
-}
-
-func nonNegativeStaticNodeResourceInt64(value int64) int64 {
-	if value < 0 {
-		return 0
-	}
-
-	return value
 }
 
 func firstNonEmptyString(values ...string) string {

@@ -263,6 +263,47 @@ func TestStaticNodeClusterReconcilerBuildsDiscoverySafeNodesBeforeAcceleratorSta
 	}
 }
 
+func TestStaticNodeClusterReconcilerPlanWaitsForDesiredComponents(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	plan, err := (&StaticNodeClusterReconciler{
+		RuntimeProfileProvider: fakeRuntimeProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					ClusterRuntime: &v1.RuntimeConfig{
+						Runtime: "nvidia",
+						Options: []string{"--gpus all"},
+					},
+				},
+			},
+		},
+	}).Plan(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, plan.Status.Phase)
+	assert.Contains(t, plan.Status.ErrorMessage, "static node head-0 component ray-head is not running desired config")
+	assert.Contains(t, plan.Status.ErrorMessage, "static node worker-0 component ray-worker is not running desired config")
+}
+
 func TestStaticNodeClusterReconcilerPlansRayRecreateUpgradeOrder(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -435,7 +476,7 @@ func TestStaticNodeClusterReconcilerCompletesRayRecreateUpgradeWhenTargetReady(t
 	}
 	currentNodes := staticNodeUpgradeCurrentNodes()
 	targetImage := "registry.example.com/neutree/neutree/neutree-serve:v1.2.1"
-	markStaticNodeUpgradeReady(currentNodes, targetImage)
+	markStaticNodeUpgradeReady(t, cluster, currentNodes, targetImage)
 
 	plan, err := (&StaticNodeClusterReconciler{}).Plan(context.Background(), cluster, currentNodes)
 
@@ -453,7 +494,7 @@ func TestStaticNodeClusterReconcilerKeepsReadyWhenObservedVersionMatchesSpec(t *
 		Version: "v1.2.1",
 	}
 	currentNodes := staticNodeUpgradeCurrentNodes()
-	markStaticNodeUpgradeReady(currentNodes, buildRayRuntimeImage(cluster))
+	markStaticNodeUpgradeReady(t, cluster, currentNodes, buildRayRuntimeImage(cluster))
 
 	plan, err := (&StaticNodeClusterReconciler{}).Plan(context.Background(), cluster, currentNodes)
 
@@ -818,18 +859,32 @@ func staticNodeUpgradeCurrentNodes() []*v1.StaticNode {
 	}
 }
 
-func markStaticNodeUpgradeReady(nodes []*v1.StaticNode, rayImage string) {
-	head := findStaticNode(nodes, "head-0")
-	if head != nil {
-		head.Status.Components = []v1.NodeComponentStatus{
-			{Name: "ray-head", Type: v1.NodeComponentTypeRayHead, Ready: true, Phase: v1.NodeComponentPhaseRunning, ObservedImage: rayImage},
-		}
-	}
+func markStaticNodeUpgradeReady(
+	t *testing.T,
+	cluster *v1.StaticNodeCluster,
+	nodes []*v1.StaticNode,
+	rayImage string,
+) {
+	t.Helper()
 
-	worker := findStaticNode(nodes, "worker-0")
-	if worker != nil {
-		worker.Status.Components = []v1.NodeComponentStatus{
-			{Name: "ray-worker", Type: v1.NodeComponentTypeRayWorker, Ready: true, Phase: v1.NodeComponentPhaseRunning, ObservedImage: rayImage},
+	desiredNodes, err := (&StaticNodeClusterReconciler{}).BuildDesiredNodes(context.Background(), cluster, nodes)
+	require.NoError(t, err)
+
+	for _, desired := range desiredNodes {
+		current := findStaticNode(nodes, desired.Metadata.Name)
+		require.NotNil(t, current)
+		require.NotNil(t, current.Status)
+
+		current.Status.Components = make([]v1.NodeComponentStatus, 0, len(desired.Spec.Components))
+		for _, component := range desired.Spec.Components {
+			current.Status.Components = append(current.Status.Components, v1.NodeComponentStatus{
+				Name:          component.Name,
+				Type:          component.Type,
+				Ready:         true,
+				Phase:         v1.NodeComponentPhaseRunning,
+				ObservedHash:  component.ConfigHash,
+				ObservedImage: rayImage,
+			})
 		}
 	}
 }
