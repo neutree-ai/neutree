@@ -23,12 +23,19 @@ func TestValidateModelCatalogSpec(t *testing.T) {
 		{
 			name: "recipe MC ok",
 			in: &v1.ModelCatalogSpec{
-				Variants: map[string]v1.RecipeVariant{"a": {}},
+				Variants: map[string]v1.RecipeVariant{"a": {Model: &v1.ModelSpec{Name: "qwen"}}},
 				Features: []v1.RecipeFeature{
 					{Name: "yarn", ConflictsWith: []string{"short-ctx"}},
 					{Name: "short-ctx"},
 				},
 			},
+		},
+		{
+			name: "variant without model",
+			in: &v1.ModelCatalogSpec{
+				Variants: map[string]v1.RecipeVariant{"a": {}},
+			},
+			wantErr: "must declare a model",
 		},
 		{
 			name: "top-level model + variants conflict",

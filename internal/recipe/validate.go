@@ -2,6 +2,7 @@ package recipe
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -26,6 +27,16 @@ func ValidateModelCatalogSpec(spec *v1.ModelCatalogSpec) error {
 
 		if spec.Resources != nil {
 			return fmt.Errorf("model_catalog: cannot set top-level resources together with variants")
+		}
+
+		// A recipe MC declares its model per-variant (top-level model is
+		// forbidden above), so every variant must supply one. Without this a
+		// variant composes to a nil model — a model-less deploy that the
+		// endpoint controller cannot expand, leaving the endpoint stuck.
+		for name, variant := range spec.Variants {
+			if variant.Model == nil || strings.TrimSpace(variant.Model.Name) == "" {
+				return fmt.Errorf("model_catalog: variant %q must declare a model", name)
+			}
 		}
 	}
 

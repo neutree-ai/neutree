@@ -375,6 +375,15 @@ func (c *EndpointController) expandCatalogRef(obj *v1.Endpoint) error {
 		return err
 	}
 
+	// A composed nil model would leave Model==nil after expansion, and the
+	// "already expanded" guard above keys off Model!=nil — so the catalog ref
+	// (omitempty, never persisted as empty) would re-trigger expansion every
+	// reconcile, an infinite loop plus a model-less deploy. Validation rejects
+	// model-less variants at write time; this is the defense-in-depth backstop.
+	if composed.Model == nil {
+		return errors.Errorf("model catalog %q variant %q resolves to no model", obj.Spec.ModelCatalog, obj.Spec.Variant)
+	}
+
 	obj.Spec.Model = composed.Model
 	obj.Spec.Resources = composed.Resources
 

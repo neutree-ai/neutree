@@ -296,3 +296,45 @@ func TestComposeEndpointSpecFeatureTypes(t *testing.T) {
 		}
 	})
 }
+
+func TestComposeNestedSubstitution(t *testing.T) {
+	mc := &v1.ModelCatalogSpec{
+		Engine:   &v1.EndpointEngineSpec{Engine: "vllm"},
+		Variants: map[string]v1.RecipeVariant{"default": {Model: &v1.ModelSpec{Name: "m"}}},
+		Features: []v1.RecipeFeature{
+			{
+				Name: "max-len",
+				Type: v1.RecipeFeatureTypeInput,
+				Input: &v1.RecipeFeatureInput{
+					ValueType: "int",
+					Default:   "4096",
+				},
+				EngineArgs: map[string]any{
+					"chat_template_kwargs": map[string]any{
+						"max_len": "${value}",
+						"presets": []any{"len-${value}"},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := ComposeEndpointSpec(mc, "default", []v1.FeatureSelection{{Name: "max-len", Value: "8192"}})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	kwargs, ok := got.EngineArgs["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested map, got %#v", got.EngineArgs["chat_template_kwargs"])
+	}
+
+	if kwargs["max_len"] != int64(8192) {
+		t.Fatalf("expected nested ${value} coerced to int64 8192, got %#v", kwargs["max_len"])
+	}
+
+	presets, ok := kwargs["presets"].([]any)
+	if !ok || len(presets) != 1 || presets[0] != "len-8192" {
+		t.Fatalf("expected nested list substitution [len-8192], got %#v", kwargs["presets"])
+	}
+}

@@ -281,25 +281,41 @@ func substituteArgs(src map[string]any, val, valueType string) map[string]any {
 	return out
 }
 
-// substituteValue replaces the placeholder inside a single engine_args value.
+// substituteValue replaces the placeholder inside an engine_args value,
+// recursing into nested maps and lists so a "${value}" buried under e.g.
+// chat_template_kwargs is substituted too — not just top-level string values.
 // A value that is exactly "${value}" is coerced to valueType (so numeric
 // inputs land as JSON numbers); a value that merely contains the placeholder
 // is treated as a string template.
 func substituteValue(v any, val, valueType string) any {
-	s, ok := v.(string)
-	if !ok {
+	switch t := v.(type) {
+	case string:
+		if t == placeholder {
+			return coerce(val, valueType)
+		}
+
+		if strings.Contains(t, placeholder) {
+			return strings.ReplaceAll(t, placeholder, val)
+		}
+
+		return t
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, vv := range t {
+			out[k] = substituteValue(vv, val, valueType)
+		}
+
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, vv := range t {
+			out[i] = substituteValue(vv, val, valueType)
+		}
+
+		return out
+	default:
 		return v
 	}
-
-	if s == placeholder {
-		return coerce(val, valueType)
-	}
-
-	if strings.Contains(s, placeholder) {
-		return strings.ReplaceAll(s, placeholder, val)
-	}
-
-	return s
 }
 
 func substituteEnv(src map[string]string, val string) map[string]string {

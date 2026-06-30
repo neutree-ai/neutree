@@ -2,9 +2,11 @@
 
 Sample recipe-shape ModelCatalogs converted from the upstream vLLM recipe
 site (https://recipes.vllm.ai/), usable as test data. Import via the UI
-(Model Catalogs → Import → Paste YAML / Upload) or the API:
+(Model Catalogs → Import → Paste YAML / Upload / From URL); the UI parses each
+YAML document client-side and creates it through the normal create flow. The
+underlying API is the standard resource create:
 
-    POST /api/v1/model_catalogs/import   { "yaml": "<file contents>", "workspace": "default" }
+    POST /api/v1/model_catalogs   (body = one document's contents as JSON)
 
 To make them **deployable**, first create the public HuggingFace model registry
 they reference (every variant's `model.registry` is `huggingface`):
@@ -24,8 +26,7 @@ Each carries per-variant model display info (parameter_count / quantization /
 context_length / architecture), `vram_minimum_gb`, the
 `recipe.vllm.ai/hardware-verified` annotation, and features of all three types:
 
-- **boolean** toggles (`text-only`, `disable-thinking`, `tool-calling`, …; some
-  marked `category: tuning`),
+- **boolean** toggles (`text-only`, `disable-thinking`, `tool-calling`, …),
 - an **input** `max-model-len` (context window) with `suggestions`
   (8K / 32K / 128K / 256K) — rendered as a "pick a preset or type your own"
   combobox (select + free input),
