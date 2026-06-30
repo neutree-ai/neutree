@@ -267,6 +267,28 @@ var _ = Describe("Model", Ordered, func() {
 			Expect(ParseKV(r.Stdout)["Version"]).To(Equal(version))
 		})
 
+		It("should direct push a model to a pre-mounted NFS registry", Label("C2723966", "nfs-direct"), func() {
+			if profile.ModelRegistry.LocalNFSPath == "" || !strings.HasPrefix(profile.ModelRegistry.URL, "nfs://") {
+				Skip("model_registry.local_nfs_path and nfs:// model_registry.url are required")
+			}
+
+			name := "e2e-nfs-direct"
+			version := "v1.0"
+			DeferCleanup(Model.EnsureDeleted, name, version)
+
+			r := pushModel(name, version, 64, "--local-nfs-path", profile.ModelRegistry.LocalNFSPath)
+			ExpectSuccess(r)
+			ExpectStdoutContains(r, "pushed successfully")
+
+			r = Model.List()
+			ExpectSuccess(r)
+			Expect(ParseTable(r.Stdout)).To(ContainElement(HaveKeyWithValue("NAME", name)))
+
+			r = Model.Get(name + ":" + version)
+			ExpectSuccess(r)
+			Expect(ParseKV(r.Stdout)["Version"]).To(Equal(version))
+		})
+
 		It("should overwrite an existing version", Label("C2621665"), func() {
 			name := "e2e-push-overwrite"
 			version := "v1.0"
