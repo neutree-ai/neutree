@@ -55,10 +55,13 @@ const (
 )
 
 type EndpointStatus struct {
-	Phase                      EndpointPhase           `json:"phase,omitempty"`
-	ServiceURL                 string                  `json:"service_url,omitempty"`
-	LastTransitionTime         string                  `json:"last_transition_time,omitempty"`
-	ErrorMessage               string                  `json:"error_message,omitempty"`
+	Phase              EndpointPhase `json:"phase,omitempty"`
+	ServiceURL         string        `json:"service_url,omitempty"`
+	LastTransitionTime string        `json:"last_transition_time,omitempty"`
+	ErrorMessage       string        `json:"error_message,omitempty"`
+	// ModelDownloadCompletedHash is reserved for future model download tracking extensions,
+	// such as node- or replica-level completion metadata. It must not be used alone as
+	// proof that the current node or replica has completed downloading.
 	ModelDownloadCompletedHash *string                 `json:"model_download_completed_hash,omitempty"`
 	Resources                  *EndpointResourceStatus `json:"resources,omitempty"`
 }
