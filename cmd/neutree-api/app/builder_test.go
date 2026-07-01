@@ -24,11 +24,11 @@ func TestNewBuilder(t *testing.T) {
 	}
 
 	for _, name := range []string{"rest/static-node-clusters", "rest/static-nodes"} {
-		if _, exists := builder.routeInits[name]; exists {
-			t.Errorf("Expected NewBuilder not to register internal %q route", name)
+		if _, exists := builder.routeInits[name]; !exists {
+			t.Errorf("Expected NewBuilder to register read-only %q route", name)
 		}
-		if _, exists := builder.routesToMiddlewares[name]; exists {
-			t.Errorf("Expected NewBuilder not to register middleware for internal %q route", name)
+		if _, exists := builder.routesToMiddlewares[name]; !exists {
+			t.Errorf("Expected NewBuilder to register middleware for read-only %q route", name)
 		}
 	}
 }
