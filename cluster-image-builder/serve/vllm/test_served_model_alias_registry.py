@@ -75,6 +75,23 @@ def _assigns_served_model_names_from_effective_args(node):
     )
 
 
+def _assigns_model_path_from_effective_args(node):
+    if not isinstance(node, ast.Assign):
+        return False
+    if not any(_is_self_model_path(target) for target in node.targets):
+        return False
+    value = node.value
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Attribute)
+        and value.func.attr == "get"
+        and _is_name(value.func.value, "args")
+        and value.args
+        and isinstance(value.args[0], ast.Constant)
+        and value.args[0].value == "model"
+    )
+
+
 def _calls_base_model_path_directly(node):
     return isinstance(node, ast.Call) and _is_name(node.func, "BaseModelPath")
 
@@ -108,6 +125,9 @@ class TestVLLMServedModelAliasRegistry(unittest.TestCase):
                 served_model_names_assignments = [
                     node for node in ast.walk(tree) if _assigns_served_model_names_from_effective_args(node)
                 ]
+                model_path_assignments = [
+                    node for node in ast.walk(tree) if _assigns_model_path_from_effective_args(node)
+                ]
                 direct_base_model_path_calls = [
                     node for node in ast.walk(tree) if _calls_base_model_path_directly(node)
                 ]
@@ -125,6 +145,11 @@ class TestVLLMServedModelAliasRegistry(unittest.TestCase):
                     len(served_model_names_assignments),
                     1,
                     f"{app_file} should store the effective served_model_name after coercion",
+                )
+                self.assertEqual(
+                    len(model_path_assignments),
+                    1,
+                    f"{app_file} should store the effective model path after coercion",
                 )
                 self.assertEqual(
                     len(served_model_names_calls),

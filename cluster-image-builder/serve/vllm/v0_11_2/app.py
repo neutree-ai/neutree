@@ -90,7 +90,6 @@ class Backend:
         print(f"[Backend] Model download completed.")
 
         self.model_id = model_serve_name
-        self.model_path = model_path
         self.model_task = model_task
 
         # Extract our custom parameters BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors
@@ -146,6 +145,7 @@ class Backend:
         # params that were read but not popped) to prevent TypeError on init.
         filter_engine_args(args, AsyncEngineArgs)
 
+        self.model_path = args.get("model", model_path)
         self.served_model_names = args.get("served_model_name", self.model_id)
         if isinstance(self.served_model_names, str):
             self.served_model_names = [self.served_model_names]
