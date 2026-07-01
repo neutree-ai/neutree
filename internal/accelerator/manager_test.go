@@ -212,7 +212,7 @@ func TestManagerDetectAcceleratorFallsBackToCPUWhenDetectorDoesNotMatch(t *testi
 	assert.Equal(t, 1, detector.detectCalls)
 }
 
-func TestManagerDetectAcceleratorTreatsDetectorErrorAsCPUFallback(t *testing.T) {
+func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testing.T) {
 	detector := &fakeStaticNodeAcceleratorPlugin{detectErr: errors.New("lspci unavailable")}
 	m := &manager{}
 	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
@@ -226,9 +226,9 @@ func TestManagerDetectAcceleratorTreatsDetectorErrorAsCPUFallback(t *testing.T) 
 		SSHPrivateKey: "key",
 	})
 
-	require.NoError(t, err)
-	require.NotNil(t, status)
-	assert.Equal(t, v1.StaticNodeAcceleratorTypeCPU, status.Type)
+	require.Error(t, err)
+	require.Nil(t, status)
+	assert.Contains(t, err.Error(), "detect static node accelerator from plugin custom_gpu failed")
 	assert.Equal(t, 1, detector.detectCalls)
 }
 

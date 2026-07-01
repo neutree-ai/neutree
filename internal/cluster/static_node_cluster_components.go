@@ -59,7 +59,7 @@ func buildRayComponent(
 	role v1.StaticNodeRole,
 	profile *v1.AcceleratorProfile,
 ) v1.NodeComponentSpec {
-	image := buildRayRuntimeImage(cluster)
+	image := buildRayRuntimeImage(cluster, clusterRuntimeImageSuffix(profile))
 	env := rayRuntimeEnv(profile)
 	dockerRunOptions := rayRuntimeDockerRunOptions(profile)
 	command := []string{"/bin/bash", "-lc"}
@@ -136,6 +136,14 @@ func rayRuntimeDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	options = append(options, profile.ClusterRuntime.Options...)
 
 	return options
+}
+
+func clusterRuntimeImageSuffix(profile *v1.AcceleratorProfile) string {
+	if profile == nil || profile.ClusterRuntime == nil {
+		return ""
+	}
+
+	return profile.ClusterRuntime.ImageSuffix
 }
 
 func rayStartCommand(
@@ -260,12 +268,17 @@ func buildNodeWarmSpec(components []v1.NodeComponentSpec) *v1.WarmSpec {
 	}
 }
 
-func buildRayRuntimeImage(cluster *v1.StaticNodeCluster) string {
+func buildRayRuntimeImage(cluster *v1.StaticNodeCluster, imageSuffixes ...string) string {
 	if cluster == nil || cluster.Spec == nil || cluster.Spec.Version == "" || cluster.Spec.ImageRegistry == "" {
 		return ""
 	}
 
-	return util.BuildClusterImageRef(strings.TrimRight(cluster.Spec.ImageRegistry, "/"), cluster.Spec.Version, "")
+	imageSuffix := ""
+	if len(imageSuffixes) > 0 {
+		imageSuffix = imageSuffixes[0]
+	}
+
+	return util.BuildClusterImageRef(strings.TrimRight(cluster.Spec.ImageRegistry, "/"), cluster.Spec.Version, imageSuffix)
 }
 
 func warmImageName(component v1.NodeComponentSpec) string {

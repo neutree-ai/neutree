@@ -33,6 +33,7 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 	if reconciler == nil {
 		reconciler = &clusterreconcile.StaticNodeClusterReconciler{
 			AcceleratorProfileProvider: option.AcceleratorProfileProvider,
+			RayVerifier:                clusterreconcile.StaticNodeClusterDashboardVerifier{},
 		}
 	}
 
@@ -127,6 +128,10 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 	if hasStaleNodes && plan.Status.Phase == v1.StaticNodeClusterPhaseReady {
 		plan.Status.Phase = v1.StaticNodeClusterPhaseProvisioning
 		plan.Status.ErrorMessage = "Deleting stale static nodes"
+	}
+
+	if !hasStaleNodes && plan.Status.Phase == v1.StaticNodeClusterPhaseReady {
+		plan.Status = reconciler.RequireRayClusterVerified(ctx, cluster, plan.Status)
 	}
 
 	if err := c.clusters.UpdateStatus(ctx, cluster, plan.Status); err != nil {

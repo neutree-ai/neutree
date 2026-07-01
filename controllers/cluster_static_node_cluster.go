@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	staticclient "github.com/neutree-ai/neutree/internal/client"
+	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/semver"
@@ -89,6 +89,13 @@ func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) e
 	if !specObserved {
 		return withClusterPhaseOverride(
 			errors.Errorf("static node cluster %s is applying desired spec", c.Metadata.Name),
+			staticNodeClusterProgressPhase(c, current.Status),
+		)
+	}
+
+	if err := controller.verifyStaticNodeClusterReady(c, desired); err != nil {
+		return withClusterPhaseOverride(
+			errors.Wrapf(err, "static node cluster %s Ray verification failed", c.Metadata.Name),
 			staticNodeClusterProgressPhase(c, current.Status),
 		)
 	}
@@ -456,14 +463,25 @@ func (controller *ClusterController) copyStaticNodeClusterStatus(
 		if c.Status.Version == "" {
 			c.Status.Version = c.GetVersion()
 		}
-
-		resources, err := controller.calculateStaticNodeClusterResources(desired)
-		if err != nil {
-			klog.Warningf("failed to calculate static cluster resources for %s: %v", c.Metadata.WorkspaceName(), err)
-		} else {
-			c.Status.ResourceInfo = resources
-		}
 	}
+}
+
+func (controller *ClusterController) verifyStaticNodeClusterReady(
+	c *v1.Cluster,
+	staticCluster *v1.StaticNodeCluster,
+) error {
+	resources, err := controller.calculateStaticNodeClusterResources(staticCluster)
+	if err != nil {
+		return err
+	}
+
+	if c.Status == nil {
+		c.Status = &v1.ClusterStatus{}
+	}
+
+	c.Status.ResourceInfo = resources
+
+	return nil
 }
 
 func staticNodeClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool {
@@ -580,10 +598,17 @@ func (controller *ClusterController) calculateStaticNodeClusterResources(
 		resourceParsers = controller.acceleratorManager.GetAllParsers()
 	}
 
-	resourceClient := resourceview.NewRayResourceClient(
-		dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)),
-		resourceParsers,
-	)
+	dashboardService := dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster))
+	rayNodes, err := dashboardService.ListNodes()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list Ray nodes")
+	}
+
+	if err := clusterreconcile.ValidateStaticNodeClusterRayNodes(staticCluster, rayNodes); err != nil {
+		return nil, err
+	}
+
+	resourceClient := resourceview.NewRayResourceClient(staticNodeClusterRayNodeService{nodes: rayNodes}, resourceParsers)
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
 	resources, err := resourceBuilder.BuildClusterResources(context.Background(), nil)
@@ -602,6 +627,38 @@ func (controller *ClusterController) calculateStaticNodeClusterResources(
 	}
 
 	return resources, nil
+}
+
+type staticNodeClusterRayNodeService struct {
+	nodes []v1.NodeSummary
+}
+
+func (s staticNodeClusterRayNodeService) ListNodes() ([]v1.NodeSummary, error) {
+	return s.nodes, nil
+}
+
+func (staticNodeClusterRayNodeService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {
+	return nil, errors.New("static node cluster cached Ray node service does not support cluster metadata")
+}
+
+func (staticNodeClusterRayNodeService) GetClusterStatus() (v1.RayAPIClusterStatus, error) {
+	return v1.RayAPIClusterStatus{}, errors.New("static node cluster cached Ray node service does not support cluster status")
+}
+
+func (staticNodeClusterRayNodeService) GetServeApplications() (*dashboard.RayServeApplicationsResponse, error) {
+	return nil, errors.New("static node cluster cached Ray node service does not support serve applications")
+}
+
+func (staticNodeClusterRayNodeService) UpdateServeApplications(dashboard.RayServeApplicationsRequest) error {
+	return errors.New("static node cluster cached Ray node service does not support serve application updates")
+}
+
+func (staticNodeClusterRayNodeService) GetActorLog(string, string, int) (string, error) {
+	return "", errors.New("static node cluster cached Ray node service does not support actor logs")
+}
+
+func (staticNodeClusterRayNodeService) ListActors([]dashboard.ActorFilter, bool, int) (*dashboard.ActorsResponse, error) {
+	return nil, errors.New("static node cluster cached Ray node service does not support actor listing")
 }
 
 func (controller *ClusterController) getUsedImageRegistry(c *v1.Cluster) (*v1.ImageRegistry, error) {

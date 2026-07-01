@@ -117,10 +117,10 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 	status.WarmReady = warmReady
 
 	switch {
-	case status.Phase == v1.StaticNodeClusterPhaseUpgrading:
-		status.Phase = v1.StaticNodeClusterPhaseUpgrading
 	case anyNodeFailed:
 		status.Phase = v1.StaticNodeClusterPhaseFailed
+	case status.Phase == v1.StaticNodeClusterPhaseUpgrading:
+		status.Phase = v1.StaticNodeClusterPhaseUpgrading
 	case status.ReadyNodes == status.DesiredNodes && status.HeadReady && status.WarmReady:
 		status.Phase = v1.StaticNodeClusterPhaseReady
 	case status.HeadReady && status.ReadyNodes > 0:
@@ -148,7 +148,7 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 	//
 	// status.version is the observed/converged version. It must not be advanced
 	// to spec.version until desired components have reached static-node status.
-	status = advanceStaticNodeClusterUpgradeStatus(cluster, nodes, status)
+	status = advanceStaticNodeClusterUpgradeStatus(cluster, nodes, status, plans)
 	status = requireDesiredComponentsObserved(cluster, status, plans, staticNodeByName(nodes))
 	status = withAcceleratorProfileFallbackStatus(status, plans)
 

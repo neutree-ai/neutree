@@ -8,6 +8,7 @@ import (
 
 type StaticNodeClusterReconciler struct {
 	AcceleratorProfileProvider AcceleratorProfileProvider
+	RayVerifier                StaticNodeClusterRayVerifier
 }
 
 type AcceleratorProfileProvider interface {
@@ -35,6 +36,41 @@ func (r *StaticNodeClusterReconciler) Plan(
 		DesiredNodes: desiredNodesFromPlans(plans),
 		Status:       status,
 	}, nil
+}
+
+type StaticNodeClusterRayVerifier interface {
+	VerifyRayCluster(ctx context.Context, cluster *v1.StaticNodeCluster) error
+}
+
+func (r *StaticNodeClusterReconciler) RequireRayClusterVerified(
+	ctx context.Context,
+	cluster *v1.StaticNodeCluster,
+	status v1.StaticNodeClusterStatus,
+) v1.StaticNodeClusterStatus {
+	if status.Phase != v1.StaticNodeClusterPhaseReady {
+		return status
+	}
+
+	if r == nil || r.RayVerifier == nil {
+		return status
+	}
+
+	if err := r.RayVerifier.VerifyRayCluster(ctx, cluster); err != nil {
+		if upgrade := staticNodeClusterUpgrade(cluster); upgrade != nil {
+			status.Phase = v1.StaticNodeClusterPhaseUpgrading
+			status.Version = upgrade.ObservedVersion
+		} else {
+			status.Phase = v1.StaticNodeClusterPhaseProvisioning
+			status.Version = ""
+			if cluster != nil && cluster.Status != nil {
+				status.Version = cluster.Status.Version
+			}
+		}
+
+		status.ErrorMessage = "Ray cluster verification failed: " + err.Error()
+	}
+
+	return status
 }
 
 func (r *StaticNodeClusterReconciler) BuildDesiredNodes(

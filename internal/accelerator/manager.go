@@ -199,6 +199,7 @@ func (a *manager) DetectAccelerator(
 		SSHAuth: sshAuth,
 	}
 	var detected *v1.StaticNodeAcceleratorStatus
+	var detectErr error
 
 	a.acceleratorsMap.Range(func(key, value any) bool {
 		p, ok := value.(registerPlugin)
@@ -215,6 +216,10 @@ func (a *manager) DetectAccelerator(
 		response, err := detector.DetectStaticNodeAccelerator(ctx, request)
 		if err != nil {
 			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, err.Error())
+			if detectErr == nil {
+				detectErr = errors.Wrapf(err, "detect static node accelerator from plugin %s failed", p.resource)
+			}
+
 			return true
 		}
 
@@ -228,6 +233,10 @@ func (a *manager) DetectAccelerator(
 
 	if detected != nil {
 		return detected, nil
+	}
+
+	if detectErr != nil {
+		return nil, detectErr
 	}
 
 	cpu := v1.CPUStaticNodeAcceleratorStatus()

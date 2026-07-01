@@ -170,6 +170,52 @@ func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
 	}
 }
 
+func TestStaticNodeClusterReconcilerUsesClusterRuntimeImageSuffix(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	nodes, err := (&StaticNodeClusterReconciler{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					ClusterRuntime: &v1.RuntimeConfig{
+						ImageSuffix: "cuda",
+						Runtime:     "nvidia",
+					},
+				},
+			},
+		},
+	}).BuildDesiredNodes(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	rayHead := findComponent(head.Spec.Components, "ray-head")
+	require.NotNil(t, rayHead)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda", rayHead.Image)
+	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
+		"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda",
+	})
+}
+
 func TestStaticNodeClusterReconcilerBuildDesiredNodesValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -484,6 +530,81 @@ func TestStaticNodeClusterReconcilerCompletesRayRecreateUpgradeWhenTargetReady(t
 	assert.Equal(t, v1.StaticNodeClusterPhaseReady, plan.Status.Phase)
 	assert.Equal(t, "v1.2.1", plan.Status.Version)
 	assert.Empty(t, plan.Status.ErrorMessage)
+}
+
+func TestStaticNodeClusterReconcilerCompletesRayRecreateUpgradeWithImageSuffix(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.2.1"
+	cluster.Status = &v1.StaticNodeClusterStatus{
+		Phase:        v1.StaticNodeClusterPhaseUpgrading,
+		Version:      "v1.2.0",
+		ErrorMessage: "Verifying",
+	}
+	currentNodes := staticNodeUpgradeCurrentNodes()
+	for _, node := range currentNodes {
+		node.Status.Accelerator = &v1.StaticNodeAcceleratorStatus{
+			Type:         v1.AcceleratorTypeNVIDIAGPU.String(),
+			ProductModel: v1.AcceleratorTypeNVIDIAGPU.String(),
+		}
+	}
+	reconciler := &StaticNodeClusterReconciler{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					ClusterRuntime:  &v1.RuntimeConfig{ImageSuffix: "cuda"},
+				},
+			},
+		},
+	}
+	desiredNodes, err := reconciler.BuildDesiredNodes(context.Background(), cluster, currentNodes)
+	require.NoError(t, err)
+	for _, desired := range desiredNodes {
+		current := findStaticNode(currentNodes, desired.Metadata.Name)
+		require.NotNil(t, current)
+		current.Status.Phase = v1.StaticNodePhaseReady
+		current.Status.Warm = &v1.WarmStatus{Ready: true}
+		current.Status.Components = make([]v1.NodeComponentStatus, 0, len(desired.Spec.Components))
+		for _, component := range desired.Spec.Components {
+			current.Status.Components = append(current.Status.Components, v1.NodeComponentStatus{
+				Name:          component.Name,
+				Type:          component.Type,
+				Ready:         true,
+				Phase:         v1.NodeComponentPhaseRunning,
+				ObservedHash:  component.ConfigHash,
+				ObservedImage: component.Image,
+			})
+		}
+	}
+
+	plan, err := reconciler.Plan(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+	assert.Equal(t, v1.StaticNodeClusterPhaseReady, plan.Status.Phase)
+	assert.Equal(t, "v1.2.1", plan.Status.Version)
+	assert.Empty(t, plan.Status.ErrorMessage)
+}
+
+func TestStaticNodeClusterReconcilerFailsUpgradeWhenNodeFails(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.2.1"
+	cluster.Status = &v1.StaticNodeClusterStatus{
+		Phase:        v1.StaticNodeClusterPhaseUpgrading,
+		Version:      "v1.2.0",
+		ErrorMessage: "Warming",
+	}
+	currentNodes := staticNodeUpgradeCurrentNodes()
+	head := findStaticNode(currentNodes, "head-0")
+	require.NotNil(t, head)
+	head.Status.Phase = v1.StaticNodePhaseFailed
+	head.Status.ErrorMessage = "ssh connection failed"
+
+	plan, err := (&StaticNodeClusterReconciler{}).Plan(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+	assert.Equal(t, v1.StaticNodeClusterPhaseFailed, plan.Status.Phase)
+	assert.Equal(t, "v1.2.0", plan.Status.Version)
+	assert.Contains(t, plan.Status.ErrorMessage, "static node head-0 phase=Failed: ssh connection failed")
 }
 
 func TestStaticNodeClusterReconcilerKeepsReadyWhenObservedVersionMatchesSpec(t *testing.T) {

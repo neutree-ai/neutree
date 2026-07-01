@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -686,8 +687,14 @@ func TestClusterControllerSyncMapsStaticNodeClusterProvisioningToUpdating(t *tes
 				Version:       "v1.0.2",
 				ImageRegistry: "registry.example.com/neutree",
 				Nodes: []v1.StaticNodeClusterNodeSpec{
-					{Name: "10.0.0.10", IP: "10.0.0.10", Role: v1.StaticNodeRoleHead},
+					{
+						Name:    "10.0.0.10",
+						IP:      "10.0.0.10",
+						Role:    v1.StaticNodeRoleHead,
+						SSHAuth: &v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+					},
 				},
+				UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
 			},
 			Status: &v1.StaticNodeClusterStatus{
 				Phase:        v1.StaticNodeClusterPhaseProvisioning,
@@ -821,8 +828,14 @@ func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButSpecChanged(t *t
 				Version:       "v1.0.2",
 				ImageRegistry: "registry.example.com/neutree",
 				Nodes: []v1.StaticNodeClusterNodeSpec{
-					{Name: "10.0.0.10", IP: "10.0.0.10", Role: v1.StaticNodeRoleHead},
+					{
+						Name:    "10.0.0.10",
+						IP:      "10.0.0.10",
+						Role:    v1.StaticNodeRoleHead,
+						SSHAuth: &v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+					},
 				},
+				UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
 			},
 			Status: &v1.StaticNodeClusterStatus{
 				Phase:        v1.StaticNodeClusterPhaseReady,
@@ -850,6 +863,103 @@ func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButSpecChanged(t *t
 	mockStorage.AssertExpectations(t)
 }
 
+func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButRayDashboardUnavailable(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	mockDashboard := &dashboardmocks.MockDashboardService{}
+	controller := &ClusterController{
+		storage:               mockStorage,
+		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+	}
+	input := &v1.Cluster{
+		ID: 13,
+		Metadata: &v1.Metadata{
+			Name:      "static-ready-dashboard-down",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.2",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{
+			Initialized: true,
+			Version:     "v1.0.2",
+			ObservedSpecHash: cluster.ComputeClusterSpecHash(&v1.ClusterSpec{
+				ImageRegistry: "registry-a",
+				Type:          v1.SSHClusterType,
+				Version:       "v1.0.2",
+				Config: &v1.ClusterConfig{
+					SSHConfig: &v1.RaySSHProvisionClusterConfig{
+						Provider: v1.Provider{HeadIP: "10.0.0.10"},
+						Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+					},
+				},
+			}),
+		},
+	}
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() {
+		dashboard.NewDashboardService = prevFactory
+	})
+
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
+		{
+			ID: 58,
+			Metadata: &v1.Metadata{
+				Name:      "static-ready-dashboard-down",
+				Workspace: "default",
+			},
+			Spec: &v1.StaticNodeClusterSpec{
+				Version:       "v1.0.2",
+				ImageRegistry: "registry.example.com/neutree",
+				Nodes: []v1.StaticNodeClusterNodeSpec{
+					{
+						Name:    "10.0.0.10",
+						IP:      "10.0.0.10",
+						Role:    v1.StaticNodeRoleHead,
+						SSHAuth: &v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+					},
+				},
+				UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
+			},
+			Status: &v1.StaticNodeClusterStatus{
+				Phase:        v1.StaticNodeClusterPhaseReady,
+				Version:      "v1.0.2",
+				ReadyNodes:   1,
+				DesiredNodes: 1,
+			},
+		},
+	}, nil).Once()
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedImageRegistry()}, nil).Once()
+	mockStorage.On("UpdateStaticNodeCluster", "58", mock.Anything).Return(nil).Once()
+	mockDashboard.On("ListNodes").Return(nil, errors.New("connection refused")).Once()
+	mockStorage.On("UpdateCluster", "13", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseUpdating, updated.Status.Phase)
+		assert.Contains(t, updated.Status.ErrorMessage, "Ray verification failed")
+		assert.Contains(t, updated.Status.ErrorMessage, "connection refused")
+
+		return true
+	})).Return(nil).Once()
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Ray verification failed")
+	mockDashboard.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
+
 func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticNodeDevices(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
 	mockDashboard := &dashboardmocks.MockDashboardService{}
@@ -872,6 +982,9 @@ func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticN
 			IP: "192.168.19.218",
 			Raylet: v1.Raylet{
 				State: v1.AliveNodeState,
+				Labels: map[string]string{
+					v1.NeutreeServingVersionLabel: "v1.0.2",
+				},
 				Resources: map[string]float64{
 					"CPU":             32,
 					"GPU":             2,
@@ -941,6 +1054,7 @@ func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticN
 	resources, err := controller.calculateStaticNodeClusterResources(&v1.StaticNodeCluster{
 		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
 		Spec: &v1.StaticNodeClusterSpec{
+			Version: "v1.0.2",
 			Nodes: []v1.StaticNodeClusterNodeSpec{
 				{Name: "192.168.19.218", IP: "192.168.19.218", Role: v1.StaticNodeRoleHead},
 			},

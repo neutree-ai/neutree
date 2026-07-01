@@ -141,7 +141,12 @@ func advanceStaticNodeClusterUpgradeStatus(
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
 	status v1.StaticNodeClusterStatus,
+	plans []staticNodeDesiredPlan,
 ) v1.StaticNodeClusterStatus {
+	if status.Phase == v1.StaticNodeClusterPhaseFailed {
+		return status
+	}
+
 	step := staticNodeClusterUpgradeStepFromStatus(&status)
 	if step == "" {
 		return status
@@ -157,15 +162,15 @@ func advanceStaticNodeClusterUpgradeStatus(
 			step = staticNodeClusterUpgradeStepStartingHead
 		}
 	case staticNodeClusterUpgradeStepStartingHead:
-		if staticNodeClusterHeadRayRunningTarget(cluster, currentNodes) {
+		if staticNodeClusterHeadRayRunningTarget(cluster, currentNodes, plans) {
 			step = staticNodeClusterUpgradeStepStartingWorkers
 		}
 	case staticNodeClusterUpgradeStepStartingWorkers:
-		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes) {
+		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes, plans) {
 			step = staticNodeClusterUpgradeStepVerifying
 		}
 	case staticNodeClusterUpgradeStepVerifying:
-		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes) &&
+		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes, plans) &&
 			status.ReadyNodes == status.DesiredNodes &&
 			status.HeadReady &&
 			status.WarmReady {
@@ -212,11 +217,20 @@ func staticNodeClusterWorkersStopped(cluster *v1.StaticNodeCluster, nodes []*v1.
 	return true
 }
 
-func staticNodeClusterRayRuntimeRunningTarget(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
-	return staticNodeClusterHeadRayRunningTarget(cluster, nodes) && staticNodeClusterWorkersRayRunningTarget(cluster, nodes)
+func staticNodeClusterRayRuntimeRunningTarget(
+	cluster *v1.StaticNodeCluster,
+	nodes []*v1.StaticNode,
+	plans []staticNodeDesiredPlan,
+) bool {
+	return staticNodeClusterHeadRayRunningTarget(cluster, nodes, plans) &&
+		staticNodeClusterWorkersRayRunningTarget(cluster, nodes, plans)
 }
 
-func staticNodeClusterHeadRayRunningTarget(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
+func staticNodeClusterHeadRayRunningTarget(
+	cluster *v1.StaticNodeCluster,
+	nodes []*v1.StaticNode,
+	plans []staticNodeDesiredPlan,
+) bool {
 	headName := staticNodeClusterHeadName(cluster)
 	if headName == "" {
 		return false
@@ -227,10 +241,18 @@ func staticNodeClusterHeadRayRunningTarget(cluster *v1.StaticNodeCluster, nodes 
 		return false
 	}
 
-	return rayComponentRunningTarget(node.Status.Components, v1.NodeComponentTypeRayHead, buildRayRuntimeImage(cluster))
+	return rayComponentRunningTarget(
+		node.Status.Components,
+		v1.NodeComponentTypeRayHead,
+		desiredRayComponentImage(plans, headName, v1.NodeComponentTypeRayHead),
+	)
 }
 
-func staticNodeClusterWorkersRayRunningTarget(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
+func staticNodeClusterWorkersRayRunningTarget(
+	cluster *v1.StaticNodeCluster,
+	nodes []*v1.StaticNode,
+	plans []staticNodeDesiredPlan,
+) bool {
 	workerNames := staticNodeClusterWorkerNames(cluster)
 	if len(workerNames) == 0 {
 		return true
@@ -243,12 +265,40 @@ func staticNodeClusterWorkersRayRunningTarget(cluster *v1.StaticNodeCluster, nod
 			return false
 		}
 
-		if !rayComponentRunningTarget(node.Status.Components, v1.NodeComponentTypeRayWorker, buildRayRuntimeImage(cluster)) {
+		if !rayComponentRunningTarget(
+			node.Status.Components,
+			v1.NodeComponentTypeRayWorker,
+			desiredRayComponentImage(plans, name, v1.NodeComponentTypeRayWorker),
+		) {
 			return false
 		}
 	}
 
 	return true
+}
+
+func desiredRayComponentImage(
+	plans []staticNodeDesiredPlan,
+	nodeName string,
+	componentType v1.NodeComponentType,
+) string {
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Metadata == nil || plan.Node.Spec == nil {
+			continue
+		}
+
+		if plan.Node.Metadata.Name != nodeName {
+			continue
+		}
+
+		for _, component := range plan.Node.Spec.Components {
+			if component.Type == componentType || rayComponentNameMatchesType(component.Name, componentType) {
+				return component.Image
+			}
+		}
+	}
+
+	return ""
 }
 
 func staticNodeClusterWorkerNames(cluster *v1.StaticNodeCluster) map[string]struct{} {
