@@ -377,7 +377,17 @@ class Backend:
         Uses vLLM's native scoring serving callable for maximum compatibility and performance.
         """
         await self._ensure_score()
-        request = RerankRequest(**payload)
+        try:
+            request = RerankRequest(**payload)
+        except (TypeError, ValueError) as e:
+            logging.error(f"Invalid payload for RerankRequest: {e}")
+            return ErrorResponse(
+                error=ErrorInfo(
+                    message=f"Invalid payload for RerankRequest: {e}",
+                    type="invalid_request_error",
+                    code=400,
+                )
+            )
         return await self.openai_serving_score(request, None)
 
     async def show_available_models(self):
@@ -406,6 +416,28 @@ def _result_to_response(result: Any) -> Response:
     return JSONResponse(content=result)
 
 
+def _stream_error_response(first_chunk: Any) -> Optional[JSONResponse]:
+    if not isinstance(first_chunk, str) or not first_chunk.startswith("data:"):
+        return None
+
+    payload = first_chunk.removeprefix("data:").strip()
+    if payload == "[DONE]":
+        return None
+
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(data, dict) or "error" not in data:
+        return None
+
+    return JSONResponse(
+        content=data["error"],
+        status_code=400,
+    )
+
+
 @serve.deployment(ray_actor_options={"num_cpus": 0.1})
 @serve.ingress(app)
 class Controller:
@@ -430,18 +462,33 @@ class Controller:
 
             try:
                 first_chunk = await r.__anext__()
-                if isinstance(first_chunk, str) and "error" in first_chunk:
-                    import json
-                    error_data = json.loads(first_chunk.replace("data: ", "").strip())
-                    return JSONResponse(
-                        content=error_data["error"],
-                        status_code=400
-                    )
-            except:
-                pass
+            except StopAsyncIteration:
+                return StreamingResponse(
+                    content=iter(()),
+                    media_type="text/event-stream"
+                )
+            except Exception as e:
+                logging.exception("Failed to initialize chat completion stream")
+                return JSONResponse(
+                    content={
+                        "message": "Failed to initialize chat completion stream",
+                        "type": "internal_server_error",
+                        "details": str(e),
+                    },
+                    status_code=500
+                )
+
+            error_response = _stream_error_response(first_chunk)
+            if error_response is not None:
+                return error_response
+
+            async def stream_with_first_chunk():
+                yield first_chunk
+                async for chunk in r:
+                    yield chunk
 
             return StreamingResponse(
-                content=r,
+                content=stream_with_first_chunk(),
                 media_type="text/event-stream"
             )
         else:
