@@ -31,7 +31,7 @@ from vllm.entrypoints.openai.serving_models import BaseModelPath, OpenAIServingM
 
 from downloader import get_downloader, build_request_from_model_args, download_with_markers
 from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
-from serve._utils import coerce_args, filter_engine_args
+from serve._utils import build_base_model_paths, coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
 
 
@@ -90,6 +90,7 @@ class Backend:
         print(f"[Backend] Model download completed.")
 
         self.model_id = model_serve_name
+        self.model_path = model_path
         self.model_task = model_task
 
         # Extract our custom parameters BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors
@@ -145,6 +146,10 @@ class Backend:
         # params that were read but not popped) to prevent TypeError on init.
         filter_engine_args(args, AsyncEngineArgs)
 
+        self.served_model_names = args.get("served_model_name", self.model_id)
+        if isinstance(self.served_model_names, str):
+            self.served_model_names = [self.served_model_names]
+
         engine_args = AsyncEngineArgs(
             **args
         )
@@ -169,8 +174,11 @@ class Backend:
             self._ensure_model_config()
             self.openai_serving_models = OpenAIServingModels(
                 self.engine,
-                [BaseModelPath(name=self.engine.model_config.served_model_name,
-                               model_path=self.engine.model_config.served_model_name)]
+                build_base_model_paths(
+                    BaseModelPath,
+                    self.served_model_names,
+                    self.model_path,
+                )
             )
         return self.openai_serving_models
 
