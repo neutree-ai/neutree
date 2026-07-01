@@ -431,58 +431,6 @@ func TestClusterControllerLegacyToStaticNodeFlowCleansLegacyRuntimeBeforeCreate(
 	mockStorage.AssertExpectations(t)
 }
 
-func TestClusterControllerStaticNodeToLegacyFlowDeletesStaticNodeClusterBeforeLegacyReconcile(t *testing.T) {
-	mockStorage := &storagemocks.MockStorage{}
-	controller := &ClusterController{
-		storage: mockStorage,
-		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
-			require.Fail(t, "legacy cluster reconcile must wait until StaticNodeCluster cleanup finishes")
-
-			return nil, nil
-		},
-	}
-	input := &v1.Cluster{
-		ID: 9,
-		Metadata: &v1.Metadata{
-			Name:      "static-rollback",
-			Workspace: "default",
-		},
-		Spec: &v1.ClusterSpec{
-			Type:    v1.SSHClusterType,
-			Version: "v1.0.1",
-		},
-		Status: &v1.ClusterStatus{
-			Initialized: true,
-			Version:     "v1.0.2",
-		},
-	}
-
-	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
-		{
-			ID: 44,
-			Metadata: &v1.Metadata{
-				Name:      "static-rollback",
-				Workspace: "default",
-			},
-		},
-	}, nil).Once()
-	mockStorage.On("UpdateStaticNodeCluster", "44", mock.MatchedBy(func(updated *v1.StaticNodeCluster) bool {
-		return updated.Metadata != nil && updated.Metadata.DeletionTimestamp != ""
-	})).Return(nil).Once()
-	mockStorage.On("UpdateCluster", "9", mock.MatchedBy(func(updated *v1.Cluster) bool {
-		require.NotNil(t, updated.Status)
-		assert.Contains(t, updated.Status.ErrorMessage, "static node cluster static-rollback is deleting")
-
-		return true
-	})).Return(nil)
-
-	err := controller.sync(input)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "static node cluster static-rollback is deleting")
-	mockStorage.AssertExpectations(t)
-}
-
 func TestClusterControllerStaticNodeClusterDeletePropagatesForceDelete(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
 	controller := &ClusterController{storage: mockStorage}

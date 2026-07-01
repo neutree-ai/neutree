@@ -118,11 +118,6 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 			return reconcileErr
 		}
 	} else {
-		if err := controller.cleanupStaticNodeClusterBeforeLegacyFlow(c); err != nil {
-			reconcileErr = errors.Wrapf(err, "failed to cleanup static node cluster before legacy reconcile %s", c.Metadata.WorkspaceName())
-			return reconcileErr
-		}
-
 		r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 		if err != nil {
 			reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())

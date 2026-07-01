@@ -248,14 +248,6 @@ func (controller *ClusterController) cleanupLegacyRuntimeBeforeStaticNodeFlow(c 
 	return nil
 }
 
-func (controller *ClusterController) cleanupStaticNodeClusterBeforeLegacyFlow(c *v1.Cluster) error {
-	if !isStaticNodeToLegacyFlowRollback(c) {
-		return nil
-	}
-
-	return controller.reconcileStaticNodeClusterDelete(c)
-}
-
 func isLegacyToStaticNodeFlowUpgrade(c *v1.Cluster) bool {
 	if c == nil || c.Status == nil || !c.Status.Initialized || c.Status.Version == "" {
 		return false
@@ -272,24 +264,6 @@ func isLegacyToStaticNodeFlowUpgrade(c *v1.Cluster) bool {
 	}
 
 	return useStaticNodeFlow
-}
-
-func isStaticNodeToLegacyFlowRollback(c *v1.Cluster) bool {
-	if c == nil || c.Status == nil || !c.Status.Initialized || c.Status.Version == "" {
-		return false
-	}
-
-	wasStaticNodeFlow, err := isStaticNodeClusterFlowVersion(c.Status.Version)
-	if err != nil || !wasStaticNodeFlow {
-		return false
-	}
-
-	useStaticNodeFlow, err := isStaticNodeClusterFlowVersion(c.GetVersion())
-	if err != nil {
-		return false
-	}
-
-	return !useStaticNodeFlow
 }
 
 func isStaticNodeClusterFlowVersion(version string) (bool, error) {
