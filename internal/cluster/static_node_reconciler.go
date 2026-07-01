@@ -411,6 +411,7 @@ func (r *StaticNodeReconciler) reconcileComponent(
 	}
 
 	dockerRuntime := NewStaticNodeDockerRuntime(runner)
+
 	running, err := dockerRuntime.ComponentContainerMatches(
 		ctx,
 		componentContainerName(node, component),

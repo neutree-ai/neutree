@@ -62,6 +62,7 @@ func (r *StaticNodeClusterReconciler) RequireRayClusterVerified(
 		} else {
 			status.Phase = v1.StaticNodeClusterPhaseProvisioning
 			status.Version = ""
+
 			if cluster != nil && cluster.Status != nil {
 				status.Version = cluster.Status.Version
 			}

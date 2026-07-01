@@ -598,8 +598,7 @@ func (controller *ClusterController) calculateStaticNodeClusterResources(
 		resourceParsers = controller.acceleratorManager.GetAllParsers()
 	}
 
-	dashboardService := dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster))
-	rayNodes, err := dashboardService.ListNodes()
+	rayNodes, err := dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)).ListNodes()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list Ray nodes")
 	}

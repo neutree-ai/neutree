@@ -111,9 +111,7 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 			reconcileErr = err
 			return reconcileErr
 		}
-	}
 
-	if useStaticNodeFlow {
 		reconcileErr = controller.reconcileStaticNodeCluster(c)
 		if reconcileErr != nil {
 			reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile static node cluster %s", c.Metadata.WorkspaceName())

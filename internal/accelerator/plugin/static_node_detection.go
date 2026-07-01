@@ -22,6 +22,7 @@ func staticNodeAcceleratorResponseFromAccelerators(
 	}
 
 	devices := make([]v1.StaticNodeAcceleratorDeviceStatus, 0, len(accelerators))
+
 	for index, accelerator := range accelerators {
 		id := accelerator.ID
 		if id == "" {

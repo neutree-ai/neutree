@@ -96,6 +96,9 @@ func (c *StaticNodeController) sync(ctx context.Context, node *v1.StaticNode) er
 	}
 
 	runner = nodeRunner
+	// The SSH runner owns any temporary private-key directory created from
+	// spec.ssh_auth. Deferring Close here keeps normal reconcile and remote
+	// delete paths from leaking key files after runner creation succeeds.
 	defer closeStaticNodeRunner(nodeRunner)
 
 	if isDeleting {

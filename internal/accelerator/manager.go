@@ -216,6 +216,7 @@ func (a *manager) DetectAccelerator(
 		response, err := detector.DetectStaticNodeAccelerator(ctx, request)
 		if err != nil {
 			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, err.Error())
+
 			if detectErr == nil {
 				detectErr = errors.Wrapf(err, "detect static node accelerator from plugin %s failed", p.resource)
 			}

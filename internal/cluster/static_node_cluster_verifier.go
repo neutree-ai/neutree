@@ -33,6 +33,7 @@ func ValidateStaticNodeClusterRayNodes(
 	}
 
 	aliveByIP := map[string]v1.NodeSummary{}
+
 	for _, node := range rayNodes {
 		if node.Raylet.State != v1.AliveNodeState {
 			continue
