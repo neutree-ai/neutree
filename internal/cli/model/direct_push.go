@@ -14,7 +14,11 @@ import (
 
 var getMountSource = defaultGetMountSource
 
-func ValidateDirectPushTarget(registry *v1.ModelRegistry, localNFSPath string) error {
+type DirectPushValidationOptions struct {
+	SkipMountCheck bool
+}
+
+func ValidateDirectPushTarget(registry *v1.ModelRegistry, localNFSPath string, options DirectPushValidationOptions) error {
 	if registry == nil || registry.Spec == nil {
 		return fmt.Errorf("direct model push only supports bentoml registries backed by nfs://")
 	}
@@ -55,6 +59,10 @@ func ValidateDirectPushTarget(registry *v1.ModelRegistry, localNFSPath string) e
 		return fmt.Errorf("failed to remove write check file under %s: %w", localNFSPath, err)
 	}
 
+	if options.SkipMountCheck {
+		return nil
+	}
+
 	mountSource, mounted, err := getMountSource(localNFSPath)
 	if err != nil {
 		return fmt.Errorf("failed to inspect local NFS mount for %s: %w", localNFSPath, err)
@@ -78,7 +86,12 @@ func ImportArchiveToLocalNFS(localNFSPath, archivePath, name, version string, pr
 	}
 	defer archive.Close()
 
-	if err := bentoml.ImportModel(localNFSPath, archive, name, version, true, progress); err != nil {
+	var reader io.Reader = archive
+	if progress != nil {
+		reader = io.TeeReader(archive, progress)
+	}
+
+	if err := bentoml.ImportModel(localNFSPath, reader, name, version, true, nil); err != nil {
 		return fmt.Errorf("failed to import model archive to local NFS path: %w", err)
 	}
 

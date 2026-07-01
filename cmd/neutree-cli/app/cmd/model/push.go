@@ -23,6 +23,7 @@ func NewPushCmd() *cobra.Command {
 	var description string
 	var labelsFlag []string
 	var localNFSPath string
+	var skipLocalNFSMountCheck bool
 
 	cmd := &cobra.Command{
 		Use:          "push [local_model_path]",
@@ -112,12 +113,24 @@ func NewPushCmd() *cobra.Command {
 			}
 
 			if localNFSPath != "" {
-				if err := cliModel.ValidateDirectPushTarget(modelRegistry, localNFSPath); err != nil {
+				options := cliModel.DirectPushValidationOptions{
+					SkipMountCheck: skipLocalNFSMountCheck,
+				}
+				if err := cliModel.ValidateDirectPushTarget(modelRegistry, localNFSPath, options); err != nil {
+					return err
+				}
+				if skipLocalNFSMountCheck {
+					fmt.Fprintln(cmd.ErrOrStderr(),
+						"\nWarning: skipped local NFS mount check; ensure --local-nfs-path points "+
+							"to the model registry export root, or inference nodes may not see the model.")
+				}
+
+				importBar, err := newLocalNFSImportProgressBar(modelPath)
+				if err != nil {
 					return err
 				}
 
-				fmt.Println("Importing model...")
-				if err := cliModel.ImportArchiveToLocalNFS(localNFSPath, modelPath, modelName, version, nil); err != nil {
+				if err := cliModel.ImportArchiveToLocalNFS(localNFSPath, modelPath, modelName, version, importBar); err != nil {
 					return err
 				}
 
@@ -174,12 +187,23 @@ func NewPushCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Description of the model")
 	cmd.Flags().StringSliceVarP(&labelsFlag, "label", "l", nil, "Labels in the format key=value")
 	cmd.Flags().StringVar(&localNFSPath, "local-nfs-path", "", "Path to a pre-mounted NFS ModelRegistry root for direct local import")
+	cmd.Flags().BoolVar(&skipLocalNFSMountCheck, "skip-local-nfs-mount-check", false,
+		"Skip NFS mount/source validation for --local-nfs-path when running on the NFS server export path")
 
 	if err := cmd.MarkFlagRequired("name"); err != nil {
 		panic(fmt.Sprintf("Failed to mark flag 'name' as required: %v", err))
 	}
 
 	return cmd
+}
+
+func newLocalNFSImportProgressBar(modelPath string) (io.Writer, error) {
+	fileInfo, err := os.Stat(modelPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get model file info: %w", err)
+	}
+
+	return progressbar.DefaultBytes(fileInfo.Size(), "Importing model"), nil
 }
 
 // calculateDirectorySize calculates the total size of all files in a directory
