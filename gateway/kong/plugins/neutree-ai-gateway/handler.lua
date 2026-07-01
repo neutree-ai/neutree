@@ -197,6 +197,14 @@ local function set_upstream_target(entry)
     kong.service.request.clear_header("x-credential-identifier")
     kong.service.request.clear_header("x-anonymous-consumer")
 
+    -- Force an identity (uncompressed) upstream response. External providers
+    -- (e.g. minimax) honour Accept-Encoding and return brotli/gzip bodies, which
+    -- Kong does NOT auto-decompress: get_raw_body() would then yield compressed
+    -- bytes, garbling ai.trace.response_body and silently breaking the
+    -- cjson.decode used for token/usage accounting. Self-hosted upstreams reply
+    -- uncompressed, so this only changes the external-provider path.
+    kong.service.request.clear_header("Accept-Encoding")
+
     if entry.auth_header and entry.auth_header ~= "" then
         kong.service.request.set_header("Authorization", entry.auth_header)
     end
