@@ -74,8 +74,7 @@ func buildRayComponent(
 			Env:              env,
 			DockerRunOptions: dockerRunOptions,
 			HealthCheck: &v1.NodeComponentHealthCheck{
-				Port:          defaultRayDashboardPort,
-				RayNodeLabels: rayNodeLabels(cluster, role),
+				Port: defaultRayDashboardPort,
 			},
 		}
 	}
@@ -89,9 +88,8 @@ func buildRayComponent(
 		Env:              env,
 		DockerRunOptions: dockerRunOptions,
 		HealthCheck: &v1.NodeComponentHealthCheck{
-			HTTPHost:      staticNodeClusterHeadIP(cluster),
-			Port:          defaultRayDashboardPort,
-			RayNodeLabels: rayNodeLabels(cluster, role),
+			HTTPHost: staticNodeClusterHeadIP(cluster),
+			Port:     defaultRayDashboardPort,
 		},
 	}
 }

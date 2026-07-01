@@ -174,14 +174,13 @@ type NodeComponentConfigFile struct {
 }
 
 type NodeComponentHealthCheck struct {
-	Command         []string          `json:"command,omitempty"`
-	HTTPHost        string            `json:"http_host,omitempty"`
-	HTTPPath        string            `json:"http_path,omitempty"`
-	Port            int               `json:"port,omitempty"`
-	InitialDelaySec int               `json:"initial_delay_sec,omitempty"`
-	IntervalSec     int               `json:"interval_sec,omitempty"`
-	TimeoutSec      int               `json:"timeout_sec,omitempty"`
-	RayNodeLabels   map[string]string `json:"ray_node_labels,omitempty"`
+	Command         []string `json:"command,omitempty"`
+	HTTPHost        string   `json:"http_host,omitempty"`
+	HTTPPath        string   `json:"http_path,omitempty"`
+	Port            int      `json:"port,omitempty"`
+	InitialDelaySec int      `json:"initial_delay_sec,omitempty"`
+	IntervalSec     int      `json:"interval_sec,omitempty"`
+	TimeoutSec      int      `json:"timeout_sec,omitempty"`
 }
 
 type NodeComponentStatus struct {

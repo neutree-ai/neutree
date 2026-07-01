@@ -83,9 +83,6 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	assert.Contains(t, rayHead.Args[0], v1.NeutreeServingVersionLabel)
 	assert.NotContains(t, rayHead.Args[0], "--autoscaling-config")
 	require.NotNil(t, rayHead.HealthCheck)
-	assert.Equal(t, map[string]string{
-		v1.NeutreeServingVersionLabel: "v1.2.0",
-	}, rayHead.HealthCheck.RayNodeLabels)
 	assert.Equal(t, "gpu", rayHead.Env["ACCELERATOR_TYPE"])
 	assert.Contains(t, rayHead.DockerRunOptions, "--runtime=nvidia")
 	assert.Contains(t, rayHead.DockerRunOptions, "--gpus all")
@@ -118,10 +115,6 @@ func TestStaticNodeClusterReconcilerBuildDesiredNodes(t *testing.T) {
 	require.NotNil(t, rayWorker.HealthCheck)
 	assert.Equal(t, "10.0.0.10", rayWorker.HealthCheck.HTTPHost)
 	assert.Equal(t, defaultRayDashboardPort, rayWorker.HealthCheck.Port)
-	assert.Equal(t, map[string]string{
-		v1.NeutreeServingVersionLabel:    "v1.2.0",
-		v1.NeutreeNodeProvisionTypeLabel: v1.StaticNodeProvisionType,
-	}, rayWorker.HealthCheck.RayNodeLabels)
 	assertNodeComponentTypes(t, worker.Spec.Components, []v1.NodeComponentType{
 		v1.NodeComponentTypeRayWorker,
 	})

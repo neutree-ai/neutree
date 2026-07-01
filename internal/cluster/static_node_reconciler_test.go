@@ -723,10 +723,6 @@ func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerHTTPProbe(t *test
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: testDefaultHealthHTTPPath,
 						Port:     healthPort,
-						RayNodeLabels: map[string]string{
-							v1.NeutreeServingVersionLabel:    "v1.2.0",
-							v1.NeutreeNodeProvisionTypeLabel: v1.StaticNodeProvisionType,
-						},
 					},
 				},
 			},
@@ -747,46 +743,6 @@ func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerHTTPProbe(t *test
 	assert.True(t, statuses[0].Ready)
 	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
 	assert.Equal(t, len(runner.responses), runner.calls)
-}
-
-func TestStaticNodeReconcilerReconcileComponentsIgnoresRayWorkerLabelsInNodeHealth(t *testing.T) {
-	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
-	node := &v1.StaticNode{
-		Spec: &v1.StaticNodeSpec{
-			Cluster: "static-a",
-			IP:      healthHost,
-			Components: []v1.NodeComponentSpec{
-				{
-					Name:       "ray-worker",
-					Type:       v1.NodeComponentTypeRayWorker,
-					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
-					ConfigHash: "hash-ray-worker",
-					HealthCheck: &v1.NodeComponentHealthCheck{
-						HTTPPath: testDefaultHealthHTTPPath,
-						Port:     healthPort,
-						RayNodeLabels: map[string]string{
-							v1.NeutreeServingVersionLabel:    "v1.2.0",
-							v1.NeutreeNodeProvisionTypeLabel: v1.StaticNodeProvisionType,
-						},
-					},
-				},
-			},
-		},
-	}
-	runner := &fakeStaticNodeRunner{
-		responses: []fakeStaticNodeResponse{
-			{
-				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-ray-worker'",
-				output:  "hash-ray-worker true\n",
-			},
-		},
-	}
-	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
-
-	require.NoError(t, err)
-	require.Len(t, statuses, 1)
-	assert.True(t, statuses[0].Ready)
-	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
 }
 
 func TestStaticNodeReconcilerReconcileComponentsWaitsForHeadBeforeRayWorker(t *testing.T) {
@@ -860,9 +816,6 @@ func TestStaticNodeReconcilerReconcileComponentsChecksRayHeadHTTPProbe(t *testin
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: testDefaultHealthHTTPPath,
 						Port:     healthPort,
-						RayNodeLabels: map[string]string{
-							v1.NeutreeServingVersionLabel: "v1.2.0",
-						},
 					},
 				},
 			},
@@ -883,45 +836,6 @@ func TestStaticNodeReconcilerReconcileComponentsChecksRayHeadHTTPProbe(t *testin
 	assert.True(t, statuses[0].Ready)
 	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
 	assert.Equal(t, len(runner.responses), runner.calls)
-}
-
-func TestStaticNodeReconcilerReconcileComponentsIgnoresRayHeadLabelsInNodeHealth(t *testing.T) {
-	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
-	node := &v1.StaticNode{
-		Spec: &v1.StaticNodeSpec{
-			Cluster: "static-a",
-			IP:      healthHost,
-			Components: []v1.NodeComponentSpec{
-				{
-					Name:       "ray-head",
-					Type:       v1.NodeComponentTypeRayHead,
-					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
-					ConfigHash: "hash-ray-head",
-					HealthCheck: &v1.NodeComponentHealthCheck{
-						HTTPPath: testDefaultHealthHTTPPath,
-						Port:     healthPort,
-						RayNodeLabels: map[string]string{
-							v1.NeutreeServingVersionLabel: "v1.2.0",
-						},
-					},
-				},
-			},
-		},
-	}
-	runner := &fakeStaticNodeRunner{
-		responses: []fakeStaticNodeResponse{
-			{
-				command: "docker inspect --format='{{index .Config.Labels \"neutree.ai/component-hash\"}} {{.State.Running}}' 'neutree-static-a-ray-head'",
-				output:  "hash-ray-head true\n",
-			},
-		},
-	}
-	statuses, err := (&StaticNodeReconciler{}).ReconcileComponents(context.Background(), node, runner)
-
-	require.NoError(t, err)
-	require.Len(t, statuses, 1)
-	assert.True(t, statuses[0].Ready)
-	assert.Equal(t, v1.NodeComponentPhaseRunning, statuses[0].Phase)
 }
 
 func staticNodeWithWarmImages(images []v1.WarmImageSpec) *v1.StaticNode {
