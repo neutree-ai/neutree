@@ -23,6 +23,10 @@ type ResourceClient interface {
 	ListEndpointInstances(ctx context.Context, opts ListEndpointInstancesOptions) ([]EndpointInstanceResource, error)
 }
 
+type StaticNodeLister interface {
+	ListByCluster(ctx context.Context, workspace, clusterName string) ([]v1.StaticNode, error)
+}
+
 const BytesPerGiB = 1024 * 1024 * 1024
 
 type ListNodesOptions struct {

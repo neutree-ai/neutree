@@ -56,7 +56,7 @@ func (r *StaticNodeClusterReconciler) RequireRayClusterVerified(
 	}
 
 	if err := r.RayVerifier.VerifyRayCluster(ctx, cluster); err != nil {
-		if upgrade := staticNodeClusterUpgrade(cluster); upgrade != nil {
+		if upgrade := staticNodeClusterUpgrade(cluster, nil, nil); upgrade != nil {
 			status.Phase = v1.StaticNodeClusterPhaseUpgrading
 			status.Version = upgrade.ObservedVersion
 		} else {

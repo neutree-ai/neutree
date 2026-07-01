@@ -27,6 +27,11 @@ const (
 	staticNodeClusterDashboardPort   = 8265
 )
 
+type staticNodeClusterPhaseContext struct {
+	status       *v1.StaticNodeClusterStatus
+	specObserved bool
+}
+
 func shouldUseStaticNodeClusterFlow(c *v1.Cluster) (bool, error) {
 	if c == nil || c.Spec == nil || c.Spec.Type != v1.SSHClusterType {
 		return false, nil
@@ -35,72 +40,64 @@ func shouldUseStaticNodeClusterFlow(c *v1.Cluster) (bool, error) {
 	return isStaticNodeClusterFlowVersion(c.GetVersion())
 }
 
-func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) error {
+func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) (*staticNodeClusterPhaseContext, error) {
 	if err := validateStaticNodeClusterSpec(c); err != nil {
-		return err
+		return nil, err
 	}
 
 	current, found, err := controller.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
 	if err != nil {
-		return errors.Wrap(err, "failed to find static node cluster")
+		return nil, errors.Wrap(err, "failed to find static node cluster")
 	}
 
 	if !found {
 		if err := controller.cleanupLegacyRuntimeBeforeStaticNodeFlow(c); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	desired, err := controller.buildStaticNodeCluster(c)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if !found {
 		if err := controller.storage.CreateStaticNodeCluster(desired); err != nil {
-			return errors.Wrap(err, "failed to create static node cluster")
+			return nil, errors.Wrap(err, "failed to create static node cluster")
 		}
 
 		controller.copyStaticNodeClusterStatus(c, desired, nil, false)
 
-		return withClusterPhaseOverride(
-			errors.Errorf("static node cluster %s is provisioning", c.Metadata.Name),
-			staticNodeClusterProgressPhase(c, nil),
-		)
+		return &staticNodeClusterPhaseContext{}, errors.Errorf("static node cluster %s is provisioning", c.Metadata.Name)
 	}
 
 	desired.ID = current.ID
 
 	specObserved := staticNodeClusterSpecObserved(current, desired)
+	phaseContext := &staticNodeClusterPhaseContext{
+		status:       current.Status,
+		specObserved: specObserved,
+	}
 
 	if err := controller.storage.UpdateStaticNodeCluster(strconv.Itoa(current.ID), desired); err != nil {
-		return errors.Wrap(err, "failed to update static node cluster")
+		return phaseContext, errors.Wrap(err, "failed to update static node cluster")
 	}
 
 	controller.copyStaticNodeClusterStatus(c, desired, current.Status, specObserved)
 
 	if current.Status == nil || current.Status.Phase != v1.StaticNodeClusterPhaseReady {
-		return withClusterPhaseOverride(
-			staticNodeClusterNotReadyError(current),
-			staticNodeClusterProgressPhase(c, current.Status),
-		)
+		return phaseContext, staticNodeClusterNotReadyError(current)
 	}
 
 	if !specObserved {
-		return withClusterPhaseOverride(
-			errors.Errorf("static node cluster %s is applying desired spec", c.Metadata.Name),
-			staticNodeClusterProgressPhase(c, current.Status),
-		)
+		return phaseContext, errors.Errorf("static node cluster %s is applying desired spec", c.Metadata.Name)
 	}
 
 	if err := controller.verifyStaticNodeClusterReady(c, desired); err != nil {
-		return withClusterPhaseOverride(
-			errors.Wrapf(err, "static node cluster %s Ray verification failed", c.Metadata.Name),
-			staticNodeClusterProgressPhase(c, current.Status),
-		)
+		return phaseContext, errors.Wrapf(err, "static node cluster %s Ray verification failed", c.Metadata.Name)
 	}
 
-	return nil
+	return phaseContext, nil
 }
 
 func validateStaticNodeClusterSpec(c *v1.Cluster) error {
@@ -466,113 +463,25 @@ func staticNodeClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool 
 	return reflect.DeepEqual(current.Spec, desired.Spec)
 }
 
-type clusterPhaseOverrideError struct {
-	err   error
-	phase v1.ClusterPhase
-}
-
-func (e *clusterPhaseOverrideError) Error() string {
-	return e.err.Error()
-}
-
-func (e *clusterPhaseOverrideError) Unwrap() error {
-	return e.err
-}
-
-func (e *clusterPhaseOverrideError) ClusterPhase() v1.ClusterPhase {
-	return e.phase
-}
-
-func withClusterPhaseOverride(err error, phase v1.ClusterPhase) error {
-	if err == nil || !isClusterOverridePhase(phase) {
-		return err
-	}
-
-	return &clusterPhaseOverrideError{err: err, phase: phase}
-}
-
-func clusterPhaseOverrideFromError(err error) (v1.ClusterPhase, bool) {
-	if err == nil {
-		return "", false
-	}
-
-	var phaseErr interface {
-		ClusterPhase() v1.ClusterPhase
-	}
-
-	if !errors.As(err, &phaseErr) {
-		return "", false
-	}
-
-	phase := phaseErr.ClusterPhase()
-	if !isClusterOverridePhase(phase) {
-		return "", false
-	}
-
-	return phase, true
-}
-
-func isClusterOverridePhase(phase v1.ClusterPhase) bool {
-	switch phase {
-	case v1.ClusterPhaseInitializing, v1.ClusterPhaseUpdating, v1.ClusterPhaseUpgrading, v1.ClusterPhaseFailed:
-		return true
-	default:
-		return false
-	}
-}
-
-func staticNodeClusterProgressPhase(
-	c *v1.Cluster,
-	status *v1.StaticNodeClusterStatus,
-) v1.ClusterPhase {
-	if c == nil || !c.IsInitialized() {
-		return v1.ClusterPhaseInitializing
-	}
-
-	if status != nil && (status.Phase == v1.StaticNodeClusterPhaseFailed || status.Phase == v1.StaticNodeClusterPhaseDegraded) {
-		return v1.ClusterPhaseFailed
-	}
-
-	if staticNodeClusterStatusIsUpgrade(c, status) {
-		return v1.ClusterPhaseUpgrading
-	}
-
-	return v1.ClusterPhaseUpdating
-}
-
-func staticNodeClusterStatusIsUpgrade(
-	c *v1.Cluster,
-	status *v1.StaticNodeClusterStatus,
-) bool {
-	if c == nil {
-		return false
-	}
-
-	desiredVersion := c.GetVersion()
-	if desiredVersion == "" {
-		return false
-	}
-
-	if c.Status != nil && c.Status.Version != "" && c.Status.Version != desiredVersion {
-		return true
-	}
-
-	if status == nil {
-		return false
-	}
-
-	return status.Phase == v1.StaticNodeClusterPhaseUpgrading || status.Version != "" && status.Version != desiredVersion
-}
-
 func (controller *ClusterController) calculateStaticNodeClusterResources(
 	staticCluster *v1.StaticNodeCluster,
 ) (*v1.ClusterResources, error) {
+	if staticCluster == nil || staticCluster.Metadata == nil {
+		return nil, errors.New("static node cluster metadata is required to calculate resources")
+	}
+
+	if controller.storage == nil {
+		return nil, errors.New("storage is required to calculate static node cluster resources")
+	}
+
 	var resourceParsers map[string]resourceparser.ResourceParser
 	if controller.acceleratorManager != nil {
 		resourceParsers = controller.acceleratorManager.GetAllParsers()
 	}
 
-	rayNodes, err := dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)).ListNodes()
+	dashboardService := dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster))
+	rayNodes, err := dashboardService.ListNodes()
+
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list Ray nodes")
 	}
@@ -581,57 +490,17 @@ func (controller *ClusterController) calculateStaticNodeClusterResources(
 		return nil, err
 	}
 
-	resourceClient := resourceview.NewRayResourceClient(staticNodeClusterRayNodeService{nodes: rayNodes}, resourceParsers)
+	var resourceClient resourceview.ResourceClient = resourceview.NewRayResourceClient(dashboardService, resourceParsers)
+	resourceClient = resourceview.NewStaticNodeClusterResourceClient(
+		resourceClient,
+		staticclient.NewStaticNodeResourceClient(controller.storage),
+		staticCluster.Metadata.Workspace,
+		staticCluster.Metadata.Name,
+	)
+
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
-	resources, err := resourceBuilder.BuildClusterResources(context.Background(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if controller.storage != nil && staticCluster != nil && staticCluster.Metadata != nil {
-		nodes, err := staticclient.NewStaticNodeResourceClient(controller.storage).
-			ListByCluster(context.Background(), staticCluster.Metadata.Workspace, staticCluster.Metadata.Name)
-		if err != nil {
-			return nil, err
-		}
-
-		resourceview.EnrichStaticNodeClusterResources(resources, nodes)
-	}
-
-	return resources, nil
-}
-
-type staticNodeClusterRayNodeService struct {
-	nodes []v1.NodeSummary
-}
-
-func (s staticNodeClusterRayNodeService) ListNodes() ([]v1.NodeSummary, error) {
-	return s.nodes, nil
-}
-
-func (staticNodeClusterRayNodeService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {
-	return nil, errors.New("static node cluster cached Ray node service does not support cluster metadata")
-}
-
-func (staticNodeClusterRayNodeService) GetClusterStatus() (v1.RayAPIClusterStatus, error) {
-	return v1.RayAPIClusterStatus{}, errors.New("static node cluster cached Ray node service does not support cluster status")
-}
-
-func (staticNodeClusterRayNodeService) GetServeApplications() (*dashboard.RayServeApplicationsResponse, error) {
-	return nil, errors.New("static node cluster cached Ray node service does not support serve applications")
-}
-
-func (staticNodeClusterRayNodeService) UpdateServeApplications(dashboard.RayServeApplicationsRequest) error {
-	return errors.New("static node cluster cached Ray node service does not support serve application updates")
-}
-
-func (staticNodeClusterRayNodeService) GetActorLog(string, string, int) (string, error) {
-	return "", errors.New("static node cluster cached Ray node service does not support actor logs")
-}
-
-func (staticNodeClusterRayNodeService) ListActors([]dashboard.ActorFilter, bool, int) (*dashboard.ActorsResponse, error) {
-	return nil, errors.New("static node cluster cached Ray node service does not support actor listing")
+	return resourceBuilder.BuildClusterResources(context.Background(), nil)
 }
 
 func (controller *ClusterController) getUsedImageRegistry(c *v1.Cluster) (*v1.ImageRegistry, error) {

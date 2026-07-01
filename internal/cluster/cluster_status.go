@@ -34,6 +34,69 @@ func DetermineClusterPhase(isResourceReady bool, cluster *v1.Cluster) v1.Cluster
 	return v1.ClusterPhaseFailed
 }
 
+func DetermineStaticNodeClusterBackedClusterPhase(
+	isResourceReady bool,
+	cluster *v1.Cluster,
+	staticStatus *v1.StaticNodeClusterStatus,
+	specObserved bool,
+) v1.ClusterPhase {
+	if isResourceReady {
+		return DetermineClusterPhase(true, cluster)
+	}
+
+	if cluster == nil || !cluster.IsInitialized() {
+		return v1.ClusterPhaseInitializing
+	}
+
+	if staticStatus != nil {
+		switch staticStatus.Phase {
+		case v1.StaticNodeClusterPhaseFailed, v1.StaticNodeClusterPhaseDegraded:
+			return v1.ClusterPhaseFailed
+		case v1.StaticNodeClusterPhaseUpgrading:
+			return v1.ClusterPhaseUpgrading
+		case v1.StaticNodeClusterPhaseProvisioning:
+			if staticNodeClusterStatusNeedsUpgrade(cluster, staticStatus) {
+				return v1.ClusterPhaseUpgrading
+			}
+
+			return v1.ClusterPhaseUpdating
+		case v1.StaticNodeClusterPhaseReady:
+			if staticNodeClusterStatusNeedsUpgrade(cluster, staticStatus) {
+				return v1.ClusterPhaseUpgrading
+			}
+
+			return v1.ClusterPhaseUpdating
+		}
+	}
+
+	if staticNodeClusterStatusNeedsUpgrade(cluster, staticStatus) {
+		return v1.ClusterPhaseUpgrading
+	}
+
+	if !specObserved {
+		return v1.ClusterPhaseUpdating
+	}
+
+	return DetermineClusterPhase(false, cluster)
+}
+
+func staticNodeClusterStatusNeedsUpgrade(cluster *v1.Cluster, status *v1.StaticNodeClusterStatus) bool {
+	if cluster == nil {
+		return false
+	}
+
+	desiredVersion := cluster.GetVersion()
+	if desiredVersion == "" {
+		return false
+	}
+
+	if cluster.Status != nil && cluster.Status.Version != "" && cluster.Status.Version != desiredVersion {
+		return true
+	}
+
+	return status != nil && status.Version != "" && status.Version != desiredVersion
+}
+
 // needsVersionUpgrade returns true when the cluster's actual version differs
 // from the desired version, indicating a version upgrade is needed.
 // Used by both phase determination and SSH reconcile logic.

@@ -1,33 +1,78 @@
 package resource
 
 import (
+	"context"
 	"sort"
+
+	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func EnrichStaticNodeClusterResources(resources *v1.ClusterResources, nodes []v1.StaticNode) {
-	normalizeStaticNodeClusterResourceProducts(resources)
-	enrichStaticNodeClusterDeviceResources(resources, nodes)
-	normalizeStaticNodeClusterResourceProducts(resources)
+type StaticNodeClusterResourceClient struct {
+	rayNodes    ResourceClient
+	staticNodes StaticNodeLister
+	workspace   string
+	clusterName string
 }
 
-func normalizeStaticNodeClusterResourceProducts(resources *v1.ClusterResources) {
-	if resources == nil {
-		return
+func NewStaticNodeClusterResourceClient(
+	rayNodes ResourceClient,
+	staticNodes StaticNodeLister,
+	workspace string,
+	clusterName string,
+) *StaticNodeClusterResourceClient {
+	return &StaticNodeClusterResourceClient{
+		rayNodes:    rayNodes,
+		staticNodes: staticNodes,
+		workspace:   workspace,
+		clusterName: clusterName,
+	}
+}
+
+func (c *StaticNodeClusterResourceClient) ListNodes(
+	ctx context.Context,
+	opts ListNodesOptions,
+) ([]ResourceNode, error) {
+	if c == nil || c.rayNodes == nil {
+		return nil, errors.New("Ray resource client is required")
 	}
 
-	normalizeStaticNodeResourceInfoProducts(resources.Allocatable)
-	normalizeStaticNodeResourceInfoProducts(resources.Available)
-
-	for _, nodeResource := range resources.NodeResources {
-		if nodeResource == nil {
-			continue
-		}
-
-		normalizeStaticNodeResourceInfoProducts(nodeResource.Allocatable)
-		normalizeStaticNodeResourceInfoProducts(nodeResource.Available)
+	if c.staticNodes == nil {
+		return nil, errors.New("static node lister is required")
 	}
+
+	nodes, err := c.rayNodes.ListNodes(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	staticNodes, err := c.staticNodes.ListByCluster(ctx, c.workspace, c.clusterName)
+	if err != nil {
+		return nil, err
+	}
+
+	return enrichStaticNodeClusterResourceNodes(nodes, staticNodes), nil
+}
+
+func (c *StaticNodeClusterResourceClient) ListEndpointInstances(
+	ctx context.Context,
+	opts ListEndpointInstancesOptions,
+) ([]EndpointInstanceResource, error) {
+	if c == nil || c.rayNodes == nil {
+		return nil, errors.New("Ray resource client is required")
+	}
+
+	return c.rayNodes.ListEndpointInstances(ctx, opts)
+}
+
+func enrichStaticNodeClusterResourceNodes(nodes []ResourceNode, staticNodes []v1.StaticNode) []ResourceNode {
+	enriched := append([]ResourceNode(nil), nodes...)
+	normalizeStaticNodeResourceNodeProducts(enriched)
+	enrichStaticNodeClusterResourceNodeDevices(&enriched, staticNodes)
+	normalizeStaticNodeResourceNodeProducts(enriched)
+
+	return enriched
 }
 
 func normalizeStaticNodeResourceInfoProducts(info *v1.ResourceInfo) {
@@ -58,47 +103,75 @@ func normalizeStaticNodeResourceInfoProducts(info *v1.ResourceInfo) {
 	}
 }
 
-func enrichStaticNodeClusterDeviceResources(
-	resources *v1.ClusterResources,
-	nodes []v1.StaticNode,
+func normalizeStaticNodeResourceNodeProducts(nodes []ResourceNode) {
+	for _, node := range nodes {
+		if node.Status == nil {
+			continue
+		}
+
+		normalizeStaticNodeResourceInfoProducts(node.Status.Allocatable)
+		normalizeStaticNodeResourceInfoProducts(node.Status.Available)
+	}
+}
+
+func enrichStaticNodeClusterResourceNodeDevices(
+	nodes *[]ResourceNode,
+	staticNodes []v1.StaticNode,
 ) {
-	if resources == nil {
-		return
+	byID := make(map[string]int, len(*nodes))
+	for i, node := range *nodes {
+		byID[node.ID] = i
 	}
 
-	for _, node := range nodes {
-		if node.Status == nil || node.Status.Accelerator == nil || len(node.Status.Accelerator.Devices) == 0 {
+	for _, staticNode := range staticNodes {
+		if staticNode.Status == nil || staticNode.Status.Accelerator == nil || len(staticNode.Status.Accelerator.Devices) == 0 {
 			continue
 		}
 
-		acceleratorType := v1.AcceleratorType(node.Status.Accelerator.Type)
-		if acceleratorType == "" || node.Status.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
+		acceleratorType := v1.AcceleratorType(staticNode.Status.Accelerator.Type)
+		if acceleratorType == "" || staticNode.Status.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
 			continue
 		}
 
-		nodeID := staticNodeResourceID(node)
+		nodeID := staticNodeResourceID(staticNode)
 		if nodeID == "" {
 			continue
 		}
 
-		if resources.NodeResources == nil {
-			resources.NodeResources = make(map[string]*v1.NodeResourceStatus)
+		index, ok := byID[nodeID]
+		if !ok {
+			*nodes = append(*nodes, ResourceNode{ID: nodeID})
+			index = len(*nodes) - 1
+			byID[nodeID] = index
 		}
 
-		nodeResource := resources.NodeResources[nodeID]
-		if nodeResource == nil {
-			nodeResource = &v1.NodeResourceStatus{}
-			resources.NodeResources[nodeID] = nodeResource
+		node := &(*nodes)[index]
+		if node.Status == nil {
+			node.Status = &v1.NodeResourceStatus{}
 		}
 
-		devices := staticNodeClusterDeviceResources(nodeResource, *node.Status.Accelerator)
+		devices := staticNodeClusterDeviceResources(node.Status, *staticNode.Status.Accelerator)
 		if len(devices) == 0 {
 			continue
 		}
 
-		nodeResource.Devices = devices
-		enrichStaticNodeClusterAcceleratorMetadata(resources, acceleratorType, devices)
+		node.Status.Devices = devices
+		enrichStaticNodeClusterResourceNodeMetadata(node, acceleratorType, devices)
 	}
+}
+
+func enrichStaticNodeClusterResourceNodeMetadata(
+	node *ResourceNode,
+	acceleratorType v1.AcceleratorType,
+	devices []*v1.DeviceResource,
+) {
+	if node.AcceleratorMetadata == nil {
+		node.AcceleratorMetadata = make(map[v1.AcceleratorType]*v1.AcceleratorMetadata)
+	}
+
+	metadata := &v1.ClusterResources{AcceleratorMetadata: node.AcceleratorMetadata}
+	enrichStaticNodeClusterAcceleratorMetadata(metadata, acceleratorType, devices)
+	node.AcceleratorMetadata = metadata.AcceleratorMetadata
 }
 
 func staticNodeResourceID(node v1.StaticNode) string {

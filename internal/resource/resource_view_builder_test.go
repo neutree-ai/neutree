@@ -19,6 +19,19 @@ type fakeResourceClient struct {
 	listNodesOptions  ListNodesOptions
 }
 
+type fakeStaticNodeLister struct {
+	nodes []v1.StaticNode
+	err   error
+}
+
+func (l *fakeStaticNodeLister) ListByCluster(
+	_ context.Context,
+	_ string,
+	_ string,
+) ([]v1.StaticNode, error) {
+	return l.nodes, l.err
+}
+
 func (c *fakeResourceClient) ListNodes(_ context.Context, opts ListNodesOptions) ([]ResourceNode, error) {
 	c.called = true
 	c.listNodesOptions = opts
@@ -39,6 +52,79 @@ func (c *fakeResourceClient) ListEndpointInstances(
 	}
 
 	return c.endpointInstances, nil
+}
+
+func TestStaticNodeClusterResourceClientListNodesEnrichesStaticDevices(t *testing.T) {
+	rayClient := &fakeResourceClient{
+		nodes: []ResourceNode{
+			{
+				ID: "10.0.0.10",
+				Status: &v1.NodeResourceStatus{
+					ResourceStatus: v1.ResourceStatus{
+						Allocatable: &v1.ResourceInfo{
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 2,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_Tesla_T4": 2,
+									},
+								},
+							},
+						},
+						Available: &v1.ResourceInfo{
+							AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+								v1.AcceleratorTypeNVIDIAGPU: {
+									Quantity: 1,
+									ProductGroups: map[v1.AcceleratorProduct]float64{
+										"NVIDIA_Tesla_T4": 1,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	staticNodes := &fakeStaticNodeLister{
+		nodes: []v1.StaticNode{
+			{
+				Spec: &v1.StaticNodeSpec{IP: "10.0.0.10"},
+				Status: &v1.StaticNodeStatus{
+					Accelerator: &v1.StaticNodeAcceleratorStatus{
+						Type:         string(v1.AcceleratorTypeNVIDIAGPU),
+						ProductModel: "Tesla T4",
+						Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+							{
+								UUID:         "GPU-1",
+								ProductModel: "Tesla T4",
+								MemoryMiB:    15360,
+								Healthy:      true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	client := NewStaticNodeClusterResourceClient(
+		rayClient,
+		staticNodes,
+		"default",
+		"static-a",
+	)
+
+	nodes, err := client.ListNodes(context.Background(), ListNodesOptions{})
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	require.NotNil(t, nodes[0].Status)
+	require.Len(t, nodes[0].Status.Devices, 1)
+	require.Equal(t, "GPU-1", nodes[0].Status.Devices[0].UUID)
+	require.Equal(t, "NVIDIA_Tesla_T4", nodes[0].Status.Devices[0].Product)
+	require.Contains(t, nodes[0].AcceleratorMetadata, v1.AcceleratorTypeNVIDIAGPU)
+	require.Equal(t, float64(15360),
+		nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_Tesla_T4"].MemoryTotalMiB)
 }
 
 func TestResourceViewBuilderBuildClusterResources(t *testing.T) {

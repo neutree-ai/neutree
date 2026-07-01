@@ -95,9 +95,10 @@ func (controller *ClusterController) sync(obj *v1.Cluster) error {
 
 func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 	var reconcileErr error
+	var phaseContext *staticNodeClusterPhaseContext
 
 	defer func() {
-		controller.updateClusterStatus(c, reconcileErr)
+		controller.updateClusterStatus(c, reconcileErr, phaseContext)
 	}()
 
 	useStaticNodeFlow, err := shouldUseStaticNodeClusterFlow(c)
@@ -112,7 +113,7 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 			return reconcileErr
 		}
 
-		reconcileErr = controller.reconcileStaticNodeCluster(c)
+		phaseContext, reconcileErr = controller.reconcileStaticNodeCluster(c)
 		if reconcileErr != nil {
 			reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile static node cluster %s", c.Metadata.WorkspaceName())
 			return reconcileErr
@@ -165,7 +166,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 	var reconcileErr error
 
 	defer func() {
-		controller.updateClusterStatus(c, reconcileErr)
+		controller.updateClusterStatus(c, reconcileErr, nil)
 	}()
 
 	reconcileErr = func() error {
@@ -211,7 +212,11 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 
 // updateClusterStatus determines cluster phase and updates storage.
 // reconcileErr == nil means resources are ready (Reconcile includes status checks).
-func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcileErr error) {
+func (controller *ClusterController) updateClusterStatus(
+	c *v1.Cluster,
+	reconcileErr error,
+	staticPhaseContext *staticNodeClusterPhaseContext,
+) {
 	if c.Metadata.DeletionTimestamp != "" {
 		phase := cluster.DetermineClusterDeletePhase(reconcileErr == nil, c)
 
@@ -222,9 +227,16 @@ func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcil
 		return
 	}
 
-	phase := cluster.DetermineClusterPhase(reconcileErr == nil, c)
-	if overridePhase, ok := clusterPhaseOverrideFromError(reconcileErr); ok {
-		phase = overridePhase
+	var phase v1.ClusterPhase
+	if staticPhaseContext != nil {
+		phase = cluster.DetermineStaticNodeClusterBackedClusterPhase(
+			reconcileErr == nil,
+			c,
+			staticPhaseContext.status,
+			staticPhaseContext.specObserved,
+		)
+	} else {
+		phase = cluster.DetermineClusterPhase(reconcileErr == nil, c)
 	}
 
 	// Set ObservedSpecHash when Running

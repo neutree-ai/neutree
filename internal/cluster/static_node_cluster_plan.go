@@ -12,6 +12,7 @@ import (
 
 type staticNodeDesiredPlan struct {
 	Node                              *v1.StaticNode
+	TargetComponents                  []v1.NodeComponentSpec
 	Accelerator                       *v1.StaticNodeAcceleratorStatus
 	Profile                           *v1.AcceleratorProfile
 	AcceleratorProfileFallbackMessage string
@@ -106,6 +107,7 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 		desiredNode.Spec.Components = components
 		plans = append(plans, staticNodeDesiredPlan{
 			Node:                              desiredNode,
+			TargetComponents:                  copyNodeComponents(components),
 			Accelerator:                       acceleratorStatus,
 			Profile:                           profile,
 			AcceleratorProfileFallbackMessage: fallbackMessage,

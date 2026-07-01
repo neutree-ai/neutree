@@ -953,7 +953,7 @@ func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticN
 				},
 			},
 		},
-	}, nil).Once()
+	}, nil).Twice()
 	mockAcceleratorManager.On("GetAllParsers").Return(map[string]resourceview.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	}).Once()

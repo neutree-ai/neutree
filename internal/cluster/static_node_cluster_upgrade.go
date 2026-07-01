@@ -1,10 +1,6 @@
 package cluster
 
-import (
-	"strings"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
-)
+import v1 "github.com/neutree-ai/neutree/api/v1"
 
 type staticNodeClusterUpgradeStep string
 
@@ -21,7 +17,7 @@ func applyRayRecreateUpgradePlan(
 	currentByName map[string]*v1.StaticNode,
 	plans []staticNodeDesiredPlan,
 ) {
-	upgrade := staticNodeClusterUpgrade(cluster)
+	upgrade := staticNodeClusterUpgrade(cluster, staticNodesFromByName(currentByName), plans)
 	if upgrade == nil {
 		return
 	}
@@ -57,7 +53,11 @@ type staticNodeClusterUpgradeState struct {
 	Step            staticNodeClusterUpgradeStep
 }
 
-func staticNodeClusterUpgrade(cluster *v1.StaticNodeCluster) *staticNodeClusterUpgradeState {
+func staticNodeClusterUpgrade(
+	cluster *v1.StaticNodeCluster,
+	currentNodes []*v1.StaticNode,
+	plans []staticNodeDesiredPlan,
+) *staticNodeClusterUpgradeState {
 	if cluster == nil || cluster.Spec == nil || cluster.Status == nil {
 		return nil
 	}
@@ -67,43 +67,51 @@ func staticNodeClusterUpgrade(cluster *v1.StaticNodeCluster) *staticNodeClusterU
 		return nil
 	}
 
-	step := staticNodeClusterUpgradeStepFromStatus(cluster.Status)
-	if step == "" {
-		step = staticNodeClusterUpgradeStepWarming
-	}
-
 	return &staticNodeClusterUpgradeState{
 		ObservedVersion: observedVersion,
-		Step:            step,
+		Step:            staticNodeClusterUpgradeStepFromObservedState(cluster, currentNodes, plans),
 	}
 }
 
-func staticNodeClusterUpgradeStepFromStatus(status *v1.StaticNodeClusterStatus) staticNodeClusterUpgradeStep {
-	if status == nil {
-		return ""
+func staticNodeClusterUpgradeStepFromObservedState(
+	cluster *v1.StaticNodeCluster,
+	currentNodes []*v1.StaticNode,
+	plans []staticNodeDesiredPlan,
+) staticNodeClusterUpgradeStep {
+	// Upgrade progress is derived from observed static-node/component state.
+	// Status.error_message may display the current step, but it must not drive
+	// the state machine; otherwise a stale or user-visible message can change
+	// desired components on the next reconcile.
+	switch {
+	case staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes, plans):
+		return staticNodeClusterUpgradeStepVerifying
+	case staticNodeClusterWorkersStopped(cluster, currentNodes) &&
+		staticNodeClusterHeadRayRunningTarget(cluster, currentNodes, plans):
+		return staticNodeClusterUpgradeStepStartingWorkers
+	case staticNodeClusterWorkersStopped(cluster, currentNodes):
+		return staticNodeClusterUpgradeStepStartingHead
+	case staticNodeClusterWarmReady(cluster, currentNodes):
+		return staticNodeClusterUpgradeStepStoppingWorkers
+	default:
+		return staticNodeClusterUpgradeStepWarming
+	}
+}
+
+func staticNodeClusterWarmReady(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
+	desiredNodeNames, _ := staticNodeClusterDesiredNodeNames(cluster)
+	if len(desiredNodeNames) == 0 {
+		return false
 	}
 
-	for _, part := range strings.Split(status.ErrorMessage, ";") {
-		step := staticNodeClusterUpgradeStep(strings.TrimSpace(part))
-		if staticNodeClusterUpgradeStepValid(step) {
-			return step
+	nodesByName := staticNodeByName(nodes)
+	for name := range desiredNodeNames {
+		node := nodesByName[name]
+		if node == nil || node.Status == nil || node.Status.Warm == nil || !node.Status.Warm.Ready {
+			return false
 		}
 	}
 
-	return ""
-}
-
-func staticNodeClusterUpgradeStepValid(step staticNodeClusterUpgradeStep) bool {
-	switch step {
-	case staticNodeClusterUpgradeStepWarming,
-		staticNodeClusterUpgradeStepStoppingWorkers,
-		staticNodeClusterUpgradeStepStartingHead,
-		staticNodeClusterUpgradeStepStartingWorkers,
-		staticNodeClusterUpgradeStepVerifying:
-		return true
-	default:
-		return false
-	}
+	return true
 }
 
 func useCurrentComponentsIfPresent(node *v1.StaticNode, current *v1.StaticNode) {
@@ -137,6 +145,15 @@ func copyNodeComponents(components []v1.NodeComponentSpec) []v1.NodeComponentSpe
 	return result
 }
 
+func staticNodesFromByName(nodesByName map[string]*v1.StaticNode) []*v1.StaticNode {
+	nodes := make([]*v1.StaticNode, 0, len(nodesByName))
+	for _, node := range nodesByName {
+		nodes = append(nodes, node)
+	}
+
+	return nodes
+}
+
 func advanceStaticNodeClusterUpgradeStatus(
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
@@ -147,29 +164,13 @@ func advanceStaticNodeClusterUpgradeStatus(
 		return status
 	}
 
-	step := staticNodeClusterUpgradeStepFromStatus(&status)
-	if step == "" {
+	upgrade := staticNodeClusterUpgrade(cluster, currentNodes, plans)
+	if upgrade == nil {
 		return status
 	}
 
-	switch step {
-	case staticNodeClusterUpgradeStepWarming:
-		if status.WarmReady {
-			step = staticNodeClusterUpgradeStepStoppingWorkers
-		}
-	case staticNodeClusterUpgradeStepStoppingWorkers:
-		if staticNodeClusterWorkersStopped(cluster, currentNodes) {
-			step = staticNodeClusterUpgradeStepStartingHead
-		}
-	case staticNodeClusterUpgradeStepStartingHead:
-		if staticNodeClusterHeadRayRunningTarget(cluster, currentNodes, plans) {
-			step = staticNodeClusterUpgradeStepStartingWorkers
-		}
-	case staticNodeClusterUpgradeStepStartingWorkers:
-		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes, plans) {
-			step = staticNodeClusterUpgradeStepVerifying
-		}
-	case staticNodeClusterUpgradeStepVerifying:
+	step := upgrade.Step
+	if step == staticNodeClusterUpgradeStepVerifying {
 		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes, plans) &&
 			status.ReadyNodes == status.DesiredNodes &&
 			status.HeadReady &&
@@ -183,6 +184,7 @@ func advanceStaticNodeClusterUpgradeStatus(
 	}
 
 	status.Phase = v1.StaticNodeClusterPhaseUpgrading
+	status.Version = upgrade.ObservedVersion
 	status.ErrorMessage = string(step)
 
 	return status
@@ -291,7 +293,12 @@ func desiredRayComponentImage(
 			continue
 		}
 
-		for _, component := range plan.Node.Spec.Components {
+		components := plan.TargetComponents
+		if len(components) == 0 {
+			components = plan.Node.Spec.Components
+		}
+
+		for _, component := range components {
 			if component.Type == componentType || rayComponentNameMatchesType(component.Name, componentType) {
 				return component.Image
 			}
@@ -318,7 +325,8 @@ func staticNodeClusterWorkerNames(cluster *v1.StaticNodeCluster) map[string]stru
 
 func rayComponentStopped(components []v1.NodeComponentStatus) bool {
 	for _, component := range components {
-		if component.Type == v1.NodeComponentTypeRayWorker || component.Name == "ray-worker" {
+		if component.Type == v1.NodeComponentTypeRayWorker ||
+			rayComponentNameMatchesType(component.Name, v1.NodeComponentTypeRayWorker) {
 			return component.Phase == v1.NodeComponentPhaseStopped
 		}
 	}

@@ -63,7 +63,7 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 		Phase:        v1.StaticNodeClusterPhaseProvisioning,
 		DesiredNodes: len(desiredNodeNames),
 	}
-	if upgrade := staticNodeClusterUpgrade(cluster); upgrade != nil {
+	if upgrade := staticNodeClusterUpgrade(cluster, nodes, plans); upgrade != nil {
 		status.Version = upgrade.ObservedVersion
 		status.ErrorMessage = string(upgrade.Step)
 		status.Phase = v1.StaticNodeClusterPhaseUpgrading
@@ -170,7 +170,7 @@ func requireDesiredComponentsObserved(
 		return status
 	}
 
-	if upgrade := staticNodeClusterUpgrade(cluster); upgrade != nil {
+	if upgrade := staticNodeClusterUpgrade(cluster, staticNodesFromByName(currentByName), plans); upgrade != nil {
 		status.Phase = v1.StaticNodeClusterPhaseUpgrading
 		status.Version = upgrade.ObservedVersion
 		status.ErrorMessage = string(staticNodeClusterUpgradeStepVerifying)

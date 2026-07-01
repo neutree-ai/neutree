@@ -18,7 +18,6 @@ var (
 	testSSHUser       = "test_user"
 	testSSHIP         = "127.0.0.1"
 	testNode          = "node1"
-	testCluster       = "test_cluster"
 	testCommand       = "echo hello"
 	testEnvVars       = map[string]interface{}{"ENV1": "value1", "ENV2": "value2"}
 	testPortForward   = []string{"8080:localhost:8080"}
