@@ -416,6 +416,24 @@ def _result_to_response(result: Any) -> Response:
     return JSONResponse(content=result)
 
 
+def _stream_error_status(error: Any) -> int:
+    if isinstance(error, dict):
+        code = error.get("code")
+        if isinstance(code, int) and not isinstance(code, bool) and 400 <= code <= 599:
+            return code
+        if isinstance(code, str):
+            try:
+                status_code = int(code)
+            except ValueError:
+                status_code = None
+            if status_code is not None and 400 <= status_code <= 599:
+                return status_code
+        if error.get("type") == "internal_server_error":
+            return 500
+
+    return 400
+
+
 def _stream_error_response(first_chunk: Any) -> Optional[JSONResponse]:
     if not isinstance(first_chunk, str) or not first_chunk.startswith("data:"):
         return None
@@ -432,9 +450,10 @@ def _stream_error_response(first_chunk: Any) -> Optional[JSONResponse]:
     if not isinstance(data, dict) or "error" not in data:
         return None
 
+    error = data["error"]
     return JSONResponse(
-        content=data["error"],
-        status_code=400,
+        content=error,
+        status_code=_stream_error_status(error),
     )
 
 
