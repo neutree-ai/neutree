@@ -1735,6 +1735,7 @@ func listOpenAIModelIDs(serviceURL string) (int, []string, string, error) {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
+
 	if err := json.Unmarshal(body, &modelList); err != nil {
 		return resp.StatusCode, nil, string(body), err
 	}
