@@ -1399,9 +1399,3 @@ func TestMutateModelCache(t *testing.T) {
 		})
 	}
 }
-
-func sshArgsContaining(want string) interface{} {
-	return mock.MatchedBy(func(args []string) bool {
-		return strings.Contains(strings.Join(args, " "), want)
-	})
-}
