@@ -14,25 +14,17 @@ type AcceleratorProfileProvider interface {
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
 }
 
-type StaticNodeClusterPlan struct {
-	DesiredNodes     []*v1.StaticNode
-	DesiredNodePlans []StaticNodeClusterDesiredNodePlan
-}
-
 func (r *StaticNodeClusterPlanner) Plan(
 	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
-) (*StaticNodeClusterPlan, error) {
+) ([]StaticNodeClusterDesiredNodePlan, error) {
 	plans, err := r.buildDesiredNodePlans(ctx, cluster, currentNodes)
 	if err != nil {
 		return nil, err
 	}
 
-	return &StaticNodeClusterPlan{
-		DesiredNodes:     desiredNodesFromPlans(plans),
-		DesiredNodePlans: plans,
-	}, nil
+	return plans, nil
 }
 
 type StaticNodeClusterRayVerifier interface {
@@ -70,31 +62,4 @@ func RequireStaticNodeClusterRayVerified(
 	}
 
 	return status
-}
-
-func (r *StaticNodeClusterPlanner) BuildDesiredNodes(
-	ctx context.Context,
-	cluster *v1.StaticNodeCluster,
-	currentNodes []*v1.StaticNode,
-) ([]*v1.StaticNode, error) {
-	plans, err := r.buildDesiredNodePlans(ctx, cluster, currentNodes)
-	if err != nil {
-		return nil, err
-	}
-
-	nodes := make([]*v1.StaticNode, 0, len(plans))
-	for _, plan := range plans {
-		nodes = append(nodes, plan.Node)
-	}
-
-	return nodes, nil
-}
-
-func desiredNodesFromPlans(plans []StaticNodeClusterDesiredNodePlan) []*v1.StaticNode {
-	nodes := make([]*v1.StaticNode, 0, len(plans))
-	for _, plan := range plans {
-		nodes = append(nodes, plan.Node)
-	}
-
-	return nodes
 }

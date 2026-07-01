@@ -86,16 +86,17 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		return c.reconcileDelete(ctx, cluster, currentNodes)
 	}
 
-	plan, err := planner.Plan(ctx, cluster, currentNodes)
+	desiredNodePlans, err := planner.Plan(ctx, cluster, currentNodes)
 	if err != nil {
 		return err
 	}
 
-	status := c.aggregator.Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
+	status := c.aggregator.Aggregate(cluster, currentNodes, desiredNodePlans)
 
-	desiredByName := make(map[string]*v1.StaticNode, len(plan.DesiredNodes))
+	desiredByName := make(map[string]*v1.StaticNode, len(desiredNodePlans))
 
-	for _, node := range plan.DesiredNodes {
+	for _, nodePlan := range desiredNodePlans {
+		node := nodePlan.Node
 		if node == nil || node.Metadata == nil {
 			continue
 		}

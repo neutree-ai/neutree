@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// FileClient writes and reads files on the SSH host.
+// FileClient manages files on the SSH host.
 type FileClient interface {
 	WriteFileIfChanged(ctx context.Context, remotePath string, content []byte, opts WriteFileOptions) (bool, error)
 	Remove(ctx context.Context, remotePath string, opts RemoveFileOptions) error

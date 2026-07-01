@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStaticNodeClusterPlannerBuildDesiredNodes(t *testing.T) {
+func TestStaticNodeClusterPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	profiles := map[string]*v1.AcceleratorProfile{
 		v1.AcceleratorTypeNVIDIAGPU.String(): {
@@ -49,9 +48,8 @@ func TestStaticNodeClusterPlannerBuildDesiredNodes(t *testing.T) {
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: profiles},
 	}
 
-	nodes, err := planner.BuildDesiredNodes(context.Background(), cluster, currentNodes)
+	nodes := plannedStaticNodes(t, planner, cluster, currentNodes)
 
-	require.NoError(t, err)
 	require.Len(t, nodes, 2)
 
 	head := nodes[0]
@@ -182,7 +180,7 @@ func TestStaticNodeClusterPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 		),
 	}
 
-	nodes, err := (&StaticNodeClusterPlanner{
+	nodes := plannedStaticNodes(t, &StaticNodeClusterPlanner{
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
 			profiles: map[string]*v1.AcceleratorProfile{
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
@@ -194,9 +192,8 @@ func TestStaticNodeClusterPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 				},
 			},
 		},
-	}).BuildDesiredNodes(context.Background(), cluster, currentNodes)
+	}, cluster, currentNodes)
 
-	require.NoError(t, err)
 	head := findStaticNode(nodes, "head-0")
 	require.NotNil(t, head)
 	rayHead := findComponent(head.Spec.Components, "ray-head")
@@ -207,7 +204,7 @@ func TestStaticNodeClusterPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	})
 }
 
-func TestStaticNodeClusterPlannerBuildDesiredNodesValidation(t *testing.T) {
+func TestStaticNodeClusterPlannerPlanValidation(t *testing.T) {
 	tests := []struct {
 		name    string
 		mutate  func(*v1.StaticNodeCluster)
@@ -273,7 +270,7 @@ func TestStaticNodeClusterPlannerBuildDesiredNodesValidation(t *testing.T) {
 			cluster := testStaticNodeCluster()
 			tt.mutate(cluster)
 
-			_, err := (&StaticNodeClusterPlanner{}).BuildDesiredNodes(context.Background(), cluster, nil)
+			_, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, nil)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
@@ -284,9 +281,8 @@ func TestStaticNodeClusterPlannerBuildDesiredNodesValidation(t *testing.T) {
 func TestStaticNodeClusterPlannerBuildsDiscoverySafeNodesBeforeAcceleratorStatus(t *testing.T) {
 	cluster := testStaticNodeCluster()
 
-	nodes, err := (&StaticNodeClusterPlanner{}).BuildDesiredNodes(context.Background(), cluster, nil)
+	nodes := plannedStaticNodes(t, &StaticNodeClusterPlanner{}, cluster, nil)
 
-	require.NoError(t, err)
 	require.Len(t, nodes, 2)
 
 	for _, node := range nodes {
@@ -298,12 +294,6 @@ func TestStaticNodeClusterPlannerBuildsDiscoverySafeNodesBeforeAcceleratorStatus
 			assert.Empty(t, node.Spec.Warm.Images)
 		}
 	}
-}
-
-func TestStaticNodeClusterPlanDoesNotExposeAggregatedStatus(t *testing.T) {
-	_, ok := reflect.TypeOf(StaticNodeClusterPlan{}).FieldByName("Status")
-
-	assert.False(t, ok)
 }
 
 func TestStaticNodeClusterPlannerPlanWaitsForDesiredComponents(t *testing.T) {
@@ -327,7 +317,7 @@ func TestStaticNodeClusterPlannerPlanWaitsForDesiredComponents(t *testing.T) {
 		),
 	}
 
-	plan, err := (&StaticNodeClusterPlanner{
+	desiredNodePlans, err := (&StaticNodeClusterPlanner{
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
 			profiles: map[string]*v1.AcceleratorProfile{
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
@@ -342,7 +332,7 @@ func TestStaticNodeClusterPlannerPlanWaitsForDesiredComponents(t *testing.T) {
 	}).Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
-	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
+	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Phase)
 	assert.Contains(t, status.ErrorMessage, "static node head-0 component ray-head is not running desired config")
 	assert.Contains(t, status.ErrorMessage, "static node worker-0 component ray-worker is not running desired config")
@@ -394,21 +384,22 @@ func TestStaticNodeClusterPlannerPlansRayRecreateUpgradeOrder(t *testing.T) {
 				tt.mutate(currentNodes)
 			}
 
-			plan, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
+			desiredNodePlans, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
 
 			require.NoError(t, err)
-			status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
+			status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 			assert.Equal(t, v1.StaticNodeClusterPhaseUpgrading, status.Phase)
 			assert.Equal(t, "v1.2.0", status.Version)
 			assert.Equal(t, tt.wantStep, status.ErrorMessage)
 
-			head := findStaticNode(plan.DesiredNodes, "head-0")
+			desiredNodes := staticNodesFromPlans(desiredNodePlans)
+			head := findStaticNode(desiredNodes, "head-0")
 			require.NotNil(t, head)
 			headRay := findComponent(head.Spec.Components, "ray-head")
 			require.NotNil(t, headRay)
 			assert.Equal(t, tt.wantHeadImage, headRay.Image)
 
-			worker := findStaticNode(plan.DesiredNodes, "worker-0")
+			worker := findStaticNode(desiredNodes, "worker-0")
 			require.NotNil(t, worker)
 			workerRay := findComponent(worker.Spec.Components, "ray-worker")
 			if !tt.wantWorkerRay {
@@ -483,10 +474,10 @@ func TestStaticNodeClusterPlannerAdvancesRayRecreateUpgradeStep(t *testing.T) {
 				tt.mutate(currentNodes)
 			}
 
-			plan, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
+			desiredNodePlans, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
 
 			require.NoError(t, err)
-			status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
+			status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 			assert.Equal(t, v1.StaticNodeClusterPhaseUpgrading, status.Phase)
 			assert.Equal(t, tt.wantStep, status.ErrorMessage)
 		})
@@ -505,10 +496,10 @@ func TestStaticNodeClusterPlannerCompletesRayRecreateUpgradeWhenTargetReady(t *t
 	targetImage := "registry.example.com/neutree/neutree/neutree-serve:v1.2.1"
 	markStaticNodeUpgradeReady(t, nil, cluster, currentNodes, targetImage)
 
-	plan, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
-	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
+	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 	assert.Equal(t, v1.StaticNodeClusterPhaseReady, status.Phase)
 	assert.Equal(t, "v1.2.1", status.Version)
 	assert.Empty(t, status.ErrorMessage)
@@ -540,10 +531,10 @@ func TestStaticNodeClusterPlannerCompletesRayRecreateUpgradeWithImageSuffix(t *t
 	}
 	markStaticNodeUpgradeReady(t, planner, cluster, currentNodes, buildRayRuntimeImage(cluster, "cuda"))
 
-	plan, err := planner.Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := planner.Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
-	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
+	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 	assert.Equal(t, v1.StaticNodeClusterPhaseReady, status.Phase)
 	assert.Equal(t, "v1.2.1", status.Version)
 	assert.Empty(t, status.ErrorMessage)
@@ -563,10 +554,10 @@ func TestStaticNodeClusterPlannerFailsUpgradeWhenNodeFails(t *testing.T) {
 	head.Status.Phase = v1.StaticNodePhaseFailed
 	head.Status.ErrorMessage = "ssh connection failed"
 
-	plan, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
-	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
+	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 	assert.Equal(t, v1.StaticNodeClusterPhaseFailed, status.Phase)
 	assert.Equal(t, "v1.2.0", status.Version)
 	assert.Contains(t, status.ErrorMessage, "static node head-0 phase=Failed: ssh connection failed")
@@ -582,10 +573,10 @@ func TestStaticNodeClusterPlannerKeepsReadyWhenObservedVersionMatchesSpec(t *tes
 	currentNodes := staticNodeUpgradeCurrentNodes()
 	markStaticNodeUpgradeReady(t, nil, cluster, currentNodes, buildRayRuntimeImage(cluster))
 
-	plan, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := (&StaticNodeClusterPlanner{}).Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
-	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
+	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 	assert.Equal(t, v1.StaticNodeClusterPhaseReady, status.Phase)
 	assert.Equal(t, "v1.2.1", status.Version)
 	assert.Empty(t, status.ErrorMessage)
@@ -598,12 +589,12 @@ func TestStaticNodeClusterPlannerReturnsErrorWhenAcceleratorProfileMissing(t *te
 		staticNodeWithAcceleratorStatus("worker-0", v1.StaticNodeRoleWorker, nvidiaAcceleratorStatus()),
 	}
 
-	plan, err := (&StaticNodeClusterPlanner{
+	desiredNodePlans, err := (&StaticNodeClusterPlanner{
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: map[string]*v1.AcceleratorProfile{}},
 	}).Plan(context.Background(), cluster, currentNodes)
 
 	require.Error(t, err)
-	assert.Nil(t, plan)
+	assert.Nil(t, desiredNodePlans)
 	assert.Contains(t, err.Error(), "accelerator profile nvidia_gpu not found")
 }
 
@@ -856,6 +847,29 @@ func findStaticNode(nodes []*v1.StaticNode, name string) *v1.StaticNode {
 	return nil
 }
 
+func plannedStaticNodes(
+	t *testing.T,
+	planner *StaticNodeClusterPlanner,
+	cluster *v1.StaticNodeCluster,
+	currentNodes []*v1.StaticNode,
+) []*v1.StaticNode {
+	t.Helper()
+
+	desiredNodePlans, err := planner.Plan(context.Background(), cluster, currentNodes)
+	require.NoError(t, err)
+
+	return staticNodesFromPlans(desiredNodePlans)
+}
+
+func staticNodesFromPlans(plans []StaticNodeClusterDesiredNodePlan) []*v1.StaticNode {
+	nodes := make([]*v1.StaticNode, 0, len(plans))
+	for _, plan := range plans {
+		nodes = append(nodes, plan.Node)
+	}
+
+	return nodes
+}
+
 func assertWarmImages(t *testing.T, images []v1.WarmImageSpec, want map[string]string) {
 	t.Helper()
 
@@ -993,8 +1007,7 @@ func markStaticNodeUpgradeReady(
 		}
 	}
 
-	desiredNodes, err := planner.BuildDesiredNodes(context.Background(), cluster, nodes)
-	require.NoError(t, err)
+	desiredNodes := plannedStaticNodes(t, planner, cluster, nodes)
 
 	for _, desired := range desiredNodes {
 		current := findStaticNode(nodes, desired.Metadata.Name)
