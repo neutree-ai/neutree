@@ -7,15 +7,12 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/cluster"
 	clustermocks "github.com/neutree-ai/neutree/internal/cluster/mocks"
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
@@ -272,73 +269,6 @@ func TestClusterController_Reconcile(t *testing.T) {
 	}
 }
 
-func TestShouldUseStaticNodeClusterFlow(t *testing.T) {
-	tests := []struct {
-		name    string
-		cluster *v1.Cluster
-		want    bool
-		wantErr string
-	}{
-		{
-			name: "ssh v1.0.1 stays on legacy ray ssh reconcile",
-			cluster: &v1.Cluster{
-				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"},
-			},
-			want: false,
-		},
-		{
-			name: "ssh v1.0.1 rc stays on legacy ray ssh reconcile",
-			cluster: &v1.Cluster{
-				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1-rc.1"},
-			},
-			want: false,
-		},
-		{
-			name: "ssh v1.0.2 uses static node resources",
-			cluster: &v1.Cluster{
-				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.2"},
-			},
-			want: true,
-		},
-		{
-			name: "ssh v1.1.0 alpha uses static node resources",
-			cluster: &v1.Cluster{
-				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0-alpha.1"},
-			},
-			want: true,
-		},
-		{
-			name: "kubernetes version never uses static node resources",
-			cluster: &v1.Cluster{
-				Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.1.0"},
-			},
-			want: false,
-		},
-		{
-			name: "invalid version fails",
-			cluster: &v1.Cluster{
-				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "custom"},
-			},
-			wantErr: "invalid cluster version",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := shouldUseStaticNodeClusterFlow(tt.cluster)
-			if tt.wantErr != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestClusterControllerSyncRejectsInvalidStaticClusterVersion(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
 	controller := &ClusterController{storage: mockStorage}
@@ -366,105 +296,6 @@ func TestClusterControllerSyncRejectsInvalidStaticClusterVersion(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid cluster version")
-	mockStorage.AssertExpectations(t)
-}
-
-func TestClusterControllerLegacyToStaticNodeFlowCleansLegacyRuntimeBeforeCreate(t *testing.T) {
-	mockStorage := &storagemocks.MockStorage{}
-	legacyReconcile := clustermocks.NewMockClusterReconcile(t)
-	cleanupCalled := false
-	controller := &ClusterController{
-		storage:               mockStorage,
-		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
-		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
-			return legacyReconcile, nil
-		},
-	}
-	input := &v1.Cluster{
-		ID: 7,
-		Metadata: &v1.Metadata{
-			Name:      "static-upgrade",
-			Workspace: "default",
-		},
-		Spec: &v1.ClusterSpec{
-			ImageRegistry: "registry-a",
-			Type:          v1.SSHClusterType,
-			Version:       "v1.0.2",
-			Config: &v1.ClusterConfig{
-				SSHConfig: &v1.RaySSHProvisionClusterConfig{
-					Provider: v1.Provider{HeadIP: "10.0.0.10"},
-					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
-				},
-			},
-		},
-		Status: &v1.ClusterStatus{
-			Initialized: true,
-			Version:     "v1.0.1",
-		},
-	}
-
-	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
-		{
-			Metadata: &v1.Metadata{Name: "registry-a", Workspace: "default"},
-			Spec: &v1.ImageRegistrySpec{
-				URL:        "registry.example.com",
-				Repository: "neutree",
-			},
-			Status: &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
-		},
-	}, nil).Once()
-	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil).Once()
-	legacyReconcile.On("ReconcileDelete", mock.Anything, input).Run(func(_ mock.Arguments) {
-		cleanupCalled = true
-	}).Return(nil).Once()
-	mockStorage.On("CreateStaticNodeCluster", mock.MatchedBy(func(_ *v1.StaticNodeCluster) bool {
-		assert.True(t, cleanupCalled, "legacy cleanup must finish before creating StaticNodeCluster")
-
-		return true
-	})).Return(nil).Once()
-	mockStorage.On("UpdateCluster", "7", mock.Anything).Return(nil)
-
-	err := controller.sync(input)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "static node cluster static-upgrade is provisioning")
-	mockStorage.AssertExpectations(t)
-}
-
-func TestClusterControllerStaticNodeClusterDeletePropagatesForceDelete(t *testing.T) {
-	mockStorage := &storagemocks.MockStorage{}
-	controller := &ClusterController{storage: mockStorage}
-	input := &v1.Cluster{
-		Metadata: &v1.Metadata{
-			Name:      "static-force",
-			Workspace: "default",
-			Annotations: map[string]string{
-				"neutree.ai/force-delete": "true",
-			},
-		},
-	}
-
-	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
-		{
-			ID: 45,
-			Metadata: &v1.Metadata{
-				Name:      "static-force",
-				Workspace: "default",
-			},
-		},
-	}, nil).Once()
-	mockStorage.On("UpdateStaticNodeCluster", "45", mock.MatchedBy(func(updated *v1.StaticNodeCluster) bool {
-		require.NotNil(t, updated.Metadata)
-		assert.True(t, v1.IsForceDelete(updated.Metadata.Annotations))
-		assert.NotEmpty(t, updated.Metadata.DeletionTimestamp)
-
-		return true
-	})).Return(nil).Once()
-
-	err := controller.reconcileStaticNodeClusterDelete(input)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "static node cluster static-force is deleting")
 	mockStorage.AssertExpectations(t)
 }
 
@@ -519,11 +350,6 @@ func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testin
 		obsCollectConfigManager: obsCollectConfigManager,
 		gw:                      gw,
 		metricsRemoteWriteURL:   "http://vmagent:8428/api/v1/write",
-		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
-			require.Fail(t, "legacy cluster reconcile should not be used for new static node flow")
-
-			return nil, nil
-		},
 	}
 	input := &v1.Cluster{
 		ID: 3,
@@ -905,133 +731,6 @@ func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButRayDashboardUnav
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Ray verification failed")
 	mockDashboard.AssertExpectations(t)
-	mockStorage.AssertExpectations(t)
-}
-
-func TestClusterControllerCalculateStaticNodeClusterResourcesEnrichesFromStaticNodeDevices(t *testing.T) {
-	mockStorage := &storagemocks.MockStorage{}
-	mockDashboard := &dashboardmocks.MockDashboardService{}
-	mockAcceleratorManager := &acceleratormocks.MockManager{}
-	controller := &ClusterController{
-		storage:            mockStorage,
-		acceleratorManager: mockAcceleratorManager,
-	}
-
-	prevFactory := dashboard.NewDashboardService
-	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
-		return mockDashboard
-	}
-	t.Cleanup(func() {
-		dashboard.NewDashboardService = prevFactory
-	})
-
-	mockDashboard.On("ListNodes").Return([]v1.NodeSummary{
-		{
-			IP: "192.168.19.218",
-			Raylet: v1.Raylet{
-				State: v1.AliveNodeState,
-				Labels: map[string]string{
-					v1.NeutreeServingVersionLabel: "v1.0.2",
-				},
-				Resources: map[string]float64{
-					"CPU":             32,
-					"GPU":             2,
-					"memory":          64 * resourceview.BytesPerGiB,
-					"NVIDIA_Tesla_T4": 2,
-				},
-				CoreWorkersStats: []v1.CoreWorkerStats{
-					{
-						UsedResources: map[string]v1.RayResourceAllocations{
-							"GPU": {
-								ResourceSlots: []v1.RayResourceSlot{{Allocation: 1}},
-							},
-							"NVIDIA_Tesla_T4": {
-								ResourceSlots: []v1.RayResourceSlot{{Allocation: 1}},
-							},
-						},
-					},
-				},
-			},
-		},
-	}, nil).Twice()
-	mockAcceleratorManager.On("GetAllParsers").Return(map[string]resourceview.ResourceParser{
-		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
-	}).Once()
-
-	mockStorage.On("GenericQuery", storage.STATIC_NODE_TABLE, "*", mock.Anything, mock.Anything).
-		Run(func(args mock.Arguments) {
-			nodes, ok := args.Get(3).(*[]v1.StaticNode)
-			require.True(t, ok)
-			*nodes = []v1.StaticNode{
-				{
-					Metadata: &v1.Metadata{
-						Name:      "192.168.19.218",
-						Workspace: "default",
-					},
-					Spec: &v1.StaticNodeSpec{
-						Cluster: "static-a",
-						IP:      "192.168.19.218",
-						Role:    v1.StaticNodeRoleHead,
-					},
-					Status: &v1.StaticNodeStatus{
-						Accelerator: &v1.StaticNodeAcceleratorStatus{
-							Type:         string(v1.AcceleratorTypeNVIDIAGPU),
-							ProductModel: "Tesla T4",
-							Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-								{
-									UUID:         "GPU-0",
-									ProductModel: "Tesla T4",
-									MemoryMiB:    15360,
-									Healthy:      true,
-								},
-								{
-									UUID:         "GPU-1",
-									ProductModel: "Tesla T4",
-									MemoryMiB:    15360,
-									Healthy:      true,
-								},
-							},
-						},
-					},
-				},
-			}
-		}).
-		Return(nil).
-		Once()
-
-	resources, err := controller.calculateStaticNodeClusterResources(&v1.StaticNodeCluster{
-		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
-		Spec: &v1.StaticNodeClusterSpec{
-			Version: "v1.0.2",
-			Nodes: []v1.StaticNodeClusterNodeSpec{
-				{Name: "192.168.19.218", IP: "192.168.19.218", Role: v1.StaticNodeRoleHead},
-			},
-		},
-	})
-
-	require.NoError(t, err)
-	require.NotNil(t, resources)
-	require.NotNil(t, resources.AcceleratorMetadata)
-	require.Contains(t, resources.AcceleratorMetadata, v1.AcceleratorTypeNVIDIAGPU)
-	require.Contains(t, resources.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products, v1.AcceleratorProduct("NVIDIA_Tesla_T4"))
-	assert.Equal(t, float64(15360),
-		resources.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_Tesla_T4"].MemoryTotalMiB)
-	require.Contains(t, resources.Allocatable.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
-	require.Contains(t, resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Products, v1.AcceleratorProduct("NVIDIA_Tesla_T4"))
-	assert.Equal(t, float64(2),
-		resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_Tesla_T4"].Quantity)
-	require.Contains(t, resources.Available.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
-	require.Contains(t, resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Products, v1.AcceleratorProduct("NVIDIA_Tesla_T4"))
-	assert.Equal(t, float64(1),
-		resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_Tesla_T4"].Quantity)
-	require.Contains(t, resources.NodeResources, "192.168.19.218")
-	require.Len(t, resources.NodeResources["192.168.19.218"].Devices, 2)
-	assert.Equal(t, "NVIDIA_Tesla_T4", resources.NodeResources["192.168.19.218"].Devices[0].Product)
-	assert.Nil(t, resources.NodeResources["192.168.19.218"].Devices[0].Available)
-	assert.Nil(t, resources.NodeResources["192.168.19.218"].Devices[1].Available)
-
-	mockDashboard.AssertExpectations(t)
-	mockAcceleratorManager.AssertExpectations(t)
 	mockStorage.AssertExpectations(t)
 }
 

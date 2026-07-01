@@ -87,11 +87,8 @@ type StaticNodeStatus struct {
 const StaticNodeAcceleratorTypeCPU = "cpu"
 
 type StaticNodeAcceleratorStatus struct {
-	Type         string                              `json:"type,omitempty"`
-	Vendor       string                              `json:"vendor,omitempty"`
-	ProductName  string                              `json:"product_name,omitempty"`
-	ProductModel string                              `json:"product_model,omitempty"`
-	Devices      []StaticNodeAcceleratorDeviceStatus `json:"devices,omitempty"`
+	Type    string                              `json:"type,omitempty"`
+	Devices []StaticNodeAcceleratorDeviceStatus `json:"devices,omitempty"`
 }
 
 type StaticNodeAcceleratorDeviceStatus struct {
@@ -106,11 +103,7 @@ type StaticNodeAcceleratorDeviceStatus struct {
 
 func CPUStaticNodeAcceleratorStatus() StaticNodeAcceleratorStatus {
 	return StaticNodeAcceleratorStatus{
-		Type:         StaticNodeAcceleratorTypeCPU,
-		Vendor:       "generic",
-		ProductName:  "CPU",
-		ProductModel: StaticNodeAcceleratorTypeCPU,
-		Devices:      []StaticNodeAcceleratorDeviceStatus{},
+		Type: StaticNodeAcceleratorTypeCPU,
 	}
 }
 
@@ -127,7 +120,6 @@ const (
 
 type NodeComponentSpec struct {
 	Name             string                    `json:"name,omitempty"`
-	Type             NodeComponentType         `json:"type,omitempty"`
 	Image            string                    `json:"image,omitempty"`
 	Command          []string                  `json:"command,omitempty"`
 	Args             []string                  `json:"args,omitempty"`
@@ -139,13 +131,6 @@ type NodeComponentSpec struct {
 	HealthCheck      *NodeComponentHealthCheck `json:"health_check,omitempty"`
 	ConfigHash       string                    `json:"config_hash,omitempty"`
 }
-
-type NodeComponentType string
-
-const (
-	NodeComponentTypeRayHead   NodeComponentType = "ray-head"
-	NodeComponentTypeRayWorker NodeComponentType = "ray-worker"
-)
 
 type NodeComponentPort struct {
 	Name     string `json:"name,omitempty"`
@@ -185,7 +170,6 @@ type NodeComponentHealthCheck struct {
 
 type NodeComponentStatus struct {
 	Name               string             `json:"name,omitempty"`
-	Type               NodeComponentType  `json:"type,omitempty"`
 	Ready              bool               `json:"ready,omitempty"`
 	Phase              NodeComponentPhase `json:"phase,omitempty"`
 	ObservedHash       string             `json:"observed_hash,omitempty"`

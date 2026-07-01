@@ -15,7 +15,7 @@ const (
 func applyRayRecreateUpgradePlan(
 	cluster *v1.StaticNodeCluster,
 	currentByName map[string]*v1.StaticNode,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 ) {
 	upgrade := staticNodeClusterUpgrade(cluster, staticNodesFromByName(currentByName), plans)
 	if upgrade == nil {
@@ -56,7 +56,7 @@ type staticNodeClusterUpgradeState struct {
 func staticNodeClusterUpgrade(
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 ) *staticNodeClusterUpgradeState {
 	if cluster == nil || cluster.Spec == nil || cluster.Status == nil {
 		return nil
@@ -76,7 +76,7 @@ func staticNodeClusterUpgrade(
 func staticNodeClusterUpgradeStepFromObservedState(
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 ) staticNodeClusterUpgradeStep {
 	// Upgrade progress is derived from observed static-node/component state.
 	// Status.error_message may display the current step, but it must not drive
@@ -130,7 +130,7 @@ func removeRayWorkerComponent(node *v1.StaticNode) {
 	components := make([]v1.NodeComponentSpec, 0, len(node.Spec.Components))
 
 	for i := range node.Spec.Components {
-		if node.Spec.Components[i].Type != v1.NodeComponentTypeRayWorker {
+		if !isRayWorkerComponentName(node.Spec.Components[i].Name) {
 			components = append(components, node.Spec.Components[i])
 		}
 	}
@@ -158,7 +158,7 @@ func advanceStaticNodeClusterUpgradeStatus(
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
 	status v1.StaticNodeClusterStatus,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 ) v1.StaticNodeClusterStatus {
 	if status.Phase == v1.StaticNodeClusterPhaseFailed {
 		return status
@@ -222,7 +222,7 @@ func staticNodeClusterWorkersStopped(cluster *v1.StaticNodeCluster, nodes []*v1.
 func staticNodeClusterRayRuntimeRunningTarget(
 	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 ) bool {
 	return staticNodeClusterHeadRayRunningTarget(cluster, nodes, plans) &&
 		staticNodeClusterWorkersRayRunningTarget(cluster, nodes, plans)
@@ -231,7 +231,7 @@ func staticNodeClusterRayRuntimeRunningTarget(
 func staticNodeClusterHeadRayRunningTarget(
 	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 ) bool {
 	headName := staticNodeClusterHeadName(cluster)
 	if headName == "" {
@@ -245,15 +245,15 @@ func staticNodeClusterHeadRayRunningTarget(
 
 	return rayComponentRunningTarget(
 		node.Status.Components,
-		v1.NodeComponentTypeRayHead,
-		desiredRayComponentImage(plans, headName, v1.NodeComponentTypeRayHead),
+		rayHeadComponentName,
+		desiredRayComponentImage(plans, headName, rayHeadComponentName),
 	)
 }
 
 func staticNodeClusterWorkersRayRunningTarget(
 	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 ) bool {
 	workerNames := staticNodeClusterWorkerNames(cluster)
 	if len(workerNames) == 0 {
@@ -269,8 +269,8 @@ func staticNodeClusterWorkersRayRunningTarget(
 
 		if !rayComponentRunningTarget(
 			node.Status.Components,
-			v1.NodeComponentTypeRayWorker,
-			desiredRayComponentImage(plans, name, v1.NodeComponentTypeRayWorker),
+			rayWorkerComponentName,
+			desiredRayComponentImage(plans, name, rayWorkerComponentName),
 		) {
 			return false
 		}
@@ -280,9 +280,9 @@ func staticNodeClusterWorkersRayRunningTarget(
 }
 
 func desiredRayComponentImage(
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 	nodeName string,
-	componentType v1.NodeComponentType,
+	componentName string,
 ) string {
 	for _, plan := range plans {
 		if plan.Node == nil || plan.Node.Metadata == nil || plan.Node.Spec == nil {
@@ -299,7 +299,7 @@ func desiredRayComponentImage(
 		}
 
 		for _, component := range components {
-			if component.Type == componentType || rayComponentNameMatchesType(component.Name, componentType) {
+			if component.Name == componentName {
 				return component.Image
 			}
 		}
@@ -325,8 +325,7 @@ func staticNodeClusterWorkerNames(cluster *v1.StaticNodeCluster) map[string]stru
 
 func rayComponentStopped(components []v1.NodeComponentStatus) bool {
 	for _, component := range components {
-		if component.Type == v1.NodeComponentTypeRayWorker ||
-			rayComponentNameMatchesType(component.Name, v1.NodeComponentTypeRayWorker) {
+		if isRayWorkerComponentName(component.Name) {
 			return component.Phase == v1.NodeComponentPhaseStopped
 		}
 	}
@@ -334,9 +333,9 @@ func rayComponentStopped(components []v1.NodeComponentStatus) bool {
 	return false
 }
 
-func rayComponentRunningTarget(components []v1.NodeComponentStatus, componentType v1.NodeComponentType, targetImage string) bool {
+func rayComponentRunningTarget(components []v1.NodeComponentStatus, componentName string, targetImage string) bool {
 	for _, component := range components {
-		if component.Type != componentType && !rayComponentNameMatchesType(component.Name, componentType) {
+		if component.Name != componentName {
 			continue
 		}
 
@@ -350,13 +349,14 @@ func rayComponentRunningTarget(components []v1.NodeComponentStatus, componentTyp
 	return false
 }
 
-func rayComponentNameMatchesType(name string, componentType v1.NodeComponentType) bool {
-	switch componentType {
-	case v1.NodeComponentTypeRayHead:
-		return name == "ray-head"
-	case v1.NodeComponentTypeRayWorker:
-		return name == "ray-worker"
-	default:
-		return false
-	}
+func isRayComponentName(name string) bool {
+	return isRayHeadComponentName(name) || isRayWorkerComponentName(name)
+}
+
+func isRayHeadComponentName(name string) bool {
+	return name == rayHeadComponentName
+}
+
+func isRayWorkerComponentName(name string) bool {
+	return name == rayWorkerComponentName
 }

@@ -69,6 +69,16 @@ func TestDetermineClusterPhase(t *testing.T) {
 			cluster:  &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, ObservedSpecHash: hashV1}},
 			expected: v1.ClusterPhaseFailed,
 		},
+		{
+			name:     "initialized, hash matches, reconciler marked updating -> Updating",
+			cluster:  &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Phase: v1.ClusterPhaseUpdating, ObservedSpecHash: hashV1}},
+			expected: v1.ClusterPhaseUpdating,
+		},
+		{
+			name:     "initialized, hash matches, reconciler marked upgrading -> Upgrading",
+			cluster:  &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Phase: v1.ClusterPhaseUpgrading, ObservedSpecHash: hashV1}},
+			expected: v1.ClusterPhaseUpgrading,
+		},
 	}
 
 	for _, tt := range tests {

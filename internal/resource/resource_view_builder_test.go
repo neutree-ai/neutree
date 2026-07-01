@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,16 +21,23 @@ type fakeResourceClient struct {
 }
 
 type fakeStaticNodeLister struct {
-	nodes []v1.StaticNode
+	nodes []*v1.StaticNode
 	err   error
 }
 
-func (l *fakeStaticNodeLister) ListByCluster(
-	_ context.Context,
-	_ string,
-	_ string,
-) ([]v1.StaticNode, error) {
-	return l.nodes, l.err
+func (l *fakeStaticNodeLister) ListStaticNode(storage.ListOption) ([]v1.StaticNode, error) {
+	if l.err != nil {
+		return nil, l.err
+	}
+
+	nodes := make([]v1.StaticNode, 0, len(l.nodes))
+	for _, node := range l.nodes {
+		if node != nil {
+			nodes = append(nodes, *node)
+		}
+	}
+
+	return nodes, nil
 }
 
 func (c *fakeResourceClient) ListNodes(_ context.Context, opts ListNodesOptions) ([]ResourceNode, error) {
@@ -87,13 +95,13 @@ func TestStaticNodeClusterResourceClientListNodesEnrichesStaticDevices(t *testin
 		},
 	}
 	staticNodes := &fakeStaticNodeLister{
-		nodes: []v1.StaticNode{
+		nodes: []*v1.StaticNode{
 			{
-				Spec: &v1.StaticNodeSpec{IP: "10.0.0.10"},
+				Metadata: &v1.Metadata{Name: "node-0", Workspace: "default"},
+				Spec:     &v1.StaticNodeSpec{IP: "10.0.0.10", Cluster: "static-a"},
 				Status: &v1.StaticNodeStatus{
 					Accelerator: &v1.StaticNodeAcceleratorStatus{
-						Type:         string(v1.AcceleratorTypeNVIDIAGPU),
-						ProductModel: "Tesla T4",
+						Type: string(v1.AcceleratorTypeNVIDIAGPU),
 						Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 							{
 								UUID:         "GPU-1",

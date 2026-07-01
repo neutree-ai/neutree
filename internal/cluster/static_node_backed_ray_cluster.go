@@ -1,4 +1,4 @@
-package controllers
+package cluster
 
 import (
 	"context"
@@ -12,92 +12,118 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
-	staticclient "github.com/neutree-ai/neutree/internal/client"
-	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
-	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-const (
-	staticNodeClusterFlowVersionGate = "v1.0.1"
-	staticNodeClusterDashboardPort   = 8265
-)
+var _ ClusterReconcile = &staticNodeClusterBackedRayReconciler{}
 
-type staticNodeClusterPhaseContext struct {
-	status       *v1.StaticNodeClusterStatus
-	specObserved bool
+type staticNodeClusterBackedRayReconciler struct {
+	storage            storage.Storage
+	acceleratorManager accelerator.Manager
+	legacy             ClusterReconcile
 }
 
-func shouldUseStaticNodeClusterFlow(c *v1.Cluster) (bool, error) {
-	if c == nil || c.Spec == nil || c.Spec.Type != v1.SSHClusterType {
-		return false, nil
+func (r *staticNodeClusterBackedRayReconciler) Reconcile(_ context.Context, c *v1.Cluster) error {
+	if err := r.validateStaticNodeClusterUpdate(c); err != nil {
+		return err
 	}
 
-	return isStaticNodeClusterFlowVersion(c.GetVersion())
-}
-
-func (controller *ClusterController) reconcileStaticNodeCluster(c *v1.Cluster) (*staticNodeClusterPhaseContext, error) {
 	if err := validateStaticNodeClusterSpec(c); err != nil {
-		return nil, err
+		return err
 	}
 
-	current, found, err := controller.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
+	current, found, err := r.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to find static node cluster")
+		return errors.Wrap(err, "failed to find static node cluster")
 	}
 
 	if !found {
-		if err := controller.cleanupLegacyRuntimeBeforeStaticNodeFlow(c); err != nil {
-			return nil, err
+		if err := r.cleanupLegacyRuntimeBeforeStaticNodeFlow(c); err != nil {
+			return err
 		}
 	}
 
-	desired, err := controller.buildStaticNodeCluster(c)
+	desired, err := r.buildStaticNodeCluster(c)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if !found {
-		if err := controller.storage.CreateStaticNodeCluster(desired); err != nil {
-			return nil, errors.Wrap(err, "failed to create static node cluster")
+		if err := r.storage.CreateStaticNodeCluster(desired); err != nil {
+			return errors.Wrap(err, "failed to create static node cluster")
 		}
 
-		controller.copyStaticNodeClusterStatus(c, desired, nil, false)
+		r.copyStaticNodeClusterStatus(c, desired, nil, false)
 
-		return &staticNodeClusterPhaseContext{}, errors.Errorf("static node cluster %s is provisioning", c.Metadata.Name)
+		return errors.Errorf("static node cluster %s is provisioning", c.Metadata.Name)
 	}
 
 	desired.ID = current.ID
 
 	specObserved := staticNodeClusterSpecObserved(current, desired)
-	phaseContext := &staticNodeClusterPhaseContext{
-		status:       current.Status,
-		specObserved: specObserved,
+
+	if err := r.storage.UpdateStaticNodeCluster(strconv.Itoa(current.ID), desired); err != nil {
+		return errors.Wrap(err, "failed to update static node cluster")
 	}
 
-	if err := controller.storage.UpdateStaticNodeCluster(strconv.Itoa(current.ID), desired); err != nil {
-		return phaseContext, errors.Wrap(err, "failed to update static node cluster")
-	}
-
-	controller.copyStaticNodeClusterStatus(c, desired, current.Status, specObserved)
+	r.copyStaticNodeClusterStatus(c, desired, current.Status, specObserved)
 
 	if current.Status == nil || current.Status.Phase != v1.StaticNodeClusterPhaseReady {
-		return phaseContext, staticNodeClusterNotReadyError(current)
+		r.markStaticNodeClusterApplying(c, current.Status, specObserved)
+		return staticNodeClusterNotReadyError(current)
 	}
 
 	if !specObserved {
-		return phaseContext, errors.Errorf("static node cluster %s is applying desired spec", c.Metadata.Name)
+		r.markStaticNodeClusterApplying(c, current.Status, specObserved)
+		return errors.Errorf("static node cluster %s is applying desired spec", c.Metadata.Name)
 	}
 
-	if err := controller.verifyStaticNodeClusterReady(c, desired); err != nil {
-		return phaseContext, errors.Wrapf(err, "static node cluster %s Ray verification failed", c.Metadata.Name)
+	if err := r.verifyStaticNodeClusterReady(c, desired); err != nil {
+		r.markStaticNodeClusterApplying(c, current.Status, specObserved)
+		return errors.Wrapf(err, "static node cluster %s Ray verification failed", c.Metadata.Name)
 	}
 
-	return phaseContext, nil
+	return nil
+}
+
+func (r *staticNodeClusterBackedRayReconciler) ReconcileDelete(_ context.Context, c *v1.Cluster) error {
+	current, found, err := r.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
+	if err != nil {
+		return errors.Wrap(err, "failed to find static node cluster")
+	}
+
+	if !found {
+		return nil
+	}
+
+	if current.Metadata == nil {
+		current.Metadata = &v1.Metadata{}
+	}
+
+	metadataChanged := false
+
+	if v1.IsForceDelete(c.Metadata.Annotations) && !v1.IsForceDelete(current.Metadata.Annotations) {
+		current.Metadata.Annotations = v1.WithForceDeleteAnnotation(current.Metadata.Annotations)
+		metadataChanged = true
+	}
+
+	if current.Metadata.DeletionTimestamp == "" {
+		current.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
+		metadataChanged = true
+	}
+
+	if metadataChanged {
+		if err := r.storage.UpdateStaticNodeCluster(strconv.Itoa(current.ID), current); err != nil {
+			return errors.Wrap(err, "failed to mark static node cluster deleting")
+		}
+	}
+
+	return errors.Errorf("static node cluster %s is deleting", current.Metadata.Name)
 }
 
 func validateStaticNodeClusterSpec(c *v1.Cluster) error {
@@ -149,68 +175,7 @@ func validateStaticNodeClusterSpec(c *v1.Cluster) error {
 	return nil
 }
 
-func (controller *ClusterController) reconcileStaticNodeClusterDelete(c *v1.Cluster) error {
-	current, found, err := controller.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
-	if err != nil {
-		return errors.Wrap(err, "failed to find static node cluster")
-	}
-
-	if !found {
-		return nil
-	}
-
-	if current.Metadata == nil {
-		current.Metadata = &v1.Metadata{}
-	}
-
-	metadataChanged := false
-
-	if v1.IsForceDelete(c.Metadata.Annotations) && !v1.IsForceDelete(current.Metadata.Annotations) {
-		current.Metadata.Annotations = v1.WithForceDeleteAnnotation(current.Metadata.Annotations)
-		metadataChanged = true
-	}
-
-	if current.Metadata.DeletionTimestamp == "" {
-		current.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
-		metadataChanged = true
-	}
-
-	if metadataChanged {
-		if err := controller.storage.UpdateStaticNodeCluster(strconv.Itoa(current.ID), current); err != nil {
-			return errors.Wrap(err, "failed to mark static node cluster deleting")
-		}
-	}
-
-	return errors.Errorf("static node cluster %s is deleting", current.Metadata.Name)
-}
-
-func (controller *ClusterController) shouldUseStaticNodeClusterDeleteFlow(c *v1.Cluster) (bool, error) {
-	if c == nil || c.Spec == nil || c.Spec.Type != v1.SSHClusterType {
-		return false, nil
-	}
-
-	useStaticNodeFlow, err := shouldUseStaticNodeClusterFlow(c)
-	if err != nil {
-		return false, err
-	}
-
-	if useStaticNodeFlow {
-		return true, nil
-	}
-
-	if c.Metadata == nil {
-		return false, nil
-	}
-
-	_, found, err := controller.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
-	if err != nil {
-		return false, err
-	}
-
-	return found, nil
-}
-
-func (controller *ClusterController) validateStaticNodeClusterUpdate(c *v1.Cluster) error {
+func (r *staticNodeClusterBackedRayReconciler) validateStaticNodeClusterUpdate(c *v1.Cluster) error {
 	if c == nil || !c.IsInitialized() {
 		return nil
 	}
@@ -228,17 +193,16 @@ func (controller *ClusterController) validateStaticNodeClusterUpdate(c *v1.Clust
 	return fmt.Errorf("initialized static cluster head ip can not be changed from %s to %s", currentHeadIP, desiredHeadIP)
 }
 
-func (controller *ClusterController) cleanupLegacyRuntimeBeforeStaticNodeFlow(c *v1.Cluster) error {
+func (r *staticNodeClusterBackedRayReconciler) cleanupLegacyRuntimeBeforeStaticNodeFlow(c *v1.Cluster) error {
 	if !isLegacyToStaticNodeFlowUpgrade(c) {
 		return nil
 	}
 
-	reconciler, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
-	if err != nil {
-		return errors.Wrap(err, "failed to create legacy static runtime cleaner")
+	if r.legacy == nil {
+		return errors.New("legacy reconciler is required to cleanup legacy static runtime")
 	}
 
-	if err := reconciler.ReconcileDelete(context.Background(), c); err != nil {
+	if err := r.legacy.ReconcileDelete(context.Background(), c); err != nil {
 		return errors.Wrap(err, "failed to cleanup legacy static runtime")
 	}
 
@@ -261,15 +225,6 @@ func isLegacyToStaticNodeFlowUpgrade(c *v1.Cluster) bool {
 	}
 
 	return useStaticNodeFlow
-}
-
-func isStaticNodeClusterFlowVersion(version string) (bool, error) {
-	useStaticNodeFlow, err := semver.LessThan(staticNodeClusterFlowVersionGate, version)
-	if err != nil {
-		return false, fmt.Errorf("invalid cluster version %q: %w", version, err)
-	}
-
-	return useStaticNodeFlow, nil
 }
 
 func staticClusterSpecHeadIP(c *v1.Cluster) (string, error) {
@@ -309,7 +264,7 @@ func currentStaticClusterHeadIP(c *v1.Cluster) string {
 	return parsed.Hostname()
 }
 
-func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.StaticNodeCluster, error) {
+func (r *staticNodeClusterBackedRayReconciler) buildStaticNodeCluster(c *v1.Cluster) (*v1.StaticNodeCluster, error) {
 	if c == nil || c.Metadata == nil {
 		return nil, errors.New("cluster metadata is required")
 	}
@@ -327,7 +282,7 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 		return nil, errors.New("head IP can not be empty")
 	}
 
-	imageRegistry, err := controller.getUsedImageRegistry(c)
+	imageRegistry, err := getUsedImageRegistries(c, r.storage)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get used image registry")
 	}
@@ -337,10 +292,9 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 		return nil, errors.Wrap(err, "failed to build image prefix")
 	}
 
-	headName := sshConfig.Provider.HeadIP
 	nodes := []v1.StaticNodeClusterNodeSpec{
 		{
-			Name:    headName,
+			Name:    sshConfig.Provider.HeadIP,
 			IP:      sshConfig.Provider.HeadIP,
 			Role:    v1.StaticNodeRoleHead,
 			SSHAuth: copyStaticClusterAuth(&sshConfig.Auth),
@@ -378,7 +332,7 @@ func (controller *ClusterController) buildStaticNodeCluster(c *v1.Cluster) (*v1.
 	}, nil
 }
 
-func (controller *ClusterController) findStaticNodeCluster(
+func (r *staticNodeClusterBackedRayReconciler) findStaticNodeCluster(
 	workspace string,
 	name string,
 ) (*v1.StaticNodeCluster, bool, error) {
@@ -393,7 +347,7 @@ func (controller *ClusterController) findStaticNodeCluster(
 		})
 	}
 
-	clusters, err := controller.storage.ListStaticNodeCluster(storage.ListOption{Filters: filters})
+	clusters, err := r.storage.ListStaticNodeCluster(storage.ListOption{Filters: filters})
 	if err != nil {
 		return nil, false, err
 	}
@@ -405,7 +359,7 @@ func (controller *ClusterController) findStaticNodeCluster(
 	return &clusters[0], true, nil
 }
 
-func (controller *ClusterController) copyStaticNodeClusterStatus(
+func (r *staticNodeClusterBackedRayReconciler) copyStaticNodeClusterStatus(
 	c *v1.Cluster,
 	desired *v1.StaticNodeCluster,
 	status *v1.StaticNodeClusterStatus,
@@ -437,11 +391,41 @@ func (controller *ClusterController) copyStaticNodeClusterStatus(
 	}
 }
 
-func (controller *ClusterController) verifyStaticNodeClusterReady(
+func (r *staticNodeClusterBackedRayReconciler) markStaticNodeClusterApplying(
+	c *v1.Cluster,
+	status *v1.StaticNodeClusterStatus,
+	observed bool,
+) {
+	if c == nil {
+		return
+	}
+
+	if c.Status == nil {
+		c.Status = &v1.ClusterStatus{}
+	}
+
+	if status != nil && status.Phase == v1.StaticNodeClusterPhaseUpgrading {
+		c.Status.Phase = v1.ClusterPhaseUpgrading
+		return
+	}
+
+	if status != nil && (status.Phase == v1.StaticNodeClusterPhaseFailed ||
+		status.Phase == v1.StaticNodeClusterPhaseDegraded) {
+		c.Status.Phase = v1.ClusterPhaseFailed
+		return
+	}
+
+	if !observed || status == nil || status.Phase == v1.StaticNodeClusterPhaseProvisioning ||
+		status.Phase == v1.StaticNodeClusterPhaseReady {
+		c.Status.Phase = v1.ClusterPhaseUpdating
+	}
+}
+
+func (r *staticNodeClusterBackedRayReconciler) verifyStaticNodeClusterReady(
 	c *v1.Cluster,
 	staticCluster *v1.StaticNodeCluster,
 ) error {
-	resources, err := controller.calculateStaticNodeClusterResources(staticCluster)
+	resources, err := r.calculateStaticNodeClusterResources(staticCluster)
 	if err != nil {
 		return err
 	}
@@ -463,37 +447,38 @@ func staticNodeClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool 
 	return reflect.DeepEqual(current.Spec, desired.Spec)
 }
 
-func (controller *ClusterController) calculateStaticNodeClusterResources(
+func (r *staticNodeClusterBackedRayReconciler) calculateStaticNodeClusterResources(
 	staticCluster *v1.StaticNodeCluster,
 ) (*v1.ClusterResources, error) {
 	if staticCluster == nil || staticCluster.Metadata == nil {
 		return nil, errors.New("static node cluster metadata is required to calculate resources")
 	}
 
-	if controller.storage == nil {
+	if r.storage == nil {
 		return nil, errors.New("storage is required to calculate static node cluster resources")
 	}
 
 	var resourceParsers map[string]resourceparser.ResourceParser
-	if controller.acceleratorManager != nil {
-		resourceParsers = controller.acceleratorManager.GetAllParsers()
+	if r.acceleratorManager != nil {
+		resourceParsers = r.acceleratorManager.GetAllParsers()
 	}
 
-	dashboardService := dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster))
-	rayNodes, err := dashboardService.ListNodes()
-
+	rayNodes, err := dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)).ListNodes()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list Ray nodes")
 	}
 
-	if err := clusterreconcile.ValidateStaticNodeClusterRayNodes(staticCluster, rayNodes); err != nil {
+	if err := ValidateStaticNodeClusterRayNodes(staticCluster, rayNodes); err != nil {
 		return nil, err
 	}
 
-	var resourceClient resourceview.ResourceClient = resourceview.NewRayResourceClient(dashboardService, resourceParsers)
+	var resourceClient resourceview.ResourceClient = resourceview.NewRayResourceClient(
+		dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)),
+		resourceParsers,
+	)
 	resourceClient = resourceview.NewStaticNodeClusterResourceClient(
 		resourceClient,
-		staticclient.NewStaticNodeResourceClient(controller.storage),
+		r.storage,
 		staticCluster.Metadata.Workspace,
 		staticCluster.Metadata.Name,
 	)
@@ -501,58 +486,6 @@ func (controller *ClusterController) calculateStaticNodeClusterResources(
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
 	return resourceBuilder.BuildClusterResources(context.Background(), nil)
-}
-
-func (controller *ClusterController) getUsedImageRegistry(c *v1.Cluster) (*v1.ImageRegistry, error) {
-	filters := []storage.Filter{
-		{
-			Column:   "metadata->name",
-			Operator: "eq",
-			Value:    fmt.Sprintf(`"%s"`, c.Spec.ImageRegistry),
-		},
-	}
-
-	if c.Metadata.Workspace != "" {
-		filters = append(filters, storage.Filter{
-			Column:   "metadata->workspace",
-			Operator: "eq",
-			Value:    fmt.Sprintf(`"%s"`, c.Metadata.Workspace),
-		})
-	}
-
-	imageRegistries, err := controller.storage.ListImageRegistry(storage.ListOption{Filters: filters})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list image registry")
-	}
-
-	if len(imageRegistries) == 0 {
-		return nil, storage.ErrResourceNotFound
-	}
-
-	imageRegistry := &imageRegistries[0]
-	if imageRegistry.Status == nil || imageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
-		return nil, errors.New("image registry " + c.Spec.ImageRegistry + " not ready")
-	}
-
-	return imageRegistry, nil
-}
-
-func staticNodeClusterDashboardURL(staticCluster *v1.StaticNodeCluster) string {
-	return fmt.Sprintf("http://%s:%d", staticNodeClusterHeadIP(staticCluster), staticNodeClusterDashboardPort)
-}
-
-func staticNodeClusterHeadIP(staticCluster *v1.StaticNodeCluster) string {
-	if staticCluster == nil || staticCluster.Spec == nil {
-		return ""
-	}
-
-	for _, node := range staticCluster.Spec.Nodes {
-		if node.Role == v1.StaticNodeRoleHead {
-			return node.IP
-		}
-	}
-
-	return ""
 }
 
 func staticNodeClusterNotReadyError(staticCluster *v1.StaticNodeCluster) error {

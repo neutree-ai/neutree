@@ -7,20 +7,21 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	staticclient "github.com/neutree-ai/neutree/internal/client"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type StaticNodeClusterController struct {
-	nodes      *staticclient.StaticNodeClient
-	clusters   *staticclient.StaticNodeClusterClient
-	reconciler *clusterreconcile.StaticNodeClusterReconciler
+	storage     storage.Storage
+	planner     *clusterreconcile.StaticNodeClusterPlanner
+	aggregator  clusterreconcile.StaticNodeClusterStatusAggregator
+	rayVerifier clusterreconcile.StaticNodeClusterRayVerifier
 }
 
 type StaticNodeClusterControllerOption struct {
-	Nodes                      *staticclient.StaticNodeClient
-	Clusters                   *staticclient.StaticNodeClusterClient
-	Reconciler                 *clusterreconcile.StaticNodeClusterReconciler
+	Storage                    storage.Storage
+	Planner                    *clusterreconcile.StaticNodeClusterPlanner
+	RayVerifier                clusterreconcile.StaticNodeClusterRayVerifier
 	AcceleratorProfileProvider clusterreconcile.AcceleratorProfileProvider
 }
 
@@ -29,18 +30,23 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 		return nil, errors.New("static node cluster controller option is required")
 	}
 
-	reconciler := option.Reconciler
-	if reconciler == nil {
-		reconciler = &clusterreconcile.StaticNodeClusterReconciler{
+	planner := option.Planner
+	if planner == nil {
+		planner = &clusterreconcile.StaticNodeClusterPlanner{
 			AcceleratorProfileProvider: option.AcceleratorProfileProvider,
-			RayVerifier:                clusterreconcile.StaticNodeClusterDashboardVerifier{},
 		}
 	}
 
+	rayVerifier := option.RayVerifier
+	if rayVerifier == nil {
+		rayVerifier = clusterreconcile.RayDashboardStaticNodeClusterVerifier{}
+	}
+
 	return &StaticNodeClusterController{
-		nodes:      option.Nodes,
-		clusters:   option.Clusters,
-		reconciler: reconciler,
+		storage:     option.Storage,
+		planner:     planner,
+		aggregator:  clusterreconcile.StaticNodeClusterStatusAggregator{},
+		rayVerifier: rayVerifier,
 	}, nil
 }
 
@@ -62,16 +68,16 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		return errors.New("static node cluster metadata is required")
 	}
 
-	if c.nodes == nil || c.clusters == nil {
-		return errors.New("static node cluster clients are required")
+	if c.storage == nil {
+		return errors.New("storage is required")
 	}
 
-	reconciler := c.reconciler
-	if reconciler == nil {
-		reconciler = &clusterreconcile.StaticNodeClusterReconciler{}
+	planner := c.planner
+	if planner == nil {
+		planner = &clusterreconcile.StaticNodeClusterPlanner{}
 	}
 
-	currentNodes, err := c.nodes.ListByCluster(ctx, cluster.Metadata.Workspace, cluster.Metadata.Name)
+	currentNodes, err := listStaticNodes(c.storage, cluster.Metadata.Workspace, cluster.Metadata.Name)
 	if err != nil {
 		return errors.Wrap(err, "failed to list static nodes")
 	}
@@ -80,10 +86,12 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		return c.reconcileDelete(ctx, cluster, currentNodes)
 	}
 
-	plan, err := reconciler.Plan(ctx, cluster, currentNodes)
+	plan, err := planner.Plan(ctx, cluster, currentNodes)
 	if err != nil {
 		return err
 	}
+
+	status := c.aggregator.Aggregate(cluster, currentNodes, plan.DesiredNodePlans)
 
 	desiredByName := make(map[string]*v1.StaticNode, len(plan.DesiredNodes))
 
@@ -94,11 +102,11 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 
 		desiredByName[node.Metadata.Name] = node
 
-		if err := c.nodes.Upsert(ctx, node); err != nil {
-			if updateErr := c.clusters.UpdateStatus(
-				ctx,
+		if err := upsertStaticNode(c.storage, node); err != nil {
+			if updateErr := updateStaticNodeClusterStatus(
+				c.storage,
 				cluster,
-				staticNodeClusterFailedStatus(plan.Status, err),
+				staticNodeClusterFailedStatus(status, err),
 			); updateErr != nil {
 				return errors.Wrap(updateErr, "failed to update static node cluster status")
 			}
@@ -120,21 +128,21 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 
 		hasStaleNodes = true
 
-		if err := c.nodes.MarkDeleting(ctx, node); err != nil {
+		if err := deleteStaticNode(c.storage, node); err != nil {
 			return errors.Wrapf(err, "failed to delete stale static node %s", node.Metadata.Name)
 		}
 	}
 
-	if hasStaleNodes && plan.Status.Phase == v1.StaticNodeClusterPhaseReady {
-		plan.Status.Phase = v1.StaticNodeClusterPhaseProvisioning
-		plan.Status.ErrorMessage = "Deleting stale static nodes"
+	if hasStaleNodes && status.Phase == v1.StaticNodeClusterPhaseReady {
+		status.Phase = v1.StaticNodeClusterPhaseProvisioning
+		status.ErrorMessage = "Deleting stale static nodes"
 	}
 
-	if !hasStaleNodes && plan.Status.Phase == v1.StaticNodeClusterPhaseReady {
-		plan.Status = reconciler.RequireRayClusterVerified(ctx, cluster, plan.Status)
+	if !hasStaleNodes && status.Phase == v1.StaticNodeClusterPhaseReady {
+		status = clusterreconcile.RequireStaticNodeClusterRayVerified(ctx, cluster, status, c.rayVerifier)
 	}
 
-	if err := c.clusters.UpdateStatus(ctx, cluster, plan.Status); err != nil {
+	if err := updateStaticNodeClusterStatus(c.storage, cluster, status); err != nil {
 		return errors.Wrap(err, "failed to update static node cluster status")
 	}
 
@@ -147,7 +155,7 @@ func (c *StaticNodeClusterController) reconcileDelete(
 	currentNodes []*v1.StaticNode,
 ) error {
 	if len(currentNodes) == 0 {
-		return c.clusters.HardDelete(ctx, cluster)
+		return hardDeleteStaticNodeCluster(c.storage, cluster)
 	}
 
 	isForceDelete := v1.IsForceDelete(cluster.Metadata.Annotations)
@@ -165,7 +173,7 @@ func (c *StaticNodeClusterController) reconcileDelete(
 			if !v1.IsForceDelete(node.Metadata.Annotations) {
 				node.Metadata.Annotations = v1.WithForceDeleteAnnotation(node.Metadata.Annotations)
 
-				if err := c.nodes.MarkDeleting(ctx, node); err != nil {
+				if err := deleteStaticNode(c.storage, node); err != nil {
 					return errors.Wrapf(err, "failed to mark static node %s force deleting", staticNodeName(node))
 				}
 
@@ -177,7 +185,7 @@ func (c *StaticNodeClusterController) reconcileDelete(
 			continue
 		}
 
-		if err := c.nodes.MarkDeleting(ctx, node); err != nil {
+		if err := deleteStaticNode(c.storage, node); err != nil {
 			return errors.Wrapf(err, "failed to delete static node %s", staticNodeName(node))
 		}
 	}
@@ -187,7 +195,7 @@ func (c *StaticNodeClusterController) reconcileDelete(
 		DesiredNodes: len(currentNodes),
 		ErrorMessage: "Deleting",
 	}
-	if err := c.clusters.UpdateStatus(ctx, cluster, status); err != nil {
+	if err := updateStaticNodeClusterStatus(c.storage, cluster, status); err != nil {
 		return errors.Wrap(err, "failed to update static node cluster deletion status")
 	}
 

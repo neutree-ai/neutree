@@ -74,7 +74,6 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 			Components: []NodeComponentSpec{
 				{
 					Name:             "ray-head",
-					Type:             NodeComponentTypeRayHead,
 					Image:            "registry.example.com/neutree/serve:v1.2.0",
 					Command:          []string{"python", "/home/ray/start.py"},
 					Args:             []string{"--head"},
@@ -91,10 +90,7 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 		Status: &StaticNodeStatus{
 			Phase: StaticNodePhaseReady,
 			Accelerator: &StaticNodeAcceleratorStatus{
-				Type:         AcceleratorTypeNVIDIAGPU.String(),
-				Vendor:       "nvidia",
-				ProductName:  "NVIDIA GPU",
-				ProductModel: "nvidia_gpu",
+				Type: AcceleratorTypeNVIDIAGPU.String(),
 				Devices: []StaticNodeAcceleratorDeviceStatus{
 					{
 						ID:           "0",
@@ -116,7 +112,6 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 			Components: []NodeComponentStatus{
 				{
 					Name:          "ray-head",
-					Type:          NodeComponentTypeRayHead,
 					Ready:         true,
 					Phase:         NodeComponentPhaseRunning,
 					ObservedHash:  "hash-a",
@@ -135,7 +130,7 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, decoded))
 	require.NotNil(t, decoded.Spec)
 	require.Len(t, decoded.Spec.Components, 1)
-	assert.Equal(t, NodeComponentTypeRayHead, decoded.Spec.Components[0].Type)
+	assert.Equal(t, "ray-head", decoded.Spec.Components[0].Name)
 	require.NotNil(t, decoded.Status)
 	require.NotNil(t, decoded.Status.Accelerator)
 	assert.Equal(t, AcceleratorTypeNVIDIAGPU.String(), decoded.Status.Accelerator.Type)
@@ -181,10 +176,16 @@ func TestStaticNodeAPIShapeOmitsInternalOrDerivedFields(t *testing.T) {
 	assert.False(t, hasResourceName, "StaticNode.status.accelerator must not expose resource_name")
 
 	componentSpecType := reflect.TypeOf(NodeComponentSpec{})
+	_, hasComponentType := componentSpecType.FieldByName("Type")
+	assert.False(t, hasComponentType, "NodeComponentSpec must not expose type; name is the component identity")
 	for _, field := range []string{"Dependencies", "RestartPolicy", "DesiredPhase"} {
 		_, ok := componentSpecType.FieldByName(field)
 		assert.False(t, ok, "NodeComponentSpec must not expose %s", field)
 	}
+
+	componentStatusType := reflect.TypeOf(NodeComponentStatus{})
+	_, hasComponentStatusType := componentStatusType.FieldByName("Type")
+	assert.False(t, hasComponentStatusType, "NodeComponentStatus must not expose type; name is the component identity")
 }
 
 func TestStaticResourcesSchemeRegistration(t *testing.T) {

@@ -52,12 +52,7 @@ func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 	status := response.Accelerator
 	require.NotNil(t, status)
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), status.Type)
-	assert.Equal(t, "nvidia", status.Vendor)
-	assert.Equal(t, "NVIDIA GPU", status.ProductName)
-	assert.Equal(t, "nvidia_gpu", status.ProductModel)
-	require.Len(t, status.Devices, 2)
-	assert.Equal(t, "0", status.Devices[0].ID)
-	assert.True(t, status.Devices[0].Healthy)
+	assert.Empty(t, status.Devices)
 	mockExecutor.AssertExpectations(t)
 }
 

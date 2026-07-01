@@ -30,10 +30,8 @@ func TestAcceleratorPluginClientGetAcceleratorProfile(t *testing.T) {
 	defer server.Close()
 
 	client := newAcceleratorPluginClient(server.URL)
-	provider, ok := client.(AcceleratorProfileProvider)
-	require.True(t, ok)
 
-	profile, err := provider.GetAcceleratorProfile(context.Background())
+	profile, err := client.GetAcceleratorProfile(context.Background())
 
 	require.NoError(t, err)
 	require.NotNil(t, profile)
@@ -47,10 +45,8 @@ func TestAcceleratorPluginClientGetAcceleratorProfileNotFound(t *testing.T) {
 	defer server.Close()
 
 	client := newAcceleratorPluginClient(server.URL)
-	provider, ok := client.(AcceleratorProfileProvider)
-	require.True(t, ok)
 
-	_, err := provider.GetAcceleratorProfile(context.Background())
+	_, err := client.GetAcceleratorProfile(context.Background())
 
 	require.Error(t, err)
 	assert.True(t, IsHTTPStatus(err, http.StatusNotFound))

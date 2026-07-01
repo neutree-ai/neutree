@@ -2,8 +2,9 @@ package cluster
 
 import (
 	"context"
-	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -54,37 +55,24 @@ func currentStaticNodeAcceleratorStatus(node *v1.StaticNode) *v1.StaticNodeAccel
 	return &accelerator
 }
 
-func (r *StaticNodeClusterReconciler) runtimeProfile(
+func (r *StaticNodeClusterPlanner) runtimeProfile(
 	ctx context.Context,
 	accelerator v1.StaticNodeAcceleratorStatus,
-) (*v1.AcceleratorProfile, string, error) {
+) (*v1.AcceleratorProfile, error) {
 	if accelerator.Type == "" || accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
-		return nil, "", nil
+		return nil, nil
 	}
 
 	if r == nil || r.AcceleratorProfileProvider == nil {
-		return nil, runtimeProfileFallbackMessage(accelerator), nil
+		return nil, errors.New("accelerator profile provider is required")
 	}
 
-	profile, supported, err := r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
+	profile, err := r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	if !supported {
-		return nil, runtimeProfileFallbackMessage(accelerator), nil
-	}
-
-	return profile, "", nil
-}
-
-func runtimeProfileFallbackMessage(accelerator v1.StaticNodeAcceleratorStatus) string {
-	profile := accelerator.ProductModel
-	if profile == "" {
-		profile = accelerator.Type
-	}
-
-	return "accelerator runtime profile " + strconv.Quote(profile) + " is not supported; fallback to CPU runtime"
+	return profile, nil
 }
 
 func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {

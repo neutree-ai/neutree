@@ -6,35 +6,32 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-type StaticNodeClusterReconciler struct {
+type StaticNodeClusterPlanner struct {
 	AcceleratorProfileProvider AcceleratorProfileProvider
-	RayVerifier                StaticNodeClusterRayVerifier
 }
 
 type AcceleratorProfileProvider interface {
-	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, bool, error)
+	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
 }
 
-type StaticNodeClusterReconcilePlan struct {
-	DesiredNodes []*v1.StaticNode
-	Status       v1.StaticNodeClusterStatus
+type StaticNodeClusterPlan struct {
+	DesiredNodes     []*v1.StaticNode
+	DesiredNodePlans []StaticNodeClusterDesiredNodePlan
 }
 
-func (r *StaticNodeClusterReconciler) Plan(
+func (r *StaticNodeClusterPlanner) Plan(
 	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
-) (*StaticNodeClusterReconcilePlan, error) {
+) (*StaticNodeClusterPlan, error) {
 	plans, err := r.buildDesiredNodePlans(ctx, cluster, currentNodes)
 	if err != nil {
 		return nil, err
 	}
 
-	status := r.AggregateStatus(cluster, currentNodes, plans)
-
-	return &StaticNodeClusterReconcilePlan{
-		DesiredNodes: desiredNodesFromPlans(plans),
-		Status:       status,
+	return &StaticNodeClusterPlan{
+		DesiredNodes:     desiredNodesFromPlans(plans),
+		DesiredNodePlans: plans,
 	}, nil
 }
 
@@ -42,20 +39,21 @@ type StaticNodeClusterRayVerifier interface {
 	VerifyRayCluster(ctx context.Context, cluster *v1.StaticNodeCluster) error
 }
 
-func (r *StaticNodeClusterReconciler) RequireRayClusterVerified(
+func RequireStaticNodeClusterRayVerified(
 	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
 	status v1.StaticNodeClusterStatus,
+	verifier StaticNodeClusterRayVerifier,
 ) v1.StaticNodeClusterStatus {
 	if status.Phase != v1.StaticNodeClusterPhaseReady {
 		return status
 	}
 
-	if r == nil || r.RayVerifier == nil {
+	if verifier == nil {
 		return status
 	}
 
-	if err := r.RayVerifier.VerifyRayCluster(ctx, cluster); err != nil {
+	if err := verifier.VerifyRayCluster(ctx, cluster); err != nil {
 		if upgrade := staticNodeClusterUpgrade(cluster, nil, nil); upgrade != nil {
 			status.Phase = v1.StaticNodeClusterPhaseUpgrading
 			status.Version = upgrade.ObservedVersion
@@ -74,7 +72,7 @@ func (r *StaticNodeClusterReconciler) RequireRayClusterVerified(
 	return status
 }
 
-func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
+func (r *StaticNodeClusterPlanner) BuildDesiredNodes(
 	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
@@ -92,7 +90,7 @@ func (r *StaticNodeClusterReconciler) BuildDesiredNodes(
 	return nodes, nil
 }
 
-func desiredNodesFromPlans(plans []staticNodeDesiredPlan) []*v1.StaticNode {
+func desiredNodesFromPlans(plans []StaticNodeClusterDesiredNodePlan) []*v1.StaticNode {
 	nodes := make([]*v1.StaticNode, 0, len(plans))
 	for _, plan := range plans {
 		nodes = append(nodes, plan.Node)

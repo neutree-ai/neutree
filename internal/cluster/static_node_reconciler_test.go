@@ -13,6 +13,8 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
+	"github.com/neutree-ai/neutree/pkg/storage"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -262,7 +264,6 @@ func TestStaticNodeReconcilerReconcileComponentsFailsWhenImageMissing(t *testing
 			Components: []v1.NodeComponentSpec{
 				{
 					Name: "ray-head",
-					Type: v1.NodeComponentTypeRayHead,
 				},
 			},
 		},
@@ -307,7 +308,6 @@ func TestStaticNodeReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       testAuxRayComponentName,
-					Type:       v1.NodeComponentTypeRayWorker,
 					Image:      testDefaultRayImage,
 					Args:       []string{"--block"},
 					ConfigHash: "hash-ray-worker",
@@ -367,13 +367,11 @@ func TestStaticNodeReconcilerReconcileComponentsContinuesAfterIndependentFailure
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       "ray-head",
-					Type:       v1.NodeComponentTypeRayHead,
 					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
 					ConfigHash: "hash-ray",
 				},
 				{
 					Name:       testAuxRayComponentName,
-					Type:       v1.NodeComponentTypeRayWorker,
 					Image:      testDefaultRayImage,
 					ConfigHash: "hash-ray-worker",
 					DockerRunOptions: []string{
@@ -441,7 +439,6 @@ func TestStaticNodeReconcilerReconcileComponentsUsesLocalImageWhenPullFails(t *t
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       testAuxRayComponentName,
-					Type:       v1.NodeComponentTypeRayWorker,
 					Image:      testDefaultRayImage,
 					ConfigHash: "hash-ray-worker",
 					HealthCheck: &v1.NodeComponentHealthCheck{
@@ -496,7 +493,6 @@ func TestStaticNodeReconcilerReconcileComponentsRestartsWhenConfigChanged(t *tes
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       testConfigRayComponentName,
-					Type:       v1.NodeComponentTypeRayHead,
 					Image:      testDefaultRayImage,
 					ConfigHash: "hash-ray-head",
 					DockerRunOptions: []string{
@@ -572,7 +568,6 @@ func TestStaticNodeReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestar
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       testConfigRayComponentName,
-					Type:       v1.NodeComponentTypeRayHead,
 					Image:      testDefaultRayImage,
 					ConfigHash: "hash-ray-head",
 					DockerRunOptions: []string{
@@ -629,7 +624,6 @@ func TestStaticNodeReconcilerReconcileComponentsStopsRemovedComponent(t *testing
 			Components: []v1.NodeComponentStatus{
 				{
 					Name:  "ray-worker",
-					Type:  v1.NodeComponentTypeRayWorker,
 					Phase: v1.NodeComponentPhaseRunning,
 					Ready: true,
 				},
@@ -660,7 +654,6 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 			Components: []v1.NodeComponentSpec{
 				{
 					Name: testConfigRayComponentName,
-					Type: v1.NodeComponentTypeRayHead,
 					ConfigFiles: []v1.NodeComponentConfigFile{
 						{
 							Path: testRayConfigPath,
@@ -674,13 +667,11 @@ func TestStaticNodeReconcilerDeleteRemovesDesiredAndObservedComponents(t *testin
 			Components: []v1.NodeComponentStatus{
 				{
 					Name:  testConfigRayComponentName,
-					Type:  v1.NodeComponentTypeRayHead,
 					Ready: true,
 					Phase: v1.NodeComponentPhaseRunning,
 				},
 				{
 					Name:  "ray-head",
-					Type:  v1.NodeComponentTypeRayHead,
 					Ready: true,
 					Phase: v1.NodeComponentPhaseRunning,
 				},
@@ -717,7 +708,6 @@ func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerHTTPProbe(t *test
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       "ray-worker",
-					Type:       v1.NodeComponentTypeRayWorker,
 					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
 					ConfigHash: "hash-ray-worker",
 					HealthCheck: &v1.NodeComponentHealthCheck{
@@ -755,7 +745,6 @@ func TestStaticNodeReconcilerReconcileComponentsWaitsForHeadBeforeRayWorker(t *t
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       "ray-worker",
-					Type:       v1.NodeComponentTypeRayWorker,
 					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
 					ConfigHash: "hash-ray-worker",
 				},
@@ -778,16 +767,17 @@ func TestStaticNodeReconcilerReconcileComponentsWaitsForHeadBeforeRayWorker(t *t
 	assert.Equal(t, 0, runner.calls)
 }
 
-func TestStaticNodeStoreHeadReadyCheckerReadsHeadStatusFromClusterNodes(t *testing.T) {
-	reader := &fakeStaticNodeHeadReadyReader{
+func TestStaticNodeClusterHeadReadyCheckerReadsHeadStatusFromClusterNodes(t *testing.T) {
+	store := &fakeStaticNodeHeadReadyStore{
 		nodes: []*v1.StaticNode{
 			{
-				Spec:   &v1.StaticNodeSpec{Cluster: "static-a", Role: v1.StaticNodeRoleHead},
-				Status: &v1.StaticNodeStatus{Phase: v1.StaticNodePhaseReady},
+				Metadata: &v1.Metadata{Workspace: "default", Name: "head-0"},
+				Spec:     &v1.StaticNodeSpec{Cluster: "static-a", Role: v1.StaticNodeRoleHead},
+				Status:   &v1.StaticNodeStatus{Phase: v1.StaticNodePhaseReady},
 			},
 		},
 	}
-	checker := &StaticNodeStoreHeadReadyChecker{Reader: reader}
+	checker := &StaticNodeClusterHeadReadyChecker{Storage: store}
 	node := &v1.StaticNode{
 		Metadata: &v1.Metadata{Workspace: "default", Name: "worker-0"},
 		Spec:     &v1.StaticNodeSpec{Cluster: "static-a", Role: v1.StaticNodeRoleWorker},
@@ -797,8 +787,8 @@ func TestStaticNodeStoreHeadReadyCheckerReadsHeadStatusFromClusterNodes(t *testi
 
 	require.NoError(t, err)
 	assert.True(t, ready)
-	assert.Equal(t, "default", reader.workspace)
-	assert.Equal(t, "static-a", reader.clusterName)
+	assert.Equal(t, "default", store.workspace)
+	assert.Equal(t, "static-a", store.clusterName)
 }
 
 func TestStaticNodeReconcilerReconcileComponentsChecksRayHeadHTTPProbe(t *testing.T) {
@@ -810,7 +800,6 @@ func TestStaticNodeReconcilerReconcileComponentsChecksRayHeadHTTPProbe(t *testin
 			Components: []v1.NodeComponentSpec{
 				{
 					Name:       "ray-head",
-					Type:       v1.NodeComponentTypeRayHead,
 					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
 					ConfigHash: "hash-ray-head",
 					HealthCheck: &v1.NodeComponentHealthCheck{
@@ -883,22 +872,36 @@ func (f fakeStaticNodeHeadReadyChecker) HeadReady(_ context.Context, _ *v1.Stati
 	return f.ready, f.err
 }
 
-type fakeStaticNodeHeadReadyReader struct {
+type fakeStaticNodeHeadReadyStore struct {
+	*storagemocks.MockStorage
 	nodes       []*v1.StaticNode
 	workspace   string
 	clusterName string
 	err         error
 }
 
-func (f *fakeStaticNodeHeadReadyReader) ListStaticNodes(
-	_ context.Context,
-	workspace string,
-	clusterName string,
-) ([]*v1.StaticNode, error) {
-	f.workspace = workspace
-	f.clusterName = clusterName
+func (f *fakeStaticNodeHeadReadyStore) ListStaticNode(option storage.ListOption) ([]v1.StaticNode, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 
-	return f.nodes, f.err
+	for _, filter := range option.Filters {
+		switch filter.Column {
+		case "metadata->>workspace":
+			f.workspace = filter.Value
+		case "spec->>cluster":
+			f.clusterName = filter.Value
+		}
+	}
+
+	items := make([]v1.StaticNode, 0, len(f.nodes))
+	for _, node := range f.nodes {
+		if node != nil {
+			items = append(items, *node)
+		}
+	}
+
+	return items, nil
 }
 
 type fakeStaticNodeRunner struct {

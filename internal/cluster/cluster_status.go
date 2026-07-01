@@ -31,6 +31,13 @@ func DetermineClusterPhase(isResourceReady bool, cluster *v1.Cluster) v1.Cluster
 		}
 	}
 
+	if cluster.Status != nil {
+		switch cluster.Status.Phase {
+		case v1.ClusterPhaseUpgrading, v1.ClusterPhaseUpdating:
+			return cluster.Status.Phase
+		}
+	}
+
 	return v1.ClusterPhaseFailed
 }
 

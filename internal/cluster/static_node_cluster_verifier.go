@@ -10,9 +10,9 @@ import (
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 )
 
-type StaticNodeClusterDashboardVerifier struct{}
+type RayDashboardStaticNodeClusterVerifier struct{}
 
-func (StaticNodeClusterDashboardVerifier) VerifyRayCluster(
+func (RayDashboardStaticNodeClusterVerifier) VerifyRayCluster(
 	_ context.Context,
 	cluster *v1.StaticNodeCluster,
 ) error {

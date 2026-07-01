@@ -14,6 +14,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 const (
@@ -63,20 +64,16 @@ type StaticNodeHeadReadyChecker interface {
 	HeadReady(ctx context.Context, node *v1.StaticNode) (bool, error)
 }
 
-type StaticNodeHeadReadyReader interface {
-	ListStaticNodes(ctx context.Context, workspace, clusterName string) ([]*v1.StaticNode, error)
+type StaticNodeClusterHeadReadyChecker struct {
+	Storage storage.Storage
 }
 
-type StaticNodeStoreHeadReadyChecker struct {
-	Reader StaticNodeHeadReadyReader
-}
-
-func (c *StaticNodeStoreHeadReadyChecker) HeadReady(ctx context.Context, node *v1.StaticNode) (bool, error) {
+func (c *StaticNodeClusterHeadReadyChecker) HeadReady(ctx context.Context, node *v1.StaticNode) (bool, error) {
 	if node == nil || node.Spec == nil || node.Spec.Role != v1.StaticNodeRoleWorker {
 		return true, nil
 	}
 
-	if c == nil || c.Reader == nil {
+	if c == nil || c.Storage == nil {
 		return false, nil
 	}
 
@@ -85,7 +82,7 @@ func (c *StaticNodeStoreHeadReadyChecker) HeadReady(ctx context.Context, node *v
 		workspace = node.Metadata.Workspace
 	}
 
-	nodes, err := c.Reader.ListStaticNodes(ctx, workspace, node.Spec.Cluster)
+	nodes, err := listStaticNodesByCluster(c.Storage, workspace, node.Spec.Cluster)
 	if err != nil {
 		return false, err
 	}
@@ -264,7 +261,6 @@ func staticNodeDeleteComponents(node *v1.StaticNode) []v1.NodeComponentSpec {
 
 			components = appendStaticNodeDeleteComponent(components, seen, v1.NodeComponentSpec{
 				Name: status.Name,
-				Type: status.Type,
 			})
 		}
 	}
@@ -278,10 +274,6 @@ func appendStaticNodeDeleteComponent(
 	component v1.NodeComponentSpec,
 ) []v1.NodeComponentSpec {
 	key := component.Name
-	if key == "" {
-		key = string(component.Type)
-	}
-
 	if key != "" {
 		if _, ok := seen[key]; ok {
 			return components
@@ -375,7 +367,6 @@ func (r *StaticNodeReconciler) reconcileComponent(
 ) (v1.NodeComponentStatus, error) {
 	status := v1.NodeComponentStatus{
 		Name:          component.Name,
-		Type:          component.Type,
 		ObservedHash:  componentHash(component),
 		ObservedImage: component.Image,
 	}
@@ -475,11 +466,10 @@ func stopStaleComponents(
 
 		status := v1.NodeComponentStatus{
 			Name:   current.Name,
-			Type:   current.Type,
 			Phase:  v1.NodeComponentPhaseStopped,
 			Reason: componentReasonStopped,
 		}
-		component := v1.NodeComponentSpec{Name: current.Name, Type: current.Type}
+		component := v1.NodeComponentSpec{Name: current.Name}
 
 		if err := NewStaticNodeDockerRuntime(runner).RemoveContainer(ctx, componentContainerName(node, component)); err != nil {
 			status.Phase = v1.NodeComponentPhaseFailed
@@ -503,7 +493,7 @@ func (r *StaticNodeReconciler) shouldWaitForHead(
 		return false, nil
 	}
 
-	if component.Type != v1.NodeComponentTypeRayWorker {
+	if !isRayWorkerComponentName(component.Name) {
 		return false, nil
 	}
 

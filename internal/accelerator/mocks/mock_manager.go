@@ -181,7 +181,7 @@ func (_c *MockManager_GetAllParsers_Call) RunAndReturn(run func() map[string]res
 }
 
 // GetAcceleratorProfile provides a mock function with given fields: ctx, acceleratorType
-func (_m *MockManager) GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, bool, error) {
+func (_m *MockManager) GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error) {
 	ret := _m.Called(ctx, acceleratorType)
 
 	if len(ret) == 0 {
@@ -189,8 +189,7 @@ func (_m *MockManager) GetAcceleratorProfile(ctx context.Context, acceleratorTyp
 	}
 
 	var r0 *v1.AcceleratorProfile
-	var r1 bool
-	var r2 error
+	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, string) *v1.AcceleratorProfile); ok {
 		r0 = rf(ctx, acceleratorType)
 	} else {
@@ -199,19 +198,13 @@ func (_m *MockManager) GetAcceleratorProfile(ctx context.Context, acceleratorTyp
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) bool); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
 		r1 = rf(ctx, acceleratorType)
 	} else {
-		r1 = ret.Get(1).(bool)
+		r1 = ret.Error(1)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, string) error); ok {
-		r2 = rf(ctx, acceleratorType)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
 // MockManager_GetAcceleratorProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAcceleratorProfile'
@@ -233,12 +226,12 @@ func (_c *MockManager_GetAcceleratorProfile_Call) Run(run func(ctx context.Conte
 	return _c
 }
 
-func (_c *MockManager_GetAcceleratorProfile_Call) Return(_a0 *v1.AcceleratorProfile, _a1 bool, _a2 error) *MockManager_GetAcceleratorProfile_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *MockManager_GetAcceleratorProfile_Call) Return(_a0 *v1.AcceleratorProfile, _a1 error) *MockManager_GetAcceleratorProfile_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManager_GetAcceleratorProfile_Call) RunAndReturn(run func(context.Context, string) (*v1.AcceleratorProfile, bool, error)) *MockManager_GetAcceleratorProfile_Call {
+func (_c *MockManager_GetAcceleratorProfile_Call) RunAndReturn(run func(context.Context, string) (*v1.AcceleratorProfile, error)) *MockManager_GetAcceleratorProfile_Call {
 	_c.Call.Return(run)
 	return _c
 }

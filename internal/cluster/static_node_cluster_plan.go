@@ -10,19 +10,16 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-type staticNodeDesiredPlan struct {
-	Node                              *v1.StaticNode
-	TargetComponents                  []v1.NodeComponentSpec
-	Accelerator                       *v1.StaticNodeAcceleratorStatus
-	Profile                           *v1.AcceleratorProfile
-	AcceleratorProfileFallbackMessage string
+type StaticNodeClusterDesiredNodePlan struct {
+	Node             *v1.StaticNode
+	TargetComponents []v1.NodeComponentSpec
 }
 
-func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
+func (r *StaticNodeClusterPlanner) buildDesiredNodePlans(
 	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
-) ([]staticNodeDesiredPlan, error) {
+) ([]StaticNodeClusterDesiredNodePlan, error) {
 	if cluster == nil {
 		return nil, errors.New("static node cluster is nil")
 	}
@@ -50,7 +47,7 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 	nodeNames := make(map[string]struct{}, len(cluster.Spec.Nodes))
 	headCount := 0
 	currentByName := staticNodeByName(currentNodes)
-	plans := make([]staticNodeDesiredPlan, 0, len(cluster.Spec.Nodes))
+	plans := make([]StaticNodeClusterDesiredNodePlan, 0, len(cluster.Spec.Nodes))
 
 	for _, nodeSpec := range cluster.Spec.Nodes {
 		if nodeSpec.Name == "" {
@@ -92,12 +89,12 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 
 		acceleratorStatus := currentStaticNodeAcceleratorStatus(currentByName[nodeSpec.Name])
 		if acceleratorStatus == nil {
-			plans = append(plans, staticNodeDesiredPlan{Node: desiredNode})
+			plans = append(plans, StaticNodeClusterDesiredNodePlan{Node: desiredNode})
 
 			continue
 		}
 
-		profile, fallbackMessage, err := r.runtimeProfile(ctx, *acceleratorStatus)
+		profile, err := r.runtimeProfile(ctx, *acceleratorStatus)
 		if err != nil {
 			return nil, err
 		}
@@ -105,12 +102,9 @@ func (r *StaticNodeClusterReconciler) buildDesiredNodePlans(
 		components := buildNodeComponents(cluster, desiredNode, profile)
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
-		plans = append(plans, staticNodeDesiredPlan{
-			Node:                              desiredNode,
-			TargetComponents:                  copyNodeComponents(components),
-			Accelerator:                       acceleratorStatus,
-			Profile:                           profile,
-			AcceleratorProfileFallbackMessage: fallbackMessage,
+		plans = append(plans, StaticNodeClusterDesiredNodePlan{
+			Node:             desiredNode,
+			TargetComponents: copyNodeComponents(components),
 		})
 	}
 

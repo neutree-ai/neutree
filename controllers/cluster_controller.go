@@ -95,41 +95,21 @@ func (controller *ClusterController) sync(obj *v1.Cluster) error {
 
 func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 	var reconcileErr error
-	var phaseContext *staticNodeClusterPhaseContext
 
 	defer func() {
-		controller.updateClusterStatus(c, reconcileErr, phaseContext)
+		controller.updateClusterStatus(c, reconcileErr)
 	}()
 
-	useStaticNodeFlow, err := shouldUseStaticNodeClusterFlow(c)
+	r, err := controller.newClusterReconciler(c)
 	if err != nil {
-		reconcileErr = err
+		reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 		return reconcileErr
 	}
 
-	if useStaticNodeFlow {
-		if err := controller.validateStaticNodeClusterUpdate(c); err != nil {
-			reconcileErr = err
-			return reconcileErr
-		}
-
-		phaseContext, reconcileErr = controller.reconcileStaticNodeCluster(c)
-		if reconcileErr != nil {
-			reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile static node cluster %s", c.Metadata.WorkspaceName())
-			return reconcileErr
-		}
-	} else {
-		r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
-		if err != nil {
-			reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
-			return reconcileErr
-		}
-
-		reconcileErr = r.Reconcile(context.Background(), c)
-		if reconcileErr != nil {
-			reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile cluster %s", c.Metadata.WorkspaceName())
-			return reconcileErr
-		}
+	reconcileErr = r.Reconcile(context.Background(), c)
+	if reconcileErr != nil {
+		reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile cluster %s", c.Metadata.WorkspaceName())
+		return reconcileErr
 	}
 
 	klog.V(4).Info("Cluster " + c.Metadata.WorkspaceName() + " reconcile succeeded, syncing to gateway")
@@ -166,7 +146,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 	var reconcileErr error
 
 	defer func() {
-		controller.updateClusterStatus(c, reconcileErr, nil)
+		controller.updateClusterStatus(c, reconcileErr)
 	}()
 
 	reconcileErr = func() error {
@@ -178,24 +158,13 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 			controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
 		}
 
-		useStaticNodeDeleteFlow, err := controller.shouldUseStaticNodeClusterDeleteFlow(c)
+		r, err := controller.newClusterReconciler(c)
 		if err != nil {
-			return errors.Wrapf(err, "failed to check static node cluster delete flow for cluster %s", c.Metadata.WorkspaceName())
+			return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 		}
 
-		if useStaticNodeDeleteFlow {
-			if err := controller.reconcileStaticNodeClusterDelete(c); err != nil {
-				return errors.Wrapf(err, "failed to reconcile delete static node cluster %s", c.Metadata.WorkspaceName())
-			}
-		} else {
-			r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
-			if err != nil {
-				return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
-			}
-
-			if err = r.ReconcileDelete(context.Background(), c); err != nil {
-				return errors.Wrapf(err, "failed to reconcile delete cluster %s", c.Metadata.WorkspaceName())
-			}
+		if err = r.ReconcileDelete(context.Background(), c); err != nil {
+			return errors.Wrapf(err, "failed to reconcile delete cluster %s", c.Metadata.WorkspaceName())
 		}
 
 		return nil
@@ -212,11 +181,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 
 // updateClusterStatus determines cluster phase and updates storage.
 // reconcileErr == nil means resources are ready (Reconcile includes status checks).
-func (controller *ClusterController) updateClusterStatus(
-	c *v1.Cluster,
-	reconcileErr error,
-	staticPhaseContext *staticNodeClusterPhaseContext,
-) {
+func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcileErr error) {
 	if c.Metadata.DeletionTimestamp != "" {
 		phase := cluster.DetermineClusterDeletePhase(reconcileErr == nil, c)
 
@@ -227,17 +192,7 @@ func (controller *ClusterController) updateClusterStatus(
 		return
 	}
 
-	var phase v1.ClusterPhase
-	if staticPhaseContext != nil {
-		phase = cluster.DetermineStaticNodeClusterBackedClusterPhase(
-			reconcileErr == nil,
-			c,
-			staticPhaseContext.status,
-			staticPhaseContext.specObserved,
-		)
-	} else {
-		phase = cluster.DetermineClusterPhase(reconcileErr == nil, c)
-	}
+	phase := cluster.DetermineClusterPhase(reconcileErr == nil, c)
 
 	// Set ObservedSpecHash when Running
 	if phase == v1.ClusterPhaseRunning {
@@ -251,6 +206,15 @@ func (controller *ClusterController) updateClusterStatus(
 	if updateErr := controller.updateStatus(c, phase, reconcileErr); updateErr != nil {
 		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
 	}
+}
+
+func (controller *ClusterController) newClusterReconciler(c *v1.Cluster) (cluster.ClusterReconcile, error) {
+	factory := controller.newClusterReconcile
+	if factory == nil {
+		factory = cluster.NewReconcile
+	}
+
+	return factory(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 }
 
 func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {

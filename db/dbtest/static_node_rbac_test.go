@@ -17,8 +17,8 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 			'v1',
 			'StaticNodeCluster',
 			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			jsonb_build_object('version', 'v1.0.2', 'nodes', jsonb_build_array()),
-			jsonb_build_object('phase', 'Ready')
+			ROW('v1.0.2', 'registry.example.com/neutree', jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+			ROW('Ready', 0, 0, FALSE, FALSE, 'v1.0.2', NULL, NULL)::api.static_node_cluster_status
 		)
 	`, clusterName, workspace)
 	if err != nil {
@@ -31,8 +31,8 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 			'v1',
 			'StaticNode',
 			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			jsonb_build_object('cluster', $3::text, 'ip', $1, 'role', 'head'),
-			jsonb_build_object('phase', 'Ready')
+			ROW($3::text, $1::text, 'head', NULL, NULL, jsonb_build_array())::api.static_node_spec,
+			ROW('Ready', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_status
 		)
 	`, "10.0.0.10", workspace, clusterName)
 	if err != nil {
@@ -40,7 +40,7 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 	}
 }
 
-func TestStaticNodeRBAC_ReadOnlyForClusterReaders(t *testing.T) {
+func TestStaticNodeRBAC_DirectUserReadsAreBlocked(t *testing.T) {
 	adminDB := GetTestDB(t)
 	ctx := context.Background()
 
@@ -66,8 +66,8 @@ func TestStaticNodeRBAC_ReadOnlyForClusterReaders(t *testing.T) {
 		`, workspace).Scan(&clusterCount); err != nil {
 			return err
 		}
-		if clusterCount != 1 {
-			t.Fatalf("expected to read one static node cluster, got %d", clusterCount)
+		if clusterCount != 0 {
+			t.Fatalf("expected static node clusters to be hidden from direct user reads, got %d", clusterCount)
 		}
 
 		var nodeCount int
@@ -77,8 +77,8 @@ func TestStaticNodeRBAC_ReadOnlyForClusterReaders(t *testing.T) {
 		`, workspace).Scan(&nodeCount); err != nil {
 			return err
 		}
-		if nodeCount != 1 {
-			t.Fatalf("expected to read one static node, got %d", nodeCount)
+		if nodeCount != 0 {
+			t.Fatalf("expected static nodes to be hidden from direct user reads, got %d", nodeCount)
 		}
 
 		return nil
@@ -123,8 +123,8 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 					'v1',
 					'StaticNodeCluster',
 					ROW('blocked-static', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-					jsonb_build_object('version', 'v1.0.2'),
-					jsonb_build_object('phase', 'Provisioning')
+					ROW('v1.0.2', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+					ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
 				)
 			`,
 		},
@@ -132,7 +132,7 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 			name: "update cluster",
 			sql: `
 				UPDATE api.static_node_clusters
-				SET status = jsonb_build_object('phase', 'Failed')
+				SET status = ROW('Failed', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
 				WHERE (metadata).workspace = 'static-node-rbac-write'
 			`,
 		},
@@ -151,8 +151,8 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 					'v1',
 					'StaticNode',
 					ROW('10.0.0.11', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-					jsonb_build_object('cluster', 'static-write-a', 'ip', '10.0.0.11', 'role', 'worker'),
-					jsonb_build_object('phase', 'Pending')
+					ROW('static-write-a', '10.0.0.11', 'worker', NULL, NULL, jsonb_build_array())::api.static_node_spec,
+					ROW('Pending', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_status
 				)
 			`,
 		},
@@ -160,7 +160,7 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 			name: "update node",
 			sql: `
 				UPDATE api.static_nodes
-				SET status = jsonb_build_object('phase', 'Failed')
+				SET status = ROW('Failed', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_status
 				WHERE (metadata).workspace = 'static-node-rbac-write'
 			`,
 		},
@@ -192,5 +192,114 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 				t.Fatalf("expected direct static node write to be blocked by RLS: %v", err)
 			}
 		})
+	}
+}
+
+func TestStaticNodeRBAC_ServiceRoleCanManageInternalResources(t *testing.T) {
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+
+	tx1, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+
+	workspace := "static-node-service-role"
+	clusterName := "static-service-a"
+	createStaticNodeResources(t, tx1, workspace, clusterName)
+
+	if err = tx1.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	tx2, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin service role transaction: %v", err)
+	}
+	defer func() {
+		_ = tx2.Rollback()
+	}()
+
+	if _, err = tx2.ExecContext(ctx, "SET LOCAL ROLE service_role"); err != nil {
+		t.Fatalf("failed to set service_role: %v", err)
+	}
+
+	var clusterCount int
+	if err = tx2.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM api.static_node_clusters
+		WHERE (metadata).workspace = $1
+	`, workspace).Scan(&clusterCount); err != nil {
+		t.Fatalf("failed to read static node clusters as service_role: %v", err)
+	}
+	if clusterCount != 1 {
+		t.Fatalf("expected service_role to read one static node cluster, got %d", clusterCount)
+	}
+
+	var nodeCount int
+	if err = tx2.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM api.static_nodes
+		WHERE (metadata).workspace = $1
+	`, workspace).Scan(&nodeCount); err != nil {
+		t.Fatalf("failed to read static nodes as service_role: %v", err)
+	}
+	if nodeCount != 1 {
+		t.Fatalf("expected service_role to read one static node, got %d", nodeCount)
+	}
+
+	if _, err = tx2.ExecContext(ctx, `
+		UPDATE api.static_node_clusters
+		SET status = ROW('Provisioning', 1, 0, FALSE, FALSE, 'v1.0.2', NULL, 'warming')::api.static_node_cluster_status
+		WHERE (metadata).workspace = $1
+	`, workspace); err != nil {
+		t.Fatalf("failed to update static node cluster as service_role: %v", err)
+	}
+
+	if _, err = tx2.ExecContext(ctx, `
+		UPDATE api.static_nodes
+		SET status = ROW('Reconciling', NULL, NULL, jsonb_build_array(), NULL, 'warming')::api.static_node_status
+		WHERE (metadata).workspace = $1
+	`, workspace); err != nil {
+		t.Fatalf("failed to update static node as service_role: %v", err)
+	}
+
+	insertedCluster := "static-service-created"
+	if _, err = tx2.ExecContext(ctx, `
+		INSERT INTO api.static_node_clusters (api_version, kind, metadata, spec, status)
+		VALUES (
+			'v1',
+			'StaticNodeCluster',
+			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW('v1.0.2', 'registry.example.com/neutree', jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+			ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
+		)
+	`, insertedCluster, workspace); err != nil {
+		t.Fatalf("failed to insert static node cluster as service_role: %v", err)
+	}
+
+	if _, err = tx2.ExecContext(ctx, `
+		INSERT INTO api.static_nodes (api_version, kind, metadata, spec, status)
+		VALUES (
+			'v1',
+			'StaticNode',
+			ROW('10.0.0.11', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW($2::text, '10.0.0.11', 'worker', NULL, NULL, jsonb_build_array())::api.static_node_spec,
+			ROW('Pending', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_status
+		)
+	`, workspace, insertedCluster); err != nil {
+		t.Fatalf("failed to insert static node as service_role: %v", err)
+	}
+
+	if _, err = tx2.ExecContext(ctx, `
+		DELETE FROM api.static_nodes
+		WHERE (metadata).workspace = $1 AND (spec).cluster = $2
+	`, workspace, insertedCluster); err != nil {
+		t.Fatalf("failed to delete static node as service_role: %v", err)
+	}
+
+	if _, err = tx2.ExecContext(ctx, `
+		DELETE FROM api.static_node_clusters
+		WHERE (metadata).workspace = $1 AND (metadata).name = $2
+	`, workspace, insertedCluster); err != nil {
+		t.Fatalf("failed to delete static node cluster as service_role: %v", err)
 	}
 }

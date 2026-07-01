@@ -11,6 +11,12 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
+const (
+	rayHeadComponentName    = "ray-head"
+	rayWorkerComponentName  = "ray-worker"
+	rayRuntimeWarmImageName = "ray-runtime"
+)
+
 func buildNodeComponents(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
@@ -66,8 +72,7 @@ func buildRayComponent(
 
 	if role == v1.StaticNodeRoleHead {
 		return v1.NodeComponentSpec{
-			Name:             "ray-head",
-			Type:             v1.NodeComponentTypeRayHead,
+			Name:             rayHeadComponentName,
 			Image:            image,
 			Command:          command,
 			Args:             []string{rayStartCommand(cluster, role)},
@@ -80,8 +85,7 @@ func buildRayComponent(
 	}
 
 	return v1.NodeComponentSpec{
-		Name:             "ray-worker",
-		Type:             v1.NodeComponentTypeRayWorker,
+		Name:             rayWorkerComponentName,
 		Image:            image,
 		Command:          command,
 		Args:             []string{rayStartCommand(cluster, role)},
@@ -280,14 +284,9 @@ func buildRayRuntimeImage(cluster *v1.StaticNodeCluster, imageSuffixes ...string
 }
 
 func warmImageName(component v1.NodeComponentSpec) string {
-	switch component.Type {
-	case v1.NodeComponentTypeRayHead, v1.NodeComponentTypeRayWorker:
-		return "ray-runtime"
-	default:
-		if component.Name != "" {
-			return component.Name
-		}
-
-		return string(component.Type)
+	if isRayComponentName(component.Name) {
+		return rayRuntimeWarmImageName
 	}
+
+	return component.Name
 }

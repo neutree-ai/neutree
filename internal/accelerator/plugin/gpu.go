@@ -100,12 +100,7 @@ func (p *GPUAcceleratorPlugin) DetectStaticNodeAccelerator(
 		return nil, err
 	}
 
-	return staticNodeAcceleratorResponseFromAccelerators(accelerators, staticNodeAcceleratorInfo{
-		acceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-		vendor:          "nvidia",
-		productName:     "NVIDIA GPU",
-		productModel:    "nvidia_gpu",
-	}), nil
+	return staticNodeAcceleratorResponseFromAccelerators(accelerators, v1.AcceleratorTypeNVIDIAGPU.String()), nil
 }
 
 func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {

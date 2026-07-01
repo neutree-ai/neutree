@@ -22,7 +22,7 @@ type Manager interface {
 
 	Start(ctx context.Context)
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
-	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, bool, error)
+	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
 	GetEngineRuntimeConfig(ctx context.Context, acceleratorType string) (v1.RuntimeConfig, bool, error)
@@ -328,44 +328,19 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 func (a *manager) GetAcceleratorProfile(
 	ctx context.Context,
 	acceleratorType string,
-) (*v1.AcceleratorProfile, bool, error) {
-	return a.getAcceleratorProfile(ctx, acceleratorType, true)
-}
-
-func (a *manager) getAcceleratorProfile(
-	ctx context.Context,
-	acceleratorType string,
-	errorOnMissingPlugin bool,
-) (*v1.AcceleratorProfile, bool, error) {
+) (*v1.AcceleratorProfile, error) {
 	if acceleratorType == "" {
-		return nil, false, nil
+		return nil, errors.New("accelerator type is required")
 	}
 
 	p, ok := a.GetPlugin(acceleratorType)
 	if !ok {
-		if !errorOnMissingPlugin {
-			return nil, false, nil
-		}
-
-		return nil, false, errors.Errorf("accelerator plugin %s not found", acceleratorType)
+		return nil, errors.Errorf("accelerator plugin %s not found", acceleratorType)
 	}
 
-	provider, ok := p.Handle().(plugin.AcceleratorProfileProvider)
-	if !ok {
-		return nil, false, nil
-	}
-
-	profile, err := provider.GetAcceleratorProfile(ctx)
-	if plugin.IsHTTPStatus(err, http.StatusNotFound) {
-		return nil, false, nil
-	}
-
+	profile, err := p.Handle().GetAcceleratorProfile(ctx)
 	if err != nil {
-		return nil, false, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
-	}
-
-	if profile == nil {
-		return nil, false, nil
+		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
 	}
 
 	if profile.AcceleratorType == "" {
@@ -373,26 +348,26 @@ func (a *manager) getAcceleratorProfile(
 		copied.AcceleratorType = acceleratorType
 		profile = &copied
 	} else if profile.AcceleratorType != acceleratorType {
-		return nil, false, errors.Errorf(
+		return nil, errors.Errorf(
 			"profile accelerator type %s does not match requested type %s",
 			profile.AcceleratorType,
 			acceleratorType,
 		)
 	}
 
-	return profile, true, nil
+	return profile, nil
 }
 
 func (a *manager) GetEngineRuntimeConfig(
 	ctx context.Context,
 	acceleratorType string,
 ) (v1.RuntimeConfig, bool, error) {
-	profile, supported, err := a.GetAcceleratorProfile(ctx, acceleratorType)
-	if err != nil || !supported {
-		return v1.RuntimeConfig{}, supported, err
+	profile, err := a.GetAcceleratorProfile(ctx, acceleratorType)
+	if err != nil {
+		return v1.RuntimeConfig{}, false, err
 	}
 
-	if profile == nil || profile.EngineRuntime == nil {
+	if profile.EngineRuntime == nil {
 		return v1.RuntimeConfig{}, true, nil
 	}
 

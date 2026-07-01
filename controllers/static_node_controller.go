@@ -7,19 +7,19 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	staticclient "github.com/neutree-ai/neutree/internal/client"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type StaticNodeController struct {
-	nodes         *staticclient.StaticNodeClient
+	storage       storage.Storage
 	runnerFactory *clusterreconcile.StaticNodeSSHRunnerFactory
 	reconciler    *clusterreconcile.StaticNodeReconciler
 	newRunner     func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error)
 }
 
 type StaticNodeControllerOption struct {
-	Nodes         *staticclient.StaticNodeClient
+	Storage       storage.Storage
 	RunnerFactory *clusterreconcile.StaticNodeSSHRunnerFactory
 	Reconciler    *clusterreconcile.StaticNodeReconciler
 }
@@ -35,7 +35,7 @@ func NewStaticNodeController(option *StaticNodeControllerOption) (*StaticNodeCon
 	}
 
 	c := &StaticNodeController{
-		nodes:         option.Nodes,
+		storage:       option.Storage,
 		runnerFactory: runnerFactory,
 		reconciler:    option.Reconciler,
 	}
@@ -62,71 +62,106 @@ func (c *StaticNodeController) sync(ctx context.Context, node *v1.StaticNode) er
 		return errors.New("static node is required")
 	}
 
-	if c.nodes == nil {
-		return errors.New("static node client is required")
+	if c.storage == nil {
+		return errors.New("storage is required")
 	}
 
+	reconciler := c.staticNodeReconciler()
+	if node.Metadata != nil && node.Metadata.DeletionTimestamp != "" {
+		return c.reconcileDelete(ctx, node, reconciler)
+	}
+
+	return c.reconcileNormal(ctx, node, reconciler)
+}
+
+func (c *StaticNodeController) staticNodeReconciler() *clusterreconcile.StaticNodeReconciler {
 	reconciler := c.reconciler
 	if reconciler == nil {
-		reconciler = &clusterreconcile.StaticNodeReconciler{}
-	}
-
-	isDeleting := node.Metadata != nil && node.Metadata.DeletionTimestamp != ""
-	isForceDelete := isDeleting && v1.IsForceDelete(node.Metadata.Annotations)
-
-	var runner clusterreconcile.StaticNodeCommandRunner
-
-	if c.newRunner == nil {
-		if isForceDelete {
-			klog.Warning("static node runner factory is required; force deleting static node without remote cleanup")
-			return c.nodes.HardDelete(ctx, node)
+		return &clusterreconcile.StaticNodeReconciler{
+			HeadReadyChecker: &clusterreconcile.StaticNodeClusterHeadReadyChecker{Storage: c.storage},
 		}
-
-		return errors.New("static node runner factory is required")
 	}
 
-	nodeRunner, err := c.newRunner(ctx, node)
+	if reconciler.HeadReadyChecker != nil {
+		return reconciler
+	}
+
+	reconcilerCopy := *reconciler
+	reconcilerCopy.HeadReadyChecker = &clusterreconcile.StaticNodeClusterHeadReadyChecker{Storage: c.storage}
+
+	return &reconcilerCopy
+}
+
+func (c *StaticNodeController) reconcileNormal(
+	ctx context.Context,
+	node *v1.StaticNode,
+	reconciler *clusterreconcile.StaticNodeReconciler,
+) error {
+	runner, err := c.newStaticNodeRunner(ctx, node)
 	if err != nil {
-		if isForceDelete {
-			klog.Warningf("failed to create static node runner during force delete: %v", err)
-			return c.nodes.HardDelete(ctx, node)
-		}
-
 		return errors.Wrap(err, "failed to create static node runner")
 	}
-
-	runner = nodeRunner
-	// The SSH runner owns any temporary private-key directory created from
-	// spec.ssh_auth. Deferring Close here keeps normal reconcile and remote
-	// delete paths from leaking key files after runner creation succeeds.
-	defer closeStaticNodeRunner(nodeRunner)
-
-	if isDeleting {
-		if err := reconciler.Delete(ctx, node, runner); err != nil {
-			if isForceDelete {
-				klog.Warningf("static node remote cleanup failed during force delete: %v", err)
-				return c.nodes.HardDelete(ctx, node)
-			}
-
-			status := clusterreconcile.BuildStaticNodeStatus(node, nil, err)
-			if updateErr := c.nodes.UpdateStatus(ctx, node, status); updateErr != nil {
-				return errors.Wrap(updateErr, "failed to update static node status")
-			}
-
-			return err
-		}
-
-		return c.nodes.HardDelete(ctx, node)
-	}
+	defer closeStaticNodeRunner(runner)
 
 	result, err := reconciler.Reconcile(ctx, node, runner)
 	status := clusterreconcile.BuildStaticNodeStatus(node, result, err)
 
-	if updateErr := c.nodes.UpdateStatus(ctx, node, status); updateErr != nil {
+	if updateErr := updateStaticNodeStatus(c.storage, node, status); updateErr != nil {
 		return errors.Wrap(updateErr, "failed to update static node status")
 	}
 
 	return err
+}
+
+func (c *StaticNodeController) reconcileDelete(
+	ctx context.Context,
+	node *v1.StaticNode,
+	reconciler *clusterreconcile.StaticNodeReconciler,
+) error {
+	isForceDelete := node.Metadata != nil && v1.IsForceDelete(node.Metadata.Annotations)
+
+	runner, err := c.newStaticNodeRunner(ctx, node)
+	if err != nil {
+		if isForceDelete {
+			klog.Warningf("failed to create static node runner during force delete best-effort cleanup: %v", err)
+
+			return hardDeleteStaticNode(c.storage, node)
+		}
+
+		return errors.Wrap(err, "failed to create static node runner")
+	}
+	// The SSH runner owns any temporary private-key directory created from
+	// spec.ssh_auth. Deferring Close here keeps remote delete paths from
+	// leaking key files after runner creation succeeds.
+	defer closeStaticNodeRunner(runner)
+
+	if err := reconciler.Delete(ctx, node, runner); err != nil {
+		if isForceDelete {
+			klog.Warningf("static node remote cleanup failed during force delete: %v", err)
+
+			return hardDeleteStaticNode(c.storage, node)
+		}
+
+		status := clusterreconcile.BuildStaticNodeStatus(node, nil, err)
+		if updateErr := updateStaticNodeStatus(c.storage, node, status); updateErr != nil {
+			return errors.Wrap(updateErr, "failed to update static node status")
+		}
+
+		return err
+	}
+
+	return hardDeleteStaticNode(c.storage, node)
+}
+
+func (c *StaticNodeController) newStaticNodeRunner(
+	ctx context.Context,
+	node *v1.StaticNode,
+) (clusterreconcile.StaticNodeCommandRunner, error) {
+	if c.newRunner == nil {
+		return nil, errors.New("static node runner factory is required")
+	}
+
+	return c.newRunner(ctx, node)
 }
 
 func closeStaticNodeRunner(runner clusterreconcile.StaticNodeCommandRunner) {

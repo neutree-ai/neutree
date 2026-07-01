@@ -8,39 +8,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func withAcceleratorProfileFallbackStatus(
-	status v1.StaticNodeClusterStatus,
-	plans []staticNodeDesiredPlan,
-) v1.StaticNodeClusterStatus {
-	messages := make([]string, 0, len(plans))
-
-	for _, plan := range plans {
-		if plan.AcceleratorProfileFallbackMessage == "" {
-			continue
-		}
-
-		nodeName := ""
-		if plan.Node != nil && plan.Node.Metadata != nil {
-			nodeName = plan.Node.Metadata.Name
-		}
-
-		if nodeName == "" {
-			messages = append(messages, plan.AcceleratorProfileFallbackMessage)
-			continue
-		}
-
-		messages = append(messages, "static node "+nodeName+" "+plan.AcceleratorProfileFallbackMessage)
-	}
-
-	if len(messages) == 0 {
-		return status
-	}
-
-	status.ErrorMessage = joinStatusMessages(status.ErrorMessage, messages...)
-
-	return status
-}
-
 func joinStatusMessages(current string, messages ...string) string {
 	result := make([]string, 0, len(messages)+1)
 	if current != "" {
@@ -52,10 +19,12 @@ func joinStatusMessages(current string, messages ...string) string {
 	return strings.Join(result, "; ")
 }
 
-func (r *StaticNodeClusterReconciler) AggregateStatus(
+type StaticNodeClusterStatusAggregator struct{}
+
+func (a StaticNodeClusterStatusAggregator) Aggregate(
 	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 ) v1.StaticNodeClusterStatus {
 	desiredNodeNames, headName := staticNodeClusterDesiredNodeNames(cluster)
 
@@ -143,14 +112,12 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 	// Status decisions intentionally happen in observed-state order:
 	// 1. aggregate static-node readiness from current status,
 	// 2. advance recreate-upgrade steps only from observed node/component state,
-	// 3. require desired components to be written and observed before marking the desired version observed,
-	// 4. append profile fallback messages without changing readiness semantics.
+	// 3. require desired components to be written and observed before marking the desired version observed.
 	//
 	// status.version is the observed/converged version. It must not be advanced
 	// to spec.version until desired components have reached static-node status.
 	status = advanceStaticNodeClusterUpgradeStatus(cluster, nodes, status, plans)
 	status = requireDesiredComponentsObserved(cluster, status, plans, staticNodeByName(nodes))
-	status = withAcceleratorProfileFallbackStatus(status, plans)
 
 	return status
 }
@@ -158,7 +125,7 @@ func (r *StaticNodeClusterReconciler) AggregateStatus(
 func requireDesiredComponentsObserved(
 	cluster *v1.StaticNodeCluster,
 	status v1.StaticNodeClusterStatus,
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 	currentByName map[string]*v1.StaticNode,
 ) v1.StaticNodeClusterStatus {
 	if status.Phase != v1.StaticNodeClusterPhaseReady {
@@ -185,7 +152,7 @@ func requireDesiredComponentsObserved(
 }
 
 func desiredComponentMismatchMessages(
-	plans []staticNodeDesiredPlan,
+	plans []StaticNodeClusterDesiredNodePlan,
 	currentByName map[string]*v1.StaticNode,
 ) []string {
 	messages := []string{}
@@ -220,11 +187,7 @@ func desiredComponentMismatchMessages(
 
 func desiredComponentObserved(component v1.NodeComponentSpec, statuses []v1.NodeComponentStatus) bool {
 	for _, status := range statuses {
-		if component.Name != "" && status.Name != component.Name {
-			continue
-		}
-
-		if component.Name == "" && status.Type != component.Type {
+		if status.Name != component.Name {
 			continue
 		}
 

@@ -24,10 +24,9 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 		lastRegisterTime: time.Now(),
 	})
 
-	profile, supported, err := m.GetAcceleratorProfile(context.Background(), v1.AcceleratorTypeNVIDIAGPU.String())
+	profile, err := m.GetAcceleratorProfile(context.Background(), v1.AcceleratorTypeNVIDIAGPU.String())
 
 	require.NoError(t, err)
-	assert.True(t, supported)
 	require.NotNil(t, profile)
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), profile.AcceleratorType)
 	require.NotNil(t, profile.ClusterRuntime)
@@ -60,10 +59,9 @@ func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
 		lastRegisterTime: time.Now(),
 	})
 
-	profile, supported, err := m.GetAcceleratorProfile(context.Background(), "external_gpu")
+	profile, err := m.GetAcceleratorProfile(context.Background(), "external_gpu")
 
 	require.NoError(t, err)
-	assert.True(t, supported)
 	require.NotNil(t, profile)
 	assert.Equal(t, "external_gpu", profile.AcceleratorType)
 	require.NotNil(t, profile.ClusterRuntime)
@@ -83,10 +81,9 @@ func TestManagerGetAcceleratorProfileRejectsMismatchedProfileType(t *testing.T) 
 		lastRegisterTime: time.Now(),
 	})
 
-	profile, supported, err := m.GetAcceleratorProfile(context.Background(), "custom_gpu")
+	profile, err := m.GetAcceleratorProfile(context.Background(), "custom_gpu")
 
 	require.Error(t, err)
-	assert.False(t, supported)
 	assert.Nil(t, profile)
 	assert.Contains(t, err.Error(), "profile accelerator type other_gpu does not match requested type custom_gpu")
 }
@@ -135,7 +132,7 @@ func TestManagerGetEngineRuntimeConfigNilEngineRuntimeIsEmptyConfig(t *testing.T
 	assert.Equal(t, v1.RuntimeConfig{}, runtimeConfig)
 }
 
-func TestManagerGetAcceleratorProfileNotFoundIsUnsupported(t *testing.T) {
+func TestManagerGetAcceleratorProfileNotFoundReturnsError(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
 
@@ -146,30 +143,26 @@ func TestManagerGetAcceleratorProfileNotFoundIsUnsupported(t *testing.T) {
 		lastRegisterTime: time.Now(),
 	})
 
-	profile, supported, err := m.GetAcceleratorProfile(context.Background(), "external_gpu")
+	profile, err := m.GetAcceleratorProfile(context.Background(), "external_gpu")
 
-	require.NoError(t, err)
-	assert.False(t, supported)
 	assert.Nil(t, profile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get accelerator profile from plugin external_gpu failed")
 }
 
 func TestManagerGetAcceleratorProfileMissingPlugin(t *testing.T) {
 	m := &manager{}
 
-	profile, supported, err := m.GetAcceleratorProfile(context.Background(), "missing")
+	profile, err := m.GetAcceleratorProfile(context.Background(), "missing")
 
 	require.Error(t, err)
-	assert.False(t, supported)
 	assert.Nil(t, profile)
 	assert.Contains(t, err.Error(), "accelerator plugin missing not found")
 }
 
 func TestManagerDetectAcceleratorDelegatesToPluginDetector(t *testing.T) {
 	expected := &v1.StaticNodeAcceleratorStatus{
-		Type:         "custom_gpu",
-		Vendor:       "custom",
-		ProductName:  "Custom GPU",
-		ProductModel: "custom-gpu",
+		Type: "custom_gpu",
 	}
 	detector := &fakeStaticNodeAcceleratorPlugin{detected: expected, matched: true}
 	m := &manager{}

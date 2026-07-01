@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	staticclient "github.com/neutree-ai/neutree/internal/client"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +25,7 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 		},
 	}
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Nodes: newTestStaticNodeClient(objectStorage),
+		Storage: newTestStaticNodeStorage(objectStorage),
 	})
 	require.NoError(t, err)
 	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
@@ -46,7 +46,7 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 
 func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Nodes: newTestStaticNodeClient(&fakeControllerStaticNodeObjectStorage{}),
+		Storage: newTestStaticNodeStorage(&fakeControllerStaticNodeObjectStorage{}),
 	})
 	require.NoError(t, err)
 
@@ -64,7 +64,7 @@ func TestStaticNodeControllerForceDeleteHardDeletesAfterBestEffortCleanup(t *tes
 		"neutree.ai/force-delete": "true",
 	}
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Nodes: newTestStaticNodeClient(objectStorage),
+		Storage: newTestStaticNodeStorage(objectStorage),
 	})
 	require.NoError(t, err)
 	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
@@ -82,13 +82,40 @@ func TestStaticNodeControllerForceDeleteHardDeletesAfterBestEffortCleanup(t *tes
 	assert.Empty(t, objectStorage.updatedStatus)
 }
 
+func TestStaticNodeControllerDeleteFailureUpdatesStatusWithoutHardDelete(t *testing.T) {
+	objectStorage := &fakeControllerStaticNodeObjectStorage{}
+	node := controllerStaticNode()
+	node.Metadata.DeletionTimestamp = "2026-06-15T16:47:17Z"
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
+		Storage: newTestStaticNodeStorage(objectStorage),
+	})
+	require.NoError(t, err)
+	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
+		return &fakeControllerStaticNodeRunner{
+			responses: []fakeControllerStaticNodeRunnerResponse{
+				{err: errors.New("remote cleanup failed")},
+			},
+		}, nil
+	}
+
+	err = controller.Reconcile(node)
+
+	require.Error(t, err)
+	assert.Empty(t, objectStorage.deletedIDs)
+	statusObj, ok := objectStorage.updatedStatus["8"].(*v1.StaticNode)
+	require.True(t, ok)
+	require.NotNil(t, statusObj.Status)
+	assert.Equal(t, v1.StaticNodePhaseFailed, statusObj.Status.Phase)
+	assert.Contains(t, statusObj.Status.ErrorMessage, "remote cleanup failed")
+}
+
 func TestStaticNodeControllerReconcileAlwaysCreatesRunner(t *testing.T) {
 	objectStorage := &fakeControllerStaticNodeObjectStorage{}
 	node := controllerStaticNode()
 	node.Spec.Warm = nil
 	node.Spec.Components = nil
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-		Nodes: newTestStaticNodeClient(objectStorage),
+		Storage: newTestStaticNodeStorage(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -109,8 +136,32 @@ func TestStaticNodeControllerReconcileAlwaysCreatesRunner(t *testing.T) {
 	assert.Equal(t, v1.StaticNodePhaseReconciling, statusObj.Status.Phase)
 }
 
-func newTestStaticNodeClient(objectStorage storage.ObjectStorage) *staticclient.StaticNodeClient {
-	return staticclient.NewStaticNodeClient(storage.NewStaticNodeObjectStore(objectStorage))
+func newTestStaticNodeStorage(objectStorage *fakeControllerStaticNodeObjectStorage) storage.Storage {
+	return &fakeControllerStaticNodeStorage{
+		MockStorage:   &storagemocks.MockStorage{},
+		objectStorage: objectStorage,
+	}
+}
+
+type fakeControllerStaticNodeStorage struct {
+	*storagemocks.MockStorage
+	objectStorage *fakeControllerStaticNodeObjectStorage
+}
+
+func (f *fakeControllerStaticNodeStorage) ListStaticNode(storage.ListOption) ([]v1.StaticNode, error) {
+	return nil, nil
+}
+
+func (f *fakeControllerStaticNodeStorage) CreateStaticNode(data *v1.StaticNode) error {
+	return f.objectStorage.Create(data)
+}
+
+func (f *fakeControllerStaticNodeStorage) UpdateStaticNode(id string, data *v1.StaticNode) error {
+	return f.objectStorage.UpdateStatus(id, data)
+}
+
+func (f *fakeControllerStaticNodeStorage) DeleteStaticNode(id string) error {
+	return f.objectStorage.Delete(id, &v1.StaticNode{Kind: "StaticNode"})
 }
 
 type fakeControllerStaticNodeObjectStorage struct {

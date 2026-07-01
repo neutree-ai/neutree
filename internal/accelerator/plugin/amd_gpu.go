@@ -98,12 +98,7 @@ func (p *AMDGPUAcceleratorPlugin) DetectStaticNodeAccelerator(
 		return nil, err
 	}
 
-	return staticNodeAcceleratorResponseFromAccelerators(accelerators, staticNodeAcceleratorInfo{
-		acceleratorType: v1.AcceleratorTypeAMDGPU.String(),
-		vendor:          "amd",
-		productName:     "AMD GPU",
-		productModel:    "amd_gpu",
-	}), nil
+	return staticNodeAcceleratorResponseFromAccelerators(accelerators, v1.AcceleratorTypeAMDGPU.String()), nil
 }
 
 func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {

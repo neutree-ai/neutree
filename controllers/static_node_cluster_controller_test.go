@@ -1,21 +1,33 @@
 package controllers
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	staticclient "github.com/neutree-ai/neutree/internal/client"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+type fakeStaticNodeClusterRayVerifier struct {
+	err    error
+	called bool
+}
+
+func (f *fakeStaticNodeClusterRayVerifier) VerifyRayCluster(_ context.Context, _ *v1.StaticNodeCluster) error {
+	f.called = true
+
+	return f.err
+}
+
 func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Nodes:    newTestStaticNodeClusterNodeClient(objectStorage),
-		Clusters: newTestStaticNodeClusterClient(objectStorage),
+		Storage: newTestStaticNodeClusterStorage(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -33,8 +45,7 @@ func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 
 func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Nodes:    newTestStaticNodeClusterNodeClient(&fakeControllerStaticNodeClusterObjectStorage{}),
-		Clusters: newTestStaticNodeClusterClient(&fakeControllerStaticNodeClusterObjectStorage{}),
+		Storage: newTestStaticNodeClusterStorage(&fakeControllerStaticNodeClusterObjectStorage{}),
 	})
 	require.NoError(t, err)
 
@@ -60,8 +71,7 @@ func TestStaticNodeClusterControllerReconcileRecordsNodeOwnerConflict(t *testing
 		},
 	}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Nodes:    newTestStaticNodeClusterNodeClient(objectStorage),
-		Clusters: newTestStaticNodeClusterClient(objectStorage),
+		Storage: newTestStaticNodeClusterStorage(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -95,8 +105,7 @@ func TestStaticNodeClusterControllerReconcileWaitsForStaleNodeDeletion(t *testin
 		},
 	}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Nodes:    newTestStaticNodeClusterNodeClient(objectStorage),
-		Clusters: newTestStaticNodeClusterClient(objectStorage),
+		Storage: newTestStaticNodeClusterStorage(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -109,6 +118,32 @@ func TestStaticNodeClusterControllerReconcileWaitsForStaleNodeDeletion(t *testin
 	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
 	assert.Equal(t, "Deleting stale static nodes", status.Status.ErrorMessage)
 	assert.Contains(t, objectStorage.updatedMetadata, "13")
+}
+
+func TestStaticNodeClusterControllerVerifiesRayClusterWhenPlanIsReady(t *testing.T) {
+	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{
+		nodes: []v1.StaticNode{
+			controllerStaticClusterNode("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady),
+			controllerStaticClusterNode("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady),
+		},
+	}
+	verifier := &fakeStaticNodeClusterRayVerifier{err: errors.New("dashboard unavailable")}
+	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
+		Storage:     newTestStaticNodeClusterStorage(objectStorage),
+		RayVerifier: verifier,
+	})
+	require.NoError(t, err)
+
+	err = controller.Reconcile(controllerStaticNodeCluster())
+
+	require.NoError(t, err)
+	assert.True(t, verifier.called)
+	status, ok := objectStorage.updatedStatus["7"].(*v1.StaticNodeCluster)
+	require.True(t, ok)
+	require.NotNil(t, status.Status)
+	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
+	assert.Contains(t, status.Status.ErrorMessage, "Ray cluster verification failed")
+	assert.Contains(t, status.Status.ErrorMessage, "dashboard unavailable")
 }
 
 func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testing.T) {
@@ -124,8 +159,7 @@ func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testin
 		},
 	}
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Nodes:    newTestStaticNodeClusterNodeClient(objectStorage),
-		Clusters: newTestStaticNodeClusterClient(objectStorage),
+		Storage: newTestStaticNodeClusterStorage(objectStorage),
 	})
 	require.NoError(t, err)
 
@@ -145,12 +179,48 @@ func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testin
 	}
 }
 
-func newTestStaticNodeClusterNodeClient(objectStorage storage.ObjectStorage) *staticclient.StaticNodeClient {
-	return staticclient.NewStaticNodeClient(storage.NewStaticNodeObjectStore(objectStorage))
+func newTestStaticNodeClusterStorage(objectStorage *fakeControllerStaticNodeClusterObjectStorage) storage.Storage {
+	return &fakeControllerStaticNodeClusterStorage{
+		MockStorage:   &storagemocks.MockStorage{},
+		objectStorage: objectStorage,
+	}
 }
 
-func newTestStaticNodeClusterClient(objectStorage storage.ObjectStorage) *staticclient.StaticNodeClusterClient {
-	return staticclient.NewStaticNodeClusterClient(storage.NewStaticNodeObjectStore(objectStorage))
+type fakeControllerStaticNodeClusterStorage struct {
+	*storagemocks.MockStorage
+	objectStorage *fakeControllerStaticNodeClusterObjectStorage
+}
+
+func (f *fakeControllerStaticNodeClusterStorage) ListStaticNode(storage.ListOption) ([]v1.StaticNode, error) {
+	return f.objectStorage.nodes, nil
+}
+
+func (f *fakeControllerStaticNodeClusterStorage) CreateStaticNode(data *v1.StaticNode) error {
+	return f.objectStorage.Create(data)
+}
+
+func (f *fakeControllerStaticNodeClusterStorage) UpdateStaticNode(id string, data *v1.StaticNode) error {
+	if data != nil && data.Metadata != nil {
+		return f.objectStorage.UpdateMetadata(id, data)
+	}
+
+	return f.objectStorage.Update(id, data)
+}
+
+func (f *fakeControllerStaticNodeClusterStorage) DeleteStaticNode(id string) error {
+	return f.objectStorage.Delete(id, &v1.StaticNode{Kind: "StaticNode"})
+}
+
+func (f *fakeControllerStaticNodeClusterStorage) UpdateStaticNodeCluster(id string, data *v1.StaticNodeCluster) error {
+	if data != nil && data.Status != nil {
+		return f.objectStorage.UpdateStatus(id, data)
+	}
+
+	return f.objectStorage.Update(id, data)
+}
+
+func (f *fakeControllerStaticNodeClusterStorage) DeleteStaticNodeCluster(id string) error {
+	return f.objectStorage.Delete(id, &v1.StaticNodeCluster{Kind: "StaticNodeCluster"})
 }
 
 type fakeControllerStaticNodeClusterObjectStorage struct {
