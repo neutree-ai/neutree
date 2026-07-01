@@ -70,7 +70,7 @@ func TestSSHFileClient_WriteFile_UploadsAndInstallsAtomically(t *testing.T) {
 			strings.Contains(joined, "/etc/neutree/metrics.yaml")
 	})).Return([]byte(""), nil).Once()
 
-	err := runner.Files().WriteFile(
+	err := (&sshFileClient{runner: runner}).writeFile(
 		context.Background(),
 		"/etc/neutree/metrics.yaml",
 		content,
@@ -127,27 +127,12 @@ func TestSSHFileClient_WriteFileIfChanged_WritesWhenContentDiffers(t *testing.T)
 	mockExec.AssertExpectations(t)
 }
 
-func TestSSHFileClient_ReadStatAndRemove(t *testing.T) {
+func TestSSHFileClient_Remove(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
 
 	mockExec.On("Execute", mock.Anything, "ssh", sshArgsContaining("uptime")).
 		Return([]byte("success"), nil).
-		Times(3)
-	mockExec.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
-		joined := strings.Join(args, " ")
-		return strings.Contains(joined, "sudo sh -c") &&
-			strings.Contains(joined, "cat") &&
-			strings.Contains(joined, "/etc/neutree/metrics.yaml")
-	})).
-		Return([]byte("body"), nil).
-		Once()
-	mockExec.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
-		joined := strings.Join(args, " ")
-		return strings.Contains(joined, "stat -c") &&
-			strings.Contains(joined, "/etc/neutree/metrics.yaml")
-	})).
-		Return([]byte("12 640 root neutree\n"), nil).
 		Once()
 	mockExec.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
 		joined := strings.Join(args, " ")
@@ -157,27 +142,7 @@ func TestSSHFileClient_ReadStatAndRemove(t *testing.T) {
 		Return([]byte(""), nil).
 		Once()
 
-	body, err := runner.Files().ReadFile(
-		context.Background(),
-		"/etc/neutree/metrics.yaml",
-		ReadFileOptions{Sudo: true},
-	)
-	require.NoError(t, err)
-	assert.Equal(t, []byte("body"), body)
-
-	stat, err := runner.Files().Stat(
-		context.Background(),
-		"/etc/neutree/metrics.yaml",
-		StatFileOptions{},
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "/etc/neutree/metrics.yaml", stat.Path)
-	assert.Equal(t, int64(12), stat.Size)
-	assert.Equal(t, "640", stat.Mode)
-	assert.Equal(t, "root", stat.Owner)
-	assert.Equal(t, "neutree", stat.Group)
-
-	err = runner.Files().Remove(
+	err := runner.Files().Remove(
 		context.Background(),
 		"/etc/neutree/metrics.yaml",
 		RemoveFileOptions{Sudo: true},

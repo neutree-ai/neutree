@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
@@ -35,10 +34,10 @@ func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, objectStorage.created, 2)
-	assert.Equal(t, "head-0", objectStorage.created[0].(*v1.StaticNode).Metadata.Name)
-	assert.Equal(t, "worker-0", objectStorage.created[1].(*v1.StaticNode).Metadata.Name)
-	status, ok := objectStorage.updatedStatus["7"].(*v1.StaticNodeCluster)
-	require.True(t, ok)
+	assert.Equal(t, "head-0", objectStorage.created[0].Metadata.Name)
+	assert.Equal(t, "worker-0", objectStorage.created[1].Metadata.Name)
+	status := objectStorage.updatedStatus["7"]
+	require.NotNil(t, status)
 	require.NotNil(t, status.Status)
 	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
 }
@@ -89,8 +88,8 @@ func TestStaticNodeClusterControllerReconcileRecordsNodeOwnerConflict(t *testing
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already owned by static node cluster static-a")
-	status, ok := objectStorage.updatedStatus["7"].(*v1.StaticNodeCluster)
-	require.True(t, ok)
+	status := objectStorage.updatedStatus["7"]
+	require.NotNil(t, status)
 	require.NotNil(t, status.Status)
 	assert.Equal(t, v1.StaticNodeClusterPhaseFailed, status.Status.Phase)
 	assert.Contains(t, status.Status.ErrorMessage, "already owned by static node cluster static-a")
@@ -112,8 +111,8 @@ func TestStaticNodeClusterControllerReconcileWaitsForStaleNodeDeletion(t *testin
 	err = controller.Reconcile(controllerStaticNodeCluster())
 
 	require.NoError(t, err)
-	status, ok := objectStorage.updatedStatus["7"].(*v1.StaticNodeCluster)
-	require.True(t, ok)
+	status := objectStorage.updatedStatus["7"]
+	require.NotNil(t, status)
 	require.NotNil(t, status.Status)
 	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
 	assert.Equal(t, "Deleting stale static nodes", status.Status.ErrorMessage)
@@ -138,8 +137,8 @@ func TestStaticNodeClusterControllerVerifiesRayClusterWhenPlanIsReady(t *testing
 
 	require.NoError(t, err)
 	assert.True(t, verifier.called)
-	status, ok := objectStorage.updatedStatus["7"].(*v1.StaticNodeCluster)
-	require.True(t, ok)
+	status := objectStorage.updatedStatus["7"]
+	require.NotNil(t, status)
 	require.NotNil(t, status.Status)
 	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
 	assert.Contains(t, status.Status.ErrorMessage, "Ray cluster verification failed")
@@ -171,8 +170,8 @@ func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testin
 
 	require.NoError(t, err)
 	for _, id := range []string{"11", "12"} {
-		updated, ok := objectStorage.updatedMetadata[id].(*v1.StaticNode)
-		require.True(t, ok)
+		updated := objectStorage.updatedMetadata[id]
+		require.NotNil(t, updated)
 		require.NotNil(t, updated.Metadata)
 		assert.True(t, v1.IsForceDelete(updated.Metadata.Annotations))
 		assert.NotEmpty(t, updated.Metadata.DeletionTimestamp)
@@ -196,92 +195,52 @@ func (f *fakeControllerStaticNodeClusterStorage) ListStaticNode(storage.ListOpti
 }
 
 func (f *fakeControllerStaticNodeClusterStorage) CreateStaticNode(data *v1.StaticNode) error {
-	return f.objectStorage.Create(data)
+	f.objectStorage.created = append(f.objectStorage.created, data)
+
+	return nil
 }
 
 func (f *fakeControllerStaticNodeClusterStorage) UpdateStaticNode(id string, data *v1.StaticNode) error {
 	if data != nil && data.Metadata != nil {
-		return f.objectStorage.UpdateMetadata(id, data)
+		if f.objectStorage.updatedMetadata == nil {
+			f.objectStorage.updatedMetadata = map[string]*v1.StaticNode{}
+		}
+
+		f.objectStorage.updatedMetadata[id] = data
+
+		return nil
 	}
 
-	return f.objectStorage.Update(id, data)
+	return nil
 }
 
 func (f *fakeControllerStaticNodeClusterStorage) DeleteStaticNode(id string) error {
-	return f.objectStorage.Delete(id, &v1.StaticNode{Kind: "StaticNode"})
+	return nil
 }
 
 func (f *fakeControllerStaticNodeClusterStorage) UpdateStaticNodeCluster(id string, data *v1.StaticNodeCluster) error {
 	if data != nil && data.Status != nil {
-		return f.objectStorage.UpdateStatus(id, data)
+		if f.objectStorage.updatedStatus == nil {
+			f.objectStorage.updatedStatus = map[string]*v1.StaticNodeCluster{}
+		}
+
+		f.objectStorage.updatedStatus[id] = data
+
+		return nil
 	}
 
-	return f.objectStorage.Update(id, data)
+	return nil
 }
 
 func (f *fakeControllerStaticNodeClusterStorage) DeleteStaticNodeCluster(id string) error {
-	return f.objectStorage.Delete(id, &v1.StaticNodeCluster{Kind: "StaticNodeCluster"})
+	return nil
 }
 
 type fakeControllerStaticNodeClusterObjectStorage struct {
 	nodes           []v1.StaticNode
-	created         []scheme.Object
-	updatedMetadata map[string]scheme.Object
-	updatedStatus   map[string]scheme.Object
-}
-
-func (f *fakeControllerStaticNodeClusterObjectStorage) Create(data scheme.Object) error {
-	f.created = append(f.created, data)
-
-	return nil
-}
-
-func (f *fakeControllerStaticNodeClusterObjectStorage) Update(_ string, _ scheme.Object) error {
-	return nil
-}
-
-func (f *fakeControllerStaticNodeClusterObjectStorage) Delete(_ string, _ scheme.Object) error {
-	return nil
-}
-
-func (f *fakeControllerStaticNodeClusterObjectStorage) Get(_ string, _ scheme.Object) error {
-	return nil
-}
-
-func (f *fakeControllerStaticNodeClusterObjectStorage) List(obj scheme.ObjectList, _ storage.ListOption) error {
-	items := make([]scheme.Object, 0, len(f.nodes))
-	for i := range f.nodes {
-		node := f.nodes[i]
-		items = append(items, &node)
-	}
-
-	obj.SetItems(items)
-
-	return nil
-}
-
-func (f *fakeControllerStaticNodeClusterObjectStorage) UpdateMetadata(id string, data scheme.Object) error {
-	if f.updatedMetadata == nil {
-		f.updatedMetadata = map[string]scheme.Object{}
-	}
-
-	f.updatedMetadata[id] = data
-
-	return nil
-}
-
-func (f *fakeControllerStaticNodeClusterObjectStorage) UpdateSpec(_ string, _ scheme.Object) error {
-	return nil
-}
-
-func (f *fakeControllerStaticNodeClusterObjectStorage) UpdateStatus(id string, data scheme.Object) error {
-	if f.updatedStatus == nil {
-		f.updatedStatus = map[string]scheme.Object{}
-	}
-
-	f.updatedStatus[id] = data
-
-	return nil
+	created         []*v1.StaticNode
+	updatedMetadata map[string]*v1.StaticNode
+	updatedStatus   map[string]*v1.StaticNodeCluster
 }
 
 func controllerStaticNodeCluster() *v1.StaticNodeCluster {

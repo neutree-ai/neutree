@@ -88,50 +88,6 @@ func TestManagerGetAcceleratorProfileRejectsMismatchedProfileType(t *testing.T) 
 	assert.Contains(t, err.Error(), "profile accelerator type other_gpu does not match requested type custom_gpu")
 }
 
-func TestManagerGetEngineRuntimeConfigUsesProfileEngineRuntime(t *testing.T) {
-	expected := &v1.RuntimeConfig{
-		ImageSuffix: "cuda-engine",
-		Runtime:     "nvidia",
-		Options:     []string{"--gpus", "all"},
-	}
-	provider := &fakeStaticNodeAcceleratorPlugin{
-		acceleratorProfile: &v1.AcceleratorProfile{
-			AcceleratorType: "custom_gpu",
-			EngineRuntime:   expected,
-		},
-	}
-	m := &manager{}
-	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
-		resource:         "custom_gpu",
-		plugin:           provider,
-		lastRegisterTime: time.Now(),
-	})
-
-	runtimeConfig, supported, err := m.GetEngineRuntimeConfig(context.Background(), "custom_gpu")
-
-	require.NoError(t, err)
-	assert.True(t, supported)
-	assert.Equal(t, *expected, runtimeConfig)
-}
-
-func TestManagerGetEngineRuntimeConfigNilEngineRuntimeIsEmptyConfig(t *testing.T) {
-	provider := &fakeStaticNodeAcceleratorPlugin{
-		acceleratorProfile: &v1.AcceleratorProfile{AcceleratorType: "custom_gpu"},
-	}
-	m := &manager{}
-	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
-		resource:         "custom_gpu",
-		plugin:           provider,
-		lastRegisterTime: time.Now(),
-	})
-
-	runtimeConfig, supported, err := m.GetEngineRuntimeConfig(context.Background(), "custom_gpu")
-
-	require.NoError(t, err)
-	assert.True(t, supported)
-	assert.Equal(t, v1.RuntimeConfig{}, runtimeConfig)
-}
-
 func TestManagerGetAcceleratorProfileNotFoundReturnsError(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()

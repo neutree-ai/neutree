@@ -28,11 +28,6 @@ func NewDockerCommandRunner(dockerConfig *v1.Docker, sshCommandConfig *CommonArg
 	}
 }
 
-// HostFiles returns a host-level file client backed by the runner's SSH connection.
-func (d *DockerCommandRunner) HostFiles() FileClient {
-	return d.sshCommandRunner.Files()
-}
-
 // Run runs a command inside the Docker container.
 func (d *DockerCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool, portForward []string, withOutput bool,
 	environmentVariables map[string]interface{}, runEnv string, sshOptionsOverrideSSHKey string, shutdownAfterRun bool) (string, error) {

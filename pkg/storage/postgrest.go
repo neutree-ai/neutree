@@ -801,39 +801,6 @@ type postgrestObjectStorage struct {
 	scheme          *scheme.Scheme
 }
 
-func (s *postgrestObjectStorage) Create(data scheme.Object) error {
-	table, ok := s.scheme.KindToTable(data.GetKind())
-	if !ok {
-		return errors.Errorf("unregistered type: %s", data.GetKind())
-	}
-
-	_, _, err := s.postgrestClient.From(table).Insert(data, true, "", "", "").Execute()
-
-	return err
-}
-
-func (s *postgrestObjectStorage) Update(id string, data scheme.Object) error {
-	table, ok := s.scheme.KindToTable(data.GetKind())
-	if !ok {
-		return errors.Errorf("unregistered type: %s", data.GetKind())
-	}
-
-	_, _, err := s.postgrestClient.From(table).Update(data, "", "").Filter("id", "eq", id).Execute()
-
-	return err
-}
-
-func (s *postgrestObjectStorage) Delete(id string, data scheme.Object) error {
-	table, ok := s.scheme.KindToTable(data.GetKind())
-	if !ok {
-		return errors.Errorf("unregistered type: %s", data.GetKind())
-	}
-
-	_, _, err := s.postgrestClient.From(table).Delete("", "").Filter("id", "eq", id).Execute()
-
-	return err
-}
-
 func (s *postgrestObjectStorage) Get(id string, obj scheme.Object) error {
 	table, ok := s.scheme.KindToTable(obj.GetKind())
 	if !ok {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -15,10 +14,7 @@ import (
 
 // FileClient writes and reads files on the SSH host.
 type FileClient interface {
-	WriteFile(ctx context.Context, remotePath string, content []byte, opts WriteFileOptions) error
 	WriteFileIfChanged(ctx context.Context, remotePath string, content []byte, opts WriteFileOptions) (bool, error)
-	ReadFile(ctx context.Context, remotePath string, opts ReadFileOptions) ([]byte, error)
-	Stat(ctx context.Context, remotePath string, opts StatFileOptions) (*FileStat, error)
 	Remove(ctx context.Context, remotePath string, opts RemoveFileOptions) error
 }
 
@@ -31,24 +27,8 @@ type WriteFileOptions struct {
 	CreateParent bool
 }
 
-type ReadFileOptions struct {
-	Sudo bool
-}
-
-type StatFileOptions struct {
-	Sudo bool
-}
-
 type RemoveFileOptions struct {
 	Sudo bool
-}
-
-type FileStat struct {
-	Path  string
-	Size  int64
-	Mode  string
-	Owner string
-	Group string
 }
 
 type sshFileClient struct {
@@ -77,14 +57,14 @@ func (f *sshFileClient) WriteFileIfChanged(
 		return false, nil
 	}
 
-	if err := f.WriteFile(ctx, remotePath, content, opts); err != nil {
+	if err := f.writeFile(ctx, remotePath, content, opts); err != nil {
 		return false, err
 	}
 
 	return true, nil
 }
 
-func (f *sshFileClient) WriteFile(
+func (f *sshFileClient) writeFile(
 	ctx context.Context,
 	remotePath string,
 	content []byte,
@@ -116,42 +96,6 @@ func (f *sshFileClient) WriteFile(
 	}
 
 	return nil
-}
-
-func (f *sshFileClient) ReadFile(ctx context.Context, remotePath string, opts ReadFileOptions) ([]byte, error) {
-	output, err := f.runner.Run(ctx, withSudo(opts.Sudo, "cat "+shellQuote(remotePath)), true, nil, true, nil, "", false)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read remote file")
-	}
-
-	return []byte(output), nil
-}
-
-func (f *sshFileClient) Stat(ctx context.Context, remotePath string, opts StatFileOptions) (*FileStat, error) {
-	command := withSudo(opts.Sudo, "stat -c '%s %a %U %G' "+shellQuote(remotePath))
-
-	output, err := f.runner.Run(ctx, command, true, nil, true, nil, "", false)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to stat remote file")
-	}
-
-	parts := strings.Fields(strings.TrimSpace(output))
-	if len(parts) != 4 {
-		return nil, fmt.Errorf("unexpected remote stat output: %q", output)
-	}
-
-	size, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse remote file size")
-	}
-
-	return &FileStat{
-		Path:  remotePath,
-		Size:  size,
-		Mode:  parts[1],
-		Owner: parts[2],
-		Group: parts[3],
-	}, nil
 }
 
 func (f *sshFileClient) Remove(ctx context.Context, remotePath string, opts RemoveFileOptions) error {

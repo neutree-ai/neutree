@@ -25,7 +25,6 @@ type Manager interface {
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
-	GetEngineRuntimeConfig(ctx context.Context, acceleratorType string) (v1.RuntimeConfig, bool, error)
 
 	// GetAllConverters returns all registered resource converters
 	GetAllConverters() map[string]plugin.ResourceConverter
@@ -356,22 +355,6 @@ func (a *manager) GetAcceleratorProfile(
 	}
 
 	return profile, nil
-}
-
-func (a *manager) GetEngineRuntimeConfig(
-	ctx context.Context,
-	acceleratorType string,
-) (v1.RuntimeConfig, bool, error) {
-	profile, err := a.GetAcceleratorProfile(ctx, acceleratorType)
-	if err != nil {
-		return v1.RuntimeConfig{}, false, err
-	}
-
-	if profile.EngineRuntime == nil {
-		return v1.RuntimeConfig{}, true, nil
-	}
-
-	return *profile.EngineRuntime, true, nil
 }
 
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {

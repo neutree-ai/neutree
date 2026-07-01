@@ -963,35 +963,6 @@ func (f *fakeStaticNodeFileClient) WriteFileIfChanged(
 	return f.changed, nil
 }
 
-func (f *fakeStaticNodeFileClient) WriteFile(
-	_ context.Context,
-	remotePath string,
-	content []byte,
-	_ commandrunner.WriteFileOptions,
-) error {
-	f.calls++
-	f.path = remotePath
-	f.content = append([]byte{}, content...)
-
-	return nil
-}
-
-func (f *fakeStaticNodeFileClient) ReadFile(
-	_ context.Context,
-	_ string,
-	_ commandrunner.ReadFileOptions,
-) ([]byte, error) {
-	return nil, nil
-}
-
-func (f *fakeStaticNodeFileClient) Stat(
-	_ context.Context,
-	_ string,
-	_ commandrunner.StatFileOptions,
-) (*commandrunner.FileStat, error) {
-	return nil, nil
-}
-
 func (f *fakeStaticNodeFileClient) Remove(
 	_ context.Context,
 	remotePath string,
