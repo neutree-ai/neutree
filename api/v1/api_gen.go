@@ -489,11 +489,12 @@ type ApiApiDailyUsageStatus struct {
 }
 
 type ApiModelSpec struct {
-	Registry string `json:"registry"`
-	Name     string `json:"name"`
-	File     string `json:"file"`
-	Version  string `json:"version"`
-	Task     string `json:"task"`
+	Registry string      `json:"registry"`
+	Name     string      `json:"name"`
+	File     string      `json:"file"`
+	Version  string      `json:"version"`
+	Task     string      `json:"task"`
+	Info     interface{} `json:"info"`
 }
 
 type ApiEndpointEngineSpec struct {
@@ -599,6 +600,10 @@ type ApiModelCatalogSpec struct {
 	Replicas          interface{} `json:"replicas"`
 	DeploymentOptions interface{} `json:"deployment_options"`
 	Variables         interface{} `json:"variables"`
+	Env               interface{} `json:"env"`
+	Base              interface{} `json:"base"`
+	Variants          interface{} `json:"variants"`
+	Features          interface{} `json:"features"`
 }
 
 type ApiModelCatalogStatus struct {

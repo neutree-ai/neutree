@@ -12,6 +12,23 @@ type ModelSpec struct {
 	File     string `json:"file,omitempty"`
 	Version  string `json:"version,omitempty"`
 	Task     string `json:"task,omitempty"`
+	// Info carries display-only metadata about the model itself (parameter
+	// count, quantization, context length, architecture). It never
+	// participates in deployment composition — same advisory nature as the
+	// hardware-verified annotation. The model catalog card / show page renders
+	// it per variant. Optional and forward-compatible; legacy specs omit it.
+	Info *ModelInfo `json:"info,omitempty"`
+}
+
+// ModelInfo is display-only metadata describing the model checkpoint a variant
+// points at. It belongs to the model (not the catalog template), so it lives on
+// ModelSpec and is reused wherever a model is referenced. When the dedicated
+// model repository resource lands it can populate this same shape.
+type ModelInfo struct {
+	ParameterCount string `json:"parameter_count,omitempty"` // e.g. "72.7B"
+	Quantization   string `json:"quantization,omitempty"`    // e.g. "bf16" / "fp8"
+	ContextLength  string `json:"context_length,omitempty"`  // e.g. "32K" or token count
+	Architecture   string `json:"architecture,omitempty"`    // e.g. "dense" / "moe"
 }
 
 type EndpointEngineSpec struct {
@@ -31,14 +48,14 @@ type ReplicaSpec struct {
 }
 
 type EndpointSpec struct {
-	Cluster           string                 `json:"cluster,omitempty"`
-	Model             *ModelSpec             `json:"model,omitempty"`
-	Engine            *EndpointEngineSpec    `json:"engine,omitempty"`
-	Resources         *ResourceSpec          `json:"resources,omitempty"`
-	Replicas          ReplicaSpec            `json:"replicas,omitempty"`
-	DeploymentOptions map[string]interface{} `json:"deployment_options,omitempty"`
-	Variables         map[string]interface{} `json:"variables,omitempty"`
-	Env               map[string]string      `json:"env,omitempty"`
+	Cluster           string              `json:"cluster,omitempty"`
+	Model             *ModelSpec          `json:"model,omitempty"`
+	Engine            *EndpointEngineSpec `json:"engine,omitempty"`
+	Resources         *ResourceSpec       `json:"resources,omitempty"`
+	Replicas          ReplicaSpec         `json:"replicas,omitempty"`
+	DeploymentOptions map[string]any      `json:"deployment_options,omitempty"`
+	Variables         map[string]any      `json:"variables,omitempty"`
+	Env               map[string]string   `json:"env,omitempty"`
 }
 
 type EndpointPhase string
@@ -188,11 +205,11 @@ func (obj *Endpoint) GetDeletionTimestamp() string {
 	return obj.Metadata.DeletionTimestamp
 }
 
-func (obj *Endpoint) GetSpec() interface{} {
+func (obj *Endpoint) GetSpec() any {
 	return obj.Spec
 }
 
-func (obj *Endpoint) GetStatus() interface{} {
+func (obj *Endpoint) GetStatus() any {
 	return obj.Status
 }
 
@@ -212,7 +229,7 @@ func (obj *Endpoint) SetID(id string) {
 	obj.ID, _ = strconv.Atoi(id)
 }
 
-func (obj *Endpoint) GetMetadata() interface{} {
+func (obj *Endpoint) GetMetadata() any {
 	return obj.Metadata
 }
 
