@@ -53,7 +53,11 @@ func validateModelCatalogRecipe() gin.HandlerFunc {
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body: " + err.Error()})
+			c.JSON(http.StatusBadRequest, &validationError{
+				Code:    "10223",
+				Message: "failed to read request body: " + err.Error(),
+				Hint:    "Retry the request",
+			})
 			c.Abort()
 
 			return
@@ -73,7 +77,11 @@ func validateModelCatalogRecipe() gin.HandlerFunc {
 
 		if trimmed[0] == '[' {
 			if err := json.Unmarshal(trimmed, &catalogs); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid model_catalog payload: " + err.Error()})
+				c.JSON(http.StatusBadRequest, &validationError{
+					Code:    "10223",
+					Message: "invalid model_catalog payload: " + err.Error(),
+					Hint:    "Check the model catalog spec fields and types",
+				})
 				c.Abort()
 
 				return
@@ -81,7 +89,11 @@ func validateModelCatalogRecipe() gin.HandlerFunc {
 		} else {
 			var one v1.ModelCatalog
 			if err := json.Unmarshal(trimmed, &one); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid model_catalog payload: " + err.Error()})
+				c.JSON(http.StatusBadRequest, &validationError{
+					Code:    "10223",
+					Message: "invalid model_catalog payload: " + err.Error(),
+					Hint:    "Check the model catalog spec fields and types",
+				})
 				c.Abort()
 
 				return
@@ -98,7 +110,11 @@ func validateModelCatalogRecipe() gin.HandlerFunc {
 			}
 
 			if err := recipe.ValidateModelCatalogSpec(catalog.Spec); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				c.JSON(http.StatusBadRequest, &validationError{
+					Code:    "10224",
+					Message: err.Error(),
+					Hint:    "Fix the recipe definition and retry",
+				})
 				c.Abort()
 
 				return
