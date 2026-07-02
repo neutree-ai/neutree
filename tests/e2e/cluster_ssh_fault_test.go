@@ -65,7 +65,8 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 
 		It("should recover after head raylet is killed", Label("C2644066"), func() {
 			r := RunSSH(sshUser, headIP, sshKeyFile,
-				"nohup docker exec ray_container pkill -f 'dist-packages/ray/core/src/ray/raylet/raylet' > /dev/null 2>&1 &")
+				rayContainerBackgroundExecCommand(clusterName, v1.StaticNodeRoleHead,
+					"pkill -9 -f 'dist-packages/ray/core/src/ray/raylet/raylet'"))
 			ExpectSuccess(r)
 
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
@@ -77,8 +78,10 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			Expect(c.Status.ReadyNodes).To(Equal(c.Status.DesiredNodes))
 		})
 
-		It("should enter Failed and auto-recover after head Ray processes are stopped", Label("C2644067", "C2613102"), func() {
-			r := RunSSH(sshUser, headIP, sshKeyFile, "docker exec ray_container ray stop")
+		It("should enter Failed and auto-recover after head raylet is killed", Label("C2644067", "C2613102"), func() {
+			r := RunSSH(sshUser, headIP, sshKeyFile,
+				rayContainerBackgroundExecCommand(clusterName, v1.StaticNodeRoleHead,
+					"pkill -9 -f 'dist-packages/ray/core/src/ray/raylet/raylet'"))
 			ExpectSuccess(r)
 
 			By("Waiting for cluster to enter Failed phase")

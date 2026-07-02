@@ -775,12 +775,6 @@ func endpointWithVGPU(cluster string, workspace string) *v1.Endpoint {
 	}
 }
 
-func runEndpointVGPUValidation(method string, body string, clusterStorage storage.Storage) *httptest.ResponseRecorder {
-	recorder, _ := runEndpointVGPUValidationWithHandler(method, body, clusterStorage)
-
-	return recorder
-}
-
 func runEndpointVGPUValidationWithPath(
 	method string,
 	path string,

@@ -28,7 +28,8 @@ type ClusterController struct {
 
 	gw gateway.Gateway
 
-	acceleratorManager accelerator.Manager
+	acceleratorManager  accelerator.Manager
+	newClusterReconcile func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
 }
 
 type ClusterControllerOption struct {
@@ -49,8 +50,9 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
 		metricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
 
-		gw:                 opt.Gw,
-		acceleratorManager: opt.AcceleratorManager,
+		gw:                  opt.Gw,
+		acceleratorManager:  opt.AcceleratorManager,
+		newClusterReconcile: cluster.NewReconcile,
 	}
 
 	c.syncHandler = c.sync
@@ -98,7 +100,7 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 		controller.updateClusterStatus(c, reconcileErr)
 	}()
 
-	r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+	r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 	if err != nil {
 		reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 		return reconcileErr
@@ -156,7 +158,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 			controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
 		}
 
-		r, err := cluster.NewReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+		r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 		}
@@ -179,7 +181,10 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 
 // updateClusterStatus determines cluster phase and updates storage.
 // reconcileErr == nil means resources are ready (Reconcile includes status checks).
-func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcileErr error) {
+func (controller *ClusterController) updateClusterStatus(
+	c *v1.Cluster,
+	reconcileErr error,
+) {
 	if c.Metadata.DeletionTimestamp != "" {
 		phase := cluster.DetermineClusterDeletePhase(reconcileErr == nil, c)
 

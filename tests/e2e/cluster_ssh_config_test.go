@@ -75,20 +75,24 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 
 		It("should have ray_container running on all nodes", Label("C2613077"), func() {
 			r := RunSSH(sshUser, headIP, sshKeyFile,
-				"docker ps --filter name=ray_container --format '{{.Names}}'")
+				rayContainerNameCommand(clusterName, v1.StaticNodeRoleHead))
 			ExpectSuccess(r)
-			Expect(r.Stdout).To(ContainSubstring("ray_container"))
+			Expect(strings.TrimSpace(r.Stdout)).NotTo(BeEmpty())
 
 			for _, ip := range workerIPs {
 				r = RunSSH(sshUser, ip, sshKeyFile,
-					"docker ps --filter name=ray_container --format '{{.Names}}'")
+					rayContainerNameCommand(clusterName, v1.StaticNodeRoleWorker))
 				ExpectSuccess(r)
-				Expect(r.Stdout).To(ContainSubstring("ray_container"),
-					"ray_container should be running on worker %s", ip)
+				Expect(strings.TrimSpace(r.Stdout)).NotTo(BeEmpty(),
+					"Ray worker container should be running on worker %s", ip)
 			}
 		})
 
 		It("should have correct HostPath permissions on all nodes", Label("C2613078"), func() {
+			if usesStaticNodeClusterFlow(profileClusterVersion()) {
+				Skip("static node cluster flow does not manage legacy SSH model cache host paths")
+			}
+
 			cachePath := profile.ModelCache.HostPath
 			if cachePath == "" {
 				cachePath = "/opt/neutree/model-cache"
@@ -123,20 +127,24 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			ExpectSuccess(r)
 
 			r = RunSSH(sshUser, headIP, sshKeyFile,
-				"docker ps -a --filter name=ray_container --format '{{.Names}}'")
+				rayContainerListCommand(clusterName, v1.StaticNodeRoleHead, true))
 			ExpectSuccess(r)
-			Expect(r.Stdout).NotTo(ContainSubstring("ray_container"))
+			Expect(strings.TrimSpace(r.Stdout)).To(BeEmpty())
 
 			for _, ip := range workerIPs {
 				r = RunSSH(sshUser, ip, sshKeyFile,
-					"docker ps -a --filter name=ray_container --format '{{.Names}}'")
+					rayContainerListCommand(clusterName, v1.StaticNodeRoleWorker, true))
 				ExpectSuccess(r)
-				Expect(r.Stdout).NotTo(ContainSubstring("ray_container"),
-					"ray_container should be cleaned up from worker %s", ip)
+				Expect(strings.TrimSpace(r.Stdout)).To(BeEmpty(),
+					"Ray worker container should be cleaned up from worker %s", ip)
 			}
 		})
 
 		It("should preserve model cache after deletion", Label("C2613100"), func() {
+			if usesStaticNodeClusterFlow(profileClusterVersion()) {
+				Skip("static node cluster flow does not manage legacy SSH model cache host paths")
+			}
+
 			cachePath := profile.ModelCache.HostPath
 			if cachePath == "" {
 				cachePath = "/opt/neutree/model-cache"
@@ -216,6 +224,12 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			c = parseClusterJSON(r.Stdout)
 			Expect(c.Status.DesiredNodes).To(BeNumerically(">", oldNodes))
 			Expect(c.Status.ReadyNodes).To(Equal(c.Status.DesiredNodes))
+
+			if usesStaticNodeClusterFlow(profileClusterVersion()) {
+				expectedNodes := 1 + len(workerIPs)
+				eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), expectedNodes, TerminalPhaseTimeout)
+				assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
+			}
 		})
 
 		It("should remove worker node and reach Running", Label("C2612831"), func() {
@@ -247,20 +261,26 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			Expect(c.Status.DesiredNodes).To(BeNumerically("<", oldNodes))
 			Expect(c.Status.ReadyNodes).To(Equal(c.Status.DesiredNodes),
 				"ReadyNodes should match DesiredNodes after worker removal")
+
+			if usesStaticNodeClusterFlow(profileClusterVersion()) {
+				eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1, TerminalPhaseTimeout)
+				assertStaticNodesForCluster(clusterName, []string{headIP})
+			}
 		})
 	})
 
 	// --- Model Cache Edit ---
 
-	Describe("Model Cache Edit", Ordered, Label("edit"), func() {
+	Describe("Model Cache Edit", Ordered, Label("edit", "endpoint"), func() {
 		var (
-			clusterName   string
-			epName        string
-			headIP        string
-			workerIPs     []string
-			sshUser       string
-			sshPrivateKey string
-			sshKeyFile    string
+			clusterName    string
+			epName         string
+			headIP         string
+			workerIPs      []string
+			sshUser        string
+			sshPrivateKey  string
+			sshKeyFile     string
+			modelCachePath string
 		)
 
 		BeforeAll(func() {
@@ -276,6 +296,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			sshKeyFile = expandHome(profile.SSHNodes[0].KeyFile)
 			clusterName = "e2e-ssh-mc-" + Cfg.RunID
 			epName = "e2e-ssh-mc-ep-" + Cfg.RunID
+			modelCachePath = "/tmp/neutree-e2e-model-cache-" + Cfg.RunID
 
 			By("Setting up model registry")
 			SetupModelRegistry()
@@ -287,7 +308,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 				"ssh_user":        sshUser,
 				"ssh_private_key": sshPrivateKey,
 				"model_caches": []ModelCache{
-					{Name: "test-cache", Mode: "host_path", HostPath: profile.ModelCache.HostPath},
+					{Name: "test-cache", Mode: "host_path", HostPath: modelCachePath},
 				},
 			})
 
@@ -306,15 +327,15 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 		AfterAll(func() {
 			deleteEndpoint(epName)
 			ClusterH.EnsureDeleted(clusterName)
+			RunSSH(sshUser, headIP, sshKeyFile, "rm -rf "+modelCachePath)
 		})
 
-		It("should have HostPath model cache mounted in ray_container", Label("C2613463"), func() {
-			By("Checking ray_container source mounts on head node")
+		It("should use HostPath model cache for endpoint backend container", Label("C2613463"), func() {
+			By("Checking host path model cache directory on head node")
 			r := RunSSH(sshUser, headIP, sshKeyFile,
-				"docker inspect ray_container --format '{{range .Mounts}}{{.Source}} {{end}}'")
+				fmt.Sprintf("stat -c '%%a %%u %%g' %s", modelCachePath))
 			ExpectSuccess(r)
-			Expect(r.Stdout).To(ContainSubstring(profile.ModelCache.HostPath),
-				"host path %s should be mounted as source in ray_container", profile.ModelCache.HostPath)
+			Expect(strings.Fields(strings.TrimSpace(r.Stdout))).To(HaveLen(3))
 
 			By("Checking endpoint backend_container config via Ray Serve API")
 			c := getClusterFullJSON(clusterName)
@@ -346,7 +367,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 
 			found := false
 			for _, opt := range runOptsSlice {
-				if optStr, isStr := opt.(string); isStr && strings.Contains(optStr, profile.ModelCache.HostPath) {
+				if optStr, isStr := opt.(string); isStr && strings.Contains(optStr, modelCachePath) {
 					found = true
 
 					break
@@ -354,7 +375,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			}
 
 			Expect(found).To(BeTrue(),
-				"backend_container run_options should contain host path mount with %s", profile.ModelCache.HostPath)
+				"backend_container run_options should contain host path mount with %s", modelCachePath)
 		})
 	})
 })

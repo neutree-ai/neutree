@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -73,7 +75,14 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		Expect(c.Status.DesiredNodes).To(Equal(1))
 		Expect(c.Status.DashboardURL).NotTo(BeEmpty())
 		Expect(c.Status.ErrorMessage).To(BeEmpty())
-		Expect(c.Status.ResourceInfo).NotTo(BeNil())
+
+		if usesStaticNodeClusterFlow(profileClusterVersion()) {
+			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1, TerminalPhaseTimeout)
+			assertStaticNodesForCluster(clusterName, []string{headIP})
+			eventuallyClusterResourceInfo(ClusterH, clusterName, TerminalPhaseTimeout)
+		} else {
+			Expect(c.Status.ResourceInfo).NotTo(BeNil())
+		}
 	})
 
 	It("should show Updating then Running on spec change", Label("C2642277"), func() {
@@ -110,6 +119,12 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		ExpectSuccess(r)
 		Expect(parseClusterJSON(r.Stdout).Status.ObservedSpecHash).NotTo(Equal(oldHash),
 			"observedSpecHash should change after a successful update")
+
+		if usesStaticNodeClusterFlow(profileClusterVersion()) {
+			expectedNodes := 1 + len(workerIPs)
+			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), expectedNodes, TerminalPhaseTimeout)
+			assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
+		}
 	})
 
 	It("should transition through Deleting to Deleted", Label("C2642278", "C2612848"), func() {
@@ -132,5 +147,25 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		r = RunCLI("get", "cluster", "-w", profileWorkspace())
 		ExpectSuccess(r)
 		Expect(r.Stdout).NotTo(ContainSubstring(clusterName))
+
+		if usesStaticNodeClusterFlow(profileClusterVersion()) {
+			assertNoStaticNodeCluster(clusterName)
+			assertStaticNodesForCluster(clusterName, nil)
+		}
 	})
 })
+
+func eventuallyClusterResourceInfo(clusterH *ClusterHelper, name string, timeout time.Duration) v1.Cluster {
+	var cluster v1.Cluster
+
+	Eventually(func(g Gomega) {
+		r := clusterH.Get(name)
+		g.Expect(r.ExitCode).To(Equal(0), r.Stderr)
+
+		cluster = parseClusterJSON(r.Stdout)
+		g.Expect(cluster.Status).NotTo(BeNil())
+		g.Expect(cluster.Status.ResourceInfo).NotTo(BeNil())
+	}, timeout, 5*time.Second).Should(Succeed())
+
+	return cluster
+}

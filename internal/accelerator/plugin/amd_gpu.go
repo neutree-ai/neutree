@@ -74,15 +74,27 @@ func (p *AMDGPUAcceleratorPlugin) GetNodeRuntimeConfig(ctx context.Context,
 	}
 
 	return &v1.GetNodeRuntimeConfigResponse{
-		RuntimeConfig: v1.RuntimeConfig{
-			ImageSuffix: "rocm",
-			Runtime:     "amd",
-			Env: map[string]string{
-				"ACCELERATOR_TYPE":    "amd_gpu",
-				"AMD_VISIBLE_DEVICES": "all",
-			},
-		},
+		RuntimeConfig: amdGPUNodeRuntimeConfig(),
 	}, nil
+}
+
+func (p *AMDGPUAcceleratorPlugin) DetectStaticNodeAccelerator(
+	ctx context.Context,
+	request *v1.DetectStaticNodeAcceleratorRequest,
+) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	if request == nil {
+		return &v1.DetectStaticNodeAcceleratorResponse{}, nil
+	}
+
+	response, err := p.GetNodeAccelerator(ctx, &v1.GetNodeAcceleratorRequest{
+		NodeIp:  request.NodeIp,
+		SSHAuth: request.SSHAuth,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return staticNodeAcceleratorResponseFromAccelerators(response.Accelerators, v1.AcceleratorTypeAMDGPU.String()), nil
 }
 
 func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {
@@ -154,13 +166,44 @@ func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, no
 }
 
 func (p *AMDGPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	return amdGPUContainerRuntimeConfig(), nil
+}
+
+func (p *AMDGPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+	engineRuntime, err := p.GetContainerRuntimeConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	clusterRuntime := amdGPUNodeRuntimeConfig()
+
+	return &v1.AcceleratorProfile{
+		AcceleratorType: string(v1.AcceleratorTypeAMDGPU),
+		ClusterRuntime:  &clusterRuntime,
+		EngineRuntime:   &engineRuntime,
+	}, nil
+}
+
+func amdGPUNodeRuntimeConfig() v1.RuntimeConfig {
+	return v1.RuntimeConfig{
+		ImageSuffix: "rocm",
+		Runtime:     "amd",
+		Env: map[string]string{
+			"ACCELERATOR_TYPE":    "amd_gpu",
+			"AMD_VISIBLE_DEVICES": "all",
+		},
+	}
+}
+
+func amdGPUContainerRuntimeConfig() v1.RuntimeConfig {
 	return v1.RuntimeConfig{
 		Runtime: "amd",
 		Env: map[string]string{
 			"AMD_VISIBLE_DEVICES": "all",
 		},
-	}, nil
+	}
 }
+
 func (p *AMDGPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
 }

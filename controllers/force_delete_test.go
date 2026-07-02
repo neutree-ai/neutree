@@ -68,3 +68,19 @@ func TestIsForceDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestWithForceDeleteAnnotation(t *testing.T) {
+	annotations := map[string]string{"other": "value"}
+
+	got := v1.WithForceDeleteAnnotation(annotations)
+
+	if !v1.IsForceDelete(got) {
+		t.Fatalf("v1.WithForceDeleteAnnotation() did not set force-delete annotation")
+	}
+	if got["other"] != "value" {
+		t.Fatalf("v1.WithForceDeleteAnnotation() did not preserve existing annotations")
+	}
+	if _, mutated := annotations[v1.ForceDeleteAnnotationKey]; mutated {
+		t.Fatalf("v1.WithForceDeleteAnnotation() mutated the input annotations")
+	}
+}

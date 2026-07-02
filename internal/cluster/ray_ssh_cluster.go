@@ -45,19 +45,6 @@ type sshRayClusterReconciler struct {
 	storage            storage.Storage
 }
 
-func newRaySSHClusterReconcile(storage storage.Storage, acceleratorManager accelerator.Manager) *sshRayClusterReconciler {
-	r := &sshRayClusterReconciler{
-		acceleratorManager: acceleratorManager,
-		storage:            storage,
-	}
-
-	if r.executor == nil {
-		r.executor = &command.OSExecutor{}
-	}
-
-	return r
-}
-
 // logWithProcessMessage logs the process messages and updates the cluster status error message.
 // Progress messages are written during initialization and upgrade to provide user-visible feedback.
 func (c *sshRayClusterReconciler) logWithProcessMessage(reconcileCtx *ReconcileContext, messages ...string) {
@@ -193,8 +180,13 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 }
 
 func (c *sshRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {
-	// Early write: set Deleting phase for user feedback
-	WriteEarlyDeleting(cluster, c.storage)
+	// ReconcileDelete is also reused by legacy-to-static upgrade cleanup.
+	// Only real user deletion has a deletion timestamp and should publish a
+	// Deleting phase. Upgrade cleanup must keep the caller's normal
+	// Updating/Upgrading status flow.
+	if cluster != nil && cluster.Metadata != nil && cluster.Metadata.DeletionTimestamp != "" {
+		WriteEarlyDeleting(cluster, c.storage)
+	}
 
 	imageRegistry, err := getUsedImageRegistries(cluster, c.storage)
 	if err != nil {

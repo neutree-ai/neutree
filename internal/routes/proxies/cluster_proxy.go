@@ -8,14 +8,18 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+const staticNodeClusterFlowVersionGate = "v1.0.1"
 
 func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
 	return func(workspace, name string) error {
@@ -102,6 +106,206 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 
 		c.Next()
 	}
+}
+
+func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodPatch {
+			c.Next()
+			return
+		}
+
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		c.Request.Body.Close()
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		c.Request.ContentLength = int64(len(body))
+		c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+		if len(bytes.TrimSpace(body)) == 0 {
+			c.Next()
+			return
+		}
+
+		desiredVersion, hasVersion, err := clusterPatchDesiredVersion(body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		if !hasVersion {
+			c.Next()
+			return
+		}
+
+		var patch v1.Cluster
+		if err := json.Unmarshal(body, &patch); err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		if patch.GetDeletionTimestamp() != "" {
+			c.Next()
+			return
+		}
+
+		current, validationErr := resolveClusterForVersionUpdate(s, patch, c.Request.URL.Query())
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+
+			return
+		}
+
+		clusterType := current.Spec.Type
+		if patch.Spec != nil && patch.Spec.Type != "" {
+			clusterType = patch.Spec.Type
+		}
+
+		if validationErr := validateStaticNodeClusterFlowDowngrade(clusterType, current.GetVersion(), desiredVersion); validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func clusterPatchDesiredVersion(body []byte) (string, bool, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", false, err
+	}
+
+	specRaw, ok := payload["spec"]
+	if !ok {
+		return "", false, nil
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
+		return "", false, err
+	}
+
+	versionRaw, ok := spec["version"]
+	if !ok {
+		return "", false, nil
+	}
+
+	var version string
+	if err := json.Unmarshal(versionRaw, &version); err != nil {
+		return "", false, err
+	}
+
+	return version, true, nil
+}
+
+func resolveClusterForVersionUpdate(
+	s storage.Storage, patch v1.Cluster, queryParams url.Values,
+) (*v1.Cluster, *validationError) {
+	filters := queryParamsToFilters(queryParams)
+	if len(filters) == 0 && patch.Metadata != nil && patch.Metadata.Workspace != "" && patch.Metadata.Name != "" {
+		filters = []storage.Filter{
+			{Column: "metadata->>workspace", Operator: "eq", Value: patch.Metadata.Workspace},
+			{Column: "metadata->>name", Operator: "eq", Value: patch.Metadata.Name},
+		}
+	}
+
+	if len(filters) == 0 {
+		return nil, &validationError{
+			Code:    "10212",
+			Message: "failed to validate cluster version update",
+			Hint:    "cluster identity is required when updating spec.version",
+		}
+	}
+
+	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
+	if err != nil {
+		return nil, &validationError{
+			Code:    "10212",
+			Message: "failed to validate cluster version update",
+			Hint:    err.Error(),
+		}
+	}
+
+	if len(clusters) != 1 {
+		return nil, &validationError{
+			Code:    "10212",
+			Message: "failed to validate cluster version update",
+			Hint:    fmt.Sprintf("expected exactly one cluster from patch filters, got %d", len(clusters)),
+		}
+	}
+
+	current := &clusters[0]
+	if current.Spec == nil {
+		return nil, &validationError{
+			Code:    "10212",
+			Message: "failed to validate cluster version update",
+			Hint:    "current cluster spec is required",
+		}
+	}
+
+	return current, nil
+}
+
+func validateStaticNodeClusterFlowDowngrade(clusterType, previousVersion, desiredVersion string) *validationError {
+	if err := validateStaticNodeClusterFlowVersionUpdate(clusterType, previousVersion, desiredVersion); err != nil {
+		return &validationError{
+			Code:    "10212",
+			Message: "invalid cluster version update",
+			Hint:    err.Error(),
+		}
+	}
+
+	return nil
+}
+
+func validateStaticNodeClusterFlowVersionUpdate(clusterType, previousVersion, desiredVersion string) error {
+	previousUsesStaticFlow, err := usesStaticNodeClusterFlow(clusterType, previousVersion)
+	if err != nil {
+		return fmt.Errorf("invalid current cluster version: %w", err)
+	}
+
+	desiredUsesStaticFlow, err := usesStaticNodeClusterFlow(clusterType, desiredVersion)
+	if err != nil {
+		return fmt.Errorf("invalid desired cluster version: %w", err)
+	}
+
+	if previousUsesStaticFlow && !desiredUsesStaticFlow {
+		return fmt.Errorf(
+			"cluster version downgrade from static flow to legacy flow is not supported for %s clusters; "+
+				"keep spec.version greater than %s or recreate the cluster if legacy flow is required",
+			clusterType,
+			staticNodeClusterFlowVersionGate,
+		)
+	}
+
+	return nil
+}
+
+func usesStaticNodeClusterFlow(clusterType, version string) (bool, error) {
+	if clusterType != v1.SSHClusterType {
+		return false, nil
+	}
+
+	useStaticNodeFlow, err := semver.LessThan(staticNodeClusterFlowVersionGate, version)
+	if err != nil {
+		return false, fmt.Errorf("invalid cluster version %q: %w", version, err)
+	}
+
+	return useStaticNodeFlow, nil
 }
 
 func clusterAcceleratorVirtualizationDisableRequested(body []byte) (bool, error) {
@@ -349,8 +553,9 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	)
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
 	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
+	versionUpdateValidation := validateClusterVersionUpdate(deps.Storage)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
-	proxyGroup.PATCH("", deletionValidation, acceleratorVirtualizationValidation, handler)
+	proxyGroup.PATCH("", deletionValidation, versionUpdateValidation, acceleratorVirtualizationValidation, handler)
 }

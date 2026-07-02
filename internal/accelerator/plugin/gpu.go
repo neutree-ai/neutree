@@ -77,14 +77,27 @@ func (p *GPUAcceleratorPlugin) GetNodeRuntimeConfig(ctx context.Context,
 	}
 
 	return &v1.GetNodeRuntimeConfigResponse{
-		RuntimeConfig: v1.RuntimeConfig{
-			Runtime: "nvidia",
-			Env: map[string]string{
-				"ACCELERATOR_TYPE": "gpu",
-			},
-			Options: []string{"--gpus all"},
-		},
+		RuntimeConfig: nvidiaGPUNodeRuntimeConfig(),
 	}, nil
+}
+
+func (p *GPUAcceleratorPlugin) DetectStaticNodeAccelerator(
+	ctx context.Context,
+	request *v1.DetectStaticNodeAcceleratorRequest,
+) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	if request == nil {
+		return &v1.DetectStaticNodeAcceleratorResponse{}, nil
+	}
+
+	response, err := p.GetNodeAccelerator(ctx, &v1.GetNodeAcceleratorRequest{
+		NodeIp:  request.NodeIp,
+		SSHAuth: request.SSHAuth,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return staticNodeAcceleratorResponseFromAccelerators(response.Accelerators, v1.AcceleratorTypeNVIDIAGPU.String()), nil
 }
 
 func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {
@@ -147,11 +160,41 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 }
 
 func (p *GPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	return nvidiaGPUContainerRuntimeConfig(), nil
+}
+
+func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+	engineRuntime, err := p.GetContainerRuntimeConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	clusterRuntime := nvidiaGPUNodeRuntimeConfig()
+
+	return &v1.AcceleratorProfile{
+		AcceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
+		ClusterRuntime:  &clusterRuntime,
+		EngineRuntime:   &engineRuntime,
+	}, nil
+}
+
+func nvidiaGPUNodeRuntimeConfig() v1.RuntimeConfig {
+	return v1.RuntimeConfig{
+		Runtime: "nvidia",
+		Env: map[string]string{
+			"ACCELERATOR_TYPE": "gpu",
+		},
+		Options: []string{"--gpus all"},
+	}
+}
+
+func nvidiaGPUContainerRuntimeConfig() v1.RuntimeConfig {
 	return v1.RuntimeConfig{
 		Runtime: "nvidia",
 		Options: []string{"--gpus all"},
-	}, nil
+	}
 }
+
 func (p *GPUAcceleratorPlugin) Ping(ctx context.Context) error {
 	return nil
 }

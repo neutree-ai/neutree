@@ -11,6 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -48,6 +49,67 @@ func TestAMDGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	assert.Equal(t, string(v1.AcceleratorTypeAMDGPU), p.Resource())
 	assert.Equal(t, p, p.Handle())
 	assert.Equal(t, InternalPluginType, p.Type())
+}
+
+func TestAMDGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, testLspciOuput, nil)
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
+
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.True(t, response.Matched)
+	status := response.Accelerator
+	require.NotNil(t, status)
+	assert.Equal(t, v1.AcceleratorTypeAMDGPU.String(), status.Type)
+	assert.Empty(t, status.Devices)
+	mockExecutor.AssertExpectations(t)
+}
+
+func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T) {
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, "{}", nil)
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
+
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	assert.False(t, response.Matched)
+	assert.Nil(t, response.Accelerator)
+	mockExecutor.AssertExpectations(t)
+}
+
+func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsPluginError(t *testing.T) {
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, "lspci failed", errors.New("lspci failed"))
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
+
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
+
+	require.Error(t, err)
+	assert.Nil(t, response)
+	mockExecutor.AssertExpectations(t)
+}
+
+func TestAMDGPUAcceleratorPluginGetAcceleratorProfile(t *testing.T) {
+	p := &AMDGPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	assert.Equal(t, v1.AcceleratorTypeAMDGPU.String(), profile.AcceleratorType)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
+	assert.Equal(t, amdGPUNodeRuntimeConfig(), *profile.ClusterRuntime)
+	require.NotNil(t, profile.EngineRuntime)
+	assert.Empty(t, profile.EngineRuntime.ImageSuffix)
+	containerRuntime, err := p.GetContainerRuntimeConfig()
+	require.NoError(t, err)
+	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
 }
 
 func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
@@ -221,4 +283,18 @@ func TestAMDGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 			assert.Equal(t, tt.expectRuntimeConfig, runtimeConfig.RuntimeConfig)
 		})
 	}
+}
+
+func TestAMDGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
+	p := &AMDGPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, string(v1.AcceleratorTypeAMDGPU), profile.AcceleratorType)
+	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
+	assert.Equal(t, "amd", profile.ClusterRuntime.Runtime)
+	assert.Equal(t, amdGPUNodeRuntimeConfig(), *profile.ClusterRuntime)
 }

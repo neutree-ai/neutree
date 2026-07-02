@@ -11,6 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -36,6 +37,95 @@ func TestGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	assert.Equal(t, plugin, plugin.Handle())
 	assert.Equal(t, InternalPluginType, plugin.Type())
 	assert.NoError(t, plugin.Ping(context.Background()))
+}
+
+func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, testNvidiaLspciOutput, nil)
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
+
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.True(t, response.Matched)
+	status := response.Accelerator
+	require.NotNil(t, status)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), status.Type)
+	assert.Empty(t, status.Devices)
+	mockExecutor.AssertExpectations(t)
+}
+
+func TestGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T) {
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, "{}", nil)
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
+
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	assert.False(t, response.Matched)
+	assert.Nil(t, response.Accelerator)
+	mockExecutor.AssertExpectations(t)
+}
+
+func TestGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsPluginError(t *testing.T) {
+	mockExecutor := &commandmocks.MockExecutor{}
+	mockNodeAcceleratorCommands(t, mockExecutor, "lspci failed", errors.New("lspci failed"))
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
+
+	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
+
+	require.Error(t, err)
+	assert.Nil(t, response)
+	mockExecutor.AssertExpectations(t)
+}
+
+func staticNodeAcceleratorTestRequest() *v1.DetectStaticNodeAcceleratorRequest {
+	return &v1.DetectStaticNodeAcceleratorRequest{
+		NodeIp: "127.0.0.1",
+		SSHAuth: v1.Auth{
+			SSHUser:       "root",
+			SSHPrivateKey: "MTIzCg==",
+		},
+	}
+}
+
+func mockNodeAcceleratorCommands(
+	t *testing.T,
+	mockExecutor *commandmocks.MockExecutor,
+	lspciOutput string,
+	lspciErr error,
+) {
+	t.Helper()
+
+	mockExecutor.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		cmds := args.Get(2).([]string)
+		assert.True(t, strings.Contains(strings.Join(cmds, " "), "uptime"))
+	}).Return([]byte("{}"), nil).Once()
+	mockExecutor.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		cmds := args.Get(2).([]string)
+		assert.True(t, strings.Contains(strings.Join(cmds, " "), "lspci -nn"))
+	}).Return([]byte(lspciOutput), lspciErr).Once()
+}
+
+func TestGPUAcceleratorPluginGetAcceleratorProfile(t *testing.T) {
+	p := &GPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), profile.AcceleratorType)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
+	assert.Equal(t, nvidiaGPUNodeRuntimeConfig(), *profile.ClusterRuntime)
+	require.NotNil(t, profile.EngineRuntime)
+	assert.Equal(t, "nvidia", profile.EngineRuntime.Runtime)
+	containerRuntime, err := p.GetContainerRuntimeConfig()
+	require.NoError(t, err)
+	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
 }
 
 func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
@@ -226,4 +316,18 @@ func TestGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 			assert.Equal(t, tt.expectRuntimeConfig, runtimeConfig.RuntimeConfig)
 		})
 	}
+}
+
+func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
+	p := &GPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, string(v1.AcceleratorTypeNVIDIAGPU), profile.AcceleratorType)
+	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
+	assert.Equal(t, []string{"--gpus all"}, profile.ClusterRuntime.Options)
+	assert.Equal(t, nvidiaGPUNodeRuntimeConfig(), *profile.ClusterRuntime)
 }
