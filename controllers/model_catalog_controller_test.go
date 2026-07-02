@@ -106,6 +106,56 @@ func TestModelCatalogController_processPendingModelCatalog(t *testing.T) {
 	mockStorage.AssertExpectations(t)
 }
 
+// A recipe catalog (variants set) must NOT be defaulted: injecting a non-nil
+// spec.resources would collide with the variants+resources invariant and turn a
+// valid recipe catalog invalid on the next write.
+func TestModelCatalogController_processPendingModelCatalog_recipe(t *testing.T) {
+	mockStorage := &storageMocks.MockStorage{}
+	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{
+		Storage: mockStorage,
+	})
+
+	modelCatalog := &v1.ModelCatalog{
+		ID: 1,
+		Metadata: &v1.Metadata{
+			Name:      "recipe-catalog",
+			Workspace: "default",
+		},
+		Spec: &v1.ModelCatalogSpec{
+			Engine: &v1.EndpointEngineSpec{
+				Engine: "vllm",
+			},
+			Variants: map[string]v1.RecipeVariant{
+				"default": {
+					Model: &v1.ModelSpec{Name: "test-model"},
+				},
+			},
+		},
+		Status: &v1.ModelCatalogStatus{
+			Phase: v1.ModelCatalogPhasePENDING,
+		},
+	}
+
+	mockStorage.On("UpdateModelCatalog", "1", mock.MatchedBy(func(mc *v1.ModelCatalog) bool {
+		return mc.Status.Phase == v1.ModelCatalogPhaseREADY &&
+			mc.Spec.Resources == nil &&
+			mc.Spec.Replicas == nil &&
+			mc.Spec.DeploymentOptions == nil &&
+			mc.Spec.Variables == nil
+	})).Return(nil)
+
+	err := controller.processPendingModelCatalog(modelCatalog)
+
+	assert.NoError(t, err)
+	assert.Equal(t, v1.ModelCatalogPhaseREADY, modelCatalog.Status.Phase)
+	assert.Nil(t, modelCatalog.Spec.Resources)
+	assert.Nil(t, modelCatalog.Spec.Replicas)
+	assert.Nil(t, modelCatalog.Spec.DeploymentOptions)
+	assert.Nil(t, modelCatalog.Spec.Variables)
+
+	mockStorage.AssertExpectations(t)
+}
+
 func TestModelCatalogController_processFailedModelCatalog(t *testing.T) {
 	mockStorage := &storageMocks.MockStorage{}
 	controller, _ := NewModelCatalogController(&ModelCatalogControllerOption{

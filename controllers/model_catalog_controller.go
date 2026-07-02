@@ -114,23 +114,30 @@ func (c *ModelCatalogController) processPendingModelCatalog(modelCatalog *v1.Mod
 	klog.V(4).Infof("Processing pending model catalog %s/%s",
 		modelCatalog.Metadata.Workspace, modelCatalog.Metadata.Name)
 
-	// Set default values for spec if not provided
-	if modelCatalog.Spec.Resources == nil {
-		modelCatalog.Spec.Resources = &v1.ResourceSpec{}
-	}
-
-	if modelCatalog.Spec.Replicas == nil {
-		modelCatalog.Spec.Replicas = &v1.ReplicaSpec{
-			Num: intPtr(1),
+	// Set default values for spec if not provided. Skip entirely for recipe
+	// catalogs (variants set): they carry no top-level model/resources/etc.
+	// (those live per-variant and are composed client-side), and injecting a
+	// non-nil spec.resources here would produce the variants+resources combo
+	// that ValidateModelCatalogSpec rejects — turning a valid recipe catalog
+	// invalid on the next write (e.g. an Edit/PATCH through the API).
+	if len(modelCatalog.Spec.Variants) == 0 {
+		if modelCatalog.Spec.Resources == nil {
+			modelCatalog.Spec.Resources = &v1.ResourceSpec{}
 		}
-	}
 
-	if modelCatalog.Spec.DeploymentOptions == nil {
-		modelCatalog.Spec.DeploymentOptions = make(map[string]interface{})
-	}
+		if modelCatalog.Spec.Replicas == nil {
+			modelCatalog.Spec.Replicas = &v1.ReplicaSpec{
+				Num: intPtr(1),
+			}
+		}
 
-	if modelCatalog.Spec.Variables == nil {
-		modelCatalog.Spec.Variables = make(map[string]interface{})
+		if modelCatalog.Spec.DeploymentOptions == nil {
+			modelCatalog.Spec.DeploymentOptions = make(map[string]interface{})
+		}
+
+		if modelCatalog.Spec.Variables == nil {
+			modelCatalog.Spec.Variables = make(map[string]interface{})
+		}
 	}
 
 	// Update status to ready
