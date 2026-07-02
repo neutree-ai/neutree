@@ -11,12 +11,29 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
-// TestVLLMV0_17_1TemplateTaskTranslation locks in the contract that the
-// v0.17.1 K8s deploy template explicitly translates the Neutree model task
-// to vLLM's --runner / --convert flags. Without this, vLLM's auto-detect
-// falls back to a generate runner for multimodal embedding architectures
-// and silently breaks /v1/embeddings.
-func TestVLLMV0_17_1TemplateTaskTranslation(t *testing.T) {
+// TestVLLMTemplateTaskTranslation locks in the contract that current vLLM K8s
+// deploy templates explicitly translate the Neutree model task to vLLM's
+// --runner / --convert flags. Without this, vLLM's auto-detect falls back to a
+// generate runner for multimodal embedding architectures and silently breaks
+// /v1/embeddings.
+func TestVLLMTemplateTaskTranslation(t *testing.T) {
+	templates := []struct {
+		name     string
+		version  string
+		template string
+	}{
+		{
+			name:     "vllm v0.17.1",
+			version:  "v0.17.1",
+			template: vllmV0_17_1DeployTemplate,
+		},
+		{
+			name:     "vllm v0.24.0",
+			version:  "v0.24.0",
+			template: vllmV0_24_0DeployTemplate,
+		},
+	}
+
 	tests := []struct {
 		name        string
 		task        string
@@ -43,18 +60,22 @@ func TestVLLMV0_17_1TemplateTaskTranslation(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			vars := newTestVLLMV0_17_1Vars(tc.task)
-			objs, err := util.RenderKubernetesManifest(vllmV0_17_1DeployTemplate, vars)
-			require.NoError(t, err)
-			require.NotEmpty(t, objs.Items)
+	for _, tmpl := range templates {
+		t.Run(tmpl.name, func(t *testing.T) {
+			for _, tc := range tests {
+				t.Run(tc.name, func(t *testing.T) {
+					vars := newTestVLLMVars(tmpl.version, tc.task)
+					objs, err := util.RenderKubernetesManifest(tmpl.template, vars)
+					require.NoError(t, err)
+					require.NotEmpty(t, objs.Items)
 
-			deploy := mustFindRenderedObject(t, objs.Items, "Deployment", "ep-test")
-			cmd := mustExtractContainerCommand(t, deploy.Object, "vllm-engine")
+					deploy := mustFindRenderedObject(t, objs.Items, "Deployment", "ep-test")
+					cmd := mustExtractContainerCommand(t, deploy.Object, "vllm-engine")
 
-			assert.Equal(t, tc.wantRunner, flagValue(cmd, "--runner"), "full cmd=%v", cmd)
-			assert.Equal(t, tc.wantConvert, flagValue(cmd, "--convert"), "full cmd=%v", cmd)
+					assert.Equal(t, tc.wantRunner, flagValue(cmd, "--runner"), "full cmd=%v", cmd)
+					assert.Equal(t, tc.wantConvert, flagValue(cmd, "--convert"), "full cmd=%v", cmd)
+				})
+			}
 		})
 	}
 }
@@ -73,6 +94,10 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 			template: vllmV0_17_1DeployTemplate,
 		},
 		{
+			name:     "vllm v0.24.0",
+			template: vllmV0_24_0DeployTemplate,
+		},
+		{
 			name:     "sglang v0.5.10",
 			template: sglangV0_5_10DeployTemplate,
 		},
@@ -84,7 +109,7 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			vars := newTestVLLMV0_17_1Vars("text-generation")
+			vars := newTestVLLMVars("v0.17.1", "text-generation")
 			vars["EndpointName"] = "4096"
 
 			objs, err := util.RenderKubernetesManifest(tc.template, vars)
@@ -99,22 +124,39 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 	}
 }
 
-// newTestVLLMV0_17_1Vars returns the minimum render variables the v0.17.1
-// template requires. We mirror the shape produced by setModelArgs in the
+func TestVLLMTemplatePreservesListEngineArgs(t *testing.T) {
+	vars := newTestVLLMVars("v0.24.0", "text-generation")
+	vars["EngineArgs"] = map[string]any{
+		"served_model_name": []any{"test-model", "neu-vllm-list-alias"},
+	}
+
+	objs, err := util.RenderKubernetesManifest(vllmV0_24_0DeployTemplate, vars)
+	require.NoError(t, err)
+
+	deploy := mustFindRenderedObject(t, objs.Items, "Deployment", "ep-test")
+	cmd := mustExtractContainerCommand(t, deploy.Object, "vllm-engine")
+
+	assert.Equal(t, "test-model", flagValue(cmd, "--served_model_name"), "full cmd=%v", cmd)
+	assert.Contains(t, cmd, "neu-vllm-list-alias", "full cmd=%v", cmd)
+	assert.NotContains(t, cmd, `["test-model","neu-vllm-list-alias"]`, "full cmd=%v", cmd)
+}
+
+// newTestVLLMVars returns the minimum render variables the current vLLM
+// templates require. We mirror the shape produced by setModelArgs in the
 // kubernetes orchestrator without taking a dependency on that package.
-func newTestVLLMV0_17_1Vars(task string) map[string]any {
+func newTestVLLMVars(version, task string) map[string]any {
 	return map[string]any{
 		"EndpointName":   "ep-test",
 		"Namespace":      "default",
 		"EngineName":     "vllm-engine",
-		"EngineVersion":  "v0.17.1",
+		"EngineVersion":  version,
 		"RoutingLogic":   "rr",
 		"ClusterName":    "test",
 		"Workspace":      "ws",
 		"Replicas":       1,
 		"ImagePrefix":    "registry.test",
 		"ImageRepo":      "neutree/engine-vllm",
-		"ImageTag":       "v0.17.1",
+		"ImageTag":       version,
 		"NeutreeVersion": "v0.0.0",
 		"ModelArgs": map[string]any{
 			"name":          "test-model",

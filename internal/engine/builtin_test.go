@@ -41,9 +41,23 @@ func TestGetBuiltinEngines(t *testing.T) {
 
 		for _, v := range e.Spec.Versions {
 			switch v.Version {
-			case "v0.11.2", "v0.17.1":
-				if _, ok := v.Images["nvidia_gpu"]; !ok {
+			case "v0.11.2", "v0.17.1", "v0.24.0":
+				img, ok := v.Images["nvidia_gpu"]
+				if !ok {
 					t.Errorf("vllm %s missing nvidia_gpu image", v.Version)
+					continue
+				}
+				if img == nil {
+					t.Errorf("vllm %s nvidia_gpu image config is nil", v.Version)
+					continue
+				}
+				if v.Version == "v0.24.0" {
+					if got, want := img.ImageName, "neutree/engine-vllm"; got != want {
+						t.Errorf("vllm %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
+					}
+					if got, want := img.Tag, "v0.24.0-neutree1-ray2.53.0"; got != want {
+						t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
+					}
 				}
 				if k8sTemplates, ok := v.DeployTemplate["kubernetes"]; !ok {
 					t.Errorf("vllm %s missing kubernetes deploy template", v.Version)
@@ -52,6 +66,10 @@ func TestGetBuiltinEngines(t *testing.T) {
 				}
 			}
 		}
+	}
+
+	if _, err := GetDeployTemplate("vllm-v0.24.0"); err != nil {
+		t.Fatalf("DeployTemplates lookup for vLLM v0.24.0 failed: %v", err)
 	}
 
 	// Verify sglang v0.5.10 has nvidia_gpu image, k8s default template, and supported tasks (rerank excluded).

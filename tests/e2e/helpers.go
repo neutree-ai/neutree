@@ -1701,6 +1701,53 @@ func doInferenceRequest(serviceURL, path string, reqBody map[string]any) (int, s
 	return resp.StatusCode, string(body), nil
 }
 
+func listOpenAIModelIDs(serviceURL string) (int, []string, string, error) {
+	client := &http.Client{Timeout: 60 * time.Second}
+
+	req, err := http.NewRequest(http.MethodGet,
+		strings.TrimRight(serviceURL, "/")+"/v1/models",
+		nil,
+	)
+	if err != nil {
+		return 0, nil, "", err
+	}
+
+	authValue := Cfg.APIKey
+	if !strings.HasPrefix(authValue, "Bearer ") {
+		authValue = "Bearer " + authValue
+	}
+
+	req.Header.Set("Authorization", authValue)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, "", err
+	}
+
+	var modelList struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &modelList); err != nil {
+		return resp.StatusCode, nil, string(body), err
+	}
+
+	ids := make([]string, 0, len(modelList.Data))
+	for _, model := range modelList.Data {
+		ids = append(ids, model.ID)
+	}
+
+	return resp.StatusCode, ids, string(body), nil
+}
+
 func inferChat(serviceURL, prompt string) (int, string, error) {
 	return inferChatWithModel(serviceURL, profileModelName(), prompt)
 }
