@@ -171,7 +171,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		head := requireStaticNodeRole(nodes, v1.StaticNodeRoleHead)
 		vmagent := requireStaticNodeComponent(head, "vmagent")
 		vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")
-		ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-accelerator-exporter-dcgm-metrics"))
+		ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-accelerator-exporter"))
 	}
 }
 

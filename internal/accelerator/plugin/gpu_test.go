@@ -322,7 +322,14 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
 	assert.Equal(t, nvidiaDCGMExporterImage, profile.MetricsExporter.Image)
 	assert.Equal(t, nvidiaDCGMExporterPort, profile.MetricsExporter.Port)
-	assert.Equal(t, []string{"--collectors", nvidiaDCGMExporterCollectorsPath}, profile.MetricsExporter.Args)
+	assert.Equal(t,
+		[]string{
+			"--collectors",
+			nvidiaDCGMExporterCollectorsPath,
+			"--address",
+			":19400",
+		},
+		profile.MetricsExporter.Args)
 	require.NotNil(t, profile.MetricsExporter.Runtime)
 	assert.True(t, profile.MetricsExporter.Runtime.HostNetwork)
 	require.NotNil(t, profile.MetricsExporter.Runtime.Capabilities)

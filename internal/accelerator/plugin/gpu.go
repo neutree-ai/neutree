@@ -232,8 +232,13 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 		MetricsExporter: &v1.AcceleratorExporterProfile{
 			Name:  "dcgm-exporter",
 			Image: nvidiaDCGMExporterImage,
-			Args:  []string{"--collectors", nvidiaDCGMExporterCollectorsPath},
-			Port:  nvidiaDCGMExporterPort,
+			Args: []string{
+				"--collectors",
+				nvidiaDCGMExporterCollectorsPath,
+				"--address",
+				":" + strconv.Itoa(nvidiaDCGMExporterPort),
+			},
+			Port: nvidiaDCGMExporterPort,
 			ConfigFiles: []v1.AcceleratorExporterConfigFile{
 				{
 					Path:         nvidiaDCGMExporterCollectorsPath,

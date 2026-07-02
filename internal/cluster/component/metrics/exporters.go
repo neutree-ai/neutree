@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
@@ -97,7 +98,8 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 ) (metricsAcceleratorExporter, bool, error) {
 	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, acceleratorType)
 	if err != nil {
-		return metricsAcceleratorExporter{}, false, err
+		klog.V(4).Infof("skip accelerator metrics exporter for %s: failed to get accelerator profile: %v", acceleratorType, err)
+		return metricsAcceleratorExporter{}, false, nil
 	}
 
 	if profile == nil || profile.MetricsExporter == nil {
