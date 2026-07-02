@@ -64,9 +64,7 @@ func (c *StaticNodeController) Reconcile(obj interface{}) error {
 		return errors.New("failed to assert obj to *v1.StaticNode")
 	}
 
-	if node.Metadata != nil {
-		klog.V(4).Info("Reconcile static node " + node.Metadata.WorkspaceName())
-	}
+	klog.V(4).Info("Reconcile static node " + node.Metadata.WorkspaceName())
 
 	return c.sync(context.Background(), node)
 }
@@ -76,7 +74,7 @@ func (c *StaticNodeController) sync(ctx context.Context, node *v1.StaticNode) er
 		return errors.New("static node is required")
 	}
 
-	if node.Metadata != nil && node.Metadata.DeletionTimestamp != "" {
+	if node.Metadata.DeletionTimestamp != "" {
 		return c.reconcileDelete(ctx, node, c.reconciler)
 	}
 
@@ -109,7 +107,7 @@ func (c *StaticNodeController) reconcileDelete(
 	node *v1.StaticNode,
 	reconciler *clusterreconcile.StaticNodeReconciler,
 ) (reconcileErr error) {
-	isForceDelete := node.Metadata != nil && v1.IsForceDelete(node.Metadata.Annotations)
+	isForceDelete := v1.IsForceDelete(node.Metadata.Annotations)
 	updateStatusOnReturn := false
 	defer func() {
 		if !updateStatusOnReturn {
@@ -162,11 +160,7 @@ func (c *StaticNodeController) updateStatus(
 			*reconcileErr = updateErr
 		}
 
-		if node != nil && node.Metadata != nil {
-			klog.Errorf("failed to update static node %s status, err: %v", node.Metadata.WorkspaceName(), updateErr)
-		} else {
-			klog.Errorf("failed to update static node status, err: %v", updateErr)
-		}
+		klog.Errorf("failed to update static node %s status, err: %v", node.Metadata.WorkspaceName(), updateErr)
 	}
 }
 

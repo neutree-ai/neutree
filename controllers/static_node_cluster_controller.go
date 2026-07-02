@@ -60,9 +60,7 @@ func (c *StaticNodeClusterController) Reconcile(obj interface{}) error {
 		return errors.New("failed to assert obj to *v1.StaticNodeCluster")
 	}
 
-	if cluster.Metadata != nil {
-		klog.V(4).Info("Reconcile static node cluster " + cluster.Metadata.WorkspaceName())
-	}
+	klog.V(4).Info("Reconcile static node cluster " + cluster.Metadata.WorkspaceName())
 
 	return c.sync(context.Background(), cluster)
 }
@@ -217,11 +215,7 @@ func (c *StaticNodeClusterController) updateStatus(
 			*reconcileErr = updateErr
 		}
 
-		if cluster != nil && cluster.Metadata != nil {
-			klog.Errorf("failed to update static node cluster %s status, err: %v", cluster.Metadata.WorkspaceName(), updateErr)
-		} else {
-			klog.Errorf("failed to update static node cluster status, err: %v", updateErr)
-		}
+		klog.Errorf("failed to update static node cluster %s status, err: %v", cluster.Metadata.WorkspaceName(), updateErr)
 	}
 }
 

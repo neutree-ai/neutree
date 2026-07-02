@@ -22,25 +22,29 @@ func NewStaticNodeClusterResourceClient(
 	staticNodes storage.StaticNodeLister,
 	workspace string,
 	clusterName string,
-) *StaticNodeClusterResourceClient {
+) (*StaticNodeClusterResourceClient, error) {
+	if rayNodes == nil {
+		return nil, errors.New("Ray resource client is required")
+	}
+
+	if staticNodes == nil {
+		return nil, errors.New("static node lister is required")
+	}
+
 	return &StaticNodeClusterResourceClient{
 		rayNodes:    rayNodes,
 		staticNodes: staticNodes,
 		workspace:   workspace,
 		clusterName: clusterName,
-	}
+	}, nil
 }
 
 func (c *StaticNodeClusterResourceClient) ListNodes(
 	ctx context.Context,
 	opts ListNodesOptions,
 ) ([]ResourceNode, error) {
-	if c == nil || c.rayNodes == nil {
+	if c == nil {
 		return nil, errors.New("Ray resource client is required")
-	}
-
-	if c.staticNodes == nil {
-		return nil, errors.New("static node lister is required")
 	}
 
 	nodes, err := c.rayNodes.ListNodes(ctx, opts)
@@ -65,7 +69,7 @@ func (c *StaticNodeClusterResourceClient) ListEndpointInstances(
 	ctx context.Context,
 	opts ListEndpointInstancesOptions,
 ) ([]EndpointInstanceResource, error) {
-	if c == nil || c.rayNodes == nil {
+	if c == nil {
 		return nil, errors.New("Ray resource client is required")
 	}
 
@@ -85,7 +89,7 @@ func staticNodePointers(nodes []v1.StaticNode, workspace, clusterName string) []
 	result := make([]*v1.StaticNode, 0, len(nodes))
 	for i := range nodes {
 		node := &nodes[i]
-		if node.Metadata == nil || node.Spec == nil {
+		if node.Spec == nil {
 			continue
 		}
 
@@ -158,10 +162,6 @@ func enrichStaticNodeClusterResourceNodeDevices(
 		}
 
 		nodeID := staticNodeResourceID(staticNode)
-		if nodeID == "" {
-			continue
-		}
-
 		index, ok := byID[nodeID]
 		if !ok {
 			*nodes = append(*nodes, ResourceNode{ID: nodeID})
@@ -207,11 +207,7 @@ func staticNodeResourceID(node *v1.StaticNode) string {
 		return node.Spec.IP
 	}
 
-	if node.Metadata != nil {
-		return node.Metadata.Name
-	}
-
-	return ""
+	return node.Metadata.Name
 }
 
 func staticNodeClusterDeviceResources(

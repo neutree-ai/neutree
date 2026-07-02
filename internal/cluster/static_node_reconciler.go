@@ -78,12 +78,7 @@ func (c *StaticNodeClusterHeadReadyChecker) HeadReady(ctx context.Context, node 
 		return false, nil
 	}
 
-	workspace := ""
-	if node.Metadata != nil {
-		workspace = node.Metadata.Workspace
-	}
-
-	nodes, err := listStaticNodesByCluster(c.Storage, workspace, node.Spec.Cluster)
+	nodes, err := listStaticNodesByCluster(c.Storage, node.Metadata.Workspace, node.Spec.Cluster)
 	if err != nil {
 		return false, err
 	}
@@ -491,10 +486,6 @@ func (r *StaticNodeReconciler) shouldWaitForHead(
 	component v1.NodeComponentSpec,
 ) (bool, error) {
 	if node == nil || node.Spec == nil || node.Spec.Role != v1.StaticNodeRoleWorker {
-		return false, nil
-	}
-
-	if !isRayWorkerComponentName(component.Name) {
 		return false, nil
 	}
 

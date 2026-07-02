@@ -50,7 +50,7 @@ func (a StaticNodeClusterStatusAggregator) Aggregate(
 	anyNodeFailed := false
 
 	for _, node := range nodes {
-		if node == nil || node.Metadata == nil || node.Status == nil {
+		if node == nil || node.Status == nil {
 			warmReady = false
 
 			continue
@@ -158,7 +158,7 @@ func desiredComponentMismatchMessages(
 	messages := []string{}
 
 	for _, plan := range plans {
-		if plan.Node == nil || plan.Node.Metadata == nil || plan.Node.Spec == nil || len(plan.Node.Spec.Components) == 0 {
+		if plan.Node == nil || plan.Node.Spec == nil || len(plan.Node.Spec.Components) == 0 {
 			continue
 		}
 

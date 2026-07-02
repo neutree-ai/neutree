@@ -115,12 +115,13 @@ func TestStaticNodeClusterResourceClientListNodesEnrichesStaticDevices(t *testin
 			},
 		},
 	}
-	client := NewStaticNodeClusterResourceClient(
+	client, err := NewStaticNodeClusterResourceClient(
 		rayClient,
 		staticNodes,
 		"default",
 		"static-a",
 	)
+	require.NoError(t, err)
 
 	nodes, err := client.ListNodes(context.Background(), ListNodesOptions{})
 
@@ -133,6 +134,17 @@ func TestStaticNodeClusterResourceClientListNodesEnrichesStaticDevices(t *testin
 	require.Contains(t, nodes[0].AcceleratorMetadata, v1.AcceleratorTypeNVIDIAGPU)
 	require.Equal(t, float64(15360),
 		nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_Tesla_T4"].MemoryTotalMiB)
+}
+
+func TestNewStaticNodeClusterResourceClientRequiresDependencies(t *testing.T) {
+	rayClient := &fakeResourceClient{}
+	staticNodes := &fakeStaticNodeLister{}
+
+	_, err := NewStaticNodeClusterResourceClient(nil, staticNodes, "default", "static-a")
+	require.ErrorContains(t, err, "Ray resource client is required")
+
+	_, err = NewStaticNodeClusterResourceClient(rayClient, nil, "default", "static-a")
+	require.ErrorContains(t, err, "static node lister is required")
 }
 
 func TestResourceViewBuilderBuildClusterResources(t *testing.T) {

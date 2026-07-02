@@ -70,9 +70,9 @@ CREATE TRIGGER validate_workspace_on_static_node_clusters
 CREATE UNIQUE INDEX static_node_clusters_name_workspace_unique_idx
     ON api.static_node_clusters (((metadata).workspace), ((metadata).name));
 
--- Static node resources are controller-owned internal tables. Do not create
--- user RLS policies here; ordinary API users cannot read or write them
--- directly. The control plane uses service_role, which is created with
+-- Static node resources are controller-owned internal tables. This migration
+-- enables RLS without write policies; later migrations may add narrowly scoped
+-- read policies. The control plane uses service_role, which is created with
 -- BYPASSRLS in db/init-scripts/000_init.sql.
 ALTER TABLE api.static_node_clusters ENABLE ROW LEVEL SECURITY;
 

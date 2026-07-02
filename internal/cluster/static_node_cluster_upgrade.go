@@ -24,7 +24,7 @@ func applyRayRecreateUpgradePlan(
 
 	for i := range plans {
 		plan := &plans[i]
-		if plan.Node == nil || plan.Node.Metadata == nil || plan.Node.Spec == nil {
+		if plan.Node == nil || plan.Node.Spec == nil {
 			continue
 		}
 
@@ -199,7 +199,7 @@ func staticNodeClusterWorkersStopped(cluster *v1.StaticNodeCluster, nodes []*v1.
 	stopped := map[string]bool{}
 
 	for _, node := range nodes {
-		if node == nil || node.Metadata == nil || node.Status == nil {
+		if node == nil || node.Status == nil {
 			continue
 		}
 
@@ -285,7 +285,7 @@ func desiredRayComponentImage(
 	componentName string,
 ) string {
 	for _, plan := range plans {
-		if plan.Node == nil || plan.Node.Metadata == nil || plan.Node.Spec == nil {
+		if plan.Node == nil || plan.Node.Spec == nil {
 			continue
 		}
 

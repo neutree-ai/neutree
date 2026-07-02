@@ -35,7 +35,7 @@ func staticNodeByName(nodes []*v1.StaticNode) map[string]*v1.StaticNode {
 	result := make(map[string]*v1.StaticNode, len(nodes))
 
 	for _, node := range nodes {
-		if node == nil || node.Metadata == nil || node.Metadata.Name == "" {
+		if node == nil {
 			continue
 		}
 

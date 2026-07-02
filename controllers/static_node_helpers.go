@@ -89,12 +89,8 @@ func validateStaticNodeOwner(existing *v1.StaticNode, desired *v1.StaticNode) er
 		return nil
 	}
 
-	name := ""
-	if desired.Metadata != nil {
-		name = desired.Metadata.Name
-	}
-
-	return errors.Errorf("static node %s is already owned by static node cluster %s", name, existing.Spec.Cluster)
+	return errors.Errorf("static node %s is already owned by static node cluster %s",
+		desired.Metadata.Name, existing.Spec.Cluster)
 }
 
 func softDeleteStaticNode(store storage.Storage, node *v1.StaticNode) error {

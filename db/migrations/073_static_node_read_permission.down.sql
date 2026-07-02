@@ -1,0 +1,2 @@
+-- No-op. PostgreSQL enum values cannot be removed safely in a down migration.
+-- The grant and RLS policies are reverted in 074_static_node_admin_read_policy.down.sql.

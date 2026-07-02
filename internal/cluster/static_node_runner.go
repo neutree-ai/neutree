@@ -117,17 +117,9 @@ func staticNodeSSHAuth(node *v1.StaticNode) (v1.Auth, error) {
 }
 
 func staticNodeRunnerID(node *v1.StaticNode) string {
-	if node.Metadata != nil && node.Metadata.Name != "" {
-		if node.Metadata.Workspace != "" {
-			return fmt.Sprintf("%s/%s", node.Metadata.Workspace, node.Metadata.Name)
-		}
-
-		return node.Metadata.Name
+	if node.Metadata.Workspace != "" {
+		return fmt.Sprintf("%s/%s", node.Metadata.Workspace, node.Metadata.Name)
 	}
 
-	if node.Spec != nil {
-		return node.Spec.IP
-	}
-
-	return "static-node"
+	return node.Metadata.Name
 }

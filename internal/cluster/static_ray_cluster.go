@@ -101,10 +101,6 @@ func (r *staticRayReconciler) ReconcileDelete(_ context.Context, c *v1.Cluster) 
 		return nil
 	}
 
-	if current.Metadata == nil {
-		current.Metadata = &v1.Metadata{}
-	}
-
 	metadataChanged := false
 
 	if v1.IsForceDelete(c.Metadata.Annotations) && !v1.IsForceDelete(current.Metadata.Annotations) {
@@ -127,8 +123,8 @@ func (r *staticRayReconciler) ReconcileDelete(_ context.Context, c *v1.Cluster) 
 }
 
 func validateStaticNodeClusterSpec(c *v1.Cluster) error {
-	if c == nil || c.Metadata == nil {
-		return errors.New("cluster metadata is required")
+	if c == nil {
+		return errors.New("cluster is required")
 	}
 
 	if c.Spec == nil {
@@ -265,8 +261,8 @@ func currentStaticClusterHeadIP(c *v1.Cluster) string {
 }
 
 func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeCluster, error) {
-	if c == nil || c.Metadata == nil {
-		return nil, errors.New("cluster metadata is required")
+	if c == nil {
+		return nil, errors.New("cluster is required")
 	}
 
 	if c.Spec == nil {
@@ -450,8 +446,8 @@ func staticClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool {
 func (r *staticRayReconciler) calculateResources(
 	staticCluster *v1.StaticNodeCluster,
 ) (*v1.ClusterResources, error) {
-	if staticCluster == nil || staticCluster.Metadata == nil {
-		return nil, errors.New("static node cluster metadata is required to calculate resources")
+	if staticCluster == nil {
+		return nil, errors.New("static node cluster is required to calculate resources")
 	}
 
 	if r.storage == nil {
@@ -476,12 +472,15 @@ func (r *staticRayReconciler) calculateResources(
 		dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)),
 		resourceParsers,
 	)
-	resourceClient = resourceview.NewStaticNodeClusterResourceClient(
+	resourceClient, err = resourceview.NewStaticNodeClusterResourceClient(
 		resourceClient,
 		r.storage,
 		staticCluster.Metadata.Workspace,
 		staticCluster.Metadata.Name,
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 

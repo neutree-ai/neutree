@@ -735,21 +735,21 @@ func TestStaticNodeReconcilerReconcileComponentsChecksRayWorkerHTTPProbe(t *test
 	assert.Equal(t, len(runner.responses), runner.calls)
 }
 
-func TestStaticNodeReconcilerReconcileComponentsWaitsForHeadBeforeRayWorker(t *testing.T) {
+func TestStaticNodeReconcilerReconcileComponentsWaitsForHeadBeforeWorkerComponent(t *testing.T) {
 	node := &v1.StaticNode{
 		Metadata: &v1.Metadata{Workspace: "default", Name: "worker-0"},
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      "10.0.0.11",
 			Role:    v1.StaticNodeRoleWorker,
-			Components: []v1.NodeComponentSpec{
-				{
-					Name:       "ray-worker",
-					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
-					ConfigHash: "hash-ray-worker",
+				Components: []v1.NodeComponentSpec{
+					{
+						Name:       "worker-runtime",
+						Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
+						ConfigHash: "hash-worker-runtime",
+					},
 				},
 			},
-		},
 	}
 	runner := &fakeStaticNodeRunner{}
 	reconciler := &StaticNodeReconciler{

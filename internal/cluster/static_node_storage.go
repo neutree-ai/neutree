@@ -29,7 +29,7 @@ func listStaticNodesByCluster(
 	nodes := make([]*v1.StaticNode, 0, len(items))
 	for i := range items {
 		node := &items[i]
-		if node.Metadata == nil || node.Spec == nil {
+		if node.Spec == nil {
 			continue
 		}
 

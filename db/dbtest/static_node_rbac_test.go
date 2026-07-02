@@ -40,7 +40,28 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 	}
 }
 
-func TestStaticNodeRBAC_DirectUserReadsAreBlocked(t *testing.T) {
+func createUserWithPresetRole(t *testing.T, tx *sql.Tx, username, email, roleName string) string {
+	t.Helper()
+	ctx := context.Background()
+	user := CreateTestUser(t, username, email, "password123")
+
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
+		VALUES (
+			'v1',
+			'RoleAssignment',
+			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW($2::uuid, NULL, TRUE, $3)::api.role_assignment_spec
+		)
+	`, username+"-"+roleName+"-role-assignment", user.ID, roleName)
+	if err != nil {
+		t.Fatalf("failed to assign preset role %s: %v", roleName, err)
+	}
+
+	return user.ID
+}
+
+func TestStaticNodeRBAC_UserWithoutStaticReadPermissionIsBlocked(t *testing.T) {
 	adminDB := GetTestDB(t)
 	ctx := context.Background()
 
@@ -67,7 +88,7 @@ func TestStaticNodeRBAC_DirectUserReadsAreBlocked(t *testing.T) {
 			return err
 		}
 		if clusterCount != 0 {
-			t.Fatalf("expected static node clusters to be hidden from direct user reads, got %d", clusterCount)
+			t.Fatalf("expected static node clusters to be hidden from users without static read permission, got %d", clusterCount)
 		}
 
 		var nodeCount int
@@ -78,7 +99,55 @@ func TestStaticNodeRBAC_DirectUserReadsAreBlocked(t *testing.T) {
 			return err
 		}
 		if nodeCount != 0 {
-			t.Fatalf("expected static nodes to be hidden from direct user reads, got %d", nodeCount)
+			t.Fatalf("expected static nodes to be hidden from users without static read permission, got %d", nodeCount)
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStaticNodeRBAC_AdminRoleCanReadStaticResources(t *testing.T) {
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+
+	tx1, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+
+	workspace := "static-node-rbac-admin-read"
+	clusterName := "static-admin-a"
+	createStaticNodeResources(t, tx1, workspace, clusterName)
+	userID := createUserWithPresetRole(t, tx1, "static-admin-reader", "static-admin-reader@test.local", "admin")
+
+	if err = tx1.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	err = executeAsUser(t, adminDB, userID, func(tx *sql.Tx) error {
+		var clusterCount int
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM api.static_node_clusters
+			WHERE (metadata).workspace = $1
+		`, workspace).Scan(&clusterCount); err != nil {
+			return err
+		}
+		if clusterCount != 1 {
+			t.Fatalf("expected admin role to read one static node cluster, got %d", clusterCount)
+		}
+
+		var nodeCount int
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM api.static_nodes
+			WHERE (metadata).workspace = $1
+		`, workspace).Scan(&nodeCount); err != nil {
+			return err
+		}
+		if nodeCount != 1 {
+			t.Fatalf("expected admin role to read one static node, got %d", nodeCount)
 		}
 
 		return nil

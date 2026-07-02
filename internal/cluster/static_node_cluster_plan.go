@@ -24,10 +24,6 @@ func (r *StaticNodeClusterPlanner) buildDesiredNodePlans(
 		return nil, errors.New("static node cluster is nil")
 	}
 
-	if cluster.Metadata == nil || cluster.Metadata.Name == "" {
-		return nil, errors.New("static node cluster metadata.name is required")
-	}
-
 	if cluster.Spec == nil {
 		return nil, errors.New("static node cluster spec is required")
 	}
