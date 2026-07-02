@@ -68,7 +68,12 @@ WORKDIR ${HOME}
 RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
     cd /install \
     && uv pip install --system -r python/requirements.txt \
-    && uv pip install --system .whl/*.whl
+    && uv pip install --system .whl/*.whl \
+    # Ray's requirements leave protobuf unbounded; protobuf >= 6.30 removes
+    # FieldDescriptor.label, which breaks Ray 2.53's generated protos at Serve
+    # deploy time (DeploymentConfig.from_proto_bytes -> AttributeError). Pin
+    # below 6 until Ray is upgraded to a protobuf-6-compatible release.
+    && uv pip install --system "protobuf>=4.25,<6"
 
 # Relax Python patch version check (cluster 3.12.x vs engine 3.12.x)
 ENV RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL=minor
