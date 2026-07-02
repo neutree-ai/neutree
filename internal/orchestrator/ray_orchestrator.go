@@ -48,6 +48,8 @@ const (
 	modelDownloadStartMarker  = "NEUTREE_MODEL_DOWNLOAD_START"
 	modelDownloadDoneMarker   = "NEUTREE_MODEL_DOWNLOAD_DONE"
 	modelDownloadFailedMarker = "NEUTREE_MODEL_DOWNLOAD_FAILED"
+
+	legacyModelDownloadDoneMarker = "Model download completed."
 )
 
 type modelDownloadMarkerState int
@@ -452,7 +454,8 @@ func modelDownloadStateFromLog(logText string) modelDownloadMarkerState {
 		return modelDownloadMarkerFailed
 	}
 
-	if strings.Contains(logText, modelDownloadDoneMarker) {
+	if strings.Contains(logText, modelDownloadDoneMarker) ||
+		strings.Contains(logText, legacyModelDownloadDoneMarker) {
 		return modelDownloadMarkerDone
 	}
 
