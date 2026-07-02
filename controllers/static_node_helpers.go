@@ -9,48 +9,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-const (
-	staticNodeClusterKind = "StaticNodeCluster"
-	staticNodeKind        = "StaticNode"
-	staticNodeListKind    = "StaticNodeList"
-)
-
-func listStaticNodes(
-	store storage.Storage,
-	workspace string,
-	clusterName string,
-) ([]*v1.StaticNode, error) {
-	if store == nil {
-		return nil, errors.New("storage is required")
-	}
-
-	items, err := store.ListStaticNode(storage.ListOption{
-		Filters: []storage.Filter{
-			{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
-			{Column: "spec->>cluster", Operator: "eq", Value: clusterName},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	nodes := make([]*v1.StaticNode, 0, len(items))
-	for i := range items {
-		node := items[i]
-		if node.Spec == nil {
-			continue
-		}
-
-		if node.Metadata.Workspace != workspace || node.Spec.Cluster != clusterName {
-			continue
-		}
-
-		nodes = append(nodes, &node)
-	}
-
-	return nodes, nil
-}
-
 func upsertStaticNode(store storage.Storage, node *v1.StaticNode) error {
 	if store == nil {
 		return errors.New("storage is required")
@@ -135,6 +93,7 @@ func hardDeleteStaticNodeCluster(store storage.Storage, cluster *v1.StaticNodeCl
 	}
 
 	prepareStaticNodeCluster(cluster)
+
 	return store.DeleteStaticNodeCluster(cluster.GetID())
 }
 
@@ -152,8 +111,8 @@ func updateStaticNodeClusterStatus(
 	}
 
 	prepareStaticNodeCluster(cluster)
+
 	return store.UpdateStaticNodeCluster(cluster.GetID(), &v1.StaticNodeCluster{
-		Kind:   staticNodeClusterKind,
 		Status: &status,
 	})
 }
@@ -172,8 +131,8 @@ func updateStaticNodeStatus(
 	}
 
 	prepareStaticNode(node)
+
 	return store.UpdateStaticNode(node.GetID(), &v1.StaticNode{
-		Kind:   staticNodeKind,
 		Status: &status,
 	})
 }
@@ -200,7 +159,7 @@ func prepareStaticNodeCluster(cluster *v1.StaticNodeCluster) {
 	}
 
 	if cluster.Kind == "" {
-		cluster.Kind = staticNodeClusterKind
+		cluster.Kind = v1.StaticNodeClusterKind
 	}
 }
 
@@ -210,6 +169,6 @@ func prepareStaticNode(node *v1.StaticNode) {
 	}
 
 	if node.Kind == "" {
-		node.Kind = staticNodeKind
+		node.Kind = v1.StaticNodeKind
 	}
 }

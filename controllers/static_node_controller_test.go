@@ -7,6 +7,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clusterreconcile "github.com/neutree-ai/neutree/internal/cluster"
+	commandrunner "github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
@@ -25,11 +26,11 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 	}
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
 		Storage: newTestStaticNodeStorage(objectStorage),
+		RunnerFactory: &fakeControllerStaticNodeRunnerFactory{
+			runner: runner,
+		},
 	})
 	require.NoError(t, err)
-	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
-		return runner, nil
-	}
 
 	err = controller.Reconcile(controllerStaticNode())
 
@@ -40,6 +41,12 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 	assert.Equal(t, v1.StaticNodePhaseReconciling, statusObj.Status.Phase)
 	require.NotNil(t, statusObj.Status.Warm)
 	assert.True(t, statusObj.Status.Warm.Ready)
+	require.Len(t, objectStorage.updatedStatusHistory, 3)
+	assert.NotNil(t, objectStorage.updatedStatusHistory[0].Status.Accelerator)
+	assert.Nil(t, objectStorage.updatedStatusHistory[0].Status.Warm)
+	require.NotNil(t, objectStorage.updatedStatusHistory[1].Status.Warm)
+	assert.True(t, objectStorage.updatedStatusHistory[1].Status.Warm.Ready)
+	assert.Equal(t, v1.StaticNodePhaseReconciling, objectStorage.updatedStatusHistory[2].Status.Phase)
 	assert.Equal(t, 1, runner.calls)
 }
 
@@ -72,15 +79,15 @@ func TestStaticNodeControllerForceDeleteHardDeletesAfterBestEffortCleanup(t *tes
 	}
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
 		Storage: newTestStaticNodeStorage(objectStorage),
+		RunnerFactory: &fakeControllerStaticNodeRunnerFactory{
+			runner: &fakeControllerStaticNodeRunner{
+				responses: []fakeControllerStaticNodeRunnerResponse{
+					{err: errors.New("remote cleanup failed")},
+				},
+			},
+		},
 	})
 	require.NoError(t, err)
-	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
-		return &fakeControllerStaticNodeRunner{
-			responses: []fakeControllerStaticNodeRunnerResponse{
-				{err: errors.New("remote cleanup failed")},
-			},
-		}, nil
-	}
 
 	err = controller.Reconcile(node)
 
@@ -95,15 +102,15 @@ func TestStaticNodeControllerDeleteFailureUpdatesStatusWithoutHardDelete(t *test
 	node.Metadata.DeletionTimestamp = "2026-06-15T16:47:17Z"
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
 		Storage: newTestStaticNodeStorage(objectStorage),
+		RunnerFactory: &fakeControllerStaticNodeRunnerFactory{
+			runner: &fakeControllerStaticNodeRunner{
+				responses: []fakeControllerStaticNodeRunnerResponse{
+					{err: errors.New("remote cleanup failed")},
+				},
+			},
+		},
 	})
 	require.NoError(t, err)
-	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
-		return &fakeControllerStaticNodeRunner{
-			responses: []fakeControllerStaticNodeRunnerResponse{
-				{err: errors.New("remote cleanup failed")},
-			},
-		}, nil
-	}
 
 	err = controller.Reconcile(node)
 
@@ -121,17 +128,18 @@ func TestStaticNodeControllerReconcileAlwaysCreatesRunner(t *testing.T) {
 	node := controllerStaticNode()
 	node.Spec.Warm = nil
 	node.Spec.Components = nil
+	runnerCreated := false
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
 		Storage: newTestStaticNodeStorage(objectStorage),
+		RunnerFactory: &fakeControllerStaticNodeRunnerFactory{
+			buildRunner: func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
+				runnerCreated = true
+
+				return &fakeControllerStaticNodeRunner{}, nil
+			},
+		},
 	})
 	require.NoError(t, err)
-
-	runnerCreated := false
-	controller.newRunner = func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error) {
-		runnerCreated = true
-
-		return &fakeControllerStaticNodeRunner{}, nil
-	}
 
 	err = controller.Reconcile(node)
 
@@ -169,6 +177,7 @@ func (f *fakeControllerStaticNodeStorage) UpdateStaticNode(id string, data *v1.S
 	}
 
 	f.objectStorage.updatedStatus[id] = data
+	f.objectStorage.updatedStatusHistory = append(f.objectStorage.updatedStatusHistory, data)
 
 	return nil
 }
@@ -180,8 +189,25 @@ func (f *fakeControllerStaticNodeStorage) DeleteStaticNode(id string) error {
 }
 
 type fakeControllerStaticNodeObjectStorage struct {
-	updatedStatus map[string]*v1.StaticNode
-	deletedIDs    []string
+	updatedStatus        map[string]*v1.StaticNode
+	updatedStatusHistory []*v1.StaticNode
+	deletedIDs           []string
+}
+
+type fakeControllerStaticNodeRunnerFactory struct {
+	runner      clusterreconcile.StaticNodeCommandRunner
+	buildRunner func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error)
+}
+
+func (f *fakeControllerStaticNodeRunnerFactory) NewStaticNodeRunner(
+	ctx context.Context,
+	node *v1.StaticNode,
+) (clusterreconcile.StaticNodeCommandRunner, error) {
+	if f.buildRunner != nil {
+		return f.buildRunner(ctx, node)
+	}
+
+	return f.runner, nil
 }
 
 type fakeControllerStaticNodeRunner struct {
@@ -212,6 +238,10 @@ func (f *fakeControllerStaticNodeRunner) Run(_ context.Context, command string) 
 }
 
 func (f *fakeControllerStaticNodeRunner) Close() error {
+	return nil
+}
+
+func (f *fakeControllerStaticNodeRunner) Files() commandrunner.FileClient {
 	return nil
 }
 

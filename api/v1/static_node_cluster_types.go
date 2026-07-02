@@ -6,6 +6,11 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
+const (
+	StaticNodeClusterKind = "StaticNodeCluster"
+	StaticNodeKind        = "StaticNode"
+)
+
 type StaticNodeCluster struct {
 	ID         int                      `json:"id,omitempty"`
 	APIVersion string                   `json:"api_version,omitempty"`
@@ -59,11 +64,19 @@ type StaticNodeClusterStatus struct {
 type StaticNodeClusterPhase string
 
 const (
+	// StaticNodeClusterPhaseProvisioning means the desired static nodes or their desired component
+	// observations have not fully converged yet.
 	StaticNodeClusterPhaseProvisioning StaticNodeClusterPhase = "Provisioning"
-	StaticNodeClusterPhaseUpgrading    StaticNodeClusterPhase = "Upgrading"
-	StaticNodeClusterPhaseReady        StaticNodeClusterPhase = "Ready"
-	StaticNodeClusterPhaseDegraded     StaticNodeClusterPhase = "Degraded"
-	StaticNodeClusterPhaseFailed       StaticNodeClusterPhase = "Failed"
+	// StaticNodeClusterPhaseUpgrading means a recreate-style version upgrade is in progress.
+	StaticNodeClusterPhaseUpgrading StaticNodeClusterPhase = "Upgrading"
+	// StaticNodeClusterPhaseReady means all desired static nodes are ready, warm-up is complete,
+	// the head node is ready, and desired components have been observed.
+	StaticNodeClusterPhaseReady StaticNodeClusterPhase = "Ready"
+	// StaticNodeClusterPhaseDegraded is reserved for future partial-service semantics.
+	// The current static cluster flow keeps partial readiness in Provisioning.
+	StaticNodeClusterPhaseDegraded StaticNodeClusterPhase = "Degraded"
+	// StaticNodeClusterPhaseFailed means a desired node failed or the cluster spec is invalid.
+	StaticNodeClusterPhaseFailed StaticNodeClusterPhase = "Failed"
 )
 
 type StaticNode struct {
@@ -147,12 +160,21 @@ func CPUStaticNodeAcceleratorStatus() StaticNodeAcceleratorStatus {
 type StaticNodePhase string
 
 const (
-	StaticNodePhasePending     StaticNodePhase = "Pending"
-	StaticNodePhaseWarming     StaticNodePhase = "Warming"
+	// StaticNodePhasePending is reserved for discovery-safe nodes that have not produced enough
+	// observed state for reconciliation to start.
+	StaticNodePhasePending StaticNodePhase = "Pending"
+	// StaticNodePhaseWarming means image warm-up has started but not all required images are ready.
+	StaticNodePhaseWarming StaticNodePhase = "Warming"
+	// StaticNodePhaseReconciling means warm-up is complete or not required, and component
+	// reconciliation is still empty, pending, or not fully running.
 	StaticNodePhaseReconciling StaticNodePhase = "Reconciling"
-	StaticNodePhaseReady       StaticNodePhase = "Ready"
-	StaticNodePhaseDegraded    StaticNodePhase = "Degraded"
-	StaticNodePhaseFailed      StaticNodePhase = "Failed"
+	// StaticNodePhaseReady means every desired component is running and ready.
+	StaticNodePhaseReady StaticNodePhase = "Ready"
+	// StaticNodePhaseDegraded is reserved for reachable nodes with unhealthy but non-fatal
+	// component or runtime state.
+	StaticNodePhaseDegraded StaticNodePhase = "Degraded"
+	// StaticNodePhaseFailed means node reconciliation failed and ErrorMessage records the cause.
+	StaticNodePhaseFailed StaticNodePhase = "Failed"
 )
 
 type NodeComponentSpec struct {
@@ -260,12 +282,22 @@ type NodeComponentStatus struct {
 type NodeComponentPhase string
 
 const (
-	NodeComponentPhasePending  NodeComponentPhase = "Pending"
+	// NodeComponentPhasePending means the component is intentionally waiting for a prerequisite,
+	// such as a worker component waiting for the head static node to become ready.
+	NodeComponentPhasePending NodeComponentPhase = "Pending"
+	// NodeComponentPhaseStarting means the controller could not confirm an existing matching
+	// container and is starting or restarting it.
 	NodeComponentPhaseStarting NodeComponentPhase = "Starting"
-	NodeComponentPhaseRunning  NodeComponentPhase = "Running"
+	// NodeComponentPhaseRunning means the component container matches the desired image/hash and
+	// passed its configured health check.
+	NodeComponentPhaseRunning NodeComponentPhase = "Running"
+	// NodeComponentPhaseDegraded means the component exists but its health check failed.
 	NodeComponentPhaseDegraded NodeComponentPhase = "Degraded"
-	NodeComponentPhaseFailed   NodeComponentPhase = "Failed"
-	NodeComponentPhaseStopped  NodeComponentPhase = "Stopped"
+	// NodeComponentPhaseFailed means component reconciliation failed, such as image, config, or
+	// container startup failure.
+	NodeComponentPhaseFailed NodeComponentPhase = "Failed"
+	// NodeComponentPhaseStopped means a previously observed stale component was removed.
+	NodeComponentPhaseStopped NodeComponentPhase = "Stopped"
 )
 
 type WarmSpec struct {

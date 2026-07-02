@@ -148,7 +148,7 @@ func TestStaticRayReconcilerCalculateResourcesEnrichesFromStaticNodeDevices(t *t
 				},
 			},
 		},
-	}, nil).Twice()
+	}, nil).Maybe()
 	mockAcceleratorManager.On("GetAllParsers").Return(map[string]resourceview.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	}).Once()
@@ -224,30 +224,7 @@ func connectedStaticNodeImageRegistry() v1.ImageRegistry {
 	}
 }
 
-func TestStaticRayReconcilerMarksApplyingPhaseForGenericClusterPhase(t *testing.T) {
-	reconciler := &staticRayReconciler{}
-	cluster := &v1.Cluster{Status: &v1.ClusterStatus{Initialized: true}}
-
-	reconciler.markApplying(cluster, &v1.StaticNodeClusterStatus{
-		Phase: v1.StaticNodeClusterPhaseProvisioning,
-	}, false)
-
-	assert.Equal(t, v1.ClusterPhaseUpdating, DetermineClusterPhase(false, cluster))
-
-	reconciler.markApplying(cluster, &v1.StaticNodeClusterStatus{
-		Phase: v1.StaticNodeClusterPhaseUpgrading,
-	}, false)
-
-	assert.Equal(t, v1.ClusterPhaseUpgrading, DetermineClusterPhase(false, cluster))
-
-	reconciler.markApplying(cluster, &v1.StaticNodeClusterStatus{
-		Phase: v1.StaticNodeClusterPhaseFailed,
-	}, false)
-
-	assert.Equal(t, v1.ClusterPhaseFailed, DetermineClusterPhase(false, cluster))
-}
-
-func TestStaticRayReconcilerWrapsDashboardVerificationAsApplying(t *testing.T) {
+func TestStaticRayReconcilerDoesNotBlockWhenResourceCalculationFails(t *testing.T) {
 	store := &storagemocks.MockStorage{}
 	mockDashboard := &dashboardmocks.MockDashboardService{}
 	reconciler := &staticRayReconciler{storage: store}
@@ -305,9 +282,9 @@ func TestStaticRayReconcilerWrapsDashboardVerificationAsApplying(t *testing.T) {
 
 	err := reconciler.Reconcile(context.Background(), cluster)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Ray verification failed")
-	assert.Equal(t, v1.ClusterPhaseUpdating, DetermineClusterPhase(false, cluster))
+	require.NoError(t, err)
+	require.NotNil(t, cluster.Status)
+	assert.Nil(t, cluster.Status.ResourceInfo)
 	mockDashboard.AssertExpectations(t)
 	store.AssertExpectations(t)
 }

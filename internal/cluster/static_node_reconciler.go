@@ -39,11 +39,8 @@ const (
 
 type StaticNodeCommandRunner interface {
 	Run(ctx context.Context, command string) (string, error)
-	Close() error
-}
-
-type staticNodeFileRunner interface {
 	Files() commandrunner.FileClient
+	Close() error
 }
 
 type StaticNodeReconciler struct {
@@ -78,7 +75,7 @@ func (c *StaticNodeClusterHeadReadyChecker) HeadReady(ctx context.Context, node 
 		return false, nil
 	}
 
-	nodes, err := listStaticNodesByCluster(c.Storage, node.Metadata.Workspace, node.Spec.Cluster)
+	nodes, err := ListStaticNodesByCluster(c.Storage, node.Metadata.Workspace, node.Spec.Cluster)
 	if err != nil {
 		return false, err
 	}
@@ -212,7 +209,7 @@ func (r *StaticNodeReconciler) Delete(
 			errs = append(errs, errors.Wrapf(err, "failed to remove component container %s", containerName))
 		}
 
-		if err := removeComponentConfigFiles(ctx, runner, component); err != nil {
+		if err := NewStaticNodeFileRuntime(runner).RemoveComponentConfigFiles(ctx, component); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -281,36 +278,6 @@ func appendStaticNodeDeleteComponent(
 	return append(components, component)
 }
 
-func removeComponentConfigFiles(
-	ctx context.Context,
-	runner StaticNodeCommandRunner,
-	component v1.NodeComponentSpec,
-) error {
-	if len(component.ConfigFiles) == 0 {
-		return nil
-	}
-
-	fileRunner, ok := runner.(staticNodeFileRunner)
-	if !ok {
-		return errors.New("static node command runner does not support file operations")
-	}
-
-	files := fileRunner.Files()
-	if files == nil {
-		return errors.New("static node command runner file client is nil")
-	}
-
-	errs := []error{}
-
-	for _, configFile := range component.ConfigFiles {
-		if err := files.Remove(ctx, configFile.Path, commandrunner.RemoveFileOptions{Sudo: configFile.Sudo}); err != nil {
-			errs = append(errs, errors.Wrapf(err, "failed to remove config file %s", configFile.Path))
-		}
-	}
-
-	return apierrors.NewAggregate(errs)
-}
-
 func (r *StaticNodeReconciler) ReconcileComponents(
 	ctx context.Context,
 	node *v1.StaticNode,
@@ -367,7 +334,7 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		ObservedImage: component.Image,
 	}
 
-	waitForHead, err := r.shouldWaitForHead(ctx, node, component)
+	waitForHead, err := r.shouldWaitForHead(ctx, node)
 	if err != nil || waitForHead {
 		status.Phase = v1.NodeComponentPhasePending
 		status.Reason = componentReasonHeadPending
@@ -388,7 +355,7 @@ func (r *StaticNodeReconciler) reconcileComponent(
 		return status, errors.New(status.Message)
 	}
 
-	configChanged, err := writeComponentConfigFiles(ctx, runner, component)
+	configChanged, err := NewStaticNodeFileRuntime(runner).WriteComponentConfigFiles(ctx, component)
 	if err != nil {
 		status.Phase = v1.NodeComponentPhaseFailed
 		status.Reason = componentReasonConfigWriteFailed
@@ -483,7 +450,6 @@ func stopStaleComponents(
 func (r *StaticNodeReconciler) shouldWaitForHead(
 	ctx context.Context,
 	node *v1.StaticNode,
-	component v1.NodeComponentSpec,
 ) (bool, error) {
 	if node == nil || node.Spec == nil || node.Spec.Role != v1.StaticNodeRoleWorker {
 		return false, nil
@@ -499,53 +465,6 @@ func (r *StaticNodeReconciler) shouldWaitForHead(
 	}
 
 	return !headReady, nil
-}
-
-func writeComponentConfigFiles(
-	ctx context.Context,
-	runner StaticNodeCommandRunner,
-	component v1.NodeComponentSpec,
-) (bool, error) {
-	if len(component.ConfigFiles) == 0 {
-		return false, nil
-	}
-
-	fileRunner, ok := runner.(staticNodeFileRunner)
-	if !ok {
-		return false, errors.New("static node command runner does not support file operations")
-	}
-
-	changed := false
-
-	files := fileRunner.Files()
-	if files == nil {
-		return false, errors.New("static node command runner file client is nil")
-	}
-
-	for _, configFile := range component.ConfigFiles {
-		fileChanged, err := files.WriteFileIfChanged(
-			ctx,
-			configFile.Path,
-			[]byte(configFile.Content),
-			commandrunner.WriteFileOptions{
-				Mode:         configFile.Mode,
-				Owner:        configFile.Owner,
-				Group:        configFile.Group,
-				Sudo:         configFile.Sudo,
-				Atomic:       configFile.Atomic,
-				CreateParent: configFile.CreateParent,
-			},
-		)
-		if err != nil {
-			return changed, errors.Wrapf(err, "failed to write config file %s", configFile.Path)
-		}
-
-		if fileChanged && !configFile.SkipRestartOnChange {
-			changed = true
-		}
-	}
-
-	return changed, nil
 }
 
 func (r *StaticNodeReconciler) checkComponentHealth(
@@ -684,10 +603,10 @@ func (r *StaticNodeReconciler) reconcileWarmImage(
 	}
 
 	status.Phase = v1.WarmPhasePulling
-	if _, pullErr := runner.Run(ctx, "docker pull "+shellArg(image.Ref)); pullErr != nil {
+	if pullErr := dockerRuntime.PullImage(ctx, image.Ref); pullErr != nil {
 		status.Phase = v1.WarmPhaseFailed
 		status.Reason = warmReasonImagePullFailed
-		status.Message = fmt.Sprintf("failed to pull image %s: %v", image.Ref, pullErr)
+		status.Message = pullErr.Error()
 
 		return status, pullErr
 	}

@@ -256,15 +256,6 @@ func resolveClusterForVersionUpdate(
 func validateStaticNodeClusterFlowDowngrade(clusterType, previousVersion, desiredVersion string) *validationError {
 	if err := clustervalidation.ValidateStaticNodeClusterFlowVersionUpdate(
 		clusterType, previousVersion, desiredVersion); err != nil {
-		return clusterVersionUpdateValidationError(err)
-	}
-
-	return nil
-}
-
-func clusterVersionUpdateValidationError(err error) *validationError {
-	var versionUpdateErr *clustervalidation.ClusterVersionUpdateError
-	if !errors.As(err, &versionUpdateErr) {
 		return &validationError{
 			Code:    "10212",
 			Message: "invalid cluster version update",
@@ -272,11 +263,7 @@ func clusterVersionUpdateValidationError(err error) *validationError {
 		}
 	}
 
-	return &validationError{
-		Code:    "10212",
-		Message: versionUpdateErr.Message,
-		Hint:    versionUpdateErr.Hint,
-	}
+	return nil
 }
 
 func clusterAcceleratorVirtualizationDisableRequested(body []byte) (bool, error) {

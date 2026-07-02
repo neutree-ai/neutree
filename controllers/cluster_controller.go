@@ -100,7 +100,7 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 		controller.updateClusterStatus(c, reconcileErr)
 	}()
 
-	r, err := controller.newClusterReconciler(c)
+	r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 	if err != nil {
 		reconcileErr = errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 		return reconcileErr
@@ -158,7 +158,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 			controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
 		}
 
-		r, err := controller.newClusterReconciler(c)
+		r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 		}
@@ -181,7 +181,10 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 
 // updateClusterStatus determines cluster phase and updates storage.
 // reconcileErr == nil means resources are ready (Reconcile includes status checks).
-func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcileErr error) {
+func (controller *ClusterController) updateClusterStatus(
+	c *v1.Cluster,
+	reconcileErr error,
+) {
 	if c.Metadata.DeletionTimestamp != "" {
 		phase := cluster.DetermineClusterDeletePhase(reconcileErr == nil, c)
 
@@ -206,15 +209,6 @@ func (controller *ClusterController) updateClusterStatus(c *v1.Cluster, reconcil
 	if updateErr := controller.updateStatus(c, phase, reconcileErr); updateErr != nil {
 		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
 	}
-}
-
-func (controller *ClusterController) newClusterReconciler(c *v1.Cluster) (cluster.ClusterReconcile, error) {
-	factory := controller.newClusterReconcile
-	if factory == nil {
-		factory = cluster.NewReconcile
-	}
-
-	return factory(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 }
 
 func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {

@@ -57,7 +57,7 @@ func TestStaticNodeKey(t *testing.T) {
 
 func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	node := &StaticNode{
-		Kind: "StaticNode",
+		Kind: StaticNodeKind,
 		Metadata: &Metadata{
 			Name:      "head-0",
 			Workspace: "default",

@@ -1,21 +1,15 @@
 package cluster
 
 import (
-	"github.com/pkg/errors"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-func listStaticNodesByCluster(
+func ListStaticNodesByCluster(
 	store storage.Storage,
 	workspace string,
 	clusterName string,
 ) ([]*v1.StaticNode, error) {
-	if store == nil {
-		return nil, errors.New("storage is required")
-	}
-
 	items, err := store.ListStaticNode(storage.ListOption{
 		Filters: []storage.Filter{
 			{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
@@ -27,6 +21,7 @@ func listStaticNodesByCluster(
 	}
 
 	nodes := make([]*v1.StaticNode, 0, len(items))
+
 	for i := range items {
 		node := &items[i]
 		if node.Spec == nil {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -21,15 +20,6 @@ import (
 type acceleratorPluginClient struct {
 	client  *http.Client
 	baseURL string
-}
-
-type pluginHTTPError struct {
-	StatusCode int
-	Content    string
-}
-
-func (e *pluginHTTPError) Error() string {
-	return fmt.Sprintf("accelerator plugin request failed, status code: %d, content: %s", e.StatusCode, e.Content)
 }
 
 func newAcceleratorPluginClient(baseUrl string) AcceleratorPluginHandle {
@@ -185,10 +175,7 @@ func parsePluginResponse(resp *http.Response, result interface{}) error {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return &pluginHTTPError{
-			StatusCode: resp.StatusCode,
-			Content:    string(content),
-		}
+		return errors.Errorf("accelerator plugin request failed, status code: %d, content: %s", resp.StatusCode, string(content))
 	}
 
 	err = json.Unmarshal(content, result)

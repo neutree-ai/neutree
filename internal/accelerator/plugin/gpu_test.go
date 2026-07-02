@@ -122,6 +122,9 @@ func TestGPUAcceleratorPluginGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
 	require.NotNil(t, profile.EngineRuntime)
 	assert.Equal(t, "nvidia", profile.EngineRuntime.Runtime)
+	containerRuntime, err := p.GetContainerRuntimeConfig()
+	require.NoError(t, err)
+	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
 }
 
 func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {

@@ -9,28 +9,6 @@ import (
 
 const StaticNodeClusterFlowVersionGate = "v1.0.1"
 
-type ClusterVersionUpdateErrorReason string
-
-const (
-	ClusterVersionUpdateInvalidVersionReason       ClusterVersionUpdateErrorReason = "invalid_version"
-	ClusterVersionUpdateUnsupportedDowngradeReason ClusterVersionUpdateErrorReason = "unsupported_static_flow_downgrade"
-)
-
-type ClusterVersionUpdateError struct {
-	Reason  ClusterVersionUpdateErrorReason
-	Message string
-	Hint    string
-	Err     error
-}
-
-func (e *ClusterVersionUpdateError) Error() string {
-	return e.Message
-}
-
-func (e *ClusterVersionUpdateError) Unwrap() error {
-	return e.Err
-}
-
 func UsesStaticNodeClusterFlow(clusterType, version string) (bool, error) {
 	if clusterType != v1.SSHClusterType {
 		return false, nil
@@ -47,32 +25,21 @@ func UsesStaticNodeClusterFlow(clusterType, version string) (bool, error) {
 func ValidateStaticNodeClusterFlowVersionUpdate(clusterType, previousVersion, desiredVersion string) error {
 	previousUsesStaticFlow, err := UsesStaticNodeClusterFlow(clusterType, previousVersion)
 	if err != nil {
-		return &ClusterVersionUpdateError{
-			Reason:  ClusterVersionUpdateInvalidVersionReason,
-			Message: "invalid current cluster version",
-			Hint:    err.Error(),
-			Err:     err,
-		}
+		return fmt.Errorf("invalid current cluster version: %w", err)
 	}
 
 	desiredUsesStaticFlow, err := UsesStaticNodeClusterFlow(clusterType, desiredVersion)
 	if err != nil {
-		return &ClusterVersionUpdateError{
-			Reason:  ClusterVersionUpdateInvalidVersionReason,
-			Message: "invalid desired cluster version",
-			Hint:    err.Error(),
-			Err:     err,
-		}
+		return fmt.Errorf("invalid desired cluster version: %w", err)
 	}
 
 	if previousUsesStaticFlow && !desiredUsesStaticFlow {
-		return &ClusterVersionUpdateError{
-			Reason: ClusterVersionUpdateUnsupportedDowngradeReason,
-			Message: fmt.Sprintf("cluster version downgrade from static flow to legacy flow is not supported for %s clusters",
-				clusterType),
-			Hint: fmt.Sprintf("Keep spec.version greater than %s or recreate the cluster if legacy flow is required",
-				StaticNodeClusterFlowVersionGate),
-		}
+		return fmt.Errorf(
+			"cluster version downgrade from static flow to legacy flow is not supported for %s clusters; "+
+				"keep spec.version greater than %s or recreate the cluster if legacy flow is required",
+			clusterType,
+			StaticNodeClusterFlowVersionGate,
+		)
 	}
 
 	return nil

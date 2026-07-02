@@ -106,6 +106,9 @@ func TestAMDGPUAcceleratorPluginGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
 	require.NotNil(t, profile.EngineRuntime)
 	assert.Equal(t, "rocm", profile.EngineRuntime.ImageSuffix)
+	containerRuntime, err := p.GetContainerRuntimeConfig()
+	require.NoError(t, err)
+	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
 }
 
 func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {

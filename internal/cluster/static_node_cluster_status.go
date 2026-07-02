@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -10,145 +11,180 @@ import (
 
 func joinStatusMessages(current string, messages ...string) string {
 	result := make([]string, 0, len(messages)+1)
-	if current != "" {
-		result = append(result, current)
+	appendMessage := func(message string) {
+		if message == "" {
+			return
+		}
+
+		if stringSliceContains(result, message) {
+			return
+		}
+
+		result = append(result, message)
 	}
 
-	result = append(result, messages...)
+	if current != "" {
+		for _, message := range strings.Split(current, "; ") {
+			appendMessage(message)
+		}
+	}
+
+	for _, message := range messages {
+		appendMessage(message)
+	}
 
 	return strings.Join(result, "; ")
 }
 
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+
+	return false
+}
+
 type StaticNodeClusterStatusAggregator struct{}
+
+type staticNodeClusterStatusContext struct {
+	DesiredNodes int
+	ReadyNodes   int
+	HeadReady    bool
+	WarmReady    bool
+
+	AnyNodeFailed  bool
+	HasMissing     bool
+	HasStale       bool
+	HasSpecDrift   bool
+	HasStatusDrift bool
+
+	Upgrade  *staticNodeClusterUpgradeState
+	Messages []string
+}
 
 func (a StaticNodeClusterStatusAggregator) Aggregate(
 	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
 	plans []StaticNodeClusterDesiredNodePlan,
 ) v1.StaticNodeClusterStatus {
-	desiredNodeNames, headName := staticNodeClusterDesiredNodeNames(cluster)
+	ctx := buildStaticNodeClusterStatusContext(cluster, nodes, plans)
+	phase := determineStaticNodeClusterPhase(ctx)
 
 	status := v1.StaticNodeClusterStatus{
-		Phase:        v1.StaticNodeClusterPhaseProvisioning,
-		DesiredNodes: len(desiredNodeNames),
-	}
-	if upgrade := staticNodeClusterUpgrade(cluster, nodes, plans); upgrade != nil {
-		status.Version = upgrade.ObservedVersion
-		status.ErrorMessage = string(upgrade.Step)
-		status.Phase = v1.StaticNodeClusterPhaseUpgrading
+		Phase:        phase,
+		DesiredNodes: ctx.DesiredNodes,
+		ReadyNodes:   ctx.ReadyNodes,
+		HeadReady:    ctx.HeadReady,
+		WarmReady:    ctx.WarmReady,
 	}
 
-	if status.DesiredNodes == 0 {
-		status.Phase = v1.StaticNodeClusterPhaseFailed
-		status.ErrorMessage = "static node cluster has no desired nodes"
-
+	if phase == v1.StaticNodeClusterPhaseReady && cluster != nil && cluster.Spec != nil {
+		status.Version = cluster.Spec.Version
 		return status
 	}
 
-	seenDesiredNodes := map[string]struct{}{}
-	warmReady := true
-	anyNodeFailed := false
-
-	for _, node := range nodes {
-		if node == nil || node.Status == nil {
-			warmReady = false
-
-			continue
-		}
-
-		if _, desired := desiredNodeNames[node.Metadata.Name]; !desired {
-			continue
-		}
-
-		seenDesiredNodes[node.Metadata.Name] = struct{}{}
-
-		if node.Status.Phase == v1.StaticNodePhaseReady {
-			status.ReadyNodes++
-		}
-
-		if node.Metadata.Name == headName {
-			status.HeadReady = node.Status.Phase == v1.StaticNodePhaseReady
-		}
-
-		if node.Status.Phase == v1.StaticNodePhaseFailed {
-			anyNodeFailed = true
-		}
-
-		if node.Status.Warm == nil || !node.Status.Warm.Ready {
-			warmReady = false
-		}
+	if ctx.Upgrade != nil {
+		status.Version = ctx.Upgrade.ObservedVersion
 	}
 
-	if len(seenDesiredNodes) < status.DesiredNodes {
-		warmReady = false
-	}
-
-	status.WarmReady = warmReady
-
-	switch {
-	case anyNodeFailed:
-		status.Phase = v1.StaticNodeClusterPhaseFailed
-	case status.Phase == v1.StaticNodeClusterPhaseUpgrading:
-		status.Phase = v1.StaticNodeClusterPhaseUpgrading
-	case status.ReadyNodes == status.DesiredNodes && status.HeadReady && status.WarmReady:
-		status.Phase = v1.StaticNodeClusterPhaseReady
-	case status.HeadReady && status.ReadyNodes > 0:
-		status.Phase = v1.StaticNodeClusterPhaseDegraded
-	default:
-		status.Phase = v1.StaticNodeClusterPhaseProvisioning
-	}
-
-	if status.Phase == v1.StaticNodeClusterPhaseReady && cluster != nil && cluster.Spec != nil {
-		status.Version = cluster.Spec.Version
-	}
-
-	if status.Phase != v1.StaticNodeClusterPhaseReady {
-		status.ErrorMessage = joinStatusMessages(
-			status.ErrorMessage,
-			staticNodeClusterNodeStatusMessages(cluster, staticNodeByName(nodes))...,
-		)
-	}
-
-	// Status decisions intentionally happen in observed-state order:
-	// 1. aggregate static-node readiness from current status,
-	// 2. advance recreate-upgrade steps only from observed node/component state,
-	// 3. require desired components to be written and observed before marking the desired version observed.
-	//
-	// status.version is the observed/converged version. It must not be advanced
-	// to spec.version until desired components have reached static-node status.
-	status = advanceStaticNodeClusterUpgradeStatus(cluster, nodes, status, plans)
-	status = requireDesiredComponentsObserved(cluster, status, plans, staticNodeByName(nodes))
+	status.ErrorMessage = joinStatusMessages("", ctx.Messages...)
 
 	return status
 }
 
-func requireDesiredComponentsObserved(
+func buildStaticNodeClusterStatusContext(
 	cluster *v1.StaticNodeCluster,
-	status v1.StaticNodeClusterStatus,
+	nodes []*v1.StaticNode,
 	plans []StaticNodeClusterDesiredNodePlan,
-	currentByName map[string]*v1.StaticNode,
-) v1.StaticNodeClusterStatus {
-	if status.Phase != v1.StaticNodeClusterPhaseReady {
-		return status
+) staticNodeClusterStatusContext {
+	desiredNodeNames, headName := staticNodeClusterDesiredNodeNames(cluster)
+	currentByName := staticNodeByName(nodes)
+	plansByName := staticNodeClusterPlanByName(plans)
+	ctx := staticNodeClusterStatusContext{
+		DesiredNodes: len(desiredNodeNames),
+		WarmReady:    true,
+		Upgrade:      staticNodeClusterUpgrade(cluster, nodes, plans),
 	}
 
-	messages := desiredComponentMismatchMessages(plans, currentByName)
-	if len(messages) == 0 {
-		return status
+	if ctx.Upgrade != nil {
+		ctx.Messages = append(ctx.Messages, string(ctx.Upgrade.Step))
 	}
 
-	if upgrade := staticNodeClusterUpgrade(cluster, staticNodesFromByName(currentByName), plans); upgrade != nil {
-		status.Phase = v1.StaticNodeClusterPhaseUpgrading
-		status.Version = upgrade.ObservedVersion
-		status.ErrorMessage = string(staticNodeClusterUpgradeStepVerifying)
+	if ctx.DesiredNodes == 0 {
+		ctx.AnyNodeFailed = true
+		ctx.Messages = append(ctx.Messages, "static node cluster has no desired nodes")
 
-		return status
+		return ctx
 	}
 
-	status.Phase = v1.StaticNodeClusterPhaseProvisioning
-	status.ErrorMessage = strings.Join(messages, "; ")
+	for _, node := range nodes {
+		if node == nil || node.Metadata == nil {
+			continue
+		}
 
-	return status
+		if _, desired := desiredNodeNames[node.Metadata.Name]; desired {
+			continue
+		}
+
+		ctx.HasStale = true
+		ctx.Messages = append(ctx.Messages, staticNodeClusterStaleNodeMessage(node))
+	}
+
+	for _, nodeName := range staticNodeClusterDesiredNodeNameList(cluster) {
+		node := currentByName[nodeName]
+		plan := plansByName[nodeName]
+
+		if node == nil {
+			ctx.HasMissing = true
+			ctx.WarmReady = false
+			ctx.Messages = append(ctx.Messages, "static node "+nodeName+" is missing")
+
+			continue
+		}
+
+		if staticNodeSpecDrifted(plan.Node, node) {
+			ctx.HasSpecDrift = true
+			ctx.Messages = append(ctx.Messages, "static node "+nodeName+" spec is not observed")
+		}
+
+		if node.Status == nil {
+			ctx.HasStatusDrift = true
+			ctx.WarmReady = false
+			ctx.Messages = append(ctx.Messages, "static node "+nodeName+" status is empty")
+
+			continue
+		}
+
+		if node.Status.Phase == v1.StaticNodePhaseReady {
+			ctx.ReadyNodes++
+		}
+
+		if nodeName == headName {
+			ctx.HeadReady = node.Status.Phase == v1.StaticNodePhaseReady
+		}
+
+		if node.Status.Phase == v1.StaticNodePhaseFailed {
+			ctx.AnyNodeFailed = true
+		}
+
+		if node.Status.Warm == nil || !node.Status.Warm.Ready {
+			ctx.WarmReady = false
+		}
+
+		if message := staticNodeStatusMessage(nodeName, node); message != "" {
+			ctx.Messages = append(ctx.Messages, message)
+		}
+	}
+
+	statusDriftMessages := desiredComponentMismatchMessages(plans, currentByName)
+	if len(statusDriftMessages) > 0 {
+		ctx.HasStatusDrift = true
+		ctx.Messages = append(ctx.Messages, statusDriftMessages...)
+	}
+
+	return ctx
 }
 
 func desiredComponentMismatchMessages(
@@ -185,6 +221,70 @@ func desiredComponentMismatchMessages(
 	return messages
 }
 
+func determineStaticNodeClusterPhase(ctx staticNodeClusterStatusContext) v1.StaticNodeClusterPhase {
+	if ctx.DesiredNodes == 0 || ctx.AnyNodeFailed {
+		return v1.StaticNodeClusterPhaseFailed
+	}
+
+	if ctx.Upgrade != nil {
+		if staticNodeClusterStatusConverged(ctx) && ctx.Upgrade.Step == staticNodeClusterUpgradeStepVerifying {
+			return v1.StaticNodeClusterPhaseReady
+		}
+
+		return v1.StaticNodeClusterPhaseUpgrading
+	}
+
+	if staticNodeClusterStatusConverged(ctx) {
+		return v1.StaticNodeClusterPhaseReady
+	}
+
+	return v1.StaticNodeClusterPhaseProvisioning
+}
+
+func staticNodeClusterStatusConverged(ctx staticNodeClusterStatusContext) bool {
+	return !ctx.HasMissing &&
+		!ctx.HasStale &&
+		!ctx.HasSpecDrift &&
+		!ctx.HasStatusDrift &&
+		ctx.ReadyNodes == ctx.DesiredNodes &&
+		ctx.HeadReady &&
+		ctx.WarmReady
+}
+
+func staticNodeClusterPlanByName(plans []StaticNodeClusterDesiredNodePlan) map[string]StaticNodeClusterDesiredNodePlan {
+	result := make(map[string]StaticNodeClusterDesiredNodePlan, len(plans))
+
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Metadata == nil {
+			continue
+		}
+
+		result[plan.Node.Metadata.Name] = plan
+	}
+
+	return result
+}
+
+func staticNodeSpecDrifted(desired *v1.StaticNode, current *v1.StaticNode) bool {
+	if desired == nil || current == nil {
+		return false
+	}
+
+	return !reflect.DeepEqual(current.Spec, desired.Spec)
+}
+
+func staticNodeClusterStaleNodeMessage(node *v1.StaticNode) string {
+	if node == nil || node.Metadata == nil {
+		return ""
+	}
+
+	if node.Metadata.DeletionTimestamp != "" {
+		return "stale static node " + node.Metadata.Name + " is deleting"
+	}
+
+	return "stale static node " + node.Metadata.Name + " exists"
+}
+
 func desiredComponentObserved(component v1.NodeComponentSpec, statuses []v1.NodeComponentStatus) bool {
 	for _, status := range statuses {
 		if status.Name != component.Name {
@@ -207,27 +307,6 @@ func desiredComponentObserved(component v1.NodeComponentSpec, statuses []v1.Node
 	}
 
 	return false
-}
-
-func staticNodeClusterNodeStatusMessages(
-	cluster *v1.StaticNodeCluster,
-	nodesByName map[string]*v1.StaticNode,
-) []string {
-	nodeNames := staticNodeClusterDesiredNodeNameList(cluster)
-	messages := make([]string, 0, len(nodeNames))
-
-	for _, nodeName := range nodeNames {
-		node := nodesByName[nodeName]
-
-		message := staticNodeStatusMessage(nodeName, node)
-		if message == "" {
-			continue
-		}
-
-		messages = append(messages, message)
-	}
-
-	return messages
 }
 
 func staticNodeStatusMessage(nodeName string, node *v1.StaticNode) string {

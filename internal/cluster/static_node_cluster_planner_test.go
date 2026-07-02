@@ -390,7 +390,7 @@ func TestStaticNodeClusterPlannerPlansRayRecreateUpgradeOrder(t *testing.T) {
 			status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 			assert.Equal(t, v1.StaticNodeClusterPhaseUpgrading, status.Phase)
 			assert.Equal(t, "v1.2.0", status.Version)
-			assert.Equal(t, tt.wantStep, status.ErrorMessage)
+			assert.Contains(t, status.ErrorMessage, tt.wantStep)
 
 			desiredNodes := staticNodesFromPlans(desiredNodePlans)
 			head := findStaticNode(desiredNodes, "head-0")
@@ -479,7 +479,7 @@ func TestStaticNodeClusterPlannerAdvancesRayRecreateUpgradeStep(t *testing.T) {
 			require.NoError(t, err)
 			status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 			assert.Equal(t, v1.StaticNodeClusterPhaseUpgrading, status.Phase)
-			assert.Equal(t, tt.wantStep, status.ErrorMessage)
+			assert.Contains(t, status.ErrorMessage, tt.wantStep)
 		})
 	}
 }
@@ -560,6 +560,7 @@ func TestStaticNodeClusterPlannerFailsUpgradeWhenNodeFails(t *testing.T) {
 	status := (StaticNodeClusterStatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
 	assert.Equal(t, v1.StaticNodeClusterPhaseFailed, status.Phase)
 	assert.Equal(t, "v1.2.0", status.Version)
+	assert.Contains(t, status.ErrorMessage, "StoppingWorkers")
 	assert.Contains(t, status.ErrorMessage, "static node head-0 phase=Failed: ssh connection failed")
 }
 
@@ -620,13 +621,13 @@ func TestStaticNodeClusterStatusAggregatorAggregate(t *testing.T) {
 			},
 		},
 		{
-			name: "degraded when head is ready but a worker is not ready",
+			name: "provisioning when head is ready but a worker is not ready",
 			nodes: []*v1.StaticNode{
 				staticNodeStatus("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady, true, nil),
 				staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReconciling, false, nil),
 			},
 			wantStatus: v1.StaticNodeClusterStatus{
-				Phase:        v1.StaticNodeClusterPhaseDegraded,
+				Phase:        v1.StaticNodeClusterPhaseProvisioning,
 				DesiredNodes: 2,
 				ReadyNodes:   1,
 				HeadReady:    true,
@@ -664,7 +665,7 @@ func TestStaticNodeClusterStatusAggregatorAggregate(t *testing.T) {
 			},
 		},
 		{
-			name: "ignores stale nodes and marks missing desired nodes not ready",
+			name: "marks stale and missing nodes as not ready",
 			nodes: []*v1.StaticNode{
 				staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, nil),
 				staticNodeStatus("stale-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, nil),
@@ -675,7 +676,7 @@ func TestStaticNodeClusterStatusAggregatorAggregate(t *testing.T) {
 				ReadyNodes:   1,
 				HeadReady:    false,
 				WarmReady:    false,
-				ErrorMessage: "static node head-0 is missing",
+				ErrorMessage: "stale static node stale-0 exists; static node head-0 is missing",
 			},
 		},
 	}
@@ -1014,6 +1015,7 @@ func markStaticNodeUpgradeReady(
 		require.NotNil(t, current)
 		require.NotNil(t, current.Status)
 
+		current.Spec = desired.Spec
 		current.Status.Components = make([]v1.NodeComponentStatus, 0, len(desired.Spec.Components))
 		for _, component := range desired.Spec.Components {
 			current.Status.Components = append(current.Status.Components, v1.NodeComponentStatus{

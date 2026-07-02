@@ -69,99 +69,11 @@ func TestDetermineClusterPhase(t *testing.T) {
 			cluster:  &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, ObservedSpecHash: hashV1}},
 			expected: v1.ClusterPhaseFailed,
 		},
-		{
-			name:     "initialized, hash matches, reconciler marked updating -> Updating",
-			cluster:  &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Phase: v1.ClusterPhaseUpdating, ObservedSpecHash: hashV1}},
-			expected: v1.ClusterPhaseUpdating,
-		},
-		{
-			name:     "initialized, hash matches, reconciler marked upgrading -> Upgrading",
-			cluster:  &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Phase: v1.ClusterPhaseUpgrading, ObservedSpecHash: hashV1}},
-			expected: v1.ClusterPhaseUpgrading,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, DetermineClusterPhase(tt.isResourceReady, tt.cluster))
-		})
-	}
-}
-
-func TestDetermineStaticNodeClusterBackedClusterPhase(t *testing.T) {
-	specV1 := &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1", ImageRegistry: "reg"}
-	specV2 := &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.2", ImageRegistry: "reg"}
-	hashV1 := ComputeClusterSpecHash(specV1)
-
-	tests := []struct {
-		name            string
-		isResourceReady bool
-		cluster         *v1.Cluster
-		staticStatus    *v1.StaticNodeClusterStatus
-		specObserved    bool
-		expected        v1.ClusterPhase
-	}{
-		{
-			name:            "resource ready -> Running",
-			isResourceReady: true,
-			cluster:         &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, ObservedSpecHash: hashV1}},
-			staticStatus:    &v1.StaticNodeClusterStatus{Phase: v1.StaticNodeClusterPhaseReady, Version: "v1.0.1"},
-			specObserved:    true,
-			expected:        v1.ClusterPhaseRunning,
-		},
-		{
-			name:         "not initialized provisioning -> Initializing",
-			cluster:      &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{}},
-			staticStatus: &v1.StaticNodeClusterStatus{Phase: v1.StaticNodeClusterPhaseProvisioning},
-			expected:     v1.ClusterPhaseInitializing,
-		},
-		{
-			name:         "initialized provisioning -> Updating",
-			cluster:      &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.1", ObservedSpecHash: hashV1}},
-			staticStatus: &v1.StaticNodeClusterStatus{Phase: v1.StaticNodeClusterPhaseProvisioning},
-			expected:     v1.ClusterPhaseUpdating,
-		},
-		{
-			name:         "static upgrade phase -> Upgrading",
-			cluster:      &v1.Cluster{Spec: specV2, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.1", ObservedSpecHash: hashV1}},
-			staticStatus: &v1.StaticNodeClusterStatus{Phase: v1.StaticNodeClusterPhaseUpgrading, Version: "v1.0.1"},
-			expected:     v1.ClusterPhaseUpgrading,
-		},
-		{
-			name:         "static failed phase -> Failed",
-			cluster:      &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.1", ObservedSpecHash: hashV1}},
-			staticStatus: &v1.StaticNodeClusterStatus{Phase: v1.StaticNodeClusterPhaseFailed},
-			expected:     v1.ClusterPhaseFailed,
-		},
-		{
-			name:         "ready but spec not observed -> Updating",
-			cluster:      &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.1", ObservedSpecHash: hashV1}},
-			staticStatus: &v1.StaticNodeClusterStatus{Phase: v1.StaticNodeClusterPhaseReady, Version: "v1.0.1"},
-			expected:     v1.ClusterPhaseUpdating,
-		},
-		{
-			name:         "ready and spec observed but outer reconcile failed -> Updating",
-			cluster:      &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.1", ObservedSpecHash: hashV1}},
-			staticStatus: &v1.StaticNodeClusterStatus{Phase: v1.StaticNodeClusterPhaseReady, Version: "v1.0.1"},
-			specObserved: true,
-			expected:     v1.ClusterPhaseUpdating,
-		},
-		{
-			name:         "missing static status and observed spec falls back to default Failed",
-			cluster:      &v1.Cluster{Spec: specV1, Status: &v1.ClusterStatus{Initialized: true, Version: "v1.0.1", ObservedSpecHash: hashV1}},
-			specObserved: true,
-			expected:     v1.ClusterPhaseFailed,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, DetermineStaticNodeClusterBackedClusterPhase(
-				tt.isResourceReady,
-				tt.cluster,
-				tt.staticStatus,
-				tt.specObserved,
-			))
 		})
 	}
 }

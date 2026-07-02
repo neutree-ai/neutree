@@ -87,6 +87,7 @@ func enrichStaticNodeClusterResourceNodes(nodes []ResourceNode, staticNodes []*v
 
 func staticNodePointers(nodes []v1.StaticNode, workspace, clusterName string) []*v1.StaticNode {
 	result := make([]*v1.StaticNode, 0, len(nodes))
+
 	for i := range nodes {
 		node := &nodes[i]
 		if node.Spec == nil {
@@ -163,6 +164,7 @@ func enrichStaticNodeClusterResourceNodeDevices(
 
 		nodeID := staticNodeResourceID(staticNode)
 		index, ok := byID[nodeID]
+
 		if !ok {
 			*nodes = append(*nodes, ResourceNode{ID: nodeID})
 			index = len(*nodes) - 1
@@ -228,7 +230,7 @@ func staticNodeClusterDeviceResources(
 		}
 		devices = append(devices, &v1.DeviceResource{
 			UUID:    device.UUID,
-			Product: staticNodeDeviceProduct(nodeResource, acceleratorType, accelerator, device),
+			Product: staticNodeDeviceProduct(nodeResource, acceleratorType, device),
 			Health:  device.Healthy,
 			Allocatable: &v1.DeviceResourcePool{
 				MemoryMiB: allocatable.MemoryMiB,
@@ -247,7 +249,6 @@ func staticNodeClusterDeviceResources(
 func staticNodeDeviceProduct(
 	nodeResource *v1.NodeResourceStatus,
 	acceleratorType v1.AcceleratorType,
-	accelerator v1.StaticNodeAcceleratorStatus,
 	device v1.StaticNodeAcceleratorDeviceStatus,
 ) string {
 	deviceProduct := firstNonEmptyString(device.ProductModel, device.ProductName)

@@ -742,14 +742,14 @@ func TestStaticNodeReconcilerReconcileComponentsWaitsForHeadBeforeWorkerComponen
 			Cluster: "static-a",
 			IP:      "10.0.0.11",
 			Role:    v1.StaticNodeRoleWorker,
-				Components: []v1.NodeComponentSpec{
-					{
-						Name:       "worker-runtime",
-						Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
-						ConfigHash: "hash-worker-runtime",
-					},
+			Components: []v1.NodeComponentSpec{
+				{
+					Name:       "worker-runtime",
+					Image:      "registry.example.com/neutree/neutree-serve:v1.2.0",
+					ConfigHash: "hash-worker-runtime",
 				},
 			},
+		},
 	}
 	runner := &fakeStaticNodeRunner{}
 	reconciler := &StaticNodeReconciler{

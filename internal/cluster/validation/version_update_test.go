@@ -59,7 +59,7 @@ func TestValidateStaticNodeClusterFlowVersionUpdate(t *testing.T) {
 		clusterType     string
 		previousVersion string
 		desiredVersion  string
-		reason          ClusterVersionUpdateErrorReason
+		wantErrContains string
 	}{
 		{
 			name:            "allows legacy to static upgrade",
@@ -78,7 +78,7 @@ func TestValidateStaticNodeClusterFlowVersionUpdate(t *testing.T) {
 			clusterType:     "ssh",
 			previousVersion: "v1.1.0",
 			desiredVersion:  "v1.0.1",
-			reason:          ClusterVersionUpdateUnsupportedDowngradeReason,
+			wantErrContains: "static flow to legacy flow is not supported",
 		},
 		{
 			name:            "allows Kubernetes version downgrade",
@@ -91,23 +91,20 @@ func TestValidateStaticNodeClusterFlowVersionUpdate(t *testing.T) {
 			clusterType:     "ssh",
 			previousVersion: "v1.1.0",
 			desiredVersion:  "custom",
-			reason:          ClusterVersionUpdateInvalidVersionReason,
+			wantErrContains: "invalid desired cluster version",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateStaticNodeClusterFlowVersionUpdate(tt.clusterType, tt.previousVersion, tt.desiredVersion)
-			if tt.reason == "" {
+			if tt.wantErrContains == "" {
 				require.NoError(t, err)
 				return
 			}
 
 			require.Error(t, err)
-
-			var validationErr *ClusterVersionUpdateError
-			require.ErrorAs(t, err, &validationErr)
-			assert.Equal(t, tt.reason, validationErr.Reason)
+			assert.Contains(t, err.Error(), tt.wantErrContains)
 		})
 	}
 }

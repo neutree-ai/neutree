@@ -271,7 +271,10 @@ func TestClusterController_Reconcile(t *testing.T) {
 
 func TestClusterControllerSyncRejectsInvalidStaticClusterVersion(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
-	controller := &ClusterController{storage: mockStorage}
+	controller := &ClusterController{
+		storage:             mockStorage,
+		newClusterReconcile: cluster.NewReconcile,
+	}
 	input := &v1.Cluster{
 		ID: 6,
 		Metadata: &v1.Metadata{
@@ -301,7 +304,10 @@ func TestClusterControllerSyncRejectsInvalidStaticClusterVersion(t *testing.T) {
 
 func TestClusterControllerRejectsInitializedStaticNodeHeadChange(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
-	controller := &ClusterController{storage: mockStorage}
+	controller := &ClusterController{
+		storage:             mockStorage,
+		newClusterReconcile: cluster.NewReconcile,
+	}
 	input := &v1.Cluster{
 		ID: 8,
 		Metadata: &v1.Metadata{
@@ -319,9 +325,9 @@ func TestClusterControllerRejectsInitializedStaticNodeHeadChange(t *testing.T) {
 			},
 		},
 		Status: &v1.ClusterStatus{
-			Initialized:         true,
-			Version:             "v1.0.2",
-			NodeProvisionStatus: `{"10.0.0.10":{"status":"provisioned","is_head":true}}`,
+			Initialized:  true,
+			Version:      "v1.0.2",
+			DashboardURL: "http://10.0.0.10:8265",
 		},
 	}
 
@@ -350,6 +356,7 @@ func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testin
 		obsCollectConfigManager: obsCollectConfigManager,
 		gw:                      gw,
 		metricsRemoteWriteURL:   "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:     cluster.NewReconcile,
 	}
 	input := &v1.Cluster{
 		ID: 3,
@@ -420,11 +427,12 @@ func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testin
 	mockStorage.AssertExpectations(t)
 }
 
-func TestClusterControllerSyncMapsStaticNodeClusterProvisioningToUpdating(t *testing.T) {
+func TestClusterControllerSyncMapsStaticNodeClusterProvisioningToFailedWhenClusterSpecIsUnchanged(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
 	controller := &ClusterController{
 		storage:               mockStorage,
 		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:   cluster.NewReconcile,
 	}
 	input := &v1.Cluster{
 		ID: 10,
@@ -481,7 +489,7 @@ func TestClusterControllerSyncMapsStaticNodeClusterProvisioningToUpdating(t *tes
 	mockStorage.On("UpdateStaticNodeCluster", "55", mock.Anything).Return(nil).Once()
 	mockStorage.On("UpdateCluster", "10", mock.MatchedBy(func(updated *v1.Cluster) bool {
 		require.NotNil(t, updated.Status)
-		assert.Equal(t, v1.ClusterPhaseUpdating, updated.Status.Phase)
+		assert.Equal(t, v1.ClusterPhaseFailed, updated.Status.Phase)
 		assert.Contains(t, updated.Status.ErrorMessage, "static node 10.0.0.10 phase=Reconciling")
 
 		return true
@@ -499,6 +507,7 @@ func TestClusterControllerSyncMapsStaticNodeClusterWarmingToUpgrading(t *testing
 	controller := &ClusterController{
 		storage:               mockStorage,
 		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:   cluster.NewReconcile,
 	}
 	input := &v1.Cluster{
 		ID: 11,
@@ -566,6 +575,7 @@ func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButSpecChanged(t *t
 	controller := &ClusterController{
 		storage:               mockStorage,
 		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:   cluster.NewReconcile,
 	}
 	input := &v1.Cluster{
 		ID: 12,
@@ -637,12 +647,19 @@ func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButSpecChanged(t *t
 	mockStorage.AssertExpectations(t)
 }
 
-func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButRayDashboardUnavailable(t *testing.T) {
+func TestClusterControllerSyncContinuesWhenStaticNodeClusterReadyButRayDashboardUnavailable(t *testing.T) {
+	obsCollectConfigManager, _ := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
+		LocalCollectConfigPath: "tmp",
+	})
 	mockStorage := &storagemocks.MockStorage{}
 	mockDashboard := &dashboardmocks.MockDashboardService{}
+	gw := &gatewaymocks.MockGateway{}
 	controller := &ClusterController{
-		storage:               mockStorage,
-		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+		storage:                 mockStorage,
+		obsCollectConfigManager: obsCollectConfigManager,
+		gw:                      gw,
+		metricsRemoteWriteURL:   "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:     cluster.NewReconcile,
 	}
 	input := &v1.Cluster{
 		ID: 13,
@@ -717,20 +734,21 @@ func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButRayDashboardUnav
 	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedImageRegistry()}, nil).Once()
 	mockStorage.On("UpdateStaticNodeCluster", "58", mock.Anything).Return(nil).Once()
 	mockDashboard.On("ListNodes").Return(nil, errors.New("connection refused")).Once()
+	gw.On("SyncCluster", mock.Anything).Return(nil).Once()
 	mockStorage.On("UpdateCluster", "13", mock.MatchedBy(func(updated *v1.Cluster) bool {
 		require.NotNil(t, updated.Status)
-		assert.Equal(t, v1.ClusterPhaseUpdating, updated.Status.Phase)
-		assert.Contains(t, updated.Status.ErrorMessage, "Ray verification failed")
-		assert.Contains(t, updated.Status.ErrorMessage, "connection refused")
+		assert.Equal(t, v1.ClusterPhaseRunning, updated.Status.Phase)
+		assert.Empty(t, updated.Status.ErrorMessage)
+		assert.Nil(t, updated.Status.ResourceInfo)
 
 		return true
 	})).Return(nil).Once()
 
 	err := controller.sync(input)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Ray verification failed")
+	require.NoError(t, err)
 	mockDashboard.AssertExpectations(t)
+	gw.AssertExpectations(t)
 	mockStorage.AssertExpectations(t)
 }
 

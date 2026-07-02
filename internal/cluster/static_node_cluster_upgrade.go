@@ -154,42 +154,6 @@ func staticNodesFromByName(nodesByName map[string]*v1.StaticNode) []*v1.StaticNo
 	return nodes
 }
 
-func advanceStaticNodeClusterUpgradeStatus(
-	cluster *v1.StaticNodeCluster,
-	currentNodes []*v1.StaticNode,
-	status v1.StaticNodeClusterStatus,
-	plans []StaticNodeClusterDesiredNodePlan,
-) v1.StaticNodeClusterStatus {
-	if status.Phase == v1.StaticNodeClusterPhaseFailed {
-		return status
-	}
-
-	upgrade := staticNodeClusterUpgrade(cluster, currentNodes, plans)
-	if upgrade == nil {
-		return status
-	}
-
-	step := upgrade.Step
-	if step == staticNodeClusterUpgradeStepVerifying {
-		if staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes, plans) &&
-			status.ReadyNodes == status.DesiredNodes &&
-			status.HeadReady &&
-			status.WarmReady {
-			status.Version = cluster.Spec.Version
-			status.Phase = v1.StaticNodeClusterPhaseReady
-			status.ErrorMessage = ""
-
-			return status
-		}
-	}
-
-	status.Phase = v1.StaticNodeClusterPhaseUpgrading
-	status.Version = upgrade.ObservedVersion
-	status.ErrorMessage = string(step)
-
-	return status
-}
-
 func staticNodeClusterWorkersStopped(cluster *v1.StaticNodeCluster, nodes []*v1.StaticNode) bool {
 	workerNames := staticNodeClusterWorkerNames(cluster)
 	if len(workerNames) == 0 {

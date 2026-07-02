@@ -109,19 +109,6 @@ func isSourceImageRegistry(segment string) bool {
 	return segment == "localhost" || strings.Contains(segment, ".") || strings.Contains(segment, ":")
 }
 
-func copyStringMap(values map[string]string) map[string]string {
-	if values == nil {
-		return nil
-	}
-
-	copied := make(map[string]string, len(values))
-	for key, value := range values {
-		copied[key] = value
-	}
-
-	return copied
-}
-
 func copyAuth(auth *v1.Auth) *v1.Auth {
 	if auth == nil {
 		return nil

@@ -1,8 +1,6 @@
 package controllers
 
 import (
-	"context"
-	"errors"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -11,17 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-type fakeStaticNodeClusterRayVerifier struct {
-	err    error
-	called bool
-}
-
-func (f *fakeStaticNodeClusterRayVerifier) VerifyRayCluster(_ context.Context, _ *v1.StaticNodeCluster) error {
-	f.called = true
-
-	return f.err
-}
 
 func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{}
@@ -123,34 +110,9 @@ func TestStaticNodeClusterControllerReconcileWaitsForStaleNodeDeletion(t *testin
 	require.NotNil(t, status)
 	require.NotNil(t, status.Status)
 	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
-	assert.Equal(t, "Deleting stale static nodes", status.Status.ErrorMessage)
+	assert.Contains(t, status.Status.ErrorMessage, "stale static node worker-stale exists")
+	assert.Contains(t, status.Status.ErrorMessage, "Deleting stale static nodes")
 	assert.Contains(t, objectStorage.updatedMetadata, "13")
-}
-
-func TestStaticNodeClusterControllerVerifiesRayClusterWhenPlanIsReady(t *testing.T) {
-	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{
-		nodes: []v1.StaticNode{
-			controllerStaticClusterNode("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady),
-			controllerStaticClusterNode("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady),
-		},
-	}
-	verifier := &fakeStaticNodeClusterRayVerifier{err: errors.New("dashboard unavailable")}
-	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage:     newTestStaticNodeClusterStorage(objectStorage),
-		RayVerifier: verifier,
-	})
-	require.NoError(t, err)
-
-	err = controller.Reconcile(controllerStaticNodeCluster())
-
-	require.NoError(t, err)
-	assert.True(t, verifier.called)
-	status := objectStorage.updatedStatus["7"]
-	require.NotNil(t, status)
-	require.NotNil(t, status.Status)
-	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
-	assert.Contains(t, status.Status.ErrorMessage, "Ray cluster verification failed")
-	assert.Contains(t, status.Status.ErrorMessage, "dashboard unavailable")
 }
 
 func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testing.T) {

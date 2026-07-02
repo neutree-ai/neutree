@@ -13,15 +13,18 @@ import (
 
 type StaticNodeController struct {
 	storage       storage.Storage
-	runnerFactory *clusterreconcile.StaticNodeSSHRunnerFactory
+	runnerFactory staticNodeRunnerFactory
 	reconciler    *clusterreconcile.StaticNodeReconciler
-	newRunner     func(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error)
 }
 
 type StaticNodeControllerOption struct {
 	Storage       storage.Storage
-	RunnerFactory *clusterreconcile.StaticNodeSSHRunnerFactory
+	RunnerFactory staticNodeRunnerFactory
 	Reconciler    *clusterreconcile.StaticNodeReconciler
+}
+
+type staticNodeRunnerFactory interface {
+	NewStaticNodeRunner(context.Context, *v1.StaticNode) (clusterreconcile.StaticNodeCommandRunner, error)
 }
 
 func NewStaticNodeController(option *StaticNodeControllerOption) (*StaticNodeController, error) {
@@ -42,6 +45,7 @@ func NewStaticNodeController(option *StaticNodeControllerOption) (*StaticNodeCon
 	if reconciler == nil {
 		reconciler = &clusterreconcile.StaticNodeReconciler{}
 	}
+
 	if reconciler.HeadReadyChecker == nil {
 		reconcilerCopy := *reconciler
 		reconcilerCopy.HeadReadyChecker = &clusterreconcile.StaticNodeClusterHeadReadyChecker{Storage: option.Storage}
@@ -53,7 +57,6 @@ func NewStaticNodeController(option *StaticNodeControllerOption) (*StaticNodeCon
 		runnerFactory: runnerFactory,
 		reconciler:    reconciler,
 	}
-	c.newRunner = c.runnerFactory.NewStaticNodeRunner
 
 	return c, nil
 }
@@ -86,19 +89,35 @@ func (c *StaticNodeController) reconcileNormal(
 	node *v1.StaticNode,
 	reconciler *clusterreconcile.StaticNodeReconciler,
 ) (reconcileErr error) {
-	var result *clusterreconcile.StaticNodeReconcileResult
-	defer func() {
-		status := clusterreconcile.BuildStaticNodeStatus(node, result, reconcileErr)
-		c.updateStatus(node, status, "failed to update static node status", &reconcileErr)
-	}()
-
-	runner, err := c.newStaticNodeRunner(ctx, node)
+	runner, err := c.runnerFactory.NewStaticNodeRunner(ctx, node)
 	if err != nil {
-		return errors.Wrap(err, "failed to create static node runner")
+		reconcileErr = errors.Wrap(err, "failed to create static node runner")
+		status := clusterreconcile.BuildStaticNodeStatus(node, nil, reconcileErr)
+		c.updateStatus(node, status, "failed to update static node status", &reconcileErr)
+
+		return reconcileErr
 	}
 	defer closeStaticNodeRunner(runner)
 
-	result, reconcileErr = reconciler.Reconcile(ctx, node, runner)
+	result := &clusterreconcile.StaticNodeReconcileResult{}
+
+	result.Accelerator, reconcileErr = reconciler.ReconcileAccelerator(ctx, node, runner)
+	c.updateStatus(node, clusterreconcile.BuildStaticNodeStatus(node, result, reconcileErr), "failed to update static node accelerator status", &reconcileErr)
+
+	if reconcileErr != nil {
+		return reconcileErr
+	}
+
+	result.Warm, reconcileErr = reconciler.ReconcileWarmImages(ctx, node, runner)
+	c.updateStatus(node, clusterreconcile.BuildStaticNodeStatus(node, result, reconcileErr), "failed to update static node warm status", &reconcileErr)
+
+	if reconcileErr != nil {
+		return reconcileErr
+	}
+
+	result.Components, reconcileErr = reconciler.ReconcileComponents(ctx, node, runner)
+	c.updateStatus(node, clusterreconcile.BuildStaticNodeStatus(node, result, reconcileErr), "failed to update static node component status", &reconcileErr)
+
 	return reconcileErr
 }
 
@@ -109,6 +128,7 @@ func (c *StaticNodeController) reconcileDelete(
 ) (reconcileErr error) {
 	isForceDelete := v1.IsForceDelete(node.Metadata.Annotations)
 	updateStatusOnReturn := false
+
 	defer func() {
 		if !updateStatusOnReturn {
 			return
@@ -118,7 +138,7 @@ func (c *StaticNodeController) reconcileDelete(
 		c.updateStatus(node, status, "failed to update static node status", &reconcileErr)
 	}()
 
-	runner, err := c.newStaticNodeRunner(ctx, node)
+	runner, err := c.runnerFactory.NewStaticNodeRunner(ctx, node)
 	if err != nil {
 		if isForceDelete {
 			klog.Warningf("failed to create static node runner during force delete best-effort cleanup: %v", err)
@@ -127,6 +147,7 @@ func (c *StaticNodeController) reconcileDelete(
 		}
 
 		updateStatusOnReturn = true
+
 		return errors.Wrap(err, "failed to create static node runner")
 	}
 	// The SSH runner owns any temporary private-key directory created from
@@ -142,6 +163,7 @@ func (c *StaticNodeController) reconcileDelete(
 		}
 
 		updateStatusOnReturn = true
+
 		return err
 	}
 
@@ -161,18 +183,11 @@ func (c *StaticNodeController) updateStatus(
 		}
 
 		klog.Errorf("failed to update static node %s status, err: %v", node.Metadata.WorkspaceName(), updateErr)
-	}
-}
 
-func (c *StaticNodeController) newStaticNodeRunner(
-	ctx context.Context,
-	node *v1.StaticNode,
-) (clusterreconcile.StaticNodeCommandRunner, error) {
-	if c.newRunner == nil {
-		return nil, errors.New("static node runner factory is required")
+		return
 	}
 
-	return c.newRunner(ctx, node)
+	node.Status = &status
 }
 
 func closeStaticNodeRunner(runner clusterreconcile.StaticNodeCommandRunner) {

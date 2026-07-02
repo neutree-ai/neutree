@@ -174,7 +174,8 @@ func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, no
 
 func (p *AMDGPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
 	return v1.RuntimeConfig{
-		Runtime: "amd",
+		ImageSuffix: "rocm",
+		Runtime:     "amd",
 		Env: map[string]string{
 			"AMD_VISIBLE_DEVICES": "all",
 		},
@@ -196,7 +197,6 @@ func (p *AMDGPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v
 			ImageSuffix: "rocm",
 			Runtime:     "amd",
 			Env: map[string]string{
-				"ACCELERATOR_TYPE":    "amd_gpu",
 				"AMD_VISIBLE_DEVICES": "all",
 			},
 		},

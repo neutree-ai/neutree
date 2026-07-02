@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"reflect"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
@@ -74,19 +74,14 @@ func (r *staticRayReconciler) Reconcile(_ context.Context, c *v1.Cluster) error 
 	r.copyStatus(c, desired, current.Status, specObserved)
 
 	if current.Status == nil || current.Status.Phase != v1.StaticNodeClusterPhaseReady {
-		r.markApplying(c, current.Status, specObserved)
 		return staticNodeClusterNotReadyError(current)
 	}
 
 	if !specObserved {
-		r.markApplying(c, current.Status, specObserved)
 		return errors.Errorf("static node cluster %s is applying desired spec", c.Metadata.Name)
 	}
 
-	if err := r.verifyReady(c, desired); err != nil {
-		r.markApplying(c, current.Status, specObserved)
-		return errors.Wrapf(err, "static node cluster %s Ray verification failed", c.Metadata.Name)
-	}
+	r.updateResourceInfo(c, desired)
 
 	return nil
 }
@@ -237,17 +232,6 @@ func currentStaticClusterHeadIP(c *v1.Cluster) string {
 		return ""
 	}
 
-	if c.Status.NodeProvisionStatus != "" {
-		nodeStatus := map[string]v1.NodeProvision{}
-		if err := json.Unmarshal([]byte(c.Status.NodeProvisionStatus), &nodeStatus); err == nil {
-			for nodeIP, provision := range nodeStatus {
-				if provision.IsHead {
-					return nodeIP
-				}
-			}
-		}
-	}
-
 	if c.Status.DashboardURL == "" {
 		return ""
 	}
@@ -312,7 +296,7 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 
 	return &v1.StaticNodeCluster{
 		APIVersion: "v1",
-		Kind:       "StaticNodeCluster",
+		Kind:       v1.StaticNodeClusterKind,
 		Metadata: &v1.Metadata{
 			Name:        c.Metadata.Name,
 			Workspace:   c.Metadata.Workspace,
@@ -387,43 +371,15 @@ func (r *staticRayReconciler) copyStatus(
 	}
 }
 
-func (r *staticRayReconciler) markApplying(
-	c *v1.Cluster,
-	status *v1.StaticNodeClusterStatus,
-	observed bool,
-) {
-	if c == nil {
-		return
-	}
-
-	if c.Status == nil {
-		c.Status = &v1.ClusterStatus{}
-	}
-
-	if status != nil && status.Phase == v1.StaticNodeClusterPhaseUpgrading {
-		c.Status.Phase = v1.ClusterPhaseUpgrading
-		return
-	}
-
-	if status != nil && (status.Phase == v1.StaticNodeClusterPhaseFailed ||
-		status.Phase == v1.StaticNodeClusterPhaseDegraded) {
-		c.Status.Phase = v1.ClusterPhaseFailed
-		return
-	}
-
-	if !observed || status == nil || status.Phase == v1.StaticNodeClusterPhaseProvisioning ||
-		status.Phase == v1.StaticNodeClusterPhaseReady {
-		c.Status.Phase = v1.ClusterPhaseUpdating
-	}
-}
-
-func (r *staticRayReconciler) verifyReady(
+func (r *staticRayReconciler) updateResourceInfo(
 	c *v1.Cluster,
 	staticCluster *v1.StaticNodeCluster,
-) error {
+) {
 	resources, err := r.calculateResources(staticCluster)
 	if err != nil {
-		return err
+		klog.Warningf("failed to calculate static node cluster %s resources: %v", staticCluster.Metadata.WorkspaceName(), err)
+
+		return
 	}
 
 	if c.Status == nil {
@@ -431,8 +387,6 @@ func (r *staticRayReconciler) verifyReady(
 	}
 
 	c.Status.ResourceInfo = resources
-
-	return nil
 }
 
 func staticClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool {
@@ -446,38 +400,22 @@ func staticClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool {
 func (r *staticRayReconciler) calculateResources(
 	staticCluster *v1.StaticNodeCluster,
 ) (*v1.ClusterResources, error) {
-	if staticCluster == nil {
-		return nil, errors.New("static node cluster is required to calculate resources")
-	}
-
-	if r.storage == nil {
-		return nil, errors.New("storage is required to calculate static node cluster resources")
-	}
-
 	var resourceParsers map[string]resourceparser.ResourceParser
 	if r.acceleratorManager != nil {
 		resourceParsers = r.acceleratorManager.GetAllParsers()
-	}
-
-	rayNodes, err := dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)).ListNodes()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list Ray nodes")
-	}
-
-	if err := ValidateStaticNodeClusterRayNodes(staticCluster, rayNodes); err != nil {
-		return nil, err
 	}
 
 	var resourceClient resourceview.ResourceClient = resourceview.NewRayResourceClient(
 		dashboard.NewDashboardService(staticNodeClusterDashboardURL(staticCluster)),
 		resourceParsers,
 	)
-	resourceClient, err = resourceview.NewStaticNodeClusterResourceClient(
+	resourceClient, err := resourceview.NewStaticNodeClusterResourceClient(
 		resourceClient,
 		r.storage,
 		staticCluster.Metadata.Workspace,
 		staticCluster.Metadata.Name,
 	)
+
 	if err != nil {
 		return nil, err
 	}

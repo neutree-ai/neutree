@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -12,16 +13,14 @@ import (
 )
 
 type StaticNodeClusterController struct {
-	storage     storage.Storage
-	planner     *clusterreconcile.StaticNodeClusterPlanner
-	aggregator  clusterreconcile.StaticNodeClusterStatusAggregator
-	rayVerifier clusterreconcile.StaticNodeClusterRayVerifier
+	storage    storage.Storage
+	planner    *clusterreconcile.StaticNodeClusterPlanner
+	aggregator clusterreconcile.StaticNodeClusterStatusAggregator
 }
 
 type StaticNodeClusterControllerOption struct {
 	Storage                    storage.Storage
 	Planner                    *clusterreconcile.StaticNodeClusterPlanner
-	RayVerifier                clusterreconcile.StaticNodeClusterRayVerifier
 	AcceleratorProfileProvider clusterreconcile.AcceleratorProfileProvider
 }
 
@@ -41,16 +40,10 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 		}
 	}
 
-	rayVerifier := option.RayVerifier
-	if rayVerifier == nil {
-		rayVerifier = clusterreconcile.RayDashboardStaticNodeClusterVerifier{}
-	}
-
 	return &StaticNodeClusterController{
-		storage:     option.Storage,
-		planner:     planner,
-		aggregator:  clusterreconcile.StaticNodeClusterStatusAggregator{},
-		rayVerifier: rayVerifier,
+		storage:    option.Storage,
+		planner:    planner,
+		aggregator: clusterreconcile.StaticNodeClusterStatusAggregator{},
 	}, nil
 }
 
@@ -70,13 +63,13 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		return errors.New("static node cluster is required")
 	}
 
-	currentNodes, err := listStaticNodes(c.storage, cluster.Metadata.Workspace, cluster.Metadata.Name)
+	currentNodes, err := clusterreconcile.ListStaticNodesByCluster(c.storage, cluster.Metadata.Workspace, cluster.Metadata.Name)
 	if err != nil {
 		return errors.Wrap(err, "failed to list static nodes")
 	}
 
 	if cluster.Metadata.DeletionTimestamp != "" {
-		return c.reconcileDelete(ctx, cluster, currentNodes)
+		return c.reconcileDelete(cluster, currentNodes)
 	}
 
 	return c.reconcileNormal(ctx, cluster, currentNodes)
@@ -136,20 +129,15 @@ func (c *StaticNodeClusterController) reconcileNormal(
 		}
 	}
 
-	if hasStaleNodes && status.Phase == v1.StaticNodeClusterPhaseReady {
+	if hasStaleNodes {
 		status.Phase = v1.StaticNodeClusterPhaseProvisioning
-		status.ErrorMessage = "Deleting stale static nodes"
-	}
-
-	if !hasStaleNodes && status.Phase == v1.StaticNodeClusterPhaseReady {
-		status = clusterreconcile.RequireStaticNodeClusterRayVerified(ctx, cluster, status, c.rayVerifier)
+		status.ErrorMessage = appendStaticNodeClusterStatusMessage(status.ErrorMessage, "Deleting stale static nodes")
 	}
 
 	return nil
 }
 
 func (c *StaticNodeClusterController) reconcileDelete(
-	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
 ) (reconcileErr error) {
@@ -169,6 +157,7 @@ func (c *StaticNodeClusterController) reconcileDelete(
 		}
 
 		hardDeleted = true
+
 		return nil
 	}
 
@@ -243,6 +232,18 @@ func staticNodeClusterFailedStatus(
 	}
 
 	return status
+}
+
+func appendStaticNodeClusterStatusMessage(current string, message string) string {
+	if current == "" {
+		return message
+	}
+
+	if message == "" || strings.Contains(current, message) {
+		return current
+	}
+
+	return current + "; " + message
 }
 
 func staticNodeClusterDeletingStatus(desiredNodes int, err error) v1.StaticNodeClusterStatus {
