@@ -8,7 +8,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	neutreeSemver "github.com/neutree-ai/neutree/internal/semver"
@@ -151,6 +153,33 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 
 			_, err = k8sH.GetRoleBinding(ctx, namespace, "vmagent-rolebinding")
 			Expect(err).NotTo(HaveOccurred(), "vmagent RoleBinding should exist")
+
+			By("Checking node-exporter DaemonSet")
+			nodeExporter := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-exporter")
+			Expect(nodeExporter.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+			Expect(nodeExporter.Spec.Template.Spec.Containers[0].Ports).To(ContainElement(
+				HaveField("ContainerPort", int32(19100)),
+			))
+
+			vmagentConfig, err := k8sH.GetConfigMap(ctx, namespace, "vmagent-config")
+			Expect(err).NotTo(HaveOccurred(), "vmagent-config ConfigMap should exist")
+			Expect(vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-http'"))
+
+			gpuNodes, err := k8sH.ListNodes(ctx, "nvidia.com/gpu.present=true")
+			Expect(err).NotTo(HaveOccurred(), "should list NVIDIA GPU nodes")
+			if len(gpuNodes) == 0 {
+				_, err = k8sH.GetDaemonSet(ctx, namespace, "nvidia-gpu-dcgm-exporter")
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "DCGM exporter should not exist without matching GPU nodes")
+			} else {
+				By("Checking NVIDIA DCGM exporter DaemonSet")
+				dcgm := eventuallyDaemonSetReady(ctx, k8sH, namespace, "nvidia-gpu-dcgm-exporter")
+				Expect(dcgm.Spec.Template.Spec.NodeSelector).To(HaveKeyWithValue("nvidia.com/gpu.present", "true"))
+				Expect(dcgm.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+				Expect(dcgm.Spec.Template.Spec.Containers[0].Ports).To(ContainElement(
+					HaveField("ContainerPort", int32(19400)),
+				))
+				Expect(vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'dcgm-exporter'"))
+			}
 
 			if !clusterVersionSupportsKubeStateMetrics(cluster.Spec.Version) {
 				_, err = k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
@@ -692,6 +721,21 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 	})
 })
+
+func eventuallyDaemonSetReady(ctx context.Context, k8sH *K8sHelper, namespace, name string) *appsv1.DaemonSet {
+	var daemonSet *appsv1.DaemonSet
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		got, err := k8sH.GetDaemonSet(ctx, namespace, name)
+		g.Expect(err).NotTo(HaveOccurred(), "%s DaemonSet should exist", name)
+		g.Expect(got.Status.DesiredNumberScheduled).To(BeNumerically(">", 0), "%s should match at least one node", name)
+		g.Expect(got.Status.NumberReady).To(Equal(got.Status.DesiredNumberScheduled), "%s should be ready", name)
+
+		daemonSet = got
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return daemonSet
+}
 
 func clusterVersionSupportsKubeStateMetrics(version string) bool {
 	baseVersion, err := neutreeSemver.BaseVersion(version)
