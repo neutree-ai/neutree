@@ -11,7 +11,9 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -52,19 +54,37 @@ type ReconcileContext struct {
 	logger klog.Logger
 }
 
-type NewReconciler func(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
-	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error)
-
-var NewReconcile NewReconciler = newReconcile
-
-func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
+func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
 	switch cluster.Spec.Type {
 	case v1.SSHClusterType:
-		return newRaySSHClusterReconcile(s, acceleratorManager), nil
+		legacy := &sshRayClusterReconciler{
+			executor:           &command.OSExecutor{},
+			acceleratorManager: acceleratorManager,
+			storage:            s,
+		}
+
+		useStaticFlow, err := isStaticNodeClusterFlowVersion(cluster.GetVersion())
+		if err != nil {
+			return nil, err
+		}
+
+		if useStaticFlow {
+			return &staticRayReconciler{
+				storage:            s,
+				acceleratorManager: acceleratorManager,
+				legacy:             legacy,
+			}, nil
+		}
+
+		return legacy, nil
 	case v1.KubernetesClusterType:
 		return NewNativeKubernetesClusterReconciler(s, acceleratorManager, metricsRemoteWriteURL), nil
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", cluster.Spec.Type)
 	}
+}
+
+func isStaticNodeClusterFlowVersion(version string) (bool, error) {
+	return clustervalidation.UsesStaticNodeClusterFlow(v1.SSHClusterType, version)
 }

@@ -6,13 +6,15 @@ import (
 )
 
 const (
-	GetNodeAcceleratorPath        = "/v1/node/accelerator"
-	GetNodeRuntimeConfigPath      = "/v1/node/runtime-config"
-	GetContainerAcceleratorPath   = "/v1/container/accelerator"
-	GetContainerRuntimeConfigPath = "/v1/container/runtime-config"
-	GetSupportEnginesPath         = "/v1/support-engines"
-	GetClusterResourcesPath       = "/v1/cluster/resources"
-	PingPath                      = "/v1/ping"
+	GetNodeAcceleratorPath          = "/v1/node/accelerator"
+	GetNodeRuntimeConfigPath        = "/v1/node/runtime-config"
+	GetContainerAcceleratorPath     = "/v1/container/accelerator"
+	GetContainerRuntimeConfigPath   = "/v1/container/runtime-config"
+	GetAcceleratorProfilePath       = "/v1/profile"
+	DetectStaticNodeAcceleratorPath = "/v1/static-node/accelerator"
+	GetSupportEnginesPath           = "/v1/support-engines"
+	GetClusterResourcesPath         = "/v1/cluster/resources"
+	PingPath                        = "/v1/ping"
 
 	// Resource conversion API paths
 	ConvertToRayPath        = "/v1/resource/convert-to-ray"
@@ -87,11 +89,31 @@ type GetContainerRuntimeConfigResponse struct {
 	RuntimeConfig RuntimeConfig `json:"runtime_config"`
 }
 
+type GetAcceleratorProfileResponse struct {
+	Profile AcceleratorProfile `json:"profile"`
+}
+
+type DetectStaticNodeAcceleratorRequest struct {
+	NodeIp  string `json:"node_ip"`
+	SSHAuth Auth   `json:"ssh_auth"`
+}
+
+type DetectStaticNodeAcceleratorResponse struct {
+	Accelerator *StaticNodeAcceleratorStatus `json:"accelerator,omitempty"`
+	Matched     bool                         `json:"matched"`
+}
+
 type RuntimeConfig struct {
 	ImageSuffix string            `json:"image_suffix"`
 	Env         map[string]string `json:"env"`
 	Runtime     string            `json:"runtime"`
 	Options     []string          `json:"options"`
+}
+
+type AcceleratorProfile struct {
+	AcceleratorType string         `json:"accelerator_type"`
+	ClusterRuntime  *RuntimeConfig `json:"cluster_runtime,omitempty"`
+	EngineRuntime   *RuntimeConfig `json:"engine_runtime,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {

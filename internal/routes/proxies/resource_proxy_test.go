@@ -386,9 +386,11 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			ID     string `json:"id"`
 			secret string `api:"-"` // unexported, no json tag to avoid go vet error
 		}
+		obj := TestObject{secret: "hidden"}
 
 		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
 
+		assert.Equal(t, "hidden", obj.secret)
 		assert.Empty(t, result)
 	})
 
@@ -487,6 +489,8 @@ func Test_extractTopLevelJSONFields(t *testing.T) {
 		NoTag    string
 		internal string
 	}
+	obj := testObject{internal: "hidden"}
+	assert.Equal(t, "hidden", obj.internal)
 
 	cases := []struct {
 		name     string

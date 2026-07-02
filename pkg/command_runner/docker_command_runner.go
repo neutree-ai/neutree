@@ -19,7 +19,7 @@ type DockerCommandRunner struct {
 
 func NewDockerCommandRunner(dockerConfig *v1.Docker, sshCommandConfig *CommonArgs) *DockerCommandRunner {
 	sshCommandRunner := NewSSHCommandRunner(sshCommandConfig.NodeID, sshCommandConfig.SshIP,
-		sshCommandConfig.AuthConfig, "", sshCommandConfig.ProcessExecute)
+		sshCommandConfig.AuthConfig, sshCommandConfig.SSHControlPath, sshCommandConfig.ProcessExecute)
 
 	return &DockerCommandRunner{
 		sshCommandRunner: sshCommandRunner,

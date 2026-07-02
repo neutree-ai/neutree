@@ -178,17 +178,18 @@ func TestUpCluster(t *testing.T) {
 		{
 			name:    "up cluster success",
 			restart: false,
-			setupMock: func(containComamnds []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
-				cmdExecutor.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			setupMock: func(containCommands []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
+				cmdExecutor.On("Execute", mock.Anything, "bash", mock.Anything).Run(func(args mock.Arguments) {
 					cmdArgs, _ := args.Get(2).([]string)
 					cmdArgsStr := strings.Join(cmdArgs, " ")
-					for _, containCmd := range containComamnds {
+					for _, containCmd := range containCommands {
 						if !strings.Contains(cmdArgsStr, containCmd) {
 							t.Errorf("Expected command to contain %s, but got %s", containCmd, cmdArgsStr)
 						}
 					}
 				}).Return([]byte("success"), nil)
-				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(v1.RuntimeConfig{}, nil)
 			},
 			wantErr:                 false,
 			expectedContainCommands: []string{"ray", "up", "--no-restart"},
@@ -196,17 +197,18 @@ func TestUpCluster(t *testing.T) {
 		{
 			name:    "restart cluster success",
 			restart: true,
-			setupMock: func(containComamnds []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
-				cmdExecutor.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			setupMock: func(containCommands []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
+				cmdExecutor.On("Execute", mock.Anything, "bash", mock.Anything).Run(func(args mock.Arguments) {
 					cmdArgs, _ := args.Get(2).([]string)
 					cmdArgsStr := strings.Join(cmdArgs, " ")
-					for _, containCmd := range containComamnds {
+					for _, containCmd := range containCommands {
 						if !strings.Contains(cmdArgsStr, containCmd) {
 							t.Errorf("Expected command to contain %s, but got %s", containCmd, cmdArgsStr)
 						}
 					}
 				}).Return([]byte("success"), nil)
-				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(v1.RuntimeConfig{}, nil)
 			},
 			wantErr:                 false,
 			expectedContainCommands: []string{"ray", "up"},
@@ -214,17 +216,18 @@ func TestUpCluster(t *testing.T) {
 		{
 			name:    "up cluster failed",
 			restart: false,
-			setupMock: func(containComamnds []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
-				cmdExecutor.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			setupMock: func(containCommands []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
+				cmdExecutor.On("Execute", mock.Anything, "bash", mock.Anything).Run(func(args mock.Arguments) {
 					cmdArgs, _ := args.Get(2).([]string)
 					cmdArgsStr := strings.Join(cmdArgs, " ")
-					for _, containCmd := range containComamnds {
+					for _, containCmd := range containCommands {
 						if !strings.Contains(cmdArgsStr, containCmd) {
 							t.Errorf("Expected command to contain %s, but got %s", containCmd, cmdArgsStr)
 						}
 					}
 				}).Return([]byte("failed"), errors.New("command execution failed"))
-				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(v1.RuntimeConfig{}, nil)
+				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(v1.RuntimeConfig{}, nil)
 			},
 			wantErr:                 true,
 			expectedContainCommands: []string{"ray", "up", "--no-restart"},
@@ -244,8 +247,10 @@ func TestUpCluster(t *testing.T) {
 
 			_, err := sshRayClusterReconciler.upCluster(&ReconcileContext{
 				sshRayClusterConfig: &v1.RayClusterConfig{},
-				sshClusterConfig:    &v1.RaySSHProvisionClusterConfig{},
-				sshConfigGenerator:  newRaySSHLocalConfigGenerator("test"),
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "127.0.0.1"},
+				},
+				sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
 				Cluster: &v1.Cluster{
 					Metadata: &v1.Metadata{
 						Name:      "test",

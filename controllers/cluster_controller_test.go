@@ -11,10 +11,13 @@ import (
 	clustermocks "github.com/neutree-ai/neutree/internal/cluster/mocks"
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClusterController(s *storagemocks.MockStorage,
@@ -23,18 +26,18 @@ func newTestClusterController(s *storagemocks.MockStorage,
 		LocalCollectConfigPath: "tmp",
 	})
 
-	cluster.NewReconcile = func(cluster *v1.Cluster, acceleratorManager accelerator.Manager, s storage.Storage, metricsRemoteWriteURL string) (cluster.ClusterReconcile, error) {
-		return r, nil
-	}
-
 	gw := &gatewaymocks.MockGateway{}
 	gw.On("SyncCluster", mock.Anything, mock.Anything).Return(nil)
 	gw.On("DeleteCluster", mock.Anything, mock.Anything).Return(nil)
+	s.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil).Maybe()
 	return &ClusterController{
 		storage:                 s,
 		defaultClusterVersion:   "v1",
 		obsCollectConfigManager: obsCollectConfigManager,
 		gw:                      gw,
+		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
+			return r, nil
+		},
 	}
 }
 
@@ -49,7 +52,7 @@ func TestClusterController_Sync_Delete(t *testing.T) {
 			Spec: &v1.ClusterSpec{
 				ImageRegistry: "test",
 				Type:          "ssh",
-				Version:       "v2",
+				Version:       "v1.0.1",
 			},
 			Status: &v1.ClusterStatus{
 				Phase: v1.ClusterPhaseDeleted,
@@ -106,7 +109,7 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			Spec: &v1.ClusterSpec{
 				ImageRegistry: "test",
 				Type:          "ssh",
-				Version:       "v2",
+				Version:       "v1.0.1",
 			},
 		}
 	}
@@ -121,7 +124,7 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			Spec: &v1.ClusterSpec{
 				ImageRegistry: "test",
 				Type:          "ssh",
-				Version:       "v2",
+				Version:       "v1.0.1",
 			},
 			Status: &v1.ClusterStatus{
 				Initialized: true,
@@ -266,24 +269,513 @@ func TestClusterController_Reconcile(t *testing.T) {
 	}
 }
 
+func TestClusterControllerSyncRejectsInvalidStaticClusterVersion(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{
+		storage:             mockStorage,
+		newClusterReconcile: cluster.NewReconcile,
+	}
+	input := &v1.Cluster{
+		ID: 6,
+		Metadata: &v1.Metadata{
+			Name:      "static-invalid",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			Type:    v1.SSHClusterType,
+			Version: "custom",
+		},
+	}
+
+	mockStorage.On("UpdateCluster", "6", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseInitializing, updated.Status.Phase)
+		assert.Contains(t, updated.Status.ErrorMessage, "invalid cluster version")
+
+		return true
+	})).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cluster version")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerRejectsInitializedStaticNodeHeadChange(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{
+		storage:             mockStorage,
+		newClusterReconcile: cluster.NewReconcile,
+	}
+	input := &v1.Cluster{
+		ID: 8,
+		Metadata: &v1.Metadata{
+			Name:      "static-head-change",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			Type:    v1.SSHClusterType,
+			Version: "v1.0.2",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.20"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{
+			Initialized:  true,
+			Version:      "v1.0.2",
+			DashboardURL: "http://10.0.0.10:8265",
+		},
+	}
+
+	mockStorage.On("UpdateCluster", "8", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Contains(t, updated.Status.ErrorMessage, "initialized static cluster head ip can not be changed")
+
+		return true
+	})).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "initialized static cluster head ip can not be changed")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerSyncCreatesStaticNodeClusterForNewSSHVersion(t *testing.T) {
+	obsCollectConfigManager, _ := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
+		LocalCollectConfigPath: "tmp",
+	})
+	mockStorage := &storagemocks.MockStorage{}
+	gw := &gatewaymocks.MockGateway{}
+	controller := &ClusterController{
+		storage:                 mockStorage,
+		obsCollectConfigManager: obsCollectConfigManager,
+		gw:                      gw,
+		metricsRemoteWriteURL:   "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:     cluster.NewReconcile,
+	}
+	input := &v1.Cluster{
+		ID: 3,
+		Metadata: &v1.Metadata{
+			Name:      "static-a",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.2",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{
+						HeadIP:    "10.0.0.10",
+						WorkerIPs: []string{"10.0.0.11"},
+					},
+					Auth: v1.Auth{
+						SSHUser:       "root",
+						SSHPrivateKey: "key",
+					},
+				},
+			},
+		},
+	}
+
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
+		{
+			Metadata: &v1.Metadata{Name: "registry-a", Workspace: "default"},
+			Spec: &v1.ImageRegistrySpec{
+				URL:        "registry.example.com",
+				Repository: "neutree",
+			},
+			Status: &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
+		},
+	}, nil)
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil)
+	mockStorage.On("CreateStaticNodeCluster", mock.MatchedBy(func(created *v1.StaticNodeCluster) bool {
+		require.NotNil(t, created.Metadata)
+		require.NotNil(t, created.Spec)
+		assert.Equal(t, "static-a", created.Metadata.Name)
+		assert.Equal(t, "default", created.Metadata.Workspace)
+		assert.Equal(t, "v1.0.2", created.Spec.Version)
+		assert.Equal(t, "registry.example.com/neutree", created.Spec.ImageRegistry)
+		require.NotNil(t, created.Spec.UpgradeStrategy)
+		assert.Equal(t, v1.ClusterUpgradeStrategyTypeRecreate, created.Spec.UpgradeStrategy.Type)
+		require.Len(t, created.Spec.Nodes, 2)
+		assert.Equal(t, "10.0.0.10", created.Spec.Nodes[0].Name)
+		assert.Equal(t, v1.StaticNodeRoleHead, created.Spec.Nodes[0].Role)
+		assert.Equal(t, "10.0.0.11", created.Spec.Nodes[1].Name)
+		assert.Equal(t, v1.StaticNodeRoleWorker, created.Spec.Nodes[1].Role)
+
+		return true
+	})).Return(nil)
+	mockStorage.On("UpdateCluster", "3", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseInitializing, updated.Status.Phase)
+		assert.Equal(t, "http://10.0.0.10:8265", updated.Status.DashboardURL)
+		assert.Equal(t, 2, updated.Status.DesiredNodes)
+
+		return true
+	})).Return(nil)
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-a is provisioning")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerSyncMapsStaticNodeClusterProvisioningToFailedWhenClusterSpecIsUnchanged(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{
+		storage:               mockStorage,
+		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:   cluster.NewReconcile,
+	}
+	input := &v1.Cluster{
+		ID: 10,
+		Metadata: &v1.Metadata{
+			Name:      "static-updating",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.2",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+	}
+	input.Status = &v1.ClusterStatus{
+		Initialized:      true,
+		Version:          "v1.0.2",
+		ObservedSpecHash: cluster.ComputeClusterSpecHash(input.Spec),
+	}
+
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
+		{
+			ID: 55,
+			Metadata: &v1.Metadata{
+				Name:      "static-updating",
+				Workspace: "default",
+			},
+			Spec: &v1.StaticNodeClusterSpec{
+				Version:       "v1.0.2",
+				ImageRegistry: "registry.example.com/neutree",
+				Nodes: []v1.StaticNodeClusterNodeSpec{
+					{
+						Name:    "10.0.0.10",
+						IP:      "10.0.0.10",
+						Role:    v1.StaticNodeRoleHead,
+						SSHAuth: &v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+					},
+				},
+				UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
+			},
+			Status: &v1.StaticNodeClusterStatus{
+				Phase:        v1.StaticNodeClusterPhaseProvisioning,
+				DesiredNodes: 1,
+				ErrorMessage: "static node 10.0.0.10 phase=Reconciling",
+			},
+		},
+	}, nil).Once()
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedImageRegistry()}, nil).Once()
+	mockStorage.On("UpdateStaticNodeCluster", "55", mock.Anything).Return(nil).Once()
+	mockStorage.On("UpdateCluster", "10", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseFailed, updated.Status.Phase)
+		assert.Contains(t, updated.Status.ErrorMessage, "static node 10.0.0.10 phase=Reconciling")
+
+		return true
+	})).Return(nil).Once()
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-updating is not ready")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerSyncMapsStaticNodeClusterWarmingToUpgrading(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{
+		storage:               mockStorage,
+		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:   cluster.NewReconcile,
+	}
+	input := &v1.Cluster{
+		ID: 11,
+		Metadata: &v1.Metadata{
+			Name:      "static-upgrading",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.2",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{
+			Initialized:  true,
+			Version:      "v1.0.1",
+			DashboardURL: "http://10.0.0.10:8265",
+		},
+	}
+
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
+		{
+			ID: 56,
+			Metadata: &v1.Metadata{
+				Name:      "static-upgrading",
+				Workspace: "default",
+			},
+			Spec: &v1.StaticNodeClusterSpec{
+				Version:       "v1.0.1",
+				ImageRegistry: "registry.example.com/neutree",
+				Nodes: []v1.StaticNodeClusterNodeSpec{
+					{Name: "10.0.0.10", IP: "10.0.0.10", Role: v1.StaticNodeRoleHead},
+				},
+			},
+			Status: &v1.StaticNodeClusterStatus{
+				Phase:        v1.StaticNodeClusterPhaseUpgrading,
+				Version:      "v1.0.1",
+				ErrorMessage: "Warming",
+			},
+		},
+	}, nil).Once()
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedImageRegistry()}, nil).Once()
+	mockStorage.On("UpdateStaticNodeCluster", "56", mock.Anything).Return(nil).Once()
+	mockStorage.On("UpdateCluster", "11", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseUpgrading, updated.Status.Phase)
+
+		return true
+	})).Return(nil).Once()
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-upgrading is not ready")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerSyncWaitsWhenStaticNodeClusterReadyButSpecChanged(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	controller := &ClusterController{
+		storage:               mockStorage,
+		metricsRemoteWriteURL: "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:   cluster.NewReconcile,
+	}
+	input := &v1.Cluster{
+		ID: 12,
+		Metadata: &v1.Metadata{
+			Name:      "static-upgrade-ready-stale",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.3",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{
+			Initialized:  true,
+			Version:      "v1.0.2",
+			DashboardURL: "http://10.0.0.10:8265",
+		},
+	}
+
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
+		{
+			ID: 57,
+			Metadata: &v1.Metadata{
+				Name:      "static-upgrade-ready-stale",
+				Workspace: "default",
+			},
+			Spec: &v1.StaticNodeClusterSpec{
+				Version:       "v1.0.2",
+				ImageRegistry: "registry.example.com/neutree",
+				Nodes: []v1.StaticNodeClusterNodeSpec{
+					{
+						Name:    "10.0.0.10",
+						IP:      "10.0.0.10",
+						Role:    v1.StaticNodeRoleHead,
+						SSHAuth: &v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+					},
+				},
+				UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
+			},
+			Status: &v1.StaticNodeClusterStatus{
+				Phase:        v1.StaticNodeClusterPhaseReady,
+				Version:      "v1.0.2",
+				ReadyNodes:   1,
+				DesiredNodes: 1,
+			},
+		},
+	}, nil).Once()
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedImageRegistry()}, nil).Once()
+	mockStorage.On("UpdateStaticNodeCluster", "57", mock.Anything).Return(nil).Once()
+	mockStorage.On("UpdateCluster", "12", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseUpgrading, updated.Status.Phase)
+		assert.Equal(t, "v1.0.2", updated.Status.Version)
+		assert.NotEqual(t, cluster.ComputeClusterSpecHash(input.Spec), updated.Status.ObservedSpecHash)
+
+		return true
+	})).Return(nil).Once()
+
+	err := controller.sync(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is applying desired spec")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestClusterControllerSyncContinuesWhenStaticNodeClusterReadyButRayDashboardUnavailable(t *testing.T) {
+	obsCollectConfigManager, _ := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
+		LocalCollectConfigPath: "tmp",
+	})
+	mockStorage := &storagemocks.MockStorage{}
+	mockDashboard := &dashboardmocks.MockDashboardService{}
+	gw := &gatewaymocks.MockGateway{}
+	controller := &ClusterController{
+		storage:                 mockStorage,
+		obsCollectConfigManager: obsCollectConfigManager,
+		gw:                      gw,
+		metricsRemoteWriteURL:   "http://vmagent:8428/api/v1/write",
+		newClusterReconcile:     cluster.NewReconcile,
+	}
+	input := &v1.Cluster{
+		ID: 13,
+		Metadata: &v1.Metadata{
+			Name:      "static-ready-dashboard-down",
+			Workspace: "default",
+		},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Type:          v1.SSHClusterType,
+			Version:       "v1.0.2",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "10.0.0.10"},
+					Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{
+			Initialized: true,
+			Version:     "v1.0.2",
+			ObservedSpecHash: cluster.ComputeClusterSpecHash(&v1.ClusterSpec{
+				ImageRegistry: "registry-a",
+				Type:          v1.SSHClusterType,
+				Version:       "v1.0.2",
+				Config: &v1.ClusterConfig{
+					SSHConfig: &v1.RaySSHProvisionClusterConfig{
+						Provider: v1.Provider{HeadIP: "10.0.0.10"},
+						Auth:     v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+					},
+				},
+			}),
+		},
+	}
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() {
+		dashboard.NewDashboardService = prevFactory
+	})
+
+	mockStorage.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{
+		{
+			ID: 58,
+			Metadata: &v1.Metadata{
+				Name:      "static-ready-dashboard-down",
+				Workspace: "default",
+			},
+			Spec: &v1.StaticNodeClusterSpec{
+				Version:       "v1.0.2",
+				ImageRegistry: "registry.example.com/neutree",
+				Nodes: []v1.StaticNodeClusterNodeSpec{
+					{
+						Name:    "10.0.0.10",
+						IP:      "10.0.0.10",
+						Role:    v1.StaticNodeRoleHead,
+						SSHAuth: &v1.Auth{SSHUser: "root", SSHPrivateKey: "key"},
+					},
+				},
+				UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
+			},
+			Status: &v1.StaticNodeClusterStatus{
+				Phase:        v1.StaticNodeClusterPhaseReady,
+				Version:      "v1.0.2",
+				ReadyNodes:   1,
+				DesiredNodes: 1,
+			},
+		},
+	}, nil).Once()
+	mockStorage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedImageRegistry()}, nil).Once()
+	mockStorage.On("UpdateStaticNodeCluster", "58", mock.Anything).Return(nil).Once()
+	mockDashboard.On("ListNodes").Return(nil, errors.New("connection refused")).Once()
+	gw.On("SyncCluster", mock.Anything).Return(nil).Once()
+	mockStorage.On("UpdateCluster", "13", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		require.NotNil(t, updated.Status)
+		assert.Equal(t, v1.ClusterPhaseRunning, updated.Status.Phase)
+		assert.Empty(t, updated.Status.ErrorMessage)
+		assert.Nil(t, updated.Status.ResourceInfo)
+
+		return true
+	})).Return(nil).Once()
+
+	err := controller.sync(input)
+
+	require.NoError(t, err)
+	mockDashboard.AssertExpectations(t)
+	gw.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
+
+func connectedImageRegistry() v1.ImageRegistry {
+	return v1.ImageRegistry{
+		Metadata: &v1.Metadata{Name: "registry-a", Workspace: "default"},
+		Spec: &v1.ImageRegistrySpec{
+			URL:        "registry.example.com",
+			Repository: "neutree",
+		},
+		Status: &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
+	}
+}
+
 func TestClusterController_UpdateClusterStatus(t *testing.T) {
 	specV2 := &v1.ClusterSpec{
 		ImageRegistry: "test",
 		Type:          "ssh",
-		Version:       "v2",
+		Version:       "v1.0.1",
 	}
 	specV2Hash := cluster.ComputeClusterSpecHash(specV2)
 
 	specV3 := &v1.ClusterSpec{
-		ImageRegistry: "test",
+		ImageRegistry: "test-v2",
 		Type:          "ssh",
-		Version:       "v3",
+		Version:       "v1.0.1",
 	}
-	diagnosticErr := errors.New(`route component is not fully ready, please check the status: DeploymentReady: false
-Diagnostics:
-deployment/router: desired=1, updated=1, ready=0, available=0
-pod/router-abcde: phase=Pending, container/router waiting reason=ImagePullBackOff message="Back-off pulling image"
-event/router-abcde: Warning FailedPull - failed to pull image`)
 
 	tests := []struct {
 		name      string
@@ -374,31 +866,6 @@ event/router-abcde: Warning FailedPull - failed to pull image`)
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
 					assert.NotEmpty(t, obj.Status.ErrorMessage)
-				}).Return(nil)
-			},
-			wantErr: true,
-		},
-		{
-			name: "Failed: reconcile diagnostic error is persisted",
-			input: &v1.Cluster{
-				ID:       1,
-				Metadata: &v1.Metadata{Name: "test"},
-				Spec:     specV2,
-				Status: &v1.ClusterStatus{
-					Phase:            v1.ClusterPhaseRunning,
-					Initialized:      true,
-					ObservedSpecHash: specV2Hash,
-				},
-			},
-			mockSetup: func(s *storagemocks.MockStorage, o *clustermocks.MockClusterReconcile) {
-				o.On("Reconcile", mock.Anything, mock.Anything).Return(diagnosticErr)
-				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
-					obj := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
-					assert.Contains(t, obj.Status.ErrorMessage, "route component is not fully ready")
-					assert.Contains(t, obj.Status.ErrorMessage, "deployment/router")
-					assert.Contains(t, obj.Status.ErrorMessage, "pod/router-abcde")
-					assert.Contains(t, obj.Status.ErrorMessage, "event/router-abcde")
 				}).Return(nil)
 			},
 			wantErr: true,
