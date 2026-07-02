@@ -39,6 +39,7 @@ const (
 
 type StaticNodeCommandRunner interface {
 	Run(ctx context.Context, command string) (string, error)
+	Close() error
 }
 
 type staticNodeFileRunner interface {

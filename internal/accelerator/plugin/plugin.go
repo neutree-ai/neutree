@@ -39,6 +39,10 @@ type ClusterVirtualizationConfigProvider interface {
 type AcceleratorPluginHandle interface {
 	GetNodeAccelerator(ctx context.Context, request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
 	GetNodeRuntimeConfig(ctx context.Context, request *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
+	DetectStaticNodeAccelerator(
+		ctx context.Context,
+		request *v1.DetectStaticNodeAcceleratorRequest,
+	) (*v1.DetectStaticNodeAcceleratorResponse, error)
 	Ping(ctx context.Context) error
 	GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error)
 	// GetResourceConverter returns the resource converter
@@ -51,13 +55,6 @@ type AcceleratorPluginHandle interface {
 	// Unlike GetNodeRuntimeConfig, this does NOT require SSH access to a node.
 	// Used to generate Docker run_options for engine containers (runtime_env.container).
 	GetContainerRuntimeConfig() (v1.RuntimeConfig, error)
-}
-
-type StaticNodeAcceleratorDetector interface {
-	DetectStaticNodeAccelerator(
-		ctx context.Context,
-		request *v1.DetectStaticNodeAcceleratorRequest,
-	) (*v1.DetectStaticNodeAcceleratorResponse, error)
 }
 
 // ResourceConverter is the interface for resource converters

@@ -93,12 +93,15 @@ func (p *AMDGPUAcceleratorPlugin) DetectStaticNodeAccelerator(
 		return &v1.DetectStaticNodeAcceleratorResponse{}, nil
 	}
 
-	accelerators, err := p.getNodeAcceleratorInfo(ctx, request.NodeIp, request.SSHAuth)
+	response, err := p.GetNodeAccelerator(ctx, &v1.GetNodeAcceleratorRequest{
+		NodeIp:  request.NodeIp,
+		SSHAuth: request.SSHAuth,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	return staticNodeAcceleratorResponseFromAccelerators(accelerators, v1.AcceleratorTypeAMDGPU.String()), nil
+	return staticNodeAcceleratorResponseFromAccelerators(response.Accelerators, v1.AcceleratorTypeAMDGPU.String()), nil
 }
 
 func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeIP string, auth v1.Auth) ([]v1.Accelerator, error) {

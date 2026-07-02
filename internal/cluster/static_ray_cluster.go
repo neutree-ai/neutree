@@ -20,16 +20,16 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-var _ ClusterReconcile = &staticNodeClusterBackedRayReconciler{}
+var _ ClusterReconcile = &staticRayReconciler{}
 
-type staticNodeClusterBackedRayReconciler struct {
+type staticRayReconciler struct {
 	storage            storage.Storage
 	acceleratorManager accelerator.Manager
 	legacy             ClusterReconcile
 }
 
-func (r *staticNodeClusterBackedRayReconciler) Reconcile(_ context.Context, c *v1.Cluster) error {
-	if err := r.validateStaticNodeClusterUpdate(c); err != nil {
+func (r *staticRayReconciler) Reconcile(_ context.Context, c *v1.Cluster) error {
+	if err := r.validateClusterUpdate(c); err != nil {
 		return err
 	}
 
@@ -37,18 +37,18 @@ func (r *staticNodeClusterBackedRayReconciler) Reconcile(_ context.Context, c *v
 		return err
 	}
 
-	current, found, err := r.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
+	current, found, err := r.findStaticCluster(c.Metadata.Workspace, c.Metadata.Name)
 	if err != nil {
 		return errors.Wrap(err, "failed to find static node cluster")
 	}
 
 	if !found {
-		if err := r.cleanupLegacyRuntimeBeforeStaticNodeFlow(c); err != nil {
+		if err := r.cleanupLegacyRuntime(c); err != nil {
 			return err
 		}
 	}
 
-	desired, err := r.buildStaticNodeCluster(c)
+	desired, err := r.buildStaticCluster(c)
 	if err != nil {
 		return err
 	}
@@ -58,41 +58,41 @@ func (r *staticNodeClusterBackedRayReconciler) Reconcile(_ context.Context, c *v
 			return errors.Wrap(err, "failed to create static node cluster")
 		}
 
-		r.copyStaticNodeClusterStatus(c, desired, nil, false)
+		r.copyStatus(c, desired, nil, false)
 
 		return errors.Errorf("static node cluster %s is provisioning", c.Metadata.Name)
 	}
 
 	desired.ID = current.ID
 
-	specObserved := staticNodeClusterSpecObserved(current, desired)
+	specObserved := staticClusterSpecObserved(current, desired)
 
 	if err := r.storage.UpdateStaticNodeCluster(strconv.Itoa(current.ID), desired); err != nil {
 		return errors.Wrap(err, "failed to update static node cluster")
 	}
 
-	r.copyStaticNodeClusterStatus(c, desired, current.Status, specObserved)
+	r.copyStatus(c, desired, current.Status, specObserved)
 
 	if current.Status == nil || current.Status.Phase != v1.StaticNodeClusterPhaseReady {
-		r.markStaticNodeClusterApplying(c, current.Status, specObserved)
+		r.markApplying(c, current.Status, specObserved)
 		return staticNodeClusterNotReadyError(current)
 	}
 
 	if !specObserved {
-		r.markStaticNodeClusterApplying(c, current.Status, specObserved)
+		r.markApplying(c, current.Status, specObserved)
 		return errors.Errorf("static node cluster %s is applying desired spec", c.Metadata.Name)
 	}
 
-	if err := r.verifyStaticNodeClusterReady(c, desired); err != nil {
-		r.markStaticNodeClusterApplying(c, current.Status, specObserved)
+	if err := r.verifyReady(c, desired); err != nil {
+		r.markApplying(c, current.Status, specObserved)
 		return errors.Wrapf(err, "static node cluster %s Ray verification failed", c.Metadata.Name)
 	}
 
 	return nil
 }
 
-func (r *staticNodeClusterBackedRayReconciler) ReconcileDelete(_ context.Context, c *v1.Cluster) error {
-	current, found, err := r.findStaticNodeCluster(c.Metadata.Workspace, c.Metadata.Name)
+func (r *staticRayReconciler) ReconcileDelete(_ context.Context, c *v1.Cluster) error {
+	current, found, err := r.findStaticCluster(c.Metadata.Workspace, c.Metadata.Name)
 	if err != nil {
 		return errors.Wrap(err, "failed to find static node cluster")
 	}
@@ -175,7 +175,7 @@ func validateStaticNodeClusterSpec(c *v1.Cluster) error {
 	return nil
 }
 
-func (r *staticNodeClusterBackedRayReconciler) validateStaticNodeClusterUpdate(c *v1.Cluster) error {
+func (r *staticRayReconciler) validateClusterUpdate(c *v1.Cluster) error {
 	if c == nil || !c.IsInitialized() {
 		return nil
 	}
@@ -193,7 +193,7 @@ func (r *staticNodeClusterBackedRayReconciler) validateStaticNodeClusterUpdate(c
 	return fmt.Errorf("initialized static cluster head ip can not be changed from %s to %s", currentHeadIP, desiredHeadIP)
 }
 
-func (r *staticNodeClusterBackedRayReconciler) cleanupLegacyRuntimeBeforeStaticNodeFlow(c *v1.Cluster) error {
+func (r *staticRayReconciler) cleanupLegacyRuntime(c *v1.Cluster) error {
 	if !isLegacyToStaticNodeFlowUpgrade(c) {
 		return nil
 	}
@@ -264,7 +264,7 @@ func currentStaticClusterHeadIP(c *v1.Cluster) string {
 	return parsed.Hostname()
 }
 
-func (r *staticNodeClusterBackedRayReconciler) buildStaticNodeCluster(c *v1.Cluster) (*v1.StaticNodeCluster, error) {
+func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeCluster, error) {
 	if c == nil || c.Metadata == nil {
 		return nil, errors.New("cluster metadata is required")
 	}
@@ -332,7 +332,7 @@ func (r *staticNodeClusterBackedRayReconciler) buildStaticNodeCluster(c *v1.Clus
 	}, nil
 }
 
-func (r *staticNodeClusterBackedRayReconciler) findStaticNodeCluster(
+func (r *staticRayReconciler) findStaticCluster(
 	workspace string,
 	name string,
 ) (*v1.StaticNodeCluster, bool, error) {
@@ -359,7 +359,7 @@ func (r *staticNodeClusterBackedRayReconciler) findStaticNodeCluster(
 	return &clusters[0], true, nil
 }
 
-func (r *staticNodeClusterBackedRayReconciler) copyStaticNodeClusterStatus(
+func (r *staticRayReconciler) copyStatus(
 	c *v1.Cluster,
 	desired *v1.StaticNodeCluster,
 	status *v1.StaticNodeClusterStatus,
@@ -391,7 +391,7 @@ func (r *staticNodeClusterBackedRayReconciler) copyStaticNodeClusterStatus(
 	}
 }
 
-func (r *staticNodeClusterBackedRayReconciler) markStaticNodeClusterApplying(
+func (r *staticRayReconciler) markApplying(
 	c *v1.Cluster,
 	status *v1.StaticNodeClusterStatus,
 	observed bool,
@@ -421,11 +421,11 @@ func (r *staticNodeClusterBackedRayReconciler) markStaticNodeClusterApplying(
 	}
 }
 
-func (r *staticNodeClusterBackedRayReconciler) verifyStaticNodeClusterReady(
+func (r *staticRayReconciler) verifyReady(
 	c *v1.Cluster,
 	staticCluster *v1.StaticNodeCluster,
 ) error {
-	resources, err := r.calculateStaticNodeClusterResources(staticCluster)
+	resources, err := r.calculateResources(staticCluster)
 	if err != nil {
 		return err
 	}
@@ -439,7 +439,7 @@ func (r *staticNodeClusterBackedRayReconciler) verifyStaticNodeClusterReady(
 	return nil
 }
 
-func staticNodeClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool {
+func staticClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool {
 	if current == nil || desired == nil {
 		return false
 	}
@@ -447,7 +447,7 @@ func staticNodeClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool 
 	return reflect.DeepEqual(current.Spec, desired.Spec)
 }
 
-func (r *staticNodeClusterBackedRayReconciler) calculateStaticNodeClusterResources(
+func (r *staticRayReconciler) calculateResources(
 	staticCluster *v1.StaticNodeCluster,
 ) (*v1.ClusterResources, error) {
 	if staticCluster == nil || staticCluster.Metadata == nil {

@@ -55,6 +55,14 @@ func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to assert obj to *v1.StaticNode")
 }
 
+func TestNewStaticNodeControllerRequiresStorage(t *testing.T) {
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{})
+
+	require.Error(t, err)
+	assert.Nil(t, controller)
+	assert.Contains(t, err.Error(), "storage is required")
+}
+
 func TestStaticNodeControllerForceDeleteHardDeletesAfterBestEffortCleanup(t *testing.T) {
 	objectStorage := &fakeControllerStaticNodeObjectStorage{}
 	node := controllerStaticNode()
@@ -201,6 +209,10 @@ func (f *fakeControllerStaticNodeRunner) Run(_ context.Context, command string) 
 	}
 
 	return response.output, response.err
+}
+
+func (f *fakeControllerStaticNodeRunner) Close() error {
+	return nil
 }
 
 func controllerStaticNode() *v1.StaticNode {

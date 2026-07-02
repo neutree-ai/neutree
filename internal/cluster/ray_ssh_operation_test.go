@@ -167,6 +167,111 @@ func TestBuildAcceleratorDockerConfig(t *testing.T) {
 	}
 }
 
+func TestUpCluster(t *testing.T) {
+	tests := []struct {
+		name                    string
+		restart                 bool
+		setupMock               func([]string, *commandmocks.MockExecutor, *acceleratormocks.MockManager)
+		wantErr                 bool
+		expectedContainCommands []string
+	}{
+		{
+			name:    "up cluster success",
+			restart: false,
+			setupMock: func(containCommands []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
+				cmdExecutor.On("Execute", mock.Anything, "bash", mock.Anything).Run(func(args mock.Arguments) {
+					cmdArgs, _ := args.Get(2).([]string)
+					cmdArgsStr := strings.Join(cmdArgs, " ")
+					for _, containCmd := range containCommands {
+						if !strings.Contains(cmdArgsStr, containCmd) {
+							t.Errorf("Expected command to contain %s, but got %s", containCmd, cmdArgsStr)
+						}
+					}
+				}).Return([]byte("success"), nil)
+				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(v1.RuntimeConfig{}, nil)
+			},
+			wantErr:                 false,
+			expectedContainCommands: []string{"ray", "up", "--no-restart"},
+		},
+		{
+			name:    "restart cluster success",
+			restart: true,
+			setupMock: func(containCommands []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
+				cmdExecutor.On("Execute", mock.Anything, "bash", mock.Anything).Run(func(args mock.Arguments) {
+					cmdArgs, _ := args.Get(2).([]string)
+					cmdArgsStr := strings.Join(cmdArgs, " ")
+					for _, containCmd := range containCommands {
+						if !strings.Contains(cmdArgsStr, containCmd) {
+							t.Errorf("Expected command to contain %s, but got %s", containCmd, cmdArgsStr)
+						}
+					}
+				}).Return([]byte("success"), nil)
+				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(v1.RuntimeConfig{}, nil)
+			},
+			wantErr:                 false,
+			expectedContainCommands: []string{"ray", "up"},
+		},
+		{
+			name:    "up cluster failed",
+			restart: false,
+			setupMock: func(containCommands []string, cmdExecutor *commandmocks.MockExecutor, accelManager *acceleratormocks.MockManager) {
+				cmdExecutor.On("Execute", mock.Anything, "bash", mock.Anything).Run(func(args mock.Arguments) {
+					cmdArgs, _ := args.Get(2).([]string)
+					cmdArgsStr := strings.Join(cmdArgs, " ")
+					for _, containCmd := range containCommands {
+						if !strings.Contains(cmdArgsStr, containCmd) {
+							t.Errorf("Expected command to contain %s, but got %s", containCmd, cmdArgsStr)
+						}
+					}
+				}).Return([]byte("failed"), errors.New("command execution failed"))
+				accelManager.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(v1.RuntimeConfig{}, nil)
+			},
+			wantErr:                 true,
+			expectedContainCommands: []string{"ray", "up", "--no-restart"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockCmdExecutor := &commandmocks.MockExecutor{}
+			mockAccelManager := &acceleratormocks.MockManager{}
+			tt.setupMock(tt.expectedContainCommands, mockCmdExecutor, mockAccelManager)
+
+			sshRayClusterReconciler := &sshRayClusterReconciler{
+				executor:           mockCmdExecutor,
+				acceleratorManager: mockAccelManager,
+			}
+
+			_, err := sshRayClusterReconciler.upCluster(&ReconcileContext{
+				sshRayClusterConfig: &v1.RayClusterConfig{},
+				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "127.0.0.1"},
+				},
+				sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
+				Cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{
+						Name:      "test",
+						Workspace: "test",
+					},
+					Status: &v1.ClusterStatus{
+						AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr(),
+					},
+				},
+			}, tt.restart)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("upCluster() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			mockCmdExecutor.AssertExpectations(t)
+			mockAccelManager.AssertExpectations(t)
+		})
+	}
+}
+
 func TestStartNode(t *testing.T) {
 	tests := []struct {
 		name                        string

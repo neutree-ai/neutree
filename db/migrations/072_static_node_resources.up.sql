@@ -57,11 +57,18 @@ CREATE TRIGGER set_static_node_clusters_default_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION set_default_metadata_timestamp_column();
 
+CREATE TRIGGER validate_name_on_static_node_clusters
+    BEFORE INSERT OR UPDATE ON api.static_node_clusters
+    FOR EACH ROW
+    EXECUTE FUNCTION api.validate_metadata_name();
+
+CREATE TRIGGER validate_workspace_on_static_node_clusters
+    BEFORE INSERT OR UPDATE ON api.static_node_clusters
+    FOR EACH ROW
+    EXECUTE FUNCTION api.validate_metadata_workspace();
+
 CREATE UNIQUE INDEX static_node_clusters_name_workspace_unique_idx
     ON api.static_node_clusters (((metadata).workspace), ((metadata).name));
-
-CREATE INDEX static_node_clusters_workspace_phase_idx
-    ON api.static_node_clusters (((metadata).workspace), ((status).phase));
 
 -- Static node resources are controller-owned internal tables. Do not create
 -- user RLS policies here; ordinary API users cannot read or write them
@@ -88,14 +95,18 @@ CREATE TRIGGER set_static_nodes_default_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION set_default_metadata_timestamp_column();
 
+CREATE TRIGGER validate_name_on_static_nodes
+    BEFORE INSERT OR UPDATE ON api.static_nodes
+    FOR EACH ROW
+    EXECUTE FUNCTION api.validate_metadata_name();
+
+CREATE TRIGGER validate_workspace_on_static_nodes
+    BEFORE INSERT OR UPDATE ON api.static_nodes
+    FOR EACH ROW
+    EXECUTE FUNCTION api.validate_metadata_workspace();
+
 CREATE UNIQUE INDEX static_nodes_name_workspace_unique_idx
     ON api.static_nodes (((metadata).workspace), ((metadata).name));
-
-CREATE INDEX static_nodes_cluster_workspace_idx
-    ON api.static_nodes (((metadata).workspace), ((spec).cluster));
-
-CREATE INDEX static_nodes_cluster_role_phase_idx
-    ON api.static_nodes (((metadata).workspace), ((spec).cluster), ((spec).role), ((status).phase));
 
 -- See static_node_clusters above for the access model.
 ALTER TABLE api.static_nodes ENABLE ROW LEVEL SECURITY;

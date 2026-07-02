@@ -54,6 +54,14 @@ func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to assert obj to *v1.StaticNodeCluster")
 }
 
+func TestNewStaticNodeClusterControllerRequiresStorage(t *testing.T) {
+	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{})
+
+	require.Error(t, err)
+	assert.Nil(t, controller)
+	assert.Contains(t, err.Error(), "storage is required")
+}
+
 func TestStaticNodeClusterControllerReconcileRecordsNodeOwnerConflict(t *testing.T) {
 	objectStorage := &fakeControllerStaticNodeClusterObjectStorage{
 		nodes: []v1.StaticNode{

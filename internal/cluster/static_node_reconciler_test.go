@@ -938,6 +938,10 @@ func (f *fakeStaticNodeRunner) Run(_ context.Context, command string) (string, e
 	return response.output, response.err
 }
 
+func (f *fakeStaticNodeRunner) Close() error {
+	return nil
+}
+
 func (f *fakeStaticNodeRunner) Files() commandrunner.FileClient {
 	return f.fileClient
 }

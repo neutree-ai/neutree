@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,11 +30,6 @@ type pluginHTTPError struct {
 
 func (e *pluginHTTPError) Error() string {
 	return fmt.Sprintf("accelerator plugin request failed, status code: %d, content: %s", e.StatusCode, e.Content)
-}
-
-func IsHTTPStatus(err error, statusCode int) bool {
-	var httpErr *pluginHTTPError
-	return stderrors.As(err, &httpErr) && httpErr.StatusCode == statusCode
 }
 
 func newAcceleratorPluginClient(baseUrl string) AcceleratorPluginHandle {
@@ -114,10 +108,6 @@ func (u *acceleratorPluginClient) DetectStaticNodeAccelerator(
 	response := &v1.DetectStaticNodeAcceleratorResponse{}
 
 	err := u.doPost(ctx, v1.DetectStaticNodeAcceleratorPath, request, response)
-	if IsHTTPStatus(err, http.StatusNotFound) {
-		return response, nil
-	}
-
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to detect static node accelerator from accelerator plugin")
 	}

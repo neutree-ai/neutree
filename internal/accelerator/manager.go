@@ -207,12 +207,7 @@ func (a *manager) DetectAccelerator(
 			return true
 		}
 
-		detector, ok := staticNodeAcceleratorDetector(p.plugin)
-		if !ok {
-			return true
-		}
-
-		response, err := detector.DetectStaticNodeAccelerator(ctx, request)
+		response, err := p.plugin.Handle().DetectStaticNodeAccelerator(ctx, request)
 		if err != nil {
 			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, err.Error())
 
@@ -242,16 +237,6 @@ func (a *manager) DetectAccelerator(
 	cpu := v1.CPUStaticNodeAcceleratorStatus()
 
 	return &cpu, nil
-}
-
-func staticNodeAcceleratorDetector(p plugin.AcceleratorPlugin) (plugin.StaticNodeAcceleratorDetector, bool) {
-	if detector, ok := p.(plugin.StaticNodeAcceleratorDetector); ok {
-		return detector, true
-	}
-
-	detector, ok := p.Handle().(plugin.StaticNodeAcceleratorDetector)
-
-	return detector, ok
 }
 
 func (a *manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {
@@ -340,18 +325,6 @@ func (a *manager) GetAcceleratorProfile(
 	profile, err := p.Handle().GetAcceleratorProfile(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
-	}
-
-	if profile.AcceleratorType == "" {
-		copied := *profile
-		copied.AcceleratorType = acceleratorType
-		profile = &copied
-	} else if profile.AcceleratorType != acceleratorType {
-		return nil, errors.Errorf(
-			"profile accelerator type %s does not match requested type %s",
-			profile.AcceleratorType,
-			acceleratorType,
-		)
 	}
 
 	return profile, nil

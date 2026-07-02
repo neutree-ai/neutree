@@ -49,7 +49,7 @@ func TestAcceleratorPluginClientGetAcceleratorProfileNotFound(t *testing.T) {
 	_, err := client.GetAcceleratorProfile(context.Background())
 
 	require.Error(t, err)
-	assert.True(t, IsHTTPStatus(err, http.StatusNotFound))
+	assert.Contains(t, err.Error(), "status code: 404")
 }
 
 func TestAcceleratorPluginClientDetectStaticNodeAccelerator(t *testing.T) {
@@ -73,10 +73,8 @@ func TestAcceleratorPluginClientDetectStaticNodeAccelerator(t *testing.T) {
 	defer server.Close()
 
 	client := newAcceleratorPluginClient(server.URL)
-	detector, ok := client.(StaticNodeAcceleratorDetector)
-	require.True(t, ok)
 
-	response, err := detector.DetectStaticNodeAccelerator(context.Background(), &v1.DetectStaticNodeAcceleratorRequest{
+	response, err := client.DetectStaticNodeAccelerator(context.Background(), &v1.DetectStaticNodeAcceleratorRequest{
 		NodeIp: "10.0.0.10",
 		SSHAuth: v1.Auth{
 			SSHUser:       "root",
@@ -91,20 +89,18 @@ func TestAcceleratorPluginClientDetectStaticNodeAccelerator(t *testing.T) {
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), response.Accelerator.Type)
 }
 
-func TestAcceleratorPluginClientDetectStaticNodeAcceleratorNotFoundIsNoMatch(t *testing.T) {
+func TestAcceleratorPluginClientDetectStaticNodeAcceleratorNotFoundReturnsError(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
 
 	client := newAcceleratorPluginClient(server.URL)
-	detector, ok := client.(StaticNodeAcceleratorDetector)
-	require.True(t, ok)
 
-	response, err := detector.DetectStaticNodeAccelerator(context.Background(), &v1.DetectStaticNodeAcceleratorRequest{
+	response, err := client.DetectStaticNodeAccelerator(context.Background(), &v1.DetectStaticNodeAcceleratorRequest{
 		NodeIp: "10.0.0.10",
 	})
 
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	assert.False(t, response.Matched)
-	assert.Nil(t, response.Accelerator)
+	require.Error(t, err)
+	assert.Nil(t, response)
+	assert.Contains(t, err.Error(), "failed to detect static node accelerator from accelerator plugin")
+	assert.Contains(t, err.Error(), "status code: 404")
 }

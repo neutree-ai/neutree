@@ -32,10 +32,10 @@ func (f *fakeLegacyStaticUpgradeCleaner) ReconcileDelete(context.Context, *v1.Cl
 	return nil
 }
 
-func TestStaticNodeClusterBackedRayReconcilerCleansLegacyRuntimeBeforeCreate(t *testing.T) {
+func TestStaticRayReconcilerCleansLegacyRuntimeBeforeCreate(t *testing.T) {
 	store := &storagemocks.MockStorage{}
 	legacyCleaner := &fakeLegacyStaticUpgradeCleaner{}
-	reconciler := &staticNodeClusterBackedRayReconciler{
+	reconciler := &staticRayReconciler{
 		storage: store,
 		legacy:  legacyCleaner,
 	}
@@ -69,9 +69,9 @@ func TestStaticNodeClusterBackedRayReconcilerCleansLegacyRuntimeBeforeCreate(t *
 	store.AssertExpectations(t)
 }
 
-func TestStaticNodeClusterBackedRayReconcilerDeletePropagatesForceDelete(t *testing.T) {
+func TestStaticRayReconcilerDeletePropagatesForceDelete(t *testing.T) {
 	store := &storagemocks.MockStorage{}
-	reconciler := &staticNodeClusterBackedRayReconciler{storage: store}
+	reconciler := &staticRayReconciler{storage: store}
 	cluster := &v1.Cluster{
 		Metadata: &v1.Metadata{
 			Name:      "static-force",
@@ -103,11 +103,11 @@ func TestStaticNodeClusterBackedRayReconcilerDeletePropagatesForceDelete(t *test
 	store.AssertExpectations(t)
 }
 
-func TestStaticNodeClusterBackedRayReconcilerCalculateResourcesEnrichesFromStaticNodeDevices(t *testing.T) {
+func TestStaticRayReconcilerCalculateResourcesEnrichesFromStaticNodeDevices(t *testing.T) {
 	store := &storagemocks.MockStorage{}
 	mockDashboard := &dashboardmocks.MockDashboardService{}
 	mockAcceleratorManager := &acceleratormocks.MockManager{}
-	reconciler := &staticNodeClusterBackedRayReconciler{
+	reconciler := &staticRayReconciler{
 		storage:            store,
 		acceleratorManager: mockAcceleratorManager,
 	}
@@ -177,7 +177,7 @@ func TestStaticNodeClusterBackedRayReconcilerCalculateResourcesEnrichesFromStati
 		}, nil).
 		Once()
 
-	resources, err := reconciler.calculateStaticNodeClusterResources(&v1.StaticNodeCluster{
+	resources, err := reconciler.calculateResources(&v1.StaticNodeCluster{
 		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
 		Spec: &v1.StaticNodeClusterSpec{
 			Version: "v1.0.2",
@@ -224,33 +224,33 @@ func connectedStaticNodeImageRegistry() v1.ImageRegistry {
 	}
 }
 
-func TestStaticNodeClusterBackedRayReconcilerMarksApplyingPhaseForGenericClusterPhase(t *testing.T) {
-	reconciler := &staticNodeClusterBackedRayReconciler{}
+func TestStaticRayReconcilerMarksApplyingPhaseForGenericClusterPhase(t *testing.T) {
+	reconciler := &staticRayReconciler{}
 	cluster := &v1.Cluster{Status: &v1.ClusterStatus{Initialized: true}}
 
-	reconciler.markStaticNodeClusterApplying(cluster, &v1.StaticNodeClusterStatus{
+	reconciler.markApplying(cluster, &v1.StaticNodeClusterStatus{
 		Phase: v1.StaticNodeClusterPhaseProvisioning,
 	}, false)
 
 	assert.Equal(t, v1.ClusterPhaseUpdating, DetermineClusterPhase(false, cluster))
 
-	reconciler.markStaticNodeClusterApplying(cluster, &v1.StaticNodeClusterStatus{
+	reconciler.markApplying(cluster, &v1.StaticNodeClusterStatus{
 		Phase: v1.StaticNodeClusterPhaseUpgrading,
 	}, false)
 
 	assert.Equal(t, v1.ClusterPhaseUpgrading, DetermineClusterPhase(false, cluster))
 
-	reconciler.markStaticNodeClusterApplying(cluster, &v1.StaticNodeClusterStatus{
+	reconciler.markApplying(cluster, &v1.StaticNodeClusterStatus{
 		Phase: v1.StaticNodeClusterPhaseFailed,
 	}, false)
 
 	assert.Equal(t, v1.ClusterPhaseFailed, DetermineClusterPhase(false, cluster))
 }
 
-func TestStaticNodeClusterBackedRayReconcilerWrapsDashboardVerificationAsApplying(t *testing.T) {
+func TestStaticRayReconcilerWrapsDashboardVerificationAsApplying(t *testing.T) {
 	store := &storagemocks.MockStorage{}
 	mockDashboard := &dashboardmocks.MockDashboardService{}
-	reconciler := &staticNodeClusterBackedRayReconciler{storage: store}
+	reconciler := &staticRayReconciler{storage: store}
 	cluster := &v1.Cluster{
 		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
 		Spec: &v1.ClusterSpec{

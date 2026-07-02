@@ -70,7 +70,7 @@ func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 		}
 
 		if useStaticFlow {
-			return &staticNodeClusterBackedRayReconciler{
+			return &staticRayReconciler{
 				storage:            s,
 				acceleratorManager: acceleratorManager,
 				legacy:             legacy,

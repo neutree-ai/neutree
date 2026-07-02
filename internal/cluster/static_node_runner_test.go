@@ -72,11 +72,7 @@ func TestStaticNodeSSHRunnerFactoryWrapsSSHRunner(t *testing.T) {
 	assert.Equal(t, "ray@10.0.0.10", calls[0].args[len(calls[0].args)-2])
 	assert.Equal(t, "docker ps", calls[1].args[len(calls[1].args)-1])
 
-	closer, ok := runner.(interface {
-		Close() error
-	})
-	require.True(t, ok)
-	require.NoError(t, closer.Close())
+	require.NoError(t, runner.Close())
 	_, err = os.Stat(keyPath)
 	assert.True(t, os.IsNotExist(err))
 }

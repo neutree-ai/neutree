@@ -40,6 +40,7 @@ func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
 
 		err := json.NewEncoder(w).Encode(v1.GetAcceleratorProfileResponse{
 			Profile: v1.AcceleratorProfile{
+				AcceleratorType: "external_gpu",
 				ClusterRuntime: &v1.RuntimeConfig{
 					Runtime: "custom-cluster",
 				},
@@ -68,24 +69,6 @@ func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
 	assert.Equal(t, "custom-cluster", profile.ClusterRuntime.Runtime)
 	require.NotNil(t, profile.EngineRuntime)
 	assert.Equal(t, "custom-engine", profile.EngineRuntime.Runtime)
-}
-
-func TestManagerGetAcceleratorProfileRejectsMismatchedProfileType(t *testing.T) {
-	provider := &fakeStaticNodeAcceleratorPlugin{
-		acceleratorProfile: &v1.AcceleratorProfile{AcceleratorType: "other_gpu"},
-	}
-	m := &manager{}
-	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
-		resource:         "custom_gpu",
-		plugin:           provider,
-		lastRegisterTime: time.Now(),
-	})
-
-	profile, err := m.GetAcceleratorProfile(context.Background(), "custom_gpu")
-
-	require.Error(t, err)
-	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "profile accelerator type other_gpu does not match requested type custom_gpu")
 }
 
 func TestManagerGetAcceleratorProfileNotFoundReturnsError(t *testing.T) {

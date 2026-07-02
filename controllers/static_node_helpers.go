@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -38,7 +37,7 @@ func listStaticNodes(
 	nodes := make([]*v1.StaticNode, 0, len(items))
 	for i := range items {
 		node := items[i]
-		if node.Metadata == nil || node.Spec == nil {
+		if node.Spec == nil {
 			continue
 		}
 
@@ -57,8 +56,8 @@ func upsertStaticNode(store storage.Storage, node *v1.StaticNode) error {
 		return errors.New("storage is required")
 	}
 
-	if node == nil || node.Metadata == nil {
-		return errors.New("static node metadata is required")
+	if node == nil {
+		return errors.New("static node is required")
 	}
 
 	prepareStaticNode(node)
@@ -77,12 +76,8 @@ func upsertStaticNode(store storage.Storage, node *v1.StaticNode) error {
 	}
 
 	node.ID = existing.ID
-	id := existing.GetID()
-	if emptyObjectID(id) {
-		return errors.New("existing static node id is required")
-	}
 
-	return store.UpdateStaticNode(id, node)
+	return store.UpdateStaticNode(existing.GetID(), node)
 }
 
 func validateStaticNodeOwner(existing *v1.StaticNode, desired *v1.StaticNode) error {
@@ -102,7 +97,7 @@ func validateStaticNodeOwner(existing *v1.StaticNode, desired *v1.StaticNode) er
 	return errors.Errorf("static node %s is already owned by static node cluster %s", name, existing.Spec.Cluster)
 }
 
-func deleteStaticNode(store storage.Storage, node *v1.StaticNode) error {
+func softDeleteStaticNode(store storage.Storage, node *v1.StaticNode) error {
 	if store == nil {
 		return errors.New("storage is required")
 	}
@@ -113,29 +108,11 @@ func deleteStaticNode(store storage.Storage, node *v1.StaticNode) error {
 
 	prepareStaticNode(node)
 
-	node, found, err := staticNodeForDelete(store, node)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return nil
-	}
-
-	id := node.GetID()
-	if emptyObjectID(id) {
-		return errors.New("static node id is required")
-	}
-
-	if node.Metadata == nil {
-		node.Metadata = &v1.Metadata{}
-	}
-
 	if node.Metadata.DeletionTimestamp == "" {
 		node.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
 	}
 
-	return store.UpdateStaticNode(id, node)
+	return store.UpdateStaticNode(node.GetID(), node)
 }
 
 func hardDeleteStaticNode(store storage.Storage, node *v1.StaticNode) error {
@@ -149,21 +126,7 @@ func hardDeleteStaticNode(store storage.Storage, node *v1.StaticNode) error {
 
 	prepareStaticNode(node)
 
-	node, found, err := staticNodeForDelete(store, node)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return nil
-	}
-
-	id := node.GetID()
-	if emptyObjectID(id) {
-		return errors.New("static node id is required")
-	}
-
-	return store.DeleteStaticNode(id)
+	return store.DeleteStaticNode(node.GetID())
 }
 
 func hardDeleteStaticNodeCluster(store storage.Storage, cluster *v1.StaticNodeCluster) error {
@@ -176,12 +139,7 @@ func hardDeleteStaticNodeCluster(store storage.Storage, cluster *v1.StaticNodeCl
 	}
 
 	prepareStaticNodeCluster(cluster)
-	id := cluster.GetID()
-	if emptyObjectID(id) {
-		return errors.New("static node cluster id is required")
-	}
-
-	return store.DeleteStaticNodeCluster(id)
+	return store.DeleteStaticNodeCluster(cluster.GetID())
 }
 
 func updateStaticNodeClusterStatus(
@@ -198,12 +156,7 @@ func updateStaticNodeClusterStatus(
 	}
 
 	prepareStaticNodeCluster(cluster)
-	id := cluster.GetID()
-	if emptyObjectID(id) {
-		return errors.New("static node cluster id is required")
-	}
-
-	return store.UpdateStaticNodeCluster(id, &v1.StaticNodeCluster{
+	return store.UpdateStaticNodeCluster(cluster.GetID(), &v1.StaticNodeCluster{
 		Kind:   staticNodeClusterKind,
 		Status: &status,
 	})
@@ -223,12 +176,7 @@ func updateStaticNodeStatus(
 	}
 
 	prepareStaticNode(node)
-	id := node.GetID()
-	if emptyObjectID(id) {
-		return errors.New("static node id is required")
-	}
-
-	return store.UpdateStaticNode(id, &v1.StaticNode{
+	return store.UpdateStaticNode(node.GetID(), &v1.StaticNode{
 		Kind:   staticNodeKind,
 		Status: &status,
 	})
@@ -242,40 +190,12 @@ func findStaticNode(store storage.Storage, workspace, name string) (*v1.StaticNo
 
 	for i := range nodes {
 		node := nodes[i]
-		if node.Metadata == nil {
-			continue
-		}
-
 		if node.Metadata.Workspace == workspace && node.Metadata.Name == name {
 			return &node, true, nil
 		}
 	}
 
 	return nil, false, nil
-}
-
-func staticNodeForDelete(store storage.Storage, node *v1.StaticNode) (*v1.StaticNode, bool, error) {
-	id := node.GetID()
-	if !emptyObjectID(id) {
-		return node, true, nil
-	}
-
-	if node.Metadata == nil {
-		return nil, false, errors.New("static node metadata is required")
-	}
-
-	existing, found, err := findStaticNode(store, node.Metadata.Workspace, node.Metadata.Name)
-	if err != nil {
-		return nil, false, err
-	}
-
-	if !found {
-		return nil, false, nil
-	}
-
-	prepareStaticNode(existing)
-
-	return existing, true, nil
 }
 
 func prepareStaticNodeCluster(cluster *v1.StaticNodeCluster) {
@@ -296,10 +216,4 @@ func prepareStaticNode(node *v1.StaticNode) {
 	if node.Kind == "" {
 		node.Kind = staticNodeKind
 	}
-}
-
-func emptyObjectID(id string) bool {
-	id = strings.TrimSpace(id)
-
-	return id == "" || id == "0"
 }

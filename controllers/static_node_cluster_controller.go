@@ -30,6 +30,10 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 		return nil, errors.New("static node cluster controller option is required")
 	}
 
+	if option.Storage == nil {
+		return nil, errors.New("storage is required")
+	}
+
 	planner := option.Planner
 	if planner == nil {
 		planner = &clusterreconcile.StaticNodeClusterPlanner{
@@ -64,17 +68,8 @@ func (c *StaticNodeClusterController) Reconcile(obj interface{}) error {
 }
 
 func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.StaticNodeCluster) error {
-	if cluster == nil || cluster.Metadata == nil {
-		return errors.New("static node cluster metadata is required")
-	}
-
-	if c.storage == nil {
-		return errors.New("storage is required")
-	}
-
-	planner := c.planner
-	if planner == nil {
-		planner = &clusterreconcile.StaticNodeClusterPlanner{}
+	if cluster == nil {
+		return errors.New("static node cluster is required")
 	}
 
 	currentNodes, err := listStaticNodes(c.storage, cluster.Metadata.Workspace, cluster.Metadata.Name)
@@ -86,32 +81,41 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		return c.reconcileDelete(ctx, cluster, currentNodes)
 	}
 
-	desiredNodePlans, err := planner.Plan(ctx, cluster, currentNodes)
+	return c.reconcileNormal(ctx, cluster, currentNodes)
+}
+
+func (c *StaticNodeClusterController) reconcileNormal(
+	ctx context.Context,
+	cluster *v1.StaticNodeCluster,
+	currentNodes []*v1.StaticNode,
+) (reconcileErr error) {
+	status := v1.StaticNodeClusterStatus{}
+	defer func() {
+		if reconcileErr != nil {
+			status = staticNodeClusterFailedStatus(status, reconcileErr)
+		}
+
+		c.updateStatus(cluster, status, "failed to update static node cluster status", &reconcileErr)
+	}()
+
+	desiredNodePlans, err := c.planner.Plan(ctx, cluster, currentNodes)
 	if err != nil {
 		return err
 	}
 
-	status := c.aggregator.Aggregate(cluster, currentNodes, desiredNodePlans)
+	status = c.aggregator.Aggregate(cluster, currentNodes, desiredNodePlans)
 
 	desiredByName := make(map[string]*v1.StaticNode, len(desiredNodePlans))
 
 	for _, nodePlan := range desiredNodePlans {
 		node := nodePlan.Node
-		if node == nil || node.Metadata == nil {
+		if node == nil {
 			continue
 		}
 
 		desiredByName[node.Metadata.Name] = node
 
 		if err := upsertStaticNode(c.storage, node); err != nil {
-			if updateErr := updateStaticNodeClusterStatus(
-				c.storage,
-				cluster,
-				staticNodeClusterFailedStatus(status, err),
-			); updateErr != nil {
-				return errors.Wrap(updateErr, "failed to update static node cluster status")
-			}
-
 			return errors.Wrapf(err, "failed to upsert static node %s", node.Metadata.Name)
 		}
 	}
@@ -119,7 +123,7 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 	hasStaleNodes := false
 
 	for _, node := range currentNodes {
-		if node == nil || node.Metadata == nil {
+		if node == nil {
 			continue
 		}
 
@@ -129,7 +133,7 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 
 		hasStaleNodes = true
 
-		if err := deleteStaticNode(c.storage, node); err != nil {
+		if err := softDeleteStaticNode(c.storage, node); err != nil {
 			return errors.Wrapf(err, "failed to delete stale static node %s", node.Metadata.Name)
 		}
 	}
@@ -143,10 +147,6 @@ func (c *StaticNodeClusterController) sync(ctx context.Context, cluster *v1.Stat
 		status = clusterreconcile.RequireStaticNodeClusterRayVerified(ctx, cluster, status, c.rayVerifier)
 	}
 
-	if err := updateStaticNodeClusterStatus(c.storage, cluster, status); err != nil {
-		return errors.Wrap(err, "failed to update static node cluster status")
-	}
-
 	return nil
 }
 
@@ -154,9 +154,24 @@ func (c *StaticNodeClusterController) reconcileDelete(
 	ctx context.Context,
 	cluster *v1.StaticNodeCluster,
 	currentNodes []*v1.StaticNode,
-) error {
+) (reconcileErr error) {
+	hardDeleted := false
+	defer func() {
+		if hardDeleted {
+			return
+		}
+
+		status := staticNodeClusterDeletingStatus(len(currentNodes), reconcileErr)
+		c.updateStatus(cluster, status, "failed to update static node cluster deletion status", &reconcileErr)
+	}()
+
 	if len(currentNodes) == 0 {
-		return hardDeleteStaticNodeCluster(c.storage, cluster)
+		if err := hardDeleteStaticNodeCluster(c.storage, cluster); err != nil {
+			return err
+		}
+
+		hardDeleted = true
+		return nil
 	}
 
 	isForceDelete := v1.IsForceDelete(cluster.Metadata.Annotations)
@@ -167,14 +182,10 @@ func (c *StaticNodeClusterController) reconcileDelete(
 		}
 
 		if isForceDelete {
-			if node.Metadata == nil {
-				node.Metadata = &v1.Metadata{}
-			}
-
 			if !v1.IsForceDelete(node.Metadata.Annotations) {
 				node.Metadata.Annotations = v1.WithForceDeleteAnnotation(node.Metadata.Annotations)
 
-				if err := deleteStaticNode(c.storage, node); err != nil {
+				if err := softDeleteStaticNode(c.storage, node); err != nil {
 					return errors.Wrapf(err, "failed to mark static node %s force deleting", staticNodeName(node))
 				}
 
@@ -182,29 +193,40 @@ func (c *StaticNodeClusterController) reconcileDelete(
 			}
 		}
 
-		if node.Metadata != nil && node.Metadata.DeletionTimestamp != "" {
+		if node.Metadata.DeletionTimestamp != "" {
 			continue
 		}
 
-		if err := deleteStaticNode(c.storage, node); err != nil {
+		if err := softDeleteStaticNode(c.storage, node); err != nil {
 			return errors.Wrapf(err, "failed to delete static node %s", staticNodeName(node))
 		}
-	}
-
-	status := v1.StaticNodeClusterStatus{
-		Phase:        v1.StaticNodeClusterPhaseProvisioning,
-		DesiredNodes: len(currentNodes),
-		ErrorMessage: "Deleting",
-	}
-	if err := updateStaticNodeClusterStatus(c.storage, cluster, status); err != nil {
-		return errors.Wrap(err, "failed to update static node cluster deletion status")
 	}
 
 	return nil
 }
 
+func (c *StaticNodeClusterController) updateStatus(
+	cluster *v1.StaticNodeCluster,
+	status v1.StaticNodeClusterStatus,
+	message string,
+	reconcileErr *error,
+) {
+	if err := updateStaticNodeClusterStatus(c.storage, cluster, status); err != nil {
+		updateErr := errors.Wrap(err, message)
+		if reconcileErr != nil && *reconcileErr == nil {
+			*reconcileErr = updateErr
+		}
+
+		if cluster != nil && cluster.Metadata != nil {
+			klog.Errorf("failed to update static node cluster %s status, err: %v", cluster.Metadata.WorkspaceName(), updateErr)
+		} else {
+			klog.Errorf("failed to update static node cluster status, err: %v", updateErr)
+		}
+	}
+}
+
 func staticNodeName(node *v1.StaticNode) string {
-	if node == nil || node.Metadata == nil {
+	if node == nil {
 		return ""
 	}
 
@@ -224,6 +246,19 @@ func staticNodeClusterFailedStatus(
 		status.ErrorMessage = err.Error()
 	} else {
 		status.ErrorMessage += "; " + err.Error()
+	}
+
+	return status
+}
+
+func staticNodeClusterDeletingStatus(desiredNodes int, err error) v1.StaticNodeClusterStatus {
+	status := v1.StaticNodeClusterStatus{
+		Phase:        v1.StaticNodeClusterPhaseProvisioning,
+		DesiredNodes: desiredNodes,
+		ErrorMessage: "Deleting",
+	}
+	if err != nil {
+		return staticNodeClusterFailedStatus(status, err)
 	}
 
 	return status

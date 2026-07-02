@@ -20,12 +20,12 @@ func TestNewReconcileDispatchesStaticNodeBackedSSHClusterByVersion(t *testing.T)
 			version: "v1.0.1",
 		},
 		{
-			name:       "SSH v1.0.2 uses static-node-backed Ray reconciler",
+			name:       "SSH v1.0.2 uses static Ray reconciler",
 			version:    "v1.0.2",
 			wantStatic: true,
 		},
 		{
-			name:       "SSH v1.1.0 uses static-node-backed Ray reconciler",
+			name:       "SSH v1.1.0 uses static Ray reconciler",
 			version:    "v1.1.0",
 			wantStatic: true,
 		},
@@ -38,7 +38,7 @@ func TestNewReconcileDispatchesStaticNodeBackedSSHClusterByVersion(t *testing.T)
 			}, nil, nil, "")
 
 			require.NoError(t, err)
-			_, isStatic := reconciler.(*staticNodeClusterBackedRayReconciler)
+			_, isStatic := reconciler.(*staticRayReconciler)
 			assert.Equal(t, tt.wantStatic, isStatic)
 		})
 	}
