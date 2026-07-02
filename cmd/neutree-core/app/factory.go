@@ -274,6 +274,7 @@ func NewStaticNodeClusterControllerFactory() ControllerFactory {
 			&controllers.StaticNodeClusterControllerOption{
 				Storage:                    opts.config.Storage,
 				AcceleratorProfileProvider: opts.config.AcceleratorManager,
+				MetricsRemoteWriteURL:      opts.config.ClusterControllerConfig.MetricsRemoteWriteURL,
 			},
 		)
 		if err != nil {

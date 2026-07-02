@@ -12,8 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// GetMetricsResources returns all Kubernetes resources for the metrics component
-func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList, error) {
+// GetMetricsResources returns all Kubernetes resources for the metrics component.
+func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructured.UnstructuredList, error) {
 	variables := m.buildManifestVariables()
 
 	enableKubeStateMetrics, err := m.supportsKubeStateMetrics()
@@ -26,6 +26,19 @@ func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList
 	variables.EnableHAMiMonitorScrape = m.cluster.Spec.AcceleratorVirtualizationEnabled()
 	variables.EnableKubeStateMetrics = enableKubeStateMetrics
 
+	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
+	}
+
+	variables.AcceleratorExporters = acceleratorExporters
+
+	vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to render vmagent config for cluster %s", m.cluster.Metadata.Name)
+	}
+	variables.VMAgentConfig = vmagentConfig
+
 	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to render metrics manifest for cluster %s", m.cluster.Metadata.Name)
@@ -36,7 +49,7 @@ func (m *MetricsComponent) GetMetricsResources() (*unstructured.UnstructuredList
 
 // ApplyResources applies all metrics resources to the cluster
 func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
-	objs, err := m.GetMetricsResources()
+	objs, err := m.GetMetricsResources(ctx)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get metrics resources for cluster %s", m.cluster.Metadata.Name)
 	}

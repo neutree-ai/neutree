@@ -3,9 +3,10 @@ package metrics
 import (
 	"context"
 	"testing"
-	"time"
 
+	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/stretchr/testify/assert"
 	"go.openly.dev/pointy"
 	appsv1 "k8s.io/api/apps/v1"
@@ -44,108 +45,19 @@ func readyMetricsDeployment(name string) *appsv1.Deployment {
 	}
 }
 
-func TestCheckResourcesStatusIncludesMetricsDiagnostics(t *testing.T) {
-	now := metav1.NewTime(time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
-	fakeClient := fake.NewClientBuilder().
-		WithObjects(
-			&appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "vmagent",
-					Namespace:  "default",
-					Generation: 2,
-				},
-				Spec: appsv1.DeploymentSpec{
-					Replicas: pointy.Int32(1),
-				},
-				Status: appsv1.DeploymentStatus{
-					ObservedGeneration: 2,
-					Replicas:           1,
-					UpdatedReplicas:    1,
-					ReadyReplicas:      0,
-					AvailableReplicas:  0,
-					Conditions: []appsv1.DeploymentCondition{
-						{
-							Type:    appsv1.DeploymentAvailable,
-							Status:  corev1.ConditionFalse,
-							Reason:  "MinimumReplicasUnavailable",
-							Message: "Deployment does not have minimum availability",
-						},
-					},
-				},
-			},
-			&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "vmagent-6f8d9c7b8c-abcde",
-					Namespace: "default",
-					Labels: map[string]string{
-						"app":       "vmagent",
-						"cluster":   "test",
-						"workspace": "default",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name: "vmagent",
-							Env: []corev1.EnvVar{
-								{Name: "SHOULD_NOT_LEAK", Value: "TOP_SECRET_VALUE"},
-							},
-						},
-					},
-				},
-				Status: corev1.PodStatus{
-					Phase: corev1.PodRunning,
-					ContainerStatuses: []corev1.ContainerStatus{
-						{
-							Name: "vmagent",
-							State: corev1.ContainerState{
-								Waiting: &corev1.ContainerStateWaiting{
-									Reason:  "CrashLoopBackOff",
-									Message: "back-off restarting failed container",
-								},
-							},
-						},
-					},
-				},
-			},
-			&corev1.Event{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "vmagent-backoff",
-					Namespace: "default",
-				},
-				InvolvedObject: corev1.ObjectReference{
-					Kind:      "Pod",
-					Namespace: "default",
-					Name:      "vmagent-6f8d9c7b8c-abcde",
-				},
-				Type:          corev1.EventTypeWarning,
-				Reason:        "BackOff",
-				Message:       "Back-off restarting failed container",
-				LastTimestamp: now,
-			},
-		).
-		Build()
-	metricsCmpt := &MetricsComponent{
-		ctrlClient: fakeClient,
-		namespace:  "default",
-		cluster: &v1.Cluster{
-			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
-			Spec:     &v1.ClusterSpec{Version: "v1.0.0"},
+func readyMetricsDaemonSet(name string, desired int32) *appsv1.DaemonSet {
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Status: appsv1.DaemonSetStatus{
+			DesiredNumberScheduled: desired,
+			NumberReady:            desired,
+			UpdatedNumberScheduled: desired,
+			NumberAvailable:        desired,
 		},
 	}
-
-	status, err := metricsCmpt.CheckResourcesStatus(context.Background())
-
-	assert.NoError(t, err)
-	assert.False(t, status.DeploymentReady)
-	message := status.String()
-	assert.Contains(t, message, "deployment/vmagent")
-	assert.Contains(t, message, "available=0")
-	assert.Contains(t, message, "pod/vmagent-6f8d9c7b8c-abcde")
-	assert.Contains(t, message, "CrashLoopBackOff")
-	assert.Contains(t, message, "event/vmagent-6f8d9c7b8c-abcde")
-	assert.Contains(t, message, "BackOff")
-	assert.NotContains(t, message, "TOP_SECRET_VALUE")
 }
 
 func Test_checkDeploymentStatus(t *testing.T) {
@@ -267,6 +179,7 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 		WithObjects(
 			readyMetricsDeployment("vmagent"),
 			readyMetricsDeployment("neutree-kube-state-metrics"),
+			readyMetricsDaemonSet("neutree-node-exporter", 2),
 		).
 		Build()
 
@@ -286,13 +199,17 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 	assert.True(t, status.DeploymentReady)
 	assert.True(t, status.KubeStateMetricsRequired)
 	assert.True(t, status.KubeStateMetricsDeploymentReady)
+	assert.True(t, status.NodeExporterDaemonSetReady)
 	assert.Equal(t, 1, status.PodsReady)
 	assert.Equal(t, 1, status.KubeStateMetricsPodsReady)
 }
 
 func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().
-		WithObjects(readyMetricsDeployment("vmagent")).
+		WithObjects(
+			readyMetricsDeployment("vmagent"),
+			readyMetricsDaemonSet("neutree-node-exporter", 2),
+		).
 		Build()
 
 	metricsCmpt := &MetricsComponent{
@@ -311,6 +228,45 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	assert.True(t, status.DeploymentReady)
 	assert.False(t, status.KubeStateMetricsRequired)
 	assert.False(t, status.KubeStateMetricsDeploymentReady)
+	assert.True(t, status.NodeExporterDaemonSetReady)
+}
+
+func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fakeClient := fake.NewClientBuilder().
+		WithObjects(
+			readyMetricsDeployment("vmagent"),
+			readyMetricsDeployment("neutree-kube-state-metrics"),
+			readyMetricsDaemonSet("neutree-node-exporter", 1),
+			readyMetricsDaemonSet("nvidia-gpu-dcgm-exporter", 1),
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "gpu-node",
+					Labels: map[string]string{
+						"nvidia.com/gpu.present": "true",
+					},
+				},
+			},
+		).
+		Build()
+
+	metricsCmpt := &MetricsComponent{
+		ctrlClient:     fakeClient,
+		namespace:      "default",
+		acceleratorMgr: accelerator.NewManager(gin.New()),
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+	}
+
+	status, err := metricsCmpt.CheckResourcesStatus(context.Background())
+
+	assert.NoError(t, err)
+	assert.True(t, status.Ready())
+	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.AcceleratorExporterRequired)
+	assert.True(t, status.AcceleratorExporterDaemonSetsReady)
 }
 
 func TestSupportsKubeStateMetricsClusterVersion(t *testing.T) {

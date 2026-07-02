@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	clustermocks "github.com/neutree-ai/neutree/internal/cluster/mocks"
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
+	"github.com/neutree-ai/neutree/internal/observability/monitoring"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
@@ -220,6 +222,97 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			}
 			mockStorage.AssertExpectations(t)
 			mockReconcile.AssertExpectations(t)
+		})
+	}
+}
+
+type mockObsCollectConfigManager struct {
+	mock.Mock
+}
+
+func (m *mockObsCollectConfigManager) GetMetricsCollectConfigManager() manager.MetricsCollectConfigManager {
+	args := m.Called()
+
+	return args.Get(0).(manager.MetricsCollectConfigManager)
+}
+
+func (m *mockObsCollectConfigManager) Start(ctx context.Context) {
+	m.Called(ctx)
+}
+
+type mockMetricsCollectConfigManager struct {
+	mock.Mock
+}
+
+func (m *mockMetricsCollectConfigManager) RegisterMetricsMonitor(key string, sm monitoring.MetricsMonitor) {
+	m.Called(key, sm)
+}
+
+func (m *mockMetricsCollectConfigManager) UnregisterMetricsMonitor(key string) {
+	m.Called(key)
+}
+
+func (m *mockMetricsCollectConfigManager) Sync() error {
+	return m.Called().Error(0)
+}
+
+func TestClusterController_SyncInternalMetricsMonitor(t *testing.T) {
+	tests := []struct {
+		name        string
+		clusterType string
+		version     string
+		mockSetup   func(*mockObsCollectConfigManager, *mockMetricsCollectConfigManager, string)
+	}{
+		{
+			name:        "legacy SSH cluster registers internal observability monitor",
+			clusterType: v1.SSHClusterType,
+			version:     "v1.0.1",
+			mockSetup: func(obsManager *mockObsCollectConfigManager, metricsManager *mockMetricsCollectConfigManager, clusterKey string) {
+				obsManager.On("GetMetricsCollectConfigManager").Return(metricsManager).Once()
+				metricsManager.On("RegisterMetricsMonitor", clusterKey, mock.Anything).Once()
+			},
+		},
+		{
+			name:        "new SSH cluster removes internal observability monitor",
+			clusterType: v1.SSHClusterType,
+			version:     "v1.1.0",
+			mockSetup: func(obsManager *mockObsCollectConfigManager, metricsManager *mockMetricsCollectConfigManager, clusterKey string) {
+				obsManager.On("GetMetricsCollectConfigManager").Return(metricsManager).Once()
+				metricsManager.On("UnregisterMetricsMonitor", clusterKey).Once()
+			},
+		},
+		{
+			name:        "Kubernetes cluster does not use internal observability monitor",
+			clusterType: v1.KubernetesClusterType,
+			version:     "v1.1.0",
+			mockSetup:   func(*mockObsCollectConfigManager, *mockMetricsCollectConfigManager, string) {},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obsManager := &mockObsCollectConfigManager{}
+			metricsManager := &mockMetricsCollectConfigManager{}
+			controller := &ClusterController{
+				obsCollectConfigManager: obsManager,
+			}
+			input := &v1.Cluster{
+				Metadata: &v1.Metadata{
+					Name:      "test",
+					Workspace: "default",
+				},
+				Spec: &v1.ClusterSpec{
+					Type:    tt.clusterType,
+					Version: tt.version,
+				},
+			}
+			tt.mockSetup(obsManager, metricsManager, input.Key())
+
+			err := controller.syncInternalMetricsMonitor(input)
+
+			assert.NoError(t, err)
+			obsManager.AssertExpectations(t)
+			metricsManager.AssertExpectations(t)
 		})
 	}
 }

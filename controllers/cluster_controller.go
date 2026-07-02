@@ -120,9 +120,31 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 		return reconcileErr
 	}
 
-	if c.Spec.Type == v1.SSHClusterType {
-		controller.obsCollectConfigManager.GetMetricsCollectConfigManager().RegisterMetricsMonitor(c.Key(), monitoring.NewClusterMonitor(c))
+	if err := controller.syncInternalMetricsMonitor(c); err != nil {
+		reconcileErr = errors.Wrapf(err, "failed to sync internal metrics monitor for cluster %s", c.Metadata.WorkspaceName())
+		return reconcileErr
 	}
+
+	return nil
+}
+
+func (controller *ClusterController) syncInternalMetricsMonitor(c *v1.Cluster) error {
+	if c.Spec.Type != v1.SSHClusterType {
+		return nil
+	}
+
+	useStaticNodeFlow, err := cluster.IsStaticNodeClusterFlowVersion(c.GetVersion())
+	if err != nil {
+		return err
+	}
+
+	metricsManager := controller.obsCollectConfigManager.GetMetricsCollectConfigManager()
+	if useStaticNodeFlow {
+		metricsManager.UnregisterMetricsMonitor(c.Key())
+		return nil
+	}
+
+	metricsManager.RegisterMetricsMonitor(c.Key(), monitoring.NewClusterMonitor(c))
 
 	return nil
 }

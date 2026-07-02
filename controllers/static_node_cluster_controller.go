@@ -22,6 +22,7 @@ type StaticNodeClusterControllerOption struct {
 	Storage                    storage.Storage
 	Planner                    *staticcluster.Planner
 	AcceleratorProfileProvider staticcluster.AcceleratorProfileProvider
+	MetricsRemoteWriteURL      string
 }
 
 func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (*StaticNodeClusterController, error) {
@@ -37,6 +38,7 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 	if planner == nil {
 		planner = &staticcluster.Planner{
 			AcceleratorProfileProvider: option.AcceleratorProfileProvider,
+			MetricsRemoteWriteURL:      option.MetricsRemoteWriteURL,
 		}
 	}
 
