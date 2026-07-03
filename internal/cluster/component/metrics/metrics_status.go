@@ -15,6 +15,7 @@ import (
 // MetricsStatus represents the status of metrics component resources
 type MetricsStatus struct {
 	DeploymentReady                    bool
+	NodeExporterRequired               bool
 	NodeExporterDaemonSetReady         bool
 	KubeStateMetricsRequired           bool
 	KubeStateMetricsDeploymentReady    bool
@@ -35,12 +36,12 @@ type MetricsStatus struct {
 func (m MetricsStatus) String() string {
 	base := fmt.Sprintf(
 		"DeploymentReady: %v, PodsReady: %d/%d, NodeExporterDaemonSetReady: %v, "+
-			"NodeExporterPodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
+			"NodeExporterRequired: %v, NodeExporterPodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
 			"KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, "+
 			"AcceleratorExporterRequired: %v, AcceleratorExporterDaemonSetsReady: %v, "+
 			"AcceleratorExporterPodsReady: %d/%d, Errors: %v",
 		m.DeploymentReady, m.PodsReady, m.TotalPods,
-		m.NodeExporterDaemonSetReady, m.NodeExporterPodsReady, m.NodeExporterTotalPods,
+		m.NodeExporterDaemonSetReady, m.NodeExporterRequired, m.NodeExporterPodsReady, m.NodeExporterTotalPods,
 		m.KubeStateMetricsRequired,
 		m.KubeStateMetricsDeploymentReady, m.KubeStateMetricsPodsReady, m.KubeStateMetricsTotalPods,
 		m.AcceleratorExporterRequired, m.AcceleratorExporterDaemonSetsReady,
@@ -56,7 +57,7 @@ func (m MetricsStatus) Ready() bool {
 	}
 
 	return m.DeploymentReady &&
-		m.NodeExporterDaemonSetReady &&
+		(!m.NodeExporterRequired || m.NodeExporterDaemonSetReady) &&
 		(!m.KubeStateMetricsRequired || m.KubeStateMetricsDeploymentReady) &&
 		(!m.AcceleratorExporterRequired || m.AcceleratorExporterDaemonSetsReady)
 }
@@ -82,13 +83,22 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		}
 	}
 
-	nodeExporterReady, nodeExporterPodsReady, nodeExporterTotalPods, err := m.checkDaemonSetStatus(ctx, nodeExporterDaemonSetName)
+	nodeExporterRequired, err := m.supportsManagedMetricsExporters()
 	if err != nil {
-		status.Errors = append(status.Errors, fmt.Sprintf("node-exporter daemonset check failed: %v", err))
-	} else {
-		status.NodeExporterDaemonSetReady = nodeExporterReady
-		status.NodeExporterPodsReady = nodeExporterPodsReady
-		status.NodeExporterTotalPods = nodeExporterTotalPods
+		status.Errors = append(status.Errors, fmt.Sprintf("managed metrics exporter support check failed: %v", err))
+		return status, nil
+	}
+
+	status.NodeExporterRequired = nodeExporterRequired
+	if nodeExporterRequired {
+		nodeExporterReady, nodeExporterPodsReady, nodeExporterTotalPods, err := m.checkDaemonSetStatus(ctx, nodeExporterDaemonSetName)
+		if err != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("node-exporter daemonset check failed: %v", err))
+		} else {
+			status.NodeExporterDaemonSetReady = nodeExporterReady
+			status.NodeExporterPodsReady = nodeExporterPodsReady
+			status.NodeExporterTotalPods = nodeExporterTotalPods
+		}
 	}
 
 	acceleratorExporters, err := m.planAcceleratorExporters(ctx)

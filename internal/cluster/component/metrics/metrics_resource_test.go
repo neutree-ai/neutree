@@ -365,6 +365,87 @@ func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
 }
 
+func TestBuildMetricsResourcesSkipsManagedExportersBeforeV110(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.0.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+			"nvidia.com/gpu.present": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "neutree-node-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "nvidia-gpu-dcgm-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "nvidia-gpu-dcgm-exporter-config"))
+	}
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+}
+
+func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.1.0",
+				Config: &v1.ClusterConfig{
+					Metrics: &v1.ClusterMetricsConfig{
+						AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+							Mode: v1.ClusterAcceleratorExporterModeExternal,
+						},
+					},
+				},
+			},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+			"nvidia.com/gpu.present": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "nvidia-gpu-dcgm-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "nvidia-gpu-dcgm-exporter-config"))
+	}
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assertValidPrometheusYAML(t, vmagentConfig)
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-dcgm-exporter"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:9400"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
+}
+
 func requireClusterRoleResource(t *testing.T, objs *unstructured.UnstructuredList, namePrefix, resource string) {
 	t.Helper()
 

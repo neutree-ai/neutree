@@ -26,6 +26,13 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	variables.EnableHAMiMonitorScrape = m.cluster.Spec.AcceleratorVirtualizationEnabled()
 	variables.EnableKubeStateMetrics = enableKubeStateMetrics
 
+	enableManagedMetricsExporters, err := m.supportsManagedMetricsExporters()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to check managed metrics exporter support for cluster %s", m.cluster.Metadata.Name)
+	}
+	variables.EnableNodeExporter = enableManagedMetricsExporters
+	variables.EnableExternalDCGMScrape = m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
+
 	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)

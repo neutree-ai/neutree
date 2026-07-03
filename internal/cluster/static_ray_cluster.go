@@ -315,10 +315,26 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 		Spec: &v1.StaticNodeClusterSpec{
 			Version:         c.Spec.Version,
 			ImageRegistry:   imagePrefix,
+			Metrics:         copyStaticClusterMetricsConfig(c.Spec.Config),
 			Nodes:           nodes,
 			UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
 		},
 	}, nil
+}
+
+func copyStaticClusterMetricsConfig(config *v1.ClusterConfig) *v1.ClusterMetricsConfig {
+	if config == nil || config.Metrics == nil {
+		return nil
+	}
+
+	copied := &v1.ClusterMetricsConfig{}
+	if config.Metrics.AcceleratorExporter != nil {
+		copied.AcceleratorExporter = &v1.ClusterAcceleratorExporterConfig{
+			Mode: config.Metrics.AcceleratorExporter.Mode,
+		}
+	}
+
+	return copied
 }
 
 func (r *staticRayReconciler) findStaticCluster(

@@ -105,6 +105,7 @@ scrape_configs:
     regex: 'sglang[:_](.+)'
     target_label: __name__
     replacement: 'sglang:$1'
+{{ if .EnableNodeExporter }}
 # Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
 - job_name: 'node-exporter-http'
   kubernetes_sd_configs:
@@ -131,6 +132,7 @@ scrape_configs:
     replacement: {{ .ClusterName }}
   - target_label: workspace
     replacement: {{ .Workspace }}
+{{ end }}
 {{ range .AcceleratorExporters }}
 # Scrape accelerator exporter metrics from detected accelerator nodes.
 - job_name: '{{ .JobName }}'
@@ -164,6 +166,34 @@ scrape_configs:
     replacement: {{ $.ClusterName }}
   - target_label: workspace
     replacement: {{ $.Workspace }}
+{{ end }}
+{{ if .EnableExternalDCGMScrape }}
+# Scrape an existing dcgm-exporter deployed outside Neutree ownership.
+- job_name: 'dcgm-exporter'
+  kubernetes_sd_configs:
+  - role: pod
+    selectors:
+    - role: pod
+      label: app=nvidia-dcgm-exporter
+  relabel_configs:
+  - source_labels: [__meta_kubernetes_pod_ip]
+    action: replace
+    target_label: __address__
+    regex: (.+)
+    replacement: $1:9400
+  - source_labels: [__meta_kubernetes_pod_node_name]
+    action: replace
+    target_label: node
+  - source_labels: [__meta_kubernetes_namespace]
+    action: replace
+    target_label: namespace
+  - source_labels: [__meta_kubernetes_pod_name]
+    action: replace
+    target_label: pod
+  - target_label: neutree_cluster
+    replacement: {{ .ClusterName }}
+  - target_label: workspace
+    replacement: {{ .Workspace }}
 {{ end }}
 {{ if .EnableHAMiMonitorScrape }}
 # Scrape HAMi vGPU monitor metrics from the managed HAMi device-plugin pods

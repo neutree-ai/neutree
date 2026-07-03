@@ -19,6 +19,13 @@ func usesStaticNodeClusterFlow(version string) bool {
 	return enabled
 }
 
+func clusterVersionSupportsStaticManagedMetricsExporters(version string) bool {
+	unsupported, err := semver.LessThan(version, "v1.1.0")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "cluster version must be semver")
+
+	return !unsupported
+}
+
 func expectedStaticNodeIPs(headIP string, workerIPs []string) []string {
 	ips := []string{headIP}
 
@@ -128,24 +135,34 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 	nodes := getStaticNodesForCluster(clusterName)
 	ExpectWithOffset(1, nodes).NotTo(BeEmpty())
 
+	managedMetricsSupported := clusterVersionSupportsStaticManagedMetricsExporters(profileClusterVersion())
 	hasGPUNode := false
 	for _, node := range nodes {
 		ExpectWithOffset(1, node.Spec).NotTo(BeNil())
 		ExpectWithOffset(1, node.Status).NotTo(BeNil())
 
-		nodeExporter := requireStaticNodeComponent(node, "node-exporter")
-		ExpectWithOffset(1, nodeExporter.Ports).To(ContainElement(v1.NodeComponentPort{
-			Name:     "metrics",
-			Port:     19100,
-			Protocol: "TCP",
-		}))
-		requireStaticNodeComponentRunning(node, "node-exporter")
+		if managedMetricsSupported {
+			nodeExporter := requireStaticNodeComponent(node, "node-exporter")
+			ExpectWithOffset(1, nodeExporter.Ports).To(ContainElement(v1.NodeComponentPort{
+				Name:     "metrics",
+				Port:     19100,
+				Protocol: "TCP",
+			}))
+			requireStaticNodeComponentRunning(node, "node-exporter")
+		} else {
+			ExpectWithOffset(1, findStaticNodeComponent(node.Spec.Components, "node-exporter")).To(BeNil())
+			ExpectWithOffset(1, findStaticNodeComponentStatus(node.Status.Components, "node-exporter")).To(BeNil())
+		}
 
 		if node.Spec.Role == v1.StaticNodeRoleHead {
 			vmagent := requireStaticNodeComponent(node, "vmagent")
 			requireStaticNodeComponentRunning(node, "vmagent")
 			vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")
-			ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-node-exporter"))
+			if managedMetricsSupported {
+				ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-node-exporter"))
+			} else {
+				ExpectWithOffset(1, vmagentConfig.Content).NotTo(ContainSubstring("job_name: static-node-node-exporter"))
+			}
 			ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-ray"))
 		}
 
@@ -158,6 +175,12 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		}
 
 		hasGPUNode = true
+		if !managedMetricsSupported {
+			ExpectWithOffset(1, findStaticNodeComponent(node.Spec.Components, "accelerator-exporter")).To(BeNil())
+			ExpectWithOffset(1, findStaticNodeComponentStatus(node.Status.Components, "accelerator-exporter")).To(BeNil())
+			continue
+		}
+
 		exporter := requireStaticNodeComponent(node, "accelerator-exporter")
 		ExpectWithOffset(1, exporter.Ports).To(ContainElement(v1.NodeComponentPort{
 			Name:     "metrics",
@@ -167,7 +190,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		requireStaticNodeComponentRunning(node, "accelerator-exporter")
 	}
 
-	if hasGPUNode {
+	if hasGPUNode && managedMetricsSupported {
 		head := requireStaticNodeRole(nodes, v1.StaticNodeRoleHead)
 		vmagent := requireStaticNodeComponent(head, "vmagent")
 		vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")

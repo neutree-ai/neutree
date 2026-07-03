@@ -2,6 +2,7 @@ package v1
 
 import (
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -67,6 +68,9 @@ type ClusterConfig struct {
 	SSHConfig        *RaySSHProvisionClusterConfig `json:"ssh_config,omitempty" yaml:"ssh_config,omitempty"`
 	KubernetesConfig *KubernetesClusterConfig      `json:"kubernetes_config,omitempty" yaml:"kubernetes_config,omitempty"`
 
+	// Metrics configures cluster-level observability collectors.
+	Metrics *ClusterMetricsConfig `json:"metrics,omitempty" yaml:"metrics,omitempty"`
+
 	// todo: after heterogeneous accelerator hybrid clusters are supported, this field will be deprecated.
 	AcceleratorType *string `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
 	// ModelCache is used to cache models downloaded from remote model registries, such as huggingface hub, bentoml cloud, etc.
@@ -74,6 +78,38 @@ type ClusterConfig struct {
 	// In addition, other data may be cached, which depends on the corresponding model registry download implementation,
 	// so it is not recommended to share a storage with the local model registry.
 	ModelCaches []ModelCache `json:"model_caches,omitempty" yaml:"model_caches,omitempty"`
+}
+
+type ClusterMetricsConfig struct {
+	// AcceleratorExporter controls how GPU metrics exporters are handled.
+	AcceleratorExporter *ClusterAcceleratorExporterConfig `json:"accelerator_exporter,omitempty" yaml:"accelerator_exporter,omitempty"`
+}
+
+type ClusterAcceleratorExporterConfig struct {
+	// Mode controls accelerator exporter ownership.
+	// managed installs and scrapes the Neutree-managed exporter when the cluster version supports it.
+	// external skips exporter installation and scrapes an existing dcgm-exporter with the legacy k8s config.
+	Mode ClusterAcceleratorExporterMode `json:"mode,omitempty" yaml:"mode,omitempty"`
+}
+
+type ClusterAcceleratorExporterMode string
+
+const (
+	ClusterAcceleratorExporterModeManaged  ClusterAcceleratorExporterMode = "managed"
+	ClusterAcceleratorExporterModeExternal ClusterAcceleratorExporterMode = "external"
+)
+
+func (c *ClusterConfig) AcceleratorExporterMode() ClusterAcceleratorExporterMode {
+	if c == nil || c.Metrics == nil || c.Metrics.AcceleratorExporter == nil {
+		return ClusterAcceleratorExporterModeManaged
+	}
+
+	switch ClusterAcceleratorExporterMode(strings.TrimSpace(string(c.Metrics.AcceleratorExporter.Mode))) {
+	case ClusterAcceleratorExporterModeExternal:
+		return ClusterAcceleratorExporterModeExternal
+	default:
+		return ClusterAcceleratorExporterModeManaged
+	}
 }
 
 type RaySSHProvisionClusterConfig struct {

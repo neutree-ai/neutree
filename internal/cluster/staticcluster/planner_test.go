@@ -279,6 +279,122 @@ func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {
 	}
 }
 
+func TestPlannerSkipsManagedMetricsExportersBeforeV110(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.0.1"
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	nodes := plannedStaticNodes(t, &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					MetricsExporter: &v1.AcceleratorExporterProfile{
+						Name:  "dcgm-exporter",
+						Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+						Port:  19400,
+					},
+				},
+			},
+		},
+		MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
+	}, cluster, currentNodes)
+
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	assert.Nil(t, findComponent(head.Spec.Components, nodeExporterComponentName))
+	assert.Nil(t, findComponent(head.Spec.Components, acceleratorExporterComponentName))
+	assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, nodeExporterComponentName))
+	assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, acceleratorExporterComponentName))
+
+	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
+	require.NotNil(t, vmagentComponent)
+	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
+	require.NotNil(t, vmagentConfig)
+	assert.NotContains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
+	assert.NotContains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
+	assert.Nil(t, findConfigFile(vmagentComponent.ConfigFiles, vmagentNodeExporterFileSDPath))
+}
+
+func TestPlannerUsesExternalAcceleratorExporterTargets(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Metrics = &v1.ClusterMetricsConfig{
+		AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+			Mode: v1.ClusterAcceleratorExporterModeExternal,
+		},
+	}
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	nodes := plannedStaticNodes(t, &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					MetricsExporter: &v1.AcceleratorExporterProfile{
+						Name:        "dcgm-exporter",
+						Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+						Port:        19400,
+						MetricsPath: "/dcgm/metrics",
+					},
+				},
+			},
+		},
+		MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
+	}, cluster, currentNodes)
+
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	assert.NotNil(t, findComponent(head.Spec.Components, nodeExporterComponentName))
+	assert.Nil(t, findComponent(head.Spec.Components, acceleratorExporterComponentName))
+	assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, acceleratorExporterComponentName))
+
+	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
+	require.NotNil(t, vmagentComponent)
+	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
+	require.NotNil(t, vmagentConfig)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
+	assert.NotContains(t, vmagentConfig.Content, `metrics_path: "/dcgm/metrics"`)
+
+	acceleratorTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/accelerator-exporter.json")
+	require.NotNil(t, acceleratorTargets)
+	assert.Contains(t, acceleratorTargets.Content, `"10.0.0.10:9400"`)
+	assert.NotContains(t, acceleratorTargets.Content, `"10.0.0.11:9400"`)
+}
+
 func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 	tests := []struct {
 		name                  string

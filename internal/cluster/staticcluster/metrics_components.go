@@ -11,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -21,6 +22,7 @@ const (
 	defaultVMAgentPort               = 8429
 	defaultNodeExporterPort          = 19100
 	defaultPrometheusHTTPPath        = "/metrics"
+	externalDCGMExporterPort         = 9400
 	defaultHealthHTTPPath            = "/health"
 	vmagentConfigPath                = "/etc/neutree/vmagent/config.yaml"
 	vmagentFileSDDir                 = "/etc/neutree/vmagent/file_sd"
@@ -82,10 +84,16 @@ func buildMetricsComponents(
 		return nil
 	}
 
-	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
+	components := []v1.NodeComponentSpec{}
 
-	if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
-		components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
+	if supportsManagedMetricsExporterVersion(clusterVersion(cluster)) {
+		components = append(components, buildNodeExporterComponent(cluster))
+
+		if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
+			if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
+				components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
+			}
+		}
 	}
 
 	if role == v1.StaticNodeRoleHead {
@@ -216,7 +224,7 @@ func attachMetricsConfigFiles(cluster *v1.StaticNodeCluster, plans []DesiredNode
 
 		appendComponentConfigFile(node, vmagentComponentName, v1.NodeComponentConfigFile{
 			Path:         vmagentConfigPath,
-			Content:      renderVMAgentConfig(plans),
+			Content:      renderVMAgentConfig(cluster, plans),
 			Mode:         "0644",
 			Owner:        "root",
 			Group:        "root",
@@ -231,25 +239,27 @@ func attachMetricsConfigFiles(cluster *v1.StaticNodeCluster, plans []DesiredNode
 	}
 }
 
-func renderVMAgentConfig(plans []DesiredNodePlan) string {
+func renderVMAgentConfig(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan) string {
 	plans = append([]DesiredNodePlan{}, plans...)
 	sort.SliceStable(plans, func(i, j int) bool {
 		return plans[i].Node.Metadata.Name < plans[j].Node.Metadata.Name
 	})
 
-	scrapeConfigs := []staticVMAgentScrapeConfig{
-		{
+	scrapeConfigs := []staticVMAgentScrapeConfig{}
+	if len(nodeExporterTargets(plans)) > 0 {
+		scrapeConfigs = append(scrapeConfigs, staticVMAgentScrapeConfig{
 			JobName:    "static-node-node-exporter",
 			FileSDPath: strconv.Quote(vmagentNodeExporterFileSDPath),
-		},
-		{
-			JobName:              "static-node-ray",
-			FileSDPath:           strconv.Quote(vmagentRayFileSDPath),
-			MetricRelabelConfigs: staticVMAgentRayMetricRelabelConfigs,
-		},
+		})
 	}
 
-	groups := acceleratorExporterTargetGroups(plans)
+	scrapeConfigs = append(scrapeConfigs, staticVMAgentScrapeConfig{
+		JobName:              "static-node-ray",
+		FileSDPath:           strconv.Quote(vmagentRayFileSDPath),
+		MetricRelabelConfigs: staticVMAgentRayMetricRelabelConfigs,
+	})
+
+	groups := acceleratorExporterTargetGroups(cluster, plans)
 	for i, group := range groups {
 		scrapeConfig := staticVMAgentScrapeConfig{
 			JobName:    acceleratorExporterJobName(group.MetricsPath, len(groups), i),
@@ -280,16 +290,19 @@ func renderVMAgentFileSDConfigFiles(
 ) []v1.NodeComponentConfigFile {
 	configFiles := []v1.NodeComponentConfigFile{
 		vmagentFileSDConfigFile(
-			vmagentNodeExporterFileSDPath,
-			renderVMAgentNodeExporterFileSDTargets(cluster, plans),
-		),
-		vmagentFileSDConfigFile(
 			vmagentRayFileSDPath,
 			renderVMAgentRayFileSDTargets(cluster, plans),
 		),
 	}
 
-	for _, group := range acceleratorExporterTargetGroups(plans) {
+	if len(nodeExporterTargets(plans)) > 0 {
+		configFiles = append(configFiles, vmagentFileSDConfigFile(
+			vmagentNodeExporterFileSDPath,
+			renderVMAgentNodeExporterFileSDTargets(cluster, plans),
+		))
+	}
+
+	for _, group := range acceleratorExporterTargetGroups(cluster, plans) {
 		configFiles = append(configFiles, vmagentFileSDConfigFile(
 			acceleratorExporterFileSDPath(group.MetricsPath),
 			renderVMAgentAcceleratorExporterFileSDTargets(cluster, group.Targets),
@@ -324,11 +337,7 @@ func renderVMAgentNodeExporterFileSDTargets(
 ) string {
 	targets := make([]vmagentFileSDTarget, 0, len(plans))
 
-	for _, plan := range plans {
-		if plan.Node == nil || plan.Node.Spec == nil || !staticNodeHasComponent(plan.Node, nodeExporterComponentName) {
-			continue
-		}
-
+	for _, plan := range nodeExporterTargets(plans) {
 		targets = append(targets, vmagentFileSDTarget{
 			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, defaultNodeExporterPort)},
 			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeExporterComponentName),
@@ -336,6 +345,20 @@ func renderVMAgentNodeExporterFileSDTargets(
 	}
 
 	return mustMarshalVMAgentFileSDTargets(targets)
+}
+
+func nodeExporterTargets(plans []DesiredNodePlan) []DesiredNodePlan {
+	targets := make([]DesiredNodePlan, 0, len(plans))
+
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Spec == nil || !staticNodeHasComponent(plan.Node, nodeExporterComponentName) {
+			continue
+		}
+
+		targets = append(targets, plan)
+	}
+
+	return targets
 }
 
 func renderVMAgentRayFileSDTargets(
@@ -384,7 +407,7 @@ func renderVMAgentAcceleratorExporterFileSDTargets(
 
 	for _, target := range targets {
 		result = append(result, vmagentFileSDTarget{
-			Targets: []string{fmt.Sprintf("%s:%d", target.Node.Spec.IP, target.Component.Ports[0].Port)},
+			Targets: []string{fmt.Sprintf("%s:%d", target.Node.Spec.IP, target.Port)},
 			Labels:  vmagentTargetLabels(cluster, target.Node, acceleratorExporterComponentName),
 		})
 	}
@@ -409,9 +432,14 @@ type acceleratorExporterTargetGroup struct {
 type acceleratorExporterTarget struct {
 	Node      *v1.StaticNode
 	Component v1.NodeComponentSpec
+	Port      int
 }
 
-func acceleratorExporterTargetGroups(plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
+func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
+	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeExternal {
+		return externalAcceleratorExporterTargetGroups(plans)
+	}
+
 	groupsByPath := map[string][]acceleratorExporterTarget{}
 
 	for _, plan := range plans {
@@ -428,9 +456,40 @@ func acceleratorExporterTargetGroups(plans []DesiredNodePlan) []acceleratorExpor
 		groupsByPath[metricsPath] = append(groupsByPath[metricsPath], acceleratorExporterTarget{
 			Node:      plan.Node,
 			Component: component,
+			Port:      component.Ports[0].Port,
 		})
 	}
 
+	return sortedAcceleratorExporterTargetGroups(groupsByPath)
+}
+
+func externalAcceleratorExporterTargetGroups(plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
+	targets := []acceleratorExporterTarget{}
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Spec == nil || plan.Accelerator == nil ||
+			plan.Accelerator.Type != v1.AcceleratorTypeNVIDIAGPU.String() {
+			continue
+		}
+
+		targets = append(targets, acceleratorExporterTarget{
+			Node: plan.Node,
+			Port: externalDCGMExporterPort,
+		})
+	}
+
+	if len(targets) == 0 {
+		return nil
+	}
+
+	return []acceleratorExporterTargetGroup{{
+		MetricsPath: defaultPrometheusHTTPPath,
+		Targets:     targets,
+	}}
+}
+
+func sortedAcceleratorExporterTargetGroups(
+	groupsByPath map[string][]acceleratorExporterTarget,
+) []acceleratorExporterTargetGroup {
 	paths := make([]string, 0, len(groupsByPath))
 	for path := range groupsByPath {
 		paths = append(paths, path)
@@ -480,6 +539,42 @@ func acceleratorExporterJobName(metricsPath string, _ int, index int) string {
 
 func acceleratorExporterFileSDPath(metricsPath string) string {
 	return vmagentFileSDDir + "/" + strings.TrimPrefix(acceleratorExporterJobName(metricsPath, 2, 0), "static-node-") + ".json"
+}
+
+func acceleratorExporterMode(cluster *v1.StaticNodeCluster) v1.ClusterAcceleratorExporterMode {
+	if cluster == nil || cluster.Spec == nil {
+		return v1.ClusterAcceleratorExporterModeManaged
+	}
+
+	config := &v1.ClusterConfig{Metrics: cluster.Spec.Metrics}
+	return config.AcceleratorExporterMode()
+}
+
+func clusterVersion(cluster *v1.StaticNodeCluster) string {
+	if cluster == nil || cluster.Spec == nil {
+		return ""
+	}
+
+	return cluster.Spec.Version
+}
+
+func supportsManagedMetricsExporterVersion(version string) bool {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return false
+	}
+
+	baseVersion, err := semver.BaseVersion(version)
+	if err != nil {
+		return false
+	}
+
+	lessThanMinVersion, err := semver.LessThan(baseVersion, "v1.1.0")
+	if err != nil {
+		return false
+	}
+
+	return !lessThanMinVersion
 }
 
 func vmagentTargetLabels(

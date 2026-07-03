@@ -8,7 +8,10 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
-const MinKubeStateMetricsClusterVersion = "v1.1.0"
+const (
+	MinKubeStateMetricsClusterVersion       = "v1.1.0"
+	MinManagedMetricsExporterClusterVersion = "v1.1.0"
+)
 
 var metricsManifestTemplate = `
 apiVersion: v1
@@ -202,6 +205,7 @@ spec:
             {{ $key }}: {{ $value }}
             {{- end }}
 {{ end }}
+{{ if .EnableNodeExporter }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -248,6 +252,7 @@ spec:
       - name: host-root
         hostPath:
           path: /
+{{ end }}
 {{ range .AcceleratorExporters }}
 {{ if .ConfigFileData }}
 ---
@@ -414,6 +419,8 @@ type MetricsManifestVariables struct {
 	HashSuffix                string
 	EnableHAMiMonitorScrape   bool
 	EnableKubeStateMetrics    bool
+	EnableNodeExporter        bool
+	EnableExternalDCGMScrape  bool
 	AcceleratorExporters      []metricsAcceleratorExporter
 	VMAgentConfig             string
 }
@@ -456,7 +463,15 @@ func (m *MetricsComponent) supportsKubeStateMetrics() (bool, error) {
 	return supportsKubeStateMetricsClusterVersion(m.cluster.GetVersion())
 }
 
+func (m *MetricsComponent) supportsManagedMetricsExporters() (bool, error) {
+	return supportsMinClusterVersion(m.cluster.GetVersion(), MinManagedMetricsExporterClusterVersion)
+}
+
 func supportsKubeStateMetricsClusterVersion(version string) (bool, error) {
+	return supportsMinClusterVersion(version, MinKubeStateMetricsClusterVersion)
+}
+
+func supportsMinClusterVersion(version string, minVersion string) (bool, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return false, nil
@@ -467,7 +482,7 @@ func supportsKubeStateMetricsClusterVersion(version string) (bool, error) {
 		return false, err
 	}
 
-	lessThanMinVersion, err := semver.LessThan(baseVersion, MinKubeStateMetricsClusterVersion)
+	lessThanMinVersion, err := semver.LessThan(baseVersion, minVersion)
 	if err != nil {
 		return false, err
 	}

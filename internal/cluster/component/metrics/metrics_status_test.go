@@ -228,7 +228,8 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	assert.True(t, status.DeploymentReady)
 	assert.False(t, status.KubeStateMetricsRequired)
 	assert.False(t, status.KubeStateMetricsDeploymentReady)
-	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.False(t, status.NodeExporterRequired)
+	assert.False(t, status.NodeExporterDaemonSetReady)
 }
 
 func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) {
