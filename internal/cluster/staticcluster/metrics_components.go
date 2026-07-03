@@ -86,13 +86,14 @@ func buildMetricsComponents(
 
 	components := []v1.NodeComponentSpec{}
 
-	if supportsManagedMetricsExporterVersion(clusterVersion(cluster)) {
+	if supportsStaticNodeExporterVersion(clusterVersion(cluster)) {
 		components = append(components, buildNodeExporterComponent(cluster))
+	}
 
-		if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
-			if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
-				components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
-			}
+	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged &&
+		supportsStaticAcceleratorExporterVersion(clusterVersion(cluster)) {
+		if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
+			components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
 		}
 	}
 
@@ -558,7 +559,15 @@ func clusterVersion(cluster *v1.StaticNodeCluster) string {
 	return cluster.Spec.Version
 }
 
-func supportsManagedMetricsExporterVersion(version string) bool {
+func supportsStaticNodeExporterVersion(version string) bool {
+	return supportsStaticMetricsComponentVersion(version)
+}
+
+func supportsStaticAcceleratorExporterVersion(version string) bool {
+	return supportsStaticMetricsComponentVersion(version)
+}
+
+func supportsStaticMetricsComponentVersion(version string) bool {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return false
