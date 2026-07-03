@@ -16,8 +16,8 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 		VALUES (
 			'v1',
 			'StaticNodeCluster',
-			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('v1.0.2', 'registry.example.com/neutree', jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+				ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+				ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
 			ROW('Ready', 0, 0, FALSE, FALSE, 'v1.0.2', NULL, NULL)::api.static_node_cluster_status
 		)
 	`, clusterName, workspace)
@@ -191,8 +191,8 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 				VALUES (
 					'v1',
 					'StaticNodeCluster',
-					ROW('blocked-static', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-					ROW('v1.0.2', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+						ROW('blocked-static', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+						ROW('v1.0.2', NULL, NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
 					ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
 				)
 			`,
@@ -338,7 +338,7 @@ func TestStaticNodeRBAC_ServiceRoleCanManageInternalResources(t *testing.T) {
 			'v1',
 			'StaticNodeCluster',
 			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('v1.0.2', 'registry.example.com/neutree', jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+			ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
 			ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
 		)
 	`, insertedCluster, workspace); err != nil {

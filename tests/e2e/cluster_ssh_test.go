@@ -20,10 +20,6 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		ClusterH = NewClusterHelper()
 	})
 
-	AfterAll(func() {
-		TeardownImageRegistry()
-	})
-
 	var (
 		clusterName   string
 		headIP        string
@@ -52,6 +48,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 
 	AfterAll(func() {
 		ClusterH.EnsureDeleted(clusterName)
+		TeardownImageRegistry()
 	})
 
 	It("should show Initializing immediately after creation", Label("C2612656"), func() {
