@@ -26,7 +26,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 		},
 		MetricsExporter: &AcceleratorExporterProfile{
 			Name:        "dcgm-exporter",
-			Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04",
+			Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 			Args:        []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
 			Port:        19400,
 			MetricsPath: "/metrics",

@@ -454,7 +454,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 
 	dcgm := findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
 	assert.Equal(t, "nvidia-gpu-dcgm-exporter", dcgm.Labels["app"])
-	assert.Equal(t, "test-image-prefix/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04",
+	assert.Equal(t, "test-image-prefix/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 		dcgm.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, "test-image-pull-secret", dcgm.Spec.Template.Spec.ImagePullSecrets[0].Name)
 	assert.Equal(t, int32(19400), dcgm.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
