@@ -500,19 +500,21 @@ func TeardownImageRegistry() {
 //   - "ssh_private_key" (string)
 //   - "worker_ips"      ([]string)       worker IP list (template-rendered as range)
 //   - "accelerator_type"(string)         optional
+//   - "accelerator_exporter_mode" (string) optional
 //   - "model_caches"    ([]ModelCache)   optional, template-rendered per Mode
 func renderSSHClusterYAML(overrides map[string]any) string {
 	data := map[string]any{
-		"CLUSTER_NAME":             stringOr(overrides, "name", ""),
-		"CLUSTER_WORKSPACE":        profileWorkspace(),
-		"CLUSTER_IMAGE_REGISTRY":   stringOr(overrides, "image_registry", testImageRegistry()),
-		"CLUSTER_VERSION":          stringOr(overrides, "version", profileClusterVersion()),
-		"CLUSTER_SSH_HEAD_IP":      stringOr(overrides, "head_ip", ""),
-		"CLUSTER_SSH_USER":         stringOr(overrides, "ssh_user", ""),
-		"CLUSTER_SSH_PRIVATE_KEY":  stringOr(overrides, "ssh_private_key", ""),
-		"CLUSTER_ACCELERATOR_TYPE": stringOr(overrides, "accelerator_type", ""),
-		"CLUSTER_MODEL_CACHES":     anySliceOr[ModelCache](overrides, "model_caches", nil),
-		"CLUSTER_WORKER_IPS":       anySliceOr[string](overrides, "worker_ips", nil),
+		"CLUSTER_NAME":                      stringOr(overrides, "name", ""),
+		"CLUSTER_WORKSPACE":                 profileWorkspace(),
+		"CLUSTER_IMAGE_REGISTRY":            stringOr(overrides, "image_registry", testImageRegistry()),
+		"CLUSTER_VERSION":                   stringOr(overrides, "version", profileClusterVersion()),
+		"CLUSTER_SSH_HEAD_IP":               stringOr(overrides, "head_ip", ""),
+		"CLUSTER_SSH_USER":                  stringOr(overrides, "ssh_user", ""),
+		"CLUSTER_SSH_PRIVATE_KEY":           stringOr(overrides, "ssh_private_key", ""),
+		"CLUSTER_ACCELERATOR_TYPE":          stringOr(overrides, "accelerator_type", ""),
+		"CLUSTER_ACCELERATOR_EXPORTER_MODE": stringOr(overrides, "accelerator_exporter_mode", ""),
+		"CLUSTER_MODEL_CACHES":              anySliceOr[ModelCache](overrides, "model_caches", nil),
+		"CLUSTER_WORKER_IPS":                anySliceOr[string](overrides, "worker_ips", nil),
 	}
 
 	path, err := renderTemplateToTempFile(filepath.Join("testdata", "ssh-cluster.yaml"), data)
@@ -532,6 +534,7 @@ func renderSSHClusterYAML(overrides map[string]any) string {
 //   - "router_cpu"       (string)         defaults to "1"
 //   - "router_memory"    (string)         defaults to "2Gi"
 //   - "model_caches"     ([]ModelCache)   optional
+//   - "accelerator_exporter_mode" (string) optional
 //   - "accelerator_virtualization_enabled" (bool) optional
 func renderK8sClusterYAML(overrides map[string]any) string {
 	data := map[string]any{
@@ -544,6 +547,7 @@ func renderK8sClusterYAML(overrides map[string]any) string {
 		"CLUSTER_ROUTER_CPU":                         stringOr(overrides, "router_cpu", "1"),
 		"CLUSTER_ROUTER_MEMORY":                      stringOr(overrides, "router_memory", "2Gi"),
 		"CLUSTER_MODEL_CACHES":                       anySliceOr[ModelCache](overrides, "model_caches", nil),
+		"CLUSTER_ACCELERATOR_EXPORTER_MODE":          stringOr(overrides, "accelerator_exporter_mode", ""),
 		"CLUSTER_ACCELERATOR_VIRTUALIZATION_ENABLED": boolOr(overrides, "accelerator_virtualization_enabled", false),
 	}
 

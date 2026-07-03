@@ -279,9 +279,9 @@ func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {
 	}
 }
 
-func TestPlannerSkipsManagedMetricsExportersBeforeV110(t *testing.T) {
+func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {
 	cluster := testStaticNodeCluster()
-	cluster.Spec.Version = "v1.0.1"
+	cluster.Spec.Version = "v1.0.2"
 	currentNodes := []*v1.StaticNode{
 		staticNodeStatusWithAccelerator(
 			"head-0",
@@ -319,18 +319,18 @@ func TestPlannerSkipsManagedMetricsExportersBeforeV110(t *testing.T) {
 
 	head := findStaticNode(nodes, "head-0")
 	require.NotNil(t, head)
-	assert.Nil(t, findComponent(head.Spec.Components, nodeExporterComponentName))
-	assert.Nil(t, findComponent(head.Spec.Components, acceleratorExporterComponentName))
-	assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, nodeExporterComponentName))
-	assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, acceleratorExporterComponentName))
+	assert.NotNil(t, findComponent(head.Spec.Components, nodeExporterComponentName))
+	assert.NotNil(t, findComponent(head.Spec.Components, acceleratorExporterComponentName))
+	assert.NotEqual(t, "", warmImageRef(head.Spec.Warm.Images, nodeExporterComponentName))
+	assert.NotEqual(t, "", warmImageRef(head.Spec.Warm.Images, acceleratorExporterComponentName))
 
 	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
 	require.NotNil(t, vmagentComponent)
 	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
 	require.NotNil(t, vmagentConfig)
-	assert.NotContains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
-	assert.NotContains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
-	assert.Nil(t, findConfigFile(vmagentComponent.ConfigFiles, vmagentNodeExporterFileSDPath))
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
+	assert.NotNil(t, findConfigFile(vmagentComponent.ConfigFiles, vmagentNodeExporterFileSDPath))
 }
 
 func TestPlannerUsesExternalAcceleratorExporterTargets(t *testing.T) {

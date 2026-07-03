@@ -10,7 +10,6 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	neutreeSemver "github.com/neutree-ai/neutree/internal/semver"
@@ -146,77 +145,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			Expect(currentCluster.Status.Phase).To(Equal(v1.ClusterPhaseRunning))
 			Expect(currentCluster.Status.Version).To(Equal(cluster.Spec.Version))
 
-			_, err := k8sH.GetDeployment(ctx, namespace, "vmagent")
-			Expect(err).NotTo(HaveOccurred(), "vmagent deployment should exist")
-
-			_, err = k8sH.GetConfigMap(ctx, namespace, "vmagent-config")
-			Expect(err).NotTo(HaveOccurred(), "vmagent-config ConfigMap should exist")
-
-			_, err = k8sH.GetServiceAccount(ctx, namespace, "vmagent-service-account")
-			Expect(err).NotTo(HaveOccurred(), "vmagent ServiceAccount should exist")
-
-			_, err = k8sH.GetRole(ctx, namespace, "vmagent-pod-reader")
-			Expect(err).NotTo(HaveOccurred(), "vmagent Role should exist")
-
-			_, err = k8sH.GetRoleBinding(ctx, namespace, "vmagent-rolebinding")
-			Expect(err).NotTo(HaveOccurred(), "vmagent RoleBinding should exist")
-
-			vmagentConfig, err := k8sH.GetConfigMap(ctx, namespace, "vmagent-config")
-			Expect(err).NotTo(HaveOccurred(), "vmagent-config ConfigMap should exist")
-
-			if !clusterVersionSupportsManagedMetricsExporters(cluster.Spec.Version) {
-				_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-exporter")
-				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "node-exporter should not exist before cluster version v1.1.0")
-				_, err = k8sH.GetDaemonSet(ctx, namespace, "nvidia-gpu-dcgm-exporter")
-				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "DCGM exporter should not exist before cluster version v1.1.0")
-				Expect(vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'node-exporter-http'"))
-				Expect(vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'dcgm-exporter'"))
-			} else {
-				By("Checking node-exporter DaemonSet")
-				nodeExporter := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-exporter")
-				Expect(nodeExporter.Spec.Template.Spec.Containers).NotTo(BeEmpty())
-				Expect(nodeExporter.Spec.Template.Spec.Containers[0].Ports).To(ContainElement(
-					HaveField("ContainerPort", int32(19100)),
-				))
-				Expect(vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-http'"))
-
-				gpuNodes, err := k8sH.ListNodes(ctx, "nvidia.com/gpu.present=true")
-				Expect(err).NotTo(HaveOccurred(), "should list NVIDIA GPU nodes")
-				if len(gpuNodes) == 0 {
-					_, err = k8sH.GetDaemonSet(ctx, namespace, "nvidia-gpu-dcgm-exporter")
-					Expect(apierrors.IsNotFound(err)).To(BeTrue(), "DCGM exporter should not exist without matching GPU nodes")
-				} else {
-					By("Checking NVIDIA DCGM exporter DaemonSet")
-					dcgm := eventuallyDaemonSetReady(ctx, k8sH, namespace, "nvidia-gpu-dcgm-exporter")
-					Expect(dcgm.Spec.Template.Spec.NodeSelector).To(HaveKeyWithValue("nvidia.com/gpu.present", "true"))
-					Expect(dcgm.Spec.Template.Spec.Containers).NotTo(BeEmpty())
-					Expect(dcgm.Spec.Template.Spec.Containers[0].Ports).To(ContainElement(
-						HaveField("ContainerPort", int32(19400)),
-					))
-					Expect(vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'dcgm-exporter'"))
-				}
-			}
-
-			if !clusterVersionSupportsKubeStateMetrics(cluster.Spec.Version) {
-				_, err = k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
-				Expect(err).To(HaveOccurred(), "kube-state-metrics deployment should not exist before cluster version v1.1.0")
-				return
-			}
-
-			_, err = k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics deployment should exist")
-
-			_, err = k8sH.GetService(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics Service should exist")
-
-			_, err = k8sH.GetServiceAccount(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics ServiceAccount should exist")
-
-			_, err = k8sH.GetRole(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics Role should exist")
-
-			_, err = k8sH.GetRoleBinding(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics RoleBinding should exist")
+			assertK8sMetricsResources(ctx, k8sH, namespace, cluster.Spec.Version)
 		})
 
 		It("should create router resources (SA, Role, RoleBinding, Deployment, Service)", Label("C2612779"), func() {
@@ -273,6 +202,53 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 
 			k8sH.WaitForNamespaceDeleted(ctx, namespace, 2*time.Minute)
+		})
+	})
+
+	Describe("External Accelerator Exporter", Ordered, Label("accelerator-exporter"), func() {
+		var (
+			clusterName string
+			kubeconfig  string
+			k8sH        *K8sHelper
+			namespace   string
+			cluster     v1.Cluster
+		)
+
+		BeforeAll(func() {
+			kubeconfig = requireK8sProfile()
+			clusterName = "e2e-k8s-ext-exp-" + Cfg.RunID
+
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":                      clusterName,
+				"kubeconfig":                kubeconfig,
+				"accelerator_exporter_mode": string(v1.ClusterAcceleratorExporterModeExternal),
+			})
+
+			r := ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			k8sH = NewK8sHelper(kubeconfig)
+
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			cluster = parseClusterJSON(r.Stdout)
+			namespace = ClusterNamespace(cluster.Metadata.Workspace, cluster.Metadata.Name, cluster.ID)
+		})
+
+		AfterAll(func() {
+			ClusterH.EnsureDeleted(clusterName)
+		})
+
+		It("should scrape external accelerator exporter without installing managed DCGM", Label("C2623077"), func() {
+			assertK8sExternalAcceleratorExporterResources(
+				context.Background(),
+				k8sH,
+				namespace,
+				cluster.Spec.Version,
+			)
 		})
 	})
 

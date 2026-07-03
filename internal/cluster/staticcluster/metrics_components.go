@@ -11,7 +11,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
-	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -84,14 +83,9 @@ func buildMetricsComponents(
 		return nil
 	}
 
-	components := []v1.NodeComponentSpec{}
+	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
 
-	if supportsStaticNodeExporterVersion(clusterVersion(cluster)) {
-		components = append(components, buildNodeExporterComponent(cluster))
-	}
-
-	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged &&
-		supportsStaticAcceleratorExporterVersion(clusterVersion(cluster)) {
+	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
 		if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
 			components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
 		}
@@ -549,41 +543,6 @@ func acceleratorExporterMode(cluster *v1.StaticNodeCluster) v1.ClusterAccelerato
 
 	config := &v1.ClusterConfig{Metrics: cluster.Spec.Metrics}
 	return config.AcceleratorExporterMode()
-}
-
-func clusterVersion(cluster *v1.StaticNodeCluster) string {
-	if cluster == nil || cluster.Spec == nil {
-		return ""
-	}
-
-	return cluster.Spec.Version
-}
-
-func supportsStaticNodeExporterVersion(version string) bool {
-	return supportsStaticMetricsComponentVersion(version)
-}
-
-func supportsStaticAcceleratorExporterVersion(version string) bool {
-	return supportsStaticMetricsComponentVersion(version)
-}
-
-func supportsStaticMetricsComponentVersion(version string) bool {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		return false
-	}
-
-	baseVersion, err := semver.BaseVersion(version)
-	if err != nil {
-		return false
-	}
-
-	lessThanMinVersion, err := semver.LessThan(baseVersion, "v1.1.0")
-	if err != nil {
-		return false
-	}
-
-	return !lessThanMinVersion
 }
 
 func vmagentTargetLabels(
