@@ -101,7 +101,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			Expect(versionBefore).NotTo(BeEmpty())
 
 			if usesStaticNodeClusterFlow(oldVersion) {
-				eventuallyStaticNodeClusterReady(clusterName, oldVersion, 1+len(workerIPs), TerminalPhaseTimeout)
+				eventuallyStaticNodeClusterReady(clusterName, oldVersion, 1+len(workerIPs))
 				assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
 				assertStaticNodeMetricsComponents(clusterName)
 			} else {

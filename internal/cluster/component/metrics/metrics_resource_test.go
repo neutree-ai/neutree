@@ -18,7 +18,6 @@ import (
 	"gotest.tools/v3/assert"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -444,38 +443,6 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-dcgm-exporter"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:9400"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
-}
-
-func requireClusterRoleResource(t *testing.T, objs *unstructured.UnstructuredList, namePrefix, resource string) {
-	t.Helper()
-
-	for _, obj := range objs.Items {
-		if obj.GetKind() != "ClusterRole" || !strings.HasPrefix(obj.GetName(), namePrefix) {
-			continue
-		}
-
-		objContent, err := json.Marshal(obj.Object)
-		if err != nil {
-			t.Fatalf("failed to marshal cluster role: %v", err)
-		}
-
-		clusterRole := &rbacv1.ClusterRole{}
-		if err := json.Unmarshal(objContent, clusterRole); err != nil {
-			t.Fatalf("failed to unmarshal cluster role: %v", err)
-		}
-
-		for _, rule := range clusterRole.Rules {
-			for _, got := range rule.Resources {
-				if got == resource {
-					return
-				}
-			}
-		}
-
-		t.Fatalf("expected cluster role %s to include resource %s", obj.GetName(), resource)
-	}
-
-	t.Fatalf("expected cluster role with prefix %s", namePrefix)
 }
 
 func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) corev1.VolumeMount {

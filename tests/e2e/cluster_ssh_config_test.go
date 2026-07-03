@@ -190,7 +190,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
 			ExpectSuccess(r)
 
-			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1+len(workerIPs), TerminalPhaseTimeout)
+			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1+len(workerIPs))
 		})
 
 		AfterAll(func() {
