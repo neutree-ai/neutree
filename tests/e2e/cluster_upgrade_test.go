@@ -132,7 +132,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 				"cluster Status.Version should equal new version after upgrade")
 
 			if usesStaticNodeClusterFlow(newVersion) {
-				eventuallyStaticNodeClusterReady(clusterName, newVersion, 1+len(workerIPs), TerminalPhaseTimeout)
+				eventuallyStaticNodeClusterReady(clusterName, newVersion, 1+len(workerIPs))
 				assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
 			}
 		})

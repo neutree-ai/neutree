@@ -77,7 +77,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		Expect(c.Status.ErrorMessage).To(BeEmpty())
 
 		if usesStaticNodeClusterFlow(profileClusterVersion()) {
-			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1, TerminalPhaseTimeout)
+			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1)
 			assertStaticNodesForCluster(clusterName, []string{headIP})
 			eventuallyClusterResourceInfo(ClusterH, clusterName, TerminalPhaseTimeout)
 		} else {
@@ -122,7 +122,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 
 		if usesStaticNodeClusterFlow(profileClusterVersion()) {
 			expectedNodes := 1 + len(workerIPs)
-			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), expectedNodes, TerminalPhaseTimeout)
+			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), expectedNodes)
 			assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
 		}
 	})

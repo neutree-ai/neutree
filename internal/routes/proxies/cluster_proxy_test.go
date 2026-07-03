@@ -565,6 +565,35 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 		mockStorage.AssertExpectations(t)
 	})
 
+	t.Run("rejects static flow downgrade using current cluster type even when patch changes type", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{
+			{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+		}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"type": "kubernetes", "version": "v1.0.1"}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "static flow to legacy flow is not supported")
+		mockStorage.AssertExpectations(t)
+	})
+
 	t.Run("skips storage lookup when patch does not update version", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
@@ -625,89 +654,48 @@ func (r *trackingReadCloser) Close() error {
 	return nil
 }
 
-func TestUsesStaticNodeClusterFlow(t *testing.T) {
-	tests := []struct {
-		name        string
-		clusterType string
-		version     string
-		want        bool
-		wantErr     bool
-	}{
-		{
-			name:        "SSH cluster at gate stays on legacy flow",
-			clusterType: "ssh",
-			version:     "v1.0.1",
-		},
-		{
-			name:        "SSH cluster above gate uses static flow",
-			clusterType: "ssh",
-			version:     "v1.0.2",
-			want:        true,
-		},
-		{
-			name:        "Kubernetes cluster does not use static flow",
-			clusterType: "kubernetes",
-			version:     "v1.1.0",
-		},
-		{
-			name:        "invalid SSH cluster version returns error",
-			clusterType: "ssh",
-			version:     "custom",
-			wantErr:     true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := usesStaticNodeClusterFlow(tt.clusterType, tt.version)
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestValidateStaticNodeClusterFlowVersionUpdate(t *testing.T) {
 	tests := []struct {
 		name            string
-		clusterType     string
-		previousVersion string
+		current         *v1.Cluster
 		desiredVersion  string
 		wantErrContains string
 	}{
 		{
-			name:            "allows legacy to static upgrade",
-			clusterType:     "ssh",
-			previousVersion: "v1.0.1",
-			desiredVersion:  "v1.1.0",
+			name:           "allows legacy to static upgrade",
+			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"}},
+			desiredVersion: "v1.1.0",
 		},
 		{
-			name:            "allows static flow version update",
-			clusterType:     "ssh",
-			previousVersion: "v1.1.0",
-			desiredVersion:  "v1.0.2",
+			name:           "allows static flow version update",
+			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+			desiredVersion: "v1.0.2",
 		},
 		{
 			name:            "rejects static flow downgrade to legacy flow",
-			clusterType:     "ssh",
-			previousVersion: "v1.1.0",
+			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
 			desiredVersion:  "v1.0.1",
 			wantErrContains: "static flow to legacy flow is not supported",
 		},
 		{
-			name:            "allows Kubernetes version downgrade",
-			clusterType:     "kubernetes",
-			previousVersion: "v1.1.0",
-			desiredVersion:  "v1.0.1",
+			name:            "rejects static flow downgrade below legacy gate",
+			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+			desiredVersion:  "v1.0.0",
+			wantErrContains: "static flow to legacy flow is not supported",
 		},
 		{
-			name:            "rejects invalid desired SSH version",
-			clusterType:     "ssh",
-			previousVersion: "v1.1.0",
+			name:           "allows Kubernetes version downgrade",
+			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.1.0"}},
+			desiredVersion: "v1.0.1",
+		},
+		{
+			name:           "allows invalid desired version when current SSH cluster is legacy flow",
+			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"}},
+			desiredVersion: "custom",
+		},
+		{
+			name:            "rejects invalid desired version when current SSH cluster is static flow",
+			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
 			desiredVersion:  "custom",
 			wantErrContains: "invalid desired cluster version",
 		},
@@ -715,7 +703,7 @@ func TestValidateStaticNodeClusterFlowVersionUpdate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateStaticNodeClusterFlowVersionUpdate(tt.clusterType, tt.previousVersion, tt.desiredVersion)
+			err := validateStaticNodeClusterFlowVersionUpdate(tt.current, tt.desiredVersion)
 			if tt.wantErrContains == "" {
 				assert.NoError(t, err)
 				return

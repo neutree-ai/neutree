@@ -227,7 +227,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 
 			if usesStaticNodeClusterFlow(profileClusterVersion()) {
 				expectedNodes := 1 + len(workerIPs)
-				eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), expectedNodes, TerminalPhaseTimeout)
+				eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), expectedNodes)
 				assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
 			}
 		})
@@ -263,7 +263,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 				"ReadyNodes should match DesiredNodes after worker removal")
 
 			if usesStaticNodeClusterFlow(profileClusterVersion()) {
-				eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1, TerminalPhaseTimeout)
+				eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1)
 				assertStaticNodesForCluster(clusterName, []string{headIP})
 			}
 		})

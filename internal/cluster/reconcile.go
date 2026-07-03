@@ -19,8 +19,6 @@ import (
 
 const (
 	ImagePullSecretName = "image-pull-secret" //nolint:gosec
-
-	staticNodeClusterFlowVersionGate = "v1.0.1"
 )
 
 var (
@@ -88,7 +86,7 @@ func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 }
 
 func isStaticNodeClusterFlowVersion(version string) (bool, error) {
-	useStaticNodeFlow, err := semver.LessThan(staticNodeClusterFlowVersionGate, version)
+	useStaticNodeFlow, err := semver.LessThan(v1.StaticNodeClusterFlowVersionGate, version)
 	if err != nil {
 		return false, fmt.Errorf("invalid cluster version %q: %w", version, err)
 	}

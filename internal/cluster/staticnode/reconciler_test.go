@@ -202,18 +202,21 @@ func TestBuildStatusClearsPreviousErrorOnSuccess(t *testing.T) {
 		},
 	}
 
-	status := buildStatus(node, result, nil)
+	status := BuildStatus(node, result, nil)
 
 	assert.Equal(t, v1.StaticNodePhaseReady, status.Phase)
 	assert.Empty(t, status.ErrorMessage)
 }
 
 func TestBuildStatusPreservesObservedScopesDuringPartialReconcile(t *testing.T) {
+	const previousTransitionTime = "2026-07-03T01:02:03Z"
+
 	node := &v1.StaticNode{
 		Status: &v1.StaticNodeStatus{
-			Phase:       v1.StaticNodePhaseReady,
-			Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU},
-			Warm:        &v1.WarmStatus{Ready: true},
+			Phase:              v1.StaticNodePhaseReady,
+			LastTransitionTime: previousTransitionTime,
+			Accelerator:        &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU},
+			Warm:               &v1.WarmStatus{Ready: true},
 			Components: []v1.NodeComponentStatus{
 				{
 					Name:  "ray-head",
@@ -224,19 +227,46 @@ func TestBuildStatusPreservesObservedScopesDuringPartialReconcile(t *testing.T) 
 		},
 	}
 
-	status := buildStatus(node, &ReconcileResult{
+	status := BuildStatus(node, &ReconcileResult{
 		Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU},
 	}, nil)
 
 	assert.Equal(t, v1.StaticNodePhaseReady, status.Phase)
+	assert.Equal(t, previousTransitionTime, status.LastTransitionTime)
 	require.NotNil(t, status.Warm)
 	assert.True(t, status.Warm.Ready)
 	require.Len(t, status.Components, 1)
 	assert.Equal(t, v1.NodeComponentPhaseRunning, status.Components[0].Phase)
 }
 
+func TestBuildStatusUpdatesTransitionTimeWhenPhaseChanges(t *testing.T) {
+	const previousTransitionTime = "2026-07-03T01:02:03Z"
+
+	node := &v1.StaticNode{
+		Status: &v1.StaticNodeStatus{
+			Phase:              v1.StaticNodePhaseReconciling,
+			LastTransitionTime: previousTransitionTime,
+		},
+	}
+
+	status := BuildStatus(node, &ReconcileResult{
+		Warm: &v1.WarmStatus{Ready: true},
+		Components: []v1.NodeComponentStatus{
+			{
+				Name:  "ray-head",
+				Ready: true,
+				Phase: v1.NodeComponentPhaseRunning,
+			},
+		},
+	}, nil)
+
+	assert.Equal(t, v1.StaticNodePhaseReady, status.Phase)
+	assert.NotEmpty(t, status.LastTransitionTime)
+	assert.NotEqual(t, previousTransitionTime, status.LastTransitionTime)
+}
+
 func TestBuildStatusEmptyComponentsReconciling(t *testing.T) {
-	status := buildStatus(&v1.StaticNode{}, &ReconcileResult{
+	status := BuildStatus(&v1.StaticNode{}, &ReconcileResult{
 		Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU},
 		Warm:        &v1.WarmStatus{Ready: true},
 		Components:  []v1.NodeComponentStatus{},

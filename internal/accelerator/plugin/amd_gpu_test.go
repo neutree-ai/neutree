@@ -94,24 +94,6 @@ func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsPluginError(t 
 	mockExecutor.AssertExpectations(t)
 }
 
-func TestAMDGPUAcceleratorPluginGetAcceleratorProfile(t *testing.T) {
-	p := &AMDGPUAcceleratorPlugin{}
-
-	profile, err := p.GetAcceleratorProfile(context.Background())
-
-	require.NoError(t, err)
-	require.NotNil(t, profile)
-	assert.Equal(t, v1.AcceleratorTypeAMDGPU.String(), profile.AcceleratorType)
-	require.NotNil(t, profile.ClusterRuntime)
-	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
-	assert.Equal(t, amdGPUNodeRuntimeConfig(), *profile.ClusterRuntime)
-	require.NotNil(t, profile.EngineRuntime)
-	assert.Empty(t, profile.EngineRuntime.ImageSuffix)
-	containerRuntime, err := p.GetContainerRuntimeConfig()
-	require.NoError(t, err)
-	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
-}
-
 func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 	tests := []struct {
 		name                    string
@@ -297,4 +279,9 @@ func TestAMDGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "rocm", profile.ClusterRuntime.ImageSuffix)
 	assert.Equal(t, "amd", profile.ClusterRuntime.Runtime)
 	assert.Equal(t, amdGPUNodeRuntimeConfig(), *profile.ClusterRuntime)
+	require.NotNil(t, profile.EngineRuntime)
+	assert.Empty(t, profile.EngineRuntime.ImageSuffix)
+	containerRuntime, err := p.GetContainerRuntimeConfig()
+	require.NoError(t, err)
+	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
 }

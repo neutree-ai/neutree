@@ -13,7 +13,7 @@ import (
 )
 
 func usesStaticNodeClusterFlow(version string) bool {
-	enabled, err := semver.LessThan("v1.0.1", version)
+	enabled, err := semver.LessThan(v1.StaticNodeClusterFlowVersionGate, version)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "cluster version must be semver")
 
 	return enabled
@@ -51,14 +51,6 @@ func rayContainerNameCommand(clusterName string, role v1.StaticNodeRole) string 
 	return rayContainerListCommand(clusterName, role, false) + " | head -n 1"
 }
 
-func rayContainerExecCommand(clusterName string, role v1.StaticNodeRole, command string) string {
-	return fmt.Sprintf(
-		"container=$(%s); test -n \"$container\" && docker exec \"$container\" %s",
-		rayContainerNameCommand(clusterName, role),
-		command,
-	)
-}
-
 func rayContainerBackgroundExecCommand(clusterName string, role v1.StaticNodeRole, command string) string {
 	return fmt.Sprintf(
 		"container=$(%s); test -n \"$container\" && nohup docker exec \"$container\" %s > /dev/null 2>&1 &",
@@ -75,7 +67,7 @@ func rayComponentName(role v1.StaticNodeRole) string {
 	return "ray-worker"
 }
 
-func eventuallyStaticNodeClusterReady(name string, desiredVersion string, desiredNodes int, timeout time.Duration) {
+func eventuallyStaticNodeClusterReady(name string, desiredVersion string, desiredNodes int) {
 	Eventually(func(g Gomega) {
 		r := RunCLI("get", "StaticNodeCluster", name, "-w", profileWorkspace(), "-o", "json")
 		g.Expect(r.ExitCode).To(Equal(0), r.Stderr)
@@ -88,7 +80,7 @@ func eventuallyStaticNodeClusterReady(name string, desiredVersion string, desire
 		g.Expect(cluster.Status.ReadyNodes).To(Equal(desiredNodes))
 		g.Expect(cluster.Status.HeadReady).To(BeTrue())
 		g.Expect(cluster.Status.Version).To(Equal(desiredVersion))
-	}, timeout, 5*time.Second).Should(Succeed())
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
 }
 
 func assertNoStaticNodeCluster(name string) {
@@ -102,6 +94,7 @@ func assertNoStaticNodeCluster(name string) {
 	}
 
 	clusters := parseStaticNodeClusterList(r.Stdout)
+
 	for _, cluster := range clusters {
 		if cluster.Metadata != nil {
 			Expect(cluster.Metadata.Name).NotTo(Equal(name))
@@ -122,6 +115,7 @@ func assertStaticNodesForCluster(clusterName string, expectedIPs []string) {
 	nodes := parseStaticNodeList(r.Stdout)
 
 	actual := map[string]struct{}{}
+
 	for _, node := range nodes {
 		if node.Spec == nil || node.Spec.Cluster != clusterName {
 			continue
@@ -131,6 +125,7 @@ func assertStaticNodesForCluster(clusterName string, expectedIPs []string) {
 	}
 
 	Expect(actual).To(HaveLen(len(expectedIPs)))
+
 	for _, ip := range expectedIPs {
 		Expect(actual).To(HaveKey(ip))
 	}

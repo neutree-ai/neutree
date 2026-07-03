@@ -31,7 +31,7 @@ func BuildStatus(
 	}
 
 	if reconcileErr != nil {
-		status.Phase = v1.StaticNodePhaseFailed
+		setPhase(&status, v1.StaticNodePhaseFailed)
 		status.ErrorMessage = reconcileErr.Error()
 
 		return status
@@ -40,35 +40,26 @@ func BuildStatus(
 	status.ErrorMessage = ""
 
 	if status.Warm != nil && !status.Warm.Ready {
-		status.Phase = v1.StaticNodePhaseWarming
+		setPhase(&status, v1.StaticNodePhaseWarming)
 
 		return status
 	}
 
 	if len(status.Components) == 0 {
-		status.Phase = v1.StaticNodePhaseReconciling
+		setPhase(&status, v1.StaticNodePhaseReconciling)
 
 		return status
 	}
 
 	if !allNodeComponentsReady(status.Components) {
-		status.Phase = v1.StaticNodePhaseReconciling
+		setPhase(&status, v1.StaticNodePhaseReconciling)
 
 		return status
 	}
 
-	status.Phase = v1.StaticNodePhaseReady
-	status.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
+	setPhase(&status, v1.StaticNodePhaseReady)
 
 	return status
-}
-
-func buildStatus(
-	node *v1.StaticNode,
-	result *ReconcileResult,
-	reconcileErr error,
-) v1.StaticNodeStatus {
-	return BuildStatus(node, result, reconcileErr)
 }
 
 func allNodeComponentsReady(components []v1.NodeComponentStatus) bool {
@@ -79,4 +70,12 @@ func allNodeComponentsReady(components []v1.NodeComponentStatus) bool {
 	}
 
 	return true
+}
+
+func setPhase(status *v1.StaticNodeStatus, phase v1.StaticNodePhase) {
+	if status.Phase != phase || status.LastTransitionTime == "" {
+		status.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	status.Phase = phase
 }
