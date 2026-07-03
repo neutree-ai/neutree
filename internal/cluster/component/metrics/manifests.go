@@ -460,18 +460,14 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 }
 
 func (m *MetricsComponent) supportsKubeStateMetrics() (bool, error) {
-	return supportsKubeStateMetricsClusterVersion(m.cluster.GetVersion())
+	return supportsClusterVersionAtLeast(m.cluster.GetVersion(), MinKubeStateMetricsClusterVersion)
 }
 
 func (m *MetricsComponent) supportsManagedMetricsExporters() (bool, error) {
-	return supportsMinClusterVersion(m.cluster.GetVersion(), MinManagedMetricsExporterClusterVersion)
+	return supportsClusterVersionAtLeast(m.cluster.GetVersion(), MinManagedMetricsExporterClusterVersion)
 }
 
-func supportsKubeStateMetricsClusterVersion(version string) (bool, error) {
-	return supportsMinClusterVersion(version, MinKubeStateMetricsClusterVersion)
-}
-
-func supportsMinClusterVersion(version string, minVersion string) (bool, error) {
+func supportsClusterVersionAtLeast(version string, minVersion string) (bool, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return false, nil

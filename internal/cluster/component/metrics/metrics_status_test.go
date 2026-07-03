@@ -270,7 +270,7 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 	assert.True(t, status.AcceleratorExporterDaemonSetsReady)
 }
 
-func TestSupportsKubeStateMetricsClusterVersion(t *testing.T) {
+func TestSupportsClusterVersionAtLeast(t *testing.T) {
 	tests := []struct {
 		name    string
 		version string
@@ -286,7 +286,7 @@ func TestSupportsKubeStateMetricsClusterVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := supportsKubeStateMetricsClusterVersion(tt.version)
+			got, err := supportsClusterVersionAtLeast(tt.version, MinKubeStateMetricsClusterVersion)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
