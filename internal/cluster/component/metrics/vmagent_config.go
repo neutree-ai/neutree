@@ -166,6 +166,8 @@ scrape_configs:
     replacement: {{ $.ClusterName }}
   - target_label: workspace
     replacement: {{ $.Workspace }}
+  - target_label: accelerator_type
+    replacement: {{ .AcceleratorType }}
 {{ end }}
 {{ if .EnableExternalDCGMScrape }}
 # Scrape an existing dcgm-exporter deployed outside Neutree ownership.

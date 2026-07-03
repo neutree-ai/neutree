@@ -15,20 +15,21 @@ import (
 )
 
 const (
-	nodeExporterComponentName        = "node-exporter"
-	vmagentComponentName             = "vmagent"
-	acceleratorExporterComponentName = "accelerator-exporter"
-	defaultVMAgentPort               = 8429
-	defaultNodeExporterPort          = 19100
-	defaultPrometheusHTTPPath        = "/metrics"
-	externalDCGMExporterPort         = 9400
-	defaultHealthHTTPPath            = "/health"
-	vmagentConfigPath                = "/etc/neutree/vmagent/config.yaml"
-	vmagentFileSDDir                 = "/etc/neutree/vmagent/file_sd"
-	vmagentNodeExporterFileSDPath    = vmagentFileSDDir + "/node-exporter.json"
-	vmagentRayFileSDPath             = vmagentFileSDDir + "/ray.json"
-	defaultNodeExporterImage         = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
-	defaultVMAgentImage              = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
+	nodeExporterComponentName           = "node-exporter"
+	vmagentComponentName                = "vmagent"
+	acceleratorExporterComponentName    = "accelerator-exporter"
+	defaultVMAgentPort                  = 8429
+	defaultNodeExporterPort             = 19100
+	defaultPrometheusHTTPPath           = "/metrics"
+	externalDCGMExporterPort            = 9400
+	defaultHealthHTTPPath               = "/health"
+	vmagentConfigPath                   = "/etc/neutree/vmagent/config.yaml"
+	vmagentFileSDDir                    = "/etc/neutree/vmagent/file_sd"
+	vmagentNodeExporterFileSDPath       = vmagentFileSDDir + "/node-exporter.json"
+	vmagentRayFileSDPath                = vmagentFileSDDir + "/ray.json"
+	managedAcceleratorExporterJobPrefix = "accelerator-exporter"
+	defaultNodeExporterImage            = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
+	defaultVMAgentImage                 = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
 )
 
 const staticVMAgentConfigTemplateText = `global:
@@ -257,8 +258,8 @@ func renderVMAgentConfig(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan)
 	groups := acceleratorExporterTargetGroups(cluster, plans)
 	for i, group := range groups {
 		scrapeConfig := staticVMAgentScrapeConfig{
-			JobName:    acceleratorExporterJobName(group.MetricsPath, len(groups), i),
-			FileSDPath: strconv.Quote(acceleratorExporterFileSDPath(group.MetricsPath)),
+			JobName:    acceleratorExporterTargetGroupJobName(group, len(groups), i),
+			FileSDPath: strconv.Quote(acceleratorExporterTargetGroupFileSDPath(group)),
 		}
 		if group.MetricsPath != defaultPrometheusHTTPPath {
 			scrapeConfig.MetricsPath = strconv.Quote(group.MetricsPath)
@@ -299,7 +300,7 @@ func renderVMAgentFileSDConfigFiles(
 
 	for _, group := range acceleratorExporterTargetGroups(cluster, plans) {
 		configFiles = append(configFiles, vmagentFileSDConfigFile(
-			acceleratorExporterFileSDPath(group.MetricsPath),
+			acceleratorExporterTargetGroupFileSDPath(group),
 			renderVMAgentAcceleratorExporterFileSDTargets(cluster, group.Targets),
 		))
 	}
@@ -401,9 +402,13 @@ func renderVMAgentAcceleratorExporterFileSDTargets(
 	result := make([]vmagentFileSDTarget, 0, len(targets))
 
 	for _, target := range targets {
+		labels := vmagentTargetLabels(cluster, target.Node, acceleratorExporterComponentName)
+		if target.AcceleratorType != "" {
+			labels["accelerator_type"] = target.AcceleratorType
+		}
 		result = append(result, vmagentFileSDTarget{
 			Targets: []string{fmt.Sprintf("%s:%d", target.Node.Spec.IP, target.Port)},
-			Labels:  vmagentTargetLabels(cluster, target.Node, acceleratorExporterComponentName),
+			Labels:  labels,
 		})
 	}
 
@@ -420,14 +425,17 @@ func mustMarshalVMAgentFileSDTargets(targets []vmagentFileSDTarget) string {
 }
 
 type acceleratorExporterTargetGroup struct {
-	MetricsPath string
-	Targets     []acceleratorExporterTarget
+	AcceleratorType string
+	MetricsPath     string
+	JobName         string
+	Targets         []acceleratorExporterTarget
 }
 
 type acceleratorExporterTarget struct {
-	Node      *v1.StaticNode
-	Component v1.NodeComponentSpec
-	Port      int
+	Node            *v1.StaticNode
+	AcceleratorType string
+	Component       v1.NodeComponentSpec
+	Port            int
 }
 
 func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
@@ -435,11 +443,11 @@ func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []Desi
 		return externalAcceleratorExporterTargetGroups(plans)
 	}
 
-	groupsByPath := map[string][]acceleratorExporterTarget{}
+	groupsByAcceleratorType := map[string]acceleratorExporterTargetGroup{}
 
 	for _, plan := range plans {
 		component, ok := desiredComponentByName(plan, acceleratorExporterComponentName)
-		if !ok || len(component.Ports) == 0 {
+		if !ok || len(component.Ports) == 0 || plan.Accelerator == nil || plan.Accelerator.Type == "" {
 			continue
 		}
 
@@ -448,14 +456,24 @@ func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []Desi
 			metricsPath = normalizedMetricsPath(component.HealthCheck.HTTPPath)
 		}
 
-		groupsByPath[metricsPath] = append(groupsByPath[metricsPath], acceleratorExporterTarget{
-			Node:      plan.Node,
-			Component: component,
-			Port:      component.Ports[0].Port,
+		acceleratorType := plan.Accelerator.Type
+		group := groupsByAcceleratorType[acceleratorType]
+		if group.AcceleratorType == "" {
+			group.AcceleratorType = acceleratorType
+			group.MetricsPath = metricsPath
+			group.JobName = managedAcceleratorExporterJobName(acceleratorType)
+		}
+
+		group.Targets = append(group.Targets, acceleratorExporterTarget{
+			Node:            plan.Node,
+			AcceleratorType: acceleratorType,
+			Component:       component,
+			Port:            component.Ports[0].Port,
 		})
+		groupsByAcceleratorType[acceleratorType] = group
 	}
 
-	return sortedAcceleratorExporterTargetGroups(groupsByPath)
+	return sortedAcceleratorExporterTargetGroups(groupsByAcceleratorType)
 }
 
 func externalAcceleratorExporterTargetGroups(plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
@@ -467,8 +485,9 @@ func externalAcceleratorExporterTargetGroups(plans []DesiredNodePlan) []accelera
 		}
 
 		targets = append(targets, acceleratorExporterTarget{
-			Node: plan.Node,
-			Port: externalDCGMExporterPort,
+			Node:            plan.Node,
+			AcceleratorType: plan.Accelerator.Type,
+			Port:            externalDCGMExporterPort,
 		})
 	}
 
@@ -483,21 +502,18 @@ func externalAcceleratorExporterTargetGroups(plans []DesiredNodePlan) []accelera
 }
 
 func sortedAcceleratorExporterTargetGroups(
-	groupsByPath map[string][]acceleratorExporterTarget,
+	groupsByAcceleratorType map[string]acceleratorExporterTargetGroup,
 ) []acceleratorExporterTargetGroup {
-	paths := make([]string, 0, len(groupsByPath))
-	for path := range groupsByPath {
-		paths = append(paths, path)
+	acceleratorTypes := make([]string, 0, len(groupsByAcceleratorType))
+	for acceleratorType := range groupsByAcceleratorType {
+		acceleratorTypes = append(acceleratorTypes, acceleratorType)
 	}
 
-	sort.Strings(paths)
+	sort.Strings(acceleratorTypes)
 
-	groups := make([]acceleratorExporterTargetGroup, 0, len(paths))
-	for _, path := range paths {
-		groups = append(groups, acceleratorExporterTargetGroup{
-			MetricsPath: path,
-			Targets:     groupsByPath[path],
-		})
+	groups := make([]acceleratorExporterTargetGroup, 0, len(acceleratorTypes))
+	for _, acceleratorType := range acceleratorTypes {
+		groups = append(groups, groupsByAcceleratorType[acceleratorType])
 	}
 
 	return groups
@@ -532,8 +548,55 @@ func acceleratorExporterJobName(metricsPath string, _ int, index int) string {
 	return "static-node-accelerator-exporter-" + name
 }
 
+func acceleratorExporterTargetGroupJobName(group acceleratorExporterTargetGroup, groupCount int, index int) string {
+	if group.JobName != "" {
+		return group.JobName
+	}
+
+	return acceleratorExporterJobName(group.MetricsPath, groupCount, index)
+}
+
+func managedAcceleratorExporterJobName(acceleratorType string) string {
+	name := sanitizeStaticMetricsName(acceleratorType)
+	if name == "" {
+		return managedAcceleratorExporterJobPrefix
+	}
+
+	return managedAcceleratorExporterJobPrefix + "-" + name
+}
+
+func acceleratorExporterTargetGroupFileSDPath(group acceleratorExporterTargetGroup) string {
+	if group.JobName != "" {
+		return vmagentFileSDDir + "/" + group.JobName + ".json"
+	}
+
+	return acceleratorExporterFileSDPath(group.MetricsPath)
+}
+
 func acceleratorExporterFileSDPath(metricsPath string) string {
 	return vmagentFileSDDir + "/" + strings.TrimPrefix(acceleratorExporterJobName(metricsPath, 2, 0), "static-node-") + ".json"
+}
+
+func sanitizeStaticMetricsName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastHyphen := false
+
+	for _, char := range value {
+		allowed := (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')
+		if allowed {
+			builder.WriteRune(char)
+			lastHyphen = false
+			continue
+		}
+
+		if builder.Len() > 0 && !lastHyphen {
+			builder.WriteRune('-')
+			lastHyphen = true
+		}
+	}
+
+	return strings.Trim(builder.String(), "-")
 }
 
 func acceleratorExporterMode(cluster *v1.StaticNodeCluster) v1.ClusterAcceleratorExporterMode {

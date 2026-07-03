@@ -20,18 +20,20 @@ const (
 	nodeExporterDaemonSetName = "neutree-node-exporter"
 	nodeExporterPort          = 19100
 
-	defaultNodeExporterImage = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
-	defaultMetricsPath       = "/metrics"
+	defaultNodeExporterImage     = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
+	defaultMetricsPath           = "/metrics"
+	acceleratorExporterJobPrefix = "accelerator-exporter"
 )
 
 type metricsAcceleratorExporter struct {
-	Name         string
-	ExporterName string
-	Image        string
-	Args         []string
-	Env          []corev1.EnvVar
-	Port         int
-	MetricsPath  string
+	Name            string
+	AcceleratorType string
+	ExporterName    string
+	Image           string
+	Args            []string
+	Env             []corev1.EnvVar
+	Port            int
+	MetricsPath     string
 
 	HostNetwork  bool
 	HostPID      bool
@@ -57,7 +59,7 @@ func (e metricsAcceleratorExporter) ContainerName() string {
 }
 
 func (e metricsAcceleratorExporter) JobName() string {
-	return sanitizeKubernetesNameValue(e.ExporterName)
+	return acceleratorExporterJobName(e.AcceleratorType)
 }
 
 func (e metricsAcceleratorExporter) ConfigMapName() string {
@@ -139,21 +141,22 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	runtime := exporterProfile.Runtime
 
 	exporter := metricsAcceleratorExporter{
-		Name:           name,
-		ExporterName:   exporterProfile.Name,
-		Image:          rewriteMetricsImage(m.imagePrefix, exporterProfile.Image),
-		Args:           append([]string{}, exporterProfile.Args...),
-		Env:            buildExporterEnv(exporterProfile.Env),
-		Port:           exporterProfile.Port,
-		MetricsPath:    exporterMetricsPath(exporterProfile.MetricsPath),
-		HostNetwork:    exporterRuntimeHostNetwork(runtime),
-		HostPID:        exporterRuntimeHostPID(runtime),
-		Capabilities:   exporterRuntimeCapabilities(runtime),
-		NodeSelector:   exporterRuntimeNodeSelector(runtime),
-		ConfigFileData: configFileData,
-		ConfigChecksum: configChecksum,
-		VolumeMounts:   volumeMounts,
-		Volumes:        volumes,
+		Name:            name,
+		AcceleratorType: acceleratorType,
+		ExporterName:    exporterProfile.Name,
+		Image:           rewriteMetricsImage(m.imagePrefix, exporterProfile.Image),
+		Args:            append([]string{}, exporterProfile.Args...),
+		Env:             buildExporterEnv(exporterProfile.Env),
+		Port:            exporterProfile.Port,
+		MetricsPath:     exporterMetricsPath(exporterProfile.MetricsPath),
+		HostNetwork:     exporterRuntimeHostNetwork(runtime),
+		HostPID:         exporterRuntimeHostPID(runtime),
+		Capabilities:    exporterRuntimeCapabilities(runtime),
+		NodeSelector:    exporterRuntimeNodeSelector(runtime),
+		ConfigFileData:  configFileData,
+		ConfigChecksum:  configChecksum,
+		VolumeMounts:    volumeMounts,
+		Volumes:         volumes,
 	}
 
 	return exporter, true, nil
@@ -161,6 +164,15 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 
 func acceleratorExporterName(acceleratorType string, exporterName string) string {
 	return sanitizeKubernetesNameValue(acceleratorType + "-" + exporterName)
+}
+
+func acceleratorExporterJobName(acceleratorType string) string {
+	name := sanitizeKubernetesNameValue(acceleratorType)
+	if name == "" {
+		return acceleratorExporterJobPrefix
+	}
+
+	return acceleratorExporterJobPrefix + "-" + name
 }
 
 func validAcceleratorExporterName(exporterName string) bool {

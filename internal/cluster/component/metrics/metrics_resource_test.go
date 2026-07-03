@@ -587,7 +587,9 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assertValidPrometheusYAML(t, vmagentConfig)
-	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "accelerator_type"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: nvidia_gpu"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
 }
 

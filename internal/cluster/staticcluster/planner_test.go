@@ -23,11 +23,10 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				Options: []string{"--gpus all"},
 			},
 			MetricsExporter: &v1.AcceleratorExporterProfile{
-				Name:        "dcgm-exporter",
-				Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-				Args:        []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
-				Port:        19400,
-				MetricsPath: "/dcgm/metrics",
+				Name:  "dcgm-exporter",
+				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+				Args:  []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
+				Port:  19400,
 				ConfigFiles: []v1.AcceleratorExporterConfigFile{
 					{
 						Path:    "/etc/neutree/dcgm-exporter/default-counters.csv",
@@ -137,7 +136,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", exporter.Volumes[0].MountPath)
 	assert.Equal(t, 19400, exporter.Ports[0].Port)
 	require.NotNil(t, exporter.HealthCheck)
-	assert.Equal(t, "/dcgm/metrics", exporter.HealthCheck.HTTPPath)
+	assert.Equal(t, "/metrics", exporter.HealthCheck.HTTPPath)
 	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
 	require.NotNil(t, vmagentComponent)
 	assert.Equal(t, "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0", vmagentComponent.Image)
@@ -156,9 +155,9 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, vmagentConfig.Content, `replacement: 'sglang:$1'`)
 	assert.NotContains(t, vmagentConfig.Content, `replacement: 'sglang_$1'`)
 	assert.NotContains(t, vmagentConfig.Content, `action: labeldrop`)
-	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter-dcgm-metrics`)
-	assert.Contains(t, vmagentConfig.Content, `metrics_path: "/dcgm/metrics"`)
-	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/accelerator-exporter-dcgm-metrics.json`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: accelerator-exporter-nvidia-gpu`)
+	assert.NotContains(t, vmagentConfig.Content, `metrics_path: "/dcgm/metrics"`)
+	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/accelerator-exporter-nvidia-gpu.json`)
 	assert.NotContains(t, vmagentConfig.Content, `remote_write:`)
 	nodeTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/node-exporter.json")
 	require.NotNil(t, nodeTargets)
@@ -171,11 +170,12 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.True(t, rayTargets.SkipRestartOnChange)
 	assert.Contains(t, rayTargets.Content, `"10.0.0.10:54311"`)
 	assert.Contains(t, rayTargets.Content, `"10.0.0.11:54311"`)
-	acceleratorTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/accelerator-exporter-dcgm-metrics.json")
+	acceleratorTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/accelerator-exporter-nvidia-gpu.json")
 	require.NotNil(t, acceleratorTargets)
 	assert.True(t, acceleratorTargets.SkipRestartOnChange)
 	assert.Contains(t, acceleratorTargets.Content, `"10.0.0.10:19400"`)
 	assert.NotContains(t, acceleratorTargets.Content, `"10.0.0.11:19400"`)
+	assert.Contains(t, acceleratorTargets.Content, `"accelerator_type": "nvidia_gpu"`)
 
 	worker := nodes[1]
 	require.NotNil(t, worker.Metadata)
@@ -329,7 +329,7 @@ func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {
 	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
 	require.NotNil(t, vmagentConfig)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
-	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: accelerator-exporter-nvidia-gpu`)
 	assert.NotNil(t, findConfigFile(vmagentComponent.ConfigFiles, vmagentNodeExporterFileSDPath))
 }
 

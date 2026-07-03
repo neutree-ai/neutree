@@ -65,7 +65,7 @@ func assertK8sMetricsResources(
 		ExpectWithOffset(1, dcgm.Spec.Template.Spec.Containers[0].Ports).To(ContainElement(
 			HaveField("ContainerPort", int32(19400)),
 		))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'dcgm-exporter'"))
+		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'accelerator-exporter-nvidia-gpu'"))
 	}
 
 	assertK8sKubeStateMetricsResources(ctx, k8sH, namespace, clusterVersion)
