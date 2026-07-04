@@ -18,13 +18,13 @@ var (
 	testSSHUser       = "test_user"
 	testSSHIP         = "127.0.0.1"
 	testNode          = "node1"
-	testCluster       = "test_cluster"
 	testCommand       = "echo hello"
 	testEnvVars       = map[string]interface{}{"ENV1": "value1", "ENV2": "value2"}
 	testPortForward   = []string{"8080:localhost:8080"}
 	testSSHOptions    = []string{
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
 		"-o", "IdentitiesOnly=yes",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ServerAliveInterval=5",
@@ -186,6 +186,7 @@ func TestSSHCommandRunner_Run_WithSSHOptionsOverride(t *testing.T) {
 		"ssh",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
 		"-o", "IdentitiesOnly=yes",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ServerAliveInterval=5",

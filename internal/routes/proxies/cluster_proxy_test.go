@@ -2,9 +2,11 @@ package proxies
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -500,6 +502,217 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
+}
+
+func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("rejects SSH static flow downgrade to legacy flow before proxy handler", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{
+			{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+		}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"version": "v1.0.1"}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10212"`)
+		assert.Contains(t, recorder.Body.String(), "static flow to legacy flow is not supported")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("allows SSH static flow version update", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{
+			{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+		}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"version": "v1.0.2"}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("rejects static flow downgrade using current cluster type even when patch changes type", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{
+			{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+		}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"type": "kubernetes", "version": "v1.0.1"}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "static flow to legacy flow is not supported")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("skips storage lookup when patch does not update version", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"metadata": {"name": "cluster"}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
+	t.Run("restores request body and content length", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		body := `{"metadata":{"name":"cluster"}}`
+		originalBody := &trackingReadCloser{Reader: strings.NewReader(body)}
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			restoredBody, err := io.ReadAll(c.Request.Body)
+			assert.NoError(t, err)
+			assert.Equal(t, body, string(restoredBody))
+			assert.Equal(t, int64(len(body)), c.Request.ContentLength)
+			assert.Equal(t, strconv.Itoa(len(body)), c.Request.Header.Get("Content-Length"))
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", nil)
+		req.Body = originalBody
+		req.ContentLength = 0
+		req.Header.Set("Content-Length", "0")
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, originalBody.closed)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+}
+
+type trackingReadCloser struct {
+	*strings.Reader
+	closed bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+
+	return nil
+}
+
+func TestValidateStaticNodeClusterFlowVersionUpdate(t *testing.T) {
+	tests := []struct {
+		name            string
+		current         *v1.Cluster
+		desiredVersion  string
+		wantErrContains string
+	}{
+		{
+			name:           "allows legacy to static upgrade",
+			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"}},
+			desiredVersion: "v1.1.0",
+		},
+		{
+			name:           "allows static flow version update",
+			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+			desiredVersion: "v1.0.2",
+		},
+		{
+			name:            "rejects static flow downgrade to legacy flow",
+			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+			desiredVersion:  "v1.0.1",
+			wantErrContains: "static flow to legacy flow is not supported",
+		},
+		{
+			name:            "rejects static flow downgrade below legacy gate",
+			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+			desiredVersion:  "v1.0.0",
+			wantErrContains: "static flow to legacy flow is not supported",
+		},
+		{
+			name:           "allows Kubernetes version downgrade",
+			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.1.0"}},
+			desiredVersion: "v1.0.1",
+		},
+		{
+			name:           "allows invalid desired version when current SSH cluster is legacy flow",
+			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"}},
+			desiredVersion: "custom",
+		},
+		{
+			name:            "rejects invalid desired version when current SSH cluster is static flow",
+			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
+			desiredVersion:  "custom",
+			wantErrContains: "invalid desired cluster version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateStaticNodeClusterFlowVersionUpdate(tt.current, tt.desiredVersion)
+			if tt.wantErrContains == "" {
+				assert.NoError(t, err)
+				return
+			}
+
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErrContains)
+		})
+	}
 }
 
 func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {

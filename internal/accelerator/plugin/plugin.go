@@ -39,7 +39,12 @@ type ClusterVirtualizationConfigProvider interface {
 type AcceleratorPluginHandle interface {
 	GetNodeAccelerator(ctx context.Context, request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
 	GetNodeRuntimeConfig(ctx context.Context, request *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
+	DetectStaticNodeAccelerator(
+		ctx context.Context,
+		request *v1.DetectStaticNodeAcceleratorRequest,
+	) (*v1.DetectStaticNodeAcceleratorResponse, error)
 	Ping(ctx context.Context) error
+	GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error)
 	// GetResourceConverter returns the resource converter
 	GetResourceConverter() ResourceConverter
 

@@ -587,6 +587,98 @@ func (_c *MockStorage_CreateRoleAssignment_Call) RunAndReturn(run func(*v1.RoleA
 	return _c
 }
 
+// CreateStaticNodeCluster provides a mock function with given fields: data
+func (_m *MockStorage) CreateStaticNodeCluster(data *v1.StaticNodeCluster) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateStaticNodeCluster")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.StaticNodeCluster) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateStaticNodeCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateStaticNodeCluster'
+type MockStorage_CreateStaticNodeCluster_Call struct {
+	*mock.Call
+}
+
+// CreateStaticNodeCluster is a helper method to define mock.On call
+//   - data *v1.StaticNodeCluster
+func (_e *MockStorage_Expecter) CreateStaticNodeCluster(data interface{}) *MockStorage_CreateStaticNodeCluster_Call {
+	return &MockStorage_CreateStaticNodeCluster_Call{Call: _e.mock.On("CreateStaticNodeCluster", data)}
+}
+
+func (_c *MockStorage_CreateStaticNodeCluster_Call) Run(run func(data *v1.StaticNodeCluster)) *MockStorage_CreateStaticNodeCluster_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.StaticNodeCluster))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateStaticNodeCluster_Call) Return(_a0 error) *MockStorage_CreateStaticNodeCluster_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateStaticNodeCluster_Call) RunAndReturn(run func(*v1.StaticNodeCluster) error) *MockStorage_CreateStaticNodeCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateStaticNode provides a mock function with given fields: data
+func (_m *MockStorage) CreateStaticNode(data *v1.StaticNode) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateStaticNode")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.StaticNode) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateStaticNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateStaticNode'
+type MockStorage_CreateStaticNode_Call struct {
+	*mock.Call
+}
+
+// CreateStaticNode is a helper method to define mock.On call
+//   - data *v1.StaticNode
+func (_e *MockStorage_Expecter) CreateStaticNode(data interface{}) *MockStorage_CreateStaticNode_Call {
+	return &MockStorage_CreateStaticNode_Call{Call: _e.mock.On("CreateStaticNode", data)}
+}
+
+func (_c *MockStorage_CreateStaticNode_Call) Run(run func(data *v1.StaticNode)) *MockStorage_CreateStaticNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.StaticNode))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateStaticNode_Call) Return(_a0 error) *MockStorage_CreateStaticNode_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateStaticNode_Call) RunAndReturn(run func(*v1.StaticNode) error) *MockStorage_CreateStaticNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateUserProfile provides a mock function with given fields: data
 func (_m *MockStorage) CreateUserProfile(data *v1.UserProfile) error {
 	ret := _m.Called(data)
@@ -1135,6 +1227,98 @@ func (_c *MockStorage_DeleteRoleAssignment_Call) Return(_a0 error) *MockStorage_
 }
 
 func (_c *MockStorage_DeleteRoleAssignment_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteStaticNode provides a mock function with given fields: id
+func (_m *MockStorage) DeleteStaticNode(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteStaticNode")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteStaticNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteStaticNode'
+type MockStorage_DeleteStaticNode_Call struct {
+	*mock.Call
+}
+
+// DeleteStaticNode is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteStaticNode(id interface{}) *MockStorage_DeleteStaticNode_Call {
+	return &MockStorage_DeleteStaticNode_Call{Call: _e.mock.On("DeleteStaticNode", id)}
+}
+
+func (_c *MockStorage_DeleteStaticNode_Call) Run(run func(id string)) *MockStorage_DeleteStaticNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteStaticNode_Call) Return(_a0 error) *MockStorage_DeleteStaticNode_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteStaticNode_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteStaticNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteStaticNodeCluster provides a mock function with given fields: id
+func (_m *MockStorage) DeleteStaticNodeCluster(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteStaticNodeCluster")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteStaticNodeCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteStaticNodeCluster'
+type MockStorage_DeleteStaticNodeCluster_Call struct {
+	*mock.Call
+}
+
+// DeleteStaticNodeCluster is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteStaticNodeCluster(id interface{}) *MockStorage_DeleteStaticNodeCluster_Call {
+	return &MockStorage_DeleteStaticNodeCluster_Call{Call: _e.mock.On("DeleteStaticNodeCluster", id)}
+}
+
+func (_c *MockStorage_DeleteStaticNodeCluster_Call) Run(run func(id string)) *MockStorage_DeleteStaticNodeCluster_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteStaticNodeCluster_Call) Return(_a0 error) *MockStorage_DeleteStaticNodeCluster_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteStaticNodeCluster_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteStaticNodeCluster_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2556,6 +2740,122 @@ func (_c *MockStorage_ListRoleAssignment_Call) RunAndReturn(run func(storage.Lis
 	return _c
 }
 
+// ListStaticNodeCluster provides a mock function with given fields: option
+func (_m *MockStorage) ListStaticNodeCluster(option storage.ListOption) ([]v1.StaticNodeCluster, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListStaticNodeCluster")
+	}
+
+	var r0 []v1.StaticNodeCluster
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.StaticNodeCluster, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.StaticNodeCluster); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.StaticNodeCluster)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListStaticNodeCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListStaticNodeCluster'
+type MockStorage_ListStaticNodeCluster_Call struct {
+	*mock.Call
+}
+
+// ListStaticNodeCluster is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListStaticNodeCluster(option interface{}) *MockStorage_ListStaticNodeCluster_Call {
+	return &MockStorage_ListStaticNodeCluster_Call{Call: _e.mock.On("ListStaticNodeCluster", option)}
+}
+
+func (_c *MockStorage_ListStaticNodeCluster_Call) Run(run func(option storage.ListOption)) *MockStorage_ListStaticNodeCluster_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListStaticNodeCluster_Call) Return(_a0 []v1.StaticNodeCluster, _a1 error) *MockStorage_ListStaticNodeCluster_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListStaticNodeCluster_Call) RunAndReturn(run func(storage.ListOption) ([]v1.StaticNodeCluster, error)) *MockStorage_ListStaticNodeCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListStaticNode provides a mock function with given fields: option
+func (_m *MockStorage) ListStaticNode(option storage.ListOption) ([]v1.StaticNode, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListStaticNode")
+	}
+
+	var r0 []v1.StaticNode
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.StaticNode, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.StaticNode); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.StaticNode)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListStaticNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListStaticNode'
+type MockStorage_ListStaticNode_Call struct {
+	*mock.Call
+}
+
+// ListStaticNode is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListStaticNode(option interface{}) *MockStorage_ListStaticNode_Call {
+	return &MockStorage_ListStaticNode_Call{Call: _e.mock.On("ListStaticNode", option)}
+}
+
+func (_c *MockStorage_ListStaticNode_Call) Run(run func(option storage.ListOption)) *MockStorage_ListStaticNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListStaticNode_Call) Return(_a0 []v1.StaticNode, _a1 error) *MockStorage_ListStaticNode_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListStaticNode_Call) RunAndReturn(run func(storage.ListOption) ([]v1.StaticNode, error)) *MockStorage_ListStaticNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListUserProfile provides a mock function with given fields: option
 func (_m *MockStorage) ListUserProfile(option storage.ListOption) ([]v1.UserProfile, error) {
 	ret := _m.Called(option)
@@ -3138,6 +3438,100 @@ func (_c *MockStorage_UpdateRoleAssignment_Call) Return(_a0 error) *MockStorage_
 }
 
 func (_c *MockStorage_UpdateRoleAssignment_Call) RunAndReturn(run func(string, *v1.RoleAssignment) error) *MockStorage_UpdateRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateStaticNodeCluster provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateStaticNodeCluster(id string, data *v1.StaticNodeCluster) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateStaticNodeCluster")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.StaticNodeCluster) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateStaticNodeCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateStaticNodeCluster'
+type MockStorage_UpdateStaticNodeCluster_Call struct {
+	*mock.Call
+}
+
+// UpdateStaticNodeCluster is a helper method to define mock.On call
+//   - id string
+//   - data *v1.StaticNodeCluster
+func (_e *MockStorage_Expecter) UpdateStaticNodeCluster(id interface{}, data interface{}) *MockStorage_UpdateStaticNodeCluster_Call {
+	return &MockStorage_UpdateStaticNodeCluster_Call{Call: _e.mock.On("UpdateStaticNodeCluster", id, data)}
+}
+
+func (_c *MockStorage_UpdateStaticNodeCluster_Call) Run(run func(id string, data *v1.StaticNodeCluster)) *MockStorage_UpdateStaticNodeCluster_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.StaticNodeCluster))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateStaticNodeCluster_Call) Return(_a0 error) *MockStorage_UpdateStaticNodeCluster_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateStaticNodeCluster_Call) RunAndReturn(run func(string, *v1.StaticNodeCluster) error) *MockStorage_UpdateStaticNodeCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateStaticNode provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateStaticNode(id string, data *v1.StaticNode) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateStaticNode")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.StaticNode) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateStaticNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateStaticNode'
+type MockStorage_UpdateStaticNode_Call struct {
+	*mock.Call
+}
+
+// UpdateStaticNode is a helper method to define mock.On call
+//   - id string
+//   - data *v1.StaticNode
+func (_e *MockStorage_Expecter) UpdateStaticNode(id interface{}, data interface{}) *MockStorage_UpdateStaticNode_Call {
+	return &MockStorage_UpdateStaticNode_Call{Call: _e.mock.On("UpdateStaticNode", id, data)}
+}
+
+func (_c *MockStorage_UpdateStaticNode_Call) Run(run func(id string, data *v1.StaticNode)) *MockStorage_UpdateStaticNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.StaticNode))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateStaticNode_Call) Return(_a0 error) *MockStorage_UpdateStaticNode_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateStaticNode_Call) RunAndReturn(run func(string, *v1.StaticNode) error) *MockStorage_UpdateStaticNode_Call {
 	_c.Call.Return(run)
 	return _c
 }

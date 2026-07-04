@@ -20,6 +20,11 @@ const (
 	KubernetesClusterType = "kubernetes"
 )
 
+// StaticNodeClusterFlowVersionGate is the highest SSH cluster version that
+// still uses the legacy Ray SSH lifecycle. Greater versions use the static-node
+// backed lifecycle.
+const StaticNodeClusterFlowVersionGate = "v1.0.1"
+
 type Cluster struct {
 	ID         int            `json:"id,omitempty"`
 	APIVersion string         `json:"api_version,omitempty"`
@@ -38,6 +43,16 @@ type ClusterSpec struct {
 	// the neutree serving version, if not specified, the default version will be used
 	Version string `json:"version"`
 }
+
+type ClusterUpgradeStrategy struct {
+	Type ClusterUpgradeStrategyType `json:"type,omitempty" yaml:"type,omitempty"`
+}
+
+type ClusterUpgradeStrategyType string
+
+const (
+	ClusterUpgradeStrategyTypeRecreate ClusterUpgradeStrategyType = "Recreate"
+)
 
 type AcceleratorVirtualizationSpec struct {
 	Enabled     bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
@@ -189,12 +204,28 @@ func (c Cluster) IsInitialized() bool {
 	return c.Status.Initialized
 }
 
+const (
+	ForceDeleteAnnotationKey   = "neutree.ai/force-delete"
+	ForceDeleteAnnotationValue = "true"
+)
+
 func IsForceDelete(annotations map[string]string) bool {
 	if annotations == nil {
 		return false
 	}
 
-	return annotations["neutree.ai/force-delete"] == "true"
+	return annotations[ForceDeleteAnnotationKey] == ForceDeleteAnnotationValue
+}
+
+func WithForceDeleteAnnotation(annotations map[string]string) map[string]string {
+	next := make(map[string]string, len(annotations)+1)
+	for key, value := range annotations {
+		next[key] = value
+	}
+
+	next[ForceDeleteAnnotationKey] = ForceDeleteAnnotationValue
+
+	return next
 }
 
 type ClusterPhase string
@@ -235,6 +266,14 @@ func (obj *Cluster) GetVersion() string {
 	}
 
 	return obj.Spec.Version
+}
+
+func DefaultClusterUpgradeStrategy() *ClusterUpgradeStrategy {
+	return &ClusterUpgradeStrategy{Type: ClusterUpgradeStrategyTypeRecreate}
+}
+
+func IsSupportedClusterUpgradeStrategyType(strategyType ClusterUpgradeStrategyType) bool {
+	return strategyType == ClusterUpgradeStrategyTypeRecreate
 }
 
 func (obj *Cluster) GetName() string {

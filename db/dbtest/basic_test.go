@@ -45,7 +45,7 @@ func TestDatabaseSetup(t *testing.T) {
 	})
 
 	t.Run("basic tables exist", func(t *testing.T) {
-		tables := []string{"workspaces", "endpoints", "clusters", "roles"}
+		tables := []string{"workspaces", "endpoints", "clusters", "static_node_clusters", "static_nodes", "roles"}
 
 		for _, table := range tables {
 			var exists bool

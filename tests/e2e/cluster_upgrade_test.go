@@ -99,6 +99,9 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			c := parseClusterJSON(r.Stdout)
 			versionBefore := c.Status.Version
 			Expect(versionBefore).NotTo(BeEmpty())
+			if !usesStaticNodeClusterFlow(oldVersion) {
+				assertNoStaticNodeCluster(clusterName)
+			}
 
 			newVersion := profileClusterVersion()
 
@@ -127,6 +130,11 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			c = parseClusterJSON(r.Stdout)
 			Expect(c.Status.Version).To(Equal(newVersion),
 				"cluster Status.Version should equal new version after upgrade")
+
+			if usesStaticNodeClusterFlow(newVersion) {
+				eventuallyStaticNodeClusterReady(clusterName, newVersion, 1+len(workerIPs))
+				assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
+			}
 		})
 	})
 

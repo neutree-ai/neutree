@@ -21,6 +21,8 @@ type Manager interface {
 	plugin.AcceleratorPluginProvider
 
 	Start(ctx context.Context)
+	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
+	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
 
@@ -178,6 +180,67 @@ func (a *manager) Start(ctx context.Context) {
 	}, time.Minute)
 }
 
+func (a *manager) DetectAccelerator(
+	ctx context.Context,
+	nodeIP string,
+	sshAuth v1.Auth,
+) (*v1.StaticNodeAcceleratorStatus, error) {
+	if nodeIP == "" {
+		return nil, errors.New("node ip is required")
+	}
+
+	if sshAuth.SSHUser == "" || sshAuth.SSHPrivateKey == "" {
+		return nil, errors.New("node ssh auth is required")
+	}
+
+	var detected *v1.StaticNodeAcceleratorStatus
+	var detectErr error
+
+	a.acceleratorsMap.Range(func(key, value any) bool {
+		p, ok := value.(registerPlugin)
+		if !ok {
+			klog.Warning("assert register plugin type failed")
+			return true
+		}
+
+		response, err := p.plugin.Handle().GetNodeAccelerator(ctx, &v1.GetNodeAcceleratorRequest{
+			NodeIp:  nodeIP,
+			SSHAuth: sshAuth,
+		})
+		if err != nil {
+			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, err.Error())
+
+			if detectErr == nil {
+				detectErr = errors.Wrapf(err, "detect static node accelerator from plugin %s failed", p.resource)
+			}
+
+			return true
+		}
+
+		if response != nil && len(response.Accelerators) > 0 {
+			detected = &v1.StaticNodeAcceleratorStatus{
+				Type: p.resource,
+			}
+
+			return false
+		}
+
+		return true
+	})
+
+	if detected != nil {
+		return detected, nil
+	}
+
+	if detectErr != nil {
+		return nil, detectErr
+	}
+
+	cpu := v1.CPUStaticNodeAcceleratorStatus()
+
+	return &cpu, nil
+}
+
 func (a *manager) GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error) {
 	var (
 		err                  error
@@ -246,6 +309,27 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 	}
 
 	return runtimeConfigResp.RuntimeConfig, nil
+}
+
+func (a *manager) GetAcceleratorProfile(
+	ctx context.Context,
+	acceleratorType string,
+) (*v1.AcceleratorProfile, error) {
+	if acceleratorType == "" {
+		return nil, errors.New("accelerator type is required")
+	}
+
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		return nil, errors.Errorf("accelerator plugin %s not found", acceleratorType)
+	}
+
+	profile, err := p.Handle().GetAcceleratorProfile(ctx)
+	if err != nil {
+		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
+	}
+
+	return profile, nil
 }
 
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {

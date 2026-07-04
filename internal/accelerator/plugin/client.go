@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -81,6 +80,31 @@ func (u *acceleratorPluginClient) GetContainerRuntimeConfig() (v1.RuntimeConfig,
 	return response.RuntimeConfig, nil
 }
 
+func (u *acceleratorPluginClient) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+	response := &v1.GetAcceleratorProfileResponse{}
+
+	err := u.doGet(ctx, v1.GetAcceleratorProfilePath, response)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get accelerator profile from accelerator plugin")
+	}
+
+	return &response.Profile, nil
+}
+
+func (u *acceleratorPluginClient) DetectStaticNodeAccelerator(
+	ctx context.Context,
+	request *v1.DetectStaticNodeAcceleratorRequest,
+) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	response := &v1.DetectStaticNodeAcceleratorResponse{}
+
+	err := u.doPost(ctx, v1.DetectStaticNodeAcceleratorPath, request, response)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to detect static node accelerator from accelerator plugin")
+	}
+
+	return response, nil
+}
+
 func (u *acceleratorPluginClient) GetResourceConverter() ResourceConverter {
 	return u
 }
@@ -151,7 +175,7 @@ func parsePluginResponse(resp *http.Response, result interface{}) error {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("get node accelerator failed, status code: %d, content: %s", resp.StatusCode, string(content))
+		return errors.Errorf("accelerator plugin request failed, status code: %d, content: %s", resp.StatusCode, string(content))
 	}
 
 	err = json.Unmarshal(content, result)

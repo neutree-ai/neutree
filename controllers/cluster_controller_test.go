@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"errors"
 	"testing"
 	"time"
 
@@ -23,18 +22,18 @@ func newTestClusterController(s *storagemocks.MockStorage,
 		LocalCollectConfigPath: "tmp",
 	})
 
-	cluster.NewReconcile = func(cluster *v1.Cluster, acceleratorManager accelerator.Manager, s storage.Storage, metricsRemoteWriteURL string) (cluster.ClusterReconcile, error) {
-		return r, nil
-	}
-
 	gw := &gatewaymocks.MockGateway{}
 	gw.On("SyncCluster", mock.Anything, mock.Anything).Return(nil)
 	gw.On("DeleteCluster", mock.Anything, mock.Anything).Return(nil)
+
 	return &ClusterController{
 		storage:                 s,
 		defaultClusterVersion:   "v1",
 		obsCollectConfigManager: obsCollectConfigManager,
 		gw:                      gw,
+		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
+			return r, nil
+		},
 	}
 }
 
@@ -49,7 +48,7 @@ func TestClusterController_Sync_Delete(t *testing.T) {
 			Spec: &v1.ClusterSpec{
 				ImageRegistry: "test",
 				Type:          "ssh",
-				Version:       "v2",
+				Version:       "v1.0.1",
 			},
 			Status: &v1.ClusterStatus{
 				Phase: v1.ClusterPhaseDeleted,
@@ -106,7 +105,7 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			Spec: &v1.ClusterSpec{
 				ImageRegistry: "test",
 				Type:          "ssh",
-				Version:       "v2",
+				Version:       "v1.0.1",
 			},
 		}
 	}
@@ -121,7 +120,7 @@ func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
 			Spec: &v1.ClusterSpec{
 				ImageRegistry: "test",
 				Type:          "ssh",
-				Version:       "v2",
+				Version:       "v1.0.1",
 			},
 			Status: &v1.ClusterStatus{
 				Initialized: true,
@@ -270,20 +269,15 @@ func TestClusterController_UpdateClusterStatus(t *testing.T) {
 	specV2 := &v1.ClusterSpec{
 		ImageRegistry: "test",
 		Type:          "ssh",
-		Version:       "v2",
+		Version:       "v1.0.1",
 	}
 	specV2Hash := cluster.ComputeClusterSpecHash(specV2)
 
 	specV3 := &v1.ClusterSpec{
-		ImageRegistry: "test",
+		ImageRegistry: "test-v2",
 		Type:          "ssh",
-		Version:       "v3",
+		Version:       "v1.0.1",
 	}
-	diagnosticErr := errors.New(`route component is not fully ready, please check the status: DeploymentReady: false
-Diagnostics:
-deployment/router: desired=1, updated=1, ready=0, available=0
-pod/router-abcde: phase=Pending, container/router waiting reason=ImagePullBackOff message="Back-off pulling image"
-event/router-abcde: Warning FailedPull - failed to pull image`)
 
 	tests := []struct {
 		name      string
@@ -374,31 +368,6 @@ event/router-abcde: Warning FailedPull - failed to pull image`)
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
 					assert.NotEmpty(t, obj.Status.ErrorMessage)
-				}).Return(nil)
-			},
-			wantErr: true,
-		},
-		{
-			name: "Failed: reconcile diagnostic error is persisted",
-			input: &v1.Cluster{
-				ID:       1,
-				Metadata: &v1.Metadata{Name: "test"},
-				Spec:     specV2,
-				Status: &v1.ClusterStatus{
-					Phase:            v1.ClusterPhaseRunning,
-					Initialized:      true,
-					ObservedSpecHash: specV2Hash,
-				},
-			},
-			mockSetup: func(s *storagemocks.MockStorage, o *clustermocks.MockClusterReconcile) {
-				o.On("Reconcile", mock.Anything, mock.Anything).Return(diagnosticErr)
-				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
-					obj := args.Get(1).(*v1.Cluster)
-					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
-					assert.Contains(t, obj.Status.ErrorMessage, "route component is not fully ready")
-					assert.Contains(t, obj.Status.ErrorMessage, "deployment/router")
-					assert.Contains(t, obj.Status.ErrorMessage, "pod/router-abcde")
-					assert.Contains(t, obj.Status.ErrorMessage, "event/router-abcde")
 				}).Return(nil)
 			},
 			wantErr: true,

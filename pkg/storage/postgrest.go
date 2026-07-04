@@ -327,6 +327,56 @@ func (s *postgrestStorage) GetRole(id string) (*v1.Role, error) {
 	return &response[0], nil
 }
 
+func (s *postgrestStorage) ListStaticNodeCluster(option ListOption) ([]v1.StaticNodeCluster, error) {
+	var response []v1.StaticNodeCluster
+	err := s.genericList(STATIC_NODE_CLUSTER_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateStaticNodeCluster(data *v1.StaticNodeCluster) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_CLUSTER_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateStaticNodeCluster(id string, data *v1.StaticNodeCluster) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_CLUSTER_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteStaticNodeCluster(id string) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_CLUSTER_TABLE).Delete("", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListStaticNode(option ListOption) ([]v1.StaticNode, error) {
+	var response []v1.StaticNode
+	err := s.genericList(STATIC_NODE_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateStaticNode(data *v1.StaticNode) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateStaticNode(id string, data *v1.StaticNode) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteStaticNode(id string) error {
+	_, _, err := s.postgrestClient.From(STATIC_NODE_TABLE).Delete("", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
 func (s *postgrestStorage) ListRole(option ListOption) ([]v1.Role, error) {
 	var response []v1.Role
 	err := s.genericList(ROLE_TABLE, &response, option)
