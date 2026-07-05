@@ -129,6 +129,13 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 	ExpectWithOffset(1, nodes).NotTo(BeEmpty())
 
 	hasGPUNode := false
+	sshUser := profileSSHUser()
+	if sshUser == "" {
+		sshUser = "root"
+	}
+	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
+	keyFile := expandHome(profile.SSHNodes[0].KeyFile)
+	ExpectWithOffset(1, keyFile).NotTo(BeEmpty(), "ssh key file must be configured")
 
 	for _, node := range nodes {
 		ExpectWithOffset(1, node.Spec).NotTo(BeNil())
@@ -172,6 +179,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 
 		isGPUNode := node.Status.Accelerator != nil &&
 			node.Status.Accelerator.Type == v1.AcceleratorTypeNVIDIAGPU.String()
+		assertStaticNodeAgentDeviceSnapshotAPI(node, sshUser, keyFile, isGPUNode)
 		if !isGPUNode {
 			ExpectWithOffset(1, findStaticNodeComponent(node.Spec.Components, "accelerator-exporter")).To(BeNil())
 			ExpectWithOffset(1, findStaticNodeComponentStatus(node.Status.Components, "accelerator-exporter")).To(BeNil())
@@ -195,6 +203,55 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")
 		ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: accelerator-exporter-nvidia-gpu"))
 	}
+}
+
+func assertStaticNodeAgentDeviceSnapshotAPI(
+	node v1.StaticNode,
+	sshUser string,
+	keyFile string,
+	expectGPU bool,
+) {
+	ExpectWithOffset(1, node.Spec).NotTo(BeNil(), "static node spec is nil")
+	ExpectWithOffset(1, node.Spec.IP).NotTo(BeEmpty(), "static node IP is empty")
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		result := RunSSH(sshUser, node.Spec.IP, keyFile,
+			"curl -fsS --max-time 5 http://127.0.0.1:19101/v1/node/device-snapshot")
+		g.Expect(result.ExitCode).To(Equal(0),
+			"node-agent device snapshot should be reachable on %s\nstdout: %s\nstderr: %s",
+			staticNodeName(node), result.Stdout, result.Stderr)
+
+		var snapshot v1.NodeDeviceSnapshot
+		g.Expect(json.Unmarshal([]byte(result.Stdout), &snapshot)).To(Succeed(),
+			"node-agent device snapshot should be valid JSON on %s: %s", staticNodeName(node), result.Stdout)
+		g.Expect(snapshot.Accelerator.Type).NotTo(BeEmpty(),
+			"node-agent device snapshot accelerator type should be set on %s", staticNodeName(node))
+
+		if !expectGPU {
+			g.Expect(snapshot.Accelerator.Type).To(Equal(v1.StaticNodeAcceleratorTypeCPU),
+				"non-GPU node should report CPU accelerator snapshot on %s", staticNodeName(node))
+			return
+		}
+
+		g.Expect(snapshot.Accelerator.Type).To(Equal(v1.AcceleratorTypeNVIDIAGPU.String()),
+			"GPU node should report NVIDIA accelerator snapshot on %s", staticNodeName(node))
+		g.Expect(snapshot.Accelerator.Devices).NotTo(BeEmpty(),
+			"GPU node should report accelerator devices on %s", staticNodeName(node))
+
+		for _, device := range snapshot.Accelerator.Devices {
+			if device.UUID == "" {
+				continue
+			}
+			g.Expect(device.ProductName != "" || device.ProductModel != "").To(BeTrue(),
+				"device %s on %s should include product name or model", device.UUID, staticNodeName(node))
+			g.Expect(device.MemoryMiB).To(BeNumerically(">", 0),
+				"device %s on %s should include memory", device.UUID, staticNodeName(node))
+			return
+		}
+
+		g.Expect("complete GPU device").To(Equal("present"),
+			"GPU node should report at least one device with UUID on %s", staticNodeName(node))
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
 }
 
 func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {

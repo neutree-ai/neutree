@@ -70,6 +70,49 @@ func assertK8sNodeAgentEndpointAcceleratorMetricsWithVDeviceIndex(
 	ExpectWithOffset(1, metrics).NotTo(BeEmpty())
 }
 
+func assertStaticRayNodeAgentEndpointAcceleratorMetrics(clusterName, endpointName string) {
+	nodes := getStaticNodesForCluster(clusterName)
+	ExpectWithOffset(1, nodes).NotTo(BeEmpty(), "static nodes should exist for cluster %s", clusterName)
+
+	sshUser := profileSSHUser()
+	if sshUser == "" {
+		sshUser = "root"
+	}
+	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
+
+	keyFile := expandHome(profile.SSHNodes[0].KeyFile)
+	ExpectWithOffset(1, keyFile).NotTo(BeEmpty(), "ssh key file must be configured")
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		var lastBodies []string
+		var lastErrs []string
+		for _, node := range nodes {
+			if node.Spec == nil || node.Spec.IP == "" {
+				continue
+			}
+
+			result := RunSSH(sshUser, node.Spec.IP, keyFile,
+				"curl -fsS --max-time 5 http://127.0.0.1:19101/metrics")
+			if result.ExitCode != 0 {
+				lastErrs = append(lastErrs, fmt.Sprintf("%s: %s", staticNodeName(node), result.Stderr))
+				continue
+			}
+
+			lastBodies = append(lastBodies, result.Stdout)
+			if err := validateEndpointAcceleratorMetricContract(result.Stdout, endpointName, ""); err == nil {
+				return
+			} else {
+				lastErrs = append(lastErrs, fmt.Sprintf("%s: %v", staticNodeName(node), err))
+			}
+		}
+
+		g.Expect(strings.Join(lastBodies, "\n")).NotTo(BeEmpty(),
+			"static node-agent metrics should be reachable, errors: %s", strings.Join(lastErrs, "; "))
+		g.Expect(strings.Join(lastErrs, "; ")).To(BeEmpty(),
+			"static node-agent metrics should contain endpoint accelerator samples")
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+}
+
 func assertK8sEndpointAcceleratorAllocationAnnotations(clusterName, endpointName string) {
 	ctx := context.Background()
 	k8sH := NewK8sHelper(profileKubeconfig())
