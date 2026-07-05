@@ -388,6 +388,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Labels["app"])
 	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.1.0",
 		nodeAgent.Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, corev1.PullAlways, nodeAgent.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Spec.Template.Spec.ServiceAccountName)
 	assert.Assert(t, nodeAgent.Spec.Template.Spec.HostNetwork)
 	assert.Equal(t, "test-image-pull-secret", nodeAgent.Spec.Template.Spec.ImagePullSecrets[0].Name)
