@@ -99,7 +99,12 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			c := parseClusterJSON(r.Stdout)
 			versionBefore := c.Status.Version
 			Expect(versionBefore).NotTo(BeEmpty())
-			if !usesStaticNodeClusterFlow(oldVersion) {
+
+			if usesStaticNodeClusterFlow(oldVersion) {
+				eventuallyStaticNodeClusterReady(clusterName, oldVersion, 1+len(workerIPs))
+				assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
+				assertStaticNodeMetricsComponents(clusterName)
+			} else {
 				assertNoStaticNodeCluster(clusterName)
 			}
 
@@ -134,6 +139,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			if usesStaticNodeClusterFlow(newVersion) {
 				eventuallyStaticNodeClusterReady(clusterName, newVersion, 1+len(workerIPs))
 				assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
+				assertStaticNodeMetricsComponents(clusterName)
 			}
 		})
 	})
@@ -290,6 +296,11 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			versionBefore := c.Status.Version
 			Expect(versionBefore).NotTo(BeEmpty())
 
+			ctx := context.Background()
+			k8sH := NewK8sHelper(kubeconfig)
+			namespace := ClusterNamespace(c.Metadata.Workspace, c.Metadata.Name, c.ID)
+			assertK8sMetricsResources(ctx, k8sH, namespace, oldVersion)
+
 			newVersion := profileClusterVersion()
 
 			By("Applying with new version " + newVersion)
@@ -314,6 +325,9 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			c = parseClusterJSON(r.Stdout)
 			Expect(c.Status.Version).To(Equal(newVersion),
 				"cluster Status.Version should equal new version after upgrade")
+
+			namespace = ClusterNamespace(c.Metadata.Workspace, c.Metadata.Name, c.ID)
+			assertK8sMetricsResources(ctx, k8sH, namespace, newVersion)
 		})
 	})
 

@@ -111,9 +111,71 @@ type RuntimeConfig struct {
 }
 
 type AcceleratorProfile struct {
-	AcceleratorType string         `json:"accelerator_type"`
-	ClusterRuntime  *RuntimeConfig `json:"cluster_runtime,omitempty"`
-	EngineRuntime   *RuntimeConfig `json:"engine_runtime,omitempty"`
+	// AcceleratorType identifies the accelerator plugin that produced this profile.
+	AcceleratorType string `json:"accelerator_type"`
+	// ClusterRuntime describes how cluster-level containers should access the accelerator.
+	ClusterRuntime *RuntimeConfig `json:"cluster_runtime,omitempty"`
+	// EngineRuntime describes how inference engine containers should access the accelerator.
+	EngineRuntime *RuntimeConfig `json:"engine_runtime,omitempty"`
+	// MetricsExporter describes the optional metrics exporter used for accelerator observability.
+	MetricsExporter *AcceleratorExporterProfile `json:"metrics_exporter,omitempty"`
+}
+
+type AcceleratorExporterProfile struct {
+	// Name is the exporter identity used for stable workload, container, and scrape-job names.
+	Name string `json:"name,omitempty"`
+	// Image is the exporter container image.
+	Image string `json:"image,omitempty"`
+	// Args are passed to the exporter image entrypoint.
+	Args []string `json:"args,omitempty"`
+	// Port is the metrics port exposed by the exporter.
+	Port int `json:"port,omitempty"`
+	// MetricsPath is the HTTP path scraped by vmagent; it defaults to /metrics when empty.
+	MetricsPath string `json:"metrics_path,omitempty"`
+	// Env contains exporter environment variables.
+	Env map[string]string `json:"env,omitempty"`
+	// ConfigFiles declares exporter configuration files that must be materialized before start.
+	ConfigFiles []AcceleratorExporterConfigFile `json:"config_files,omitempty"`
+	// Runtime declares backend-specific runtime requirements for running the exporter.
+	Runtime *AcceleratorExporterRuntimeProfile `json:"runtime,omitempty"`
+}
+
+type AcceleratorExporterConfigFile struct {
+	// Path is the file path consumed by the exporter.
+	Path string `json:"path,omitempty"`
+	// Content is the desired file content.
+	Content string `json:"content,omitempty"`
+	// Mode is the file permission mode used by backends that materialize host files.
+	Mode string `json:"mode,omitempty"`
+	// Owner is the desired file owner used by backends that materialize host files.
+	Owner string `json:"owner,omitempty"`
+	// Group is the desired file group used by backends that materialize host files.
+	Group string `json:"group,omitempty"`
+	// Sudo writes the file through elevated privileges on backends that need it.
+	Sudo bool `json:"sudo,omitempty"`
+	// Atomic stages and renames the file into place on backends that support atomic writes.
+	Atomic bool `json:"atomic,omitempty"`
+	// CreateParent creates the parent directory before writing on backends that materialize host files.
+	CreateParent bool `json:"create_parent,omitempty"`
+	// SkipRestartOnChange excludes dynamic file contents from restart decisions on backends that hash config.
+	SkipRestartOnChange bool `json:"skip_restart_on_change,omitempty"`
+}
+
+type AcceleratorExporterRuntimeProfile struct {
+	// HostNetwork is supported by StaticNode and Kubernetes when the backend has an equivalent.
+	HostNetwork bool `json:"host_network,omitempty"`
+	// HostPID is supported by StaticNode and Kubernetes when the backend has an equivalent.
+	HostPID bool `json:"host_pid,omitempty"`
+	// Capabilities is supported by StaticNode and Kubernetes when the backend has an equivalent.
+	Capabilities *AcceleratorExporterCapabilities `json:"capabilities,omitempty"`
+	// NodeSelector is Kubernetes-only placement; StaticNode ignores it.
+	NodeSelector map[string]string `json:"node_selector,omitempty"`
+	// DockerRunOptions is StaticNode-only Docker fallback; Kubernetes must not parse it.
+	DockerRunOptions []string `json:"docker_run_options,omitempty"`
+}
+
+type AcceleratorExporterCapabilities struct {
+	Add []string `json:"add,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {

@@ -75,6 +75,23 @@ func (h *K8sHelper) GetDeployment(ctx context.Context, namespace, name string) (
 	return h.clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
+// GetDaemonSet retrieves a specific daemonset.
+func (h *K8sHelper) GetDaemonSet(ctx context.Context, namespace, name string) (*appsv1.DaemonSet, error) {
+	return h.clientset.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// ListNodes lists nodes with optional label selector.
+func (h *K8sHelper) ListNodes(ctx context.Context, labelSelector string) ([]corev1.Node, error) {
+	list, err := h.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return list.Items, nil
+}
+
 // GetService retrieves a specific service.
 func (h *K8sHelper) GetService(ctx context.Context, namespace, name string) (*corev1.Service, error) {
 	return h.clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})

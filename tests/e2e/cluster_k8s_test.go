@@ -18,10 +18,6 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 		ClusterH = NewClusterHelper()
 	})
 
-	AfterAll(func() {
-		TeardownImageRegistry()
-	})
-
 	var (
 		clusterName string
 		kubeconfig  string
@@ -42,6 +38,7 @@ var _ = Describe("K8s Cluster Lifecycle", Ordered, Label("cluster", "k8s", "life
 
 	AfterAll(func() {
 		ClusterH.EnsureDeleted(clusterName)
+		TeardownImageRegistry()
 	})
 
 	It("should transition to Running", Label("C2613101"), func() {

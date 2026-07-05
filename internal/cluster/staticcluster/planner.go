@@ -12,6 +12,7 @@ import (
 
 type Planner struct {
 	AcceleratorProfileProvider AcceleratorProfileProvider
+	MetricsRemoteWriteURL      string
 }
 
 type AcceleratorProfileProvider interface {
@@ -20,6 +21,7 @@ type AcceleratorProfileProvider interface {
 
 type DesiredNodePlan struct {
 	Node             *v1.StaticNode
+	Accelerator      *v1.StaticNodeAcceleratorStatus
 	TargetComponents []v1.NodeComponentSpec
 }
 
@@ -115,10 +117,11 @@ func (r *Planner) buildDesiredNodePlans(
 			return nil, err
 		}
 
-		components := buildNodeComponents(cluster, desiredNode, profile)
+		components := buildNodeComponents(cluster, desiredNode, profile, r.MetricsRemoteWriteURL)
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
+			Accelerator:      acceleratorStatus,
 			Node:             desiredNode,
 			TargetComponents: copyNodeComponents(components),
 		})
@@ -132,6 +135,7 @@ func (r *Planner) buildDesiredNodePlans(
 		return plans[i].Node.Metadata.Name < plans[j].Node.Metadata.Name
 	})
 
+	attachMetricsConfigFiles(cluster, plans)
 	applyRayRecreateUpgradePlan(cluster, currentByName, plans)
 
 	for _, plan := range plans {

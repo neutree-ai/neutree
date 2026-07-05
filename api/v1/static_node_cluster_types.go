@@ -25,6 +25,8 @@ type StaticNodeClusterSpec struct {
 	Version string `json:"version,omitempty"`
 	// ImageRegistry is the registry prefix used when rendering static node component images.
 	ImageRegistry string `json:"image_registry,omitempty"`
+	// Metrics configures static-node observability collectors.
+	Metrics *ClusterMetricsConfig `json:"metrics,omitempty" yaml:"metrics,omitempty"`
 	// Nodes declares the desired static machines that make up the cluster.
 	Nodes []StaticNodeClusterNodeSpec `json:"nodes,omitempty"`
 	// UpgradeStrategy controls how the static cluster rolls from the observed version to Version.

@@ -8,7 +8,10 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
-const MinKubeStateMetricsClusterVersion = "v1.1.0"
+const (
+	MinKubeStateMetricsClusterVersion       = "v1.1.0"
+	MinManagedMetricsExporterClusterVersion = "v1.1.0"
+)
 
 var metricsManifestTemplate = `
 apiVersion: v1
@@ -20,259 +23,7 @@ metadata:
     app: vmagent
 data:
   prometheus.yml: |
-    global:
-      scrape_interval: 30s # Set the scrape interval to every 30 seconds. Default is every 1 minute.
-
-    scrape_configs:
-    # Scrape from Kubernetes pods using service discovery
-    - job_name: 'neutree-router'
-      kubernetes_sd_configs:
-      - role: pod
-        namespaces:
-          names:
-          - {{ .Namespace }}
-        selectors:
-        - role: pod
-          label: app=router
-      relabel_configs:
-      # Only scrape pods with cluster and workspace labels matching
-      - source_labels: [__meta_kubernetes_pod_label_cluster]
-        action: keep
-        regex: {{ .ClusterName }}
-      - source_labels: [__meta_kubernetes_pod_label_workspace]
-        action: keep
-        regex: {{ .Workspace }}
-      # Set the __address__ to pod IP and port 8000
-      - source_labels: [__meta_kubernetes_pod_ip]
-        action: replace
-        target_label: __address__
-        regex: (.+)
-        replacement: $1:8000
-      # Add pod metadata as labels
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        target_label: namespace
-      - source_labels: [__meta_kubernetes_pod_label_cluster]
-        action: replace
-        target_label: neutree_cluster
-      - source_labels: [__meta_kubernetes_pod_label_workspace]
-        action: replace
-        target_label: workspace
-      - source_labels: [__meta_kubernetes_pod_label_app]
-        action: replace
-        target_label: app
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        target_label: pod
-      # Add fixed labels to all scraped metrics
-      - target_label: deployment
-        replacement: Router
-    - job_name: 'neutree-inference'
-      kubernetes_sd_configs:
-      - role: pod
-        namespaces:
-          names:
-          - {{ .Namespace }}
-        selectors:
-        - role: pod
-          label: app=inference
-      relabel_configs:
-      # Only scrape pods with cluster and workspace labels matching
-      - source_labels: [__meta_kubernetes_pod_label_cluster]
-        action: keep
-        regex: {{ .ClusterName }}
-      - source_labels: [__meta_kubernetes_pod_label_workspace]
-        action: keep
-        regex: {{ .Workspace }}
-      # Set the __address__ to pod IP and port 8000
-      - source_labels: [__meta_kubernetes_pod_ip]
-        action: replace
-        target_label: __address__
-        regex: (.+)
-        replacement: $1:8000
-      # Add pod metadata as labels
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        target_label: namespace
-      - source_labels: [__meta_kubernetes_pod_label_cluster]
-        action: replace
-        target_label: neutree_cluster
-      - source_labels: [__meta_kubernetes_pod_label_workspace]
-        action: replace
-        target_label: workspace
-      - source_labels: [__meta_kubernetes_pod_label_endpoint]
-        action: replace
-        target_label: application
-      # Add fixed labels to all scraped metrics
-      - target_label: deployment
-        replacement: Backend
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        target_label: replica
-      - source_labels: [__meta_kubernetes_pod_label_engine]
-        action: replace
-        target_label: engine
-      - source_labels: [__meta_kubernetes_pod_label_engine_version]
-        action: replace
-        target_label: engine_version
-      metric_relabel_configs:
-      - source_labels: [__name__]
-        regex: 'sglang[:_](.+)'
-        target_label: __name__
-        replacement: 'sglang:$1'
-    # Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
-    - job_name: 'node-exporter-http'
-      kubernetes_sd_configs:
-      - role: node
-      # Use HTTP scheme for direct node-exporter access
-      scheme: http
-      relabel_configs:
-      # Set the __address__ to node IP and port 9100
-      - source_labels: [__address__]
-        action: replace
-        target_label: __address__
-        regex: '([^:]+)(?::\d+)?'
-        replacement: '$1:9100'
-      # Use node name as instance label
-      - source_labels: [__meta_kubernetes_node_name]
-        action: replace
-        target_label: instance
-      # Add node name as additional label
-      - source_labels: [__meta_kubernetes_node_name]
-        action: replace
-        target_label: node
-      # Add cluster and workspace labels
-      - target_label: neutree_cluster
-        replacement: {{ .ClusterName }}
-      - target_label: workspace
-        replacement: {{ .Workspace }}
-    # Scrape node-exporter metrics from all nodes (HTTPS - with kube-rbac-proxy)
-    - job_name: 'node-exporter-https'
-      kubernetes_sd_configs:
-      - role: node
-      # Use bearer token for authentication with kube-rbac-proxy
-      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-      # Use HTTPS scheme
-      scheme: https
-      # Skip TLS verification for self-signed certificates
-      tls_config:
-        insecure_skip_verify: true
-      relabel_configs:
-      # Set the __address__ to node IP and port 9100
-      - source_labels: [__address__]
-        action: replace
-        target_label: __address__
-        regex: '([^:]+)(?::\d+)?'
-        replacement: '$1:9100'
-      # Use node name as instance label
-      - source_labels: [__meta_kubernetes_node_name]
-        action: replace
-        target_label: instance
-      # Add node name as additional label
-      - source_labels: [__meta_kubernetes_node_name]
-        action: replace
-        target_label: node
-      # Add cluster and workspace labels
-      - target_label: neutree_cluster
-        replacement: {{ .ClusterName }}
-      - target_label: workspace
-        replacement: {{ .Workspace }}
-    # Scrape dcgm-exporter metrics from GPU nodes
-    - job_name: 'dcgm-exporter'
-      kubernetes_sd_configs:
-      - role: pod
-        selectors:
-        - role: pod
-          label: app=nvidia-dcgm-exporter
-      relabel_configs:
-      # Set the __address__ to pod IP and port 9400
-      - source_labels: [__meta_kubernetes_pod_ip]
-        action: replace
-        target_label: __address__
-        regex: (.+)
-        replacement: $1:9400
-      # Add node name from pod's node
-      - source_labels: [__meta_kubernetes_pod_node_name]
-        action: replace
-        target_label: node
-      # Add pod metadata as labels
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        target_label: namespace
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        target_label: pod
-      # Add cluster and workspace labels
-      - target_label: neutree_cluster
-        replacement: {{ .ClusterName }}
-      - target_label: workspace
-        replacement: {{ .Workspace }}
-{{ if .EnableHAMiMonitorScrape }}
-    # Scrape HAMi vGPU monitor metrics from the managed HAMi device-plugin pods
-    - job_name: 'hami-vgpu-monitor'
-      kubernetes_sd_configs:
-      - role: pod
-        namespaces:
-          names:
-          - {{ .Namespace }}
-        selectors:
-        - role: pod
-          label: app.kubernetes.io/component=hami-device-plugin
-      relabel_configs:
-      # Set the __address__ to pod IP and vGPU monitor port
-      - source_labels: [__meta_kubernetes_pod_ip]
-        action: replace
-        target_label: __address__
-        regex: (.+)
-        replacement: $1:9394
-      # Add monitor target metadata as labels. HAMi container metrics already
-      # expose workload namespace/pod labels, so keep those intact.
-      - source_labels: [__meta_kubernetes_pod_node_name]
-        action: replace
-        target_label: node
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        target_label: monitor_namespace
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        target_label: monitor_pod
-      # Add cluster and workspace labels
-      - target_label: neutree_cluster
-        replacement: {{ .ClusterName }}
-      - target_label: workspace
-        replacement: {{ .Workspace }}
-{{ end }}
-{{ if .EnableKubeStateMetrics }}
-    # Scrape kube-state-metrics for Neutree pod ownership labels.
-    - job_name: 'neutree-kube-state-metrics'
-      kubernetes_sd_configs:
-      - role: pod
-        namespaces:
-          names:
-          - {{ .Namespace }}
-        selectors:
-        - role: pod
-          label: app=neutree-kube-state-metrics
-      relabel_configs:
-      - source_labels: [__meta_kubernetes_pod_container_port_name]
-        action: keep
-        regex: http-metrics
-      - source_labels: [__meta_kubernetes_pod_ip]
-        action: replace
-        target_label: __address__
-        regex: (.+)
-        replacement: $1:8080
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        target_label: monitor_namespace
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        target_label: monitor_pod
-      - target_label: neutree_cluster
-        replacement: {{ .ClusterName }}
-      - target_label: workspace
-        replacement: {{ .Workspace }}
-{{ end }}
+{{ .VMAgentConfig | indent 4 }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -454,6 +205,136 @@ spec:
             {{ $key }}: {{ $value }}
             {{- end }}
 {{ end }}
+{{ if .EnableNodeExporter }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .NodeExporterName }}
+  namespace: {{ .Namespace }}
+  labels:
+    app: {{ .NodeExporterName }}
+    neutree.ai/cluster-version: {{ .ClusterVersion }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ .NodeExporterName }}
+      cluster: {{ .ClusterName }}
+      workspace: {{ .Workspace }}
+  template:
+    metadata:
+      labels:
+        app: {{ .NodeExporterName }}
+        cluster: {{ .ClusterName }}
+        workspace: {{ .Workspace }}
+        neutree.ai/cluster-version: {{ .ClusterVersion }}
+    spec:
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+      - operator: Exists
+      imagePullSecrets:
+      - name: {{ .ImagePullSecret }}
+      containers:
+      - name: node-exporter
+        image: {{ .NodeExporterImage }}
+        args:
+        - --path.rootfs=/host
+        - --web.listen-address=:{{ .NodeExporterPort }}
+        ports:
+        - name: metrics
+          containerPort: {{ .NodeExporterPort }}
+        volumeMounts:
+        - name: host-root
+          mountPath: /host
+          readOnly: true
+      volumes:
+      - name: host-root
+        hostPath:
+          path: /
+{{ end }}
+{{ range .AcceleratorExporters }}
+{{ if .ConfigFileData }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .ConfigMapName }}
+  namespace: {{ $.Namespace }}
+  labels:
+    app: {{ .AppLabel }}
+    cluster: {{ $.ClusterName }}
+    workspace: {{ $.Workspace }}
+    neutree.ai/cluster-version: {{ $.ClusterVersion }}
+data:
+{{ .ConfigFileData | toYaml | indent 2 }}
+{{ end }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Name }}
+  namespace: {{ $.Namespace }}
+  labels:
+    app: {{ .AppLabel }}
+    neutree.ai/cluster-version: {{ $.ClusterVersion }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ .AppLabel }}
+      cluster: {{ $.ClusterName }}
+      workspace: {{ $.Workspace }}
+  template:
+    metadata:
+      labels:
+        app: {{ .AppLabel }}
+        cluster: {{ $.ClusterName }}
+        workspace: {{ $.Workspace }}
+        neutree.ai/cluster-version: {{ $.ClusterVersion }}
+{{ if .ConfigChecksum }}
+      annotations:
+        checksum/config: {{ .ConfigChecksum }}
+{{ end }}
+    spec:
+      hostNetwork: {{ .HostNetwork }}
+      hostPID: {{ .HostPID }}
+      tolerations:
+      - operator: Exists
+{{ if .NodeSelector }}
+      nodeSelector:
+{{ .NodeSelector | toYaml | indent 8 }}
+{{ end }}
+      imagePullSecrets:
+      - name: {{ $.ImagePullSecret }}
+      containers:
+      - name: {{ .ContainerName }}
+        image: {{ .Image }}
+{{ if .Args }}
+        args:
+{{ .Args | toYaml | indent 8 }}
+{{ end }}
+{{ if .Env }}
+        env:
+{{ .Env | toYaml | indent 8 }}
+{{ end }}
+        ports:
+        - name: metrics
+          containerPort: {{ .Port }}
+{{ if .Capabilities }}
+        securityContext:
+          capabilities:
+            add:
+{{ .Capabilities | toYaml | indent 12 }}
+{{ end }}
+{{ if .VolumeMounts }}
+        volumeMounts:
+{{ .VolumeMounts | toYaml | indent 8 }}
+{{ end }}
+{{ if .Volumes }}
+      volumes:
+{{ .Volumes | toYaml | indent 6 }}
+{{ end }}
+{{ end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -526,6 +407,9 @@ type MetricsManifestVariables struct {
 	ImagePrefix               string
 	ImagePullSecret           string
 	Version                   string
+	NodeExporterName          string
+	NodeExporterImage         string
+	NodeExporterPort          int
 	KubeStateMetricsVersion   string
 	ClusterVersion            string
 	MetricsRemoteWriteURL     string
@@ -535,6 +419,10 @@ type MetricsManifestVariables struct {
 	HashSuffix                string
 	EnableHAMiMonitorScrape   bool
 	EnableKubeStateMetrics    bool
+	EnableNodeExporter        bool
+	EnableExternalDCGMScrape  bool
+	AcceleratorExporters      []metricsAcceleratorExporter
+	VMAgentConfig             string
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
@@ -558,6 +446,9 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		ImagePrefix:               m.imagePrefix,
 		ImagePullSecret:           m.imagePullSecret,
 		Version:                   version,
+		NodeExporterName:          nodeExporterDaemonSetName,
+		NodeExporterImage:         rewriteMetricsImage(m.imagePrefix, defaultNodeExporterImage),
+		NodeExporterPort:          nodeExporterPort,
 		KubeStateMetricsVersion:   componentversion.KubeStateMetrics,
 		ClusterVersion:            m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:     m.metricsRemoteWriteURL,
@@ -569,10 +460,14 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 }
 
 func (m *MetricsComponent) supportsKubeStateMetrics() (bool, error) {
-	return supportsKubeStateMetricsClusterVersion(m.cluster.GetVersion())
+	return supportsClusterVersionAtLeast(m.cluster.GetVersion(), MinKubeStateMetricsClusterVersion)
 }
 
-func supportsKubeStateMetricsClusterVersion(version string) (bool, error) {
+func (m *MetricsComponent) supportsManagedMetricsExporters() (bool, error) {
+	return supportsClusterVersionAtLeast(m.cluster.GetVersion(), MinManagedMetricsExporterClusterVersion)
+}
+
+func supportsClusterVersionAtLeast(version string, minVersion string) (bool, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return false, nil
@@ -583,7 +478,7 @@ func supportsKubeStateMetricsClusterVersion(version string) (bool, error) {
 		return false, err
 	}
 
-	lessThanMinVersion, err := semver.LessThan(baseVersion, MinKubeStateMetricsClusterVersion)
+	lessThanMinVersion, err := semver.LessThan(baseVersion, minVersion)
 	if err != nil {
 		return false, err
 	}

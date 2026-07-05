@@ -1,17 +1,36 @@
 package metrics
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/stretchr/testify/mock"
+	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/assert"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+func metricsTestNode(name string, labels map[string]string) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+	}
+}
 
 func TestBuildVMAgentDeployment(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
@@ -27,7 +46,7 @@ func TestBuildVMAgentDeployment(t *testing.T) {
 		imagePullSecret: "test-image-pull-secret",
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources()
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to build vmagent deployment: %v", err)
 	}
@@ -73,7 +92,7 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 		imagePullSecret: "test-image-pull-secret",
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources()
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to build vmagent resources: %v", err)
 	}
@@ -110,7 +129,7 @@ func TestBuildVMAgentConfigNormalizesSGLangMetricNames(t *testing.T) {
 		imagePullSecret: "test-image-pull-secret",
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources()
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to build vmagent resources: %v", err)
 	}
@@ -157,7 +176,7 @@ func TestBuildMetricsResourcesSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 		imagePullSecret: "test-image-pull-secret",
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources()
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to build metrics resources: %v", err)
 	}
@@ -190,7 +209,7 @@ func TestBuildVMAgentConfigSkipsHAMiMonitorScrapeWhenAcceleratorVirtualizationDi
 		imagePullSecret: "test-image-pull-secret",
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources()
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to build vmagent resources: %v", err)
 	}
@@ -225,7 +244,7 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrapeBeforeV110WhenAcceleratorVir
 		imagePullSecret: "test-image-pull-secret",
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources()
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to build vmagent resources: %v", err)
 	}
@@ -256,7 +275,7 @@ func TestBuildMetricsResourcesIncludesKubeStateMetrics(t *testing.T) {
 		imagePullSecret: "test-image-pull-secret",
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources()
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to build metrics resources: %v", err)
 	}
@@ -303,6 +322,618 @@ func TestBuildMetricsResourcesIncludesKubeStateMetrics(t *testing.T) {
 	assert.Assert(t, foundRoleBinding, "kube-state-metrics role binding not found")
 }
 
+func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	nodeExporter := findMetricsDaemonSet(t, objs, "neutree-node-exporter")
+	assert.Equal(t, "test-namespace", nodeExporter.Namespace)
+	assert.Equal(t, "neutree-node-exporter", nodeExporter.Labels["app"])
+	assert.Equal(t, "test-image-prefix/prometheus/node-exporter:v1.8.2",
+		nodeExporter.Spec.Template.Spec.Containers[0].Image)
+	assert.Assert(t, nodeExporter.Spec.Template.Spec.HostNetwork)
+	assert.Assert(t, nodeExporter.Spec.Template.Spec.HostPID)
+	assert.Equal(t, "test-image-pull-secret", nodeExporter.Spec.Template.Spec.ImagePullSecrets[0].Name)
+	assert.Equal(t, int32(19100), nodeExporter.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
+	assert.Assert(t, strings.Contains(strings.Join(nodeExporter.Spec.Template.Spec.Containers[0].Args, "\n"),
+		"--web.listen-address=:19100"))
+	assert.Assert(t, !strings.Contains(strings.Join(nodeExporter.Spec.Template.Spec.Containers[0].Args, "\n"),
+		"--web.listen-address=:9100"))
+	assert.Assert(t, strings.Contains(strings.Join(nodeExporter.Spec.Template.Spec.Containers[0].Args, "\n"),
+		"--path.rootfs=/host"))
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-https'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
+}
+
+func TestBuildMetricsResourcesSkipsManagedExportersBeforeV110(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.0.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+			"nvidia.com/gpu.present": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "neutree-node-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "nvidia-gpu-dcgm-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "nvidia-gpu-dcgm-exporter-config"))
+	}
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+}
+
+func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.1.0",
+				Config: &v1.ClusterConfig{
+					Metrics: &v1.ClusterMetricsConfig{
+						AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+							Mode: v1.ClusterAcceleratorExporterModeExternal,
+						},
+					},
+				},
+			},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+			"nvidia.com/gpu.present": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "nvidia-gpu-dcgm-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "nvidia-gpu-dcgm-exporter-config"))
+	}
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assertValidPrometheusYAML(t, vmagentConfig)
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-dcgm-exporter"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:9400"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
+}
+
+func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) corev1.VolumeMount {
+	t.Helper()
+
+	if len(daemonSet.Spec.Template.Spec.Containers) == 0 {
+		t.Fatal("expected daemonset to have containers")
+	}
+	for _, mount := range daemonSet.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if mount.Name == name && mount.MountPath == mountPath {
+			return mount
+		}
+	}
+
+	t.Fatalf("expected volume mount %s at %s", name, mountPath)
+
+	return corev1.VolumeMount{}
+}
+
+func requireVolume(t *testing.T, daemonSet *appsv1.DaemonSet, name string) corev1.Volume {
+	t.Helper()
+
+	for _, volume := range daemonSet.Spec.Template.Spec.Volumes {
+		if volume.Name == name {
+			return volume
+		}
+	}
+
+	t.Fatalf("expected volume %s", name)
+
+	return corev1.Volume{}
+}
+
+func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+			"nvidia.com/gpu.present": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	dcgm := findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
+	assert.Equal(t, "nvidia-gpu-dcgm-exporter", dcgm.Labels["app"])
+	assert.Equal(t, "test-image-prefix/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
+		dcgm.Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, "test-image-pull-secret", dcgm.Spec.Template.Spec.ImagePullSecrets[0].Name)
+	assert.Equal(t, int32(19400), dcgm.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
+	assert.DeepEqual(t,
+		map[string]string{"nvidia.com/gpu.present": "true"},
+		dcgm.Spec.Template.Spec.NodeSelector)
+	assert.Assert(t, dcgm.Spec.Template.Spec.HostNetwork)
+	requireContainerCapability(t, dcgm, "SYS_ADMIN")
+	assert.Assert(t, dcgm.Spec.Template.Spec.Affinity == nil)
+	assert.Assert(t, dcgm.Spec.Template.Annotations["checksum/config"] != "")
+	configMount := requireVolumeMount(t, dcgm, "nvidia-gpu-dcgm-exporter-config", "/etc/neutree/dcgm-exporter")
+	assert.Equal(t, "", configMount.SubPath)
+
+	config := findMetricsConfigMap(t, objs, "nvidia-gpu-dcgm-exporter-config")
+	collectors := config.Data["default-counters.csv"]
+	for _, metric := range []string{
+		"DCGM_FI_DEV_GPU_UTIL",
+		"DCGM_FI_DEV_NAME",
+		"DCGM_FI_DEV_BRAND",
+		"DCGM_FI_DEV_PCI_BUSID",
+		"DCGM_FI_CUDA_DRIVER_VERSION",
+		"DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY",
+		"DCGM_FI_DEV_PCIE_LINK_GEN",
+		"DCGM_FI_DEV_PCIE_LINK_WIDTH",
+		"DCGM_FI_DEV_FB_USED_PERCENT",
+		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL",
+		"DCGM_FI_DEV_RETIRED_PENDING",
+		"DCGM_FI_DEV_PCIE_REPLAY_COUNTER",
+		"DCGM_FI_PROF_GR_ENGINE_ACTIVE",
+		"DCGM_FI_PROF_SM_ACTIVE",
+		"DCGM_FI_PROF_SM_OCCUPANCY",
+		"DCGM_FI_PROF_PIPE_TENSOR_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP64_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP32_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP16_ACTIVE",
+		"DCGM_FI_PROF_DRAM_ACTIVE",
+		"DCGM_FI_PROF_PCIE_TX_BYTES",
+		"DCGM_FI_PROF_PCIE_RX_BYTES",
+		"DCGM_FI_PROF_NVLINK_RX_BYTES",
+		"DCGM_FI_PROF_NVLINK_TX_BYTES",
+		"DCGM_FI_DEV_POWER_VIOLATION",
+		"DCGM_FI_DEV_THERMAL_VIOLATION",
+	} {
+		assert.Assert(t, strings.Contains(collectors, metric))
+	}
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_CUSTOM_"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_CLOCKS_EVENT_REASONS"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_P2P_NVLINK_STATUS"))
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assertValidPrometheusYAML(t, vmagentConfig)
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "accelerator_type"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: nvidia_gpu"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
+}
+
+func TestBuildMetricsResourcesSkipsAcceleratorExporterChecksumForRuntimeConfigFiles(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: "custom_gpu",
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:  "custom-exporter",
+				Image: "example.com/custom/exporter:test",
+				Port:  19090,
+				ConfigFiles: []v1.AcceleratorExporterConfigFile{
+					{
+						Path:                "/etc/custom/file-sd.json",
+						Content:             "[]",
+						SkipRestartOnChange: true,
+					},
+				},
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector: map[string]string{"accelerator.example.com/custom": "true"},
+				},
+			},
+		}, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
+			"accelerator.example.com/custom": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	exporter := findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
+	assert.Equal(t, "", exporter.Spec.Template.Annotations["checksum/config"])
+}
+
+func TestBuildMetricsResourcesProjectsDuplicateAcceleratorExporterConfigBasenames(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: "custom_gpu",
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:  "custom-exporter",
+				Image: "example.com/custom/exporter:test",
+				Port:  19090,
+				ConfigFiles: []v1.AcceleratorExporterConfigFile{
+					{Path: "/etc/foo/config.yaml", Content: "foo: true"},
+					{Path: "/opt/bar/config.yaml", Content: "bar: true"},
+				},
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector: map[string]string{"accelerator.example.com/custom": "true"},
+				},
+			},
+		}, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
+			"accelerator.example.com/custom": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	config := findMetricsConfigMap(t, objs, "custom-gpu-custom-exporter-config")
+	assert.Equal(t, "foo: true", config.Data["etc.foo.config.yaml"])
+	assert.Equal(t, "bar: true", config.Data["opt.bar.config.yaml"])
+
+	exporter := findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
+	requireVolumeMount(t, exporter, "custom-gpu-custom-exporter-config", "/etc/foo")
+	requireVolumeMount(t, exporter, "custom-gpu-custom-exporter-config-2", "/opt/bar")
+	assert.Assert(t, exporter.Spec.Template.Annotations["checksum/config"] != "")
+
+	fooVolume := requireVolume(t, exporter, "custom-gpu-custom-exporter-config")
+	assert.DeepEqual(t, []corev1.KeyToPath{
+		{Key: "etc.foo.config.yaml", Path: "config.yaml"},
+	}, fooVolume.ConfigMap.Items)
+	barVolume := requireVolume(t, exporter, "custom-gpu-custom-exporter-config-2")
+	assert.DeepEqual(t, []corev1.KeyToPath{
+		{Key: "opt.bar.config.yaml", Path: "config.yaml"},
+	}, barVolume.ConfigMap.Items)
+}
+
+func TestBuildMetricsResourcesDoesNotParseDockerRunOptions(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: "custom_gpu",
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:        "custom-exporter",
+				Image:       "example.com/custom/exporter:test",
+				Port:        19090,
+				MetricsPath: "custom/metrics",
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector:     map[string]string{"accelerator.example.com/custom": "true"},
+					DockerRunOptions: []string{"--net=host", "--cap-add=SYS_ADMIN"},
+				},
+			},
+		}, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
+			"accelerator.example.com/custom": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	exporter := findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
+	assert.Assert(t, !exporter.Spec.Template.Spec.HostNetwork)
+	assert.Assert(t, exporter.Spec.Template.Spec.Containers[0].SecurityContext == nil)
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assert.Assert(t, strings.Contains(vmagentConfig, "metrics_path: /custom/metrics"))
+}
+
+func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutMatchingNode(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: "custom_gpu",
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:  "custom-exporter",
+				Image: "example.com/custom/exporter:test",
+				Port:  19090,
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector: map[string]string{"accelerator.example.com/custom": "true"},
+				},
+			},
+		}, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("cpu-node", map[string]string{
+			"kubernetes.io/os": "linux",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "custom-gpu-custom-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "custom-gpu-custom-exporter-config"))
+	}
+}
+
+func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutName(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: "custom_gpu",
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Image: "example.com/custom/exporter:test",
+				Port:  19090,
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector: map[string]string{"accelerator.example.com/custom": "true"},
+				},
+			},
+		}, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && strings.Contains(obj.GetName(), "accelerator-exporter")))
+		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && strings.Contains(obj.GetName(), "accelerator-exporter")))
+	}
+}
+
+func TestBuildMetricsResourcesSkipsAcceleratorExporterProfileErrors(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu", "legacy_accelerator"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: "custom_gpu",
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:  "custom-exporter",
+				Image: "example.com/custom/exporter:test",
+				Port:  19090,
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector: map[string]string{"accelerator.example.com/custom": "true"},
+				},
+			},
+		}, nil)
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "legacy_accelerator").
+		Return((*v1.AcceleratorProfile)(nil), errors.New("profile endpoint returned 404"))
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
+			"accelerator.example.com/custom": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && strings.Contains(obj.GetName(), "legacy-accelerator")))
+	}
+}
+
+func TestBuildMetricsResourcesIncludesMultipleMatchingAcceleratorExporters(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu", v1.AcceleratorTypeNVIDIAGPU.String()})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: "custom_gpu",
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:  "custom-exporter",
+				Image: "example.com/custom/exporter:test",
+				Port:  19090,
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector: map[string]string{"accelerator.example.com/enabled": "true"},
+				},
+			},
+		}, nil)
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, v1.AcceleratorTypeNVIDIAGPU.String()).
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:  "dcgm-exporter",
+				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+				Port:  19400,
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector: map[string]string{"accelerator.example.com/enabled": "true"},
+				},
+			},
+		}, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("accelerator-node", map[string]string{
+			"accelerator.example.com/enabled": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
+	findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
+}
+
+func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutProvider(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "nvidia-dcgm-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "nvidia-dcgm-exporter-config"))
+	}
+}
+
 func TestBuildVMAgentConfigIncludesKubeStateMetricsScrape(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
@@ -317,7 +948,7 @@ func TestBuildVMAgentConfigIncludesKubeStateMetricsScrape(t *testing.T) {
 		imagePullSecret: "test-image-pull-secret",
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources()
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to build vmagent resources: %v", err)
 	}
@@ -336,4 +967,70 @@ func TestBuildVMAgentConfigIncludesKubeStateMetricsScrape(t *testing.T) {
 	}
 
 	t.Fatalf("vmagent config map not found in resources")
+}
+
+func requireContainerCapability(t *testing.T, daemonSet *appsv1.DaemonSet, capability string) {
+	t.Helper()
+
+	securityContext := daemonSet.Spec.Template.Spec.Containers[0].SecurityContext
+	if securityContext == nil || securityContext.Capabilities == nil {
+		t.Fatalf("container securityContext capabilities are empty")
+	}
+
+	for _, candidate := range securityContext.Capabilities.Add {
+		if string(candidate) == capability {
+			return
+		}
+	}
+
+	t.Fatalf("capability %s not found in %#v", capability, securityContext.Capabilities.Add)
+}
+
+func findMetricsDaemonSet(t *testing.T, objs *unstructured.UnstructuredList, name string) *appsv1.DaemonSet {
+	t.Helper()
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "DaemonSet" && obj.GetName() == name {
+			objContent, _ := json.Marshal(obj.Object)
+			daemonSet := &appsv1.DaemonSet{}
+			if err := json.Unmarshal(objContent, daemonSet); err != nil {
+				t.Fatalf("Failed to unmarshal DaemonSet %s: %v", name, err)
+			}
+
+			return daemonSet
+		}
+	}
+
+	t.Fatalf("DaemonSet %s not found", name)
+
+	return nil
+}
+
+func findMetricsConfigMap(t *testing.T, objs *unstructured.UnstructuredList, name string) *corev1.ConfigMap {
+	t.Helper()
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "ConfigMap" && obj.GetName() == name {
+			objContent, _ := json.Marshal(obj.Object)
+			configMap := &corev1.ConfigMap{}
+			if err := json.Unmarshal(objContent, configMap); err != nil {
+				t.Fatalf("Failed to unmarshal ConfigMap %s: %v", name, err)
+			}
+
+			return configMap
+		}
+	}
+
+	t.Fatalf("ConfigMap %s not found", name)
+
+	return nil
+}
+
+func assertValidPrometheusYAML(t *testing.T, config string) {
+	t.Helper()
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(config), &parsed); err != nil {
+		t.Fatalf("prometheus.yml is not valid YAML: %v\n%s", err, config)
+	}
 }

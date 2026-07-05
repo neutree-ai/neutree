@@ -8,6 +8,11 @@ spec:
   image_registry: {{ .CLUSTER_IMAGE_REGISTRY }}
   version: "{{ .CLUSTER_VERSION }}"
   config:
+{{- if .CLUSTER_ACCELERATOR_EXPORTER_MODE }}
+    metrics:
+      accelerator_exporter:
+        mode: "{{ .CLUSTER_ACCELERATOR_EXPORTER_MODE }}"
+{{- end }}
 {{- if .CLUSTER_ACCELERATOR_TYPE }}
     accelerator_type: "{{ .CLUSTER_ACCELERATOR_TYPE }}"
 {{- end }}

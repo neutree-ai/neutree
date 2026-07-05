@@ -137,6 +137,7 @@ case "$PACKAGE_TYPE" in
                 ;;
             ssh)
                 PACKAGE_NAME="neutree-cluster-ssh"
+                IMAGE_LIST_FILES+=("image-lists/cluster/ssh/images.txt")
 
                 if [[ -n "$ACCELERATOR" ]]; then
                     IMAGE_LIST_FILES+=("image-lists/cluster/ssh/${ACCELERATOR}-images.txt")

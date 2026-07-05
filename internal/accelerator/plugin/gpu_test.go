@@ -308,6 +308,8 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, profile)
 	require.NotNil(t, profile.ClusterRuntime)
+	require.NotNil(t, profile.EngineRuntime)
+	require.NotNil(t, profile.MetricsExporter)
 	assert.Equal(t, string(v1.AcceleratorTypeNVIDIAGPU), profile.AcceleratorType)
 	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
 	assert.Equal(t, []string{"--gpus all"}, profile.ClusterRuntime.Options)
@@ -317,4 +319,62 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	containerRuntime, err := p.GetContainerRuntimeConfig()
 	require.NoError(t, err)
 	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
+	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
+	assert.Equal(t, nvidiaDCGMExporterImage, profile.MetricsExporter.Image)
+	assert.Equal(t, nvidiaDCGMExporterPort, profile.MetricsExporter.Port)
+	assert.Equal(t,
+		[]string{
+			"--collectors",
+			nvidiaDCGMExporterCollectorsPath,
+			"--address",
+			":19400",
+		},
+		profile.MetricsExporter.Args)
+	require.NotNil(t, profile.MetricsExporter.Runtime)
+	assert.True(t, profile.MetricsExporter.Runtime.HostNetwork)
+	require.NotNil(t, profile.MetricsExporter.Runtime.Capabilities)
+	assert.Equal(t, []string{"SYS_ADMIN"}, profile.MetricsExporter.Runtime.Capabilities.Add)
+	assert.Equal(t,
+		map[string]string{NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue},
+		profile.MetricsExporter.Runtime.NodeSelector)
+	assert.Equal(t, []string{"--gpus all"}, profile.MetricsExporter.Runtime.DockerRunOptions)
+	require.Len(t, profile.MetricsExporter.ConfigFiles, 1)
+	assert.Equal(t, nvidiaDCGMExporterCollectorsPath, profile.MetricsExporter.ConfigFiles[0].Path)
+	collectors := profile.MetricsExporter.ConfigFiles[0].Content
+	for _, metric := range []string{
+		"DCGM_FI_DEV_GPU_UTIL",
+		"DCGM_FI_DEV_NAME",
+		"DCGM_FI_DEV_BRAND",
+		"DCGM_FI_DEV_FB_USED",
+		"DCGM_FI_DEV_FB_TOTAL",
+		"DCGM_FI_DEV_FB_USED_PERCENT",
+		"DCGM_FI_DEV_PCI_BUSID",
+		"DCGM_FI_CUDA_DRIVER_VERSION",
+		"DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY",
+		"DCGM_FI_DEV_PCIE_LINK_GEN",
+		"DCGM_FI_DEV_PCIE_LINK_WIDTH",
+		"DCGM_FI_DEV_XID_ERRORS",
+		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL",
+		"DCGM_FI_DEV_RETIRED_PENDING",
+		"DCGM_FI_DEV_PCIE_REPLAY_COUNTER",
+		"DCGM_FI_PROF_GR_ENGINE_ACTIVE",
+		"DCGM_FI_PROF_SM_ACTIVE",
+		"DCGM_FI_PROF_SM_OCCUPANCY",
+		"DCGM_FI_PROF_PIPE_TENSOR_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP64_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP32_ACTIVE",
+		"DCGM_FI_PROF_PIPE_FP16_ACTIVE",
+		"DCGM_FI_PROF_DRAM_ACTIVE",
+		"DCGM_FI_PROF_PCIE_TX_BYTES",
+		"DCGM_FI_PROF_PCIE_RX_BYTES",
+		"DCGM_FI_PROF_NVLINK_RX_BYTES",
+		"DCGM_FI_PROF_NVLINK_TX_BYTES",
+		"DCGM_FI_DEV_POWER_VIOLATION",
+		"DCGM_FI_DEV_THERMAL_VIOLATION",
+	} {
+		assert.Contains(t, collectors, metric)
+	}
+	assert.NotContains(t, collectors, "DCGM_CUSTOM_")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_CLOCKS_EVENT_REASONS")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_P2P_NVLINK_STATUS")
 }

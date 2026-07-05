@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -137,41 +138,14 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		It("should create observability resources", Label("C2612763"), func() {
 			ctx := context.Background()
 
-			_, err := k8sH.GetDeployment(ctx, namespace, "vmagent")
-			Expect(err).NotTo(HaveOccurred(), "vmagent deployment should exist")
+			r := ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			currentCluster := parseClusterJSON(r.Stdout)
+			Expect(currentCluster.Status).NotTo(BeNil())
+			Expect(currentCluster.Status.Phase).To(Equal(v1.ClusterPhaseRunning))
+			Expect(currentCluster.Status.Version).To(Equal(cluster.Spec.Version))
 
-			_, err = k8sH.GetConfigMap(ctx, namespace, "vmagent-config")
-			Expect(err).NotTo(HaveOccurred(), "vmagent-config ConfigMap should exist")
-
-			_, err = k8sH.GetServiceAccount(ctx, namespace, "vmagent-service-account")
-			Expect(err).NotTo(HaveOccurred(), "vmagent ServiceAccount should exist")
-
-			_, err = k8sH.GetRole(ctx, namespace, "vmagent-pod-reader")
-			Expect(err).NotTo(HaveOccurred(), "vmagent Role should exist")
-
-			_, err = k8sH.GetRoleBinding(ctx, namespace, "vmagent-rolebinding")
-			Expect(err).NotTo(HaveOccurred(), "vmagent RoleBinding should exist")
-
-			if !clusterVersionSupportsKubeStateMetrics(cluster.Spec.Version) {
-				_, err = k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
-				Expect(err).To(HaveOccurred(), "kube-state-metrics deployment should not exist before cluster version v1.1.0")
-				return
-			}
-
-			_, err = k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics deployment should exist")
-
-			_, err = k8sH.GetService(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics Service should exist")
-
-			_, err = k8sH.GetServiceAccount(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics ServiceAccount should exist")
-
-			_, err = k8sH.GetRole(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics Role should exist")
-
-			_, err = k8sH.GetRoleBinding(ctx, namespace, "neutree-kube-state-metrics")
-			Expect(err).NotTo(HaveOccurred(), "kube-state-metrics RoleBinding should exist")
+			assertK8sMetricsResources(ctx, k8sH, namespace, cluster.Spec.Version)
 		})
 
 		It("should create router resources (SA, Role, RoleBinding, Deployment, Service)", Label("C2612779"), func() {
@@ -228,6 +202,53 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 
 			k8sH.WaitForNamespaceDeleted(ctx, namespace, 2*time.Minute)
+		})
+	})
+
+	Describe("External Accelerator Exporter", Ordered, Label("accelerator-exporter"), func() {
+		var (
+			clusterName string
+			kubeconfig  string
+			k8sH        *K8sHelper
+			namespace   string
+			cluster     v1.Cluster
+		)
+
+		BeforeAll(func() {
+			kubeconfig = requireK8sProfile()
+			clusterName = "e2e-k8s-ext-exp-" + Cfg.RunID
+
+			yaml := renderK8sClusterYAML(map[string]any{
+				"name":                      clusterName,
+				"kubeconfig":                kubeconfig,
+				"accelerator_exporter_mode": string(v1.ClusterAcceleratorExporterModeExternal),
+			})
+
+			r := ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			k8sH = NewK8sHelper(kubeconfig)
+
+			r = ClusterH.Get(clusterName)
+			ExpectSuccess(r)
+			cluster = parseClusterJSON(r.Stdout)
+			namespace = ClusterNamespace(cluster.Metadata.Workspace, cluster.Metadata.Name, cluster.ID)
+		})
+
+		AfterAll(func() {
+			ClusterH.EnsureDeleted(clusterName)
+		})
+
+		It("should scrape external accelerator exporter without installing managed DCGM", Label("C2623077"), func() {
+			assertK8sExternalAcceleratorExporterResources(
+				context.Background(),
+				k8sH,
+				namespace,
+				cluster.Spec.Version,
+			)
 		})
 	})
 
@@ -693,13 +714,36 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 	})
 })
 
+func eventuallyDaemonSetReady(ctx context.Context, k8sH *K8sHelper, namespace, name string) *appsv1.DaemonSet {
+	var daemonSet *appsv1.DaemonSet
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		got, err := k8sH.GetDaemonSet(ctx, namespace, name)
+		g.Expect(err).NotTo(HaveOccurred(), "%s DaemonSet should exist", name)
+		g.Expect(got.Status.DesiredNumberScheduled).To(BeNumerically(">", 0), "%s should match at least one node", name)
+		g.Expect(got.Status.NumberReady).To(Equal(got.Status.DesiredNumberScheduled), "%s should be ready", name)
+
+		daemonSet = got
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return daemonSet
+}
+
 func clusterVersionSupportsKubeStateMetrics(version string) bool {
+	return clusterVersionAtLeast(version, "v1.1.0")
+}
+
+func clusterVersionSupportsManagedMetricsExporters(version string) bool {
+	return clusterVersionAtLeast(version, "v1.1.0")
+}
+
+func clusterVersionAtLeast(version string, minVersion string) bool {
 	baseVersion, err := neutreeSemver.BaseVersion(version)
 	if err != nil {
 		return false
 	}
 
-	lessThanMinVersion, err := neutreeSemver.LessThan(baseVersion, "v1.1.0")
+	lessThanMinVersion, err := neutreeSemver.LessThan(baseVersion, minVersion)
 	if err != nil {
 		return false
 	}

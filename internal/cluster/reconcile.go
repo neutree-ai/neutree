@@ -93,3 +93,9 @@ func isStaticNodeClusterFlowVersion(version string) (bool, error) {
 
 	return useStaticNodeFlow, nil
 }
+
+// IsStaticNodeClusterFlowVersion reports whether a cluster version uses the
+// static-node-backed SSH reconciliation flow.
+func IsStaticNodeClusterFlowVersion(version string) (bool, error) {
+	return isStaticNodeClusterFlowVersion(version)
+}

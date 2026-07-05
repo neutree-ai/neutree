@@ -20,10 +20,6 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		ClusterH = NewClusterHelper()
 	})
 
-	AfterAll(func() {
-		TeardownImageRegistry()
-	})
-
 	var (
 		clusterName   string
 		headIP        string
@@ -52,6 +48,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 
 	AfterAll(func() {
 		ClusterH.EnsureDeleted(clusterName)
+		TeardownImageRegistry()
 	})
 
 	It("should show Initializing immediately after creation", Label("C2612656"), func() {
@@ -79,6 +76,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		if usesStaticNodeClusterFlow(profileClusterVersion()) {
 			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1)
 			assertStaticNodesForCluster(clusterName, []string{headIP})
+			assertStaticNodeMetricsComponents(clusterName)
 			eventuallyClusterResourceInfo(ClusterH, clusterName, TerminalPhaseTimeout)
 		} else {
 			Expect(c.Status.ResourceInfo).NotTo(BeNil())
@@ -124,6 +122,7 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 			expectedNodes := 1 + len(workerIPs)
 			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), expectedNodes)
 			assertStaticNodesForCluster(clusterName, expectedStaticNodeIPs(headIP, workerIPs))
+			assertStaticNodeMetricsComponents(clusterName)
 		}
 	})
 

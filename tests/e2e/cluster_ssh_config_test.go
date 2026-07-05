@@ -158,6 +158,50 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 		})
 	})
 
+	Describe("External Accelerator Exporter", Ordered, Label("accelerator-exporter"), func() {
+		var (
+			clusterName   string
+			headIP        string
+			workerIPs     []string
+			sshUser       string
+			sshPrivateKey string
+		)
+
+		BeforeAll(func() {
+			if !usesStaticNodeClusterFlow(profileClusterVersion()) {
+				Skip("static node cluster flow is required for static external accelerator exporter checks")
+			}
+
+			headIP, workerIPs, sshUser, sshPrivateKey = requireSSHProfile()
+			clusterName = "e2e-ssh-ext-exp-" + Cfg.RunID
+
+			yaml := renderSSHClusterYAML(map[string]any{
+				"name":                      clusterName,
+				"head_ip":                   headIP,
+				"worker_ips":                workerIPs,
+				"ssh_user":                  sshUser,
+				"ssh_private_key":           sshPrivateKey,
+				"accelerator_exporter_mode": string(v1.ClusterAcceleratorExporterModeExternal),
+			})
+
+			r := ClusterH.Apply(yaml)
+			ExpectSuccess(r)
+
+			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+			ExpectSuccess(r)
+
+			eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1+len(workerIPs))
+		})
+
+		AfterAll(func() {
+			ClusterH.EnsureDeleted(clusterName)
+		})
+
+		It("should keep node-exporter managed and scrape external accelerator exporter", Label("C2613101"), func() {
+			assertStaticNodeExternalAcceleratorExporterComponents(clusterName)
+		})
+	})
+
 	// --- Worker Edit ---
 
 	Describe("Worker Edit", Ordered, Label("edit"), func() {
