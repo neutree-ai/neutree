@@ -80,6 +80,15 @@ func TestImagePusherBuildTargetImage(t *testing.T) {
 			},
 			expected: "registry.example.com/neutree/library/postgres:v13.0.0",
 		},
+		{
+			name:        "push non dockerhub registry image without namespace",
+			imagePrefix: "registry.example.com",
+			imgSpec: &ImageSpec{
+				ImageName: "private.example.com/postgres",
+				Tag:       "v13.0.0",
+			},
+			expected: "registry.example.com/postgres:v13.0.0",
+		},
 	}
 
 	for _, tt := range tests {
