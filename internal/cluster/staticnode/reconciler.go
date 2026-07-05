@@ -113,11 +113,11 @@ func (r *Reconciler) ReconcileAccelerator(
 	node *v1.StaticNode,
 	runner CommandRunner,
 ) (*v1.StaticNodeAcceleratorStatus, error) {
-	if r == nil || r.AcceleratorManager == nil {
-		if node != nil && node.Status != nil && node.Status.Accelerator != nil {
-			return node.Status.Accelerator, nil
-		}
+	if node != nil && node.Status != nil && node.Status.Accelerator != nil && node.Status.Accelerator.Type != "" {
+		return node.Status.Accelerator, nil
+	}
 
+	if r == nil || r.AcceleratorManager == nil {
 		cpu := v1.CPUStaticNodeAcceleratorStatus()
 
 		return &cpu, nil

@@ -304,6 +304,50 @@ func TestBuildStatusEmptyComponentsReconciling(t *testing.T) {
 	assert.Empty(t, status.ErrorMessage)
 }
 
+func TestReconcilerReconcileAcceleratorSkipsDetectionWhenCurrentStatusExists(t *testing.T) {
+	node := staticNodeForDeviceSnapshot()
+	node.Spec.SSHAuth = &v1.Auth{}
+	node.Status = &v1.StaticNodeStatus{
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4"},
+			},
+		},
+	}
+	manager := &fakeAcceleratorManager{
+		accelerator: &v1.StaticNodeAcceleratorStatus{Type: "amd_gpu"},
+	}
+
+	accelerator, err := (&Reconciler{
+		AcceleratorManager: manager,
+	}).ReconcileAccelerator(context.Background(), node, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelerator.Type)
+	require.Len(t, accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", accelerator.Devices[0].UUID)
+	assert.Equal(t, 0, manager.calls)
+}
+
+func TestReconcilerReconcileAcceleratorDetectsWhenCurrentStatusIsEmpty(t *testing.T) {
+	node := staticNodeForDeviceSnapshot()
+	node.Spec.SSHAuth = &v1.Auth{}
+	manager := &fakeAcceleratorManager{
+		accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.AcceleratorTypeNVIDIAGPU.String()},
+	}
+
+	accelerator, err := (&Reconciler{
+		AcceleratorManager: manager,
+	}).ReconcileAccelerator(context.Background(), node, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelerator.Type)
+	assert.Equal(t, 1, manager.calls)
+}
+
 func TestReconcilerReconcileNodeDeviceSnapshotUsesAgentForDetails(t *testing.T) {
 	client := &fakeNodeDeviceSnapshotClient{
 		snapshot: &v1.NodeDeviceSnapshot{
@@ -1285,6 +1329,22 @@ func (f *fakeNodeDeviceSnapshotClient) DeviceSnapshot(_ context.Context, _ *v1.S
 	f.calls++
 
 	return f.snapshot, f.err
+}
+
+type fakeAcceleratorManager struct {
+	accelerator *v1.StaticNodeAcceleratorStatus
+	err         error
+	calls       int
+}
+
+func (f *fakeAcceleratorManager) DetectAccelerator(
+	_ context.Context,
+	_ string,
+	_ v1.Auth,
+) (*v1.StaticNodeAcceleratorStatus, error) {
+	f.calls++
+
+	return f.accelerator, f.err
 }
 
 func staticNodeForDeviceSnapshot() *v1.StaticNode {

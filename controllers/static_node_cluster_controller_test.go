@@ -195,6 +195,42 @@ func TestStaticNodeClusterControllerReconcileRequiresRayVerificationBeforeReady(
 	assert.Contains(t, status.Status.ErrorMessage, "connection refused")
 }
 
+func TestStaticNodeClusterControllerReconcileDoesNotUpdateStaticNodeStatusOnUpsert(t *testing.T) {
+	nodes := []v1.StaticNode{
+		controllerStaticClusterNode("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReconciling),
+		controllerStaticClusterNode("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReconciling),
+	}
+	nodes[0].Status.Accelerator = &v1.StaticNodeAcceleratorStatus{
+		Type: v1.StaticNodeAcceleratorTypeCPU,
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+			{UUID: "GPU-head", ProductModel: "NVIDIA_Tesla_T4"},
+		},
+	}
+
+	updatedNodes := map[string]*v1.StaticNode{}
+	mockStorage := newMockStaticNodeClusterStorage(t, nodes)
+	mockStorage.On("UpdateStaticNode", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			updatedNodes[args.Get(0).(string)] = args.Get(1).(*v1.StaticNode)
+		}).
+		Return(nil).
+		Maybe()
+	mockStorage.On("UpdateStaticNodeCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
+	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
+		Storage: mockStorage,
+	})
+	require.NoError(t, err)
+
+	err = controller.Reconcile(controllerStaticNodeCluster())
+
+	require.NoError(t, err)
+	updated := updatedNodes["11"]
+	require.NotNil(t, updated)
+	assert.Nil(t, updated.Status)
+	require.NotNil(t, updated.Spec)
+	assert.Equal(t, "static-a", updated.Spec.Cluster)
+}
+
 func TestStaticNodeClusterControllerReconcileFailsReadyClusterWhenRayVerificationFails(t *testing.T) {
 	updatedStatus := map[string]*v1.StaticNodeCluster{}
 	nodes := []v1.StaticNode{
@@ -270,6 +306,8 @@ func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testin
 		require.NotNil(t, updated.Metadata)
 		assert.True(t, v1.IsForceDelete(updated.Metadata.Annotations))
 		assert.NotEmpty(t, updated.Metadata.DeletionTimestamp)
+		assert.Nil(t, updated.Spec)
+		assert.Nil(t, updated.Status)
 	}
 }
 

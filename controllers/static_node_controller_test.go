@@ -56,13 +56,12 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 	assert.Equal(t, v1.StaticNodePhaseReconciling, statusObj.Status.Phase)
 	require.NotNil(t, statusObj.Status.Warm)
 	assert.True(t, statusObj.Status.Warm.Ready)
-	require.Len(t, updatedStatusHistory, 4)
+	require.Len(t, updatedStatusHistory, 3)
 	assert.NotNil(t, updatedStatusHistory[0].Status.Accelerator)
 	assert.Nil(t, updatedStatusHistory[0].Status.Warm)
 	require.NotNil(t, updatedStatusHistory[1].Status.Warm)
 	assert.True(t, updatedStatusHistory[1].Status.Warm.Ready)
 	assert.Equal(t, v1.StaticNodePhaseReconciling, updatedStatusHistory[2].Status.Phase)
-	assert.Equal(t, v1.StaticNodePhaseReconciling, updatedStatusHistory[3].Status.Phase)
 	assert.Equal(t, 2, runner.calls)
 }
 
@@ -263,6 +262,40 @@ func TestStaticNodeControllerUpdateStatusDoesNotWriteParentStaticNodeCluster(t *
 
 	require.NoError(t, reconcileErr)
 	assert.Empty(t, updatedStaticNodeClusterStatus)
+}
+
+func TestStaticNodeControllerUpdateStatusSkipsUnchangedStatus(t *testing.T) {
+	updateCount := 0
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
+		Storage: newMockStaticNodeStorage(
+			t,
+			nil,
+			nil,
+			func(string, *v1.StaticNode) {
+				updateCount++
+			},
+			nil,
+			nil,
+		),
+	})
+	require.NoError(t, err)
+	reconcileErr := error(nil)
+	node := controllerStaticNode()
+	node.Status = &v1.StaticNodeStatus{
+		Phase: v1.StaticNodePhaseReady,
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4"},
+			},
+		},
+		Warm: &v1.WarmStatus{Ready: true},
+	}
+
+	controller.updateStatus(node, *node.Status, "failed to update static node status", &reconcileErr)
+
+	require.NoError(t, reconcileErr)
+	assert.Equal(t, 0, updateCount)
 }
 
 func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
