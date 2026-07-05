@@ -79,6 +79,8 @@ type metricsCollector struct {
 	samples []normalizer.Sample
 }
 
+// metricDescriptor keeps the native prometheus.Desc with its Neutree sample name
+// and label validation metadata so the normalizer can stay sample-oriented.
 type metricDescriptor struct {
 	name         string
 	labelNames   []string

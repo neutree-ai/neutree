@@ -39,8 +39,7 @@ const staticVMAgentConfigTemplateText = `global:
   scrape_interval: 15s
 scrape_configs:
 {{ range .ScrapeConfigs }}- job_name: {{ .JobName }}
-{{ if .HonorLabels }}  honor_labels: true
-{{ end }}{{ if .MetricsPath }}  metrics_path: {{ .MetricsPath }}
+{{ if .MetricsPath }}  metrics_path: {{ .MetricsPath }}
 {{ end }}  file_sd_configs:
   - files:
     - {{ .FileSDPath }}
@@ -73,7 +72,6 @@ type staticVMAgentConfigData struct {
 
 type staticVMAgentScrapeConfig struct {
 	JobName              string
-	HonorLabels          bool
 	MetricsPath          string
 	FileSDPath           string
 	MetricRelabelConfigs string
@@ -183,7 +181,7 @@ func buildNodeAgentComponent(
 		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
 		"--cluster-type=ray",
 		"--metrics-mode=" + string(acceleratorExporterMode(cluster)),
-		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), defaultRayDashboardPort),
+		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), v1.RayDashboardPort),
 		"--procfs-root=/host/proc",
 		"--cgroupfs-root=/host/sys/fs/cgroup",
 	}
@@ -215,7 +213,7 @@ func buildNodeAgentComponent(
 }
 
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
-	return "neutree-node-agent:" + staticNodeClusterVersion(cluster)
+	return "neutree/neutree-node-agent:" + staticNodeClusterVersion(cluster)
 }
 
 func staticNodeClusterVersion(cluster *v1.StaticNodeCluster) string {
@@ -341,9 +339,8 @@ func renderVMAgentConfig(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan)
 
 	if len(nodeAgentTargets(plans)) > 0 {
 		scrapeConfigs = append(scrapeConfigs, staticVMAgentScrapeConfig{
-			JobName:     "static-node-node-agent",
-			HonorLabels: true,
-			FileSDPath:  strconv.Quote(vmagentNodeAgentFileSDPath),
+			JobName:    "static-node-node-agent",
+			FileSDPath: strconv.Quote(vmagentNodeAgentFileSDPath),
 		})
 	}
 

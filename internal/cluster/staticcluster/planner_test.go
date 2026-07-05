@@ -111,7 +111,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:           "registry.example.com/neutree/neutree-node-agent:v1.2.0",
+		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
@@ -141,7 +141,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "/metrics", exporter.HealthCheck.HTTPPath)
 	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
 	require.NotNil(t, nodeAgent)
-	assert.Equal(t, "registry.example.com/neutree/neutree-node-agent:v1.2.0", nodeAgent.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0", nodeAgent.Image)
 	assert.Contains(t, nodeAgent.Args, "--listen-address=:19101")
 	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
 	assert.Contains(t, nodeAgent.Args, "--metrics-mode=managed")
@@ -177,7 +177,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-exporter.json`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-agent`)
-	assert.Contains(t, vmagentConfig.Content, `honor_labels: true`)
+	assert.NotContains(t, vmagentConfig.Content, `honor_labels: true`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-agent.json`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-ray`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/ray.json`)
@@ -240,7 +240,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree-node-agent:v1.2.0",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0",
 	})
 
 	cluster.Spec.Version = "mutated"
@@ -556,6 +556,12 @@ func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
 	}
 }
 
+func TestDefaultNodeAgentImageUsesSameRepositoryPathAsKubernetes(t *testing.T) {
+	cluster := testStaticNodeCluster()
+
+	assert.Equal(t, "neutree/neutree-node-agent:v1.2.0", defaultNodeAgentImage(cluster))
+}
+
 func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	currentNodes := []*v1.StaticNode{
@@ -600,7 +606,7 @@ func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree-node-agent:v1.2.0",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0",
 		vmagentComponentName:      "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 }

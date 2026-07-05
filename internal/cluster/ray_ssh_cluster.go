@@ -160,7 +160,11 @@ func (c *sshRayClusterReconciler) checkAndUpdateStatus(reconcileCtx *ReconcileCo
 	}
 
 	cluster.Status.Initialized = true
-	cluster.Status.DashboardURL = fmt.Sprintf("http://%s:8265", reconcileCtx.sshClusterConfig.Provider.HeadIP)
+	cluster.Status.DashboardURL = fmt.Sprintf(
+		"http://%s:%d",
+		reconcileCtx.sshClusterConfig.Provider.HeadIP,
+		v1.RayDashboardPort,
+	)
 
 	// Default status.version to spec.version when not reported by Ray nodes
 	// (e.g. legacy nodes without version labels, or first initialization).

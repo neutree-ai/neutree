@@ -400,7 +400,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	assert.Assert(t, strings.Contains(args, "--metrics-mode=managed"))
 	assert.Assert(t, strings.Contains(args, "--node=$(NODE_NAME)"))
 	assert.Assert(t, strings.Contains(args, "--node-ip=$(NODE_IP)"))
-	assert.Assert(t, strings.Contains(args, "--kubelet-pod-resources-socket=/var/lib/kubelet/pod-resources/kubelet.sock"))
+	assert.Assert(t, !strings.Contains(args, "--kubelet-pod-resources-socket"))
 	assert.Assert(t, !strings.Contains(args, "--cluster=test-cluster"))
 	assert.Assert(t, !strings.Contains(args, "--workspace=test-workspace"))
 	assert.Assert(t, !strings.Contains(args, "--enable-kubernetes-annotation-writer"))

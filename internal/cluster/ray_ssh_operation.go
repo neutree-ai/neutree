@@ -207,7 +207,7 @@ func (c *sshRayClusterReconciler) stopNode(reconcileCtx *ReconcileContext, nodeI
 }
 
 func (c *sshRayClusterReconciler) getDashboardService(headIP string) dashboard.DashboardService {
-	return dashboard.NewDashboardService(fmt.Sprintf("http://%s:8265", headIP))
+	return dashboard.NewDashboardService(fmt.Sprintf("http://%s:%d", headIP, v1.RayDashboardPort))
 }
 
 func (c *sshRayClusterReconciler) downCluster(reconcileCtx *ReconcileContext) error {
@@ -414,7 +414,11 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		headCmdParts = append(headCmdParts, "--dashboard-grpc-port=8079")
 	}
 
-	headCmdParts = append(headCmdParts, "--dashboard-port=8265", "--ray-client-server-port=10001", headLabel)
+	headCmdParts = append(headCmdParts,
+		fmt.Sprintf("--dashboard-port=%d", v1.RayDashboardPort),
+		"--ray-client-server-port=10001",
+		headLabel,
+	)
 
 	rayClusterConfig.HeadStartRayCommands = []string{
 		"ray stop",

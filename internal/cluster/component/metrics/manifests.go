@@ -338,7 +338,6 @@ spec:
         - --metrics-mode={{ .MetricsMode }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
-        - --kubelet-pod-resources-socket={{ .KubeletPodResourcesSocket }}
         env:
         - name: NODE_NAME
           valueFrom:
@@ -541,7 +540,6 @@ type MetricsManifestVariables struct {
 	NeutreeNodeAgentMetricsName      string
 	NeutreeNodeAgentMetricsImage     string
 	NeutreeNodeAgentMetricsPort      int
-	KubeletPodResourcesSocket        string
 	KubeStateMetricsVersion          string
 	ClusterVersion                   string
 	MetricsRemoteWriteURL            string
@@ -586,12 +584,11 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		ImagePullSecret:                  m.imagePullSecret,
 		Version:                          version,
 		NodeExporterName:                 nodeExporterDaemonSetName,
-		NodeExporterImage:                rewriteMetricsImage(m.imagePrefix, defaultNodeExporterImage),
+		NodeExporterImage:                util.RewriteImageRef(m.imagePrefix, defaultNodeExporterImage),
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
-		NeutreeNodeAgentMetricsImage:     rewriteMetricsImage(m.imagePrefix, neutreeNodeAgentImageName+":"+m.cluster.GetVersion()),
+		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+m.cluster.GetVersion()),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
-		KubeletPodResourcesSocket:        "/var/lib/kubelet/pod-resources/kubelet.sock",
 		KubeStateMetricsVersion:          componentversion.KubeStateMetrics,
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,

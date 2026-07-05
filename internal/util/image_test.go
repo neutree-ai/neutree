@@ -89,6 +89,53 @@ func TestBuildEngineImageRef(t *testing.T) {
 	}
 }
 
+func TestRewriteImageRef(t *testing.T) {
+	tests := []struct {
+		name        string
+		imagePrefix string
+		image       string
+		expected    string
+	}{
+		{
+			name:        "docker.io image keeps repository path",
+			imagePrefix: "registry.example.com/neutree-ai",
+			image:       "docker.io/neutree/neutree-node-agent:v1.2.0",
+			expected:    "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			name:        "image without source registry keeps repository path",
+			imagePrefix: "registry.example.com/neutree-ai",
+			image:       "neutree/neutree-node-agent:v1.2.0",
+			expected:    "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			name:        "already rewritten image is unchanged",
+			imagePrefix: "registry.example.com/neutree-ai",
+			image:       "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+			expected:    "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			name:        "empty prefix leaves image unchanged",
+			imagePrefix: "",
+			image:       "docker.io/neutree/neutree-node-agent:v1.2.0",
+			expected:    "docker.io/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			name:        "empty image stays empty",
+			imagePrefix: "registry.example.com/neutree-ai",
+			image:       "",
+			expected:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RewriteImageRef(tt.imagePrefix, tt.image)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
 func TestResolveEngineImage(t *testing.T) {
 	ev := &v1.EngineVersion{
 		Version: "v0.11.2",

@@ -449,14 +449,6 @@ func (r *staticRayReconciler) calculateResources(
 	return resources, nil
 }
 
-func staticNodeClusterResourceName(staticCluster *v1.StaticNodeCluster) string {
-	if staticCluster == nil || staticCluster.Metadata == nil {
-		return ""
-	}
-
-	return staticCluster.Metadata.WorkspaceName()
-}
-
 func (r *staticRayReconciler) calculateResourcesFromStaticNodes(
 	staticCluster *v1.StaticNodeCluster,
 ) (*v1.ClusterResources, bool, error) {

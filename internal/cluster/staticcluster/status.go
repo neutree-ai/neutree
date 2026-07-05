@@ -67,7 +67,7 @@ func stringSliceContains(values []string, target string) bool {
 }
 
 func DashboardURL(cluster *v1.StaticNodeCluster) string {
-	return fmt.Sprintf("http://%s:%d", staticNodeClusterHeadIP(cluster), defaultRayDashboardPort)
+	return fmt.Sprintf("http://%s:%d", staticNodeClusterHeadIP(cluster), v1.RayDashboardPort)
 }
 
 type StatusAggregator struct{}

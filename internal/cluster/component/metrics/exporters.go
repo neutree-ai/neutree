@@ -14,6 +14,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 const (
@@ -144,7 +145,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Name:            name,
 		AcceleratorType: acceleratorType,
 		ExporterName:    exporterProfile.Name,
-		Image:           rewriteMetricsImage(m.imagePrefix, exporterProfile.Image),
+		Image:           util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
 		Args:            append([]string{}, exporterProfile.Args...),
 		Env:             buildExporterEnv(exporterProfile.Env),
 		Port:            exporterProfile.Port,
@@ -533,36 +534,6 @@ func configVolumeName(baseName string, index int) string {
 	}
 
 	return trimmed + suffix
-}
-
-func rewriteMetricsImage(imagePrefix string, image string) string {
-	if image == "" {
-		return ""
-	}
-
-	imagePrefix = strings.TrimRight(strings.TrimSpace(imagePrefix), "/")
-	if imagePrefix == "" || strings.HasPrefix(image, imagePrefix+"/") {
-		return image
-	}
-
-	return imagePrefix + "/" + stripMetricsSourceImageRegistry(image)
-}
-
-func stripMetricsSourceImageRegistry(image string) string {
-	parts := strings.SplitN(image, "/", 2)
-	if len(parts) < 2 {
-		return image
-	}
-
-	if isMetricsSourceImageRegistry(parts[0]) {
-		return parts[1]
-	}
-
-	return image
-}
-
-func isMetricsSourceImageRegistry(segment string) bool {
-	return segment == "localhost" || strings.Contains(segment, ".") || strings.Contains(segment, ":")
 }
 
 func sanitizeKubernetesName(value string) string {

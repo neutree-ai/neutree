@@ -150,7 +150,7 @@ func rayStartCommand(
 		parts = append(parts, strings.Join([]string{
 			"python /home/ray/start.py --head --port=6379 --dashboard-host=0.0.0.0",
 			commonArgs,
-			"--dashboard-port=8265",
+			fmt.Sprintf("--dashboard-port=%d", v1.RayDashboardPort),
 			"--ray-client-server-port=10001",
 			"--block",
 			rayNodeLabelArg(cluster, role),

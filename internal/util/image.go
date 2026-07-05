@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -45,6 +46,38 @@ func BuildEngineImageRef(imagePrefix string, engineImage *v1.EngineImage) string
 	}
 
 	return imageName + ":" + tag
+}
+
+// RewriteImageRef rewrites image into imagePrefix while preserving the image
+// repository path and removing any source registry host.
+func RewriteImageRef(imagePrefix, image string) string {
+	if image == "" {
+		return ""
+	}
+
+	imagePrefix = strings.TrimRight(strings.TrimSpace(imagePrefix), "/")
+	if imagePrefix == "" || strings.HasPrefix(image, imagePrefix+"/") {
+		return image
+	}
+
+	return imagePrefix + "/" + stripSourceImageRegistry(image)
+}
+
+func stripSourceImageRegistry(image string) string {
+	parts := strings.SplitN(image, "/", 2)
+	if len(parts) < 2 {
+		return image
+	}
+
+	if isSourceImageRegistry(parts[0]) {
+		return parts[1]
+	}
+
+	return image
+}
+
+func isSourceImageRegistry(segment string) bool {
+	return segment == "localhost" || strings.Contains(segment, ".") || strings.Contains(segment, ":")
 }
 
 // ResolveEngineImage finds the engine image for a given engine version and accelerator type,
