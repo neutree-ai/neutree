@@ -48,7 +48,7 @@
       },
       "targets": [
         {
-          "expr": "sum(last_over_time(neutree_node_gpu_total{neutree_cluster=~\"$Cluster\"}[30m]))",
+          "expr": "sum(last_over_time(neutree_node_accelerator_total{neutree_cluster=~\"$Cluster\"}[30m]))",
           "refId": "A"
         }
       ],
@@ -79,7 +79,7 @@
       },
       "targets": [
         {
-          "expr": "avg(neutree_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\"})",
+          "expr": "avg(neutree_accelerator_utilization_ratio{neutree_cluster=~\"$Cluster\"})",
           "refId": "A"
         }
       ],
@@ -110,7 +110,7 @@
       },
       "targets": [
         {
-          "expr": "sum(neutree_gpu_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_gpu_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)",
+          "expr": "sum(neutree_accelerator_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_accelerator_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)",
           "refId": "A"
         }
       ],
@@ -141,7 +141,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(vllm:request_success_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or sum(rate(sglang_num_requests_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or sum(rate(sglang_e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval]))",
+          "expr": "sum(rate(vllm:request_success_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or sum(rate(sglang:num_requests_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or sum(rate(sglang:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval]))",
           "refId": "A"
         }
       ],
@@ -172,7 +172,7 @@
       },
       "targets": [
         {
-          "expr": "avg(rate(vllm:e2e_request_latency_seconds_sum{neutree_cluster=~\"$Cluster\"}[$__rate_interval]) / clamp_min(rate(vllm:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval]), 1)) or avg(rate(sglang_e2e_request_latency_seconds_sum{neutree_cluster=~\"$Cluster\"}[$__rate_interval]) / clamp_min(rate(sglang_e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval]), 1))",
+          "expr": "avg(rate(vllm:e2e_request_latency_seconds_sum{neutree_cluster=~\"$Cluster\"}[$__rate_interval]) / clamp_min(rate(vllm:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval]), 1)) or avg(rate(sglang:e2e_request_latency_seconds_sum{neutree_cluster=~\"$Cluster\"}[$__rate_interval]) / clamp_min(rate(sglang:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval]), 1))",
           "refId": "A"
         }
       ],
@@ -252,14 +252,14 @@
       "id": 10,
       "targets": [
         {
-          "expr": "sum by (product) (last_over_time(neutree_node_gpu_total{neutree_cluster=~\"$Cluster\"}[30m]))",
+          "expr": "sum by (product) (last_over_time(neutree_node_accelerator_total{neutree_cluster=~\"$Cluster\"}[30m]))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{product}}",
           "refId": "A"
         },
         {
-          "expr": "sum by (product) (last_over_time(neutree_node_gpu_free{neutree_cluster=~\"$Cluster\"}[30m]))",
+          "expr": "sum by (product) (last_over_time(neutree_node_accelerator_free{neutree_cluster=~\"$Cluster\"}[30m]))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{product}}",
@@ -322,12 +322,12 @@
           "refId": "B"
         },
         {
-          "expr": "avg(neutree_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\"})",
+          "expr": "avg(neutree_accelerator_utilization_ratio{neutree_cluster=~\"$Cluster\"})",
           "legendFormat": "GPU",
           "refId": "C"
         },
         {
-          "expr": "sum(neutree_gpu_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_gpu_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)",
+          "expr": "sum(neutree_accelerator_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_accelerator_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)",
           "legendFormat": "GPU memory",
           "refId": "D"
         }

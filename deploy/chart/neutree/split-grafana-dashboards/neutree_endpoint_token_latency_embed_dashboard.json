@@ -23,7 +23,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang_prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
+          "expr": "sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
           "refId": "A"
         }
       ],
@@ -48,7 +48,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang_generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(sglang_gen_throughput{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"})",
+          "expr": "sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(sglang:gen_throughput{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"})",
           "refId": "A"
         }
       ],
@@ -73,7 +73,7 @@
       },
       "targets": [
         {
-          "expr": "(sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang_prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) + (sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang_generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(sglang_gen_throughput{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}))",
+          "expr": "(sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) + (sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(sglang:gen_throughput{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}))",
           "refId": "A"
         }
       ],
@@ -91,17 +91,17 @@
       "id": 4,
       "targets": [
         {
-          "expr": "sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang_prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
+          "expr": "sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
           "refId": "A",
           "legendFormat": "prompt tokens/s"
         },
         {
-          "expr": "sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang_generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(sglang_gen_throughput{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"})",
+          "expr": "sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(sglang:gen_throughput{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"})",
           "refId": "B",
           "legendFormat": "generation tokens/s"
         },
         {
-          "expr": "(sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang_prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) + (sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang_generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(sglang_gen_throughput{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}))",
+          "expr": "(sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) + (sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(rate(sglang:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum(sglang:gen_throughput{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}))",
           "refId": "C",
           "legendFormat": "total tokens/s"
         }
@@ -167,7 +167,7 @@
       },
       "targets": [
         {
-          "expr": "sum by(le) (increase(vllm:request_prompt_tokens_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum by(le) (increase(sglang_prompt_tokens_histogram_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
+          "expr": "sum by(le) (increase(vllm:request_prompt_tokens_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum by(le) (increase(sglang:prompt_tokens_histogram_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
           "refId": "A",
           "legendFormat": "{{le}}",
           "format": "heatmap",
@@ -236,7 +236,7 @@
       },
       "targets": [
         {
-          "expr": "sum by(le) (increase(vllm:request_generation_tokens_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum by(le) (increase(sglang_generation_tokens_histogram_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
+          "expr": "sum by(le) (increase(vllm:request_generation_tokens_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) or sum by(le) (increase(sglang:generation_tokens_histogram_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))",
           "refId": "A",
           "legendFormat": "{{le}}",
           "format": "heatmap",
@@ -278,10 +278,10 @@
       },
       {
         "datasource": "${datasource}",
-        "definition": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "definition": "label_values(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "includeAll": true,
         "name": "Endpoint",
-        "query": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "query": "label_values(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "refresh": 1,
         "type": "query"
       }

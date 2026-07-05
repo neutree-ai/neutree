@@ -23,7 +23,7 @@
       },
       "targets": [
         {
-          "expr": "sum(label_value(last_over_time(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",kv_cache_size_tokens=~\"[0-9]+\"}[30m]), \"kv_cache_size_tokens\")) or sum(label_value(last_over_time(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}[30m]), \"num_gpu_blocks\") * label_value(last_over_time(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}[30m]), \"block_size\")) or sum(last_over_time(sglang_max_total_num_tokens{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m]))",
+          "expr": "sum(label_value(last_over_time(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",kv_cache_size_tokens=~\"[0-9]+\"}[30m]), \"kv_cache_size_tokens\")) or sum(label_value(last_over_time(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}[30m]), \"num_gpu_blocks\") * label_value(last_over_time(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}[30m]), \"block_size\")) or sum(last_over_time(sglang:max_total_num_tokens{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m]))",
           "refId": "A"
         }
       ],
@@ -55,7 +55,7 @@
       },
       "targets": [
         {
-          "expr": "avg(last_over_time(vllm:kv_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m])) or avg(last_over_time(vllm:gpu_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m])) or avg(last_over_time(sglang_token_usage{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m]))",
+          "expr": "avg(last_over_time(vllm:kv_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m])) or avg(last_over_time(vllm:gpu_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m])) or avg(last_over_time(sglang:token_usage{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m]))",
           "refId": "A"
         }
       ],
@@ -86,7 +86,7 @@
       },
       "targets": [
         {
-          "expr": "(sum(rate(vllm:prefix_cache_hits_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) / clamp_min(sum(rate(vllm:prefix_cache_queries_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])), 1)) or avg(last_over_time(sglang_cache_hit_rate{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m]))",
+          "expr": "(sum(rate(vllm:prefix_cache_hits_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) / clamp_min(sum(rate(vllm:prefix_cache_queries_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])), 1)) or avg(last_over_time(sglang:cache_hit_rate{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[30m]))",
           "refId": "A"
         }
       ],
@@ -110,7 +110,7 @@
       "id": 4,
       "targets": [
         {
-          "expr": "vllm:kv_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"} or vllm:gpu_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"} or sglang_token_usage{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}",
+          "expr": "vllm:kv_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"} or vllm:gpu_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"} or sglang:token_usage{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}",
           "refId": "A",
           "legendFormat": "{{replica}} usage"
         }
@@ -135,7 +135,7 @@
       "id": 5,
       "targets": [
         {
-          "expr": "(sum by (replica) (rate(vllm:prefix_cache_hits_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) / clamp_min(sum by (replica) (rate(vllm:prefix_cache_queries_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])), 1)) or sglang_cache_hit_rate{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}",
+          "expr": "(sum by (replica) (rate(vllm:prefix_cache_hits_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])) / clamp_min(sum by (replica) (rate(vllm:prefix_cache_queries_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])), 1)) or sglang:cache_hit_rate{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}",
           "refId": "A",
           "legendFormat": "{{replica}} hit"
         }
@@ -180,10 +180,10 @@
       },
       {
         "datasource": "${datasource}",
-        "definition": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "definition": "label_values(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "includeAll": true,
         "name": "Endpoint",
-        "query": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "query": "label_values(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "refresh": 1,
         "type": "query"
       }

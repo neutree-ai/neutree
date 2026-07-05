@@ -23,7 +23,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (product) (last_over_time(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) or on() vector(0)",
+          "expr": "sum by (product) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) or on() vector(0)",
           "refId": "A",
           "legendFormat": "{{product}}"
         }
@@ -55,7 +55,7 @@
       },
       "targets": [
         {
-          "expr": "sum(max by (node, gpu_uuid) (last_over_time(neutree_gpu_memory_used_bytes{neutree_cluster=~\"$Cluster\"}[30m])) * on (node, gpu_uuid) group_left() max by (node, gpu_uuid) (last_over_time(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])))",
+          "expr": "sum(max by (node, accelerator_uuid) (last_over_time(neutree_accelerator_memory_used_bytes{neutree_cluster=~\"$Cluster\"}[30m])) * on (node, accelerator_uuid) group_left() max by (node, accelerator_uuid) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])))",
           "refId": "A"
         }
       ],
@@ -147,9 +147,9 @@
       "id": 2,
       "targets": [
         {
-          "expr": "max by (node, gpu_uuid) (last_over_time(neutree_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\"}[30m])) * on (node, gpu_uuid) group_left(replica, gpu_index) max by (node, gpu_uuid, replica, gpu_index) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
+          "expr": "max by (node, accelerator_uuid) (last_over_time(neutree_accelerator_utilization_ratio{neutree_cluster=~\"$Cluster\"}[30m])) * on (node, accelerator_uuid) group_left(replica_id, accelerator_index) max by (node, accelerator_uuid, replica_id, accelerator_index) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
           "refId": "A",
-          "legendFormat": "replica-{{replica}}-node-{{node}}-gpu-{{gpu_index}}"
+          "legendFormat": "replica-{{replica_id}}-node-{{node}}-gpu-{{accelerator_index}}"
         }
       ],
       "title": "GPU utilization trend",
@@ -172,9 +172,9 @@
       "id": 3,
       "targets": [
         {
-          "expr": "(max by (node, gpu_uuid) (last_over_time(neutree_gpu_memory_used_bytes{neutree_cluster=~\"$Cluster\"}[30m])) / clamp_min(max by (node, gpu_uuid) (last_over_time(neutree_gpu_memory_total_bytes{neutree_cluster=~\"$Cluster\"}[30m])), 1)) * on (node, gpu_uuid) group_left(replica, gpu_index) max by (node, gpu_uuid, replica, gpu_index) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
+          "expr": "(max by (node, accelerator_uuid) (last_over_time(neutree_accelerator_memory_used_bytes{neutree_cluster=~\"$Cluster\"}[30m])) / clamp_min(max by (node, accelerator_uuid) (last_over_time(neutree_accelerator_memory_total_bytes{neutree_cluster=~\"$Cluster\"}[30m])), 1)) * on (node, accelerator_uuid) group_left(replica_id, accelerator_index) max by (node, accelerator_uuid, replica_id, accelerator_index) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
           "refId": "A",
-          "legendFormat": "replica-{{replica}}-node-{{node}}-gpu-{{gpu_index}}"
+          "legendFormat": "replica-{{replica_id}}-node-{{node}}-gpu-{{accelerator_index}}"
         }
       ],
       "title": "VRAM utilization trend",
@@ -246,7 +246,7 @@
             "uid": "$Datasource"
           },
           "editorMode": "code",
-          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
+          "expr": "max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m]))",
           "format": "table",
           "instant": true,
           "legendFormat": "allocation info",
@@ -259,7 +259,7 @@
             "uid": "$Datasource"
           },
           "editorMode": "code",
-          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, gpu_uuid) group_left(architecture, cuda_capability, driver_version, cuda_driver_version, nvlink, nvswitch, pcie_bus_id, pcie_generation, pcie_width, numa_node) max by (node, gpu_uuid, architecture, cuda_capability, driver_version, cuda_driver_version, nvlink, nvswitch, pcie_bus_id, pcie_generation, pcie_width, numa_node) (neutree_node_gpu_hardware_info{neutree_cluster=~\"$Cluster\"})",
+          "expr": "max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, accelerator_uuid) group_left(architecture, cuda_capability, driver_version, cuda_driver_version, nvlink, nvswitch, pcie_bus_id, pcie_generation, pcie_width, numa_node) max by (node, accelerator_uuid, architecture, cuda_capability, driver_version, cuda_driver_version, nvlink, nvswitch, pcie_bus_id, pcie_generation, pcie_width, numa_node) (neutree_node_accelerator_nvidia_info{neutree_cluster=~\"$Cluster\"})",
           "format": "table",
           "instant": true,
           "legendFormat": "hardware",
@@ -272,7 +272,7 @@
             "uid": "$Datasource"
           },
           "editorMode": "code",
-          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, gpu_uuid) group_left() max by (node, gpu_uuid) (last_over_time(neutree_gpu_utilization_ratio{neutree_cluster=~\"$Cluster\"}[30m]))",
+          "expr": "max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, accelerator_uuid) group_left() max by (node, accelerator_uuid) (last_over_time(neutree_accelerator_utilization_ratio{neutree_cluster=~\"$Cluster\"}[30m]))",
           "format": "table",
           "instant": true,
           "legendFormat": "gpu util",
@@ -280,7 +280,7 @@
           "refId": "C"
         },
         {
-          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, gpu_uuid) group_left() (sum by (node, gpu_uuid) (rate(neutree_gpu_pcie_tx_bytes_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) + sum by (node, gpu_uuid) (rate(neutree_gpu_pcie_rx_bytes_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
+          "expr": "max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, accelerator_uuid) group_left() (sum by (node, accelerator_uuid) (rate(neutree_accelerator_pcie_tx_bytes_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) + sum by (node, accelerator_uuid) (rate(neutree_accelerator_pcie_rx_bytes_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])))",
           "refId": "D",
           "format": "table",
           "instant": true,
@@ -292,7 +292,7 @@
             "uid": "$Datasource"
           },
           "editorMode": "code",
-          "expr": "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, gpu_uuid) group_left() max by (node, gpu_uuid) (last_over_time(neutree_gpu_temperature_celsius{neutree_cluster=~\"$Cluster\"}[30m]))",
+          "expr": "max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (node, accelerator_uuid) group_left() max by (node, accelerator_uuid) (last_over_time(neutree_accelerator_temperature_celsius{neutree_cluster=~\"$Cluster\"}[30m]))",
           "format": "table",
           "instant": true,
           "legendFormat": "temperature",
@@ -305,7 +305,7 @@
             "uid": "$Datasource"
           },
           "editorMode": "code",
-          "expr": "max by (endpoint, replica, node, gpu_uuid, model_replica, model_name) ((label_join((max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (replica) group_left(model_name) (max by (replica, model_name) (last_over_time(vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:request_success_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:engine_sleep_state{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang_num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m])) or label_replace(max by (replica, served_model_name) (last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m]) or last_over_time(sglang_num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m])), \"model_name\", \"$1\", \"served_model_name\", \"(.*)\"))), \"model_replica\", \" / \", \"model_name\", \"replica\")) or (label_join(label_set(max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram) (last_over_time(neutree_node_gpu_allocation_info{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])), \"model_name\", \"-\"), \"model_replica\", \" / \", \"model_name\", \"replica\") unless on (replica) (max by (replica, model_name) (last_over_time(vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:request_success_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:engine_sleep_state{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang_num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m])) or label_replace(max by (replica, served_model_name) (last_over_time(sglang_num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m]) or last_over_time(sglang_num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m])), \"model_name\", \"$1\", \"served_model_name\", \"(.*)\"))))",
+          "expr": "max by (endpoint, replica, node, accelerator_uuid, model_replica, model_name) ((label_join((max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])) * on (replica) group_left(model_name) (max by (replica, model_name) (last_over_time(vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:request_success_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:engine_sleep_state{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang:num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang:num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m])) or label_replace(max by (replica, served_model_name) (last_over_time(sglang:num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m]) or last_over_time(sglang:num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m])), \"model_name\", \"$1\", \"served_model_name\", \"(.*)\"))), \"model_replica\", \" / \", \"model_name\", \"replica\")) or (label_join(label_set(max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram) (last_over_time(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\",endpoint=~\"$Endpoint\"}[30m])), \"model_name\", \"-\"), \"model_replica\", \" / \", \"model_name\", \"replica\") unless on (replica) (max by (replica, model_name) (last_over_time(vllm:num_requests_running{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:request_success_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(vllm:engine_sleep_state{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang:num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m]) or last_over_time(sglang:num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",model_name=~\".+\"}[30m])) or label_replace(max by (replica, served_model_name) (last_over_time(sglang:num_running_reqs{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m]) or last_over_time(sglang:num_requests_total{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\",served_model_name=~\".+\"}[30m])), \"model_name\", \"$1\", \"served_model_name\", \"(.*)\"))))",
           "format": "table",
           "instant": true,
           "legendFormat": "model",
@@ -328,8 +328,8 @@
               "Value": true,
               "Value #A": true,
               "Value #B": true,
-              "gpu_uuid": true,
-              "gpu_index": true,
+              "accelerator_uuid": true,
+              "accelerator_index": true,
               "endpoint": true,
               "replica": true,
               "model_name": true
@@ -594,10 +594,10 @@
       },
       {
         "datasource": "${datasource}",
-        "definition": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "definition": "label_values(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "includeAll": true,
         "name": "Endpoint",
-        "query": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "query": "label_values(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "refresh": 1,
         "type": "query"
       }

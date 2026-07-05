@@ -23,7 +23,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang_e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "A"
         }
       ],
@@ -54,7 +54,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang_time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "A"
         }
       ],
@@ -116,7 +116,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang_inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "A"
         }
       ],
@@ -140,22 +140,22 @@
       "id": 5,
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.5, sum by (le) (rate(sglang_e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.5, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "P50"
         },
         {
-          "expr": "histogram_quantile(0.9, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.9, sum by (le) (rate(sglang_e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.9, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "B",
           "legendFormat": "P90"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang_e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "C",
           "legendFormat": "P95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang_e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "D",
           "legendFormat": "P99"
         }
@@ -180,22 +180,22 @@
       "id": 6,
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.5, sum by (le) (rate(sglang_time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.5, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "P50"
         },
         {
-          "expr": "histogram_quantile(0.9, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.9, sum by (le) (rate(sglang_time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.9, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "B",
           "legendFormat": "P90"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang_time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "C",
           "legendFormat": "P95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang_time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "D",
           "legendFormat": "P99"
         }
@@ -260,22 +260,22 @@
       "id": 8,
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.5, sum by (le) (rate(sglang_inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.5, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "P50"
         },
         {
-          "expr": "histogram_quantile(0.9, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.9, sum by (le) (rate(sglang_inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.9, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "B",
           "legendFormat": "P90"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang_inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "C",
           "legendFormat": "P95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang_inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=~\".*$Endpoint.*\"}[$__rate_interval])))",
           "refId": "D",
           "legendFormat": "P99"
         }
@@ -320,10 +320,10 @@
       },
       {
         "datasource": "${datasource}",
-        "definition": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "definition": "label_values(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "includeAll": true,
         "name": "Endpoint",
-        "query": "label_values(neutree_node_gpu_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
+        "query": "label_values(neutree_node_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "refresh": 1,
         "type": "query"
       }

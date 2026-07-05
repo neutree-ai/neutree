@@ -222,121 +222,121 @@ func TestSplitDashboardPanelMetricScope(t *testing.T) {
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "Nodes",
 		"neutree_node_ready")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "GPU",
-		"neutree_node_gpu_total")
+		"neutree_node_accelerator_total")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "GPU inventory by model",
-		"neutree_node_gpu_total", "neutree_node_gpu_free")
+		"neutree_node_accelerator_total", "neutree_node_accelerator_free")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "Current QPS",
-		"vllm:request_success_total", "sglang_num_requests_total", "sglang_e2e_request_latency_seconds_count")
+		"vllm:request_success_total", "sglang:num_requests_total", "sglang:e2e_request_latency_seconds_count")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "Avg latency",
 		"vllm:e2e_request_latency_seconds_sum", "vllm:e2e_request_latency_seconds_count",
-		"sglang_e2e_request_latency_seconds_sum", "sglang_e2e_request_latency_seconds_count")
+		"sglang:e2e_request_latency_seconds_sum", "sglang:e2e_request_latency_seconds_count")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "CPU avg",
 		"neutree_node_cpu_seconds_total")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "Memory avg",
 		"neutree_node_memory_used_bytes", "neutree_node_memory_total_bytes")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "GPU avg",
-		"neutree_gpu_utilization_ratio")
+		"neutree_accelerator_utilization_ratio")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "GPU memory",
-		"neutree_gpu_memory_used_bytes", "neutree_gpu_memory_total_bytes")
+		"neutree_accelerator_memory_used_bytes", "neutree_accelerator_memory_total_bytes")
 	assertPanelMetricScope(t, "neutree_overview_embed_dashboard.json", "Cluster utilization",
 		"neutree_node_cpu_seconds_total", "neutree_node_memory_used_bytes", "neutree_node_memory_total_bytes",
-		"neutree_gpu_utilization_ratio", "neutree_gpu_memory_used_bytes", "neutree_gpu_memory_total_bytes")
+		"neutree_accelerator_utilization_ratio", "neutree_accelerator_memory_used_bytes", "neutree_accelerator_memory_total_bytes")
 
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "Consumed GPUs",
-		"neutree_node_gpu_allocation")
+		"neutree_node_accelerator_allocation")
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "VRAM used",
-		"neutree_gpu_memory_used_bytes", "neutree_node_gpu_allocation")
+		"neutree_accelerator_memory_used_bytes", "neutree_node_accelerator_allocation")
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "CPU cores",
 		"neutree_endpoint_replica_cpu_usage_seconds_total")
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "Memory working set",
 		"neutree_endpoint_replica_memory_working_set_bytes")
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "GPU allocation details",
-		"neutree_node_gpu_allocation_info", "neutree_node_gpu_hardware_info",
-		"neutree_gpu_temperature_celsius", "vllm:num_requests_running", "vllm:request_success_total",
-		"sglang_num_running_reqs", "sglang_num_requests_total")
+		"neutree_node_accelerator_allocation", "neutree_node_accelerator_nvidia_info",
+		"neutree_accelerator_temperature_celsius", "vllm:num_requests_running", "vllm:request_success_total",
+		"sglang:num_running_reqs", "sglang:num_requests_total")
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "GPU utilization trend",
-		"neutree_gpu_utilization_ratio", "neutree_node_gpu_allocation_info")
+		"neutree_accelerator_utilization_ratio", "neutree_node_accelerator_allocation")
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "VRAM utilization trend",
-		"neutree_gpu_memory_used_bytes", "neutree_gpu_memory_total_bytes", "neutree_node_gpu_allocation_info")
+		"neutree_accelerator_memory_used_bytes", "neutree_accelerator_memory_total_bytes", "neutree_node_accelerator_allocation")
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "CPU usage trend",
 		"neutree_endpoint_replica_cpu_usage_seconds_total")
 	assertPanelMetricScope(t, "neutree_endpoint_overview_embed_dashboard.json", "Memory usage trend",
 		"neutree_endpoint_replica_memory_working_set_bytes")
 
 	assertPanelMetricScope(t, "neutree_endpoint_latency_embed_dashboard.json", "E2E P95",
-		"vllm:e2e_request_latency_seconds_bucket", "sglang_e2e_request_latency_seconds_bucket")
+		"vllm:e2e_request_latency_seconds_bucket", "sglang:e2e_request_latency_seconds_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_latency_embed_dashboard.json", "TTFT P95",
-		"vllm:time_to_first_token_seconds_bucket", "sglang_time_to_first_token_seconds_bucket")
+		"vllm:time_to_first_token_seconds_bucket", "sglang:time_to_first_token_seconds_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_latency_embed_dashboard.json", "TPOT P95",
 		"vllm:request_time_per_output_token_seconds_bucket", "vllm:time_per_output_token_seconds_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_latency_embed_dashboard.json", "ITL P95",
-		"vllm:inter_token_latency_seconds_bucket", "sglang_inter_token_latency_seconds_bucket")
+		"vllm:inter_token_latency_seconds_bucket", "sglang:inter_token_latency_seconds_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_latency_embed_dashboard.json", "E2E latency trend",
-		"vllm:e2e_request_latency_seconds_bucket", "sglang_e2e_request_latency_seconds_bucket")
+		"vllm:e2e_request_latency_seconds_bucket", "sglang:e2e_request_latency_seconds_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_latency_embed_dashboard.json", "TTFT latency trend",
-		"vllm:time_to_first_token_seconds_bucket", "sglang_time_to_first_token_seconds_bucket")
+		"vllm:time_to_first_token_seconds_bucket", "sglang:time_to_first_token_seconds_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_latency_embed_dashboard.json", "TPOT latency trend",
 		"vllm:request_time_per_output_token_seconds_bucket", "vllm:time_per_output_token_seconds_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_latency_embed_dashboard.json", "ITL latency trend",
-		"vllm:inter_token_latency_seconds_bucket", "sglang_inter_token_latency_seconds_bucket")
+		"vllm:inter_token_latency_seconds_bucket", "sglang:inter_token_latency_seconds_bucket")
 
 	assertPanelMetricScope(t, "neutree_endpoint_queue_embed_dashboard.json", "Running",
-		"vllm:num_requests_running", "sglang_num_running_reqs")
+		"vllm:num_requests_running", "sglang:num_running_reqs")
 	assertPanelMetricScope(t, "neutree_endpoint_queue_embed_dashboard.json", "Waiting",
-		"vllm:num_requests_waiting", "sglang_num_queue_reqs")
+		"vllm:num_requests_waiting", "sglang:num_queue_reqs")
 	assertPanelMetricScope(t, "neutree_endpoint_queue_embed_dashboard.json", "Preemptions / Retractions",
-		"vllm:num_preemptions_total", "sglang_num_retracted_requests_total")
+		"vllm:num_preemptions_total", "sglang:num_retracted_requests_total")
 	assertPanelMetricScope(t, "neutree_endpoint_queue_embed_dashboard.json", "Queue time P95",
-		"vllm:request_queue_time_seconds_bucket", "sglang_queue_time_seconds_bucket")
+		"vllm:request_queue_time_seconds_bucket", "sglang:queue_time_seconds_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_queue_embed_dashboard.json", "Queue status trend",
-		"vllm:num_requests_running", "sglang_num_running_reqs",
-		"vllm:num_requests_waiting", "sglang_num_queue_reqs",
-		"vllm:num_preemptions_total", "sglang_num_retracted_requests_total")
+		"vllm:num_requests_running", "sglang:num_running_reqs",
+		"vllm:num_requests_waiting", "sglang:num_queue_reqs",
+		"vllm:num_preemptions_total", "sglang:num_retracted_requests_total")
 	assertPanelMetricScope(t, "neutree_endpoint_queue_embed_dashboard.json", "Queue time trend",
-		"vllm:request_queue_time_seconds_bucket", "sglang_queue_time_seconds_bucket")
+		"vllm:request_queue_time_seconds_bucket", "sglang:queue_time_seconds_bucket")
 
 	assertPanelMetricScope(t, "neutree_endpoint_cache_embed_dashboard.json", "KV token capacity",
-		"vllm:cache_config_info", "sglang_max_total_num_tokens")
+		"vllm:cache_config_info", "sglang:max_total_num_tokens")
 	assertPanelMetricScope(t, "neutree_endpoint_cache_embed_dashboard.json", "KV usage",
-		"vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc", "sglang_token_usage")
+		"vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc", "sglang:token_usage")
 	assertPanelMetricScope(t, "neutree_endpoint_cache_embed_dashboard.json", "Cache hit",
-		"sglang_cache_hit_rate", "vllm:prefix_cache_hits_total", "vllm:prefix_cache_queries_total")
+		"sglang:cache_hit_rate", "vllm:prefix_cache_hits_total", "vllm:prefix_cache_queries_total")
 	assertPanelMetricScope(t, "neutree_endpoint_cache_embed_dashboard.json", "KV usage trend",
-		"vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc", "sglang_token_usage")
+		"vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc", "sglang:token_usage")
 	assertPanelMetricScope(t, "neutree_endpoint_cache_embed_dashboard.json", "Cache hit trend",
-		"sglang_cache_hit_rate", "vllm:prefix_cache_hits_total", "vllm:prefix_cache_queries_total")
+		"sglang:cache_hit_rate", "vllm:prefix_cache_hits_total", "vllm:prefix_cache_queries_total")
 
 	assertPanelMetricScope(t, "neutree_endpoint_token_latency_embed_dashboard.json", "Prompt tokens/s",
-		"vllm:prompt_tokens_total", "sglang_prompt_tokens_total")
+		"vllm:prompt_tokens_total", "sglang:prompt_tokens_total")
 	assertPanelMetricScope(t, "neutree_endpoint_token_latency_embed_dashboard.json", "Generation tokens/s",
-		"vllm:generation_tokens_total", "sglang_generation_tokens_total", "sglang_gen_throughput")
+		"vllm:generation_tokens_total", "sglang:generation_tokens_total", "sglang:gen_throughput")
 	assertPanelMetricScope(t, "neutree_endpoint_token_latency_embed_dashboard.json", "Total tokens/s",
-		"vllm:prompt_tokens_total", "sglang_prompt_tokens_total",
-		"vllm:generation_tokens_total", "sglang_generation_tokens_total", "sglang_gen_throughput")
+		"vllm:prompt_tokens_total", "sglang:prompt_tokens_total",
+		"vllm:generation_tokens_total", "sglang:generation_tokens_total", "sglang:gen_throughput")
 	assertPanelMetricScope(t, "neutree_endpoint_token_latency_embed_dashboard.json", "Token throughput trend",
-		"vllm:prompt_tokens_total", "sglang_prompt_tokens_total",
-		"vllm:generation_tokens_total", "sglang_generation_tokens_total", "sglang_gen_throughput")
+		"vllm:prompt_tokens_total", "sglang:prompt_tokens_total",
+		"vllm:generation_tokens_total", "sglang:generation_tokens_total", "sglang:gen_throughput")
 	assertPanelMetricScope(t, "neutree_endpoint_token_latency_embed_dashboard.json", "Request Prompt Length",
-		"vllm:request_prompt_tokens_bucket", "sglang_prompt_tokens_histogram_bucket")
+		"vllm:request_prompt_tokens_bucket", "sglang:prompt_tokens_histogram_bucket")
 	assertPanelMetricScope(t, "neutree_endpoint_token_latency_embed_dashboard.json", "Request Generation Length",
-		"vllm:request_generation_tokens_bucket", "sglang_generation_tokens_histogram_bucket")
+		"vllm:request_generation_tokens_bucket", "sglang:generation_tokens_histogram_bucket")
 
 	assertPanelMetricScope(t, "neutree_cluster_overview_embed_dashboard.json", "Nodes",
 		"neutree_node_ready")
 	assertPanelMetricScope(t, "neutree_cluster_overview_embed_dashboard.json", "Total GPUs",
-		"neutree_node_gpu_total")
+		"neutree_node_accelerator_total")
 	assertPanelMetricScope(t, "neutree_cluster_overview_embed_dashboard.json", "Free GPUs",
-		"neutree_node_gpu_free")
+		"neutree_node_accelerator_free")
 	assertPanelMetricScope(t, "neutree_cluster_overview_embed_dashboard.json", "GPU avg",
-		"neutree_gpu_utilization_ratio")
+		"neutree_accelerator_utilization_ratio")
 	assertPanelMetricScope(t, "neutree_cluster_overview_embed_dashboard.json", "VRAM avg",
-		"neutree_gpu_memory_used_bytes", "neutree_gpu_memory_total_bytes")
+		"neutree_accelerator_memory_used_bytes", "neutree_accelerator_memory_total_bytes")
 	assertPanelMetricScope(t, "neutree_cluster_overview_embed_dashboard.json", "Utilization trend",
 		"neutree_node_cpu_seconds_total", "neutree_node_memory_used_bytes", "neutree_node_memory_total_bytes",
-		"neutree_gpu_utilization_ratio", "neutree_gpu_memory_used_bytes", "neutree_gpu_memory_total_bytes")
+		"neutree_accelerator_utilization_ratio", "neutree_accelerator_memory_used_bytes", "neutree_accelerator_memory_total_bytes")
 	assertPanelMetricScope(t, "neutree_cluster_overview_embed_dashboard.json", "GPU allocation details",
-		"neutree_node_gpu_allocation_info", "neutree_node_gpu_hardware_info",
-		"neutree_gpu_temperature_celsius")
+		"neutree_node_accelerator_allocation", "neutree_node_accelerator_nvidia_info",
+		"neutree_accelerator_temperature_celsius")
 }
 
 func TestEndpointConsumedGPUsFallbackDoesNotAddZeroSeriesWhenProductsExist(t *testing.T) {
@@ -355,18 +355,18 @@ func TestOverviewGPUInventoryPanelsShowTotalAndProductCounts(t *testing.T) {
 
 	total := dashboardPanel(t, "neutree_overview_embed_dashboard.json", "GPU")
 	require.Len(t, total.Targets, 1)
-	assert.Contains(t, total.Targets[0].Expr, "sum(last_over_time(neutree_node_gpu_total")
+	assert.Contains(t, total.Targets[0].Expr, "sum(last_over_time(neutree_node_accelerator_total")
 
 	models := dashboardPanel(t, "neutree_overview_embed_dashboard.json", "GPU inventory by model")
 	assert.Equal(t, "table", models.Type)
 	require.Len(t, models.Targets, 2)
 	assert.Contains(t, models.Targets[0].Expr, "sum by (product)")
-	assert.Contains(t, models.Targets[0].Expr, "neutree_node_gpu_total")
+	assert.Contains(t, models.Targets[0].Expr, "neutree_node_accelerator_total")
 	assert.Equal(t, "table", models.Targets[0].Format)
 	assert.True(t, models.Targets[0].Instant)
 	assert.Equal(t, "{{product}}", models.Targets[0].LegendFormat)
 	assert.Contains(t, models.Targets[1].Expr, "sum by (product)")
-	assert.Contains(t, models.Targets[1].Expr, "neutree_node_gpu_free")
+	assert.Contains(t, models.Targets[1].Expr, "neutree_node_accelerator_free")
 	assert.Equal(t, "table", models.Targets[1].Format)
 	assert.True(t, models.Targets[1].Instant)
 	assert.Equal(t, "{{product}}", models.Targets[1].LegendFormat)
@@ -520,7 +520,7 @@ func TestEndpointQueueDashboardUsesStatusAndQueueTimePanels(t *testing.T) {
 	)
 	assert.NotContains(t, expressions, "vllm:num_requests_swapped")
 	assert.Contains(t, expressions, "vllm:num_preemptions_total")
-	assert.Contains(t, expressions, "sglang_num_retracted_requests_total")
+	assert.Contains(t, expressions, "sglang:num_retracted_requests_total")
 
 	panel := dashboardPanel(t, "neutree_endpoint_queue_embed_dashboard.json", "Queue status trend")
 	assert.Equal(t, "{{replica}} preemptions/s", panel.Targets[2].LegendFormat)
@@ -537,7 +537,7 @@ func TestEndpointCacheCapacityUsesEngineTokenCapacity(t *testing.T) {
 	assert.Contains(t, expr, `"kv_cache_size_tokens"`)
 	assert.Contains(t, expr, `"num_gpu_blocks"`)
 	assert.Contains(t, expr, `"block_size"`)
-	assert.Contains(t, expr, "sglang_max_total_num_tokens")
+	assert.Contains(t, expr, "sglang:max_total_num_tokens")
 	assert.NotContains(t, expr, "vector(0)")
 	assert.NotContains(t, expr, "vllm:neutree_kv_token_capacity")
 	assert.NotContains(t, expr, "vllm:num_gpu_blocks")
@@ -554,8 +554,8 @@ func TestClusterOverviewUtilizationTrendDoesNotMixPendingReplicas(t *testing.T) 
 	assert.Contains(t, expressions, "neutree_node_cpu_seconds_total")
 	assert.Contains(t, expressions, "neutree_node_memory_used_bytes")
 	assert.Contains(t, expressions, "neutree_node_memory_total_bytes")
-	assert.Contains(t, expressions, "neutree_gpu_utilization_ratio")
-	assert.Contains(t, expressions, "neutree_gpu_memory_used_bytes")
+	assert.Contains(t, expressions, "neutree_accelerator_utilization_ratio")
+	assert.Contains(t, expressions, "neutree_accelerator_memory_used_bytes")
 	assert.NotContains(t, expressions, "neutree_endpoint_pending_replicas")
 }
 
@@ -588,13 +588,13 @@ func TestEndpointLatencyTrendsSplitByLatencyDimension(t *testing.T) {
 			title:    "E2E latency trend",
 			metric:   "vllm:e2e_request_latency_seconds_bucket",
 			gridPos:  gridPosConfig{H: 8, W: 12, X: 0, Y: 4},
-			fallback: "sglang_e2e_request_latency_seconds_bucket",
+			fallback: "sglang:e2e_request_latency_seconds_bucket",
 		},
 		{
 			title:    "TTFT latency trend",
 			metric:   "vllm:time_to_first_token_seconds_bucket",
 			gridPos:  gridPosConfig{H: 8, W: 12, X: 12, Y: 4},
-			fallback: "sglang_time_to_first_token_seconds_bucket",
+			fallback: "sglang:time_to_first_token_seconds_bucket",
 		},
 		{
 			title:    "TPOT latency trend",
@@ -606,7 +606,7 @@ func TestEndpointLatencyTrendsSplitByLatencyDimension(t *testing.T) {
 			title:    "ITL latency trend",
 			metric:   "vllm:inter_token_latency_seconds_bucket",
 			gridPos:  gridPosConfig{H: 8, W: 12, X: 12, Y: 12},
-			fallback: "sglang_inter_token_latency_seconds_bucket",
+			fallback: "sglang:inter_token_latency_seconds_bucket",
 		},
 	}
 
@@ -648,16 +648,16 @@ func TestClusterOverviewGPUAllocationDetailsUsesReplicaScopedAllocationRows(t *t
 
 	allocationTarget := panel.Targets[0]
 	assert.Equal(t, "A", allocationTarget.RefID)
-	assert.Contains(t, allocationTarget.Expr, "neutree_node_gpu_allocation_info")
-	assert.Contains(t, allocationTarget.Expr, "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram)")
-	assert.NotContains(t, allocationTarget.Expr, "neutree_node_gpu_allocation{")
-	assert.NotContains(t, allocationTarget.Expr, "unless on (node, gpu_uuid)")
+	assert.Contains(t, allocationTarget.Expr, "neutree_node_accelerator_allocation")
+	assert.Contains(t, allocationTarget.Expr, "max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram)")
+	assert.NotContains(t, allocationTarget.Expr, "neutree_node_gpu_allocation")
+	assert.NotContains(t, allocationTarget.Expr, "unless on (node, accelerator_uuid)")
 	assert.NotContains(t, allocationTarget.Expr, `"endpoint", "-"`)
-	assert.NotContains(t, allocationTarget.Expr, `"replica", "-"`)
+	assert.NotContains(t, allocationTarget.Expr, `"replica_id", "-"`)
 
 	organize := transformationOptions(t, panel, "organize")
 	assertNestedString(t, organize, "Endpoint / Replica", "renameByName", "endpoint_replica")
-	assertNestedBool(t, organize, true, "excludeByName", "gpu_uuid")
+	assertNestedBool(t, organize, true, "excludeByName", "accelerator_uuid")
 }
 
 func TestEndpointTokenLatencyLengthHeatmapsMatchVLLMDisplay(t *testing.T) {
@@ -668,7 +668,7 @@ func TestEndpointTokenLatencyLengthHeatmapsMatchVLLMDisplay(t *testing.T) {
 		"Heatmap of request prompt length",
 		"Prompt Length",
 		"vllm:request_prompt_tokens_bucket",
-		"sglang_prompt_tokens_histogram_bucket",
+		"sglang:prompt_tokens_histogram_bucket",
 	)
 	assertTokenLengthHeatmap(
 		t,
@@ -677,7 +677,7 @@ func TestEndpointTokenLatencyLengthHeatmapsMatchVLLMDisplay(t *testing.T) {
 		"Heatmap of request generation length",
 		"Generation Length",
 		"vllm:request_generation_tokens_bucket",
-		"sglang_generation_tokens_histogram_bucket",
+		"sglang:generation_tokens_histogram_bucket",
 	)
 }
 
@@ -814,11 +814,11 @@ func TestEndpointGPUTrendsUseGPULevelLegendWithRealReplicaName(t *testing.T) {
 		t.Run(title, func(t *testing.T) {
 			panel := dashboardPanel(t, "neutree_endpoint_overview_embed_dashboard.json", title)
 			require.Len(t, panel.Targets, 1)
-			assert.True(t, strings.HasPrefix(panel.Targets[0].LegendFormat, "replica-{{replica}}"))
+			assert.True(t, strings.HasPrefix(panel.Targets[0].LegendFormat, "replica-{{replica_id}}"))
 			assert.NotContains(t, strings.ToLower(panel.Targets[0].LegendFormat), "order")
-			assert.Equal(t, "replica-{{replica}}-node-{{node}}-gpu-{{gpu_index}}", panel.Targets[0].LegendFormat)
-			assert.Contains(t, panel.Targets[0].Expr, "group_left(replica, gpu_index)")
-			assert.Contains(t, panel.Targets[0].Expr, "max by (node, gpu_uuid, replica, gpu_index)")
+			assert.Equal(t, "replica-{{replica_id}}-node-{{node}}-gpu-{{accelerator_index}}", panel.Targets[0].LegendFormat)
+			assert.Contains(t, panel.Targets[0].Expr, "group_left(replica_id, accelerator_index)")
+			assert.Contains(t, panel.Targets[0].Expr, "max by (node, accelerator_uuid, replica_id, accelerator_index)")
 		})
 	}
 }
@@ -1067,25 +1067,25 @@ func assertGPUAllocationDetailTable(t *testing.T, file string, endpointScoped bo
 			assert.Contains(t, target.Expr, `endpoint=~"$Endpoint"`)
 		} else {
 			assert.NotContains(t, target.Expr, `endpoint=~"$Endpoint"`)
-			assert.Contains(t, target.Expr, `endpoint!="-"`)
-			assert.Contains(t, target.Expr, `replica!="-"`)
+			assert.Contains(t, target.Expr, `endpoint!=""`)
+			assert.Contains(t, target.Expr, `replica_id!=""`)
 		}
 	}
 
 	assert.Equal(t, "A", panel.Targets[0].RefID)
-	assert.Contains(t, panel.Targets[0].Expr, "neutree_node_gpu_allocation_info")
-	assert.Contains(t, panel.Targets[0].Expr, "max by (endpoint_replica, endpoint, replica, node, node_gpu, gpu_uuid, gpu_index, product, physical_vram, vram)")
-	assert.Contains(t, panel.Targets[1].Expr, "neutree_node_gpu_hardware_info")
+	assert.Contains(t, panel.Targets[0].Expr, "neutree_node_accelerator_allocation")
+	assert.Contains(t, panel.Targets[0].Expr, "max by (endpoint_replica, endpoint, replica_id, node, node_gpu, accelerator_uuid, accelerator_index, product, physical_vram, vram)")
+	assert.Contains(t, panel.Targets[1].Expr, "neutree_node_accelerator_nvidia_info")
 	assert.Contains(t, panel.Targets[1].Expr, "group_left(architecture")
 	assert.NotContains(t, panel.Targets[1].Expr, "memory_total_mib")
-	assert.NotContains(t, panel.Targets[1].Expr, "last_over_time(neutree_node_gpu_hardware_info")
-	assert.Contains(t, panel.Targets[2].Expr, "neutree_gpu_utilization_ratio")
+	assert.NotContains(t, panel.Targets[1].Expr, "last_over_time(neutree_node_accelerator_nvidia_info")
+	assert.Contains(t, panel.Targets[2].Expr, "neutree_accelerator_utilization_ratio")
 	assert.NotContains(t, panel.Targets[2].Expr, "DCGM_FI_DEV_GPU_UTIL")
-	assert.Contains(t, panel.Targets[3].Expr, "neutree_gpu_pcie_tx_bytes_total")
-	assert.Contains(t, panel.Targets[3].Expr, "neutree_gpu_pcie_rx_bytes_total")
+	assert.Contains(t, panel.Targets[3].Expr, "neutree_accelerator_pcie_tx_bytes_total")
+	assert.Contains(t, panel.Targets[3].Expr, "neutree_accelerator_pcie_rx_bytes_total")
 	assert.NotContains(t, panel.Targets[3].Expr, "DCGM_FI_PROF_PCIE_TX_BYTES")
 	assert.NotContains(t, panel.Targets[3].Expr, "DCGM_FI_PROF_PCIE_RX_BYTES")
-	assert.Contains(t, panel.Targets[4].Expr, "neutree_gpu_temperature_celsius")
+	assert.Contains(t, panel.Targets[4].Expr, "neutree_accelerator_temperature_celsius")
 	assert.NotContains(t, panel.Targets[4].Expr, "DCGM_FI_DEV_GPU_TEMP")
 	if withRuntimeModel {
 		assert.Contains(t, panel.Targets[5].Expr, `max by (replica, model_name)`)
@@ -1105,12 +1105,12 @@ func assertGPUAllocationDetailTable(t *testing.T, file string, endpointScoped bo
 	assertNestedBool(t, organize, true, "excludeByName", "Value")
 	assertNestedBool(t, organize, true, "excludeByName", "Value #A")
 	assertNestedBool(t, organize, true, "excludeByName", "Value #B")
-	assertNestedBool(t, organize, true, "excludeByName", "gpu_index")
-	assertNestedBool(t, organize, true, "excludeByName", "gpu_uuid")
+	assertNestedBool(t, organize, true, "excludeByName", "accelerator_index")
+	assertNestedBool(t, organize, true, "excludeByName", "accelerator_uuid")
 	assertNestedBool(t, organize, true, "excludeByName", "endpoint")
 	assertNestedBool(t, organize, true, "excludeByName", "replica")
 	assertNestedString(t, organize, "Node / GPU", "renameByName", "node_gpu")
-	assertNestedMissing(t, organize, "renameByName", "gpu_uuid")
+	assertNestedMissing(t, organize, "renameByName", "accelerator_uuid")
 	assertNestedString(t, organize, "CUDA Capability", "renameByName", "cuda_capability")
 	assertNestedString(t, organize, "Driver", "renameByName", "driver_version")
 	assertNestedString(t, organize, "CUDA Driver", "renameByName", "cuda_driver_version")
@@ -1219,7 +1219,7 @@ func assertGPUAllocationDetailColumnOrder(
 	for name, index := range expectedPrefix {
 		assertNestedFloat(t, organize, float64(index), "indexByName", name)
 	}
-	assertNestedMissing(t, organize, "indexByName", "gpu_uuid")
+	assertNestedMissing(t, organize, "indexByName", "accelerator_uuid")
 	assertNestedMissing(t, organize, "indexByName", "memory_total_mib")
 
 	if withRuntimeModel {
