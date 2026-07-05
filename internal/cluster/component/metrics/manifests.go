@@ -592,7 +592,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NodeExporterImage:                rewriteMetricsImage(m.imagePrefix, defaultNodeExporterImage),
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
-		NeutreeNodeAgentMetricsImage:     rewriteMetricsImage(m.imagePrefix, "neutree-node-agent:"+m.cluster.GetVersion()),
+		NeutreeNodeAgentMetricsImage:     rewriteMetricsImage(m.imagePrefix, neutreeNodeAgentImageName+":"+m.cluster.GetVersion()),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
 		KubeletPodResourcesSocket:        "/var/lib/kubelet/pod-resources/kubelet.sock",
 		KubeStateMetricsVersion:          componentversion.KubeStateMetrics,

@@ -21,6 +21,7 @@ const (
 	nodeExporterDaemonSetName   = "neutree-node-exporter"
 	nodeExporterPort            = 19100
 	neutreeNodeAgentMetricsName = "neutree-node-agent"
+	neutreeNodeAgentImageName   = "neutree/neutree-node-agent"
 	neutreeNodeAgentMetricsPort = 19101
 	externalDCGMExporterPort    = 9400
 
