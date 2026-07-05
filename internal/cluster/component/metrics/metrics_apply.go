@@ -41,14 +41,6 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	variables.AcceleratorExporters = acceleratorExporters
-	variables.NeutreeNodeAgentMetricsAcceleratorExporterURLs = acceleratorExporterLocalMetricsURLs(acceleratorExporters)
-	if variables.EnableExternalDCGMScrape {
-		// The first external DCGM path assumes the exporter is node-local and exposes 9400 on the host.
-		variables.NeutreeNodeAgentMetricsAcceleratorExporterURLs = append(
-			variables.NeutreeNodeAgentMetricsAcceleratorExporterURLs,
-			externalDCGMExporterLocalMetricsURL(),
-		)
-	}
 
 	vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
 	if err != nil {

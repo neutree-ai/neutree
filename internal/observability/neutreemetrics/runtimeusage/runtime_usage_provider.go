@@ -18,12 +18,14 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/promtext"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/ray/rayserve"
+	prommodel "github.com/prometheus/common/model"
 )
 
 const (
-	defaultProcFSRoot   = "/proc"
-	defaultCGroupFSRoot = "/sys/fs/cgroup"
-	kubernetesPodApp    = "inference"
+	defaultProcFSRoot         = "/proc"
+	defaultCGroupFSRoot       = "/sys/fs/cgroup"
+	kubernetesPodApp          = "inference"
+	rayServeBackendDeployment = "Backend"
 )
 
 type Provider interface {
@@ -250,6 +252,10 @@ func (p RayServeRuntimeUsageProvider) Usages(ctx context.Context) ([]model.Endpo
 	for _, appName := range rayserve.SortedServeApplicationNames(applications) {
 		status := applications.Applications[appName]
 		for _, deploymentName := range rayserve.SortedDeploymentNames(status.Deployments) {
+			if deploymentName != rayServeBackendDeployment {
+				continue
+			}
+
 			deployment := status.Deployments[deploymentName]
 			for _, replica := range deployment.Replicas {
 				if replica.NodeID != nodeID || replica.ActorID == "" {
@@ -333,7 +339,7 @@ func rayReplicaRuntimeUsage(
 		InstanceID:            replica.ActorID,
 		ReplicaID:             replicaID,
 		NodeID:                nodeLabel,
-		Deployment:            deploymentName,
+		WorkloadRole:          model.WorkloadRoleBackend,
 		Container:             deploymentName,
 		ContainerID:           containerUsage.ContainerID,
 		CPUUsageSeconds:       containerUsage.CPUUsageSeconds,
@@ -440,7 +446,7 @@ func endpointReplicaRuntimeUsagesFromCAdvisor(
 ) []model.EndpointReplicaRuntimeUsage {
 	index := map[podContainerMetricKey]*model.EndpointReplicaRuntimeUsage{}
 
-	for _, metric := range promtext.Parse(raw) {
+	for _, metric := range promtext.ParseVector(raw) {
 		key, ok := cAdvisorPodContainerMetricKey(metric)
 		if !ok {
 			continue
@@ -458,13 +464,13 @@ func endpointReplicaRuntimeUsagesFromCAdvisor(
 			index[key] = usage
 		}
 
-		switch metric.Name {
+		switch promtext.MetricName(metric) {
 		case "container_cpu_usage_seconds_total":
-			usage.CPUUsageSeconds = metric.Value
+			usage.CPUUsageSeconds = promtext.Value(metric)
 		case "container_memory_usage_bytes":
-			usage.MemoryUsageBytes = float64Ptr(metric.Value)
+			usage.MemoryUsageBytes = float64Ptr(promtext.Value(metric))
 		case "container_memory_working_set_bytes":
-			usage.MemoryWorkingSetBytes = float64Ptr(metric.Value)
+			usage.MemoryWorkingSetBytes = float64Ptr(promtext.Value(metric))
 		}
 	}
 
@@ -488,7 +494,7 @@ func runtimeUsageFromKubernetesContainer(container kubernetesEndpointContainer) 
 		InstanceID:       container.pod.Name,
 		ReplicaID:        container.pod.Name,
 		NodeID:           container.pod.Spec.NodeName,
-		Deployment:       labels["endpoint"],
+		WorkloadRole:     model.WorkloadRoleBackend,
 		Container:        container.container.Name,
 		ContainerID:      normalizeContainerID(container.status.ContainerID),
 		Engine:           labels["engine"],
@@ -498,14 +504,14 @@ func runtimeUsageFromKubernetesContainer(container kubernetesEndpointContainer) 
 	}
 }
 
-func cAdvisorPodContainerMetricKey(metric promtext.Sample) (podContainerMetricKey, bool) {
-	container := firstNonEmpty(metric.Labels["container"], metric.Labels["container_name"])
+func cAdvisorPodContainerMetricKey(metric *prommodel.Sample) (podContainerMetricKey, bool) {
+	container := promtext.LabelValue(metric, "container", "container_name")
 	if container == "" || container == "POD" {
 		return podContainerMetricKey{}, false
 	}
 
-	namespace := firstNonEmpty(metric.Labels["namespace"], metric.Labels["pod_namespace"])
-	pod := firstNonEmpty(metric.Labels["pod"], metric.Labels["pod_name"])
+	namespace := promtext.LabelValue(metric, "namespace", "pod_namespace")
+	pod := promtext.LabelValue(metric, "pod", "pod_name")
 	if namespace == "" || pod == "" {
 		return podContainerMetricKey{}, false
 	}

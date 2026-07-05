@@ -21,7 +21,7 @@ func TestMetricsCollectorUsesFixedEndpointAcceleratorLabels(t *testing.T) {
 				"cluster_type":      "kubernetes",
 				"endpoint":          "chat",
 				"instance_id":       "chat-abc",
-				"replica_id":        "replica-a",
+				"replica":           "replica-a",
 				"node":              "node-a",
 				"accelerator_type":  "nvidia_gpu",
 				"accelerator_uuid":  "GPU-abc",
@@ -38,12 +38,16 @@ func TestMetricsCollectorUsesFixedEndpointAcceleratorLabels(t *testing.T) {
 		},
 	})
 
-	require.Contains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{accelerator_index="unknown",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",neutree_cluster="k8s-a",node="node-a",product="A100",replica_id="replica-a",vdevice_index="0",workspace="default"} 0.75`)
+	require.Contains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{accelerator_index="unknown",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",node="node-a",product="A100",replica="replica-a",vdevice_index="0"} 0.75`)
 	require.NotContains(t, output, `container=`)
 	require.NotContains(t, output, `container_id=`)
 	require.NotContains(t, output, `gpu_uuid=`)
 	require.NotContains(t, output, `source=`)
 	require.NotContains(t, output, `node_ip=`)
+	require.NotContains(t, output, `workspace=`)
+	require.NotContains(t, output, `neutree_cluster=`)
+	require.NotContains(t, output, `static_node_cluster=`)
+	require.NotContains(t, output, `replica_id=`)
 	require.NotContains(t, output, `unexpected_vendor=`)
 }
 
@@ -57,7 +61,7 @@ func TestMetricsCollectorDropsEndpointAcceleratorSamplesWithoutUUID(t *testing.T
 				"cluster_type":     "kubernetes",
 				"endpoint":         "chat",
 				"instance_id":      "chat-abc",
-				"replica_id":       "replica-a",
+				"replica":          "replica-a",
 				"node":             "node-a",
 				"accelerator_type": "nvidia_gpu",
 				"product":          "A100",

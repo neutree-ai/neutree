@@ -6,7 +6,10 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-const SourceNodeAgent = "neutree-node-agent"
+const (
+	SourceNodeAgent     = "neutree-node-agent"
+	WorkloadRoleBackend = "backend"
+)
 
 type CanonicalLabels struct {
 	Workspace         string
@@ -57,7 +60,7 @@ type EndpointReplicaRuntimeUsage struct {
 	InstanceID            string
 	ReplicaID             string
 	NodeID                string
-	Deployment            string
+	WorkloadRole          string
 	Container             string
 	ContainerID           string
 	Engine                string

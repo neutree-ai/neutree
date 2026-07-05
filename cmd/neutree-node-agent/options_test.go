@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
@@ -18,16 +19,29 @@ import (
 func TestOptionsConfigDefaults(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = clusterTypeRay
-	opts.acceleratorExporterURLs = []string{"http://127.0.0.1:9400/metrics"}
 
 	config, err := opts.config()
 
 	assert.NoError(t, err)
 	assert.Equal(t, ":9101", config.ListenAddress)
-	assert.Equal(t, "http://127.0.0.1:9100/metrics", config.NodeExporterURL)
-	assert.Equal(t, []string{"http://127.0.0.1:9400/metrics"}, config.AcceleratorExporterURLs)
+	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
+		MetricsMode: neutreemetrics.MetricsModeManaged,
+	}, config.ScrapeTargetProvider)
 	assert.Equal(t, model.CanonicalLabels{ClusterType: clusterTypeRay}, config.Labels)
 	assert.Nil(t, config.KubernetesWriter)
+}
+
+func TestOptionsConfigUsesExternalMetricsMode(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+	opts.metricsMode = neutreemetrics.MetricsModeExternal
+
+	config, err := opts.config()
+
+	require.NoError(t, err)
+	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
+		MetricsMode: neutreemetrics.MetricsModeExternal,
+	}, config.ScrapeTargetProvider)
 }
 
 func TestOptionsConfigRequiresNodeForKubernetes(t *testing.T) {

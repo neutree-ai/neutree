@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -26,15 +28,13 @@ const (
 )
 
 type Config struct {
-	ListenAddress   string
-	Labels          model.CanonicalLabels
-	NodeExporterURL string
+	ListenAddress        string
+	Labels               model.CanonicalLabels
+	ScrapeTargetProvider ScrapeTargetProvider
 	// TODO: Introduce accelerator exporter adapters here. The first built-in
 	// adapter is NVIDIA DCGM-compatible metrics; future external adapters should
 	// map vendor exporter output into Neutree's canonical accelerator samples
 	// before normalizing to neutree_* metrics and device snapshots.
-	AcceleratorExporterURL   string
-	AcceleratorExporterURLs  []string
 	DeviceSnapshotProvider   model.DeviceSnapshotProvider
 	AllocationProvider       allocation.Provider
 	RuntimeUsageProvider     runtimeusage.Provider
@@ -169,7 +169,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) normalizeRequest(ctx context.Context) metricsnormalizer.NormalizeRequest {
 	normalizeReq := metricsnormalizer.NormalizeRequest{
 		Labels:                       s.config.Labels,
-		NodeExporter:                 s.scrape(ctx, metricsnormalizer.TargetNodeExporter, s.config.NodeExporterURL),
+		NodeExporter:                 s.scrapeFirstTarget(ctx, metricsnormalizer.TargetNodeExporter),
 		EndpointReplicaRuntimeUsages: s.endpointReplicaRuntimeUsages(ctx),
 		EndpointReplicaGPUUsages:     s.endpointReplicaGPUUsages(ctx),
 	}
@@ -372,22 +372,39 @@ func (s *Server) allocationTimeout() time.Duration {
 }
 
 func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *model.ScrapeResult {
-	urls := append([]string{}, s.config.AcceleratorExporterURLs...)
-	if s.config.AcceleratorExporterURL != "" {
-		urls = append(urls, s.config.AcceleratorExporterURL)
-	}
-
-	if len(urls) == 0 {
+	if s.config.ScrapeTargetProvider == nil {
 		return nil
 	}
+
+	targets, err := s.scrapeTargets(ctx, metricsnormalizer.TargetAcceleratorExporter)
+	if err != nil {
+		klog.V(2).InfoS("Failed to discover scrape targets", "target", metricsnormalizer.TargetAcceleratorExporter, "error", err)
+		return &model.ScrapeResult{
+			Target: metricsnormalizer.TargetAcceleratorExporter,
+			Error:  err.Error(),
+		}
+	}
+	if len(targets) == 0 {
+		klog.V(2).InfoS("No scrape targets discovered", "target", metricsnormalizer.TargetAcceleratorExporter)
+		return &model.ScrapeResult{Target: metricsnormalizer.TargetAcceleratorExporter}
+	}
+	klog.V(2).InfoS("Discovered scrape targets", "target", metricsnormalizer.TargetAcceleratorExporter, "count", len(targets))
 
 	var body strings.Builder
 	errors := make([]string, 0)
 	succeeded := 0
+	successfulFallbacks := map[string]struct{}{}
 
-	for _, url := range urls {
-		result := s.scrape(ctx, metricsnormalizer.TargetAcceleratorExporter, url)
+	for _, target := range targets {
+		fallbackKey := scrapeTargetFallbackKey(target.URL)
+		if _, ok := successfulFallbacks[fallbackKey]; ok && isHTTPSURL(target.URL) {
+			klog.V(2).InfoS("Skipping HTTPS scrape fallback after successful HTTP scrape", "target", metricsnormalizer.TargetAcceleratorExporter, "url", target.URL)
+			continue
+		}
+
+		result := s.scrape(ctx, metricsnormalizer.TargetAcceleratorExporter, target.URL)
 		if !result.Up {
+			klog.V(2).InfoS("Scrape target failed", "target", metricsnormalizer.TargetAcceleratorExporter, "url", target.URL, "error", result.Error)
 			if result.Error != "" {
 				errors = append(errors, result.Error)
 			}
@@ -395,7 +412,9 @@ func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *model.ScrapeRe
 			continue
 		}
 
+		klog.V(2).InfoS("Scrape target succeeded", "target", metricsnormalizer.TargetAcceleratorExporter, "url", target.URL, "body_bytes", len(result.Body))
 		succeeded++
+		successfulFallbacks[fallbackKey] = struct{}{}
 		body.WriteString(result.Body)
 
 		if !strings.HasSuffix(result.Body, "\n") {
@@ -403,12 +422,66 @@ func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *model.ScrapeRe
 		}
 	}
 
-	return &model.ScrapeResult{
+	result := &model.ScrapeResult{
 		Target: metricsnormalizer.TargetAcceleratorExporter,
 		Up:     succeeded > 0,
 		Body:   body.String(),
 		Error:  strings.Join(errors, "; "),
 	}
+	klog.V(2).InfoS("Scraped accelerator exporters", "target", metricsnormalizer.TargetAcceleratorExporter, "discovered", len(targets), "succeeded", succeeded)
+
+	return result
+}
+
+func (s *Server) scrapeFirstTarget(ctx context.Context, targetType string) model.ScrapeResult {
+	targets, err := s.scrapeTargets(ctx, targetType)
+	if err != nil {
+		klog.V(2).InfoS("Failed to discover scrape targets", "target", targetType, "error", err)
+		return model.ScrapeResult{Target: targetType, Error: err.Error()}
+	}
+	if len(targets) == 0 {
+		klog.V(2).InfoS("No scrape targets discovered", "target", targetType)
+		return model.ScrapeResult{Target: targetType}
+	}
+	klog.V(2).InfoS("Discovered scrape targets", "target", targetType, "count", len(targets))
+
+	errors := make([]string, 0)
+	for _, target := range targets {
+		result := s.scrape(ctx, targetType, target.URL)
+		if result.Up {
+			klog.V(2).InfoS("Scrape target succeeded", "target", targetType, "url", target.URL, "body_bytes", len(result.Body))
+			return result
+		}
+		klog.V(2).InfoS("Scrape target failed", "target", targetType, "url", target.URL, "error", result.Error)
+		if result.Error != "" {
+			errors = append(errors, result.Error)
+		}
+	}
+
+	return model.ScrapeResult{Target: targetType, Error: strings.Join(errors, "; ")}
+}
+
+func (s *Server) scrapeTargets(ctx context.Context, targetType string) ([]ScrapeTarget, error) {
+	provider := s.config.ScrapeTargetProvider
+	if provider == nil {
+		return nil, nil
+	}
+
+	return provider.Targets(ctx, targetType)
+}
+
+func scrapeTargetFallbackKey(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	return parsed.Host + parsed.EscapedPath()
+}
+
+func isHTTPSURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	return err == nil && parsed.Scheme == "https"
 }
 
 func (s *Server) scrape(ctx context.Context, target string, url string) model.ScrapeResult {

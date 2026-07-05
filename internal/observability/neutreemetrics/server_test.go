@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,10 +49,12 @@ DCGM_FI_CUDA_DRIVER_VERSION{gpu="0",UUID="GPU-abc",modelName="A100"} 12020
 			Node:           "node-a",
 			NodeIP:         "10.0.0.10",
 		},
-		NodeExporterURL:        nodeExporter.URL + "/metrics",
-		AcceleratorExporterURL: acceleratorExporter.URL + "/metrics",
-		HTTPClient:             nodeExporter.Client(),
-		GPUHardwareProvider:    emptyGPUHardwareProvider,
+		ScrapeTargetProvider: testTargetProvider(
+			nodeExporter.URL+"/metrics",
+			acceleratorExporter.URL+"/metrics",
+		),
+		HTTPClient:          nodeExporter.Client(),
+		GPUHardwareProvider: emptyGPUHardwareProvider,
 	})
 	require.NoError(t, err)
 
@@ -68,15 +72,15 @@ DCGM_FI_CUDA_DRIVER_VERSION{gpu="0",UUID="GPU-abc",modelName="A100"} 12020
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
-	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",static_node_cluster="unknown",target="node-exporter",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",target="node-exporter"} 1`)
 	assert.Contains(t, body, `# HELP neutree_accelerator_utilization_ratio Neutree node-agent metric neutree_accelerator_utilization_ratio.`)
 	assert.Contains(t, body, `# TYPE neutree_accelerator_utilization_ratio gauge`)
-	assert.Contains(t, body, `neutree_node_ready{cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",static_node_cluster="unknown",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_node_ready{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent"} 1`)
 	assert.Contains(t, body, `# TYPE neutree_node_memory_used_bytes gauge`)
-	assert.Contains(t, body, `neutree_node_memory_used_bytes{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="node-exporter",static_node_cluster="unknown",workspace="default"}`)
-	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",product="A100",workspace="default"} 0.87`)
-	assert.Contains(t, body, `neutree_node_accelerator_hardware_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",memory_total_bytes="85899345920",neutree_cluster="k8s-a",node="node-a",numa_node="unknown",pcie_bus_id="unknown",pcie_generation="unknown",pcie_width="unknown",product="A100",workspace="default"} 1`)
-	assert.Contains(t, body, `neutree_node_accelerator_nvidia_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",architecture="unknown",cluster_type="kubernetes",cuda_capability="unknown",cuda_driver_version="12.2",driver_version="535.104.05",neutree_cluster="k8s-a",node="node-a",nvlink="unknown",nvswitch="unknown",product="A100",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_node_memory_used_bytes{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="node-exporter"}`)
+	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",node="node-a",product="A100"} 0.87`)
+	assert.Contains(t, body, `neutree_node_accelerator_hardware_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",memory_total_bytes="85899345920",node="node-a",numa_node="unknown",pcie_bus_id="unknown",pcie_generation="unknown",pcie_width="unknown",product="A100"} 1`)
+	assert.Contains(t, body, `neutree_node_accelerator_nvidia_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",architecture="unknown",cluster_type="kubernetes",cuda_capability="unknown",cuda_driver_version="12.2",driver_version="535.104.05",node="node-a",nvlink="unknown",nvswitch="unknown",product="A100"} 1`)
 }
 
 func TestServerMetricsIncludesDiscoveredEndpointAllocations(t *testing.T) {
@@ -104,10 +108,12 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 			NodeIP:            "10.0.0.10",
 			NodeRole:          "head",
 		},
-		NodeExporterURL:        nodeExporter.URL + "/metrics",
-		AcceleratorExporterURL: acceleratorExporter.URL + "/metrics",
-		HTTPClient:             nodeExporter.Client(),
-		GPUHardwareProvider:    emptyGPUHardwareProvider,
+		ScrapeTargetProvider: testTargetProvider(
+			nodeExporter.URL+"/metrics",
+			acceleratorExporter.URL+"/metrics",
+		),
+		HTTPClient:          nodeExporter.Client(),
+		GPUHardwareProvider: emptyGPUHardwareProvider,
 		AllocationProvider: allocation.ProviderFunc(func(_ context.Context, snapshot *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 			require.Len(t, snapshot.Accelerator.Devices, 1)
 			assert.Equal(t, "GPU-abc", snapshot.Accelerator.Devices[0].UUID)
@@ -144,10 +150,10 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
-	assert.Contains(t, body, `neutree_node_accelerator_total{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",product="A100",workspace="default"} 1`)
-	assert.Contains(t, body, `neutree_node_accelerator_allocated{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",product="A100",workspace="default"} 1`)
-	assert.Contains(t, body, `neutree_node_accelerator_free{accelerator_type="nvidia_gpu",cluster_type="ray",neutree_cluster="static-a",node="head-0",product="A100",workspace="default"} 0`)
-	allocationLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="actor-a",neutree_cluster="static-a",node="head-0",product="NVIDIA_A100",replica_id="replica-a",vdevice_index="0",workspace="default"`
+	assert.Contains(t, body, `neutree_node_accelerator_total{accelerator_type="nvidia_gpu",cluster_type="ray",node="head-0",product="A100"} 1`)
+	assert.Contains(t, body, `neutree_node_accelerator_allocated{accelerator_type="nvidia_gpu",cluster_type="ray",node="head-0",product="A100"} 1`)
+	assert.Contains(t, body, `neutree_node_accelerator_free{accelerator_type="nvidia_gpu",cluster_type="ray",node="head-0",product="A100"} 0`)
+	allocationLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="actor-a",node="head-0",product="NVIDIA_A100",replica="replica-a",vdevice_index="0"`
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_allocation{`+allocationLabels+`} 1`)
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+allocationLabels+`}`)
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+allocationLabels+`}`)
@@ -175,8 +181,8 @@ node_memory_MemAvailable_bytes 6442450944
 			NodeIP:            "10.0.0.10",
 			NodeRole:          "head",
 		},
-		NodeExporterURL: nodeExporter.URL + "/metrics",
-		HTTPClient:      nodeExporter.Client(),
+		ScrapeTargetProvider: testTargetProvider(nodeExporter.URL + "/metrics"),
+		HTTPClient:           nodeExporter.Client(),
 		RuntimeUsageProvider: runtimeusage.ProviderFunc(func(_ context.Context) ([]model.EndpointReplicaRuntimeUsage, error) {
 			return []model.EndpointReplicaRuntimeUsage{
 				{
@@ -186,7 +192,7 @@ node_memory_MemAvailable_bytes 6442450944
 					InstanceID:            "actor-a",
 					ReplicaID:             "replica-a",
 					NodeID:                "head-0",
-					Deployment:            "Backend",
+					WorkloadRole:          model.WorkloadRoleBackend,
 					Container:             "engine",
 					ContainerID:           "docker-abc",
 					CPUUsageSeconds:       12.5,
@@ -206,10 +212,10 @@ node_memory_MemAvailable_bytes 6442450944
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
-	runtimeLabels := `cluster_type="ray",container="engine",container_id="docker-abc",deployment="Backend",` +
-		`endpoint="chat",engine="unknown",engine_version="unknown",instance_id="actor-a",neutree_cluster="static-a",` +
+	runtimeLabels := `cluster_type="ray",container="engine",container_id="docker-abc",` +
+		`endpoint="chat",engine="unknown",engine_version="unknown",instance_id="actor-a",` +
 		`node="head-0",node_ip="10.0.0.10",node_role="head",replica="replica-a",` +
-		`replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"`
+		`source="neutree-node-agent",workload_role="backend"`
 	assert.Contains(t, body, `neutree_endpoint_replica_cpu_usage_seconds_total{`+runtimeLabels+`} 12.5`)
 	assert.Contains(t, body, `neutree_endpoint_replica_memory_working_set_bytes{`+runtimeLabels+`} 512`)
 }
@@ -233,8 +239,8 @@ node_memory_MemAvailable_bytes 6442450944
 			Node:           "node-a",
 			NodeIP:         "10.0.0.10",
 		},
-		NodeExporterURL: nodeExporter.URL + "/metrics",
-		HTTPClient:      nodeExporter.Client(),
+		ScrapeTargetProvider: testTargetProvider(nodeExporter.URL + "/metrics"),
+		HTTPClient:           nodeExporter.Client(),
 		EndpointGPUUsageProvider: fakeEndpointGPUUsageProvider{
 			usages: []model.EndpointReplicaGPUUsage{
 				{
@@ -266,8 +272,8 @@ node_memory_MemAvailable_bytes 6442450944
 
 	body := readResponseBody(t, metricsResp)
 	commonLabels := `accelerator_index="unknown",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
-		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",neutree_cluster="k8s-a",` +
-		`node="node-a",product="NVIDIA_A100",replica_id="chat-abc",vdevice_index="0",workspace="default"`
+		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
+		`node="node-a",product="NVIDIA_A100",replica="chat-abc",vdevice_index="0"`
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_allocation{`+commonLabels+`} 1`)
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+commonLabels+`}`)
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+commonLabels+`}`)
@@ -298,11 +304,13 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 			Node:           "node-a",
 			NodeIP:         "10.0.0.10",
 		},
-		NodeExporterURL:        nodeExporter.URL + "/metrics",
-		AcceleratorExporterURL: acceleratorExporter.URL + "/metrics",
-		HTTPClient:             nodeExporter.Client(),
-		AllocationTimeout:      10 * time.Millisecond,
-		GPUHardwareProvider:    emptyGPUHardwareProvider,
+		ScrapeTargetProvider: testTargetProvider(
+			nodeExporter.URL+"/metrics",
+			acceleratorExporter.URL+"/metrics",
+		),
+		HTTPClient:          nodeExporter.Client(),
+		AllocationTimeout:   10 * time.Millisecond,
+		GPUHardwareProvider: emptyGPUHardwareProvider,
 		AllocationProvider: allocation.ProviderFunc(func(ctx context.Context, _ *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 			select {
 			case <-ctx.Done():
@@ -336,7 +344,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Less(t, time.Since(start), 80*time.Millisecond)
 
 	body := readResponseBody(t, metricsResp)
-	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",product="A100",workspace="default"} 0.87`)
+	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",node="node-a",product="A100"} 0.87`)
 	assert.NotContains(t, body, "neutree_endpoint_replica_accelerator_allocation")
 }
 
@@ -361,9 +369,9 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 			Node:           "node-a",
 			NodeIP:         "10.0.0.10",
 		},
-		AcceleratorExporterURLs: []string{goodExporter.URL, badExporter.URL},
-		HTTPClient:              goodExporter.Client(),
-		GPUHardwareProvider:     emptyGPUHardwareProvider,
+		ScrapeTargetProvider: testTargetProvider("", goodExporter.URL, badExporter.URL),
+		HTTPClient:           goodExporter.Client(),
+		GPUHardwareProvider:  emptyGPUHardwareProvider,
 	})
 	require.NoError(t, err)
 
@@ -376,8 +384,130 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
-	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",static_node_cluster="unknown",target="accelerator-exporter",workspace="default"} 1`)
-	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",product="A100",workspace="default"} 0.87`)
+	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",target="accelerator-exporter"} 1`)
+	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",node="node-a",product="A100"} 0.87`)
+}
+
+func TestServerSkipsAcceleratorHTTPSFallbackWhenHTTPAlreadySucceeded(t *testing.T) {
+	httpsRequests := 0
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Scheme == "https" {
+				httpsRequests++
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`DCGM_FI_DEV_GPU_UTIL{gpu="1",UUID="GPU-def",modelName="A100"} 50`)),
+					Header:     http.Header{},
+					Request:    req,
+				}, nil
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87`)),
+				Header:     http.Header{},
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	server, err := NewServer(Config{
+		Labels: model.CanonicalLabels{
+			ClusterType: "kubernetes",
+			Node:        "node-a",
+			NodeIP:      "10.0.0.10",
+		},
+		ScrapeTargetProvider: staticTestTargetProvider{
+			metricsnormalizer.TargetAcceleratorExporter: {
+				{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "http://exporter.local:9400/metrics"},
+				{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "https://exporter.local:9400/metrics"},
+			},
+		},
+		HTTPClient:          client,
+		GPUHardwareProvider: emptyGPUHardwareProvider,
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+
+	body := readResponseBody(t, metricsResp)
+	assert.Equal(t, 0, httpsRequests)
+	assert.Contains(t, body, `accelerator_uuid="GPU-abc"`)
+	assert.NotContains(t, body, `accelerator_uuid="GPU-def"`)
+}
+
+func TestServerUsesNextNodeExporterTargetWhenFirstFails(t *testing.T) {
+	badExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+	}))
+	t.Cleanup(badExporter.Close)
+
+	goodExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184
+node_memory_MemAvailable_bytes 6442450944
+`))
+	}))
+	t.Cleanup(goodExporter.Close)
+
+	server, err := NewServer(Config{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		ScrapeTargetProvider: staticTestTargetProvider{
+			metricsnormalizer.TargetNodeExporter: {
+				{TargetType: metricsnormalizer.TargetNodeExporter, URL: badExporter.URL},
+				{TargetType: metricsnormalizer.TargetNodeExporter, URL: goodExporter.URL},
+			},
+		},
+		HTTPClient: goodExporter.Client(),
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
+
+	body := readResponseBody(t, metricsResp)
+	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",target="node-exporter"} 1`)
+	assert.Contains(t, body, `neutree_node_memory_used_bytes{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="node-exporter"}`)
+}
+
+func TestServerReportsAcceleratorScrapeDownWhenProviderFindsNoTargets(t *testing.T) {
+	server, err := NewServer(Config{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		ScrapeTargetProvider: staticTestTargetProvider{},
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
+
+	body := readResponseBody(t, metricsResp)
+	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",target="accelerator-exporter"} 0`)
 }
 
 func TestServerNodeDeviceSnapshotDoesNotBlockOnSlowAllocationProvider(t *testing.T) {
@@ -431,8 +561,8 @@ func TestServerNodeDeviceSnapshotSetsMinorNumberFromHardwareInfo(t *testing.T) {
 	t.Cleanup(acceleratorExporter.Close)
 
 	server, err := NewServer(Config{
-		AcceleratorExporterURL: acceleratorExporter.URL,
-		HTTPClient:             acceleratorExporter.Client(),
+		ScrapeTargetProvider: testTargetProvider("", acceleratorExporter.URL),
+		HTTPClient:           acceleratorExporter.Client(),
 		GPUHardwareProvider: hardware.GPUHardwareInfoProviderFunc(func(context.Context) ([]model.GPUHardwareInfo, error) {
 			return []model.GPUHardwareInfo{{UUID: "GPU-abc", MinorNumber: "3"}}, nil
 		}),
@@ -496,4 +626,36 @@ type fakeEndpointGPUUsageProvider struct {
 
 func (p fakeEndpointGPUUsageProvider) Usages(context.Context) ([]model.EndpointReplicaGPUUsage, error) {
 	return p.usages, p.err
+}
+
+type staticTestTargetProvider map[string][]ScrapeTarget
+
+func (p staticTestTargetProvider) Targets(_ context.Context, targetType string) ([]ScrapeTarget, error) {
+	return p[targetType], nil
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func testTargetProvider(nodeURL string, acceleratorURLs ...string) staticTestTargetProvider {
+	provider := staticTestTargetProvider{}
+	if nodeURL != "" {
+		provider[metricsnormalizer.TargetNodeExporter] = []ScrapeTarget{
+			{TargetType: metricsnormalizer.TargetNodeExporter, URL: nodeURL},
+		}
+	}
+	for _, acceleratorURL := range acceleratorURLs {
+		if acceleratorURL == "" {
+			continue
+		}
+		provider[metricsnormalizer.TargetAcceleratorExporter] = append(
+			provider[metricsnormalizer.TargetAcceleratorExporter],
+			ScrapeTarget{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: acceleratorURL},
+		)
+	}
+
+	return provider
 }

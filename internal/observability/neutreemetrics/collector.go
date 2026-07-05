@@ -9,8 +9,6 @@ const missingLabelValue = "unknown"
 
 var (
 	baseNodeLabelNames = []string{
-		"workspace",
-		"static_node_cluster",
 		"cluster_type",
 		"node",
 		"node_ip",
@@ -18,8 +16,6 @@ var (
 		"source",
 	}
 	physicalAcceleratorLabelNames = []string{
-		"workspace",
-		"neutree_cluster",
 		"cluster_type",
 		"node",
 		"accelerator_type",
@@ -28,20 +24,16 @@ var (
 		"product",
 	}
 	nodeAcceleratorProductLabelNames = []string{
-		"workspace",
-		"neutree_cluster",
 		"cluster_type",
 		"node",
 		"accelerator_type",
 		"product",
 	}
 	endpointAcceleratorLabelNames = []string{
-		"workspace",
-		"neutree_cluster",
 		"cluster_type",
 		"endpoint",
 		"instance_id",
-		"replica_id",
+		"replica",
 		"node",
 		"accelerator_type",
 		"accelerator_uuid",
@@ -50,19 +42,15 @@ var (
 		"product",
 	}
 	endpointRuntimeLabelNames = []string{
-		"workspace",
-		"static_node_cluster",
 		"cluster_type",
 		"node",
 		"node_ip",
 		"node_role",
 		"source",
-		"neutree_cluster",
 		"endpoint",
 		"instance_id",
-		"replica_id",
 		"replica",
-		"deployment",
+		"workload_role",
 		"container",
 		"container_id",
 		"engine",
@@ -157,7 +145,7 @@ func hasRequiredLabels(labels map[string]string, keys []string) bool {
 
 func newMetricDescriptors() []*metricDescriptor {
 	descriptors := []*metricDescriptor{
-		newMetricDescriptor("neutree_node_ready", appendLabels(baseNodeLabelNames, "neutree_cluster"), prometheus.GaugeValue, nil),
+		newMetricDescriptor("neutree_node_ready", baseNodeLabelNames, prometheus.GaugeValue, nil),
 		newMetricDescriptor("neutree_metrics_scrape_up", appendLabels(baseNodeLabelNames, "target"), prometheus.GaugeValue, nil),
 		newMetricDescriptor("neutree_node_cpu_seconds_total", appendLabels(baseNodeLabelNames, "cpu", "mode"), prometheus.CounterValue, nil),
 		newMetricDescriptor("neutree_node_memory_total_bytes", baseNodeLabelNames, prometheus.GaugeValue, nil),

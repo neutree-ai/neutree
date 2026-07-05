@@ -9,7 +9,8 @@ import (
 )
 
 func TestFromAcceleratorMetricsSetsMinorNumberFromGPUIndex(t *testing.T) {
-	snapshot := FromAcceleratorMetrics(`DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87`)
+	snapshot := FromAcceleratorMetrics(`# TYPE DCGM_FI_DEV_GPU_UTIL gauge
+DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87`)
 
 	require.NotNil(t, snapshot)
 	require.Len(t, snapshot.Accelerator.Devices, 1)
@@ -17,7 +18,8 @@ func TestFromAcceleratorMetricsSetsMinorNumberFromGPUIndex(t *testing.T) {
 }
 
 func TestFromAcceleratorMetricsRequiresGPUUtilWithUUIDForDevice(t *testing.T) {
-	snapshot := FromAcceleratorMetrics(`DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`)
+	snapshot := FromAcceleratorMetrics(`# TYPE DCGM_FI_DEV_FB_TOTAL gauge
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`)
 
 	require.NotNil(t, snapshot)
 	assert.Equal(t, v1.StaticNodeAcceleratorTypeCPU, snapshot.Accelerator.Type)
@@ -25,7 +27,9 @@ func TestFromAcceleratorMetricsRequiresGPUUtilWithUUIDForDevice(t *testing.T) {
 }
 
 func TestFromAcceleratorMetricsUsesGPUUtilGateAndEnrichesFromOtherMetrics(t *testing.T) {
-	snapshot := FromAcceleratorMetrics(`DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 0
+	snapshot := FromAcceleratorMetrics(`# TYPE DCGM_FI_DEV_GPU_UTIL gauge
+DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 0
+# TYPE DCGM_FI_DEV_FB_TOTAL gauge
 DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`)
 
 	require.NotNil(t, snapshot)
@@ -39,7 +43,8 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`)
 }
 
 func TestFromAcceleratorMetricsUsesUnknownMinorNumberWhenMissing(t *testing.T) {
-	snapshot := FromAcceleratorMetrics(`DCGM_FI_DEV_GPU_UTIL{UUID="GPU-abc",modelName="A100"} 87`)
+	snapshot := FromAcceleratorMetrics(`# TYPE DCGM_FI_DEV_GPU_UTIL gauge
+DCGM_FI_DEV_GPU_UTIL{UUID="GPU-abc",modelName="A100"} 87`)
 
 	require.NotNil(t, snapshot)
 	require.Len(t, snapshot.Accelerator.Devices, 1)

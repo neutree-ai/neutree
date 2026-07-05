@@ -66,6 +66,7 @@ func assertK8sMetricsResources(
 	))
 	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--listen-address=:19101"))
 	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--cluster-type=kubernetes"))
+	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--metrics-mode=managed"))
 	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--node=$(NODE_NAME)"))
 	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--node-ip=$(NODE_IP)"))
 	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--kubelet-pod-resources-socket=/var/lib/kubelet/pod-resources/kubelet.sock"))
@@ -141,8 +142,9 @@ func assertK8sExternalAcceleratorExporterResources(
 
 		nodeAgent := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-agent")
 		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers).NotTo(BeEmpty())
-		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers[0].Args).To(ContainElement(
-			"--accelerator-exporter-url=http://127.0.0.1:9400/metrics",
+		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--metrics-mode=external"))
+		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers[0].Args).NotTo(ContainElement(
+			ContainSubstring("--accelerator-exporter-url="),
 		))
 	} else {
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-exporter")

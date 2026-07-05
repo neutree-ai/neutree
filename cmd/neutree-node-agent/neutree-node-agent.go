@@ -38,6 +38,9 @@ func main() {
 	}
 
 	klog.InitFlags(nil)
+	if err := flag.Set("v", "2"); err != nil {
+		klog.Fatalf("Failed to set default log verbosity: %v", err)
+	}
 	defer klog.Flush()
 
 	opts := newOptions()
@@ -49,6 +52,14 @@ func main() {
 	if err != nil {
 		klog.Fatalf("Failed to build neutree-node-agent config: %v", err)
 	}
+	klog.V(2).InfoS(
+		"Built neutree-node-agent config",
+		"listen_address", opts.listenAddress,
+		"cluster_type", opts.clusterType,
+		"metrics_mode", opts.metricsMode,
+		"node", opts.node,
+		"node_ip", opts.nodeIP,
+	)
 
 	server, err := neutreemetrics.NewServer(config)
 	if err != nil {
@@ -66,10 +77,9 @@ func main() {
 type options struct {
 	listenAddress           string
 	clusterType             string
+	metricsMode             string
 	node                    string
 	nodeIP                  string
-	nodeExporterURL         string
-	acceleratorExporterURLs []string
 	kubeletPodResourcesSock string
 	rayDashboardURL         string
 	procFSRoot              string
@@ -78,22 +88,20 @@ type options struct {
 
 func newOptions() *options {
 	return &options{
-		listenAddress:   ":9101",
-		clusterType:     clusterTypeKubernetes,
-		nodeExporterURL: "http://127.0.0.1:9100/metrics",
-		procFSRoot:      "/proc",
-		cgroupFSRoot:    "/sys/fs/cgroup",
+		listenAddress: ":9101",
+		clusterType:   clusterTypeKubernetes,
+		metricsMode:   neutreemetrics.MetricsModeManaged,
+		procFSRoot:    "/proc",
+		cgroupFSRoot:  "/sys/fs/cgroup",
 	}
 }
 
 func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.listenAddress, "listen-address", o.listenAddress, "HTTP listen address")
 	fs.StringVar(&o.clusterType, "cluster-type", o.clusterType, "Cluster type used to select allocation and runtime providers")
+	fs.StringVar(&o.metricsMode, "metrics-mode", o.metricsMode, "Metrics exporter mode: managed or external")
 	fs.StringVar(&o.node, "node", o.node, "Local node name used by Kubernetes and Ray providers")
 	fs.StringVar(&o.nodeIP, "node-ip", o.nodeIP, "Local node IP used to match the Ray Dashboard node")
-	fs.StringVar(&o.nodeExporterURL, "node-exporter-url", o.nodeExporterURL, "Node exporter metrics URL")
-	fs.StringArrayVar(&o.acceleratorExporterURLs, "accelerator-exporter-url", nil,
-		"Accelerator exporter metrics URL; can be specified multiple times")
 	fs.StringVar(&o.kubeletPodResourcesSock, "kubelet-pod-resources-socket",
 		metricskubernetes.DefaultKubeletPodResourcesSocket,
 		"Kubelet pod resources socket path used to discover Kubernetes accelerator allocations")
@@ -107,10 +115,8 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 
 func (o *options) config() (neutreemetrics.Config, error) {
 	config := neutreemetrics.Config{
-		ListenAddress:           o.listenAddress,
-		Labels:                  o.labels(),
-		NodeExporterURL:         o.nodeExporterURL,
-		AcceleratorExporterURLs: o.acceleratorExporterURLs,
+		ListenAddress: o.listenAddress,
+		Labels:        o.labels(),
 	}
 
 	writer, err := o.kubernetesWriter()
@@ -119,6 +125,7 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	}
 
 	config.KubernetesWriter = writer
+	config.ScrapeTargetProvider = o.scrapeTargetProvider(writer)
 	config.AllocationProvider = o.allocationProvider(writer)
 	config.EndpointGPUUsageProvider = o.endpointGPUUsageProvider(writer)
 	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
@@ -128,6 +135,29 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	config.RuntimeUsageProvider = runtimeUsageProvider
 
 	return config, nil
+}
+
+func (o *options) scrapeTargetProvider(
+	writer *metricskubernetes.AnnotationWriter,
+) neutreemetrics.ScrapeTargetProvider {
+	switch o.clusterType {
+	case clusterTypeKubernetes:
+		if writer == nil {
+			return nil
+		}
+
+		return neutreemetrics.KubernetesScrapeTargetProvider{
+			Client:      writer.Client,
+			MetricsMode: o.metricsMode,
+			NodeName:    writer.NodeName,
+		}
+	case clusterTypeRay:
+		return neutreemetrics.StaticScrapeTargetProvider{
+			MetricsMode: o.metricsMode,
+		}
+	default:
+		return nil
+	}
 }
 
 func (o *options) labels() model.CanonicalLabels {

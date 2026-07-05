@@ -396,14 +396,15 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
 	assert.Assert(t, strings.Contains(args, "--listen-address=:19101"))
 	assert.Assert(t, strings.Contains(args, "--cluster-type=kubernetes"))
+	assert.Assert(t, strings.Contains(args, "--metrics-mode=managed"))
 	assert.Assert(t, strings.Contains(args, "--node=$(NODE_NAME)"))
 	assert.Assert(t, strings.Contains(args, "--node-ip=$(NODE_IP)"))
-	assert.Assert(t, strings.Contains(args, "--node-exporter-url=http://127.0.0.1:19100/metrics"))
 	assert.Assert(t, strings.Contains(args, "--kubelet-pod-resources-socket=/var/lib/kubelet/pod-resources/kubelet.sock"))
 	assert.Assert(t, !strings.Contains(args, "--cluster=test-cluster"))
 	assert.Assert(t, !strings.Contains(args, "--workspace=test-workspace"))
 	assert.Assert(t, !strings.Contains(args, "--enable-kubernetes-annotation-writer"))
-	assert.Assert(t, !strings.Contains(args, "--node-exporter-url=http://127.0.0.1:9100/metrics"))
+	assert.Assert(t, !strings.Contains(args, "--node-exporter-url"))
+	assert.Assert(t, !strings.Contains(args, "--accelerator-exporter-url"))
 
 	requireVolumeMount(t, nodeAgent, "kubelet-pod-resources", "/var/lib/kubelet/pod-resources")
 
@@ -497,7 +498,9 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
-	assert.Assert(t, strings.Contains(args, "--accelerator-exporter-url=http://127.0.0.1:9400/metrics"))
+	assert.Assert(t, strings.Contains(args, "--metrics-mode=external"))
+	assert.Assert(t, !strings.Contains(args, "--node-exporter-url"))
+	assert.Assert(t, !strings.Contains(args, "--accelerator-exporter-url"))
 }
 
 func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) corev1.VolumeMount {
@@ -557,6 +560,8 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 
 	dcgm := findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
 	assert.Equal(t, "nvidia-gpu-dcgm-exporter", dcgm.Labels["app"])
+	assert.Equal(t, "accelerator-exporter", dcgm.Labels["neutree.ai/metrics-target"])
+	assert.Equal(t, "accelerator-exporter", dcgm.Spec.Template.Labels["neutree.ai/metrics-target"])
 	assert.Equal(t, "test-image-prefix/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 		dcgm.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, "test-image-pull-secret", dcgm.Spec.Template.Spec.ImagePullSecrets[0].Name)

@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -156,12 +157,18 @@ func TestRayServeRuntimeUsageProviderMapsReplicaToCGroupUsage(t *testing.T) {
 									{NodeID: "node-a", ActorID: "actor-a", ReplicaID: "replica-a"},
 								},
 							},
+							"Controller": {
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "controller-a", ReplicaID: "controller-a"},
+								},
+							},
 						},
 					},
 				},
 			},
 			actors: map[string]dashboard.Actor{
-				"actor-a": {ActorID: "actor-a", PID: 1234},
+				"actor-a":      {ActorID: "actor-a", PID: 1234},
+				"controller-a": {ActorID: "controller-a", PID: 5678},
 			},
 		},
 		Node:        "head-0",
@@ -178,7 +185,8 @@ func TestRayServeRuntimeUsageProviderMapsReplicaToCGroupUsage(t *testing.T) {
 	assert.Equal(t, "actor-a", usages[0].InstanceID)
 	assert.Equal(t, "replica-a", usages[0].ReplicaID)
 	assert.Equal(t, "head-0", usages[0].NodeID)
-	assert.Equal(t, "Backend", usages[0].Deployment)
+	assert.Equal(t, model.WorkloadRoleBackend, usages[0].WorkloadRole)
+	assert.Equal(t, "Backend", usages[0].Container)
 	assert.Equal(t, "docker-abc", usages[0].ContainerID)
 	assert.Equal(t, 12.5, usages[0].CPUUsageSeconds)
 	assert.Equal(t, 1024.0, *usages[0].MemoryUsageBytes)
@@ -294,6 +302,7 @@ container_memory_working_set_bytes{namespace="default",pod="chat-abc",container=
 	assert.Equal(t, "chat-abc", usages[0].InstanceID)
 	assert.Equal(t, "chat-abc", usages[0].ReplicaID)
 	assert.Equal(t, "node-a", usages[0].NodeID)
+	assert.Equal(t, model.WorkloadRoleBackend, usages[0].WorkloadRole)
 	assert.Equal(t, "vllm", usages[0].Container)
 	assert.Equal(t, "container-abc", usages[0].ContainerID)
 	assert.Equal(t, "vllm", usages[0].Engine)

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path"
 	"sort"
-	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -252,29 +251,6 @@ func exporterMetricsPath(metricsPath string) string {
 	}
 
 	return metricsPath
-}
-
-func acceleratorExporterLocalMetricsURLs(exporters []metricsAcceleratorExporter) []string {
-	urls := make([]string, 0, len(exporters))
-
-	for _, exporter := range exporters {
-		if !exporter.HostNetwork || exporter.Port <= 0 {
-			continue
-		}
-
-		metricsPath := exporterMetricsPath(exporter.MetricsPath)
-		if !strings.HasPrefix(metricsPath, "/") {
-			metricsPath = "/" + metricsPath
-		}
-
-		urls = append(urls, "http://127.0.0.1:"+strconv.Itoa(exporter.Port)+metricsPath)
-	}
-
-	return urls
-}
-
-func externalDCGMExporterLocalMetricsURL() string {
-	return "http://127.0.0.1:" + strconv.Itoa(externalDCGMExporterPort) + defaultMetricsPath
 }
 
 func buildExporterEnv(env map[string]string) []corev1.EnvVar {

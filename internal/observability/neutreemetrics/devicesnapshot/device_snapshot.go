@@ -29,17 +29,17 @@ func FromAcceleratorMetrics(raw string) *model.NodeDeviceSnapshot {
 }
 
 func acceleratorDevicesFromMetrics(raw string) []v1.StaticNodeAcceleratorDeviceStatus {
-	parsed := promtext.Parse(raw)
+	parsed := promtext.ParseVector(raw)
 	devicesByUUID := map[string]v1.StaticNodeAcceleratorDeviceStatus{}
 	discoveredUUIDs := map[string]struct{}{}
 
 	for _, metric := range parsed {
-		uuid := firstNonEmpty(metric.Labels["UUID"], metric.Labels["uuid"])
+		uuid := promtext.LabelValue(metric, "UUID", "uuid")
 		if uuid == "" {
 			continue
 		}
 
-		if metric.Name == "DCGM_FI_DEV_GPU_UTIL" {
+		if promtext.MetricName(metric) == "DCGM_FI_DEV_GPU_UTIL" {
 			discoveredUUIDs[uuid] = struct{}{}
 		}
 
@@ -50,20 +50,20 @@ func acceleratorDevicesFromMetrics(raw string) []v1.StaticNodeAcceleratorDeviceS
 		device.UUID = uuid
 		device.Healthy = true
 
-		if id := firstNonEmpty(metric.Labels["gpu"], metric.Labels["GPU_I_ID"]); id != "" {
+		if id := promtext.LabelValue(metric, "gpu", "GPU_I_ID"); id != "" {
 			device.ID = id
 			if minorNumber, err := strconv.Atoi(id); err == nil {
 				device.MinorNumber = minorNumber
 			}
 		}
 
-		if model := firstNonEmpty(metric.Labels["modelName"], metric.Labels["model"]); model != "" {
+		if model := promtext.LabelValue(metric, "modelName", "model"); model != "" {
 			device.ProductName = model
 			device.ProductModel = model
 		}
 
-		if metric.Name == "DCGM_FI_DEV_FB_TOTAL" && metric.Value > 0 {
-			device.MemoryMiB = int64(metric.Value)
+		if promtext.MetricName(metric) == "DCGM_FI_DEV_FB_TOTAL" && promtext.Value(metric) > 0 {
+			device.MemoryMiB = int64(promtext.Value(metric))
 		}
 
 		devicesByUUID[uuid] = device

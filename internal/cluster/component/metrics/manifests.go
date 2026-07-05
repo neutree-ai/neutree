@@ -335,13 +335,10 @@ spec:
         args:
         - --listen-address=:{{ .NeutreeNodeAgentMetricsPort }}
         - --cluster-type=kubernetes
+        - --metrics-mode={{ .MetricsMode }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
-        - --node-exporter-url=http://127.0.0.1:{{ .NodeExporterPort }}/metrics
         - --kubelet-pod-resources-socket={{ .KubeletPodResourcesSocket }}
-{{ range .NeutreeNodeAgentMetricsAcceleratorExporterURLs }}
-        - --accelerator-exporter-url={{ . }}
-{{ end }}
         env:
         - name: NODE_NAME
           valueFrom:
@@ -408,6 +405,7 @@ metadata:
   namespace: {{ $.Namespace }}
   labels:
     app: {{ .AppLabel }}
+    neutree.ai/metrics-target: accelerator-exporter
     neutree.ai/cluster-version: {{ $.ClusterVersion }}
 spec:
   selector:
@@ -419,6 +417,7 @@ spec:
     metadata:
       labels:
         app: {{ .AppLabel }}
+        neutree.ai/metrics-target: accelerator-exporter
         cluster: {{ $.ClusterName }}
         workspace: {{ $.Workspace }}
         neutree.ai/cluster-version: {{ $.ClusterVersion }}
@@ -532,35 +531,35 @@ spec:
 
 // MetricsManifestVariables holds the variables for rendering metrics manifests
 type MetricsManifestVariables struct {
-	ClusterName                                    string
-	Workspace                                      string
-	Namespace                                      string
-	ImagePrefix                                    string
-	ImagePullSecret                                string
-	Version                                        string
-	NodeExporterName                               string
-	NodeExporterImage                              string
-	NodeExporterPort                               int
-	NeutreeNodeAgentMetricsName                    string
-	NeutreeNodeAgentMetricsImage                   string
-	NeutreeNodeAgentMetricsPort                    int
-	KubeletPodResourcesSocket                      string
-	KubeStateMetricsVersion                        string
-	ClusterVersion                                 string
-	MetricsRemoteWriteURL                          string
-	Replicas                                       int
-	Resources                                      map[string]string
-	NeutreeNodeAgentMetricsResources               map[string]string
-	KubeStateMetricsResources                      map[string]string
-	HashSuffix                                     string
-	EnableHAMiMonitorScrape                        bool
-	EnableKubeStateMetrics                         bool
-	EnableNeutreeNodeAgentMetrics                  bool
-	EnableNodeExporter                             bool
-	EnableExternalDCGMScrape                       bool
-	AcceleratorExporters                           []metricsAcceleratorExporter
-	VMAgentConfig                                  string
-	NeutreeNodeAgentMetricsAcceleratorExporterURLs []string
+	ClusterName                      string
+	Workspace                        string
+	Namespace                        string
+	ImagePrefix                      string
+	ImagePullSecret                  string
+	Version                          string
+	NodeExporterName                 string
+	NodeExporterImage                string
+	NodeExporterPort                 int
+	NeutreeNodeAgentMetricsName      string
+	NeutreeNodeAgentMetricsImage     string
+	NeutreeNodeAgentMetricsPort      int
+	KubeletPodResourcesSocket        string
+	KubeStateMetricsVersion          string
+	ClusterVersion                   string
+	MetricsRemoteWriteURL            string
+	MetricsMode                      string
+	Replicas                         int
+	Resources                        map[string]string
+	NeutreeNodeAgentMetricsResources map[string]string
+	KubeStateMetricsResources        map[string]string
+	HashSuffix                       string
+	EnableHAMiMonitorScrape          bool
+	EnableKubeStateMetrics           bool
+	EnableNeutreeNodeAgentMetrics    bool
+	EnableNodeExporter               bool
+	EnableExternalDCGMScrape         bool
+	AcceleratorExporters             []metricsAcceleratorExporter
+	VMAgentConfig                    string
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
@@ -598,6 +597,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		KubeStateMetricsVersion:          componentversion.KubeStateMetrics,
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
+		MetricsMode:                      string(m.acceleratorExporterMode()),
 		Replicas:                         replicas,
 		Resources:                        resources,
 		NeutreeNodeAgentMetricsResources: neutreeNodeAgentMetricsResources,

@@ -14,6 +14,7 @@ import (
 
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/promtext"
+	prommodel "github.com/prometheus/common/model"
 )
 
 const unknownHardwareValue = "unknown"
@@ -233,23 +234,23 @@ func parseNvidiaSMICUDAVersion(raw string) string {
 }
 
 func FromAcceleratorMetrics(raw string) []model.GPUHardwareInfo {
-	samples := promtext.Parse(raw)
+	samples := promtext.ParseVector(raw)
 	infosByUUID := map[string]model.GPUHardwareInfo{}
 
 	for _, s := range samples {
-		uuid := firstNonEmpty(s.Labels["UUID"], s.Labels["uuid"])
+		uuid := promtext.LabelValue(s, "UUID", "uuid")
 		if uuid == "" {
 			continue
 		}
 
 		info := infosByUUID[uuid]
 		info.UUID = uuid
-		applyHardwareLabelHints(&info, s.Labels)
+		applyHardwareLabelHints(&info, promtext.Labels(s))
 
-		if gpuIndex := firstNonEmpty(s.Labels["gpu"], s.Labels["GPU_I_ID"]); gpuIndex != "" {
+		if gpuIndex := promtext.LabelValue(s, "gpu", "GPU_I_ID"); gpuIndex != "" {
 			info.Index = gpuIndex
 		}
-		if model := firstNonEmpty(s.Labels["modelName"], s.Labels["model"]); model != "" {
+		if model := promtext.LabelValue(s, "modelName", "model"); model != "" {
 			info.Product = model
 		}
 
@@ -269,44 +270,47 @@ func gpuHardwareInfosFromAcceleratorMetrics(raw string) []model.GPUHardwareInfo 
 	return FromAcceleratorMetrics(raw)
 }
 
-func applyDCGMHardwareSample(info *model.GPUHardwareInfo, s promtext.Sample) {
-	switch s.Name {
+func applyDCGMHardwareSample(info *model.GPUHardwareInfo, s *prommodel.Sample) {
+	value := promtext.Value(s)
+	labels := promtext.Labels(s)
+
+	switch promtext.MetricName(s) {
 	case "DCGM_FI_DEV_FB_TOTAL":
-		info.MemoryTotalMiB = formatFloat(s.Value)
+		info.MemoryTotalMiB = formatFloat(value)
 	case "DCGM_FI_DRIVER_VERSION", "DCGM_FI_SYSTEM_DRIVER_VERSION":
 		info.DriverVersion = firstKnownHardwareValue(
 			info.DriverVersion,
-			hardwareLabelValue(s.Labels, "DCGM_FI_DRIVER_VERSION", "driver_version", "Driver_Version", "version"),
+			hardwareLabelValue(labels, "DCGM_FI_DRIVER_VERSION", "driver_version", "Driver_Version", "version"),
 		)
 	case "DCGM_FI_CUDA_DRIVER_VERSION":
 		info.CUDADriverVersion = firstKnownHardwareValue(
 			info.CUDADriverVersion,
-			formatCUDADriverVersion(s.Value),
+			formatCUDADriverVersion(value),
 		)
 	case "DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY", "DCGM_FI_CUDA_GPU_COMPUTE_CAPABILITY":
 		info.CUDACapability = firstKnownHardwareValue(
 			info.CUDACapability,
-			formatCUDAComputeCapability(s.Value),
+			formatCUDAComputeCapability(value),
 		)
 	case "DCGM_FI_DEV_PCI_BUSID", "DCGM_FI_DEV_PCI_BUS_ID", "DCGM_FI_DEV_PCIE_BUS_ID":
 		info.PCIEBusID = firstKnownHardwareValue(
 			info.PCIEBusID,
-			hardwareLabelValue(s.Labels, "DCGM_FI_DEV_PCI_BUSID", "pci_bus_id", "pcie_bus_id", "pci_busid", "bus_id"),
+			hardwareLabelValue(labels, "DCGM_FI_DEV_PCI_BUSID", "pci_bus_id", "pcie_bus_id", "pci_busid", "bus_id"),
 		)
 	case "DCGM_FI_DEV_PCIE_MAX_LINK_GEN":
-		info.PCIEGeneration = firstKnownHardwareValue(formatFloat(s.Value), info.PCIEGeneration)
+		info.PCIEGeneration = firstKnownHardwareValue(formatFloat(value), info.PCIEGeneration)
 	case "DCGM_FI_DEV_PCIE_LINK_GEN":
-		info.PCIEGeneration = firstKnownHardwareValue(info.PCIEGeneration, formatFloat(s.Value))
+		info.PCIEGeneration = firstKnownHardwareValue(info.PCIEGeneration, formatFloat(value))
 	case "DCGM_FI_DEV_PCIE_MAX_LINK_WIDTH":
-		info.PCIEWidth = firstKnownHardwareValue(formatFloat(s.Value), info.PCIEWidth)
+		info.PCIEWidth = firstKnownHardwareValue(formatFloat(value), info.PCIEWidth)
 	case "DCGM_FI_DEV_PCIE_LINK_WIDTH":
-		info.PCIEWidth = firstKnownHardwareValue(info.PCIEWidth, formatFloat(s.Value))
+		info.PCIEWidth = firstKnownHardwareValue(info.PCIEWidth, formatFloat(value))
 	case "DCGM_FI_DEV_P2P_NVLINK_STATUS", "DCGM_FI_DEV_NVLINK_P2P_STATUS", "DCGM_FI_SYSTEM_NVLINK_TOPOLOGY":
-		if s.Value > 0 {
+		if value > 0 {
 			info.NVLink = "present"
 		}
 	case "DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL":
-		if s.Value > 0 {
+		if value > 0 {
 			info.NVLink = "present"
 		}
 	}

@@ -117,6 +117,15 @@ func (p KubernetesAllocationProvider) podAllocation(
 	podResource model.PodResource,
 	deviceLookup acceleratorDeviceLookup,
 ) (v1.StaticNodeAllocationStatus, bool, error) {
+	devices := allocationDevicesFromRefs(
+		containerDeviceRefs(podResource.Containers),
+		deviceLookup,
+		p.NodeName,
+	)
+	if len(devices) == 0 {
+		return v1.StaticNodeAllocationStatus{}, false, nil
+	}
+
 	pod := &corev1.Pod{}
 	if err := p.Client.Get(ctx, client.ObjectKey{Namespace: podResource.Namespace, Name: podResource.Name}, pod); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -127,15 +136,6 @@ func (p KubernetesAllocationProvider) podAllocation(
 	}
 
 	if pod.Spec.NodeName != p.NodeName {
-		return v1.StaticNodeAllocationStatus{}, false, nil
-	}
-
-	devices := allocationDevicesFromRefs(
-		containerDeviceRefs(podResource.Containers),
-		deviceLookup,
-		p.NodeName,
-	)
-	if len(devices) == 0 {
 		return v1.StaticNodeAllocationStatus{}, false, nil
 	}
 

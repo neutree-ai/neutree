@@ -268,14 +268,14 @@ func endpointGPUUsagesFromHAMiMetrics(
 ) []model.EndpointReplicaGPUUsage {
 	index := map[gpuUsageKey]*model.EndpointReplicaGPUUsage{}
 
-	for _, sample := range promtext.Parse(raw) {
+	for _, sample := range promtext.ParseVector(raw) {
 		key := gpuUsageKey{
-			namespace:    sample.Labels["namespace"],
-			pod:          sample.Labels["pod"],
-			container:    sample.Labels["container"],
-			deviceUUID:   firstNonEmpty(sample.Labels["device_uuid"], sample.Labels["gpu_uuid"], sample.Labels["uuid"]),
-			vdeviceIndex: sample.Labels["vdevice_index"],
-			node:         sample.Labels["node"],
+			namespace:    promtext.LabelValue(sample, "namespace"),
+			pod:          promtext.LabelValue(sample, "pod"),
+			container:    promtext.LabelValue(sample, "container"),
+			deviceUUID:   promtext.LabelValue(sample, "device_uuid", "gpu_uuid", "uuid"),
+			vdeviceIndex: promtext.LabelValue(sample, "vdevice_index"),
+			node:         promtext.LabelValue(sample, "node"),
 		}
 		if key.namespace == "" || key.pod == "" || key.deviceUUID == "" {
 			continue
@@ -300,22 +300,22 @@ func endpointGPUUsagesFromHAMiMetrics(
 				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 				VDeviceIndex:    key.vdeviceIndex,
 				Product: firstNonEmpty(
-					sample.Labels["device_name"],
-					sample.Labels["product"],
-					sample.Labels["modelName"],
-					sample.Labels["model"],
+					promtext.LabelValue(sample, "device_name"),
+					promtext.LabelValue(sample, "product"),
+					promtext.LabelValue(sample, "modelName"),
+					promtext.LabelValue(sample, "model"),
 				),
 			}
 			index[key] = usage
 		}
 
-		switch sample.Name {
+		switch promtext.MetricName(sample) {
 		case hamiMetricMemoryLimitBytes:
-			usage.MemoryAllocatedBytes = addFloat64Pointer(usage.MemoryAllocatedBytes, sample.Value)
+			usage.MemoryAllocatedBytes = addFloat64Pointer(usage.MemoryAllocatedBytes, promtext.Value(sample))
 		case hamiMetricMemoryUsedBytes:
-			usage.MemoryUsedBytes = addFloat64Pointer(usage.MemoryUsedBytes, sample.Value)
+			usage.MemoryUsedBytes = addFloat64Pointer(usage.MemoryUsedBytes, promtext.Value(sample))
 		case hamiMetricUtilizationRatio:
-			value := normalizedRatio(sample.Value)
+			value := normalizedRatio(promtext.Value(sample))
 			usage.UtilizationRatio = maxFloat64Pointer(usage.UtilizationRatio, value)
 		}
 	}

@@ -182,7 +182,7 @@ func buildNodeAgentComponent(
 	args := []string{
 		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
 		"--cluster-type=ray",
-		fmt.Sprintf("--node-exporter-url=http://127.0.0.1:%d%s", defaultNodeExporterPort, defaultPrometheusHTTPPath),
+		"--metrics-mode=" + string(acceleratorExporterMode(cluster)),
 		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), defaultRayDashboardPort),
 		"--procfs-root=/host/proc",
 		"--cgroupfs-root=/host/sys/fs/cgroup",
@@ -193,20 +193,6 @@ func buildNodeAgentComponent(
 	}
 	if node != nil && node.Spec != nil {
 		args = append(args, "--node-ip="+node.Spec.IP)
-	}
-
-	if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
-		args = append(args, fmt.Sprintf(
-			"--accelerator-exporter-url=http://127.0.0.1:%d%s",
-			exporter.Port,
-			exporterMetricsPath(exporter),
-		))
-	} else if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeExternal {
-		args = append(args, fmt.Sprintf(
-			"--accelerator-exporter-url=http://127.0.0.1:%d%s",
-			externalDCGMExporterPort,
-			defaultPrometheusHTTPPath,
-		))
 	}
 
 	return v1.NodeComponentSpec{

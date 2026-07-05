@@ -1,133 +1,116 @@
 package promtext
 
 import (
-	"strconv"
+	"sort"
 	"strings"
+
+	"github.com/prometheus/common/expfmt"
+	prommodel "github.com/prometheus/common/model"
 )
 
-type Sample struct {
-	Name   string
-	Labels map[string]string
-	Value  float64
-}
+func ParseVector(raw string) prommodel.Vector {
+	if raw != "" && !strings.HasSuffix(raw, "\n") {
+		raw += "\n"
+	}
 
-func Parse(raw string) []Sample {
-	var result []Sample
+	var parser expfmt.TextParser
+	families, err := parser.TextToMetricFamilies(strings.NewReader(raw))
+	if err != nil {
+		return nil
+	}
 
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
+	familyNames := make([]string, 0, len(families))
+	for name := range families {
+		familyNames = append(familyNames, name)
+	}
+	sort.Strings(familyNames)
 
-		metricPart, valuePart, ok := splitSampleLine(line)
-		if !ok {
-			continue
-		}
-
-		value, err := strconv.ParseFloat(valuePart, 64)
+	result := prommodel.Vector{}
+	for _, familyName := range familyNames {
+		vector, err := expfmt.ExtractSamples(&expfmt.DecodeOptions{}, families[familyName])
 		if err != nil {
 			continue
 		}
 
-		name, labels := parseMetricPart(metricPart)
-		if name == "" {
-			continue
+		result = append(result, vector...)
+	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		if MetricName(result[i]) == MetricName(result[j]) {
+			return labelsKey(result[i].Metric) < labelsKey(result[j].Metric)
 		}
 
-		result = append(result, Sample{Name: name, Labels: labels, Value: value})
-	}
+		return MetricName(result[i]) < MetricName(result[j])
+	})
 
 	return result
 }
 
-func splitSampleLine(line string) (string, string, bool) {
-	inQuotes := false
-	escapeNext := false
+func MetricName(sample *prommodel.Sample) string {
+	if sample == nil {
+		return ""
+	}
 
-	for i := len(line) - 1; i >= 0; i-- {
-		ch := line[i]
-		if escapeNext {
-			escapeNext = false
-			continue
-		}
-		if ch == '\\' {
-			escapeNext = true
-			continue
-		}
-		if ch == '"' {
-			inQuotes = !inQuotes
-			continue
-		}
-		if !inQuotes && (ch == ' ' || ch == '\t') {
-			metricPart := strings.TrimSpace(line[:i])
-			valuePart := strings.TrimSpace(line[i+1:])
-			return metricPart, valuePart, metricPart != "" && valuePart != ""
+	return string(sample.Metric[prommodel.MetricNameLabel])
+}
+
+func LabelValue(sample *prommodel.Sample, names ...string) string {
+	if sample == nil {
+		return ""
+	}
+
+	for _, name := range names {
+		value := string(sample.Metric[prommodel.LabelName(name)])
+		if value != "" {
+			return value
 		}
 	}
 
-	return "", "", false
+	return ""
 }
 
-func parseMetricPart(metricPart string) (string, map[string]string) {
+func Labels(sample *prommodel.Sample) map[string]string {
 	labels := map[string]string{}
-	open := strings.Index(metricPart, "{")
-	if open < 0 {
-		return metricPart, labels
+	if sample == nil {
+		return labels
 	}
 
-	close := strings.LastIndex(metricPart, "}")
-	if close < open {
-		return "", nil
-	}
-
-	name := metricPart[:open]
-	for _, item := range splitLabelItems(metricPart[open+1 : close]) {
-		key, value, ok := strings.Cut(item, "=")
-		if !ok {
+	for name, value := range sample.Metric {
+		if name == prommodel.MetricNameLabel {
 			continue
 		}
 
-		labels[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"`)
+		labels[string(name)] = string(value)
 	}
 
-	return name, labels
+	return labels
 }
 
-func splitLabelItems(raw string) []string {
-	var result []string
-	var current strings.Builder
-	inQuotes := false
-	escapeNext := false
-
-	for _, ch := range raw {
-		if escapeNext {
-			current.WriteRune(ch)
-			escapeNext = false
-			continue
-		}
-		if ch == '\\' {
-			current.WriteRune(ch)
-			escapeNext = true
-			continue
-		}
-		if ch == '"' {
-			current.WriteRune(ch)
-			inQuotes = !inQuotes
-			continue
-		}
-		if ch == ',' && !inQuotes {
-			result = append(result, strings.TrimSpace(current.String()))
-			current.Reset()
-			continue
-		}
-
-		current.WriteRune(ch)
+func Value(sample *prommodel.Sample) float64 {
+	if sample == nil {
+		return 0
 	}
 
-	if current.Len() > 0 {
-		result = append(result, strings.TrimSpace(current.String()))
+	return float64(sample.Value)
+}
+
+func labelsKey(labels prommodel.Metric) string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		if key == prommodel.MetricNameLabel {
+			continue
+		}
+		keys = append(keys, string(key))
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	for _, key := range keys {
+		builder.WriteString(key)
+		builder.WriteByte('=')
+		builder.WriteString(string(labels[prommodel.LabelName(key)]))
+		builder.WriteByte(',')
 	}
 
-	return result
+	return builder.String()
 }

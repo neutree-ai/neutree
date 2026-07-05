@@ -19,12 +19,10 @@ import (
 )
 
 var endpointAcceleratorMetricLabelNames = []string{
-	"workspace",
-	"neutree_cluster",
 	"cluster_type",
 	"endpoint",
 	"instance_id",
-	"replica_id",
+	"replica",
 	"node",
 	"accelerator_type",
 	"accelerator_uuid",
@@ -34,11 +32,13 @@ var endpointAcceleratorMetricLabelNames = []string{
 }
 
 var forbiddenEndpointAcceleratorMetricLabels = []string{
+	"workspace",
+	"neutree_cluster",
 	"source",
 	"node_ip",
 	"container",
 	"container_id",
-	"replica",
+	"replica_id",
 	"gpu_uuid",
 	"gpu_index",
 }

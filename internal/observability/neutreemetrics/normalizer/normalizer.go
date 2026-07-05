@@ -12,6 +12,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/promtext"
+	prommodel "github.com/prometheus/common/model"
 )
 
 const (
@@ -101,40 +102,28 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 	return samples
 }
 
-func (n *Normalizer) Normalize(req NormalizeRequest) string {
-	samples := n.Samples(req)
-
-	var builder strings.Builder
-	for _, s := range samples {
-		builder.WriteString(formatSample(s))
-		builder.WriteByte('\n')
-	}
-
-	return builder.String()
-}
-
 func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
-	samples := promtext.Parse(raw)
+	samples := promtext.ParseVector(raw)
 	parsed := indexFirstSampleByName(samples)
 	var result []Sample
 
 	for _, s := range samples {
-		if s.Name != "node_cpu_seconds_total" {
+		if promtext.MetricName(s) != "node_cpu_seconds_total" {
 			continue
 		}
 
 		metricLabels := baseLabels(labels, TargetNodeExporter)
-		if cpu := s.Labels["cpu"]; cpu != "" {
+		if cpu := promtext.LabelValue(s, "cpu"); cpu != "" {
 			metricLabels["cpu"] = cpu
 		}
-		if mode := s.Labels["mode"]; mode != "" {
+		if mode := promtext.LabelValue(s, "mode"); mode != "" {
 			metricLabels["mode"] = mode
 		}
 
 		result = append(result, Sample{
 			Name:   "neutree_node_cpu_seconds_total",
 			Labels: metricLabels,
-			Value:  s.Value,
+			Value:  promtext.Value(s),
 		})
 	}
 
@@ -142,7 +131,7 @@ func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
 		result = append(result, Sample{
 			Name:   "neutree_node_memory_total_bytes",
 			Labels: baseLabels(labels, TargetNodeExporter),
-			Value:  total.Value,
+			Value:  promtext.Value(total),
 		})
 	}
 
@@ -150,7 +139,7 @@ func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
 		result = append(result, Sample{
 			Name:   "neutree_node_memory_available_bytes",
 			Labels: baseLabels(labels, TargetNodeExporter),
-			Value:  available.Value,
+			Value:  promtext.Value(available),
 		})
 	}
 
@@ -161,7 +150,7 @@ func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
 		result = append(result, Sample{
 			Name:   "neutree_node_memory_used_bytes",
 			Labels: baseLabels(labels, TargetNodeExporter),
-			Value:  total.Value - available.Value,
+			Value:  promtext.Value(total) - promtext.Value(available),
 		})
 	}
 
@@ -169,7 +158,7 @@ func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
 		result = append(result, Sample{
 			Name:   "neutree_node_load1",
 			Labels: baseLabels(labels, TargetNodeExporter),
-			Value:  load1.Value,
+			Value:  promtext.Value(load1),
 		})
 	}
 
@@ -177,7 +166,7 @@ func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
 }
 
 func normalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sample {
-	parsed := promtext.Parse(raw)
+	parsed := promtext.ParseVector(raw)
 	result := make([]Sample, 0)
 
 	for _, s := range parsed {
@@ -186,9 +175,9 @@ func normalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sam
 			continue
 		}
 
-		switch s.Name {
+		switch promtext.MetricName(s) {
 		case "DCGM_FI_DEV_GPU_UTIL":
-			value := s.Value
+			value := promtext.Value(s)
 			if value > 1 {
 				value /= 100
 			}
@@ -202,31 +191,31 @@ func normalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sam
 			result = append(result, Sample{
 				Name:   "neutree_accelerator_memory_used_bytes",
 				Labels: metricLabels,
-				Value:  s.Value * 1024 * 1024,
+				Value:  promtext.Value(s) * 1024 * 1024,
 			})
 		case "DCGM_FI_DEV_FB_TOTAL":
 			result = append(result, Sample{
 				Name:   "neutree_accelerator_memory_total_bytes",
 				Labels: metricLabels,
-				Value:  s.Value * 1024 * 1024,
+				Value:  promtext.Value(s) * 1024 * 1024,
 			})
 		case "DCGM_FI_DEV_GPU_TEMP":
 			result = append(result, Sample{
 				Name:   "neutree_accelerator_temperature_celsius",
 				Labels: metricLabels,
-				Value:  s.Value,
+				Value:  promtext.Value(s),
 			})
 		case "DCGM_FI_PROF_PCIE_TX_BYTES":
 			result = append(result, Sample{
 				Name:   "neutree_accelerator_pcie_tx_bytes_total",
 				Labels: metricLabels,
-				Value:  s.Value,
+				Value:  promtext.Value(s),
 			})
 		case "DCGM_FI_PROF_PCIE_RX_BYTES":
 			result = append(result, Sample{
 				Name:   "neutree_accelerator_pcie_rx_bytes_total",
 				Labels: metricLabels,
-				Value:  s.Value,
+				Value:  promtext.Value(s),
 			})
 		}
 	}
@@ -473,25 +462,25 @@ type gpuUsageSnapshot struct {
 	acceleratorIndex string
 }
 
-func gpuUsageSnapshotByUUID(samples []promtext.Sample) map[string]gpuUsageSnapshot {
+func gpuUsageSnapshotByUUID(samples prommodel.Vector) map[string]gpuUsageSnapshot {
 	result := map[string]gpuUsageSnapshot{}
 
 	for _, s := range samples {
-		uuid := firstNonEmpty(s.Labels["UUID"], s.Labels["uuid"])
+		uuid := promtext.LabelValue(s, "UUID", "uuid")
 		if uuid == "" {
 			continue
 		}
 
 		snapshot := result[uuid]
-		if index := firstNonEmpty(s.Labels["gpu"], s.Labels["GPU_I_ID"]); index != "" {
+		if index := promtext.LabelValue(s, "gpu", "GPU_I_ID"); index != "" {
 			snapshot.acceleratorIndex = index
 		}
-		switch s.Name {
+		switch promtext.MetricName(s) {
 		case "DCGM_FI_DEV_FB_USED":
-			usedBytes := s.Value * 1024 * 1024
+			usedBytes := promtext.Value(s) * 1024 * 1024
 			snapshot.memoryUsedBytes = &usedBytes
 		case "DCGM_FI_DEV_GPU_UTIL":
-			utilization := s.Value
+			utilization := promtext.Value(s)
 			if utilization > 1 {
 				utilization /= 100
 			}
@@ -513,9 +502,9 @@ func acceleratorIndexesByUUID(raw string, infos []model.GPUHardwareInfo) map[str
 		result[info.UUID] = info.Index
 	}
 
-	for _, sample := range promtext.Parse(raw) {
-		uuid := firstNonEmpty(sample.Labels["UUID"], sample.Labels["uuid"])
-		index := firstNonEmpty(sample.Labels["gpu"], sample.Labels["GPU_I_ID"])
+	for _, sample := range promtext.ParseVector(raw) {
+		uuid := promtext.LabelValue(sample, "UUID", "uuid")
+		index := promtext.LabelValue(sample, "gpu", "GPU_I_ID")
 		if uuid == "" || index == "" {
 			continue
 		}
@@ -650,14 +639,11 @@ func endpointReplicaRuntimeUsageLabels(
 	usage model.EndpointReplicaRuntimeUsage,
 ) map[string]string {
 	metricLabels := baseLabels(labels, model.SourceNodeAgent)
-	metricLabels["workspace"] = firstNonEmpty(usage.Workspace, labels.Workspace)
-	metricLabels["neutree_cluster"] = firstNonEmpty(usage.Cluster, labels.NeutreeCluster, labels.StaticNodeCluster)
 	metricLabels["endpoint"] = usage.Endpoint
 	metricLabels["instance_id"] = usage.InstanceID
-	metricLabels["replica_id"] = usage.ReplicaID
 	metricLabels["replica"] = usage.ReplicaID
 	metricLabels["node"] = firstNonEmpty(usage.NodeID, labels.Node)
-	metricLabels["deployment"] = usage.Deployment
+	metricLabels["workload_role"] = labelValueOrUnknown(usage.WorkloadRole)
 	metricLabels["container"] = usage.Container
 	metricLabels["container_id"] = usage.ContainerID
 	metricLabels["engine"] = usage.Engine
@@ -718,7 +704,7 @@ func normalizeEndpointReplicaGPUUsageFromDCGMSamples(
 	allocations []model.EndpointAllocation,
 	explicitUsages []model.EndpointReplicaGPUUsage,
 ) []Sample {
-	snapshots := gpuUsageSnapshotByUUID(promtext.Parse(raw))
+	snapshots := gpuUsageSnapshotByUUID(promtext.ParseVector(raw))
 	if len(snapshots) == 0 || len(allocations) == 0 {
 		return nil
 	}
@@ -779,7 +765,6 @@ func endpointReplicaGPUUsageLabels(
 
 func nodeReadySample(labels model.CanonicalLabels) Sample {
 	metricLabels := baseLabels(labels, model.SourceNodeAgent)
-	metricLabels["neutree_cluster"] = firstNonEmpty(labels.NeutreeCluster, labels.StaticNodeCluster)
 
 	return Sample{
 		Name:   "neutree_node_ready",
@@ -847,12 +832,10 @@ func endpointAcceleratorLabels(
 	product string,
 ) map[string]string {
 	return map[string]string{
-		"workspace":         labelValueOrUnknown(firstNonEmpty(workspace, labels.Workspace)),
-		"neutree_cluster":   labelValueOrUnknown(firstNonEmpty(cluster, labels.NeutreeCluster, labels.StaticNodeCluster)),
 		"cluster_type":      labelValueOrUnknown(labels.ClusterType),
 		"endpoint":          labelValueOrUnknown(endpoint),
 		"instance_id":       labelValueOrUnknown(instanceID),
-		"replica_id":        labelValueOrUnknown(replicaID),
+		"replica":           labelValueOrUnknown(replicaID),
 		"node":              labelValueOrUnknown(firstNonEmpty(node, labels.Node)),
 		"accelerator_type":  labelValueOrUnknown(acceleratorType),
 		"accelerator_uuid":  uuid,
@@ -864,10 +847,8 @@ func endpointAcceleratorLabels(
 
 func acceleratorBaseLabels(labels model.CanonicalLabels) map[string]string {
 	return map[string]string{
-		"workspace":       labelValueOrUnknown(labels.Workspace),
-		"neutree_cluster": labelValueOrUnknown(firstNonEmpty(labels.NeutreeCluster, labels.StaticNodeCluster)),
-		"cluster_type":    labelValueOrUnknown(labels.ClusterType),
-		"node":            labelValueOrUnknown(labels.Node),
+		"cluster_type": labelValueOrUnknown(labels.ClusterType),
+		"node":         labelValueOrUnknown(labels.Node),
 	}
 }
 
@@ -916,12 +897,6 @@ func baseLabels(labels model.CanonicalLabels, source string) map[string]string {
 		"source": source,
 	}
 
-	if labels.Workspace != "" {
-		result["workspace"] = labels.Workspace
-	}
-	if labels.StaticNodeCluster != "" {
-		result["static_node_cluster"] = labels.StaticNodeCluster
-	}
 	if labels.ClusterType != "" {
 		result["cluster_type"] = labels.ClusterType
 	}
@@ -938,8 +913,8 @@ func baseLabels(labels model.CanonicalLabels, source string) map[string]string {
 	return result
 }
 
-func acceleratorMetricLabels(labels model.CanonicalLabels, s promtext.Sample) (map[string]string, bool) {
-	uuid := firstNonEmpty(s.Labels["UUID"], s.Labels["uuid"])
+func acceleratorMetricLabels(labels model.CanonicalLabels, s *prommodel.Sample) (map[string]string, bool) {
+	uuid := promtext.LabelValue(s, "UUID", "uuid")
 	if uuid == "" {
 		return nil, false
 	}
@@ -948,8 +923,8 @@ func acceleratorMetricLabels(labels model.CanonicalLabels, s promtext.Sample) (m
 		labels,
 		v1.AcceleratorTypeNVIDIAGPU.String(),
 		uuid,
-		firstNonEmpty(s.Labels["gpu"], s.Labels["GPU_I_ID"]),
-		firstNonEmpty(s.Labels["modelName"], s.Labels["model"]),
+		promtext.LabelValue(s, "gpu", "GPU_I_ID"),
+		promtext.LabelValue(s, "modelName", "model"),
 	), true
 }
 
@@ -963,14 +938,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func indexFirstSampleByName(samples []promtext.Sample) map[string]promtext.Sample {
-	result := make(map[string]promtext.Sample, len(samples))
+func indexFirstSampleByName(samples prommodel.Vector) map[string]*prommodel.Sample {
+	result := make(map[string]*prommodel.Sample, len(samples))
 	for _, s := range samples {
-		if _, exists := result[s.Name]; exists {
+		name := promtext.MetricName(s)
+		if _, exists := result[name]; exists {
 			continue
 		}
 
-		result[s.Name] = s
+		result[name] = s
 	}
 
 	return result
