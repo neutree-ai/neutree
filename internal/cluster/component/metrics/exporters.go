@@ -138,6 +138,8 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	configFileData, volumeMounts, volumes, configChecksum := buildExporterConfigVolumes(name, exporterProfile.ConfigFiles)
 	runtime := exporterProfile.Runtime
 
+	// Kubernetes managed exporters intentionally do not project host network/PID
+	// flags from the runtime profile; those flags are for static-node runtimes.
 	exporter := metricsAcceleratorExporter{
 		Name:            name,
 		AcceleratorType: acceleratorType,

@@ -339,6 +339,8 @@ func staticNodeEndpointAllocationDevices(
 		if copied.NodeID == "" {
 			copied.NodeID = nodeID
 		}
+		// Endpoint resources report the product requested by the endpoint spec,
+		// not the product guessed from node-agent allocation details.
 		copied.Product = product
 		result = append(result, copied)
 	}

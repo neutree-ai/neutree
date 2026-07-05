@@ -74,7 +74,7 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 	}
 
 	pods := &corev1.PodList{}
-	if err := p.Client.List(ctx, pods); err != nil {
+	if err := p.Client.List(ctx, pods, client.MatchingFields{"spec.nodeName": p.NodeName}); err != nil {
 		return nil, fmt.Errorf("list scrape target pods: %w", err)
 	}
 

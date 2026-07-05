@@ -11,13 +11,19 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
+	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestServerHealthAndMetrics(t *testing.T) {
@@ -274,10 +280,10 @@ node_memory_MemAvailable_bytes 6442450944
 	commonLabels := `accelerator_index="unknown",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
 		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
 		`node="node-a",product="NVIDIA_A100",replica="chat-abc",vdevice_index="0"`
-	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_allocation{`+commonLabels+`} 1`)
-	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+commonLabels+`}`)
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+commonLabels+`}`)
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_utilization_ratio{`+commonLabels+`} 0.75`)
+	assert.NotContains(t, body, `neutree_endpoint_replica_accelerator_allocation{`+commonLabels+`}`)
+	assert.NotContains(t, body, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+commonLabels+`}`)
 	assert.NotContains(t, body, "container=")
 }
 
@@ -552,6 +558,32 @@ func TestServerWriteKubernetesAnnotationsUsesProvidedContext(t *testing.T) {
 	start := time.Now()
 	server.writeKubernetesAnnotations(ctx)
 	assert.Less(t, time.Since(start), 80*time.Millisecond)
+}
+
+func TestServerWriteKubernetesAnnotationsKeepsDeviceAnnotationOnEmptyCPUFallback(t *testing.T) {
+	const devicesAnnotation = `[{"uuid":"GPU-abc","minor_number":0,"memory_mib":81920,"healthy":true}]`
+	ctrClient := fake.NewClientBuilder().WithObjects(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorDevicesAnnotation: devicesAnnotation,
+			},
+		},
+	}).Build()
+	server, err := NewServer(Config{
+		ScrapeTargetProvider: staticTestTargetProvider{},
+		KubernetesWriter: &metricskubernetes.AnnotationWriter{
+			Client:   ctrClient,
+			NodeName: "node-a",
+		},
+	})
+	require.NoError(t, err)
+
+	server.writeKubernetesAnnotations(context.Background())
+
+	node := &corev1.Node{}
+	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, node))
+	assert.Equal(t, devicesAnnotation, node.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation])
 }
 
 func TestServerNodeDeviceSnapshotSetsMinorNumberFromHardwareInfo(t *testing.T) {

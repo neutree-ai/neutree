@@ -220,10 +220,10 @@ func TestNormalizerNormalizesEndpointReplicaGPURuntimeUsage(t *testing.T) {
 	commonLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
 		`cluster_type="ray",endpoint="chat",instance_id="chat-abc",` +
 		`node="head-0",product="NVIDIA_A100",replica="chat-abc",vdevice_index="2"`
-	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+commonLabels+`} 1`)
-	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+commonLabels+`} 8589934592`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+commonLabels+`} 4294967296`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{`+commonLabels+`} 0.75`)
+	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+commonLabels+`}`)
+	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+commonLabels+`}`)
 	assert.NotContains(t, output, "container=")
 	assert.NotContains(t, output, "gpu_uuid=")
 }

@@ -149,8 +149,20 @@ func (s *Server) writeKubernetesAnnotations(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	if isEmptyCPUDeviceSnapshot(snapshot) {
+		return
+	}
 
 	_ = s.config.KubernetesWriter.Write(ctx, snapshot)
+}
+
+func isEmptyCPUDeviceSnapshot(snapshot *v1.NodeDeviceSnapshot) bool {
+	if snapshot == nil {
+		return false
+	}
+
+	return snapshot.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU &&
+		len(snapshot.Accelerator.Devices) == 0
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

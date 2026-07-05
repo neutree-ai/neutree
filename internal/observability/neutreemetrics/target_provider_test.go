@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
@@ -109,7 +110,18 @@ func newKubernetesTargetProvider(t *testing.T, pods ...*corev1.Pod) KubernetesSc
 	}
 
 	return KubernetesScrapeTargetProvider{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build(),
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithRuntimeObjects(objects...).
+			WithIndex(&corev1.Pod{}, "spec.nodeName", func(obj client.Object) []string {
+				pod, ok := obj.(*corev1.Pod)
+				if !ok || pod.Spec.NodeName == "" {
+					return nil
+				}
+
+				return []string{pod.Spec.NodeName}
+			}).
+			Build(),
 	}
 }
 

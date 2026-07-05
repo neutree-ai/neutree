@@ -664,20 +664,6 @@ func normalizeEndpointReplicaGPUUsageSamples(
 		}
 
 		metricLabels := endpointReplicaGPUUsageLabels(labels, usage)
-		result = append(result, Sample{
-			Name:   "neutree_endpoint_replica_accelerator_allocation",
-			Labels: metricLabels,
-			Value:  1,
-		})
-
-		if usage.MemoryAllocatedBytes != nil {
-			result = append(result, Sample{
-				Name:   "neutree_endpoint_replica_accelerator_memory_allocated_bytes",
-				Labels: metricLabels,
-				Value:  *usage.MemoryAllocatedBytes,
-			})
-		}
-
 		if usage.MemoryUsedBytes != nil {
 			result = append(result, Sample{
 				Name:   "neutree_endpoint_replica_accelerator_memory_used_bytes",
