@@ -12,7 +12,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 )
 
 type AnnotationWriter struct {
@@ -20,7 +19,7 @@ type AnnotationWriter struct {
 	NodeName string
 }
 
-func (w *AnnotationWriter) Write(ctx context.Context, snapshot *model.NodeDeviceSnapshot) error {
+func (w *AnnotationWriter) Write(ctx context.Context, snapshot *v1.NodeDeviceSnapshot) error {
 	if w == nil || w.Client == nil || w.NodeName == "" || snapshot == nil {
 		return nil
 	}

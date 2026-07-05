@@ -812,7 +812,7 @@ func (o *RayOrchestrator) buildEndpointResourceStatus(endpoint *v1.Endpoint) (*v
 		return nil, nil
 	}
 
-	resourceClient := resourceview.NewStaticNodeResourceClient(o.storage, nil)
+	resourceClient := resourceview.NewStaticNodeClusterResourceClient(o.storage, nil)
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
 	return resourceBuilder.BuildEndpointResources(context.Background(), o.cluster, endpoint)

@@ -178,6 +178,7 @@ func TestResourceViewBuilderReturnsClientError(t *testing.T) {
 }
 
 func TestResourceViewBuilderBuildEndpointResources(t *testing.T) {
+	order := 1
 	client := &fakeResourceClient{
 		endpointInstances: []EndpointInstanceResource{
 			{
@@ -212,15 +213,31 @@ func TestResourceViewBuilderBuildEndpointResources(t *testing.T) {
 	}
 
 	endpoint := &v1.Endpoint{Metadata: &v1.Metadata{Name: "endpoint"}}
-	cluster := &v1.Cluster{Metadata: &v1.Metadata{Name: "cluster", Workspace: "default"}}
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "cluster", Workspace: "default"},
+		Status: &v1.ClusterStatus{
+			ResourceInfo: &v1.ClusterResources{
+				NodeResources: map[string]*v1.NodeResourceStatus{
+					"node-1": {
+						Devices: []*v1.DeviceResource{
+							{UUID: "GPU-1", Order: &order},
+						},
+					},
+				},
+			},
+		},
+	}
 	resources, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
 
 	require.NoError(t, err)
+	require.False(t, client.called)
 	require.True(t, client.endpointCalled)
 	require.Same(t, cluster, client.cluster)
 	require.Same(t, endpoint, client.endpoint)
 	require.Len(t, resources.Replicas, 2)
 	require.Equal(t, "endpoint-abc", resources.Replicas[0].InstanceID)
+	require.NotNil(t, resources.Replicas[0].Devices[0].Order)
+	require.Equal(t, 1, *resources.Replicas[0].Devices[0].Order)
 	require.Equal(t, int64(23040), resources.Summary.Products["Tesla-T4"].MemoryMiB)
 	require.Equal(t, int64(150), resources.Summary.Products["Tesla-T4"].CoreUnits)
 }

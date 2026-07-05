@@ -114,7 +114,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 		),
 		HTTPClient:          nodeExporter.Client(),
 		GPUHardwareProvider: emptyGPUHardwareProvider,
-		AllocationProvider: allocation.ProviderFunc(func(_ context.Context, snapshot *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
+		AllocationProvider: allocation.ProviderFunc(func(_ context.Context, snapshot *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 			require.Len(t, snapshot.Accelerator.Devices, 1)
 			assert.Equal(t, "GPU-abc", snapshot.Accelerator.Devices[0].UUID)
 
@@ -311,7 +311,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 		HTTPClient:          nodeExporter.Client(),
 		AllocationTimeout:   10 * time.Millisecond,
 		GPUHardwareProvider: emptyGPUHardwareProvider,
-		AllocationProvider: allocation.ProviderFunc(func(ctx context.Context, _ *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
+		AllocationProvider: allocation.ProviderFunc(func(ctx context.Context, _ *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -513,7 +513,7 @@ func TestServerReportsAcceleratorScrapeDownWhenProviderFindsNoTargets(t *testing
 func TestServerNodeDeviceSnapshotDoesNotBlockOnSlowAllocationProvider(t *testing.T) {
 	server, err := NewServer(Config{
 		AllocationTimeout: 10 * time.Millisecond,
-		AllocationProvider: allocation.ProviderFunc(func(ctx context.Context, _ *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
+		AllocationProvider: allocation.ProviderFunc(func(ctx context.Context, _ *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -538,7 +538,7 @@ func TestServerNodeDeviceSnapshotDoesNotBlockOnSlowAllocationProvider(t *testing
 
 func TestServerWriteKubernetesAnnotationsUsesProvidedContext(t *testing.T) {
 	server, err := NewServer(Config{
-		AllocationProvider: allocation.ProviderFunc(func(ctx context.Context, _ *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
+		AllocationProvider: allocation.ProviderFunc(func(ctx context.Context, _ *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 			<-ctx.Done()
 
 			return nil, ctx.Err()
@@ -576,7 +576,7 @@ func TestServerNodeDeviceSnapshotSetsMinorNumberFromHardwareInfo(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
 
-	var snapshot model.NodeDeviceSnapshot
+	var snapshot v1.NodeDeviceSnapshot
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&snapshot))
 	require.Len(t, snapshot.Accelerator.Devices, 1)
 	assert.Equal(t, "7", snapshot.Accelerator.Devices[0].ID)
@@ -585,10 +585,10 @@ func TestServerNodeDeviceSnapshotSetsMinorNumberFromHardwareInfo(t *testing.T) {
 
 func TestServerNodeDeviceSnapshotAllowsRequests(t *testing.T) {
 	server, err := NewServer(Config{
-		DeviceSnapshotProvider: model.DeviceSnapshotProviderFunc(func(_ *http.Request) (*model.NodeDeviceSnapshot, error) {
+		DeviceSnapshotProvider: model.DeviceSnapshotProviderFunc(func(_ *http.Request) (*v1.NodeDeviceSnapshot, error) {
 			cpu := v1.CPUStaticNodeAcceleratorStatus()
 
-			return &model.NodeDeviceSnapshot{Accelerator: cpu}, nil
+			return &v1.NodeDeviceSnapshot{Accelerator: cpu}, nil
 		}),
 	})
 	require.NoError(t, err)
@@ -601,7 +601,7 @@ func TestServerNodeDeviceSnapshotAllowsRequests(t *testing.T) {
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var snapshot model.NodeDeviceSnapshot
+	var snapshot v1.NodeDeviceSnapshot
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&snapshot))
 	assert.Equal(t, v1.StaticNodeAcceleratorTypeCPU, snapshot.Accelerator.Type)
 }

@@ -166,6 +166,11 @@ type StaticNodeAllocationStatus struct {
 	Devices      []DeviceAllocation `json:"devices,omitempty"`
 }
 
+type NodeDeviceSnapshot struct {
+	Accelerator StaticNodeAcceleratorStatus  `json:"accelerator,omitempty"`
+	Allocations []StaticNodeAllocationStatus `json:"allocations,omitempty"`
+}
+
 func CPUStaticNodeAcceleratorStatus() StaticNodeAcceleratorStatus {
 	return StaticNodeAcceleratorStatus{
 		Type: StaticNodeAcceleratorTypeCPU,

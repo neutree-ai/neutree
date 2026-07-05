@@ -28,18 +28,13 @@ type ScrapeResult struct {
 	Error  string
 }
 
-type NodeDeviceSnapshot struct {
-	Accelerator v1.StaticNodeAcceleratorStatus  `json:"accelerator,omitempty"`
-	Allocations []v1.StaticNodeAllocationStatus `json:"allocations,omitempty"`
-}
-
 type DeviceSnapshotProvider interface {
-	DeviceSnapshot(r *http.Request) (*NodeDeviceSnapshot, error)
+	DeviceSnapshot(r *http.Request) (*v1.NodeDeviceSnapshot, error)
 }
 
-type DeviceSnapshotProviderFunc func(r *http.Request) (*NodeDeviceSnapshot, error)
+type DeviceSnapshotProviderFunc func(r *http.Request) (*v1.NodeDeviceSnapshot, error)
 
-func (f DeviceSnapshotProviderFunc) DeviceSnapshot(r *http.Request) (*NodeDeviceSnapshot, error) {
+func (f DeviceSnapshotProviderFunc) DeviceSnapshot(r *http.Request) (*v1.NodeDeviceSnapshot, error) {
 	return f(r)
 }
 

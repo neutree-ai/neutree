@@ -89,7 +89,7 @@ func (p KubernetesProvider) Usages(ctx context.Context) ([]model.EndpointReplica
 
 func (p KubernetesProvider) Allocations(
 	ctx context.Context,
-	_ *model.NodeDeviceSnapshot,
+	_ *v1.NodeDeviceSnapshot,
 ) ([]v1.StaticNodeAllocationStatus, error) {
 	if p.Client == nil || p.NodeName == "" {
 		return nil, nil

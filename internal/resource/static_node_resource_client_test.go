@@ -49,7 +49,7 @@ func newStaticNodeResourceClientForTest(
 ) *StaticNodeResourceClient {
 	_, lister := staticNodeClusterAndListerForTest(nodes)
 
-	return NewStaticNodeResourceClient(lister, baseClient)
+	return NewStaticNodeClusterResourceClient(lister, baseClient)
 }
 
 func staticNodeClusterAndListerForTest(nodes []*v1.StaticNode) (*v1.Cluster, *fakeStaticNodeLister) {

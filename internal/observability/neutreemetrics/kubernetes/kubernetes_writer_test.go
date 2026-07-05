@@ -6,7 +6,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -54,7 +53,7 @@ func TestAnnotationWriterPatchesOnlyLocalNodeAndPods(t *testing.T) {
 		Client:   ctrClient,
 		NodeName: "node-a",
 	}
-	snapshot := &model.NodeDeviceSnapshot{
+	snapshot := &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{

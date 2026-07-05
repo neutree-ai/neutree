@@ -69,13 +69,8 @@ type HeadReadyChecker interface {
 	HeadReady(ctx context.Context, node *v1.StaticNode) (bool, error)
 }
 
-type NodeDeviceSnapshot struct {
-	Accelerator v1.StaticNodeAcceleratorStatus  `json:"accelerator,omitempty"`
-	Allocations []v1.StaticNodeAllocationStatus `json:"allocations,omitempty"`
-}
-
 type NodeDeviceSnapshotClient interface {
-	DeviceSnapshot(ctx context.Context, node *v1.StaticNode) (*NodeDeviceSnapshot, error)
+	DeviceSnapshot(ctx context.Context, node *v1.StaticNode) (*v1.NodeDeviceSnapshot, error)
 }
 
 type HTTPNodeDeviceSnapshotClient struct {
@@ -145,6 +140,10 @@ func (r *Reconciler) ReconcileNodeDeviceSnapshot(
 	fallback *v1.StaticNodeAcceleratorStatus,
 	componentStatuses ...[]v1.NodeComponentStatus,
 ) (*v1.StaticNodeAcceleratorStatus, []v1.StaticNodeAllocationStatus, error) {
+	if fallback != nil && fallback.Type == v1.StaticNodeAcceleratorTypeCPU {
+		return fallback, currentStaticNodeAllocations(node), nil
+	}
+
 	if !nodeAgentReady(componentStatuses...) {
 		return fallback, currentStaticNodeAllocations(node), nil
 	}
@@ -264,7 +263,7 @@ func currentStaticNodeAllocations(node *v1.StaticNode) []v1.StaticNodeAllocation
 	return append([]v1.StaticNodeAllocationStatus{}, node.Status.Allocations...)
 }
 
-func (c HTTPNodeDeviceSnapshotClient) DeviceSnapshot(ctx context.Context, node *v1.StaticNode) (*NodeDeviceSnapshot, error) {
+func (c HTTPNodeDeviceSnapshotClient) DeviceSnapshot(ctx context.Context, node *v1.StaticNode) (*v1.NodeDeviceSnapshot, error) {
 	if node == nil || node.Spec == nil || node.Spec.IP == "" {
 		return nil, errors.New("static node ip is required for node device snapshot")
 	}
@@ -289,7 +288,7 @@ func (c HTTPNodeDeviceSnapshotClient) DeviceSnapshot(ctx context.Context, node *
 		return nil, fmt.Errorf("node device snapshot %s returned %s", request.URL.String(), response.Status)
 	}
 
-	var snapshot NodeDeviceSnapshot
+	var snapshot v1.NodeDeviceSnapshot
 	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
 		return nil, err
 	}

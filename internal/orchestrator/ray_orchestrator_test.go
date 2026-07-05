@@ -256,6 +256,7 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 }
 
 func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
+	deviceOrder := 2
 	endpoint := &v1.Endpoint{
 		Metadata: &v1.Metadata{
 			Workspace: "production",
@@ -331,6 +332,15 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 			Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType},
 			Status: &v1.ClusterStatus{
 				DashboardURL: "http://127.0.0.1:8265",
+				ResourceInfo: &v1.ClusterResources{
+					NodeResources: map[string]*v1.NodeResourceStatus{
+						"10.0.0.1": {
+							Devices: []*v1.DeviceResource{
+								{UUID: "GPU-abc", Order: &deviceOrder},
+							},
+						},
+					},
+				},
 			},
 		},
 		storage: mockStorage,
@@ -351,6 +361,8 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 	assert.Equal(t, "GPU-abc", replica.Devices[0].UUID)
 	assert.Equal(t, "NVIDIA-L20", replica.Devices[0].Product)
 	assert.Equal(t, "10.0.0.1", replica.Devices[0].NodeID)
+	require.NotNil(t, replica.Devices[0].Order)
+	assert.Equal(t, 2, *replica.Devices[0].Order)
 	require.NotNil(t, status.Resources.Summary)
 	assert.Equal(t, int64(49152), status.Resources.Summary.Products["NVIDIA-L20"].MemoryMiB)
 	assert.Equal(t, int64(100), status.Resources.Summary.Products["NVIDIA-L20"].CoreUnits)

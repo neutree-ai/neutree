@@ -16,7 +16,7 @@ type StaticNodeResourceClient struct {
 	baseClient ResourceClient
 }
 
-func NewStaticNodeResourceClient(
+func NewStaticNodeClusterResourceClient(
 	nodeLister storage.StaticNodeLister,
 	baseClient ResourceClient,
 ) *StaticNodeResourceClient {

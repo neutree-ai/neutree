@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/devicesnapshot"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
@@ -229,7 +230,7 @@ func (s *Server) handleNodeDeviceSnapshot(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(snapshot)
 }
 
-func (s *Server) nodeDeviceSnapshot(r *http.Request) (*model.NodeDeviceSnapshot, error) {
+func (s *Server) nodeDeviceSnapshot(r *http.Request) (*v1.NodeDeviceSnapshot, error) {
 	if s.config.DeviceSnapshotProvider != nil {
 		return s.config.DeviceSnapshotProvider.DeviceSnapshot(r)
 	}
@@ -250,7 +251,7 @@ func (s *Server) nodeDeviceSnapshot(r *http.Request) (*model.NodeDeviceSnapshot,
 	return s.withAllocations(ctx, snapshot)
 }
 
-func applyGPUHardwareInfoToSnapshot(snapshot *model.NodeDeviceSnapshot, infos []model.GPUHardwareInfo) {
+func applyGPUHardwareInfoToSnapshot(snapshot *v1.NodeDeviceSnapshot, infos []model.GPUHardwareInfo) {
 	if snapshot == nil || len(infos) == 0 {
 		return
 	}
@@ -296,7 +297,7 @@ func gpuHardwareInfoByUUID(infos []model.GPUHardwareInfo) map[string]model.GPUHa
 	return result
 }
 
-func (s *Server) withAllocations(ctx context.Context, snapshot *model.NodeDeviceSnapshot) (*model.NodeDeviceSnapshot, error) {
+func (s *Server) withAllocations(ctx context.Context, snapshot *v1.NodeDeviceSnapshot) (*v1.NodeDeviceSnapshot, error) {
 	if s.config.AllocationProvider == nil || snapshot == nil {
 		return snapshot, nil
 	}

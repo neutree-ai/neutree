@@ -390,7 +390,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 		nodeAgent.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, corev1.PullAlways, nodeAgent.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Spec.Template.Spec.ServiceAccountName)
-	assert.Assert(t, nodeAgent.Spec.Template.Spec.HostNetwork)
+	assert.Assert(t, !nodeAgent.Spec.Template.Spec.HostNetwork)
 	assert.Equal(t, "test-image-pull-secret", nodeAgent.Spec.Template.Spec.ImagePullSecrets[0].Name)
 	assert.Equal(t, int32(19101), nodeAgent.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
 
@@ -570,7 +570,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	assert.DeepEqual(t,
 		map[string]string{"nvidia.com/gpu.present": "true"},
 		dcgm.Spec.Template.Spec.NodeSelector)
-	assert.Assert(t, dcgm.Spec.Template.Spec.HostNetwork)
+	assert.Assert(t, !dcgm.Spec.Template.Spec.HostNetwork)
 	requireContainerCapability(t, dcgm, "SYS_ADMIN")
 	assert.Assert(t, dcgm.Spec.Template.Spec.Affinity == nil)
 	assert.Assert(t, dcgm.Spec.Template.Annotations["checksum/config"] != "")

@@ -39,8 +39,6 @@ type metricsAcceleratorExporter struct {
 	Port            int
 	MetricsPath     string
 
-	HostNetwork  bool
-	HostPID      bool
 	Capabilities []corev1.Capability
 
 	NodeSelector   map[string]string
@@ -149,8 +147,6 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Env:             buildExporterEnv(exporterProfile.Env),
 		Port:            exporterProfile.Port,
 		MetricsPath:     exporterMetricsPath(exporterProfile.MetricsPath),
-		HostNetwork:     exporterRuntimeHostNetwork(runtime),
-		HostPID:         exporterRuntimeHostPID(runtime),
 		Capabilities:    exporterRuntimeCapabilities(runtime),
 		NodeSelector:    exporterRuntimeNodeSelector(runtime),
 		ConfigFileData:  configFileData,
@@ -272,14 +268,6 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	}
 
 	return envVars
-}
-
-func exporterRuntimeHostNetwork(runtime *v1.AcceleratorExporterRuntimeProfile) bool {
-	return runtime != nil && runtime.HostNetwork
-}
-
-func exporterRuntimeHostPID(runtime *v1.AcceleratorExporterRuntimeProfile) bool {
-	return runtime != nil && runtime.HostPID
 }
 
 func exporterRuntimeNodeSelector(runtime *v1.AcceleratorExporterRuntimeProfile) map[string]string {

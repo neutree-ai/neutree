@@ -12,15 +12,15 @@ func firstNonEmpty(values ...string) string {
 	return model.FirstNonEmpty(values...)
 }
 
-func FromAcceleratorMetrics(raw string) *model.NodeDeviceSnapshot {
+func FromAcceleratorMetrics(raw string) *v1.NodeDeviceSnapshot {
 	devices := acceleratorDevicesFromMetrics(raw)
 	if len(devices) == 0 {
 		cpu := v1.CPUStaticNodeAcceleratorStatus()
 
-		return &model.NodeDeviceSnapshot{Accelerator: cpu}
+		return &v1.NodeDeviceSnapshot{Accelerator: cpu}
 	}
 
-	return &model.NodeDeviceSnapshot{
+	return &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Type:    v1.AcceleratorTypeNVIDIAGPU.String(),
 			Devices: devices,

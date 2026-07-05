@@ -162,6 +162,7 @@ func TestStaticNodeControllerReconcileWritesNodeDeviceSnapshot(t *testing.T) {
 	updatedStatus := map[string]*v1.StaticNode{}
 	var updatedStatusHistory []*v1.StaticNode
 	node := controllerStaticNode()
+	node.Spec.SSHAuth = &v1.Auth{}
 	node.Spec.Warm = nil
 	node.Spec.Components = []v1.NodeComponentSpec{
 		{
@@ -198,8 +199,13 @@ func TestStaticNodeControllerReconcileWritesNodeDeviceSnapshot(t *testing.T) {
 			runner: runner,
 		},
 		Reconciler: &staticnode.Reconciler{
+			AcceleratorManager: fakeControllerAcceleratorManager{
+				accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+				},
+			},
 			NodeDeviceSnapshotClient: &fakeControllerNodeDeviceSnapshotClient{
-				snapshot: &staticnode.NodeDeviceSnapshot{
+				snapshot: &v1.NodeDeviceSnapshot{
 					Accelerator: v1.StaticNodeAcceleratorStatus{
 						Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 						Devices: []v1.StaticNodeAcceleratorDeviceStatus{
@@ -489,15 +495,28 @@ func (f *fakeControllerStaticNodeRunner) Files() commandrunner.FileClient {
 	return nil
 }
 
+type fakeControllerAcceleratorManager struct {
+	accelerator *v1.StaticNodeAcceleratorStatus
+	err         error
+}
+
+func (f fakeControllerAcceleratorManager) DetectAccelerator(
+	_ context.Context,
+	_ string,
+	_ v1.Auth,
+) (*v1.StaticNodeAcceleratorStatus, error) {
+	return f.accelerator, f.err
+}
+
 type fakeControllerNodeDeviceSnapshotClient struct {
-	snapshot *staticnode.NodeDeviceSnapshot
+	snapshot *v1.NodeDeviceSnapshot
 	err      error
 }
 
 func (f *fakeControllerNodeDeviceSnapshotClient) DeviceSnapshot(
 	_ context.Context,
 	_ *v1.StaticNode,
-) (*staticnode.NodeDeviceSnapshot, error) {
+) (*v1.NodeDeviceSnapshot, error) {
 	return f.snapshot, f.err
 }
 

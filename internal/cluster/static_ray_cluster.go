@@ -465,7 +465,7 @@ func (r *staticRayReconciler) calculateResourcesFromStaticNodes(
 	}
 
 	baseResourceClient := r.rayResourceClient(staticCluster)
-	resourceClient := resourceview.NewStaticNodeResourceClient(r.storage, baseResourceClient)
+	resourceClient := resourceview.NewStaticNodeClusterResourceClient(r.storage, baseResourceClient)
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 	resources, err := resourceBuilder.BuildClusterResources(context.Background(), clusterFromStaticNodeCluster(staticCluster))
 	if errors.Is(err, resourceview.ErrIncompleteStaticNodeDeviceSnapshots) {

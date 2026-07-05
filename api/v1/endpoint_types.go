@@ -98,6 +98,7 @@ type ReplicaDeviceAllocation struct {
 type DeviceAllocation struct {
 	UUID          string `json:"uuid"`
 	Product       string `json:"product"`
+	Order         *int   `json:"order,omitempty"`
 	MemoryMiB     int64  `json:"memory_mib"`
 	UsedMemoryMiB int64  `json:"used_memory_mib,omitempty"`
 	CoreUnits     int64  `json:"core_units"`

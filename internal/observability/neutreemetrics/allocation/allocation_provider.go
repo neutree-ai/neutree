@@ -22,14 +22,14 @@ import (
 const endpointWorkloadType = "endpoint"
 
 type Provider interface {
-	Allocations(ctx context.Context, snapshot *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error)
+	Allocations(ctx context.Context, snapshot *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error)
 }
 
-type ProviderFunc func(ctx context.Context, snapshot *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error)
+type ProviderFunc func(ctx context.Context, snapshot *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error)
 
 func (f ProviderFunc) Allocations(
 	ctx context.Context,
-	snapshot *model.NodeDeviceSnapshot,
+	snapshot *v1.NodeDeviceSnapshot,
 ) ([]v1.StaticNodeAllocationStatus, error) {
 	return f(ctx, snapshot)
 }
@@ -40,7 +40,7 @@ type MultiProvider struct {
 
 func (p MultiProvider) Allocations(
 	ctx context.Context,
-	snapshot *model.NodeDeviceSnapshot,
+	snapshot *v1.NodeDeviceSnapshot,
 ) ([]v1.StaticNodeAllocationStatus, error) {
 	allocations := make([]v1.StaticNodeAllocationStatus, 0)
 
@@ -82,7 +82,7 @@ type KubernetesAllocationProvider struct {
 
 func (p KubernetesAllocationProvider) Allocations(
 	ctx context.Context,
-	snapshot *model.NodeDeviceSnapshot,
+	snapshot *v1.NodeDeviceSnapshot,
 ) ([]v1.StaticNodeAllocationStatus, error) {
 	if p.Client == nil || p.NodeName == "" || p.PodResources == nil || snapshot == nil {
 		return nil, nil
@@ -165,7 +165,7 @@ type RayServeAllocationProvider struct {
 
 func (p RayServeAllocationProvider) Allocations(
 	ctx context.Context,
-	snapshot *model.NodeDeviceSnapshot,
+	snapshot *v1.NodeDeviceSnapshot,
 ) ([]v1.StaticNodeAllocationStatus, error) {
 	if snapshot == nil {
 		return nil, nil

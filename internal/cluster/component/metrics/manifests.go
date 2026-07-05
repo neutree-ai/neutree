@@ -324,7 +324,6 @@ spec:
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
       serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
-      hostNetwork: true
       tolerations:
       - operator: Exists
       imagePullSecrets:
@@ -427,8 +426,6 @@ spec:
         checksum/config: {{ .ConfigChecksum }}
 {{ end }}
     spec:
-      hostNetwork: {{ .HostNetwork }}
-      hostPID: {{ .HostPID }}
       tolerations:
       - operator: Exists
 {{ if .NodeSelector }}

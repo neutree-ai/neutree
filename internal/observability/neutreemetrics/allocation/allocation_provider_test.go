@@ -18,15 +18,15 @@ import (
 )
 
 func TestMultiProviderMergesAllocations(t *testing.T) {
-	snapshot := &model.NodeDeviceSnapshot{}
+	snapshot := &v1.NodeDeviceSnapshot{}
 	provider := MultiProvider{
 		Providers: []Provider{
-			ProviderFunc(func(_ context.Context, got *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
+			ProviderFunc(func(_ context.Context, got *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 				require.Same(t, snapshot, got)
 
 				return []v1.StaticNodeAllocationStatus{{Endpoint: "chat", InstanceID: "pod-a"}}, nil
 			}),
-			ProviderFunc(func(_ context.Context, got *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
+			ProviderFunc(func(_ context.Context, got *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 				require.Same(t, snapshot, got)
 
 				return []v1.StaticNodeAllocationStatus{{Endpoint: "embed", InstanceID: "pod-b"}}, nil
@@ -46,13 +46,13 @@ func TestMultiProviderReturnsProviderError(t *testing.T) {
 	expectedErr := errors.New("boom")
 	provider := MultiProvider{
 		Providers: []Provider{
-			ProviderFunc(func(_ context.Context, _ *model.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
+			ProviderFunc(func(_ context.Context, _ *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error) {
 				return nil, expectedErr
 			}),
 		},
 	}
 
-	allocations, err := provider.Allocations(context.Background(), &model.NodeDeviceSnapshot{})
+	allocations, err := provider.Allocations(context.Background(), &v1.NodeDeviceSnapshot{})
 
 	require.ErrorIs(t, err, expectedErr)
 	assert.Nil(t, allocations)
@@ -115,7 +115,7 @@ func TestKubernetesAllocationProviderMapsPodResourcesToExactDeviceUUIDs(t *testi
 			}, nil
 		}),
 	}
-	snapshot := &model.NodeDeviceSnapshot{
+	snapshot := &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
@@ -174,7 +174,7 @@ func TestRayServeAllocationProviderMapsActorProcessVisibleDevices(t *testing.T) 
 			return map[string]string{"CUDA_VISIBLE_DEVICES": "0"}, nil
 		}),
 	}
-	snapshot := &model.NodeDeviceSnapshot{
+	snapshot := &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
@@ -233,7 +233,7 @@ func TestRayServeAllocationProviderPrefersExactNVIDIAUUIDOverRelativeCUDAIndex(t
 			}, nil
 		}),
 	}
-	snapshot := &model.NodeDeviceSnapshot{
+	snapshot := &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
@@ -292,7 +292,7 @@ func TestRayServeAllocationProviderIgnoresAmbiguousAllVisibleDevices(t *testing.
 			return map[string]string{"NVIDIA_VISIBLE_DEVICES": "void"}, nil
 		}),
 	}
-	snapshot := &model.NodeDeviceSnapshot{
+	snapshot := &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
@@ -355,7 +355,7 @@ func TestRayServeAllocationProviderMapsDescendantGPUProcess(t *testing.T) {
 			return pid == 3000 && ancestorPID == 2000, nil
 		}),
 	}
-	snapshot := &model.NodeDeviceSnapshot{
+	snapshot := &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
@@ -413,7 +413,7 @@ func TestRayServeAllocationProviderKeepsEnvVisibleDevicesWhenOnlyOneGPUHasProces
 			return pid == 3000 && ancestorPID == 2000, nil
 		}),
 	}
-	snapshot := &model.NodeDeviceSnapshot{
+	snapshot := &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
@@ -466,7 +466,7 @@ func TestRayServeAllocationProviderUsesRoutePrefixForEndpointIdentity(t *testing
 			return map[string]string{"CUDA_VISIBLE_DEVICES": "0"}, nil
 		}),
 	}
-	snapshot := &model.NodeDeviceSnapshot{
+	snapshot := &v1.NodeDeviceSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
 				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
