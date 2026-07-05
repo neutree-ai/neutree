@@ -94,11 +94,7 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	candidates := make([]metricsAcceleratorExporter, 0, len(acceleratorTypes))
 
 	for _, acceleratorType := range acceleratorTypes {
-		exporter, ok, err := m.buildAcceleratorExporter(ctx, acceleratorType)
-		if err != nil {
-			return nil, err
-		}
-
+		exporter, ok := m.buildAcceleratorExporter(ctx, acceleratorType)
 		if ok {
 			candidates = append(candidates, exporter)
 		}
@@ -118,22 +114,22 @@ func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExport
 func (m *MetricsComponent) buildAcceleratorExporter(
 	ctx context.Context,
 	acceleratorType string,
-) (metricsAcceleratorExporter, bool, error) {
+) (metricsAcceleratorExporter, bool) {
 	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, acceleratorType)
 	if err != nil {
 		klog.V(4).Infof("skip accelerator metrics exporter for %s: failed to get accelerator profile: %v", acceleratorType, err)
-		return metricsAcceleratorExporter{}, false, nil
+		return metricsAcceleratorExporter{}, false
 	}
 
 	if profile == nil || profile.MetricsExporter == nil {
-		return metricsAcceleratorExporter{}, false, nil
+		return metricsAcceleratorExporter{}, false
 	}
 
 	exporterProfile := profile.MetricsExporter
 	if strings.TrimSpace(exporterProfile.Image) == "" ||
 		exporterProfile.Port <= 0 ||
 		!validAcceleratorExporterName(exporterProfile.Name) {
-		return metricsAcceleratorExporter{}, false, nil
+		return metricsAcceleratorExporter{}, false
 	}
 
 	name := acceleratorExporterName(acceleratorType, exporterProfile.Name)
@@ -159,7 +155,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Volumes:         volumes,
 	}
 
-	return exporter, true, nil
+	return exporter, true
 }
 
 func acceleratorExporterName(acceleratorType string, exporterName string) string {
@@ -193,6 +189,7 @@ func (m *MetricsComponent) selectClusterAcceleratorExporter(
 	}
 
 	matchedExporters := make([]metricsAcceleratorExporter, 0, 1)
+
 	for _, exporter := range candidates {
 		if acceleratorExporterMatchesAnyNode(exporter, nodes) {
 			matchedExporters = append(matchedExporters, exporter)
@@ -332,6 +329,7 @@ func buildExporterConfigVolumes(
 	}
 
 	volumeName := sanitizeKubernetesName(exporterName + "-config")
+
 	configFiles = validExporterConfigFiles(configFiles)
 	if len(configFiles) == 0 {
 		return nil, nil, nil, ""
@@ -353,12 +351,16 @@ func buildExporterConfigVolumes(
 		mountDir := path.Dir(configFile.Path)
 		fileName := configFileKey(configFile.Path)
 		key := fileName
+
 		if baseNameCounts[fileName] > 1 {
 			key = uniqueConfigFileKey(configFile.Path)
 		}
+
 		key = uniqueConfigMapKey(configFileData, key)
 		configFileData[key] = configFile.Content
+
 		dirItems[mountDir] = append(dirItems[mountDir], corev1.KeyToPath{Key: key, Path: fileName})
+
 		checksum.write(configFile)
 
 		if _, exists := dirVolumeNames[mountDir]; !exists {
@@ -377,6 +379,7 @@ func buildExporterConfigVolumes(
 	}
 
 	volumes := make([]corev1.Volume, 0, len(dirOrder))
+
 	for _, mountDir := range dirOrder {
 		items := dirItems[mountDir]
 		sort.Slice(items, func(i, j int) bool {
@@ -386,6 +389,7 @@ func buildExporterConfigVolumes(
 
 			return items[i].Path < items[j].Path
 		})
+
 		volumes = append(volumes, corev1.Volume{
 			Name: dirVolumeNames[mountDir],
 			VolumeSource: corev1.VolumeSource{
@@ -402,6 +406,7 @@ func buildExporterConfigVolumes(
 
 func validExporterConfigFiles(configFiles []v1.AcceleratorExporterConfigFile) []v1.AcceleratorExporterConfigFile {
 	valid := make([]v1.AcceleratorExporterConfigFile, 0, len(configFiles))
+
 	for _, configFile := range configFiles {
 		if configFile.Path == "" {
 			continue
@@ -474,6 +479,7 @@ func uniqueConfigFileKey(filePath string) string {
 
 	var builder strings.Builder
 	lastSeparator := false
+
 	for _, char := range value {
 		allowed := (char >= 'a' && char <= 'z') ||
 			(char >= 'A' && char <= 'Z') ||
@@ -483,6 +489,7 @@ func uniqueConfigFileKey(filePath string) string {
 			char == '.'
 		if allowed {
 			builder.WriteRune(char)
+
 			lastSeparator = false
 
 			continue
@@ -490,6 +497,7 @@ func uniqueConfigFileKey(filePath string) string {
 
 		if !lastSeparator {
 			builder.WriteByte('.')
+
 			lastSeparator = true
 		}
 	}

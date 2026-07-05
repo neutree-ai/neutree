@@ -129,6 +129,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 	ExpectWithOffset(1, nodes).NotTo(BeEmpty())
 
 	hasGPUNode := false
+
 	for _, node := range nodes {
 		ExpectWithOffset(1, node.Spec).NotTo(BeNil())
 		ExpectWithOffset(1, node.Status).NotTo(BeNil())
@@ -144,6 +145,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		if node.Spec.Role == v1.StaticNodeRoleHead {
 			vmagent := requireStaticNodeComponent(node, "vmagent")
 			requireStaticNodeComponentRunning(node, "vmagent")
+
 			vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")
 			ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-node-exporter"))
 			ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-ray"))
@@ -154,6 +156,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		if !isGPUNode {
 			ExpectWithOffset(1, findStaticNodeComponent(node.Spec.Components, "accelerator-exporter")).To(BeNil())
 			ExpectWithOffset(1, findStaticNodeComponentStatus(node.Status.Components, "accelerator-exporter")).To(BeNil())
+
 			continue
 		}
 
@@ -180,6 +183,7 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 	ExpectWithOffset(1, nodes).NotTo(BeEmpty())
 
 	gpuNodeIPs := []string{}
+
 	for _, node := range nodes {
 		ExpectWithOffset(1, node.Spec).NotTo(BeNil())
 		ExpectWithOffset(1, node.Status).NotTo(BeNil())
@@ -204,6 +208,7 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 	head := requireStaticNodeRole(nodes, v1.StaticNodeRoleHead)
 	vmagent := requireStaticNodeComponent(head, "vmagent")
 	requireStaticNodeComponentRunning(head, "vmagent")
+
 	vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")
 	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-node-exporter"))
 	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-ray"))
@@ -214,10 +219,12 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 	}
 
 	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-accelerator-exporter"))
+
 	acceleratorTargets := requireStaticNodeComponentConfigFile(
 		vmagent,
 		"/etc/neutree/vmagent/file_sd/accelerator-exporter.json",
 	)
+
 	for _, ip := range gpuNodeIPs {
 		ExpectWithOffset(1, acceleratorTargets.Content).To(ContainSubstring(fmt.Sprintf(`"%s:9400"`, ip)))
 	}
@@ -231,6 +238,7 @@ func getStaticNodesForCluster(clusterName string) []v1.StaticNode {
 
 	nodes := parseStaticNodeList(r.Stdout)
 	filtered := make([]v1.StaticNode, 0, len(nodes))
+
 	for _, node := range nodes {
 		if node.Spec == nil || node.Spec.Cluster != clusterName {
 			continue

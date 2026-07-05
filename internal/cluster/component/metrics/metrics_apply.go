@@ -30,6 +30,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to check managed metrics exporter support for cluster %s", m.cluster.Metadata.Name)
 	}
+
 	variables.EnableNodeExporter = enableManagedMetricsExporters
 	variables.EnableExternalDCGMScrape = m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
@@ -44,6 +45,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to render vmagent config for cluster %s", m.cluster.Metadata.Name)
 	}
+
 	variables.VMAgentConfig = vmagentConfig
 
 	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)

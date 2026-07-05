@@ -406,6 +406,7 @@ func renderVMAgentAcceleratorExporterFileSDTargets(
 		if target.AcceleratorType != "" {
 			labels["accelerator_type"] = target.AcceleratorType
 		}
+
 		result = append(result, vmagentFileSDTarget{
 			Targets: []string{fmt.Sprintf("%s:%d", target.Node.Spec.IP, target.Port)},
 			Labels:  labels,
@@ -458,6 +459,7 @@ func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []Desi
 
 		acceleratorType := plan.Accelerator.Type
 		group := groupsByAcceleratorType[acceleratorType]
+
 		if group.AcceleratorType == "" {
 			group.AcceleratorType = acceleratorType
 			group.MetricsPath = metricsPath
@@ -478,6 +480,7 @@ func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []Desi
 
 func externalAcceleratorExporterTargetGroups(plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
 	targets := []acceleratorExporterTarget{}
+
 	for _, plan := range plans {
 		if plan.Node == nil || plan.Node.Spec == nil || plan.Accelerator == nil ||
 			plan.Accelerator.Type != v1.AcceleratorTypeNVIDIAGPU.String() {
@@ -585,14 +588,17 @@ func sanitizeStaticMetricsName(value string) string {
 	for _, char := range value {
 		allowed := (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')
 		if allowed {
-			builder.WriteRune(char)
 			lastHyphen = false
+
+			builder.WriteRune(char)
+
 			continue
 		}
 
 		if builder.Len() > 0 && !lastHyphen {
-			builder.WriteRune('-')
 			lastHyphen = true
+
+			builder.WriteRune('-')
 		}
 	}
 
@@ -605,6 +611,7 @@ func acceleratorExporterMode(cluster *v1.StaticNodeCluster) v1.ClusterAccelerato
 	}
 
 	config := &v1.ClusterConfig{Metrics: cluster.Spec.Metrics}
+
 	return config.AcceleratorExporterMode()
 }
 

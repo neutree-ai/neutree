@@ -41,10 +41,12 @@ func assertK8sMetricsResources(
 		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'dcgm-exporter'"))
 
 		assertK8sKubeStateMetricsResources(ctx, k8sH, namespace, clusterVersion)
+
 		return
 	}
 
 	By("Checking node-exporter DaemonSet")
+
 	nodeExporter := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-exporter")
 	ExpectWithOffset(1, nodeExporter.Spec.Template.Spec.Containers).NotTo(BeEmpty())
 	ExpectWithOffset(1, nodeExporter.Spec.Template.Spec.Containers[0].Ports).To(ContainElement(
@@ -54,11 +56,13 @@ func assertK8sMetricsResources(
 
 	gpuNodes, err := k8sH.ListNodes(ctx, "nvidia.com/gpu.present=true")
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "should list NVIDIA GPU nodes")
+
 	if len(gpuNodes) == 0 {
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "nvidia-gpu-dcgm-exporter")
 		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "DCGM exporter should not exist without matching GPU nodes")
 	} else {
 		By("Checking NVIDIA DCGM exporter DaemonSet")
+
 		dcgm := eventuallyDaemonSetReady(ctx, k8sH, namespace, "nvidia-gpu-dcgm-exporter")
 		ExpectWithOffset(1, dcgm.Spec.Template.Spec.NodeSelector).To(HaveKeyWithValue("nvidia.com/gpu.present", "true"))
 		ExpectWithOffset(1, dcgm.Spec.Template.Spec.Containers).NotTo(BeEmpty())

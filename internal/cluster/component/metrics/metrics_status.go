@@ -90,6 +90,7 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 	}
 
 	status.NodeExporterRequired = nodeExporterRequired
+
 	if nodeExporterRequired {
 		nodeExporterReady, nodeExporterPodsReady, nodeExporterTotalPods, err := m.checkDaemonSetStatus(ctx, nodeExporterDaemonSetName)
 		if err != nil {
