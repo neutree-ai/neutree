@@ -83,6 +83,11 @@ func assertK8sMetricsResources(
 		"neutree_node_memory_total_bytes",
 	)
 	ExpectWithOffset(1, metrics).To(ContainSubstring("neutree_node_cpu_seconds_total"))
+	for _, name := range obsoleteEndpointAcceleratorMetricNames {
+		ExpectWithOffset(1, metrics).NotTo(ContainSubstring(name))
+	}
+	ExpectWithOffset(1, metrics).NotTo(ContainSubstring("neutree_gpu_"))
+	ExpectWithOffset(1, metrics).NotTo(ContainSubstring("neutree_node_gpu_"))
 
 	gpuNodes, err := k8sH.ListNodes(ctx, "nvidia.com/gpu.present=true")
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "should list NVIDIA GPU nodes")
@@ -100,6 +105,9 @@ func assertK8sMetricsResources(
 			HaveField("ContainerPort", int32(19400)),
 		))
 		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'accelerator-exporter-nvidia-gpu'"))
+
+		By("Checking node-agent writes node accelerator device annotations")
+		assertK8sNodeAcceleratorDeviceAnnotations(ctx, k8sH)
 	}
 
 	assertK8sKubeStateMetricsResources(ctx, k8sH, namespace, clusterVersion)

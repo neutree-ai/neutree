@@ -56,7 +56,7 @@ GO_BUILD_ARGS = \
 	-ldflags="-extldflags=-static \
 	-X '$(MODULE_PATH)/internal/version.gitCommit=$(GIT_COMMIT)' \
 	-X '$(MODULE_PATH)/internal/version.appVersion=$(IMAGE_TAG)' \
-	-X '$(MODULE_PATH)/internal/version.buildTime=$(shell date --iso-8601=seconds)'"
+	-X '$(MODULE_PATH)/internal/version.buildTime=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")'"
 
 MOCKERY_DIRS=./ internal/model_registry pkg/storage pkg/command internal/orchestrator internal/cluster internal/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config internal/gateway internal/accelerator internal/auth internal/util
 MOCKERY_OUTPUT_DIRS=testing/mocks internal/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/cluster/mocks internal/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks internal/gateway/mocks internal/accelerator/mocks internal/auth/mocks internal/util/mocks
@@ -400,6 +400,28 @@ build-engine-manifest: ## Build engine manifest only (no Docker image export, co
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json) \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
 		-d "$(ENGINE_DESCRIPTION)"
+
+##@ Cluster Package
+
+CLUSTER_PACKAGE_SCRIPT := scripts/builder/build-package.sh
+CLUSTER_PACKAGE_SCRIPT_DIR := $(dir $(CLUSTER_PACKAGE_SCRIPT))
+CLUSTER_PACKAGE_SCRIPT_NAME := $(notdir $(CLUSTER_PACKAGE_SCRIPT))
+CLUSTER_PACKAGE_OUTPUT_DIR ?= dist
+CLUSTER_PACKAGE_TYPE ?= k8s
+CLUSTER_PACKAGE_ACCELERATOR ?=
+CLUSTER_PACKAGE_MIRROR_REGISTRY ?=
+
+.PHONY: build-cluster-package
+build-cluster-package: ## Build cluster package (CLUSTER_PACKAGE_TYPE=k8s|ssh, optional CLUSTER_PACKAGE_ACCELERATOR=nvidia_gpu|amd_gpu)
+	@mkdir -p $(CLUSTER_PACKAGE_OUTPUT_DIR)
+	cd $(CLUSTER_PACKAGE_SCRIPT_DIR) && bash $(CLUSTER_PACKAGE_SCRIPT_NAME) \
+		--type cluster \
+		--cluster-type $(CLUSTER_PACKAGE_TYPE) \
+		--version $(IMAGE_TAG) \
+		--arch $(ARCH) \
+		--output-dir $(abspath $(CLUSTER_PACKAGE_OUTPUT_DIR)) \
+		$(if $(CLUSTER_PACKAGE_ACCELERATOR),--accelerator $(CLUSTER_PACKAGE_ACCELERATOR)) \
+		$(if $(CLUSTER_PACKAGE_MIRROR_REGISTRY),--mirror-registry $(CLUSTER_PACKAGE_MIRROR_REGISTRY))
 
 .PHONY: sync-images-list
 sync-images-list: ## Sync images list for building package

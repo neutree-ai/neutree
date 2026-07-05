@@ -68,12 +68,12 @@ DCGM_FI_CUDA_DRIVER_VERSION{gpu="0",UUID="GPU-abc",modelName="A100"} 12020
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
-	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",source="neutree-node-agent",target="node-exporter",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",static_node_cluster="unknown",target="node-exporter",workspace="default"} 1`)
 	assert.Contains(t, body, `# HELP neutree_accelerator_utilization_ratio Neutree node-agent metric neutree_accelerator_utilization_ratio.`)
 	assert.Contains(t, body, `# TYPE neutree_accelerator_utilization_ratio gauge`)
-	assert.Contains(t, body, `neutree_node_ready{cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",node_ip="10.0.0.10",source="neutree-node-agent",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_node_ready{cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",static_node_cluster="unknown",workspace="default"} 1`)
 	assert.Contains(t, body, `# TYPE neutree_node_memory_used_bytes gauge`)
-	assert.Contains(t, body, `neutree_node_memory_used_bytes{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",source="node-exporter",workspace="default"}`)
+	assert.Contains(t, body, `neutree_node_memory_used_bytes{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="node-exporter",static_node_cluster="unknown",workspace="default"}`)
 	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",product="A100",workspace="default"} 0.87`)
 	assert.Contains(t, body, `neutree_node_accelerator_hardware_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",memory_total_bytes="85899345920",neutree_cluster="k8s-a",node="node-a",numa_node="unknown",pcie_bus_id="unknown",pcie_generation="unknown",pcie_width="unknown",product="A100",workspace="default"} 1`)
 	assert.Contains(t, body, `neutree_node_accelerator_nvidia_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",architecture="unknown",cluster_type="kubernetes",cuda_capability="unknown",cuda_driver_version="12.2",driver_version="535.104.05",neutree_cluster="k8s-a",node="node-a",nvlink="unknown",nvswitch="unknown",product="A100",workspace="default"} 1`)
@@ -207,7 +207,7 @@ node_memory_MemAvailable_bytes 6442450944
 
 	body := readResponseBody(t, metricsResp)
 	runtimeLabels := `cluster_type="ray",container="engine",container_id="docker-abc",deployment="Backend",` +
-		`endpoint="chat",engine="",engine_version="",instance_id="actor-a",neutree_cluster="static-a",` +
+		`endpoint="chat",engine="unknown",engine_version="unknown",instance_id="actor-a",neutree_cluster="static-a",` +
 		`node="head-0",node_ip="10.0.0.10",node_role="head",replica="replica-a",` +
 		`replica_id="replica-a",source="neutree-node-agent",static_node_cluster="static-a",workspace="default"`
 	assert.Contains(t, body, `neutree_endpoint_replica_cpu_usage_seconds_total{`+runtimeLabels+`} 12.5`)
@@ -376,7 +376,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
-	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",source="neutree-node-agent",target="accelerator-exporter",workspace="default"} 1`)
+	assert.Contains(t, body, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent",static_node_cluster="unknown",target="accelerator-exporter",workspace="default"} 1`)
 	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",neutree_cluster="k8s-a",node="node-a",product="A100",workspace="default"} 0.87`)
 }
 
