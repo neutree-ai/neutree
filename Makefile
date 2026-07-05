@@ -15,7 +15,7 @@ NEUTREE_RUNTIME_IMAGE := $(IMAGE_PREFIX)neutree-runtime
 NEUTREE_NODE_AGENT_IMAGE := $(IMAGE_PREFIX)neutree-node-agent
 
 ARCH ?= amd64
-ALL_ARCH = amd64 arm64
+ALL_ARCH ?= amd64 arm64
 
 TOOLS_BIN_DIR := $(shell pwd)/bin
 
